@@ -111,6 +111,25 @@ class FilterOp(LogicalOp):
     native_options: NativeOptions | None = None
 
 
+class StreamStage:
+    """流式算子规范（继承式，2026-09-04·九）：策略字段 + __call__ 实现。
+
+    与 SearchEngine 协议的分工：协议适合无状态源实现（结构化鸭子类型）；
+    本基类适合管线级算子——并发/队列深度/认缺白名单/统计名随算子声明
+    （子类可给默认值，组装层可覆写），依赖经 __init__ 绑定，逻辑写在
+    __call__（row -> row | None | list[row]，None=认缺、list=展开，
+    同步或异步皆可）。Dataset.map_stage 读取全部策略字段构造 AsyncMapOp。
+    """
+
+    label: str = ""
+    concurrency: int = 1
+    queue_depth: int | None = None
+    catch: tuple = ()          # 认缺异常白名单：命中只计数不断链
+
+    async def __call__(self, row):
+        raise NotImplementedError
+
+
 @dataclass(frozen=True)
 class AsyncMapOp(LogicalOp):
     """async 流式算子（streaming 执行路径专用，2026-09-04 新增）。

@@ -220,6 +220,29 @@ class Dataset:
             self._source, self._plan.append(operation), self._executor,
         )
 
+    def map_stage(self, stage) -> "Dataset":
+        """Append one streaming stage（继承式规范算子，策略字段随算子声明）。
+
+        从 stage 读取 label/concurrency/queue_depth/catch 构造 AsyncMapOp
+        （替代「裸函数 + 散装 kwargs」的工厂形态）；stage 须为 StreamStage
+        子类实例（鸭子判定），__call__ 同步/异步皆可。绑定的依赖（锁/连接
+        等不可深拷贝对象）安全：规格持有的是绑定方法，不做实例深拷贝。
+        """
+        from .plan import StreamStage
+        if not all(hasattr(stage, a) for a in
+                   ("label", "concurrency", "queue_depth", "catch", "__call__")):
+            raise TypeError("map_stage 需要 StreamStage 规范算子（策略字段 + __call__）")
+        if int(stage.concurrency) < 1:
+            raise ValueError("StreamStage.concurrency must be >= 1")
+        operation = AsyncMapOp(
+            CallableSpec.create(stage.__call__),
+            int(stage.concurrency), stage.queue_depth, tuple(stage.catch),
+            stage.label or type(stage).__name__,
+        )
+        return Dataset(
+            self._source, self._plan.append(operation), self._executor,
+        )
+
     def run_stream(
         self,
         *,

@@ -188,3 +188,81 @@ def test_multi_stage_sentinel_drain():
           .map_async(c, concurrency=5, label="last"))
     stats = ds.run_stream()
     assert stats.stage("last")["emitted"] == 100
+
+
+# ---------------------------------------------------------------------------
+# StreamStage 规范算子（继承式）
+# ---------------------------------------------------------------------------
+
+def test_map_stage_policy_from_class():
+    """策略字段随算子声明：label/并发/认缺白名单全部从 stage 类读取。"""
+    from demiflow.data.plan import StreamStage
+
+    class Soft(Exception):
+        pass
+
+    class Doubler(StreamStage):
+        label = "double"
+        concurrency = 3
+        catch = (Soft,)
+
+        async def __call__(self, row):
+            if row["i"] == 2:
+                raise Soft("miss")
+            return {**row, "v": row["i"] * 2}
+
+    ctx = local_data()
+    ds = (ctx.from_items([{"i": i} for i in range(5)])
+          .map_stage(Doubler()))
+    stats = ds.run_stream(log_every=0)
+    assert stats.emitted == 4
+    assert stats.miss["double:Soft"] == 1
+    assert stats.stage("double")["in"] == 5
+
+
+def test_stage_bound_deps_not_deepcopied():
+    """绑定了不可深拷贝依赖（锁/连接）的 stage 安全通过。"""
+    import copy
+    from demiflow.data.plan import StreamStage
+
+    class NoCopy:
+        def __deepcopy__(self, memo):
+            raise RuntimeError("不许深拷贝")
+
+    class Counter:
+        def __init__(self):
+            self.n = 0
+
+    class Toucher(StreamStage):
+        label = "touch"
+        concurrency = 2
+
+        def __init__(self):
+            self.dep = NoCopy()
+            self.counter = Counter()
+
+        async def __call__(self, row):
+            self.counter.n += 1
+            return row
+
+    st = Toucher()
+    ctx = local_data()
+    ds = ctx.from_items([{"i": i} for i in range(4)]).map_stage(st)
+    ds.run_stream()
+    assert st.counter.n == 4          # 同一实例（未深拷贝）
+
+
+def test_map_stage_sync_call_and_label_default():
+    from demiflow.data.plan import StreamStage
+
+    class SyncPassthrough(StreamStage):     # 同步 __call__ 也合法
+        concurrency = 2
+
+        def __call__(self, row):
+            return [row, row] if row["i"] % 2 else None
+
+    ctx = local_data()
+    ds = ctx.from_items([{"i": i} for i in range(4)]).map_stage(SyncPassthrough())
+    stats = ds.run_stream()
+    assert stats.emitted == 4
+    assert "SyncPassthrough" in stats.stages      # label 缺省取类名
