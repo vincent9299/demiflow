@@ -16,10 +16,10 @@ chat() 的重试语义：**单次尝试、失败上抛**——重试循环归调
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import io
-from typing import Any, Mapping, Optional
+import os
+from typing import Optional
 
 import httpx
 
@@ -96,3 +96,61 @@ def encode_image_b64(data: bytes, *, max_edge: int = 768,
             return base64.b64encode(buf.getvalue()).decode("ascii")
     except Exception:  # noqa: BLE001 - 解码失败一律按拒收
         return None
+
+
+# ---------------------------------------------------------------------------
+# 端点资源注册表（平台资源：配置驱动、惰性建客户端、统一生命周期）
+# 消费方（算子集）只声明配置——与 map_prompt 的 PromptPack 同款形态，
+# 不维护自己的客户端包；env 覆盖支持跨机器部署零代码改动。
+# ---------------------------------------------------------------------------
+
+_ENDPOINT_CFG: dict[str, dict] = {}
+_ENDPOINT_CLIENTS: dict[str, AsyncLLMClient] = {}
+
+
+def register_endpoint(name: str, *, base_url: str, model: str,
+                      max_connections: int = 56, timeout: float = 600.0,
+                      base_url_env: str = "", model_env: str = "") -> None:
+    """声明一个 LLM 端点资源（重复注册后者覆盖；改配置用 reconfigure）。"""
+    _ENDPOINT_CFG[name] = dict(base_url=base_url, model=model,
+                                max_connections=max_connections,
+                                timeout=timeout, base_url_env=base_url_env,
+                                model_env=model_env)
+    _ENDPOINT_CLIENTS.pop(name, None)
+
+
+def reconfigure_endpoint(name: str, **overrides) -> None:
+    """更新端点配置（如按并发上限调池），已建客户端作废重建。"""
+    if name not in _ENDPOINT_CFG:
+        raise KeyError(f"未声明的端点资源：{name}")
+    _ENDPOINT_CFG[name].update(overrides)
+    _ENDPOINT_CLIENTS.pop(name, None)
+
+
+def get_llm_client(name: str) -> AsyncLLMClient:
+    """取端点的共享客户端（惰性建；env 覆盖 base_url/model）。"""
+    if name not in _ENDPOINT_CLIENTS:
+        cfg = _ENDPOINT_CFG.get(name)
+        if cfg is None:
+            raise KeyError(f"未声明的端点资源：{name}"
+                           f"（已声明：{sorted(_ENDPOINT_CFG) or '无'}）")
+        base_url = (os.environ.get(cfg["base_url_env"], cfg["base_url"])
+                    if cfg["base_url_env"] else cfg["base_url"])
+        model = (os.environ.get(cfg["model_env"], cfg["model"])
+                 if cfg["model_env"] else cfg["model"])
+        _ENDPOINT_CLIENTS[name] = AsyncLLMClient(
+            base_url=base_url, model=model,
+            max_connections=cfg["max_connections"], timeout=cfg["timeout"])
+    return _ENDPOINT_CLIENTS[name]
+
+
+def inject_endpoint_client(name: str, client: AsyncLLMClient) -> None:
+    """冒烟注入（MockTransport 版客户端顶替惰性构造）。"""
+    _ENDPOINT_CLIENTS[name] = client
+
+
+async def close_all_llm() -> None:
+    """平台收尾：关全部端点客户端（run_stages 退出期统一调用）。"""
+    for client in _ENDPOINT_CLIENTS.values():
+        await client.aclose()
+    _ENDPOINT_CLIENTS.clear()

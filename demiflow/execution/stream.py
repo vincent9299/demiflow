@@ -237,3 +237,45 @@ def run_stream(source_iter, plan: LogicalPlan, *,
                       on_progress=on_progress, on_drain=on_drain,
                       log_every=log_every, cancellation=cancellation))
     return stats
+
+
+# ---------------------------------------------------------------------------
+# 编排串联原语：stage 列表 → 一次跑完（平台管调度与资源收尾）
+# ---------------------------------------------------------------------------
+
+def run_stages(ctx, items, stages: list, *,
+               concurrency: dict | None = None,
+               on_progress=None, on_drain=None, log_every: int = 0,
+               cancellation=None) -> StreamStats:
+    """demiflow 编排入口：stage 列表即管线声明，一步执行到底。
+
+    - stages：StreamStage 规范算子列表（策略默认值在类上声明）；
+    - concurrency：{label: (并发, 队列深度|None)} 编排层覆盖（如 CLI 参数）；
+    - 退出期（含 Ctrl-C/异常）平台统一收尾资源：LLM 端点客户端 +
+      HTTP 双池（on_drain 用户钩子先跑，再关平台资源）；
+    - 返回 StreamStats；编排层不再接触 map_stage/run_stream 细节。
+    """
+    ds = ctx.from_items(list(items))
+    for stage in stages:
+        if concurrency and stage.label in concurrency:
+            stage.concurrency, stage.queue_depth = concurrency[stage.label]
+        ds = ds.map_stage(stage)
+    try:
+        return ds.run_stream(on_progress=on_progress, on_drain=on_drain,
+                             log_every=log_every, cancellation=cancellation)
+    finally:
+        # 平台资源收尾（KI 路径客户端已随其事件循环终结，作清注册即可）
+        import contextlib
+        with contextlib.suppress(Exception):
+            import asyncio as _a
+            _a.run(_close_platform())
+        from ..collect import llm as _llm, net as _net
+        _llm._ENDPOINT_CLIENTS.clear()
+        _net._client_direct = _net._client_proxy = None
+        _net._dl_client_direct = _net._dl_client_proxy = None
+
+
+async def _close_platform():
+    from ..collect import llm as _llm, net as _net
+    await _llm.close_all_llm()
+    await _net.close_client()

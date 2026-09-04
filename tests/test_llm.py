@@ -78,3 +78,54 @@ def test_encode_image_b64_small_untouched():
 def test_encode_image_b64_rejects_garbage():
     assert encode_image_b64(b"not image") is None
     assert encode_image_b64(_img(64, 64)[:16]) is None
+
+
+# ---------------------------------------------------------------------------
+# 端点资源注册表
+# ---------------------------------------------------------------------------
+
+async def test_endpoint_registry_env_override(monkeypatch):
+    from demiflow.collect import llm
+    llm.register_endpoint("_t", base_url="http://default/v1", model="m1",
+                          base_url_env="T_BASE", model_env="T_MODEL")
+    c1 = llm.get_llm_client("_t")
+    assert c1.base_url == "http://default/v1" and c1.model == "m1"
+    monkeypatch.setenv("T_BASE", "http://overridden/v1")
+    monkeypatch.setenv("T_MODEL", "m2")
+    llm.reconfigure_endpoint("_t", max_connections=8)   # 作废重建
+    c2 = llm.get_llm_client("_t")
+    assert c2.base_url == "http://overridden/v1" and c2.model == "m2"
+    await llm.close_all_llm()
+    assert llm.get_llm_client("_t").base_url == "http://overridden/v1"  # 重建仍走 env
+
+
+def test_endpoint_unknown_rejected():
+    from demiflow.collect import llm
+    import pytest
+    with pytest.raises(KeyError, match="未声明"):
+        llm.get_llm_client("_nope")
+
+
+def test_run_stages_orchestration():
+    from demiflow.collect import llm
+    from demiflow.data.plan import StreamStage
+    from demiflow.standalone import local_data, run_stages
+
+    class Double(StreamStage):
+        label = "double"
+        concurrency = 2
+
+        async def __call__(self, row):
+            return {**row, "v": row["i"] * 2}
+
+    class Keep(StreamStage):
+        label = "keep"
+
+        def __call__(self, row):
+            return row if row["v"] > 4 else None
+
+    stats = run_stages(local_data(), [{"i": i} for i in range(5)],
+                       [Double(), Keep()],
+                       concurrency={"double": (3, 8)})
+    assert stats.emitted == 3
+    assert stats.stage("keep")["in"] == 5

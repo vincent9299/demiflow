@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -50,9 +51,10 @@ DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 DOWNLOAD_LIMITS = httpx.Limits(max_connections=128, max_keepalive_connections=64)
 
 # 消费方策略注册面（引擎零业务默认）：
-# - PROXY_URL：代理源出网代理（None=无代理；消费方 startup 注册）
+# - PROXY_URL：代理源出网代理（机器级配置：默认读 env DEMIFLOW_PROXY_URL，
+#   None=无代理；算子集不再用代码设代理）
 # - SOURCE_LIMITS：源 → 限速/并发/代理归属（gate_for 未登记源直接报错）
-PROXY_URL: Optional[str] = None
+PROXY_URL: Optional[str] = os.environ.get("DEMIFLOW_PROXY_URL")
 SOURCE_LIMITS: dict[str, SourceLimits] = {}
 
 
