@@ -4,6 +4,9 @@
 
 ## 定位
 
+- **采集 HTTP 底座**（`demiflow.collect.net`，2026-09-04 起）：按源限速闸门、
+  分类重试、双池代理客户端、流式下载原语——机制归引擎，限速表/代理名单/
+  身份 UA 由消费方策略注册（`register_limits` / `SOURCE_LIMITS` / `PROXY_URL`）；
 - **惰性批式路径**：Ray Data 兼容超集的 Dataset API（`from_items/map/filter/take_all/write_*`），
   确定性物理计划 + 本地线程池执行器；Ray 为可选 extras；
 - **流式路径**（2026-09-04 新增）：`map_async` + `run_stream`——常驻 worker 协程 +
