@@ -15,6 +15,8 @@ ray = ["ray[data]>=2.9"]
 llm = ["openai>=1.0", "httpx>=0.27"]
 crawl = ["crawl4ai>=0.9"]
 images = ["pillow>=10"]
+# 聚合 extras：一键装齐采集栈（net/fetch 零三方依赖，crawl 与 images 惰性）
+collect = ["crawl4ai>=0.9", "pillow>=10"]
 dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]

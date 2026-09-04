@@ -27,8 +27,14 @@
 ## 快速开始
 
 ```bash
-pip install -e .            # 核心：pyarrow/PyYAML/click/packaging
-pip install -e .[dev]       # + pytest
+pip install -e .              # 核心：pyarrow/PyYAML/click/packaging（net/fetch/store/resume 零额外依赖）
+pip install -e .[dev]         # + pytest
+pip install -e .[collect]     # + 采集栈：crawl4ai（crawl）+ pillow（images）
+```
+
+依赖口径：crawl4ai 等重依赖全部 extras 化、机制内惰性 import——核心安装零重物。
+SearXNG 类**服务**依赖不是 Python 包（PyPI 同名包为占位包），由消费方
+自行部署（如 demiwtg 的 data/webgate 模块），不进本库依赖。
 
 python smoke_standalone.py  # 惰性路径冒烟
 python -m pytest tests/ -q  # streaming 路径 10 用例
