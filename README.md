@@ -16,6 +16,12 @@
     新旧版本兼容 shim + 惰性依赖，extras `[crawl]`）；
   - `images.verify_image`：字节 → 图像元数据（Pillow 全量解码 +
     mime/ext 规范表，fetch_tiers 的 verify 钩子，extras `[images]`）；
+  - `search`：SearchEngine 协议 + 注册表 + `is_connect_failure`；
+  - `llm`：AsyncLLMClient（单次 chat，重试归消费方口径）+ 端点资源注册表
+    （`register_endpoint(base_url_env=...)` 配置驱动，env 覆盖跨机器零代码）；
+  - 调度：`data.plan.StreamStage` 规范算子（策略字段随算子声明）+
+    `Dataset.map_stage` + `execution.stream.run_stages`（stage 列表一步执行 +
+    退出期平台资源统一收尾）；
 - **惰性批式路径**：Ray Data 兼容超集的 Dataset API（`from_items/map/filter/take_all/write_*`），
   确定性物理计划 + 本地线程池执行器；Ray 为可选 extras；
 - **流式路径**（2026-09-04 新增）：`map_async` + `run_stream`——常驻 worker 协程 +
