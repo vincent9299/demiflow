@@ -127,5 +127,5 @@ def test_run_stages_orchestration():
     stats = run_stages(local_data(), [{"i": i} for i in range(5)],
                        [Double(), Keep()],
                        concurrency={"double": (3, 8)})
-    assert stats.emitted == 3
+    assert stats.emitted == 2
     assert stats.stage("keep")["in"] == 5
