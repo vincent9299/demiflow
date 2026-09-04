@@ -15,10 +15,14 @@ from .data.api import DataAPI
 from .execution.executors.local import LocalDatasetExecutor
 
 
-def local_data(workers: int = 4, *, block_size: int = 256) -> DataAPI:
+def local_data(workers: int = 4, *, block_size: int = 256,
+               prompt_packs: dict | None = None) -> DataAPI:
     """零配置本地 Dataset API（进程内线程池执行器）。
 
     workers/block_size 语义与 LocalDatasetExecutor 一致（惰性路径的
     线程池宽度与批大小；streaming 路径的并发由各 map_async 自己声明）。
+    prompt_packs：{配置名.yaml: PromptPack}，启用 map_prompt（惰性路径的
+    LLM 算子）时传入——脱离 Candidate 机制独立使用 map_prompt 的入口。
     """
-    return DataAPI(LocalDatasetExecutor(workers=workers, block_size=block_size))
+    return DataAPI(LocalDatasetExecutor(workers=workers, block_size=block_size,
+                                        prompt_packs=prompt_packs))
