@@ -160,9 +160,15 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
 FIRST_STAGE_REF: list = [None]   # _arun 内注入；模块级引用避免改 worker 签名
 
 
+def _local_queue(depth: int):
+    """进程内有界队列（默认传输实现；D2 的分布式实现替换此工厂）。"""
+    return asyncio.Queue(maxsize=depth)
+
+
 async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
-                log_every, cancellation) -> None:
-    queues = [asyncio.Queue(maxsize=s.queue_depth) for s in stages]
+                log_every, cancellation, queue_factory=None) -> None:
+    make_queue = queue_factory or _local_queue
+    queues = [make_queue(s.queue_depth) for s in stages]
     FIRST_STAGE_REF[0] = stages[0]
 
     async def feed():
@@ -229,13 +235,19 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
 
 def run_stream(source_iter, plan: LogicalPlan, *,
                on_progress=None, on_drain=None, log_every: int = 0,
-               cancellation=None) -> StreamStats:
-    """同步驱动入口：建事件循环跑至完成（或 Ctrl-C/异常终止），返回 StreamStats。"""
+               cancellation=None, queue_factory=None) -> StreamStats:
+    """同步驱动入口：建事件循环跑至完成（或 Ctrl-C/异常终止），返回 StreamStats。
+
+    queue_factory(depth) 是行传输缝（调度层内部，算子/编排零感知）：
+    缺省进程内有界队列；分布式实现（如 redis 支撑的跨节点队列）替换
+    此工厂即可，行需可序列化、stage 由各 worker 侧自行构造。
+    """
     stages = _materialize(plan)
     stats = StreamStats()
     asyncio.run(_arun(source_iter, stages, stats,
                       on_progress=on_progress, on_drain=on_drain,
-                      log_every=log_every, cancellation=cancellation))
+                      log_every=log_every, cancellation=cancellation,
+                      queue_factory=queue_factory))
     return stats
 
 
@@ -246,7 +258,7 @@ def run_stream(source_iter, plan: LogicalPlan, *,
 def run_stages(ctx, items, stages: list, *,
                concurrency: dict | None = None,
                on_progress=None, on_drain=None, log_every: int = 0,
-               cancellation=None) -> StreamStats:
+               cancellation=None, queue_factory=None) -> StreamStats:
     """demiflow 编排入口：stage 列表即管线声明，一步执行到底。
 
     - stages：StreamStage 规范算子列表（策略默认值在类上声明）；
@@ -262,7 +274,8 @@ def run_stages(ctx, items, stages: list, *,
         ds = ds.map_stage(stage)
     try:
         return ds.run_stream(on_progress=on_progress, on_drain=on_drain,
-                             log_every=log_every, cancellation=cancellation)
+                             log_every=log_every, cancellation=cancellation,
+                             queue_factory=queue_factory)
     finally:
         # 退出期统一收尾：算子生命周期钩子（aclose，如持浏览器的抓取算子）
         # → 平台资源（LLM 端点 + HTTP 双池）。KI 路径绑定旧 loop 的资源

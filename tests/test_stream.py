@@ -293,3 +293,38 @@ def test_stage_aclose_lifecycle_hook():
     ctx = local_data()
     run_stages(ctx, [{"i": 1}], [Plain(), Resourced()])
     assert closed == ["res"]
+
+
+def test_queue_factory_transport_seam():
+    """行传输缝：自定义 queue_factory 可替换进程内队列，行为不变。"""
+
+    class CountingQueue(asyncio.Queue):
+        def __init__(self, maxsize):
+            super().__init__(maxsize=maxsize)
+
+        async def put(self, item):
+            CountingQueue.puts += 1
+            await super().put(item)
+
+    CountingQueue.puts = 0
+
+    ctx = local_data()
+
+    from demiflow.data.plan import StreamStage
+
+    class Pass(StreamStage):
+        label = "pass"
+        concurrency = 2
+
+        def __call__(self, row):
+            return row
+
+    stats = run_stages_or_import(ctx, [{"i": i} for i in range(5)], [Pass()],
+                                 queue_factory=lambda d: CountingQueue(d))
+    assert stats.emitted == 5
+    assert CountingQueue.puts >= 5        # 工厂确实被使用
+
+
+def run_stages_or_import(ctx, items, stages, **kw):
+    from demiflow.standalone import run_stages
+    return run_stages(ctx, items, stages, **kw)

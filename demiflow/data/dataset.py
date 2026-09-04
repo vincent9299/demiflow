@@ -250,6 +250,7 @@ class Dataset:
         on_drain=None,
         log_every: int = 0,
         cancellation=None,
+        queue_factory=None,
     ):
         """streaming 路径终结动作：驱动含 map_async 的计划至完成。
 
@@ -264,7 +265,7 @@ class Dataset:
         return _run_stream(
             rows, self._plan,
             on_progress=on_progress, on_drain=on_drain, log_every=log_every,
-            cancellation=cancellation,
+            cancellation=cancellation, queue_factory=queue_factory,
         )
 
     def map_batches(

@@ -24,6 +24,21 @@ from typing import Callable, Optional
 KeyOf = Callable[[dict], list]
 
 
+def atomic_write_bytes(path: str, data: bytes) -> None:
+    """原子写字节：pid 唯一临时文件 + os.replace（同目录同文件系统）。
+
+    内容寻址 blob 的并发同内容写安全：不同进程临时名互不碰撞，
+    replace 后发者胜且内容相同；不同内容同路径只可能来自哈希碰撞
+    （工程上忽略）。2026-09-04·D1 新增：行引用化后下载算子即时落
+    blob 用（跨节点并发写的原子性由本函数保证）。
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
 class AppendManifestStore:
     """追加式清单存储：幂等去重键为任意可哈希值（如 (内容哈希, 归属键)）。"""
 
@@ -106,11 +121,7 @@ class AppendManifestStore:
                     return False
                 os.makedirs(os.path.dirname(blob_path) or ".", exist_ok=True)
                 if not os.path.exists(blob_path):
-                    # 临时文件与目标同目录：os.replace 要求同文件系统
-                    tmp = blob_path + ".tmp"
-                    with open(tmp, "wb") as f:
-                        f.write(data)
-                    os.replace(tmp, blob_path)
+                    atomic_write_bytes(blob_path, data)
                 with open(self.manifest, "a", encoding="utf-8") as f:
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 self._scan_end = os.path.getsize(self.manifest)   # 推进含本行
