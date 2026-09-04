@@ -266,3 +266,30 @@ def test_map_stage_sync_call_and_label_default():
     stats = ds.run_stream()
     assert stats.emitted == 4
     assert "SyncPassthrough" in stats.stages      # label 缺省取类名
+
+
+def test_stage_aclose_lifecycle_hook():
+    """持有资源（浏览器/连接）的规范算子经 run_stages 退出期统一 aclose。"""
+    from demiflow.data.plan import StreamStage
+
+    closed = []
+
+    class Resourced(StreamStage):
+        label = "res"
+
+        async def __call__(self, row):
+            return row
+
+        async def aclose(self):
+            closed.append("res")
+
+    class Plain(StreamStage):     # 无 aclose 的算子不受影响
+        label = "plain"
+
+        def __call__(self, row):
+            return row
+
+    from demiflow.standalone import run_stages
+    ctx = local_data()
+    run_stages(ctx, [{"i": 1}], [Plain(), Resourced()])
+    assert closed == ["res"]

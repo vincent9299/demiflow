@@ -264,8 +264,11 @@ def run_stages(ctx, items, stages: list, *,
         return ds.run_stream(on_progress=on_progress, on_drain=on_drain,
                              log_every=log_every, cancellation=cancellation)
     finally:
-        # 平台资源收尾（KI 路径客户端已随其事件循环终结，作清注册即可）
+        # 退出期统一收尾：算子生命周期钩子（aclose，如持浏览器的抓取算子）
+        # → 平台资源（LLM 端点 + HTTP 双池）。KI 路径绑定旧 loop 的资源
+        # 由进程退出回收，此处 best-effort。
         import contextlib
+        _close_stages(stages)
         with contextlib.suppress(Exception):
             import asyncio as _a
             _a.run(_close_platform())
@@ -273,6 +276,25 @@ def run_stages(ctx, items, stages: list, *,
         _llm._ENDPOINT_CLIENTS.clear()
         _net._client_direct = _net._client_proxy = None
         _net._dl_client_direct = _net._dl_client_proxy = None
+
+
+def _close_stages(stages: list) -> None:
+    """规范算子可选 aclose() 钩子（同步/异步皆可，best-effort）。"""
+    import contextlib
+    import inspect
+
+    async def _all():
+        for st in stages:
+            fn = getattr(st, "aclose", None)
+            if fn is None:
+                continue
+            r = fn()
+            if inspect.isawaitable(r):
+                await r
+
+    with contextlib.suppress(Exception):
+        import asyncio
+        asyncio.run(_all())
 
 
 async def _close_platform():
