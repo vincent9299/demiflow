@@ -106,6 +106,9 @@ def encode_image_b64(data: bytes, *, max_edge: int = 768,
 
 _ENDPOINT_CFG: dict[str, dict] = {}
 _ENDPOINT_CLIENTS: dict[str, AsyncLLMClient] = {}
+# 冒烟注入缝：优先于惰性构造，且不被 reconfigure_endpoint 清除
+# （编排启动期按并发 reconfigure 池上限是常规动作，注入必须存活）
+_INJECTED: dict[str, AsyncLLMClient] = {}
 
 
 def register_endpoint(name: str, *, base_url: str, model: str,
@@ -128,7 +131,9 @@ def reconfigure_endpoint(name: str, **overrides) -> None:
 
 
 def get_llm_client(name: str) -> AsyncLLMClient:
-    """取端点的共享客户端（惰性建；env 覆盖 base_url/model）。"""
+    """取端点的共享客户端（注入优先，惰性建；env 覆盖 base_url/model）。"""
+    if name in _INJECTED:
+        return _INJECTED[name]
     if name not in _ENDPOINT_CLIENTS:
         cfg = _ENDPOINT_CFG.get(name)
         if cfg is None:
@@ -145,12 +150,13 @@ def get_llm_client(name: str) -> AsyncLLMClient:
 
 
 def inject_endpoint_client(name: str, client: AsyncLLMClient) -> None:
-    """冒烟注入（MockTransport 版客户端顶替惰性构造）。"""
-    _ENDPOINT_CLIENTS[name] = client
+    """冒烟注入（MockTransport 版客户端顶替惰性构造；reconfigure 不清除）。"""
+    _INJECTED[name] = client
 
 
 async def close_all_llm() -> None:
     """平台收尾：关全部端点客户端（run_stages 退出期统一调用）。"""
-    for client in _ENDPOINT_CLIENTS.values():
+    for client in list(_ENDPOINT_CLIENTS.values()) + list(_INJECTED.values()):
         await client.aclose()
     _ENDPOINT_CLIENTS.clear()
+    _INJECTED.clear()

@@ -129,3 +129,17 @@ def test_run_stages_orchestration():
                        concurrency={"double": (3, 8)})
     assert stats.emitted == 2
     assert stats.stage("keep")["in"] == 5
+
+
+async def test_injection_survives_reconfigure():
+    """冒烟注入优先且不被 reconfigure 清除（编排启动期常规 reconfigure 池上限）。"""
+    from demiflow.collect import llm
+    llm.register_endpoint("_t2", base_url="http://default/v1", model="m")
+    c = AsyncLLMClient(base_url="http://mock/v1", model="mock",
+                       http=httpx.AsyncClient(transport=httpx.MockTransport(
+                           lambda req: httpx.Response(200, json={
+                               "choices": [{"message": {"content": "x"}}]}))))
+    llm.inject_endpoint_client("_t2", c)
+    llm.reconfigure_endpoint("_t2", max_connections=4)
+    assert llm.get_llm_client("_t2") is c
+    await llm.close_all_llm()
