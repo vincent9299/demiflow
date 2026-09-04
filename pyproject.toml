@@ -13,6 +13,8 @@ dependencies = ["pyarrow>=14", "PyYAML>=6", "click>=8", "packaging>=23"]
 lance = ["pylance>=0.9"]
 ray = ["ray[data]>=2.9"]
 llm = ["openai>=1.0", "httpx>=0.27"]
+crawl = ["crawl4ai>=0.9"]
+images = ["pillow>=10"]
 dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]

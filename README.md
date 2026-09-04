@@ -12,6 +12,10 @@
   - `store.AppendManifestStore`：内容寻址 blob 原子写 + jsonl 追加清单 +
     跨进程 fcntl 幂等去重（吸收式尾扫索引）；
   - `resume.scan_counts`：清单现算 done-set/计数（断点续跑依据，不落盘）；
+  - `crawl.PageCrawler`：URL → 正文 Markdown（Crawl4AI 进程内封装，
+    新旧版本兼容 shim + 惰性依赖，extras `[crawl]`）；
+  - `images.verify_image`：字节 → 图像元数据（Pillow 全量解码 +
+    mime/ext 规范表，fetch_tiers 的 verify 钩子，extras `[images]`）；
 - **惰性批式路径**：Ray Data 兼容超集的 Dataset API（`from_items/map/filter/take_all/write_*`），
   确定性物理计划 + 本地线程池执行器；Ray 为可选 extras；
 - **流式路径**（2026-09-04 新增）：`map_async` + `run_stream`——常驻 worker 协程 +
