@@ -289,6 +289,8 @@ def run_stages(ctx, items, stages: list, *,
         _llm._ENDPOINT_CLIENTS.clear()
         _net._client_direct = _net._client_proxy = None
         _net._dl_client_direct = _net._dl_client_proxy = None
+        _net._gates.clear()   # 闸门缓存含 loop 绑定原语，与池同生命周期
+                              # （配额循环多轮各自事件循环，跨轮复用会炸）
 
 
 def _close_stages(stages: list) -> None:
