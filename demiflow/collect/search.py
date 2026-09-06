@@ -80,6 +80,7 @@ async def engine_search(name: str, query: str, k: int, *,
     tel = _tel(name)
     t0 = _time.perf_counter()
     tel["attempts"] += 1
+    rows = None
     try:
         rows = await eng.search(query, min(k, eng.k_cap), lang=lang,
                                 client=client)
@@ -91,7 +92,8 @@ async def engine_search(name: str, query: str, k: int, *,
         dt = (_time.perf_counter() - t0) * 1000
         tel["latency_ms_sum"] += dt
         tel["latency_ms_max"] = max(tel["latency_ms_max"], dt)
-        tel["results"] += len(rows) if rows else 0
+        if rows:
+            tel["results"] += len(rows)
     return rows
 
 
