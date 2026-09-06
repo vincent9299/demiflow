@@ -36,7 +36,18 @@ def atomic_write_bytes(path: str, data: bytes) -> None:
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "wb") as f:
         f.write(data)
-    os.replace(tmp, path)
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        # cosfs 等对象存储 FUSE 的 rename 语义缺陷（tmp 刚写完即改名可
+        # ENOENT）。回退直写终径：内容寻址下同内容并发写良性（同字节流
+        # 自偏移 0 顺序写，任意交错终态一致；异内容同径=哈希碰撞，忽略）
+        with open(path, "wb") as f:
+            f.write(data)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 class AppendManifestStore:

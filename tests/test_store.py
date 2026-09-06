@@ -123,3 +123,15 @@ async def test_index_rebuild_and_bad_line_tolerance():
         print("[PASS] 索引重建与坏行容忍")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_atomic_write_rename_fallback(tmp_path, monkeypatch):
+    """FUSE rename 失败回退直写（cosfs 语义缺陷场景）。"""
+    import os as _os
+    from demiflow.collect.store import atomic_write_bytes
+    monkeypatch.setattr(_os, "replace",
+                        lambda a, b: (_ for _ in ()).throw(OSError(2, "noent")))
+    target = str(tmp_path / "x" / "ca" / "blob.bin")
+    atomic_write_bytes(target, b"payload")
+    assert open(target, "rb").read() == b"payload"
+    assert not [p for p in tmp_path.rglob("*.tmp")]    # 临时文件已清
