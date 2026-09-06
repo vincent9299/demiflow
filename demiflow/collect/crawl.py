@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 
@@ -70,7 +71,11 @@ class PageCrawler:
             self._crawler = None
 
     async def fetch(self, url: str) -> Optional[dict]:
-        """抓单页正文；成功返回 {url, title, markdown}，失败返回 None（认缺）。"""
+        """抓单页；成功返回 {url, title, markdown, images}，失败 None（认缺）。
+
+        images = [{src, alt}]：页面内嵌图（图文绑定原料）——Crawl4AI media
+        透传为主、markdown 内联 ![alt](src) 解析兜底，按出现序去重。
+        """
         if self._crawler is None:
             raise RuntimeError("PageCrawler 须 async with 使用（浏览器未启动）")
         try:
@@ -85,4 +90,29 @@ class PageCrawler:
         meta = getattr(res, "metadata", None) or {}
         title = meta.get("title") if isinstance(meta, dict) else None
         return {"url": url, "title": (str(title).strip() if title else None),
-                "markdown": markdown}
+                "markdown": markdown,
+                "images": _extract_images(markdown, getattr(res, "media", None))}
+
+
+_IMG_MD_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
+
+
+def _extract_images(markdown: str, media) -> list:
+    """内嵌图清单（图文绑定原料）：Crawl4AI media 优先，markdown 内联兜底。"""
+    out, seen = [], set()
+
+    def _add(src, alt):
+        src = (src or "").strip()
+        if (not src or src.startswith(("data:", "javascript:"))
+                or src in seen):
+            return
+        seen.add(src)
+        out.append({"src": src, "alt": (alt or "").strip()})
+
+    if isinstance(media, dict):
+        for m in media.get("images") or []:
+            if isinstance(m, dict):
+                _add(m.get("src"), m.get("alt"))
+    for alt, src in _IMG_MD_RE.findall(markdown or ""):
+        _add(src, alt)
+    return out

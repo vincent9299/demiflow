@@ -45,11 +45,54 @@ def get_engine(name: str) -> SearchEngine:
     return eng
 
 
+# 引擎级遥测（2026-09-06：反爬/性能分析的的数据基础；进程级累计，
+# flow drain 侧 dump_engine_telemetry() 落盘由消费方决定）
+ENGINE_TELEMETRY: dict = {}
+
+
+def _tel(name: str) -> dict:
+    return ENGINE_TELEMETRY.setdefault(
+        name, {"attempts": 0, "results": 0, "errors": {},
+               "latency_ms_sum": 0.0, "latency_ms_max": 0.0})
+
+
+def dump_engine_telemetry() -> dict:
+    """快照引擎遥测（深拷贝；含均值派生）。"""
+    import copy
+    out = copy.deepcopy(ENGINE_TELEMETRY)
+    for t in out.values():
+        n = max(t["attempts"], 1)
+        t["latency_ms_avg"] = round(t["latency_ms_sum"] / n, 1)
+        t["error_rate"] = round(
+            sum(t["errors"].values()) / max(t["attempts"], 1), 3)
+    return out
+
+
 async def engine_search(name: str, query: str, k: int, *,
                         lang: str = "en", client: Any = None) -> list:
-    """分派检索：K 按引擎 k_cap 封顶；异常语义由引擎实现与调用方约定。"""
+    """分派检索：K 按引擎 k_cap 封顶；异常语义由引擎实现与调用方约定。
+
+    遥测：attempts/errors（按异常类型）/results/延迟（累计与峰值）——
+    反爬信号（403/429/Timeout 比率）与性能画像的数据源。
+    """
+    import time as _time
     eng = get_engine(name)
-    return await eng.search(query, min(k, eng.k_cap), lang=lang, client=client)
+    tel = _tel(name)
+    t0 = _time.perf_counter()
+    tel["attempts"] += 1
+    try:
+        rows = await eng.search(query, min(k, eng.k_cap), lang=lang,
+                                client=client)
+    except BaseException as exc:
+        key = type(exc).__name__
+        tel["errors"][key] = tel["errors"].get(key, 0) + 1
+        raise
+    finally:
+        dt = (_time.perf_counter() - t0) * 1000
+        tel["latency_ms_sum"] += dt
+        tel["latency_ms_max"] = max(tel["latency_ms_max"], dt)
+        tel["results"] += len(rows) if rows else 0
+    return rows
 
 
 def is_connect_failure(exc: BaseException) -> bool:
