@@ -196,20 +196,22 @@ def _limits_for(source: str) -> Optional[SourceLimits]:
 
 def get_client(source: str = "") -> httpx.AsyncClient:
     """按源取进程级共享 HTTP 客户端（双池：直连 / 代理，惰性创建）。
+
     检索侧专用：下载侧（dl: 流量）另走 get_download_client。
+    冒烟注入层优先（set_client，跨 run 存活）。
 
     两池均 max_keepalive_connections=0（2026-08-21 定案）：三次夜跑卡死
     同一签名——半读状态的连接（CLOSE-WAIT 且接收缓冲有未读字节）被池
     保留，下次复用读流永久阻塞，全链路静默停摆。任务取消是半读连接
     的主要来源，无法从池层根治，故直接禁用复用：每次请求新连接，
     代价（每请求一次 TCP+TLS 握手）远小于停摆风险。
-
-    冒烟可先 set_client 注入（无 proxy 需求的源注 direct 池，
-    proxy 源注 proxy 池）。
     """
+    lim = _limits_for(source)
+    injected = _INJECTED["proxy" if (lim and lim.proxy) else "direct"]
+    if injected is not None:
+        return injected
     global _client_direct, _client_proxy
     no_keepalive = httpx.Limits(max_keepalive_connections=0)
-    lim = _limits_for(source)
     need_proxy = bool(lim and lim.proxy)
     if need_proxy:
         if _client_proxy is None:
@@ -226,6 +228,7 @@ def get_client(source: str = "") -> httpx.AsyncClient:
 
 def get_download_client(source: str) -> httpx.AsyncClient:
     """下载专用客户端（双池：直连 / 代理，惰性创建）：开启连接复用。
+    冒烟注入层优先（set_download_client，跨 run 存活）。
 
     沿革：2026-08-21 三次夜跑停摆后全链路禁复用（keepalive=0）；2026-08-22
     拍板仅下载侧恢复复用——病根（stream yield-in-retry 制造半读连接）已修，
@@ -237,8 +240,11 @@ def get_download_client(source: str) -> httpx.AsyncClient:
     回退条件：任何停摆/风控迹象 → 上面 DOWNLOAD_LIMITS 的
     max_keepalive_connections 改回 0，重启即恢复旧行为。
     """
-    global _dl_client_direct, _dl_client_proxy
     lim = _limits_for(source)
+    injected = _INJECTED["dl_proxy" if (lim and lim.proxy) else "dl_direct"]
+    if injected is not None:
+        return injected
+    global _dl_client_direct, _dl_client_proxy
     need_proxy = bool(lim and lim.proxy)
     if need_proxy:
         if _dl_client_proxy is None:
@@ -253,21 +259,26 @@ def get_download_client(source: str) -> httpx.AsyncClient:
     return _dl_client_direct
 
 
+# 冒烟注入层（2026-09-06）：优先于惰性池构建，且不被 run_stages 退出期
+# 的平台资源收尾清除（收尾只清惰性池；注入实例生命周期归注入方）——
+# 修复配额循环第二轮 mock 被清、打到真实端点的缺陷
+_INJECTED: dict = {"direct": None, "proxy": None,
+                   "dl_direct": None, "dl_proxy": None}
+
+
 def set_client(client: httpx.AsyncClient, *, proxy: bool = False) -> None:
-    global _client_direct, _client_proxy
-    if proxy:
-        _client_proxy = client
-    else:
-        _client_direct = client
+    """冒烟注入检索池客户端（注入层，优先且跨 run 存活）。"""
+    _INJECTED["proxy" if proxy else "direct"] = client
 
 
 def set_download_client(client: httpx.AsyncClient, *, proxy: bool = False) -> None:
-    """冒烟注入下载池客户端（与 set_client 对称；2026-09-04 flow 冒烟需要）。"""
-    global _dl_client_direct, _dl_client_proxy
-    if proxy:
-        _dl_client_proxy = client
-    else:
-        _dl_client_direct = client
+    """冒烟注入下载池客户端（注入层，与 set_client 对称）。"""
+    _INJECTED["dl_proxy" if proxy else "dl_direct"] = client
+
+
+def reset_injected_clients() -> None:
+    """冒烟自清理：清空注入层（恢复惰性池行为）。"""
+    _INJECTED.update({k: None for k in _INJECTED})
 
 
 async def close_client() -> None:

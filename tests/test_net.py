@@ -32,6 +32,7 @@ def clean_policy():
     net.PROXY_URL = saved_proxy
     net._client_direct = net._client_proxy = None
     net._dl_client_direct = net._dl_client_proxy = None
+    net.reset_injected_clients()
 
 
 async def test_deterministic_404_zero_retry(clean_policy):
