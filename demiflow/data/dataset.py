@@ -194,9 +194,9 @@ class Dataset:
         self,
         fn: Callable[..., Any],
         *,
-        concurrency: int = 1,
+        concurrency: Optional[int] = None,
         queue_depth: Optional[int] = None,
-        catch: tuple = (),
+        catch: Optional[tuple] = None,
         label: Optional[str] = None,
     ) -> "Dataset":
         """Append one async streaming transformation（streaming 路径专用）。
@@ -208,45 +208,45 @@ class Dataset:
         深度×载荷即内存上界，按需收窄）。catch = 认缺异常白名单：命中只
         计数不断链（网络类瞬态/确定性失败），白名单外异常终止整链。
         计划中含本算子时，终结动作必须用 run_stream()（惰性动作将拒绝）。
+
+        输入多态（fn/actor 二元注入，2026-09-07 收敛 map_stage 入此）：
+        fn 为裸函数时策略取 kwargs（concurrency 缺省 1）；fn 为 actor
+        形态（带齐 label/concurrency/queue_depth/catch/__call__ 的可调用
+        类实例，StreamStage 即其继承式基类）时策略随对象，显式 kwargs
+        覆盖对象声明；actor 记入计划算子表供 run_stream 退出期 aclose。
         """
-        if int(concurrency) < 1:
+        is_actor = all(hasattr(fn, a) for a in
+                       ("label", "concurrency", "queue_depth", "catch",
+                        "__call__"))
+        if is_actor:
+            conc = int(concurrency if concurrency is not None else fn.concurrency)
+            depth = queue_depth if queue_depth is not None else fn.queue_depth
+            ctch = tuple(catch) if catch is not None else tuple(fn.catch)
+            lbl = label or fn.label or type(fn).__name__
+        else:
+            conc = int(concurrency if concurrency is not None else 1)
+            depth = queue_depth
+            ctch = tuple(catch) if catch is not None else ()
+            lbl = label
+        if conc < 1:
             raise ValueError("map_async concurrency must be >= 1")
-        if queue_depth is not None and int(queue_depth) < 1:
+        if depth is not None and int(depth) < 1:
             raise ValueError("map_async queue_depth must be >= 1 or None")
         operation = AsyncMapOp(
-            CallableSpec.create(fn),
-            int(concurrency),
-            None if queue_depth is None else int(queue_depth),
-            tuple(catch),
-            label,
+            CallableSpec.create(fn.__call__ if is_actor else fn),
+            conc,
+            None if depth is None else int(depth),
+            ctch,
+            lbl,
         )
         return Dataset(
             self._source, self._plan.append(operation), self._executor,
+            self._stages + (fn,) if is_actor else self._stages,
         )
 
-    def map_stage(self, stage) -> "Dataset":
-        """Append one streaming stage（继承式规范算子，策略字段随算子声明）。
-
-        从 stage 读取 label/concurrency/queue_depth/catch 构造 AsyncMapOp
-        （替代「裸函数 + 散装 kwargs」的工厂形态）；stage 须为 StreamStage
-        子类实例（鸭子判定），__call__ 同步/异步皆可。绑定的依赖（锁/连接
-        等不可深拷贝对象）安全：规格持有的是绑定方法，不做实例深拷贝。
-        """
-        from .plan import StreamStage
-        if not all(hasattr(stage, a) for a in
-                   ("label", "concurrency", "queue_depth", "catch", "__call__")):
-            raise TypeError("map_stage 需要 StreamStage 规范算子（策略字段 + __call__）")
-        if int(stage.concurrency) < 1:
-            raise ValueError("StreamStage.concurrency must be >= 1")
-        operation = AsyncMapOp(
-            CallableSpec.create(stage.__call__),
-            int(stage.concurrency), stage.queue_depth, tuple(stage.catch),
-            stage.label or type(stage).__name__,
-        )
-        return Dataset(
-            self._source, self._plan.append(operation), self._executor,
-            self._stages + (stage,),
-        )
+    # map_stage 已于 2026-09-07 移除：actor 形态输入由 map_async 多态承接
+    # （策略随对象、显式 kwargs 覆盖、记入计划算子表供 aclose）。注入
+    # 形态二元：map（惰性 fn）与 map_async（流式 fn|actor）。
 
     def run_stream(
         self,

@@ -194,7 +194,7 @@ def test_multi_stage_sentinel_drain():
 # StreamStage 规范算子（继承式）
 # ---------------------------------------------------------------------------
 
-def test_map_stage_policy_from_class():
+def test_map_async_actor_policy_from_class():
     """策略字段随算子声明：label/并发/认缺白名单全部从 stage 类读取。"""
     from demiflow.data.plan import StreamStage
 
@@ -213,7 +213,7 @@ def test_map_stage_policy_from_class():
 
     ctx = local_data()
     ds = (ctx.from_items([{"i": i} for i in range(5)])
-          .map_stage(Doubler()))
+          .map_async(Doubler()))
     stats = ds.run_stream(log_every=0)
     assert stats.emitted == 4
     assert stats.miss["double:Soft"] == 1
@@ -247,12 +247,12 @@ def test_stage_bound_deps_not_deepcopied():
 
     st = Toucher()
     ctx = local_data()
-    ds = ctx.from_items([{"i": i} for i in range(4)]).map_stage(st)
+    ds = ctx.from_items([{"i": i} for i in range(4)]).map_async(st)
     ds.run_stream()
     assert st.counter.n == 4          # 同一实例（未深拷贝）
 
 
-def test_map_stage_sync_call_and_label_default():
+def test_map_async_actor_sync_call_and_label_default():
     from demiflow.data.plan import StreamStage
 
     class SyncPassthrough(StreamStage):     # 同步 __call__ 也合法
@@ -262,14 +262,14 @@ def test_map_stage_sync_call_and_label_default():
             return [row, row] if row["i"] % 2 else None
 
     ctx = local_data()
-    ds = ctx.from_items([{"i": i} for i in range(4)]).map_stage(SyncPassthrough())
+    ds = ctx.from_items([{"i": i} for i in range(4)]).map_async(SyncPassthrough())
     stats = ds.run_stream()
     assert stats.emitted == 4
     assert "SyncPassthrough" in stats.stages      # label 缺省取类名
 
 
 def test_stage_aclose_lifecycle_hook():
-    """持有资源（浏览器/连接）的规范算子经 run_stages 退出期统一 aclose。"""
+    """持有资源（浏览器/连接）的 actor 算子经 run_stream 退出期统一 aclose。"""
     from demiflow.data.plan import StreamStage
 
     closed = []
@@ -289,9 +289,10 @@ def test_stage_aclose_lifecycle_hook():
         def __call__(self, row):
             return row
 
-    from demiflow.standalone import run_stages
     ctx = local_data()
-    run_stages(ctx, [{"i": 1}], [Plain(), Resourced()])
+    (ctx.from_items([{"i": 1}])
+     .map_async(Plain()).map_async(Resourced())
+     .run_stream())
     assert closed == ["res"]
 
 
@@ -319,12 +320,8 @@ def test_queue_factory_transport_seam():
         def __call__(self, row):
             return row
 
-    stats = run_stages_or_import(ctx, [{"i": i} for i in range(5)], [Pass()],
-                                 queue_factory=lambda d: CountingQueue(d))
+    stats = (ctx.from_items([{"i": i} for i in range(5)])
+             .map_async(Pass())
+             .run_stream(queue_factory=lambda d: CountingQueue(d)))
     assert stats.emitted == 5
     assert CountingQueue.puts >= 5        # 工厂确实被使用
-
-
-def run_stages_or_import(ctx, items, stages, **kw):
-    from demiflow.standalone import run_stages
-    return run_stages(ctx, items, stages, **kw)

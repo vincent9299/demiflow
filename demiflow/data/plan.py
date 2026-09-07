@@ -125,7 +125,7 @@ class StreamStage:
     本基类适合管线级算子——并发/队列深度/认缺白名单/统计名随算子声明
     （子类可给默认值，组装层可覆写），依赖经 __init__ 绑定，逻辑写在
     __call__（row -> row | None | list[row]，None=认缺、list=展开，
-    同步或异步皆可）。Dataset.map_stage 读取全部策略字段构造 AsyncMapOp。
+    同步或异步皆可）。Dataset.map_async（actor 形态）读取策略字段构造 AsyncMapOp。
     """
 
     label: str = ""

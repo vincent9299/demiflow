@@ -109,7 +109,7 @@ def test_endpoint_unknown_rejected():
 def test_run_stages_orchestration():
     from demiflow.collect import llm
     from demiflow.data.plan import StreamStage
-    from demiflow.standalone import local_data, run_stages
+    from demiflow.standalone import local_data
 
     class Double(StreamStage):
         label = "double"
@@ -124,9 +124,10 @@ def test_run_stages_orchestration():
         def __call__(self, row):
             return row if row["v"] > 4 else None
 
-    stats = run_stages(local_data(), [{"i": i} for i in range(5)],
-                       [Double(), Keep()],
-                       concurrency={"double": (3, 8)})
+    stats = (local_data().from_items([{"i": i} for i in range(5)])
+             .map_async(Double(), concurrency=3, queue_depth=8)
+             .map_async(Keep())
+             .run_stream())
     assert stats.emitted == 2
     assert stats.stage("keep")["in"] == 5
 

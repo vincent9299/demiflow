@@ -252,7 +252,7 @@ def run_stream(source_iter, plan: LogicalPlan, *,
 
 
 # run_stages（stage 列表便捷入口）已于 2026-09-07 移除：收尾语义下沉到
-# Dataset.run_stream 后，链式声明（from_items().map_stage()×N.run_stream()）
+# Dataset.run_stream 后，链式声明（from_items().map_async()×N.run_stream()）
 # 是唯一编排形态——历史沿革：09-05 作为便捷入口引入，收敛期回归原始
 # Dataset API 风格后退役。
 
