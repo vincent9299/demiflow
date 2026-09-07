@@ -272,44 +272,19 @@ def run_stages(ctx, items, stages: list, *,
         if concurrency and stage.label in concurrency:
             stage.concurrency, stage.queue_depth = concurrency[stage.label]
         ds = ds.map_stage(stage)
-    try:
-        return ds.run_stream(on_progress=on_progress, on_drain=on_drain,
-                             log_every=log_every, cancellation=cancellation,
-                             queue_factory=queue_factory)
-    finally:
-        # 退出期统一收尾：算子生命周期钩子（aclose，如持浏览器的抓取算子）
-        # → 平台资源（LLM 端点 + HTTP 双池）。KI 路径绑定旧 loop 的资源
-        # 由进程退出回收，此处 best-effort。
-        import contextlib
-        _close_stages(stages)
-        with contextlib.suppress(Exception):
-            import asyncio as _a
-            _a.run(_close_platform())
-        from ..collect import llm as _llm, net as _net
-        _llm._ENDPOINT_CLIENTS.clear()
-        _net._client_direct = _net._client_proxy = None
-        _net._dl_client_direct = _net._dl_client_proxy = None
-        _net._gates.clear()   # 闸门缓存含 loop 绑定原语，与池同生命周期
-                              # （配额循环多轮各自事件循环，跨轮复用会炸）
+    # 退出期收尾（aclose/平台资源）已下沉到 Dataset.run_stream 的 finally
+    # （2026-09-07）——编排层组合原语与链式 API 同等享有，此处不再重复。
+    return ds.run_stream(on_progress=on_progress, on_drain=on_drain,
+                         log_every=log_every, cancellation=cancellation,
+                         queue_factory=queue_factory)
 
 
 def _close_stages(stages: list) -> None:
-    """规范算子可选 aclose() 钩子（同步/异步皆可，best-effort）。"""
-    import contextlib
-    import inspect
+    """规范算子可选 aclose() 钩子（同步/异步皆可，best-effort）。
 
-    async def _all():
-        for st in stages:
-            fn = getattr(st, "aclose", None)
-            if fn is None:
-                continue
-            r = fn()
-            if inspect.isawaitable(r):
-                await r
-
-    with contextlib.suppress(Exception):
-        import asyncio
-        asyncio.run(_all())
+    2026-09-07：收尾逻辑下沉到 Dataset.run_stream finally 后，本函数保留
+    供外部工具（冒烟脚本等）显式收尾使用。
+    """
 
 
 async def _close_platform():

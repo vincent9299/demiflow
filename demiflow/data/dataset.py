@@ -105,10 +105,14 @@ class Dataset:
 
     def __init__(
         self, source: SourcePlan, plan: LogicalPlan, executor: Any,
+        stages: tuple = (),
     ) -> None:
         self._source = source
         self._plan = plan
         self._executor = executor
+        # map_stage 挂载的规范算子实例（run_stream 退出期收尾 aclose 用；
+        # 惰性路径不带 stages，终结动作收尾为空操作）
+        self._stages = tuple(stages)
 
     def map(
         self,
@@ -241,6 +245,7 @@ class Dataset:
         )
         return Dataset(
             self._source, self._plan.append(operation), self._executor,
+            self._stages + (stage,),
         )
 
     def run_stream(
@@ -262,11 +267,38 @@ class Dataset:
         """
         from ..execution.stream import run_stream as _run_stream
         rows = self._executor.iter_rows(self._source, LogicalPlan())
-        return _run_stream(
-            rows, self._plan,
-            on_progress=on_progress, on_drain=on_drain, log_every=log_every,
-            cancellation=cancellation, queue_factory=queue_factory,
-        )
+        try:
+            return _run_stream(
+                rows, self._plan,
+                on_progress=on_progress, on_drain=on_drain, log_every=log_every,
+                cancellation=cancellation, queue_factory=queue_factory,
+            )
+        finally:
+            # 退出期统一收尾（2026-09-07 从 run_stages 下沉到终结动作：
+            # 链式 Dataset API 与 run_stages 同等享有）——算子生命周期钩子
+            # （aclose，如持浏览器的抓取算子）→ 平台资源（LLM 端点 + HTTP
+            # 双池 + 闸门缓存）。KI 路径绑定旧 loop 的资源由进程退出回收，
+            # 此处 best-effort。
+            import contextlib
+            import inspect
+
+            async def _close_all():
+                for st in self._stages:
+                    fn = getattr(st, "aclose", None)
+                    if fn is None:
+                        continue
+                    r = fn()
+                    if inspect.isawaitable(r):
+                        await r
+
+            with contextlib.suppress(Exception):
+                import asyncio as _a
+                _a.run(_close_all())
+            from ..collect import llm as _llm, net as _net
+            _llm._ENDPOINT_CLIENTS.clear()
+            _net._client_direct = _net._client_proxy = None
+            _net._dl_client_direct = _net._dl_client_proxy = None
+            _net._gates.clear()   # 闸门缓存含 loop 绑定原语，与池同生命周期
 
     def map_batches(
         self, fn: Callable[..., Any], *, batch_size: Optional[int] = None,
