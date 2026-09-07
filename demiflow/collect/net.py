@@ -278,7 +278,7 @@ def get_download_client(source: str) -> httpx.AsyncClient:
     return _dl_client_direct
 
 
-# 冒烟注入层（2026-09-06）：优先于惰性池构建，且不被 run_stages 退出期
+# 冒烟注入层（2026-09-06）：优先于惰性池构建，且不被 run_stream 退出期
 # 的平台资源收尾清除（收尾只清惰性池；注入实例生命周期归注入方）——
 # 修复配额循环第二轮 mock 被清、打到真实端点的缺陷
 _INJECTED: dict = {"direct": None, "proxy": None,

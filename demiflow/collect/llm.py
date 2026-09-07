@@ -155,7 +155,7 @@ def inject_endpoint_client(name: str, client: AsyncLLMClient) -> None:
 
 
 async def close_all_llm() -> None:
-    """平台收尾：关全部端点客户端（run_stages 退出期统一调用）。"""
+    """平台收尾：关全部端点客户端（run_stream 退出期统一调用）。"""
     for client in list(_ENDPOINT_CLIENTS.values()) + list(_INJECTED.values()):
         await client.aclose()
     _ENDPOINT_CLIENTS.clear()

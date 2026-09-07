@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from .data.api import DataAPI
 from .execution.executors.local import LocalDatasetExecutor
-from .execution.stream import run_stages
 
-__all__ = ["local_data", "run_stages"]
+
+__all__ = ["local_data"]
 
 
 def local_data(workers: int = 4, *, block_size: int = 256,

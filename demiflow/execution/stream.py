@@ -251,32 +251,10 @@ def run_stream(source_iter, plan: LogicalPlan, *,
     return stats
 
 
-# ---------------------------------------------------------------------------
-# 编排串联原语：stage 列表 → 一次跑完（平台管调度与资源收尾）
-# ---------------------------------------------------------------------------
-
-def run_stages(ctx, items, stages: list, *,
-               concurrency: dict | None = None,
-               on_progress=None, on_drain=None, log_every: int = 0,
-               cancellation=None, queue_factory=None) -> StreamStats:
-    """demiflow 编排入口：stage 列表即管线声明，一步执行到底。
-
-    - stages：StreamStage 规范算子列表（策略默认值在类上声明）；
-    - concurrency：{label: (并发, 队列深度|None)} 编排层覆盖（如 CLI 参数）；
-    - 退出期（含 Ctrl-C/异常）平台统一收尾资源：LLM 端点客户端 +
-      HTTP 双池（on_drain 用户钩子先跑，再关平台资源）；
-    - 返回 StreamStats；编排层不再接触 map_stage/run_stream 细节。
-    """
-    ds = ctx.from_items(list(items))
-    for stage in stages:
-        if concurrency and stage.label in concurrency:
-            stage.concurrency, stage.queue_depth = concurrency[stage.label]
-        ds = ds.map_stage(stage)
-    # 退出期收尾（aclose/平台资源）已下沉到 Dataset.run_stream 的 finally
-    # （2026-09-07）——编排层组合原语与链式 API 同等享有，此处不再重复。
-    return ds.run_stream(on_progress=on_progress, on_drain=on_drain,
-                         log_every=log_every, cancellation=cancellation,
-                         queue_factory=queue_factory)
+# run_stages（stage 列表便捷入口）已于 2026-09-07 移除：收尾语义下沉到
+# Dataset.run_stream 后，链式声明（from_items().map_stage()×N.run_stream()）
+# 是唯一编排形态——历史沿革：09-05 作为便捷入口引入，收敛期回归原始
+# Dataset API 风格后退役。
 
 
 def _close_stages(stages: list) -> None:
