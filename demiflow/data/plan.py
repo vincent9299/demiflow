@@ -114,6 +114,13 @@ class FilterOp(LogicalOp):
 class StreamStage:
     """流式算子规范（继承式，2026-09-04·九）：策略字段 + __call__ 实现。
 
+    设计分类学对齐（2026-09-07 补记）：平台注入形态二元——fn（无状态
+    函数，map/map_async）与 actor（有状态可调用类）。本基类即 actor 槽位
+    在本地流式路径的形态（Ray 执行器对 callable class 保 actor 语义，
+    ray.py 同源）：状态经 __init__ 绑定（浏览器/锁/池），aclose 生命周期
+    钩子由 run_stream 退出期统一调用。命名"Stage"强调管线角色，分类学
+    上就是 actor。
+
     与 SearchEngine 协议的分工：协议适合无状态源实现（结构化鸭子类型）；
     本基类适合管线级算子——并发/队列深度/认缺白名单/统计名随算子声明
     （子类可给默认值，组装层可覆写），依赖经 __init__ 绑定，逻辑写在
