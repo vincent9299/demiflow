@@ -325,3 +325,33 @@ def test_queue_factory_transport_seam():
              .run_stream(queue_factory=lambda d: CountingQueue(d)))
     assert stats.emitted == 5
     assert CountingQueue.puts >= 5        # 工厂确实被使用
+
+
+def test_map_async_plain_class_partial_fields():
+    """普通类（零继承）漏声明部分策略字段：仍按 actor 解析，缺项走默认。"""
+    ctx = local_data()
+
+    class PlainActor:               # 无继承，只声明了 concurrency
+        concurrency = 2
+
+        async def __call__(self, row):
+            return row
+
+    hit = []
+
+    class PartialCatch:             # 只声明了 catch（label/并发走默认）
+        catch = (ValueError,)
+
+        async def __call__(self, row):
+            if row["i"] == 3:
+                raise ValueError("soft")
+            hit.append(row["i"])
+            return row
+
+    stats = (ctx.from_items([{"i": i} for i in range(4)])
+             .map_async(PlainActor())
+             .map_async(PartialCatch())
+             .run_stream())
+    assert stats.emitted == 3                     # 漏字段没有误判 fn 路径
+    assert stats.miss["PartialCatch:ValueError"] == 1
+    assert "PartialCatch" in stats.stages         # label 默认取类名

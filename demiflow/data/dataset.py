@@ -227,14 +227,20 @@ class Dataset:
         类实例，StreamStage 即其继承式基类）时策略随对象，显式 kwargs
         覆盖对象声明；actor 记入计划算子表供 run_stream 退出期 aclose。
         """
-        is_actor = all(hasattr(fn, a) for a in
-                       ("label", "concurrency", "queue_depth", "catch",
-                        "__call__"))
+        # actor 检测（韧性鸭子）：任一策略属性在场即按 actor 解析，
+        # 缺失字段逐项回落默认——普通类漏声明一个字段不会被静默误判
+        # 为 fn（策略丢失无告警）；functools.partial 等无策略属性的
+        # 可调用对象照常走 fn 路径
+        policy_attrs = ("label", "concurrency", "queue_depth", "catch")
+        is_actor = any(hasattr(fn, a) for a in policy_attrs)
         if is_actor:
-            conc = int(concurrency if concurrency is not None else fn.concurrency)
-            depth = queue_depth if queue_depth is not None else fn.queue_depth
-            ctch = tuple(catch) if catch is not None else tuple(fn.catch)
-            lbl = label or fn.label or type(fn).__name__
+            conc = int(concurrency if concurrency is not None
+                       else getattr(fn, "concurrency", 1))
+            depth = (queue_depth if queue_depth is not None
+                     else getattr(fn, "queue_depth", None))
+            ctch = tuple(catch) if catch is not None \
+                else tuple(getattr(fn, "catch", ()))
+            lbl = label or getattr(fn, "label", None) or type(fn).__name__
         else:
             conc = int(concurrency if concurrency is not None else 1)
             depth = queue_depth
