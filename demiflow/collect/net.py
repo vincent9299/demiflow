@@ -157,14 +157,33 @@ class SourceGate:
 
 _gates: dict[str, SourceGate] = {}
 
+# 下载闸默认兜底（2026-09-07，聚合源架构）：dl: 键来自动态上游引擎名
+# （searxng 聚合层的清单 source），不可穷举枚举——未登记的下载源回落
+# 此通用档并一次性告警（agent 扩源零代码改动的平台前提）；检索键保持
+# 严格登记（路由表本就穷举，漏配是 bug 不该静默）。
+DEFAULT_DL_LIMITS = SourceLimits(rate=15.0, concurrency=32)
+_warned_unregistered: set[str] = set()
+
 
 def gate_for(source: str) -> SourceGate:
-    """按源名取闸门（惰性创建）。未登记源直接报错，不给默认限速。"""
+    """按源名取闸门（惰性创建）。
+
+    检索源未登记直接报错（严格制）；dl: 下载源未登记回落
+    DEFAULT_DL_LIMITS 并告警一次（动态上游名语义）。
+    """
     gate = _gates.get(source)
     if gate is None:
         limits = SOURCE_LIMITS.get(source)
         if limits is None:
-            raise ValueError(f"源 {source!r} 未在限速表 SOURCE_LIMITS 登记")
+            if source.startswith("dl:"):
+                if source not in _warned_unregistered:
+                    _warned_unregistered.add(source)
+                    print(f"[net] 下载源 {source!r} 未登记限速，"
+                          f"回落 DEFAULT_DL_LIMITS（{DEFAULT_DL_LIMITS.rate}rps/"
+                          f"c{DEFAULT_DL_LIMITS.concurrency}）", flush=True)
+                limits = DEFAULT_DL_LIMITS
+            else:
+                raise ValueError(f"源 {source!r} 未在限速表 SOURCE_LIMITS 登记")
         gate = _gates[source] = SourceGate(limits)
     return gate
 
