@@ -41,11 +41,19 @@ def _extract_markdown(md) -> str:
 class PageCrawler:
     """Crawl4AI 浏览器封装：async with 生命周期，fetch 并发共享一个实例。"""
 
+    # 带项目标识的浏览器 UA（2026-09-07 合规改造：浏览器兼容性保底的
+    # 同时声明采集身份——比裸 HeadlessChrome 诚实，比纯标识 UA 存活）
+    DEFAULT_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 "
+                  "demiwtg-collector/0.1 (+https://github.com/vincent9299/demiwtg-data)")
+
     def __init__(self, *, proxy: Optional[str] = None,
-                 page_timeout: float = 40.0, headless: bool = True):
+                 page_timeout: float = 40.0, headless: bool = True,
+                 user_agent: Optional[str] = None):
         self._proxy = proxy
         self._page_timeout = page_timeout
         self._headless = headless
+        self._ua = user_agent or self.DEFAULT_UA
         self._crawler = None
 
     def _build(self):
@@ -55,7 +63,8 @@ class PageCrawler:
         except ImportError:                                      # noqa: F401
             from crawl4ai import CrawlerConfig as RunConfig      # 旧版命名
         browser_cfg = BrowserConfig(headless=self._headless,
-                                    proxy=self._proxy)
+                                    proxy=self._proxy,
+                                    user_agent=self._ua)
         run_cfg = RunConfig(cache_mode=CacheMode.BYPASS,
                             page_timeout=int(self._page_timeout * 1000))
         return AsyncWebCrawler(config=browser_cfg), run_cfg
