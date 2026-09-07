@@ -136,6 +136,13 @@ class Dataset:
         return value in one row field. ``outputs`` maps callable return keys to
         destination row fields. Use at most one of ``output`` and ``outputs``.
         Demiflow plans worker resources and parallelism at action time.
+
+        执行模型（2026-09-07 两轴定版）：本族（map/flat_map/map_batches/
+        map_prompt）走**拉模型**——终结动作按需向上游要行，算子同步组合、
+        无级间队列；map_async 走**推模型**——每级 worker 协程 + 有界队列，
+        节点解耦、级间并发、背压由队列深度承载。"async" 命名标记的是
+        callable 形态轴（本族仅收同步 fn；map_async 同步/异步皆可），
+        非执行模型轴。
         """
         spec = CallableSpec.create(
             fn,
@@ -199,7 +206,12 @@ class Dataset:
         catch: Optional[tuple] = None,
         label: Optional[str] = None,
     ) -> "Dataset":
-        """Append one async streaming transformation（streaming 路径专用）。
+        """Append one async streaming transformation（**推模型**执行路径）。
+
+        执行模型（两轴定版）：每级 N 个 worker 协程从有界输入队列取行、
+        算完推给下一级队列——节点解耦、级间并发、背压由 queue_depth 承载；
+        与 map 族（拉模型：终结动作按需向上游要行）相对。"async" 标记
+        callable 形态轴：同步/异步函数皆可（awaitable 会被等待）。
 
         fn(row) -> row | None | list[row]，同步或异步函数均可（awaitable
         会被等待）。None = 认缺丢弃并计数；list = 展开（flat 语义合一，
