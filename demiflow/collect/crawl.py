@@ -49,12 +49,20 @@ class PageCrawler:
 
     def __init__(self, *, proxy: Optional[str] = None,
                  page_timeout: float = 40.0, headless: bool = True,
-                 user_agent: Optional[str] = None):
+                 user_agent: Optional[str] = None,
+                 recycle_every: Optional[int] = 50):
         self._proxy = proxy
         self._page_timeout = page_timeout
         self._headless = headless
         self._ua = user_agent or self.DEFAULT_UA
         self._crawler = None
+        # 浏览器定量回收（2026-09-08 宕机复盘）：crawl4ai 超时路径的
+        # context/tab 碎片在单例长生命周期进程内只进不出（本机 docs 线
+        # 7h 累积→内存耗尽→平台硬重启实证）。每 recycle_every 次抓取
+        # 重建浏览器进程，碎片封顶；None=关闭（行为同旧版）。
+        self._recycle_every = recycle_every
+        self._fetch_count = 0
+        self._recycle_lock = None
 
     def _build(self):
         from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode
@@ -71,6 +79,7 @@ class PageCrawler:
 
     async def __aenter__(self) -> "PageCrawler":
         self._crawler, self._run_cfg = self._build()
+        self._fetch_count = 0
         await self._crawler.__aenter__()
         return self
 
@@ -87,10 +96,13 @@ class PageCrawler:
         """
         if self._crawler is None:
             raise RuntimeError("PageCrawler 须 async with 使用（浏览器未启动）")
+        await self._maybe_recycle()
         try:
             res = await self._crawler.arun(url=url, config=self._run_cfg)
         except Exception:  # noqa: BLE001 - 网络/渲染/超时一律认缺
             return None
+        finally:
+            self._fetch_count += 1
         if not getattr(res, "success", False):
             return None
         markdown = _extract_markdown(getattr(res, "markdown", None))
@@ -101,6 +113,35 @@ class PageCrawler:
         return {"url": url, "title": (str(title).strip() if title else None),
                 "markdown": markdown,
                 "images": _extract_images(markdown, getattr(res, "media", None))}
+
+    async def _maybe_recycle(self) -> None:
+        """浏览器进程定量重建（防碎片累积）。
+
+        到量即换新实例；旧实例延迟 page_timeout+10s 关闭——在途 arun
+        要么已自然结束，要么随旧浏览器消亡走认缺（失败语义不变）。
+        锁内双检防并发重复回收。
+        """
+        if not self._recycle_every or self._fetch_count < self._recycle_every:
+            return
+        if self._recycle_lock is None:
+            import asyncio
+            self._recycle_lock = asyncio.Lock()
+        async with self._recycle_lock:
+            if self._fetch_count < self._recycle_every:
+                return                          # 并发路径已回收过
+            import asyncio
+            old = self._crawler
+            self._crawler, self._run_cfg = self._build()
+            self._fetch_count = 0
+            await self._crawler.__aenter__()
+
+            async def _retire():
+                await asyncio.sleep(self._page_timeout + 10)
+                try:
+                    await old.__aexit__(None, None, None)
+                except Exception:               # noqa: BLE001 - 退役尽力而为
+                    pass
+            asyncio.create_task(_retire())
 
 
 _IMG_MD_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)")
