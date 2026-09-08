@@ -11,6 +11,7 @@ from .native_options import parse_native_options
 from .sources import (
     DatasourceSource,
     FileSource,
+    IterableSource,
     ItemsSource,
     LanceSource,
     MaterializedSource,
@@ -44,6 +45,24 @@ class DataAPI:
         handle = self._executor.from_items(bounded_items)
         return MaterializedDataset(
             MaterializedSource(handle, len(bounded_items)), LogicalPlan(), self._executor,
+        )
+
+    def from_iter(
+        self,
+        factory: Callable[[], Iterator[Any]],
+    ) -> Dataset:
+        """Create a lazy Dataset from a zero-arg iterator factory.
+
+        惰性流式源（2026-09-08 新增）：``factory`` 每次调用产出新迭代器，
+        行在终结动作执行时才被拉取（run_stream 的 feed 分块拉取、级间
+        有界队列背压），内存上界=队列深度×行载荷而非全量——大文件流式
+        解析（如 Wikipedia dump 逐页喂入）的入口。迭代器/生成器不物化、
+        不序列化，仅本地执行路径支持；跨节点分布请用可再分布的数据源。
+    """
+        if not callable(factory):
+            raise TypeError("from_iter requires a zero-arg callable returning an iterator")
+        return Dataset(
+            IterableSource(factory), LogicalPlan(), self._executor,
         )
 
     def range(

@@ -33,7 +33,7 @@ from ...data.plan import (
     StandardCallable,
 )
 from ...operator_llm.runtime import BoundOperatorLLMMap, InProcessOperatorLLMCoordinator, OperatorLLMRuntime
-from ...data.sources import DatasourceSource, FileSource, ItemsSource, LanceSource, MaterializedSource, RangeSource, SourcePlan, SqlSource
+from ...data.sources import DatasourceSource, FileSource, IterableSource, ItemsSource, LanceSource, MaterializedSource, RangeSource, SourcePlan, SqlSource
 from ...data.constraints import SourceReadConstraints, analyze_source_constraints, analyze_stage_work_units, stage_parallelism_caps
 from ...observability import current_action_observer
 from ...data.stats import ExecutionMetadata, StageStats
@@ -194,6 +194,10 @@ class LocalDatasetExecutor(DatasetExecutor):
                 return
             if isinstance(source, ItemsSource):
                 yield from source.items
+                return
+            if isinstance(source, IterableSource):
+                # factory 每次动作产新迭代器；行不物化（流式消费契约）
+                yield from iter(source.factory())
                 return
             if isinstance(source, RangeSource):
                 for value in range(source.count):
