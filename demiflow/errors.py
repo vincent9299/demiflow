@@ -16,6 +16,15 @@ class UnsupportedExecutionOptionError(DemiflowError):
     pass
 
 
+class StallError(DemiflowError):
+    """流式管线停摆（活性保证层，2026-09-14）：非 EOF 状态下全局进度
+    stall_timeout 秒零产出。message 含停摆时全部挂起任务的栈转储与
+    net 闸门超龄持有诊断。历史上四次夜跑静默凝固（2026-08-21×3 半读
+    连接、2026-09-12 worker 无定时器 Future）皆属此类——本错误的存在
+    使其从"凌晨三点的静默"变为"30 秒内的显式报错"。"""
+    pass
+
+
 class PhysicalPlanningError(DemiflowError):
     def __init__(
         self, code: str, *, responsibility: str, stage_ordinal: int = -1

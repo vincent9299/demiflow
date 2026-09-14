@@ -121,3 +121,19 @@ async def test_register_limits_update_semantics(clean_policy):
     gate = net.gate_for("_t_new")
     assert gate.limits.rate == 1.0
     print("[PASS] register_limits 注册语义")
+
+
+async def test_gate_stalls_reports_held_slots():
+    """U1c：闸门持有登记与超龄快照（活性取证）。"""
+    import asyncio
+    from demiflow.collect import net
+    net._gates.clear()
+    net.register_limits({"liveness_probe_src":
+                         net.SourceLimits(rate=100.0, concurrency=2)})
+    g = net.gate_for("liveness_probe_src")
+    async with g.slot():
+        await asyncio.sleep(0.05)
+        snap = net.gate_stalls(max_age=0.0)
+        assert "liveness_probe_src" in snap
+    assert net.gate_stalls() == {}          # 释放后无持有
+    net._gates.clear()

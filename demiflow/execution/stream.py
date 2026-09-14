@@ -23,9 +23,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import time
+import traceback
 from typing import Any, Callable, Optional
 
-from ..data.plan import AsyncMapOp, FilterOp, LogicalPlan
+from ..data.plan import AsyncMapOp, BatchMapOp, FilterOp, LogicalPlan
+
+from ..errors import StallError
 
 SENTINEL = object()
 _FEED_CHUNK = 256            # 源头同步迭代器的分块拉取粒度（每块一次线程切换）
@@ -39,6 +43,8 @@ class StreamStats:
     def __init__(self) -> None:
         self.stages: dict[str, dict[str, int]] = {}
         self.miss: dict[str, int] = {}
+        self.dead_batches: list = []      # 攒批整批失败内容（活性层，有界）
+        self.dead_batches_dropped: int = 0  # 超 1000 批后的只计数不留存
 
     def stage(self, name: str) -> dict[str, int]:
         return self.stages.setdefault(name, {"in": 0, "emitted": 0})
@@ -63,10 +69,12 @@ class StreamStats:
 
 class _Stage:
     __slots__ = ("name", "fn", "concurrency", "queue_depth", "catch",
-                 "pre_filters", "post_filters")
+                 "pre_filters", "post_filters", "hard_timeout",
+                 "max_batch", "flush_interval")
 
     def __init__(self, name, fn, concurrency, queue_depth, catch,
-                 pre_filters, post_filters):
+                 pre_filters, post_filters, hard_timeout=None,
+                 max_batch=None, flush_interval=None):
         self.name = name
         self.fn = fn
         self.concurrency = concurrency
@@ -74,6 +82,9 @@ class _Stage:
         self.catch = catch
         self.pre_filters = pre_filters
         self.post_filters = post_filters
+        self.hard_timeout = hard_timeout
+        self.max_batch = max_batch          # 非 None 即攒批级（BatchMapOp）
+        self.flush_interval = flush_interval
 
 
 def _materialize(plan: LogicalPlan) -> list[_Stage]:
@@ -86,7 +97,16 @@ def _materialize(plan: LogicalPlan) -> list[_Stage]:
             stages.append(_Stage(
                 name, op.callable.instantiate(), op.concurrency,
                 op.queue_depth or op.concurrency, op.catch,
-                head_filters if not stages else [], []))
+                head_filters if not stages else [], [],
+                op.hard_timeout))
+            head_filters = []
+        elif isinstance(op, BatchMapOp):
+            name = op.label or op.callable.name
+            stages.append(_Stage(
+                name, op.callable.instantiate(), op.concurrency,
+                op.queue_depth or op.concurrency, op.catch,
+                head_filters if not stages else [], [],
+                op.hard_timeout, op.max_batch, op.flush_interval))
             head_filters = []
         elif isinstance(op, FilterOp):
             pred = op.callable.instantiate()
@@ -127,6 +147,8 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
 
     async def worker():
         st = stats.stage(name)
+        if stage.max_batch is not None:
+            return await batch_worker(st)   # 攒批级：走批循环
         while True:
             row = await q_in.get()
             if row is SENTINEL:
@@ -136,9 +158,14 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                 stats.add_miss(f"{name}:filtered")
             else:
                 try:
-                    out = await _call(stage.fn, row)
+                    out = (await asyncio.wait_for(_call(stage.fn, row),
+                                                  stage.hard_timeout)
+                           if stage.hard_timeout is not None
+                           else await _call(stage.fn, row))
                 except stage.catch as exc:   # noqa: PERF203 - 认缺白名单
                     stats.add_miss(f"{name}:{type(exc).__name__}")
+                except asyncio.TimeoutError:
+                    stats.add_miss(f"{name}:hard_timeout")   # 活性层：必醒
                 else:
                     out = _post_filter(stage.post_filters, out)
                     if out is None:
@@ -154,6 +181,79 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                     and st["in"] % log_every == 0 and on_progress is not None):
                 await _call(on_progress, stats)
 
+    async def _emit(out, st):
+        """批输出的展开/后滤/下发（与逐行级同语义）。"""
+        if out is None:
+            return
+        outs = out if isinstance(out, list) else [out]
+        for r in outs:
+            if not all(p(r) for p in stage.post_filters):
+                continue
+            if q_out is not None:
+                await q_out.put(r)
+            st["emitted"] += 1
+
+    def _record_dead(batch, reason):
+        if len(stats.dead_batches) < 1000:
+            stats.dead_batches.append(
+                {"stage": name, "reason": reason, "rows": batch})
+        else:
+            stats.dead_batches_dropped += 1
+
+    async def batch_worker(st):
+        """攒批级 worker：条数满/时间窗/EOF 三触发，fn(list)->list。"""
+        loop = asyncio.get_running_loop()
+        while True:
+            batch, deadline = [], None
+            while True:
+                timeout = None
+                if batch and stage.flush_interval is not None:
+                    timeout = deadline - loop.time()
+                    if timeout <= 0:
+                        break                        # 时间窗到，刷出
+                try:
+                    row = await asyncio.wait_for(
+                        q_in.get(), None if timeout is None else timeout)
+                except asyncio.TimeoutError:
+                    break                            # 时间窗到，刷出
+                if row is SENTINEL:
+                    if batch:
+                        await _flush(batch)
+                    return                           # 尾批已刷，退役
+                if not batch:
+                    if stage.flush_interval is not None:
+                        deadline = loop.time() + stage.flush_interval
+                batch.append(row)
+                st["in"] += 1
+                if (log_every and stage is FIRST_STAGE_REF[0]
+                        and st["in"] % log_every == 0
+                        and on_progress is not None):
+                    await _call(on_progress, stats)
+                if len(batch) >= stage.max_batch:
+                    break                            # 条数满，刷出
+            if batch:
+                await _flush(batch)
+
+    async def _flush(batch):
+        st = stats.stage(name)
+        try:
+            out = (await asyncio.wait_for(_call(stage.fn, batch),
+                                          stage.hard_timeout)
+                   if stage.hard_timeout is not None
+                   else await _call(stage.fn, batch))
+        except stage.catch as exc:
+            stats.add_miss(f"{name}:{type(exc).__name__}")
+            _record_dead(batch, type(exc).__name__)
+        except asyncio.TimeoutError:
+            stats.add_miss(f"{name}:hard_timeout")
+            _record_dead(batch, "hard_timeout")
+        else:
+            if out is None:
+                stats.add_miss(f"{name}:drop")
+                _record_dead(batch, "drop")
+            else:
+                await _emit(out, st)
+
     return worker
 
 
@@ -166,7 +266,8 @@ def _local_queue(depth: int):
 
 
 async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
-                log_every, cancellation, queue_factory=None) -> None:
+                log_every, cancellation, queue_factory=None,
+                stall_timeout=None) -> None:
     make_queue = queue_factory or _local_queue
     queues = [make_queue(s.queue_depth) for s in stages]
     FIRST_STAGE_REF[0] = stages[0]
@@ -198,7 +299,13 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                 t.cancel()
 
     async def watchdog():
-        """真异常收敛：任一 worker 以白名单外异常退出 → 取消全场并记录。"""
+        """真异常收敛 + 零吞吐停摆检测（活性层，2026-09-14）。
+
+        停摆口径：全局进度（各级 in+emitted 之和）在 stall_timeout 秒内
+        零变化 → StallError，message 携带挂起任务栈转储与 net 闸门超龄
+        持有诊断。历史四次夜跑静默凝固皆属此类（沿革见 errors.StallError）。
+        """
+        last_progress, last_tick = -1, time.monotonic()
         while True:
             await asyncio.sleep(_WATCHDOG_INTERVAL)
             for t in all_tasks:
@@ -206,6 +313,46 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                     fatal.append(t.exception())
                     _cancel_all()
                     return
+            if stall_timeout is None:
+                continue
+            progress = sum(v["in"] + v["emitted"]
+                           for v in stats.stages.values())
+            now = time.monotonic()
+            if progress != last_progress:
+                last_progress, last_tick = progress, now
+                continue
+            if now - last_tick < stall_timeout:
+                continue
+            fatal.append(StallError(_stall_dump(all_tasks)))
+            _cancel_all()
+            return
+
+    def _stall_dump(tasks) -> str:
+        """停摆现场：挂起任务栈 + net 闸门持有诊断（活性层取证包）。"""
+        parts = ["pipeline stalled: task stacks follows"]
+        for t in tasks:
+            if t.done():
+                continue
+            frames = t.get_stack(limit=6)
+            if not frames:
+                continue
+            # 纯属性拼行：format_stack 的 linecache 在循环内对挂起帧
+            # 会挂死（实测），file:line:func 足够取证
+            loc = " <- ".join(
+                f"{f.f_code.co_filename.rsplit('/', 1)[-1]}:"
+                f"{f.f_lineno}:{f.f_code.co_name}" for f in frames)
+            parts.append(f"--- {t.get_name()}: {loc}")
+        try:
+            _net = __import__("sys").modules.get("demiflow.collect.net")
+            # 事件循环内 import 会死锁(实测),故只取已加载引用——
+            # 真实采集管线 net 必已常驻,诊断可用;纯流式用例静默跳过
+            if _net is not None:
+                stale = _net.gate_stalls()
+                if stale:
+                    parts.append("net gates held: " + repr(stale))
+        except Exception:
+            pass
+        return "\n".join(parts)[:20000]
 
     wd = asyncio.create_task(watchdog())
     try:
@@ -216,11 +363,31 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         if feed_task.done() and not feed_task.cancelled() \
                 and feed_task.exception() is not None:
             raise feed_task.exception()
-        # 源头投喂完毕 → sentinel 逐级注入、逐级 join（chain.py 同款收尾）
+        # 源头投喂完毕 → sentinel 逐级注入、逐级 join（chain.py 同款收尾）。
+        # 活性层（2026-09-14）：drain 的 sentinel put 可能因工人被看门狗
+        # 取消而永久阻塞（满队列无消费者）——put/gather 均走有界等待，
+        # 超时且 fatal 非空时立即上抛（原引擎潜伏死角，流式停摆场景首证）。
+        async def _abort_check():
+            if fatal:
+                raise fatal[0]
+
         for i, group in enumerate(stage_tasks):
             for _ in group:
-                await queues[i].put(SENTINEL)
-            await asyncio.gather(*group)
+                while True:
+                    try:
+                        await asyncio.wait_for(queues[i].put(SENTINEL), 2)
+                        break
+                    except asyncio.TimeoutError:
+                        await _abort_check()
+            while True:
+                done, _ = await asyncio.wait(set(group), timeout=2)
+                if len(done) == len(group):
+                    break
+                await _abort_check()
+            ex = next((t.exception() for t in group
+                       if not t.cancelled() and t.exception() is not None), None)
+            if ex is not None:
+                raise ex
     except BaseException:
         _cancel_all()
         with contextlib.suppress(BaseException):
@@ -235,7 +402,8 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
 
 def run_stream(source_iter, plan: LogicalPlan, *,
                on_progress=None, on_drain=None, log_every: int = 0,
-               cancellation=None, queue_factory=None) -> StreamStats:
+               cancellation=None, queue_factory=None,
+               stall_timeout=None) -> StreamStats:
     """同步驱动入口：建事件循环跑至完成（或 Ctrl-C/异常终止），返回 StreamStats。
 
     queue_factory(depth) 是行传输缝（调度层内部，算子/编排零感知）：
@@ -247,7 +415,8 @@ def run_stream(source_iter, plan: LogicalPlan, *,
     asyncio.run(_arun(source_iter, stages, stats,
                       on_progress=on_progress, on_drain=on_drain,
                       log_every=log_every, cancellation=cancellation,
-                      queue_factory=queue_factory))
+                      queue_factory=queue_factory,
+                      stall_timeout=stall_timeout))
     return stats
 
 

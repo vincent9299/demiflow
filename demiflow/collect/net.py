@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import os
 import socket
 from contextlib import asynccontextmanager
@@ -45,10 +46,13 @@ class SourceLimits:
 
 MAX_RETRIES = 3          # 瞬态失败重试次数（不含首次）
 RETRY_INTERVAL = 1.0     # 重试固定间隔（秒），不做指数退避
+# 429 专用长退避（2026-09-11 夜航新增）：边缘限速语义是"停一阵再来"，
+# 1 秒硬重试只会续期惩罚窗（实测 25 机连锁全罚）。按重试轮次取值。
+RATE_LIMIT_BACKOFF = (30.0, 120.0, 300.0)
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0)
 
 # 下载专用池参数（下载打 CDN：连接复用换吞吐；回退 = keepalive 改回 0）
-DOWNLOAD_LIMITS = httpx.Limits(max_connections=128, max_keepalive_connections=64)
+DOWNLOAD_LIMITS = httpx.Limits(max_connections=128, max_keepalive_connections=0)
 
 # 消费方策略注册面（引擎零业务默认）：
 # - PROXY_URL：代理源出网代理（机器级配置：默认读 env DEMIFLOW_PROXY_URL，
@@ -141,18 +145,40 @@ class RateLimiter:
 
 
 class SourceGate:
-    """每源闸门：并发信号量 + 限速器。slot() 内发请求。"""
+    """每源闸门：并发信号量 + 限速器。slot() 内发请求。
+
+    活性层（2026-09-14）：slot 持有期按 task 登记 monotonic 时刻，
+    gate_stalls() 供停摆取证（四次夜跑凝固的教训：闸门持有必须可见）。
+    """
 
     def __init__(self, limits: SourceLimits):
         self.limits = limits
         self._sem = asyncio.Semaphore(limits.concurrency)
         self._rl = RateLimiter(limits.rate)
+        self._held: dict = {}          # task -> 获取时刻（活性取证）
 
     @asynccontextmanager
     async def slot(self) -> AsyncIterator[None]:
         async with self._sem:
             await self._rl.acquire()
-            yield
+            task = asyncio.current_task()
+            self._held[task] = time.monotonic()
+            try:
+                yield
+            finally:
+                self._held.pop(task, None)
+
+
+def gate_stalls(max_age: float = 0.0) -> dict:
+    """全部闸门的超龄持有快照（活性层取证）：{源: [(task名, 持有秒)]}。"""
+    out = {}
+    for src, gate in _gates.items():
+        now = time.monotonic()
+        held = [(t.get_name() if t else "?", round(now - ts, 1))
+                for t, ts in gate._held.items() if now - ts >= max_age]
+        if held:
+            out[src] = held
+    return out
 
 
 _gates: dict[str, SourceGate] = {}
@@ -197,9 +223,11 @@ _client_proxy: Optional[httpx.AsyncClient] = None
 _dl_client_direct: Optional[httpx.AsyncClient] = None
 _dl_client_proxy: Optional[httpx.AsyncClient] = None
 
-# 下载专用池参数（2026-08-22 拍板恢复连接复用，显式推翻 2026-08-21 keepalive=0 定案，
-# 沿革见 get_download_client 文档串）；回退 = max_keepalive_connections 改回 0。
-DOWNLOAD_LIMITS = httpx.Limits(max_connections=128, max_keepalive_connections=64)
+# 下载专用池参数（2026-09-11 夜航回退：kb 配图线 fleet 多机出现半读连接
+# 停摆签名（CLOSE-WAIT 带 Recv-Q 未读字节、全链静默），按 get_download_client
+# 文档的回退条款 max_keepalive_connections 归零；每下载一次握手的代价可接受，
+# 消除整类停摆。恢复复用需先根治新停摆源并重新压测。）
+DOWNLOAD_LIMITS = httpx.Limits(max_connections=128, max_keepalive_connections=0)
 
 
 def _limits_for(source: str) -> Optional[SourceLimits]:
@@ -346,9 +374,13 @@ async def request(
                 if verdict == "deterministic":
                     raise DeterministicError(f"{source} {url}: HTTP {resp.status_code}")
                 last_exc, last_status = None, resp.status_code
-        # 瞬态失败：固定间隔后重试
+        # 瞬态失败：固定间隔后重试（429 走长退避）
         if attempt < MAX_RETRIES:
-            await asyncio.sleep(RETRY_INTERVAL)
+            if last_status == 429:
+                await asyncio.sleep(RATE_LIMIT_BACKOFF[min(attempt,
+                                                           len(RATE_LIMIT_BACKOFF) - 1)])
+            else:
+                await asyncio.sleep(RETRY_INTERVAL)
 
     detail = f"HTTP {last_status}" if last_status else repr(last_exc)
     raise TransientExhaustedError(
@@ -410,7 +442,11 @@ async def stream(
                 raise DeterministicError(f"{source} {url}: HTTP {status}")
             last_exc, last_status = None, status
         if attempt < MAX_RETRIES:
-            await asyncio.sleep(RETRY_INTERVAL)
+            if last_status == 429:
+                await asyncio.sleep(RATE_LIMIT_BACKOFF[min(attempt,
+                                                           len(RATE_LIMIT_BACKOFF) - 1)])
+            else:
+                await asyncio.sleep(RETRY_INTERVAL)
     else:
         detail = f"HTTP {last_status}" if last_status else repr(last_exc)
         raise TransientExhaustedError(

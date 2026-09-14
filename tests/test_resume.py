@@ -46,3 +46,16 @@ def test_row_filter_and_bad_lines():
 def test_missing_manifest_empty():
     assert scan_counts("/nonexistent/m.jsonl") == {}
     print("[PASS] 清单不存在返回空")
+
+
+def test_checkpoint_filter_skips_done(tmp_path):
+    """U4：账本现算 done-set 跳过已收行（幂等重跑核心）。"""
+    import json
+    from demiflow.collect.resume import checkpoint_filter
+    m = tmp_path / "manifest.jsonl"
+    m.write_text("\n".join(json.dumps({"qid": f"Q{i}", "f": f"x{i}.jpg"})
+                            for i in range(3)) + "\n")
+    rows = [{"qid": f"Q{i}", "f": f"x{i}.jpg"} for i in range(6)]
+    kept = list(checkpoint_filter(
+        rows, manifest=str(m), key_of=lambda r: [f'{r["qid"]}|{r["f"]}']))
+    assert [r["qid"] for r in kept] == ["Q3", "Q4", "Q5"]

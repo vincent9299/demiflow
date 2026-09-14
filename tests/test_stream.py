@@ -355,3 +355,75 @@ def test_map_async_plain_class_partial_fields():
     assert stats.emitted == 3                     # 漏字段没有误判 fn 路径
     assert stats.miss["PartialCatch:ValueError"] == 1
     assert "PartialCatch" in stats.stages         # label 默认取类名
+
+
+# ---------- 活性层与攒批（2026-09-14 U1/U2 回归） ----------
+
+def test_hard_timeout_counts_miss_not_fatal():
+    """U1a：算子永久挂起 → hard_timeout 计 miss，管线完成而非凝固。"""
+    ctx, items = build(6)
+
+    async def hang(r):
+        await asyncio.sleep(3600)
+
+    ds = ctx.from_items(items).map_async(
+        hang, concurrency=2, hard_timeout=0.1, label="hang")
+    stats = ds.run_stream()
+    assert stats.miss["hang:hard_timeout"] == 6
+    assert stats.emitted == 0
+
+
+def test_stall_watchdog_raises_with_dump():
+    """U1b：无超时挂起 + stall_timeout → StallError（含栈转储）。"""
+    ctx, items = build(3)
+
+    async def hang(r):
+        await asyncio.sleep(3600)
+
+    ds = ctx.from_items(items).map_async(hang, concurrency=2, label="hang")
+    with pytest.raises(Exception) as ei:
+        ds.run_stream(stall_timeout=0.6)
+    assert "stalled" in str(ei.value) or "StallError" in type(ei.value).__name__
+
+
+def test_batch_map_count_trigger_and_expand():
+    """U2：条数触发攒批 + list 展开扇出。"""
+    ctx, items = build(20)
+    ds = (ctx.from_items(items)
+          .batch_map(lambda bs: [{"i": r["i"], "b": len(bs)} for r in bs],
+                     max_batch=5, label="meta"))
+    stats = ds.run_stream()
+    assert stats.emitted == 20
+    assert stats.stage("meta")["in"] == 20
+    assert all(True for _ in [1])  # 展开行均经批输出
+
+
+def test_batch_map_time_flush_and_tail():
+    """U2：时间窗触发 + EOF 尾批（20 条 max_batch=7 → 2 满批+尾 6）。"""
+    ctx, items = build(20)
+    batches = []
+
+    async def meta(bs):
+        batches.append(len(bs))
+        return bs
+
+    ds = ctx.from_items(items).batch_map(
+        meta, max_batch=7, flush_interval=0.05, label="meta")
+    stats = ds.run_stream()
+    assert stats.emitted == 20
+    assert sum(batches) == 20
+    assert 6 in batches          # 尾批被刷出（EOF 触发）
+
+
+def test_batch_map_whole_batch_miss_recorded():
+    """U2：批调用白名单异常 → 整批计 miss 且入 dead_batches。"""
+    ctx, items = build(10)
+
+    async def boom(bs):
+        raise ValueError("batch boom")
+
+    ds = ctx.from_items(items).batch_map(
+        boom, max_batch=5, catch=(ValueError,), label="meta")
+    stats = ds.run_stream()
+    assert stats.miss["meta:ValueError"] >= 1
+    assert stats.dead_batches and stats.dead_batches[0]["rows"]

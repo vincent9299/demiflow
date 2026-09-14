@@ -136,6 +136,9 @@ class StreamStage:
     concurrency: int = 1
     queue_depth: int | None = None
     catch: tuple = ()          # 认缺异常白名单：命中只计数不断链
+    hard_timeout: float | None = None
+                               # 单行算子调用硬超时（秒，None=不启用，
+                               # 活性层 2026-09-14）：超时该行计 miss
 
     async def __call__(self, row):
         raise NotImplementedError
@@ -157,6 +160,29 @@ class AsyncMapOp(LogicalOp):
     queue_depth: int | None = None
     catch: Tuple[type[BaseException], ...] = ()
     label: str | None = None
+    hard_timeout: float | None = None   # 单行硬超时；超时计 miss（活性层）
+
+
+@dataclass(frozen=True)
+class BatchMapOp(LogicalOp):
+    """async 攒批算子（streaming 专用，2026-09-14）：引擎在级前攒批。
+
+    fn(list[row]) -> list[row] | None：一次调用消化 max_batch 行（条数
+    满 / flush_interval 到 / 尾部三触发），输出经既有 list 展开扇出。
+    机制动机：限速 API 按请求计费而批端点一次背 N 条——攒批把条目
+    吞吐从请求吞吐解耦（如 MediaWiki 50 题/次，配额杠杆 ×50）。批
+    调用异常按 catch 白名单整批计 miss，批内容记入 stats.dead_batches
+    供幂等重跑回收（账本续跑即重试，不设平台级 DLQ）。
+    惰性路径遇到本算子显式拒绝（与 AsyncMapOp 同款不对称）。
+    """
+    callable: CallableSpec
+    max_batch: int = 50
+    flush_interval: float | None = None   # 秒；首行入批起算的刷出窗口
+    concurrency: int = 1
+    queue_depth: int | None = None
+    catch: Tuple[type[BaseException], ...] = ()
+    label: str | None = None
+    hard_timeout: float | None = None     # 单批调用硬超时；同 AsyncMapOp
 
 
 @dataclass(frozen=True)

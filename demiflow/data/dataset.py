@@ -12,6 +12,7 @@ from .datasink import Datasink, WriteResult, validate_write_result
 from .plan import (
     AddColumnOp,
     AsyncMapOp,
+    BatchMapOp,
     BoundMapOp,
     CallableSpec,
     DropColumnsOp,
@@ -205,6 +206,7 @@ class Dataset:
         queue_depth: Optional[int] = None,
         catch: Optional[tuple] = None,
         label: Optional[str] = None,
+        hard_timeout: Optional[float] = None,
     ) -> "Dataset":
         """Append one async streaming transformation（**推模型**执行路径）。
 
@@ -231,7 +233,8 @@ class Dataset:
         # 缺失字段逐项回落默认——普通类漏声明一个字段不会被静默误判
         # 为 fn（策略丢失无告警）；functools.partial 等无策略属性的
         # 可调用对象照常走 fn 路径
-        policy_attrs = ("label", "concurrency", "queue_depth", "catch")
+        policy_attrs = ("label", "concurrency", "queue_depth", "catch",
+                        "hard_timeout")
         is_actor = any(hasattr(fn, a) for a in policy_attrs)
         if is_actor:
             conc = int(concurrency if concurrency is not None
@@ -241,11 +244,14 @@ class Dataset:
             ctch = tuple(catch) if catch is not None \
                 else tuple(getattr(fn, "catch", ()))
             lbl = label or getattr(fn, "label", None) or type(fn).__name__
+            hto = (hard_timeout if hard_timeout is not None
+                   else getattr(fn, "hard_timeout", None))
         else:
             conc = int(concurrency if concurrency is not None else 1)
             depth = queue_depth
             ctch = tuple(catch) if catch is not None else ()
             lbl = label
+            hto = hard_timeout
         if conc < 1:
             raise ValueError("map_async concurrency must be >= 1")
         if depth is not None and int(depth) < 1:
@@ -256,10 +262,48 @@ class Dataset:
             None if depth is None else int(depth),
             ctch,
             lbl,
+            None if hto is None else float(hto),
         )
         return Dataset(
             self._source, self._plan.append(operation), self._executor,
             self._stages + (fn,) if is_actor else self._stages,
+        )
+
+    def batch_map(
+        self,
+        fn: Callable[..., Any],
+        *,
+        max_batch: int,
+        flush_interval: Optional[float] = None,
+        concurrency: int = 1,
+        queue_depth: Optional[int] = None,
+        catch: Optional[tuple] = None,
+        label: Optional[str] = None,
+        hard_timeout: Optional[float] = None,
+    ) -> "Dataset":
+        """Append a batching async transformation（引擎攒批，2026-09-14）。
+
+        fn(list[row]) -> list[row] | None。引擎在级前把连续行攒成批：
+        条数满 max_batch / 首行起 flush_interval 秒 / 上游 EOF 三触发；
+        批输出经既有 list 展开扇出，批调用异常按 catch 整批计 miss 并
+        记入 stats.dead_batches（幂等重跑即重试）。动机与契约详见
+        plan.BatchMapOp；惰性路径遇到本算子将显式拒绝（同 AsyncMapOp）。
+        """
+        if int(max_batch) < 1:
+            raise ValueError("batch_map max_batch must be >= 1")
+        operation = BatchMapOp(
+            CallableSpec.create(fn),
+            int(max_batch),
+            None if flush_interval is None else float(flush_interval),
+            int(concurrency),
+            None if queue_depth is None else int(queue_depth),
+            tuple(catch) if catch is not None else (),
+            label,
+            None if hard_timeout is None else float(hard_timeout),
+        )
+        return Dataset(
+            self._source, self._plan.append(operation), self._executor,
+            self._stages,
         )
 
     # map_stage 已于 2026-09-07 移除：actor 形态输入由 map_async 多态承接
@@ -274,8 +318,13 @@ class Dataset:
         log_every: int = 0,
         cancellation=None,
         queue_factory=None,
+        stall_timeout: Optional[float] = None,
     ):
         """streaming 路径终结动作：驱动含 map_async 的计划至完成。
+
+        stall_timeout（活性层，2026-09-14；None=不启用）：非 EOF 状态
+        全局进度持续该秒数零产出 → 抛 StallError（含挂起任务栈转储与
+        net 闸门超龄诊断）。历史四次夜跑静默凝固皆属此类。
 
         同步入口（内部自建事件循环；不要再包在 asyncio.run 里调用）。
         返回 StreamStats（per-stage 计数 + 认缺归集）。on_progress(stats)
@@ -290,6 +339,7 @@ class Dataset:
                 rows, self._plan,
                 on_progress=on_progress, on_drain=on_drain, log_every=log_every,
                 cancellation=cancellation, queue_factory=queue_factory,
+                stall_timeout=stall_timeout,
             )
         finally:
             # 退出期统一收尾（2026-09-07 从 run_stages 下沉到终结动作：

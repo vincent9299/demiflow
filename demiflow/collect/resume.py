@@ -46,3 +46,14 @@ def scan_counts(manifest: str, *,
                 counts[k] = counts.get(k, 0) + 1
             n += 1
     return counts
+
+
+def checkpoint_filter(rows, *, manifest: str, key_of: KeyOf):
+    """账本续跑过滤器（2026-09-14，活性层配套）：现算 done-set 跳过已收行。
+
+    与 scan_counts 同哲学：只读现算、不落盘、坏行容忍。返回生成器，
+    key_of(row) 返回的键任一已在清单则跳过该行——五波八百万张图的
+    采集即靠此模式实现机器级幂等重跑。
+    """
+    done = set(scan_counts(manifest, key_of=key_of).keys())
+    return (r for r in rows if not (set(key_of(r)) & done))
