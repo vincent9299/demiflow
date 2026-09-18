@@ -144,7 +144,7 @@ def render_template(
                 ) from exc
             _append_text(parts, rendered)
         else:
-            parts.extend(_render_images(item.name, value))
+            parts.extend(_render_images(item.name, value, numbered=item.kind is PlaceholderKind.NUMBERED_IMAGE))
         cursor = item.end
     _append_text(parts, template.source[cursor:])
     return tuple(parts)
@@ -162,15 +162,17 @@ def _render_text(name: str, value: Any) -> str:
     raise PromptArgumentTypeError(f"unsupported prompt text argument {name!r}: {type(value).__name__}")
 
 
-def _render_images(name: str, value: Any) -> list[ImagePart]:
+def _render_images(name: str, value: Any, *, numbered: bool = False) -> list[OperatorLLMPart]:
     values = (
         list(value)
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray, ImageValue))
         else [value]
     )
-    out: list[ImagePart] = []
-    for item in values:
+    out: list[OperatorLLMPart] = []
+    for number, item in enumerate(values, 1):
         try:
+            if numbered:
+                out.append(TextPart(f"\nImage {number}:\n"))
             out.append(ImagePart(_image_value(item)))
         except (TypeError, ValueError) as exc:
             raise PromptArgumentTypeError(

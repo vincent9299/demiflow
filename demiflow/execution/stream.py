@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import inspect
 import time
 import traceback
@@ -274,11 +275,13 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
 
     async def feed():
         it = iter(source_iter)
+        # Resume a generator in the same Context across worker threads.
+        feed_context = contextvars.copy_context()
         while True:
             if cancellation is not None and cancellation.requested:
                 break
             chunk = await asyncio.to_thread(
-                lambda: [r for _, r in zip(range(_FEED_CHUNK), it)])
+                feed_context.run, lambda: [r for _, r in zip(range(_FEED_CHUNK), it)])
             if not chunk:
                 break
             for row in chunk:
@@ -402,21 +405,29 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
 
 def run_stream(source_iter, plan: LogicalPlan, *,
                on_progress=None, on_drain=None, log_every: int = 0,
-               cancellation=None, queue_factory=None,
-               stall_timeout=None) -> StreamStats:
+               cancellation=None, queue_factory=None, on_close=None, stall_timeout=None) -> StreamStats:
     """同步驱动入口：建事件循环跑至完成（或 Ctrl-C/异常终止），返回 StreamStats。
 
     queue_factory(depth) 是行传输缝（调度层内部，算子/编排零感知）：
     缺省进程内有界队列；分布式实现（如 redis 支撑的跨节点队列）替换
     此工厂即可，行需可序列化、stage 由各 worker 侧自行构造。
     """
-    stages = _materialize(plan)
     stats = StreamStats()
-    asyncio.run(_arun(source_iter, stages, stats,
-                      on_progress=on_progress, on_drain=on_drain,
-                      log_every=log_every, cancellation=cancellation,
-                      queue_factory=queue_factory,
-                      stall_timeout=stall_timeout))
+
+    async def execute():
+        try:
+            stages = _materialize(plan)
+            await _arun(source_iter, stages, stats,
+                        on_progress=on_progress, on_drain=on_drain,
+                        log_every=log_every, cancellation=cancellation,
+                        queue_factory=queue_factory, stall_timeout=stall_timeout)
+        finally:
+            if on_close is not None:
+                result = on_close()
+                if inspect.isawaitable(result):
+                    await result
+
+    asyncio.run(execute())
     return stats
 
 

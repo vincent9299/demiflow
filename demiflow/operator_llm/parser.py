@@ -107,7 +107,7 @@ def _inspect_prompt(name: str, raw: Any) -> tuple[PromptDefinition | None, tuple
             "prompt_definition_invalid", f"invalid prompt: {name!r}",
             f"$.prompts.{name}", name,
         ),)
-    for field in sorted(set(raw) - {"version", "model", "response_schema", "schema_retries", "template"}):
+    for field in sorted(set(raw) - {"version", "model", "response_schema", "schema_retries", "template", "response_format"}):
         issues.append(PromptContractDiagnostic(
             "prompt_field_unsupported",
             f"prompt {name!r} has unsupported field: {field}",
@@ -130,6 +130,12 @@ def _inspect_prompt(name: str, raw: Any) -> tuple[PromptDefinition | None, tuple
         "prompt_response_schema_invalid", f"prompt {name!r} response_schema invalid: {message}",
         f"$.prompts.{name}.response_schema{path.removeprefix('$')}", name,
     ) for path, message in schema_issues)
+    response_format = raw.get("response_format", "json")
+    if response_format not in {"json", "text"}:
+        issues.append(PromptContractDiagnostic("prompt_response_format_invalid", "response_format must be json or text", f"$.prompts.{name}.response_format", name))
+    if response_format == "text" and schema is not None:
+        if schema.get("required") != ["result"] or set(schema.get("properties", {})) != {"result"} or schema["properties"]["result"].get("type") != "string":
+            issues.append(PromptContractDiagnostic("prompt_text_schema_invalid", "text format requires a single string result property", f"$.prompts.{name}.response_schema", name))
     retries = raw.get("schema_retries", 0)
     if isinstance(retries, bool) or not isinstance(retries, int) or retries not in (0, 1):
         issues.append(PromptContractDiagnostic(
@@ -139,7 +145,7 @@ def _inspect_prompt(name: str, raw: Any) -> tuple[PromptDefinition | None, tuple
         ))
     if issues or model is None or template is None or schema is None:
         return None, tuple(issues)
-    return PromptDefinition(name, version, model, template, schema, retries), ()
+    return PromptDefinition(name, version, model, template, schema, retries, response_format), ()
 
 def load_prompt_pack(path: str | Path) -> PromptPack:
     target = Path(path)
@@ -166,7 +172,7 @@ def load_referenced_prompt_packs(bundle_root: str | Path) -> dict[str, PromptPac
     for source_path in reachable_pipeline_sources(root,entrypoint):
         tree=ast.parse(source_path.read_text(encoding="utf-8"),filename=str(source_path))
         for node in ast.walk(tree):
-            if not isinstance(node,ast.Call) or not isinstance(node.func,ast.Attribute) or node.func.attr!="map_prompt": continue
+            if not isinstance(node,ast.Call) or not isinstance(node.func,ast.Attribute) or node.func.attr not in {"map_prompt", "map_prompt_async"}: continue
             keywords={item.arg:item.value for item in node.keywords if item.arg}; value=keywords.get("config")
             if not isinstance(value,ast.Constant) or not isinstance(value.value,str): raise PromptPackError("map_prompt config must be a string literal")
             name=value.value; path=Path(name)

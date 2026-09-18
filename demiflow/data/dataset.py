@@ -115,6 +115,62 @@ class Dataset:
         # 惰性路径不带 stages，终结动作收尾为空操作）
         self._stages = tuple(stages)
 
+    def join(self, other, *, on, right_on=None, how="inner", suffix="_right", chunk_bytes=32*1024*1024):
+        """Local spillable equijoin. Checkpoint async inputs first; null keys do not match.
+
+        left joins preserve unmatched rows with right fields absent. semi/anti
+        joins preserve left cardinality; inner/left emit all matching pairs.
+        """
+        from .local_relational import join
+        return join(self,other,on,right_on,how,suffix,chunk_bytes)
+
+    def reduce_by_key(self, on, reducer, *, initial=None, chunk_bytes=32*1024*1024):
+        """Local spillable grouping; reducer owns the size of its accumulator."""
+        from .local_relational import reduce_by_key
+        return reduce_by_key(self,on,reducer,initial,chunk_bytes)
+
+    def group_batches(self, on, *, max_rows=32, output="items", chunk_bytes=32*1024*1024):
+        """Group into bounded batches; emits group_index/group_last for coverage."""
+        from .local_relational import group_batches
+        return group_batches(self,on,max_rows,output,chunk_bytes)
+
+    def map_cached(self, fn, *, cache_dir, version):
+        """Async map with atomic per-input JSON results; errors retained separately."""
+        from .local_relational import CachedMap
+        return self.map_async(CachedMap(fn,cache_dir,version))
+
+    def union(self, *others):
+        """Concatenate datasets lazily, retaining this Dataset's execution context.
+
+        Local implementation uses native read tasks; does not materialize rows.
+        Upstream transforms run under their original contexts. No schema coercion.
+        """
+        from .api import DataAPI
+        from .records import UnionDatasource
+        if self._executor.__class__.__module__ != 'demiflow.execution.executors.local':
+            raise NotImplementedError('union currently supports local execution')
+        if not all(isinstance(ds,Dataset) for ds in others):raise TypeError('union requires Datasets')
+        return DataAPI(self._executor).read_datasource(UnionDatasource((self,*others)))
+
+    def checkpoint(self, path, *, version):
+        """Execute to an atomic JSONL snapshot and return a replayable Dataset.
+
+        This is a terminal boundary. Reuse requires the same explicit version;
+        use map_cached before it to resume expensive per-row work after failure.
+        """
+        from .local_relational import checkpoint
+        return checkpoint(self,path,version)
+
+    async def checkpoint_async(self, path, *, version):
+        """Await the native checkpoint from an existing event loop (e.g. Jupyter).
+
+        The synchronous executor runs in a worker thread, including its own loop.
+        Row caching, atomic output, version checks and exception propagation are
+        identical to checkpoint; this does not add another execution engine.
+        """
+        import asyncio
+        return await asyncio.to_thread(self.checkpoint, path, version=version)
+
     def map(
         self,
         fn: Callable[..., Any],
@@ -269,6 +325,7 @@ class Dataset:
             self._stages + (fn,) if is_actor else self._stages,
         )
 
+
     def batch_map(
         self,
         fn: Callable[..., Any],
@@ -322,10 +379,6 @@ class Dataset:
     ):
         """streaming 路径终结动作：驱动含 map_async 的计划至完成。
 
-        stall_timeout（活性层，2026-09-14；None=不启用）：非 EOF 状态
-        全局进度持续该秒数零产出 → 抛 StallError（含挂起任务栈转储与
-        net 闸门超龄诊断）。历史四次夜跑静默凝固皆属此类。
-
         同步入口（内部自建事件循环；不要再包在 asyncio.run 里调用）。
         返回 StreamStats（per-stage 计数 + 认缺归集）。on_progress(stats)
         在首级每消费 log_every 行时回调（同步/异步皆可）；on_drain(stats)
@@ -333,35 +386,31 @@ class Dataset:
         写放最前（await 段在中断路径可能被取消截断，契约见 stream.py）。
         """
         from ..execution.stream import run_stream as _run_stream
+        import contextlib
+        import inspect
+
+        async def close_actors():
+            seen = set()
+            for actor in self._stages:
+                if id(actor) in seen:
+                    continue
+                seen.add(id(actor))
+                close = getattr(actor, 'aclose', None)
+                if close is not None:
+                    with contextlib.suppress(Exception):
+                        result = close()
+                        if inspect.isawaitable(result):
+                            await result
+
         rows = self._executor.iter_rows(self._source, LogicalPlan())
         try:
             return _run_stream(
                 rows, self._plan,
                 on_progress=on_progress, on_drain=on_drain, log_every=log_every,
                 cancellation=cancellation, queue_factory=queue_factory,
-                stall_timeout=stall_timeout,
+                on_close=close_actors, stall_timeout=stall_timeout,
             )
         finally:
-            # 退出期统一收尾（2026-09-07 从 run_stages 下沉到终结动作：
-            # 链式 Dataset API 与 run_stages 同等享有）——算子生命周期钩子
-            # （aclose，如持浏览器的抓取算子）→ 平台资源（LLM 端点 + HTTP
-            # 双池 + 闸门缓存）。KI 路径绑定旧 loop 的资源由进程退出回收，
-            # 此处 best-effort。
-            import contextlib
-            import inspect
-
-            async def _close_all():
-                for st in self._stages:
-                    fn = getattr(st, "aclose", None)
-                    if fn is None:
-                        continue
-                    r = fn()
-                    if inspect.isawaitable(r):
-                        await r
-
-            with contextlib.suppress(Exception):
-                import asyncio as _a
-                _a.run(_close_all())
             from ..collect import llm as _llm, net as _net
             _llm._ENDPOINT_CLIENTS.clear()
             _net._client_direct = _net._client_proxy = None
@@ -443,7 +492,9 @@ class Dataset:
         ``{{ name | json }}`` for strict JSON, and ``{{ name | image }}`` for
         image bytes with detectable PNG/JPEG/GIF/WebP type, data-image URLs,
         HTTP(S) URLs, ``ImageValue``, or a sequence of image values. Parts are
-        emitted in template order.
+        emitted in template order. ``{{ name | numbered_image }}`` accepts the
+        same image values and puts ``Image 1:``, ``Image 2:``, etc. directly
+        before each image, so references need not rely on counting pictures.
 
         A model requires ``name``, ``transport``, and ``api_key_env`` plus
         exactly one of ``base_url`` and ``base_url_env``. Transport is
@@ -492,6 +543,39 @@ class Dataset:
         return Dataset(
             self._source, self._plan.append(operation), self._executor,
         )
+
+    def map_prompt_async(
+        self, prompt: str, *, config: str,
+        inputs: Mapping[str, str] | Sequence[str],
+        output: Optional[str] = None, outputs: Optional[Mapping[str, str]] = None,
+        concurrency: int = 1, queue_depth: Optional[int] = None,
+        catch: tuple = (), label: Optional[str] = None,
+        when=None, call_output: Optional[str] = None, error_output: Optional[str] = None,
+    ) -> "Dataset":
+        """Native streaming prompt actor, sharing map_prompt's prompt-pack contract.
+
+        Same template, model, inputs/output(s), JSON schema and schema_retries.
+        Adds map_async worker/queue/error policies. Execute with run_stream()
+        or checkpoint(); checkpoint before later joins or lazy transforms.
+        Requires local_data(prompt_packs=...). Non-local executors currently
+        reject this interface explicitly. HTTP is truly asynchronous; transport
+        errors are not silently retried. Repeated actions can repeat calls.
+        """
+        declared = self.map_prompt(prompt, config=config, inputs=inputs,
+                                   output=output, outputs=outputs)
+        factory = getattr(self._executor, 'prompt_actor', None)
+        if factory is None:
+            raise NotImplementedError('map_prompt_async currently requires the local streaming executor')
+        if when is not None and not callable(when):raise TypeError('when must be a row predicate')
+        if any(v is not None and (not isinstance(v,str) or not v) for v in (call_output,error_output)):
+            raise TypeError('call_output/error_output must be nonempty column names')
+        destinations=set((outputs or {}).values()) | ({output} if output else set())
+        extra=[v for v in (call_output,error_output) if v]
+        if len(set(extra))!=len(extra) or destinations.intersection(extra):raise ValueError('Prompt output columns must be distinct')
+        actor = factory(declared._plan.operations[-1])
+        actor.when=when;actor.call_output=call_output;actor.error_output=error_output
+        return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth,
+                              catch=catch, label=label)
 
     def filter(
         self,

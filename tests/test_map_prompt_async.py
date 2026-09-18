@@ -66,6 +66,24 @@ def context(pack=PACK, **kw):return local_data(prompt_packs={'p.yaml':parse_prom
 def prompt(ds, **kw):return ds.map_prompt_async('enrich',config='p.yaml',inputs={'payload':'item'},output='answer',**kw)
 
 
+def test_numbered_images_reach_http_in_order_and_journal_replay(server,tmp_path):
+    pack=PACK.replace('{{ payload | json }}','{{ payload | json }}\n      {{ pictures | numbered_image }}')
+    parsed=parse_prompt_pack(pack)
+    assert parsed.prompt_definitions['enrich'].input_modalities==('text','image')
+    pictures=['data:image/png;base64,AAAA','data:image/png;base64,BBBB']
+    for attempt in range(2):
+        ctx=context(pack,prompt_options={'journal_dir':str(tmp_path/'calls')})
+        rows=(ctx.from_items([{'item':{'task':'compare'},'pixels':pictures}])
+              .map_prompt_async('enrich',config='p.yaml',inputs={'payload':'item','pictures':'pixels'},output='answer')
+              .checkpoint(tmp_path/f'out{attempt}.jsonl',version='v1').take_all())
+        assert rows[0]['answer']=='ok'
+    assert len(server['requests'])==1
+    content=server['requests'][0]['body']['messages'][1]['content']
+    for index,url in enumerate(pictures,1):
+        pos=next(i for i,part in enumerate(content) if part.get('image_url',{}).get('url')==url)
+        assert content[pos-1]=={'type':'text','text':f'\nImage {index}:\n'}
+
+
 def test_sync_async_contract_parity_and_checkpoint_reuse(server,tmp_path):
     ctx=context();items=[{'id':i,'item':{'x':i}} for i in range(3)]
     sync=ctx.from_items(items).map_prompt('enrich',config='p.yaml',inputs={'payload':'item'},output='answer').take_all()

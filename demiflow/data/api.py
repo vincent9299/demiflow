@@ -27,6 +27,13 @@ class DataAPI:
             raise ValueError("DataAPI requires a Dataset executor")
         self._executor = executor
 
+    def prompt_usage(self) -> dict[str, int]:
+        """Cumulative prompt usage for this context (sync and async combined)."""
+        usage = getattr(self._executor, 'operator_llm_usage', None)
+        if usage is None:
+            raise NotImplementedError('Prompt usage is not exposed by this executor')
+        return usage()
+
     def from_items(
         self,
         items: list[Any],
@@ -64,6 +71,24 @@ class DataAPI:
         return Dataset(
             IterableSource(factory), LogicalPlan(), self._executor,
         )
+
+    def read_records(self, paths, *, format='jsonl', item_prefix=None, max_records=None,
+                     report_path=None, missing='error'):
+        """Read local JSONL/gzip, JSON items, or text with path/row/error provenance.
+
+        Rows contain value/path/row/error/raw. Malformed lines are retained;
+        use a business map/flat_map to interpret values and route errors.
+        JSON containers stream through optional ijson; max_records is per file.
+        """
+        from pathlib import Path
+        from .records import FileRecords
+        if self._executor.__class__.__module__ != 'demiflow.execution.executors.local':
+            raise NotImplementedError('read_records currently supports local execution')
+        paths=[str(paths)] if isinstance(paths,(str,Path)) else [str(p) for p in paths]
+        if not paths:raise ValueError('read_records requires paths')
+        if report_path is not None and len(paths)!=1:raise ValueError('report_path requires exactly one file')
+        return self.read_datasource(FileRecords(paths,format=format,item_prefix=item_prefix,max_records=max_records,
+                                               report_path=report_path,missing=missing))
 
     def range(
         self, n: int, *, backend_options=None,

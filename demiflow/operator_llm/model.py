@@ -66,6 +66,7 @@ class PlaceholderKind(str, Enum):
     TEXT = "text"
     JSON = "json"
     IMAGE = "image"
+    NUMBERED_IMAGE = "numbered_image"
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,7 @@ class PromptDefinition:
     template: CompiledTemplate
     response_schema: Mapping[str, Any]
     schema_retries: int = 0
+    response_format: str = "json"
 
     @property
     def response_keys(self) -> tuple[str, ...]:
@@ -113,7 +115,7 @@ class PromptDefinition:
     @property
     def input_modalities(self) -> tuple[str, ...]:
         values = ["text"]
-        if any(item.kind is PlaceholderKind.IMAGE for item in self.template.placeholders):
+        if any(item.kind in {PlaceholderKind.IMAGE, PlaceholderKind.NUMBERED_IMAGE} for item in self.template.placeholders):
             values.append("image")
         return tuple(values)
 
@@ -173,6 +175,7 @@ class OperatorLLMRequest:
     response_schema: Mapping[str, Any] = field(default_factory=dict)
     schema_attempt: int = 1
     validation_feedback: str = ""
+    response_format: str = "json"
 
     def __post_init__(self) -> None:
         if self.schema_attempt < 1:
@@ -251,6 +254,7 @@ class OperatorLLMResponse:
     content: Any
     usage: OperatorLLMRequestUsage | None = None
     endpoint: str = ""
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

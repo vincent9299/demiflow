@@ -19,13 +19,16 @@ __all__ = ["local_data"]
 
 
 def local_data(workers: int = 4, *, block_size: int = 256,
-               prompt_packs: dict | None = None) -> DataAPI:
+               prompt_packs: dict | None = None,
+               max_prompt_requests: int | None = None, prompt_options: dict | None = None) -> DataAPI:
     """零配置本地 Dataset API（进程内线程池执行器）。
 
     workers/block_size 语义与 LocalDatasetExecutor 一致（惰性路径的
     线程池宽度与批大小；streaming 路径的并发由各 map_async 自己声明）。
-    prompt_packs：{配置名.yaml: PromptPack}，启用 map_prompt（惰性路径的
-    LLM 算子）时传入——脱离 Candidate 机制独立使用 map_prompt 的入口。
+    prompt_packs：{配置名.yaml: PromptPack}，由 map_prompt 与 map_prompt_async 共用。
+    max_prompt_requests：同一 context 的累计请求上限（含 schema 重试）；
+    两种执行方式共用预算，None 不限。prompt_usage() 查看累计统计。
     """
     return DataAPI(LocalDatasetExecutor(workers=workers, block_size=block_size,
-                                        prompt_packs=prompt_packs))
+                                        prompt_packs=prompt_packs,
+                                        max_prompt_requests=max_prompt_requests,prompt_options=prompt_options))

@@ -79,6 +79,8 @@ class LocalDatasetExecutor(DatasetExecutor):
         materialize_memory_limit: int = 64 * 1024 * 1024,
         aggregate_state_max_bytes: int = 8 * 1024 * 1024,
         prompt_packs=None,
+        max_prompt_requests=None,
+        prompt_options=None,
         usage_callback=None,
         planning_policy=None,
         candidate_execution=None,
@@ -94,11 +96,21 @@ class LocalDatasetExecutor(DatasetExecutor):
         self._pool: Optional[ThreadPoolExecutor] = None
         self._last_metadata: Optional[ExecutionMetadata] = None
         self._spill_paths: set[str] = set()
+        if max_prompt_requests is not None and (not isinstance(max_prompt_requests, int) or max_prompt_requests < 0):
+            raise ValueError("max_prompt_requests must be a nonnegative integer or None")
+        self._prompt_options=prompt_options;self._max_prompt_requests=max_prompt_requests
         self._prompt_packs = dict(prompt_packs or {})
         self._operator_llm_coordinator = (
-            InProcessOperatorLLMCoordinator(on_change=usage_callback)
+            InProcessOperatorLLMCoordinator(max_requests=max_prompt_requests, on_change=usage_callback)
             if self._prompt_packs else None
         )
+
+    def prompt_actor(self, operation):
+        from ...operator_llm.runtime import PromptActor
+        if operation.config_path not in self._prompt_packs:
+            raise ValueError(f'Prompt pack not loaded: {operation.config_path}')
+        return PromptActor(operation, self._prompt_packs[operation.config_path],
+                           self._operator_llm_coordinator,self._prompt_options,self._max_prompt_requests)
 
     def operator_llm_usage(self) -> dict[str, int]:
         if self._operator_llm_coordinator is None:
@@ -518,7 +530,7 @@ class LocalDatasetExecutor(DatasetExecutor):
                     ),
                     width,
                 )
-                def flatten():
+                def flatten(mapped=mapped):
                     for values in mapped:
                         if isinstance(values, Mapping):
                             raise TypeError(
