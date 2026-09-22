@@ -132,37 +132,54 @@ def commit_lance_append(
             ),
         )
     try:
-        reopened = open_lance_dataset(
-            prepared.uri, committed_version, prepared.storage_options,
+        err = verify_committed_append(
+            prepared, committed_version, expected_paths,
         )
-        transaction = reopened.read_transaction(reopened.version)
-        marker = (transaction.transaction_properties or {}).get(
-            "__lance_commit_message"
-        )
-        actual_paths = {
-            file.path for fragment in reopened.get_fragments()
-            for file in fragment.metadata.files
-        }
-        if (
-            marker != f"demiflow-lance:{prepared.operation_id}"
-            or not expected_paths.issubset(actual_paths)
-        ):
-            return _receipt(
-                prepared, rows, committed_version, status="indeterminate",
-                error=make_error(
-                    module=__name__, type_name="CommitVerificationFailed",
-                    message=(
-                        "Lance append transaction marker or fragments "
-                        "could not be verified"
-                    ),
-                ),
-            )
     except Exception as exc:
         return _receipt(
             prepared, rows, committed_version, status="indeterminate",
             error=error_from_exception(exc),
         )
+    if err is not None:
+        return _receipt(
+            prepared, rows, committed_version, status="indeterminate",
+            error=err,
+        )
     return _receipt(prepared, rows, committed_version, status="committed")
+
+
+def verify_committed_append(
+    prepared: _PreparedLanceAppend, committed_version: int,
+    expected_paths: frozenset[str] | set[str],
+):
+    """Verify a stored commit; return an error payload or None when verified.
+
+    Confirms the transaction marker of ``prepared`` at ``committed_version``
+    and that every expected fragment data file is part of that version.
+    """
+    reopened = open_lance_dataset(
+        prepared.uri, committed_version, prepared.storage_options,
+    )
+    transaction = reopened.read_transaction(committed_version)
+    marker = (transaction.transaction_properties or {}).get(
+        "__lance_commit_message"
+    )
+    actual_paths = {
+        file.path for fragment in reopened.get_fragments()
+        for file in fragment.metadata.files
+    }
+    if (
+        marker != f"demiflow-lance:{prepared.operation_id}"
+        or not expected_paths.issubset(actual_paths)
+    ):
+        return make_error(
+            module=__name__, type_name="CommitVerificationFailed",
+            message=(
+                "Lance append transaction marker or fragments "
+                "could not be verified"
+            ),
+        )
+    return None
 
 
 def _append_or_create(
@@ -277,5 +294,5 @@ def _prepend(first, iterator):
 
 __all__ = [
     "append_lance", "commit_lance_append", "prepare_lance_append",
-    "write_lance_fragment",
+    "verify_committed_append", "write_lance_fragment",
 ]

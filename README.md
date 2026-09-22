@@ -19,6 +19,14 @@
   - `search`：SearchEngine 协议 + 注册表 + `is_connect_failure`；
   - `llm`：AsyncLLMClient（单次 chat，重试归消费方口径）+ 端点资源注册表
     （`register_endpoint(base_url_env=...)` 配置驱动，env 覆盖跨机器零代码）；
+  - `exec_curl`（2026-09-18，fleet 实战上移）：短命 curl 传输 + AIMD 节拍 +
+    出口唯一身份（VM 长跑场景 asyncio 静默断连的解）；
+  - `fleet`（2026-09-18）：worker_plan 分配 + systemd-run 托管发射 +
+    幂等守卫 + 巡检（ssh argv 直传，无引号地狱）；
+  - `cosio` / `cosqueue` / `queue_runner`（2026-09-20，第三代队列沉淀）：
+    COS 签名对象存取（瞬态 403/429 退避重试）→ COS 任务队列（分批生产/
+    认领校验/**成功才 complete**/超龄认领回收）→ 认领-算子-完成常驻循环
+    （身份 KEY=VALUE env 注入，值可含括号；消费方只写批算子）；
   - 调度：`data.plan.StreamStage` 规范算子（策略字段随算子声明）+
     `Dataset.map_stage` + `execution.stream.run_stages`（stage 列表一步执行 +
     退出期平台资源统一收尾）；

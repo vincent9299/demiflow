@@ -28,6 +28,8 @@ def local_data(workers: int = 4, *, block_size: int = 256,
     prompt_packs：{配置名.yaml: PromptPack}，由 map_prompt 与 map_prompt_async 共用。
     max_prompt_requests：同一 context 的累计请求上限（含 schema 重试）；
     两种执行方式共用预算，None 不限。prompt_usage() 查看累计统计。
+    Async prompt_options may select offline_dir for file-based external authors;
+    rendering/schema checks stay native, external dispatch is caller-managed.
     """
     return DataAPI(LocalDatasetExecutor(workers=workers, block_size=block_size,
                                         prompt_packs=prompt_packs,

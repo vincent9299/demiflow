@@ -28,7 +28,7 @@ import time
 import traceback
 from typing import Any, Callable, Optional
 
-from ..data.plan import AsyncMapOp, BatchMapOp, FilterOp, LogicalPlan
+from ..data.plan import AsyncMapOp, BatchMapOp, FilterOp, MapOp, LogicalPlan, StandardCallable
 
 from ..errors import StallError
 
@@ -89,7 +89,9 @@ class _Stage:
 
 
 def _materialize(plan: LogicalPlan) -> list[_Stage]:
-    """LogicalPlan → streaming 级列表（FilterOp 折叠；其他 sync 算子拒绝）。"""
+    """Lower async actors and their row-wise synchronous maps to bounded stages."""
+    if not any(isinstance(op, (AsyncMapOp, BatchMapOp)) for op in plan.operations):
+        raise ValueError('run_stream 需要至少一个 map_async 算子')
     stages: list[_Stage] = []
     head_filters: list[Callable] = []
     for op in plan.operations:
@@ -115,9 +117,15 @@ def _materialize(plan: LogicalPlan) -> list[_Stage]:
                 stages[-1].post_filters.append(pred)
             else:
                 head_filters.append(pred)
+        elif isinstance(op, MapOp):
+            # Pure row validation/application can follow a native prompt actor;
+            # callers should not have to disguise it as asynchronous work.
+            stages.append(_Stage(op.callable.name, StandardCallable(op.callable), 1, 1, (),
+                                 head_filters if not stages else [], []))
+            head_filters = []
         else:
             raise ValueError(
-                f"streaming 路径只支持 map_async 与 filter，"
+                f"streaming 路径支持 map_async、batch_map、map 与 filter，"
                 f"遇到 {type(op).__name__}（惰性动作走 take/write 系列则不支持本算子组合）")
     if not stages:
         raise ValueError("run_stream 需要至少一个 map_async 算子")

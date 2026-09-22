@@ -182,6 +182,12 @@ def _response_contract_instruction(request: OperatorLLMRequest) -> str:
     return "\n".join(lines)
 
 
+def request_messages(request: OperatorLLMRequest) -> list[dict[str, Any]]:
+    """The exact model-visible context shared by HTTP and offline transports."""
+    return [{"role": "system", "content": _response_contract_instruction(request)},
+            {"role": "user", "content": _request_content(request)}]
+
+
 def create_operator_llm_client(model: PromptModel):
     if model.transport == "azure_openai":
         return AzureOpenAIOperatorLLMClient(model)
@@ -195,12 +201,16 @@ class AsyncOperatorLLMClient:
         from urllib.parse import quote
         from .journal import PromptJournal
         self.options=dict(options or {});self.model=model;self.checked=False
-        allowed={'journal_dir','timeout_s','request_options','verify_model','require_finish_reason_stop','trust_env'}
+        allowed={'lance_journal','journal_dir','timeout_s','request_options','verify_model','require_finish_reason_stop','trust_env','max_keepalive_connections'}
         if set(self.options)-allowed:raise ValueError('Unknown prompt execution options')
         self.request_options=dict(self.options.get('request_options',{}))
         if set(self.request_options)&{'model','messages','stream'}:
             raise ValueError('request_options cannot replace model/messages/stream')
         self.journal=PromptJournal(self.options['journal_dir'],max_requests) if self.options.get('journal_dir') else None
+        if self.options.get('lance_journal'):
+            if self.journal: raise ValueError('Select one journal store')
+            from .lance_journal import LancePromptJournal
+            self.journal = LancePromptJournal(self.options['lance_journal'], max_requests)
         names=tuple(name for name in (model.base_url_env,model.api_key_env) if name)
         values=required_environment(names)
         self.base=(model.base_url or values[model.base_url_env]).rstrip('/')
@@ -213,12 +223,11 @@ class AsyncOperatorLLMClient:
             headers={'Authorization':f'Bearer {key}'};self.temperature=0
         else:raise PromptProviderUnavailableError(f'unsupported Operator LLM transport: {model.transport}')
         self.client=httpx.AsyncClient(headers=headers,timeout=self.options.get('timeout_s',120),
+                                     limits=httpx.Limits(max_keepalive_connections=self.options.get('max_keepalive_connections',20)),
                                      trust_env=self.options.get('trust_env',True),follow_redirects=False)
 
     def record(self,request):
-        payload={'model':request.model,'messages':[
-            {'role':'system','content':_response_contract_instruction(request)},
-            {'role':'user','content':_request_content(request)}],
+        payload={'model':request.model,'messages':request_messages(request),
             'temperature':self.temperature,**self.request_options}
         if request.response_format == 'text':
             payload.pop('response_format', None)
@@ -229,12 +238,15 @@ class AsyncOperatorLLMClient:
     def decode(self,request,record,reused=False):
         from .errors import PromptResponseContractError
         source=self.record(request)
-        paths=self.journal.paths(source) if self.journal else {}
+        paths=self.journal.paths(source) if self.journal and hasattr(self.journal, 'paths') else {}
         body=record['body']
         metadata={'request_path':str(paths['request']) if paths else None,
                   'response_path':str(paths['response']) if paths else None,'reused':reused,
                   'elapsed_s':record['elapsed_s'],'model':body.get('model',self.model.name) if isinstance(body,dict) else self.model.name,
                   'usage':body.get('usage',{}) if isinstance(body,dict) else {}}
+        if self.journal and hasattr(self.journal, 'references'):
+            metadata.pop('request_path', None); metadata.pop('response_path', None)
+            metadata.update(self.journal.references(source))
         try:
             if record['status_code']!=200:raise PromptResponseContractError(f'HTTP {record["status_code"]}; full response saved')
             choice=body['choices'][0]
@@ -289,4 +301,10 @@ class AsyncOperatorLLMClient:
 
 
 def create_async_operator_llm_client(model: PromptModel, options=None, max_requests=None):
+    if options and 'offline_store' in options:
+        from .lance_journal import LanceOfflinePromptClient
+        return LanceOfflinePromptClient(model, options)
+    if options and 'offline_dir' in options:
+        from .offline import OfflinePromptClient
+        return OfflinePromptClient(model, options)
     return AsyncOperatorLLMClient(model,options,max_requests)

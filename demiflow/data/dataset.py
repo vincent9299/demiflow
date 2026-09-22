@@ -171,6 +171,47 @@ class Dataset:
         import asyncio
         return await asyncio.to_thread(self.checkpoint, path, version=version)
 
+    def checkpoint_lance(
+        self, uri: str, *, schema, fingerprint: str,
+        storage_options: Optional[Mapping[str, str]] = None,
+        max_rows_per_batch: int = 8192,
+    ) -> "Dataset":
+        """Execute to an atomic Lance snapshot and return a replayable Dataset.
+
+        This is a terminal boundary pinned to the committed Lance version. The
+        explicit ``schema`` is enforced on every row batch; a zero-row result
+        commits a valid empty table. Completion is registered in a sidecar
+        receipt next to the table: replays with the same ``fingerprint``
+        reopen the pinned version without re-executing the plan, while a
+        different fingerprint at the same location is an error. A receiptless
+        existing table at the target is never overwritten: it is either
+        recovered through a matching pending receipt or rejected explicitly.
+        Concurrent writers are rejected via an advisory file lock; only local
+        filesystem targets are supported. Expensive per-row work can resume
+        with map_cached before this boundary, as with checkpoint. Plans
+        containing async operators are bridged through the streaming
+        executor, matching the native JSONL checkpoint behavior.
+        """
+        from ..lance.checkpoint import checkpoint_lance
+        return checkpoint_lance(
+            self, uri, schema=schema, fingerprint=fingerprint,
+            storage_options=storage_options,
+            max_rows_per_batch=max_rows_per_batch,
+        )
+
+    async def checkpoint_lance_async(
+        self, uri: str, *, schema, fingerprint: str,
+        storage_options: Optional[Mapping[str, str]] = None,
+        max_rows_per_batch: int = 8192,
+    ) -> "Dataset":
+        """Await checkpoint_lance from an existing event loop (e.g. Jupyter)."""
+        import asyncio
+        return await asyncio.to_thread(
+            self.checkpoint_lance, uri, schema=schema, fingerprint=fingerprint,
+            storage_options=storage_options,
+            max_rows_per_batch=max_rows_per_batch,
+        )
+
     def map(
         self,
         fn: Callable[..., Any],
@@ -200,6 +241,9 @@ class Dataset:
         节点解耦、级间并发、背压由队列深度承载。"async" 命名标记的是
         callable 形态轴（本族仅收同步 fn；map_async 同步/异步皆可），
         非执行模型轴。
+        A row-wise map may also follow an async actor in a streaming chain;
+        there it runs as one bounded synchronous stage, preserving fn_args and
+        fn_kwargs. This does not make arbitrary blocking code asynchronous.
         """
         spec = CallableSpec.create(
             fn,
@@ -560,6 +604,10 @@ class Dataset:
         Requires local_data(prompt_packs=...). Non-local executors currently
         reject this interface explicitly. HTTP is truly asynchronous; transport
         errors are not silently retried. Repeated actions can repeat calls.
+        prompt_options={'offline_dir': ...} materializes the same model context
+        for external authors and validates submitted responses through this
+        actor. Missing responses produce PromptResponsePending; no HTTP call
+        or provider-budget reservation occurs in offline mode.
         """
         declared = self.map_prompt(prompt, config=config, inputs=inputs,
                                    output=output, outputs=outputs)

@@ -52,9 +52,13 @@ def decode_lance_fragments(
         expected = {
             "id", "files", "physical_rows", "deletion_file", "row_id_meta",
             "created_at_version_meta", "last_updated_at_version_meta",
+            # pylance >= 12 always emits overlays (empty for plain appends)
+            "overlays",
         }
         if set(token) != expected:
             raise InvalidLanceRequest("unsupported Lance fragment metadata fields")
+        if not isinstance(token["overlays"], list):
+            raise InvalidLanceRequest("Lance fragment overlays must be a list")
         if token["deletion_file"] is not None or token["row_id_meta"] is not None:
             raise InvalidLanceRequest(
                 "Lance append fragments cannot contain deletion or row-id metadata"

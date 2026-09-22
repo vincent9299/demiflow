@@ -232,7 +232,14 @@ def observe_rows(action: str, rows: Iterable[Any], source: Any, plan: Any, execu
     else:
         observer.complete()
     finally:
-        _CURRENT_ACTION.reset(token)
+        try:
+            _CURRENT_ACTION.reset(token)
+        except ValueError:
+            # The generator was resumed or closed from a different execution
+            # context (Arrow C Data readers may pull batches on another
+            # thread); the owning context is gone, so drop the token instead
+            # of failing the data write. Observability degrades gracefully.
+            pass
 
 
 def observe_batches(action: str, batches: Iterable[Any], source: Any, plan: Any, executor: Any) -> Iterator[Any]:
@@ -253,7 +260,14 @@ def observe_batches(action: str, batches: Iterable[Any], source: Any, plan: Any,
     else:
         observer.complete()
     finally:
-        _CURRENT_ACTION.reset(token)
+        try:
+            _CURRENT_ACTION.reset(token)
+        except ValueError:
+            # The generator was resumed or closed from a different execution
+            # context (Arrow C Data readers may pull batches on another
+            # thread); the owning context is gone, so drop the token instead
+            # of failing the data write. Observability degrades gracefully.
+            pass
 
 
 @contextmanager
@@ -267,7 +281,14 @@ def observe_action(action: str, source: Any, plan: Any, executor: Any, **fields:
         observer.fail(exc)
         raise
     finally:
-        _CURRENT_ACTION.reset(token)
+        try:
+            _CURRENT_ACTION.reset(token)
+        except ValueError:
+            # The generator was resumed or closed from a different execution
+            # context (Arrow C Data readers may pull batches on another
+            # thread); the owning context is gone, so drop the token instead
+            # of failing the data write. Observability degrades gracefully.
+            pass
 
 
 def current_action_observer() -> ActionObserver | None:
