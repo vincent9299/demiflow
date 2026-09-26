@@ -20,6 +20,39 @@ _ALLOWED_STORAGE_OPTIONS = frozenset({
 })
 
 
+def resolve_local_uri(value):
+    """Resolve an explicitly relocated local table, preserving frozen references.
+
+    Optional _demiflow/lance_locations.json maps exact relative table paths to
+    physical paths under the same storage root. No discovery by basename,
+    version changes, or fallback to another table is permitted.
+    """
+    path = Path(value).expanduser().absolute()
+    for root in path.parents:
+        manifest = root / '_demiflow' / 'lance_locations.json'
+        if not manifest.is_file():
+            continue
+        stat = manifest.stat()
+        mapping = _location_mapping(str(manifest), stat.st_mtime_ns, stat.st_size)
+        target = mapping.get(path.relative_to(root).as_posix())
+        if target is not None:
+            relative = Path(target)
+            if relative.is_absolute() or '..' in relative.parts or relative.suffix != '.lance':
+                raise ValueError('Invalid relocated table path: ' + target)
+            return (root / relative).resolve(strict=False)
+    return path.resolve(strict=False)
+
+
+from functools import lru_cache
+
+@lru_cache(maxsize=16)
+def _location_mapping(filename, modified_ns, size):
+    document = json.loads(Path(filename).read_text())
+    if document.get('version') != 1 or not isinstance(document.get('tables'), dict):
+        raise ValueError('Invalid Lance location manifest: ' + filename)
+    return document['tables']
+
+
 def normalize_lance_uri(value: Any) -> str:
     if not isinstance(value, str) or not value or value != value.strip():
         raise InvalidLanceRequest("Lance uri must be a normalized non-empty string")
@@ -33,11 +66,13 @@ def normalize_lance_uri(value: Any) -> str:
             raise InvalidLanceRequest("Lance object URI requires a bucket or host")
         if parsed.scheme == "file" and parsed.netloc not in {"", "localhost"}:
             raise InvalidLanceRequest("Lance file URI must be local")
+        if parsed.scheme == "file":
+            return str(resolve_local_uri(parsed.path))
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
     path = Path(os.path.expanduser(value))
     if not path.is_absolute():
         raise InvalidLanceRequest("Lance uri must be an absolute path or supported URI")
-    return str(path.resolve(strict=False))
+    return str(resolve_local_uri(path))
 
 
 def normalize_storage_options(

@@ -9,21 +9,21 @@ from .control import control_directory, table_lock_path
 import fcntl
 from .registry import Catalog
 from .refs import DatasetRef
-from .storage import schema_hash
+from .storage import schema_hash, resolve_local_uri
 
 
 @contextmanager
 def registered_table_edit(root, relative_uri, *, schema_name, schema_version):
     import lance
     import shutil
-    root=Path(root).resolve();path=root/relative_uri
+    root=Path(root).resolve();path=resolve_local_uri(root/relative_uri)
     if Path(relative_uri).is_absolute() or '..' in Path(relative_uri).parts or not path.resolve().is_relative_to(root):
         raise ValueError('Unsafe table URI')
     path.parent.mkdir(parents=True,exist_ok=True)
     with table_lock_path(path).open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         catalog=Catalog(root)
-        versions=[r for r in catalog.registered() if r.relative_uri==relative_uri]
+        versions=[r for r in catalog.registered() if r.resolve(root)==str(path)]
         prior=max(versions,key=lambda r:r.lance_version) if versions else None
         if path.exists() and prior is None:raise ValueError('Unregistered table requires explicit recovery')
         if prior and lance.dataset(str(path)).version!=prior.lance_version:

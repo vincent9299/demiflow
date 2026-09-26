@@ -14,6 +14,7 @@ import shutil
 
 from .records import LanceRecordStore
 from .registry import Catalog, ReleaseRegistry
+from .storage import resolve_local_uri
 
 
 def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
@@ -27,9 +28,10 @@ def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
     for uri in uris:
         p = Path(uri)
         if (p.is_absolute() or '..' in p.parts or p.suffix != '.lance'
-                or p.parts[0] == 'registry' or not (root/p).resolve().is_relative_to(root)):
+                or p.parts[0] == 'registry'
+                or resolve_local_uri(root/p) in {Path(Catalog(root).uri), Path(ReleaseRegistry(root).uri)} or not (root/p).resolve().is_relative_to(root)):
             raise ValueError('Unsafe retirement URI: ' + uri)
-    journal = LanceRecordStore(root, f'runs/maintenance/{operation_id}/records.lance')
+    journal = LanceRecordStore(root, f'datasets/records__{operation_id}.lance')
     spec = {'table_uris': uris, 'release_ids': ids, 'reason': reason}
     catalog, releases = Catalog(root), ReleaseRegistry(root)
     with ExitStack() as locks:
@@ -60,11 +62,11 @@ def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
                                 'release_rows': [row for row in published if row['release_id'] in ids]})
         complete = journal.get('complete')
         if complete is not None and not removed and not any(row['release_id'] in ids for row in published):
-            if any((root/uri).exists() for uri in uris):
+            if any(resolve_local_uri(root/uri).exists() for uri in uris):
                 raise ValueError('Retired table path exists again')
             return complete
         for uri in uris:
-            path = root/uri
+            path = resolve_local_uri(root/uri)
             lock = locks.enter_context(table_lock_path(path).open('a'))
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         # Retire live publication visibility first, then remove its table registrations.
@@ -77,13 +79,13 @@ def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
             lance.write_dataset(pa.Table.from_pylist(kept, schema=ds.schema), catalog.uri, mode='overwrite')
         journal.put('registrations_retired', True)
         for uri in uris:
-            path = root/uri
+            path = resolve_local_uri(root/uri)
             if path.exists(): shutil.rmtree(path)
             (control_directory(path)/'checkpoint.json').unlink(missing_ok=True)
         journal.put('complete', {'tables': len(uris), 'releases': len(ids)})
     # Release locks before deleting their idle files.
     for uri in uris:
-        directory = control_directory(root/uri)
+        directory = control_directory(resolve_local_uri(root/uri))
         (directory/'write.lock').unlink(missing_ok=True)
         if directory.exists() and not any(directory.iterdir()): directory.rmdir()
         if directory.parent.exists() and not any(directory.parent.iterdir()): directory.parent.rmdir()

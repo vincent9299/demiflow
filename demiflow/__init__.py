@@ -1,8 +1,8 @@
 """Demiflow public API: one Driver program, Dataset, and Local/Ray execution."""
 
+from . import data
 from .pipeline import Pipeline, PipelineProgram, ResourceAPI
 from .data import (
-    DataAPI,
     Dataset,
     MaterializedDataset,
     Datasource,
@@ -37,7 +37,7 @@ __all__ = [
     "Pipeline",
     "PipelineProgram",
     "ResourceAPI",
-    "DataAPI",
+    "data",
     "Dataset",
     "MaterializedDataset",
     "Datasource",

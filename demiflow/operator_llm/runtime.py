@@ -87,12 +87,24 @@ class InProcessOperatorLLMCoordinator:
 
 
 class OperatorLLMRuntime:
-    def __init__(self, config: PromptPack, coordinator) -> None:
+    def __init__(self, config: PromptPack, coordinator, options=None) -> None:
         self.config = config
         self.coordinator = coordinator
+        self.options = options
         self._local = threading.local()
 
     def call(self, prompt_name: str, values: Mapping[str, Any]) -> dict[str, Any]:
+        if self.options is not None:
+            # The synchronous worker uses the same option-aware transport,
+            # including offline responses and journals, and closes it per call.
+            import asyncio
+            async def execute():
+                runtime = AsyncOperatorLLMRuntime(self.config, self.coordinator, self.options)
+                try:
+                    return await runtime.call(prompt_name, values)
+                finally:
+                    await runtime.aclose()
+            return asyncio.run(execute())
         prompt = resolve_prompt(self.config, prompt_name)
         parts = render_template(prompt.template, values)
         clients = getattr(self._local, "clients", None)
@@ -229,10 +241,10 @@ class BoundOperatorLLMMap:
 
 
 class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
-    def __init__(self, config, coordinator, options=None, max_requests=None):
+    def __init__(self, config, coordinator, options=None):
         super().__init__(config, coordinator)
         self._clients = {}
-        self.options=options;self.max_requests=max_requests
+        self.options=options
 
     async def call(self, prompt_name, values):
         result, _ = await self.call_with_trace(prompt_name,values)
@@ -243,7 +255,7 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
         parts = render_template(prompt.template, values)
         client = self._clients.get(prompt.model)
         if client is None:
-            client = (create_async_operator_llm_client(prompt.model,self.options,self.max_requests)
+            client = (create_async_operator_llm_client(prompt.model,self.options)
                       if self.options else create_async_operator_llm_client(prompt.model))
             self._clients[prompt.model] = client
         traces=[]
@@ -276,8 +288,8 @@ class PromptActor(BoundOperatorLLMMap):
     queue_depth = None
     catch = ()
 
-    def __init__(self, operation, config, coordinator, options=None, max_requests=None):
-        super().__init__(operation, AsyncOperatorLLMRuntime(config, coordinator, options,max_requests))
+    def __init__(self, operation, config, coordinator, options=None):
+        super().__init__(operation, AsyncOperatorLLMRuntime(config, coordinator, options))
         self.when=None;self.call_output=None;self.error_output=None
         self.label = operation.prompt_name
 

@@ -1,17 +1,17 @@
 """数据集版本登记（catalog）、多表发布登记（releases）与登记式写入。
 
-- ``Catalog``：长期增量登记表（数据根 registry/datasets.lance）。登记行
+- ``Catalog``：长期增量登记表（数据根 datasets/registry_datasets.lance）。登记行
   以（dataset_id, relative_uri, lance_version）为主键；完全重复幂等跳过，
   同主键不同内容是冲突，必须报错而不是覆盖。显式 schema、单写者文件锁、
   批量追加、登记前查重对账。
-- ``ReleaseRegistry``：发布登记（registry/releases.lance）。一次发布＝多张
+- ``ReleaseRegistry``：发布登记（datasets/registry_releases.lance）。一次发布＝多张
   表的固定版本组合；登记是可见边界，登记前逐引用核验（catalog 在册＋固定
   版本可读＋schema/行数一致），任何不符在写入可见行之前失败。
 - ``write_registered_table``：checkpoint_lance 原子提交＋回执读取＋引用
   构造＋catalog 登记的公共写端。schema 由调用方显式传入——本层不知道任何
   业务 schema 集合。
 
-登记/发布表的磁盘格式是在册契约：字段、schema、相对位置不得变更。
+登记/发布行的字段和 schema 保持在册契约；物理位置可按显式映射搬迁。
 读取经 lance 直读——这是存储记账，不是第二编排引擎；执行经 DataAPI。
 """
 from __future__ import annotations
@@ -22,14 +22,15 @@ import os
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
+from .storage import resolve_local_uri
 from pathlib import Path
 from .control import control_directory, table_lock_path
 
 from .refs import DatasetRef
 from .storage import open_lance_dataset, schema_hash as lance_schema_hash
 
-REGISTRY_RELATIVE = "registry/datasets.lance"
-RELEASES_RELATIVE = "registry/releases.lance"
+REGISTRY_RELATIVE = "datasets/registry_datasets.lance"
+RELEASES_RELATIVE = "datasets/registry_releases.lance"
 
 _REGISTRY_FIELDS = (
     "dataset_id", "store_id", "relative_uri", "lance_version",
@@ -97,7 +98,7 @@ class Catalog:
 
     @property
     def uri(self) -> str:
-        return str(self.root / REGISTRY_RELATIVE)
+        return str(resolve_local_uri(self.root / REGISTRY_RELATIVE))
 
     # ------------------------------------------------------------------ read
 
@@ -218,7 +219,7 @@ class ReleaseRegistry:
 
     @property
     def uri(self) -> str:
-        return str(self.root / RELEASES_RELATIVE)
+        return str(resolve_local_uri(self.root / RELEASES_RELATIVE))
 
     def rows(self) -> list[dict]:
         if not Path(self.uri).exists():
@@ -361,14 +362,14 @@ def write_registered_table(
     from .checkpoint import read_checkpoint_record
 
     if data_api is None:
-        from ..standalone import local_data
+        from ..data.api import DataAPI
 
-        data_api = local_data()
+        data_api = DataAPI()
 
     relative_path = Path(relative_uri)
     if relative_path.is_absolute() or ".." in relative_path.parts:
         raise ValueError("relative_uri must stay within the datasets root")
-    uri = str((Path(datasets_root) / relative_path).resolve(strict=False))
+    uri = str(resolve_local_uri(Path(datasets_root) / relative_path))
 
     existing = read_checkpoint_record(uri)
     if existing is not None:

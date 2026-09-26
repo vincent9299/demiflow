@@ -9,7 +9,7 @@ import pytest
 pa = pytest.importorskip("pyarrow")
 pytest.importorskip("lance")
 
-from demiflow.standalone import local_data
+from demiflow.data.api import DataAPI
 from demiflow.errors import (
     InvalidLanceRequest, LanceExecutionError, LanceWriteConflict,
     LanceWriteError, LanceResourceNotFound,
@@ -17,7 +17,7 @@ from demiflow.errors import (
 
 
 def ds(rows):
-    return local_data().from_items(rows)
+    return DataAPI().from_items(rows)
 
 
 def write_direct(uri, rows, schema=None):
@@ -51,7 +51,7 @@ def test_write_lance_append_schema_mismatch_is_indeterminate(tmp_path):
 def test_read_lance_pinned_version_ignores_later_appends(tmp_path):
     uri = str(tmp_path / "t.lance")
     ds([{"k": "a"}]).write_lance(uri)
-    api = local_data()
+    api = DataAPI()
     import lance
     pinned_version = lance.dataset(uri).version
     pinned = api.read_lance(uri, version=pinned_version)
@@ -97,7 +97,7 @@ def checkpoint_uri(tmp_path, name="out"):
 
 def test_checkpoint_writes_pinned_replayable_snapshot(tmp_path):
     uri = checkpoint_uri(tmp_path)
-    api = local_data()
+    api = DataAPI()
     saved = ds([{"k": "a", "n": 1}, {"k": "b", "n": 2}]).checkpoint_lance(
         uri, schema=SCHEMA, fingerprint="fp-1",
     )
@@ -234,7 +234,7 @@ def test_checkpoint_recovers_pending_publish(tmp_path):
         consumed["executed"] = True
         return iter([{"k": "b", "n": 2}])
 
-    saved = local_data().from_iter(factory).checkpoint_lance(
+    saved = DataAPI().from_iter(factory).checkpoint_lance(
         uri, schema=SCHEMA, fingerprint="fp-1",
     )
     assert saved.take_all()[0]["k"] == "a"          # committed rows, not factory rows
@@ -280,7 +280,7 @@ def test_checkpoint_replay_binds_caller_uri_after_move(tmp_path):
         consumed["executed"] = True
         return iter([{"k": "b", "n": 2}])
 
-    saved = local_data().from_iter(factory).checkpoint_lance(
+    saved = DataAPI().from_iter(factory).checkpoint_lance(
         str(second_root / "out.lance"), schema=SCHEMA, fingerprint="fp-1",
     )
     rows = saved.take_all()
@@ -297,7 +297,7 @@ def test_checkpoint_replay_binds_caller_uri_after_move(tmp_path):
     shutil.move(str(second_root / "out.lance"), str(third_root / "out.lance"))
     shutil.move(str(control_directory(second_root/'out.lance') / 'checkpoint.json'),
                 str(control_directory(third_root/'out.lance') / 'checkpoint.json'))
-    saved3 = local_data().from_iter(factory).checkpoint_lance(
+    saved3 = DataAPI().from_iter(factory).checkpoint_lance(
         str(third_root / "out.lance"), schema=SCHEMA, fingerprint="fp-1",
     )
     assert saved3.take_all()[0]["k"] == "a"
@@ -424,7 +424,7 @@ def test_checkpoint_supports_async_operator_plan(tmp_path):
         await asyncio.sleep(0)
         return {**row, "n": row["n"] * 2}
 
-    api = local_data()
+    api = DataAPI()
     saved = api.from_items([{"k": "a", "n": 1}, {"k": "b", "n": 2}]).map_async(double).checkpoint_lance(
         uri, schema=SCHEMA, fingerprint="fp-async",
     )
@@ -443,7 +443,7 @@ def test_checkpoint_async_from_running_loop(tmp_path):
 
     async def main():
         await asyncio.sleep(0)
-        return await local_data().from_items([{"k": "a", "n": 7}]).checkpoint_lance_async(
+        return await DataAPI().from_items([{"k": "a", "n": 7}]).checkpoint_lance_async(
             uri, schema=SCHEMA, fingerprint="fp-loop",
         )
 

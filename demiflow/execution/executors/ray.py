@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Optional
+from pathlib import Path
 
 import ray
 
@@ -177,11 +178,16 @@ class _RayLanceDirectWriteSink:
 
             def write(self, blocks, ctx):
                 del ctx
-                from ...lance.write import append_lance
-                return append_lance(spec, blocks).to_dict()
+                from ...lance.write import write_lance
+                return write_lance(spec, blocks).to_dict()
 
             def on_write_complete(self, write_results):
                 values = getattr(write_results, "write_returns", write_results)
+                if not values and spec.schema is not None:
+                    # 空 Dataset 可能没有 worker 写入任务，由 driver 用声明的 schema 提交一次。
+                    from ...lance.write import write_lance
+                    owner.receipt = write_lance(spec, ())
+                    return
                 if len(values) != 1:
                     raise RuntimeError("Lance direct write requires one result")
                 from ...lance.model import LanceWriteReceipt
@@ -225,32 +231,35 @@ class RayDatasetExecutor(DatasetExecutor):
 
     def __init__(
         self, *, aggregate_state_max_bytes: int = 8 * 1024 * 1024,
-        prompt_packs=None, planning_policy=None, candidate_execution=None,
+        resource_root=None, planning_policy=None, candidate_execution=None,
     ) -> None:
         self._aggregate_state_max_bytes = max(1, int(aggregate_state_max_bytes))
         self._last_native = None
-        self._prompt_packs = dict(prompt_packs or {})
+        self.resource_root = Path(resource_root or ".").resolve()
+        self._prompt_coordinators = {}
         self._planning_policy = planning_policy or parse_platform_planning_policy(None)
         self._candidate_execution = candidate_execution
         self._active_physical_plan = None
-        self._operator_llm_coordinator = None
-        if self._prompt_packs:
-            self._ensure_ray()
-            coordinator = _RayOperatorLLMCoordinatorProxy(
-                _ray_operator_llm_coordinator_class().remote()
-            )
-            self._operator_llm_coordinator = coordinator
-
     def _ensure_ray(self) -> None:
         if not ray.is_initialized():
             raise RuntimeError(
                 "RayDatasetExecutor requires an initialized Ray driver"
             )
 
+    def _prompt_coordinator(self, operation):
+        if operation.node_id not in self._prompt_coordinators:
+            self._ensure_ray()
+            self._prompt_coordinators[operation.node_id] = _RayOperatorLLMCoordinatorProxy(
+                _ray_operator_llm_coordinator_class().remote(operation.max_requests)
+            )
+        return self._prompt_coordinators[operation.node_id]
+
     def operator_llm_usage(self) -> dict[str, int]:
-        if self._operator_llm_coordinator is None:
-            return {}
-        return self._operator_llm_coordinator.usage().to_dict()
+        totals = {}
+        for coordinator in self._prompt_coordinators.values():
+            for key, value in coordinator.usage().to_dict().items():
+                totals[key] = totals.get(key, 0) + value
+        return totals
 
     def from_items(self, items: list[Any], *, override_num_blocks: int | None = None) -> Any:
         self._ensure_ray()
@@ -378,11 +387,9 @@ class RayDatasetExecutor(DatasetExecutor):
                 )
                 ds = ds.map(target, **options)
             elif isinstance(operation, OperatorLLMMapOp):
-                if not self._prompt_packs or self._operator_llm_coordinator is None:
-                    raise RuntimeError("OperatorLLMMapOp requires Operator LLM configuration")
                 ds = ds.map(
                     make_ray_operator_llm_callable_class(
-                        operation, self._prompt_packs[operation.config_path], self._operator_llm_coordinator,
+                        operation, operation.config, self._prompt_coordinator(operation),
                     ),
                     **options,
                 )
@@ -632,7 +639,8 @@ class RayDatasetExecutor(DatasetExecutor):
             raise
 
     def write_lance(self, source, plan, spec, *, native_options=None):
-        if spec.expected_version is None:
+        # 覆盖由单个 writer 提交整个新快照；显式 schema 也在同一路径统一转换。
+        if spec.expected_version is None or spec.mode == "overwrite" or spec.schema is not None:
             return self._write_lance_direct(
                 source, plan, spec, native_options=native_options,
             )
@@ -694,7 +702,7 @@ def make_ray_operator_llm_callable_class(operation, config, coordinator):
     class RayOperatorLLMCallable:
         def __init__(self):
             self._bound = BoundOperatorLLMMap(
-                operation, OperatorLLMRuntime(config, coordinator),
+                operation, OperatorLLMRuntime(config, coordinator, operation.options),
             )
 
         def __call__(self, row):
@@ -761,7 +769,8 @@ def _ray_operator_llm_coordinator_class():
 
     @ray.remote(num_cpus=0)
     class RayOperatorLLMCoordinator:
-        def __init__(self):
+        def __init__(self, max_requests=None):
+            self.max_requests = max_requests
             self.values = {
                 "calls_attempted": 0,
                 "requests_reserved": 0,
@@ -777,6 +786,9 @@ def _ray_operator_llm_coordinator_class():
             self.values["calls_attempted"] += 1
 
         def reserve(self):
+            from ...operator_llm.errors import PromptBudgetExceededError
+            if self.max_requests is not None and self.values['requests_reserved'] >= self.max_requests:
+                raise PromptBudgetExceededError('Operator LLM request budget exhausted')
             value = "operator-llm-" + uuid.uuid4().hex
             self.reservations.add(value)
             self.values["requests_reserved"] += 1

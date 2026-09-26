@@ -1,4 +1,4 @@
-"""Direct and distributed Lance create-or-append execution."""
+"""通用 Lance 追加/覆盖提交；只处理 Arrow 数据、版本和写入回执。"""
 from __future__ import annotations
 
 import uuid
@@ -24,12 +24,15 @@ from .storage import (
 _COMMIT_TIMEOUT_SECONDS = 1800
 
 
-def append_lance(
+def write_lance(
     spec: LanceWriteSpec,
     batches: Iterable[pa.RecordBatch | pa.Table],
 ) -> LanceWriteReceipt:
-    if spec.expected_version is None:
-        return _append_or_create(spec, batches)
+    """执行一次表写入；覆盖始终一次提交，不逐批清空目标。"""
+    if spec.schema is not None:
+        batches = (table.cast(spec.schema) for table in _normalize_tables(batches))
+    if spec.expected_version is None or spec.mode == "overwrite":
+        return _write_direct(spec, batches)
     prepared = prepare_lance_append(spec)
     if prepared is None:
         raise AssertionError("expected-version Lance append was not prepared")
@@ -40,6 +43,8 @@ def append_lance(
 def prepare_lance_append(
     spec: LanceWriteSpec,
 ) -> _PreparedLanceAppend | None:
+    if spec.mode != "append":
+        raise InvalidLanceRequest("append preparation requires mode=append")
     if spec.expected_version is None:
         return None
     inspection = inspect_lance(spec.uri, None, spec.storage_options)
@@ -48,6 +53,8 @@ def prepare_lance_append(
             f"Lance append expected version {spec.expected_version}, "
             f"current is {inspection.resolved_version}"
         )
+    if spec.schema is not None:
+        require_compatible_schema(spec.schema, inspection.schema)
     return _PreparedLanceAppend(
         operation_id=str(uuid.uuid4()), request_hash=spec.content_hash,
         uri=spec.uri, expected_version=spec.expected_version,
@@ -182,14 +189,24 @@ def verify_committed_append(
     return None
 
 
-def _append_or_create(
+def _write_direct(
     spec: LanceWriteSpec,
     batches: Iterable[pa.RecordBatch | pa.Table],
 ) -> LanceWriteReceipt:
+    # 覆盖的版本检查先于消费输入；提交时还会由 Lance 原子检查同一版本。
+    if spec.expected_version is not None:
+        current = inspect_lance(spec.uri, None, spec.storage_options)
+        if current.resolved_version != spec.expected_version:
+            raise LanceWriteConflict(
+                f"Lance overwrite expected version {spec.expected_version}, "
+                f"current is {current.resolved_version}"
+            )
     iterator = iter(_normalize_tables(batches))
     first = next((table for table in iterator if table.num_rows), None)
     if first is None:
-        raise InvalidLanceRequest("Lance write requires at least one row")
+        if spec.schema is None:
+            raise InvalidLanceRequest("Lance write requires at least one row or an explicit schema")
+        first = pa.Table.from_batches([], schema=spec.schema)
     input_schema = first.schema
     rows = 0
 
@@ -203,35 +220,55 @@ def _append_or_create(
                 yield batch
 
     reader = pa.RecordBatchReader.from_batches(input_schema, validated())
+    lance = require_lance()
+    CommitConflictError = lance_commit_conflict_error()
     try:
-        committed = require_lance().write_dataset(
-            reader, spec.uri, mode="append", commit_lock=None,
-            storage_options=dict(spec.storage_options) or None,
-            commit_message=f"demiflow-lance:{spec.content_hash}",
-        )
+        if spec.expected_version is None:
+            committed = lance.write_dataset(
+                reader, spec.uri, mode=spec.mode, commit_lock=None,
+                storage_options=dict(spec.storage_options) or None,
+                commit_message=f"demiflow-lance:{spec.content_hash}",
+            )
+        else:
+            # 先写未提交的数据文件，再以 expected_version 原子替换快照；
+            # 不使用“检查后普通覆盖”，避免覆盖期间的其他提交被悄悄吞掉。
+            fragments = lance.fragment.write_fragments(
+                reader, spec.uri, mode="overwrite",
+                storage_options=dict(spec.storage_options) or None,
+            )
+            committed = lance.LanceDataset.commit(
+                spec.uri, lance.LanceOperation.Overwrite(input_schema, fragments),
+                read_version=spec.expected_version, max_retries=0,
+                storage_options=dict(spec.storage_options) or None,
+                commit_message=f"demiflow-lance:{spec.content_hash}",
+                commit_timeout=timedelta(seconds=_COMMIT_TIMEOUT_SECONDS),
+            )
+    except CommitConflictError as exc:
+        raise LanceWriteConflict(str(exc)) from exc
     except Exception as exc:
         return LanceWriteReceipt(
             request_hash=spec.content_hash, uri=spec.uri,
-            expected_version=None, committed_version=None,
+            expected_version=spec.expected_version, committed_version=None,
             input_rows=rows, written_rows=None,
             schema_hash=schema_hash(input_schema), status="indeterminate",
             error=error_from_exception(exc),
         )
     version = getattr(committed, "version", None)
-    if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
+    if (isinstance(version, bool) or not isinstance(version, int) or version <= 0
+            or (spec.expected_version is not None and version != spec.expected_version + 1)):
         return LanceWriteReceipt(
             request_hash=spec.content_hash, uri=spec.uri,
-            expected_version=None, committed_version=None,
+            expected_version=spec.expected_version, committed_version=None,
             input_rows=rows, written_rows=None,
             schema_hash=schema_hash(input_schema), status="indeterminate",
             error=make_error(
                 module=__name__, type_name="CommitVersionInvalid",
-                message="Lance append returned an invalid committed version",
+                message="Lance write returned an invalid committed version",
             ),
         )
     return LanceWriteReceipt(
         request_hash=spec.content_hash, uri=spec.uri,
-        expected_version=None, committed_version=version,
+        expected_version=spec.expected_version, committed_version=version,
         input_rows=rows, written_rows=rows,
         schema_hash=schema_hash(input_schema), status="committed",
     )
@@ -293,6 +330,6 @@ def _prepend(first, iterator):
 
 
 __all__ = [
-    "append_lance", "commit_lance_append", "prepare_lance_append",
+    "write_lance", "commit_lance_append", "prepare_lance_append",
     "verify_committed_append", "write_lance_fragment",
 ]

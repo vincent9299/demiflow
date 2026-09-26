@@ -78,9 +78,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         block_size: int = 256,
         materialize_memory_limit: int = 64 * 1024 * 1024,
         aggregate_state_max_bytes: int = 8 * 1024 * 1024,
-        prompt_packs=None,
-        max_prompt_requests=None,
-        prompt_options=None,
+        resource_root=None,
         usage_callback=None,
         planning_policy=None,
         candidate_execution=None,
@@ -96,26 +94,29 @@ class LocalDatasetExecutor(DatasetExecutor):
         self._pool: Optional[ThreadPoolExecutor] = None
         self._last_metadata: Optional[ExecutionMetadata] = None
         self._spill_paths: set[str] = set()
-        if max_prompt_requests is not None and (not isinstance(max_prompt_requests, int) or max_prompt_requests < 0):
-            raise ValueError("max_prompt_requests must be a nonnegative integer or None")
-        self._prompt_options=prompt_options;self._max_prompt_requests=max_prompt_requests
-        self._prompt_packs = dict(prompt_packs or {})
-        self._operator_llm_coordinator = (
-            InProcessOperatorLLMCoordinator(max_requests=max_prompt_requests, on_change=usage_callback)
-            if self._prompt_packs else None
+        self.resource_root = Path(resource_root or '.').resolve()
+        self._prompt_coordinators = {}
+        self._usage_callback = usage_callback
+
+    def _prompt_coordinator(self, operation):
+        # Workers of one node share accounting; different nodes never share limits.
+        return self._prompt_coordinators.setdefault(
+            operation.node_id,
+            InProcessOperatorLLMCoordinator(operation.max_requests, on_change=self._usage_callback),
         )
 
     def prompt_actor(self, operation):
         from ...operator_llm.runtime import PromptActor
-        if operation.config_path not in self._prompt_packs:
-            raise ValueError(f'Prompt pack not loaded: {operation.config_path}')
-        return PromptActor(operation, self._prompt_packs[operation.config_path],
-                           self._operator_llm_coordinator,self._prompt_options,self._max_prompt_requests)
+        return PromptActor(operation, operation.config,
+                           self._prompt_coordinator(operation), operation.options)
 
     def operator_llm_usage(self) -> dict[str, int]:
-        if self._operator_llm_coordinator is None:
-            return {}
-        return self._operator_llm_coordinator.usage().to_dict()
+        # Aggregate monitoring only; it does not impose a common request budget.
+        totals = {}
+        for coordinator in self._prompt_coordinators.values():
+            for key, value in coordinator.usage().to_dict().items():
+                totals[key] = totals.get(key, 0) + value
+        return totals
 
     def plan(
         self, source, plan, action_kind, *, terminal_category="action",
@@ -497,16 +498,12 @@ class LocalDatasetExecutor(DatasetExecutor):
                     width,
                 )
             elif isinstance(operation, OperatorLLMMapOp):
-                if self._operator_llm_coordinator is None:
-                    raise RuntimeError("OperatorLLMMapOp requires Operator LLM configuration")
+                coordinator = self._prompt_coordinator(operation)
                 rows = self._map_stage(
                     rows,
                     _ThreadLocalRuntime(
-                        lambda op=operation: BoundOperatorLLMMap(
-                            op, OperatorLLMRuntime(
-                                self._prompt_packs[op.config_path],
-                                self._operator_llm_coordinator,
-                            ),
+                        lambda op=operation, coordinator=coordinator: BoundOperatorLLMMap(
+                            op, OperatorLLMRuntime(op.config, coordinator, op.options),
                         )
                     ),
                     width,
@@ -674,10 +671,25 @@ class LocalDatasetExecutor(DatasetExecutor):
             yield rows
 
     def materialize(self, source: SourcePlan, plan: LogicalPlan) -> _LocalMaterializedHandle:
+        """按同步迭代器执行计划，缓存块和溢写策略与异步入口共用。"""
+        def execute(append):
+            for row in self._apply_plan(source, plan, action_kind="materialize"):
+                append(row)
+        return self._materialize_blocks(source, execute)
+
+    def materialize_stream(self, dataset) -> _LocalMaterializedHandle:
+        """以既有有界流式执行器驱动异步链，完整排空并关闭 actor 后才发布缓存。"""
+        def execute(append):
+            dataset.map_async(append, concurrency=1, queue_depth=1, label="materialize").run_stream()
+        return self._materialize_blocks(dataset._source, execute)
+
+    def _materialize_blocks(self, source, execute) -> _LocalMaterializedHandle:
+        """通用块缓存；失败时清理本次溢写，不返回部分结果或删除其他缓存。"""
         blocks = []
         rows_count = 0
         current = []
         memory_bytes = 0
+        created_spills = []
 
         def finish_block(rows):
             nonlocal memory_bytes
@@ -688,19 +700,33 @@ class LocalDatasetExecutor(DatasetExecutor):
                 return block
             fd, path = tempfile.mkstemp(prefix="demiflow-block-", suffix=".pkl")
             os.close(fd)
+            created_spills.append(path)
             with open(path, "wb") as fh:
                 pickle.dump(block, fh, protocol=pickle.HIGHEST_PROTOCOL)
             self._spill_paths.add(path)
             return _SpilledBlock(path)
 
-        for row in self._apply_plan(source, plan, action_kind="materialize"):
+        def append(row):
+            nonlocal current, rows_count
             current.append(row)
             rows_count += 1
             if len(current) >= self._block_size:
                 blocks.append(finish_block(current))
                 current = []
-        if current:
-            blocks.append(finish_block(current))
+            return row
+
+        try:
+            execute(append)
+            if current:
+                blocks.append(finish_block(current))
+        except BaseException:
+            for path in created_spills:
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+                self._spill_paths.discard(path)
+            raise
         self._last_metadata = ExecutionMetadata(
             source_name=type(source).__name__, rows_output=rows_count, blocks_output=len(blocks)
         )
@@ -857,10 +883,10 @@ class LocalDatasetExecutor(DatasetExecutor):
         if native_options is not None:
             raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
         physical=self.plan(source,plan,"write_lance",terminal_category="sink",terminal_parallelism_cap=1)
-        from ...lance.write import append_lance
+        from ...lance.write import write_lance
         rows=self._apply_plan(source,plan,action_kind="write_lance",terminal_category="sink",physical_plan=physical)
         batches=self._rows_as_batches(rows,batch_size=self._block_size,batch_format="pyarrow")
-        return append_lance(spec,batches)
+        return write_lance(spec,batches)
 
     def write_file(
         self, source: SourcePlan, plan: LogicalPlan, format_name: str,

@@ -354,8 +354,16 @@ def _batch(chunk: list[dict], schema):
     import pyarrow as pa
 
     try:
+        blob_fields = {f.name for f in schema if isinstance(f.type, pa.ExtensionType)
+                       and f.type.extension_name == 'lance.blob.v2'}
+        if blob_fields:
+            import lance
+            return pa.RecordBatch.from_arrays([
+                lance.blob_array([row.get(f.name) for row in chunk]) if f.name in blob_fields
+                else pa.array([row.get(f.name) for row in chunk], type=f.type)
+                for f in schema], schema=schema)
         return pa.RecordBatch.from_pylist(chunk, schema=schema)
-    except pa.ArrowInvalid as exc:
+    except (pa.ArrowInvalid, pa.ArrowTypeError) as exc:
         raise InvalidLanceRequest(
             f"checkpoint row does not match the schema: {exc}",
         ) from exc

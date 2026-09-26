@@ -6,7 +6,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from demiflow.standalone import local_data
+from demiflow.data.api import DataAPI
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.operator_llm.errors import PromptBudgetExceededError, PromptResponseContractError
 from demiflow.operator_llm.runtime import PromptActor
@@ -62,8 +62,7 @@ def server(monkeypatch):
     srv.shutdown();srv.server_close();worker.join()
 
 
-def context(pack=PACK, **kw):return local_data(prompt_packs={'p.yaml':parse_prompt_pack(pack)},**kw)
-def prompt(ds, **kw):return ds.map_prompt_async('enrich',config='p.yaml',inputs={'payload':'item'},output='answer',**kw)
+def prompt(ds, *, pack=PACK, **kw):return ds.map_prompt_async('enrich',config=parse_prompt_pack(pack),inputs={'payload':'item'},output='answer',**kw)
 
 
 def test_numbered_images_reach_http_in_order_and_journal_replay(server,tmp_path):
@@ -72,9 +71,9 @@ def test_numbered_images_reach_http_in_order_and_journal_replay(server,tmp_path)
     assert parsed.prompt_definitions['enrich'].input_modalities==('text','image')
     pictures=['data:image/png;base64,AAAA','data:image/png;base64,BBBB']
     for attempt in range(2):
-        ctx=context(pack,prompt_options={'journal_dir':str(tmp_path/'calls')})
+        ctx=DataAPI()
         rows=(ctx.from_items([{'item':{'task':'compare'},'pixels':pictures}])
-              .map_prompt_async('enrich',config='p.yaml',inputs={'payload':'item','pictures':'pixels'},output='answer')
+              .map_prompt_async('enrich',config=parsed,options={'journal_dir':str(tmp_path/'calls')},inputs={'payload':'item','pictures':'pixels'},output='answer')
               .checkpoint(tmp_path/f'out{attempt}.jsonl',version='v1').take_all())
         assert rows[0]['answer']=='ok'
     assert len(server['requests'])==1
@@ -85,8 +84,8 @@ def test_numbered_images_reach_http_in_order_and_journal_replay(server,tmp_path)
 
 
 def test_sync_async_contract_parity_and_checkpoint_reuse(server,tmp_path):
-    ctx=context();items=[{'id':i,'item':{'x':i}} for i in range(3)]
-    sync=ctx.from_items(items).map_prompt('enrich',config='p.yaml',inputs={'payload':'item'},output='answer').take_all()
+    ctx=DataAPI();items=[{'id':i,'item':{'x':i}} for i in range(3)]
+    sync=ctx.from_items(items).map_prompt('enrich',config=parse_prompt_pack(PACK),inputs={'payload':'item'},output='answer').take_all()
     stream=prompt(ctx.from_items(items),concurrency=2,queue_depth=1)
     assert isinstance(stream._stages[-1],PromptActor)
     assert isinstance(stream._plan.operations[-1],AsyncMapOp)
@@ -106,7 +105,7 @@ def test_real_concurrency_and_same_loop_close(server,monkeypatch):
     monkeypatch.setattr(AsyncOperatorLLMClient,'execute',execute);monkeypatch.setattr(AsyncOperatorLLMClient,'aclose',aclose)
     def respond(body,index):time.sleep(.08);return {'result':'ok'}
     server['respond']=respond
-    ds=prompt(context().from_items([{'item':i} for i in range(8)]),concurrency=3,queue_depth=1)
+    ds=prompt(DataAPI().from_items([{'item':i} for i in range(8)]),concurrency=3,queue_depth=1)
     assert ds.run_stream().emitted==8
     assert 1<server['peak']<=3
     assert len(closed)==1 and all(loop is closed[0] for loop in loops)
@@ -118,33 +117,39 @@ def test_real_concurrency_and_same_loop_close(server,monkeypatch):
 
 def test_schema_retry_shared_usage_and_feedback(server):
     server['respond']=lambda b,i:{'wrong':'x'} if i==0 else {'result':'ok'}
-    ctx=context(PACK.replace('schema_retries: 0','schema_retries: 1'),max_prompt_requests=2)
-    assert prompt(ctx.from_items([{'item':1}])).run_stream().emitted==1
+    ctx=DataAPI()
+    assert prompt(ctx.from_items([{'item':1}]), pack=PACK.replace('schema_retries: 0','schema_retries: 1'), max_requests=2).run_stream().emitted==1
     usage=ctx.prompt_usage()
     assert usage['provider_requests_failed']==1 and usage['provider_requests_completed']==1
     assert usage['input_tokens']==20 and usage['output_tokens']==4
     assert 'previous response failed' in server['requests'][1]['body']['messages'][0]['content']
 
 
-def test_budget_counts_sync_async_and_retries(server):
-    ctx=context(max_prompt_requests=1)
-    ctx.from_items([{'item':1}]).map_prompt('enrich',config='p.yaml',inputs={'payload':'item'},output='out').take_all()
-    with pytest.raises(PromptBudgetExceededError):prompt(ctx.from_items([{'item':2}])).run_stream()
-    assert len(server['requests'])==1
+def test_sync_and_async_nodes_have_independent_budgets(server):
+    ctx=DataAPI()
+    sync=ctx.from_items([{'item':1}]).map_prompt('enrich', config=parse_prompt_pack(PACK),
+        inputs={'payload':'item'}, output='out', max_requests=1)
+    sync.take_all()
+    stream=prompt(ctx.from_items([{'item':2}]), max_requests=1)
+    stream.run_stream()
+    assert len(server['requests'])==2
+    with pytest.raises(PromptBudgetExceededError):sync.take_all()
+    with pytest.raises(PromptBudgetExceededError):stream.run_stream()
+    assert len(server['requests'])==2
 
 
 def test_invalid_bindings_rejected_without_request(server):
-    ds=context().from_items([{'item':1}])
-    with pytest.raises(PromptResponseContractError):ds.map_prompt_async('enrich',config='p.yaml',inputs=['bad'],output='x')
-    with pytest.raises(PromptResponseContractError):ds.map_prompt_async('enrich',config='p.yaml',inputs={'payload':'item'},outputs={'bad':'x'})
-    with pytest.raises(KeyError):prompt(context().from_items([{}])).run_stream()
+    ds=DataAPI().from_items([{'item':1}])
+    with pytest.raises(PromptResponseContractError):ds.map_prompt_async('enrich',config=parse_prompt_pack(PACK),inputs=['bad'],output='x')
+    with pytest.raises(PromptResponseContractError):ds.map_prompt_async('enrich',config=parse_prompt_pack(PACK),inputs={'payload':'item'},outputs={'bad':'x'})
+    with pytest.raises(KeyError):prompt(DataAPI().from_items([{}])).run_stream()
     assert not server['requests']
 
 
 def test_http_errors_not_retried_and_catch_is_explicit(server):
     import httpx
     server['status']=503
-    ctx=context()
+    ctx=DataAPI()
     with pytest.raises(httpx.HTTPStatusError):prompt(ctx.from_items([{'item':1}])).run_stream()
     assert len(server['requests'])==1
     stats=prompt(ctx.from_items([{'item':2}]),catch=(httpx.HTTPStatusError,)).run_stream()
@@ -155,7 +160,7 @@ def test_http_errors_not_retried_and_catch_is_explicit(server):
 
 def test_schema_failure_does_not_publish_checkpoint(server,tmp_path):
     server['respond']=lambda b,i:{'result':99}
-    ctx=context()
+    ctx=DataAPI()
     with pytest.raises(PromptResponseContractError):prompt(ctx.from_items([{'item':1}])).checkpoint(tmp_path/'failed.jsonl',version='v1')
     assert not (tmp_path/'failed.jsonl').exists()
     assert list(tmp_path.glob('*.partial'))
@@ -166,8 +171,8 @@ def test_images_and_multiple_output_mapping(server):
     pack=PACK.replace('required: [result]','required: [result, n]').replace('        result: {type: string}', '        result: {type: string}\n        n: {type: integer}').replace('{{ payload | json }}','{{ payload | json }}\n      {{ picture | image }}')
     server['respond']=lambda b,i:{'result':'ok','n':2}
     seen=[]
-    (context(pack).from_items([{'item':1,'image':'https://example.org/a.png','keep':True}])
-     .map_prompt_async('enrich',config='p.yaml',inputs={'payload':'item','picture':'image'},outputs={'result':'answer','n':'count'})
+    (DataAPI().from_items([{'item':1,'image':'https://example.org/a.png','keep':True}])
+     .map_prompt_async('enrich',config=parse_prompt_pack(pack),inputs={'payload':'item','picture':'image'},outputs={'result':'answer','n':'count'})
      .map_async(lambda row:seen.append(row) or row).run_stream())
     assert seen[0]['answer']=='ok' and seen[0]['count']==2 and seen[0]['keep']
     parts=server['requests'][0]['body']['messages'][1]['content']
@@ -176,7 +181,7 @@ def test_images_and_multiple_output_mapping(server):
 
 def test_azure_async_transport(server):
     pack=PACK.replace('transport: openai_compatible','transport: azure_openai\n      api_version: 2024-02-01')
-    prompt(context(pack).from_items([{'item':1}])).run_stream()
+    prompt(DataAPI().from_items([{'item':1}]), pack=pack).run_stream()
     request=server['requests'][0]
     assert '/openai/deployments/mock-model/chat/completions?api-version=2024-02-01' in request['path']
     assert request['headers']['api-key']=='test'
@@ -202,8 +207,8 @@ def test_cancelled_request_releases_reservation_and_closes_on_loop(monkeypatch):
 
 def test_schema_retry_cannot_exceed_budget(server):
     server['respond']=lambda b,i:{'result':False}
-    ctx=context(PACK.replace('schema_retries: 0','schema_retries: 1'),max_prompt_requests=1)
-    with pytest.raises(PromptBudgetExceededError):prompt(ctx.from_items([{'item':1}])).run_stream()
+    ctx=DataAPI()
+    with pytest.raises(PromptBudgetExceededError):prompt(ctx.from_items([{'item':1}]), pack=PACK.replace('schema_retries: 0','schema_retries: 1'), max_requests=1).run_stream()
     assert len(server['requests'])==1
     assert ctx.prompt_usage()['provider_requests_failed']==1
 
@@ -211,9 +216,9 @@ def test_schema_retry_cannot_exceed_budget(server):
 def test_sync_transport_has_no_hidden_http_retry(server):
     import requests
     server['status']=503
-    ctx=context()
+    ctx=DataAPI()
     with pytest.raises(requests.HTTPError):
-        ctx.from_items([{'item':1}]).map_prompt('enrich',config='p.yaml',inputs={'payload':'item'},output='out').take_all()
+        ctx.from_items([{'item':1}]).map_prompt('enrich',config=parse_prompt_pack(PACK),inputs={'payload':'item'},output='out').take_all()
     assert len(server['requests'])==1
 
 
@@ -232,18 +237,19 @@ def test_stream_failure_cancels_inflight_prompt_and_closes_actor(monkeypatch):
     def make(model):
         client=Client();clients.append(client);return client
     monkeypatch.setattr(runtime,'create_async_operator_llm_client',make)
-    ctx=context();ds=prompt(ctx.from_items([{'item':1},{'item':2}]),concurrency=2)
+    ctx=DataAPI();ds=prompt(ctx.from_items([{'item':1},{'item':2}]),concurrency=2)
     with pytest.raises(RuntimeError,match='request failed'):ds.run_stream()
     assert clients[0].closed
     usage=ctx.prompt_usage()
     assert usage['provider_requests_started']==2 and usage['provider_requests_failed']==2
-    assert not ctx._executor._operator_llm_coordinator._reservations
+    assert all(not c._reservations for c in ctx._executor._prompt_coordinators.values())
 
 
 def test_missing_pack_and_unsupported_executor_fail_at_declaration():
-    with pytest.raises(ValueError,match='not loaded'):
-        prompt(local_data().from_items([]))
-    ds=context().from_items([]);ds._executor=object()
+    from demiflow.operator_llm.errors import PromptPackError
+    with pytest.raises(PromptPackError,match='not found'):
+        DataAPI().from_items([]).map_prompt_async('enrich', config='missing.yaml', inputs={'payload':'item'}, output='answer')
+    ds=DataAPI().from_items([]);ds._executor=object()
     with pytest.raises(NotImplementedError):prompt(ds)
 
 
@@ -264,28 +270,96 @@ def test_bundle_discovers_async_prompt_configuration(tmp_path,monkeypatch):
 def test_durable_replay_budget_and_uncertain_call(server,tmp_path):
     from demiflow.operator_llm.journal import UncertainPromptCall
     options={'journal_dir':str(tmp_path/'calls')}
-    ctx=context(max_prompt_requests=1,prompt_options=options)
-    row=prompt(ctx.from_items([{'item':1}]),call_output='call').checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()[0]
+    ctx=DataAPI()
+    row=prompt(ctx.from_items([{'item':1}]),call_output='call', options=options, max_requests=1).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()[0]
     assert row['answer']=='ok' and not row['call']['reused']
     request=json.loads(__import__('pathlib').Path(row['call']['request_path']).read_text())
     assert 'test' not in json.dumps(request)  # never archive authorization headers
-    fresh=context(max_prompt_requests=1,prompt_options=options)
-    replay=prompt(fresh.from_items([{'item':1}]),call_output='call').checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()[0]
+    fresh=DataAPI()
+    replay=prompt(fresh.from_items([{'item':1}]),call_output='call', options=options, max_requests=1).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()[0]
     assert replay['call']['reused'] and len(server['requests'])==1
     assert fresh.prompt_usage()['provider_requests_started']==0
-    with pytest.raises(PromptBudgetExceededError):prompt(fresh.from_items([{'item':2}])).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
+    # A new node has its own allowance even when it uses the same call journal.
+    prompt(fresh.from_items([{'item':2}]), options=options, max_requests=1).run_stream()
+    assert len(server['requests'])==2
     __import__('pathlib').Path(row['call']['response_path']).unlink()
-    with pytest.raises(UncertainPromptCall):prompt(context(prompt_options=options).from_items([{'item':1}])).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
-    assert len(server['requests'])==1
+    with pytest.raises(UncertainPromptCall):prompt(DataAPI().from_items([{'item':1}]), options=options).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
+    assert len(server['requests'])==2
 
 
 def test_prompt_skip_and_error_rows_keep_original_data(server,tmp_path):
     server['status']=503
     options={'journal_dir':str(tmp_path/'calls')}
     items=[{'item':1,'skip':True},{'item':2,'skip':False}]
-    result=prompt(context(prompt_options=options).from_items(items),when=lambda r:not r['skip'],error_output='error').checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
+    result=prompt(DataAPI().from_items(items),when=lambda r:not r['skip'],error_output='error',options=options).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
     assert result[0]==items[0]
     assert result[1]['item']==2 and result[1]['error']['type']=='PromptResponseContractError'
     assert result[1]['error']['call']['response_path']
-    prompt(context(prompt_options=options).from_items(items),when=lambda r:not r['skip'],error_output='error').checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
+    prompt(DataAPI().from_items(items),when=lambda r:not r['skip'],error_output='error',options=options).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
     assert len(server['requests'])==1
+
+
+@pytest.mark.parametrize('method', ['map_prompt', 'map_prompt_async'])
+def test_nodes_bind_separate_models_options_and_budgets(server, method):
+    """同一链的两次模型调用各有配置和上限；后来修改 options 不改变已声明节点。"""
+    data = DataAPI()
+    first_options = {'request_options': {'max_tokens': 13}}
+    ds = getattr(data.from_items([{'item': 1}]), method)(
+        'enrich', config=parse_prompt_pack(PACK.replace('mock-model', 'model-a')),
+        options=first_options, max_requests=1, inputs={'payload': 'item'}, output='first',
+    )
+    ds = getattr(ds, method)(
+        'enrich', config=parse_prompt_pack(PACK.replace('mock-model', 'model-b')),
+        options={'request_options': {'max_tokens': 29}}, max_requests=1,
+        inputs={'payload': 'first'}, output='second',
+    )
+    first_options['request_options']['max_tokens'] = 999
+    assert ds.materialize().take_all() == [{'item': 1, 'first': 'ok', 'second': 'ok'}]
+    assert [(r['body']['model'], r['body']['max_tokens']) for r in server['requests']] == [
+        ('model-a', 13), ('model-b', 29),
+    ]
+
+
+@pytest.mark.parametrize('method', ['map_prompt', 'map_prompt_async'])
+def test_node_budget_covers_all_concurrent_workers(server, method):
+    data = DataAPI(workers=4, block_size=1)
+    kwargs = {'concurrency': 4} if method == 'map_prompt_async' else {}
+    ds = getattr(data.from_items([{'item': n} for n in range(8)]), method)(
+        'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'item'}, output='answer',
+        max_requests=2, **kwargs,
+    )
+    with pytest.raises(PromptBudgetExceededError):
+        ds.materialize()
+    assert len(server['requests']) <= 2
+    assert data.prompt_usage()['provider_requests_reserved'] == 2
+
+
+def test_config_is_a_real_yaml_path_and_is_bound_at_declaration(server, tmp_path, monkeypatch):
+    path = tmp_path / 'prompts' / 'enrich.yaml'
+    path.parent.mkdir()
+    path.write_text(PACK)
+    monkeypatch.chdir(tmp_path)
+    ds = DataAPI().from_items([{'item': 1}]).map_prompt(
+        'enrich', config='prompts/enrich.yaml', inputs={'payload': 'item'}, output='answer',
+    )
+    path.write_text('invalid replacement')
+    assert ds.take_all()[0]['answer'] == 'ok'
+
+
+def test_sync_options_reuse_async_journal_without_consuming_budget(server, tmp_path):
+    options = {'journal_dir': str(tmp_path / 'calls'), 'request_options': {'max_tokens': 17}}
+    prompt(DataAPI().from_items([{'item': 1}]), options=options, max_requests=1).run_stream()
+    data = DataAPI()
+    replay = data.from_items([{'item': 1}]).map_prompt(
+        'enrich', config=parse_prompt_pack(PACK), options=options, max_requests=0,
+        inputs={'payload': 'item'}, output='answer',
+    )
+    assert replay.take_all()[0]['answer'] == 'ok'
+    assert len(server['requests']) == 1
+    assert data.prompt_usage()['provider_requests_started'] == 0
+
+
+@pytest.mark.parametrize('limit', [-1, True, 1.5])
+def test_invalid_node_budget_is_rejected_at_declaration(limit):
+    with pytest.raises(ValueError, match='max_requests'):
+        prompt(DataAPI().from_items([]), max_requests=limit)

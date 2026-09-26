@@ -1,14 +1,14 @@
 import gzip
 import json
 import pytest
-from demiflow.standalone import local_data
+from demiflow.data.api import DataAPI
 from demiflow.data.sources import DatasourceSource
 
 
 def test_located_gzip_invalid_rows_and_json_container(tmp_path):
     p=tmp_path/'rows.jsonl.gz'
     with gzip.open(p,'wb') as f:f.write(b'{"id":1}\ninvalid\n\xff\n{"id":4}\n')
-    data=local_data();ds=data.read_records(p)
+    data=DataAPI();ds=data.read_records(p)
     assert isinstance(ds._source,DatasourceSource)
     rows=ds.take_all()
     assert [r['row'] for r in rows]==[1,2,3,4]
@@ -22,7 +22,7 @@ def test_located_gzip_invalid_rows_and_json_container(tmp_path):
 
 
 def test_native_union_is_lazy_repeatable_and_keeps_context(tmp_path):
-    data=local_data();seen=[]
+    data=DataAPI();seen=[]
     def rows():seen.append('read');yield {'id':1}
     left=data.from_iter(rows);ds=left.union(data.from_items([{'id':2}]))
     assert seen==[] and ds._executor is left._executor
@@ -36,12 +36,12 @@ def test_native_union_is_lazy_repeatable_and_keeps_context(tmp_path):
 def test_scan_report_records_limit_errors_and_missing(tmp_path):
     p=tmp_path/'rows.jsonl';p.write_text('{"a":1}\nbad\n{"a":3}\n')
     report=tmp_path/'report.json'
-    rows=local_data().read_records(p,max_records=2,report_path=report).take_all()
+    rows=DataAPI().read_records(p,max_records=2,report_path=report).take_all()
     scope=json.loads(report.read_text())
     assert len(rows)==2 and scope['rows']==2 and scope['invalid_rows']==1
     assert scope['status']=='budget_limited' and not scope['complete']
     missing=tmp_path/'missing.json'
-    assert local_data().read_records(tmp_path/'absent',missing='empty',report_path=missing).take_all()==[]
+    assert DataAPI().read_records(tmp_path/'absent',missing='empty',report_path=missing).take_all()==[]
     assert json.loads(missing.read_text())['status']=='missing'
 
 

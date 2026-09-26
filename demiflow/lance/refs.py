@@ -1,7 +1,7 @@
 """DatasetRef：表版本的稳定引用（通用平台机制）。
 
 引用只保存相对位置（store_id + relative_uri）与具体 Lance 版本；解析为
-绝对 URI 依赖调用方传入的数据根，因此搬迁数据根不改变身份。引用一经
+绝对 URI 依赖调用方传入的数据根和显式位置映射；整表搬迁不改变固定引用身份。引用一经
 创建即不可变，运行中不得追随 latest。
 
 字段与序列化格式（to_dict/from_dict）是登记表在册数据的既有契约，
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from .storage import resolve_local_uri
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -117,7 +118,7 @@ class DatasetRef:
 
         数据根位置由调用方配置；引用本身只保存相对位置，搬迁根不改身份。
         """
-        return str((Path(root) / self.relative_uri).resolve(strict=False))
+        return str(resolve_local_uri(Path(root) / self.relative_uri))
 
     def open(self, root, storage_options=None):
         """按固定版本打开 Lance Dataset；不追随 latest。"""

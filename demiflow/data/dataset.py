@@ -6,6 +6,11 @@ with the first-class field-bound map extension.
 
 from __future__ import annotations
 
+from pathlib import Path
+from copy import deepcopy
+from ..operator_llm.model import PromptPack
+from ..operator_llm.parser import load_prompt_pack
+
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from .datasink import Datasink, WriteResult, validate_write_result
@@ -274,7 +279,7 @@ class Dataset:
                 native_options,
             )
         return Dataset(
-            self._source, self._plan.append(operation), self._executor,
+            self._source, self._plan.append(operation), self._executor, self._stages,
         )
 
     def flat_map(
@@ -295,7 +300,7 @@ class Dataset:
             parse_native_options(backend_options, family="row_transform"),
         )
         return Dataset(
-            self._source, self._plan.append(operation), self._executor,
+            self._source, self._plan.append(operation), self._executor, self._stages,
         )
 
     def map_async(
@@ -490,18 +495,22 @@ class Dataset:
         self,
         prompt: str,
         *,
-        config: str,
+        config: str | Path | PromptPack,
         inputs: Mapping[str, str] | Sequence[str],
         output: Optional[str] = None,
         outputs: Optional[Mapping[str, str]] = None,
+        options: Mapping[str, Any] | None = None,
+        max_requests: int | None = None,
         backend_options=None,
     ) -> "Dataset":
-        """Append one lazy Candidate-owned Operator LLM transformation.
+        """Append a model node with its own configuration and request budget.
 
-        ``prompt`` and ``config`` name Candidate-owned prompt resources. ``config`` names a
-        top-level YAML file inside ``pipeline/``: use ``"map_prompt.yaml"``;
-        do not use a variable, absolute or nested path, or
-        ``"pipeline/map_prompt.yaml"``.
+        ``config`` is a PromptPack or an actual YAML path, not a registered alias.
+        Relative paths use the execution resource directory (cwd for plain scripts).
+        ``options`` applies only to this node, in both sync and async execution.
+        ``max_requests`` caps new provider requests by this node across its rows,
+        workers and schema retries. Replays do not consume requests. Declaring
+        another node creates an independent budget, even for the same prompt.
 
         The file must use ``demiflow_prompt_pack_v2``. This minimal generic
         example is valid (business prompt text and model values must still come
@@ -568,7 +577,16 @@ class Dataset:
         name = str(prompt or "").strip()
         if not name:
             raise TypeError("Dataset.map_prompt requires a non-empty prompt name")
-        config_path = _prompt_config_path(config)
+        if max_requests is not None and (type(max_requests) is not int or max_requests < 0):
+            raise ValueError("max_requests must be a nonnegative integer or None")
+        if options is not None and not isinstance(options, Mapping):
+            raise TypeError("options must be a mapping or None")
+        if isinstance(config, PromptPack):
+            pack = config
+        elif isinstance(config, (str, Path)) and str(config).strip():
+            pack = load_prompt_pack(Path(getattr(self._executor, 'resource_root', Path.cwd())) / config)
+        else:
+            raise TypeError("config must be a PromptPack or YAML path")
         if output is not None and outputs is not None:
             raise TypeError("Dataset.map_prompt accepts either output or outputs, not both")
         if output is None and outputs is None:
@@ -578,39 +596,45 @@ class Dataset:
             raise TypeError("Dataset.map_prompt output must be non-empty")
         operation = OperatorLLMMapOp(
             name,
-            config_path,
+            pack,
             normalize_bound_inputs(inputs),
             normalized_output,
             normalize_outputs(outputs),
             parse_native_options(backend_options, family="row_transform"),
+            options=deepcopy(dict(options)) if options is not None else None,
+            max_requests=max_requests,
         )
+        from ..operator_llm.runtime import validate_prompt_binding
+        validate_prompt_binding(operation, pack)
         return Dataset(
-            self._source, self._plan.append(operation), self._executor,
+            self._source, self._plan.append(operation), self._executor, self._stages,
         )
 
     def map_prompt_async(
-        self, prompt: str, *, config: str,
+        self, prompt: str, *, config: str | Path | PromptPack,
         inputs: Mapping[str, str] | Sequence[str],
         output: Optional[str] = None, outputs: Optional[Mapping[str, str]] = None,
         concurrency: int = 1, queue_depth: Optional[int] = None,
         catch: tuple = (), label: Optional[str] = None,
         when=None, call_output: Optional[str] = None, error_output: Optional[str] = None,
+        options: Mapping[str, Any] | None = None, max_requests: int | None = None,
     ) -> "Dataset":
         """Native streaming prompt actor, sharing map_prompt's prompt-pack contract.
 
         Same template, model, inputs/output(s), JSON schema and schema_retries.
         Adds map_async worker/queue/error policies. Execute with run_stream()
         or checkpoint(); checkpoint before later joins or lazy transforms.
-        Requires local_data(prompt_packs=...). Non-local executors currently
-        reject this interface explicitly. HTTP is truly asynchronous; transport
+        Configuration and limits belong to this node. Non-local executors
+        currently reject this async interface explicitly. HTTP is truly asynchronous; transport
         errors are not silently retried. Repeated actions can repeat calls.
-        prompt_options={'offline_dir': ...} materializes the same model context
+        options={'offline_dir': ...} materializes the same model context
         for external authors and validates submitted responses through this
         actor. Missing responses produce PromptResponsePending; no HTTP call
         or provider-budget reservation occurs in offline mode.
         """
         declared = self.map_prompt(prompt, config=config, inputs=inputs,
-                                   output=output, outputs=outputs)
+                                   output=output, outputs=outputs, options=options,
+                                   max_requests=max_requests)
         factory = getattr(self._executor, 'prompt_actor', None)
         if factory is None:
             raise NotImplementedError('map_prompt_async currently requires the local streaming executor')
@@ -648,7 +672,7 @@ class Dataset:
             parse_native_options(backend_options, family="row_transform"),
         )
         return Dataset(
-            self._source, self._plan.append(operation), self._executor,
+            self._source, self._plan.append(operation), self._executor, self._stages,
         )
 
     def limit(self, limit: int) -> "Dataset":
@@ -840,11 +864,21 @@ class Dataset:
 
         Returns a new ``MaterializedDataset`` and does not mutate the original.
         Use it before multiple actions to avoid repeating external reads,
-        callables, or Operator LLM requests. The handle is current-run only and
+        callables, or Operator LLM requests. Local async chains use run_stream
+        with the same bounded queues, error handling and actor cleanup. The
+        synchronous action must run outside an active event loop (or in a thread).
+        The handle is current-run only and
         must not be returned from ``PipelineProgram.run``.
         """
         with observe_action("materialize", self._source, self._plan, self._executor) as observer:
-            handle = self._executor.materialize(self._source, self._plan)
+            if any(isinstance(op, (AsyncMapOp, BatchMapOp)) for op in self._plan.operations):
+                # 异步链复用本地流式执行器；缓存由 executor 管理，不把行交回业务层收集。
+                execute = getattr(self._executor, "materialize_stream", None)
+                if execute is None:
+                    raise NotImplementedError("async materialize is only supported by the local executor")
+                handle = execute(self)
+            else:
+                handle = self._executor.materialize(self._source, self._plan)
             known_row_count = getattr(handle, "row_count", None)
             row_count = int(known_row_count or 0)
             block_count = len(getattr(handle, "blocks", ()) or ())
@@ -1089,21 +1123,24 @@ class Dataset:
     def write_lance(
         self, uri: str, *, expected_version: int | None = None,
         storage_options: Mapping[str, str] | None = None,
+        mode: str = "append", schema=None,
         backend_options=None,
     ) -> None:
-        """Create or append this Dataset through one managed Lance write.
+        """将 Dataset 以追加或覆盖模式提交为一个 Lance 版本。
 
-        An absent target is created and an existing target is appended after
-        exact Arrow schema validation. ``expected_version`` enables real
-        compare-and-append. The action returns ``None``; an indeterminate
-        commit raises ``LanceWriteError`` and requires reconciliation. Lance
-        writes do not overwrite, evolve schema, or provide data idempotency.
+        ``mode='append'`` 保留默认的创建/追加行为，已有表要求 schema 一致；
+        ``mode='overwrite'`` 用本次数据及 schema 替换当前内容，旧版本仍可读取。
+        显式 ``schema`` 约束 Arrow 类型，并允许无数据时创建或覆盖为空表；
+        无 schema 的空输入仍报错。``expected_version`` 在提交时检查并发冲突；
+        compare-and-append 仍要求至少一行。返回值为 ``None``，提交结果不确定时
+        抛出带回执的 ``LanceWriteError``，不自动重试或去重。
+        这是同步 Dataset 的终结动作；异步算子仍通过 ``run_stream()`` 执行。
         """
         from ..lance.model import LanceWriteSpec
 
         spec = LanceWriteSpec(
             uri=uri, expected_version=expected_version,
-            storage_options=storage_options,
+            storage_options=storage_options, mode=mode, schema=schema,
         )
         target = spec.uri
         with observe_action(
@@ -1186,12 +1223,3 @@ def _write_options(options, filesystem, backend_options):
     native=parse_native_options(backend_options, family="sink")
     if native is not None: options["_demiflow_native_options"] = native
 
-
-def _prompt_config_path(value: str) -> str:
-    from pathlib import PurePosixPath
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise TypeError("Dataset.map_prompt config must be a non-empty static path")
-    path = PurePosixPath(value)
-    if path.is_absolute() or len(path.parts) != 1 or path.suffix not in {".yaml", ".yml"}:
-        raise ValueError("Dataset.map_prompt config must be a top-level pipeline YAML file")
-    return value

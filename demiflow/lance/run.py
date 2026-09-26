@@ -10,7 +10,7 @@ from .registry import Catalog
 from .checkpoint import read_checkpoint_record
 from .storage import schema_hash
 from ..execution.artifacts import digest
-from ..standalone import local_data
+from ..data.api import DataAPI
 
 
 class LanceRun:
@@ -64,7 +64,7 @@ class LanceRun:
 
     def replay_stage(self, name, data=None):
         ref = DatasetRef.from_dict(self.stages[name]['dataset_ref'])
-        return (data or local_data()).read_lance(ref.resolve(self.storage_root),
+        return (data or DataAPI()).read_lance(ref.resolve(self.storage_root),
                         version=ref.lance_version).map(self.decode_row)
 
     def finish(self):

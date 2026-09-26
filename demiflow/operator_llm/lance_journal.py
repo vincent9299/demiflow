@@ -7,6 +7,7 @@ from .errors import PromptBudgetExceededError
 from .offline import request_record, PromptResponsePending
 from .model import OperatorLLMResponse
 from ..lance.records import LanceRecordStore, RecordRef
+from ..lance.control import control_directory
 
 
 def key_for(value):
@@ -36,7 +37,9 @@ class LancePromptJournal:
 
     def reserve(self, request):
         self.store.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.store.path.with_suffix('.reservation.lock').open('a') as lock:
+        control = control_directory(self.store.path)
+        control.mkdir(parents=True, exist_ok=True)
+        with (control / 'reservation.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             if self.lookup(request) is not None: return False
             if self.limit is not None and len(self.store.keys(prefix='request/')) >= self.limit:

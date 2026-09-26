@@ -1,8 +1,8 @@
 import pytest
-from demiflow.standalone import local_data
+from demiflow.data.api import DataAPI
 
 
-def ds(rows):return local_data().from_items(rows)
+def ds(rows):return DataAPI().from_items(rows)
 
 
 def test_join_many_to_many_and_nulls():
@@ -74,8 +74,8 @@ def test_async_checkpoint_preserves_source_context_across_feed_chunks(tmp_path, 
 
 
 def test_consecutive_flat_maps_bind_separate_iterators():
-    from demiflow.standalone import local_data
-    rows = (local_data().from_items([{"value": 1}, {"value": 2}])
+    from demiflow.data.api import DataAPI
+    rows = (DataAPI().from_items([{"value": 1}, {"value": 2}])
             .flat_map(lambda r: [{"value": r["value"]}, {"value": r["value"] + 10}])
             .flat_map(lambda r: [{"value": r["value"] * 2}]).take_all())
     assert [r["value"] for r in rows] == [2, 22, 4, 24]

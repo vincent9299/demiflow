@@ -203,6 +203,9 @@ class AsyncOperatorLLMClient:
         self.options=dict(options or {});self.model=model;self.checked=False
         allowed={'lance_journal','journal_dir','timeout_s','request_options','verify_model','require_finish_reason_stop','trust_env','max_keepalive_connections'}
         if set(self.options)-allowed:raise ValueError('Unknown prompt execution options')
+        verification = self.options.get('verify_model', False)
+        if verification is not True and verification is not False and verification != 'listed':
+            raise ValueError('verify_model must be true, false, or listed')
         self.request_options=dict(self.options.get('request_options',{}))
         if set(self.request_options)&{'model','messages','stream'}:
             raise ValueError('request_options cannot replace model/messages/stream')
@@ -250,9 +253,13 @@ class AsyncOperatorLLMClient:
         try:
             if record['status_code']!=200:raise PromptResponseContractError(f'HTTP {record["status_code"]}; full response saved')
             choice=body['choices'][0]
+            message = choice['message']
+            reasoning = message.get('reasoning_content') or message.get('reasoning')
+            if isinstance(reasoning, str):
+                metadata['reasoning'] = reasoning
             if self.options.get('require_finish_reason_stop') and choice.get('finish_reason')!='stop':
                 raise PromptResponseContractError('Incomplete/truncated model output; full response saved')
-            content = choice['message']['content']
+            content = message['content']
             # Some local reasoning models return their explicit thinking delimiter
             # in content instead of a separate reasoning_content field. Preserve
             # the raw response in the journal, expose only the final answer.
@@ -279,7 +286,9 @@ class AsyncOperatorLLMClient:
         if self.options.get('verify_model') and not self.checked:
             response=await self.client.get(self.base+'/models');response.raise_for_status()
             names=[m['id'] for m in response.json()['data']]
-            if names!=[self.model.name]:raise ValueError(f'Endpoint model differs: {names}')
+            matched = (self.model.name in names if self.options['verify_model'] == 'listed'
+                       else names == [self.model.name])
+            if not matched:raise ValueError(f'Endpoint model differs: {names}')
             self.checked=True
         if self.journal and not self.journal.reserve(source):
             return self.decode(request,self.journal.lookup(source),reused=True)

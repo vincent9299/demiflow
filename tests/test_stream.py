@@ -8,11 +8,11 @@ import time
 import pytest
 
 from demiflow.data.plan import LogicalPlan
-from demiflow.standalone import local_data
+from demiflow.data.api import DataAPI
 
 
 def build(n=50):
-    ctx = local_data()
+    ctx = DataAPI()
     return ctx, [{"i": i} for i in range(n)]
 
 
@@ -90,7 +90,7 @@ def test_catch_whitelist_miss_and_fatal_terminates():
     class Hard(Exception):
         pass
 
-    ctx = local_data()
+    ctx = DataAPI()
     items = [{"i": i} for i in range(20)]
 
     async def flaky(r):
@@ -211,7 +211,7 @@ def test_map_async_actor_policy_from_class():
                 raise Soft("miss")
             return {**row, "v": row["i"] * 2}
 
-    ctx = local_data()
+    ctx = DataAPI()
     ds = (ctx.from_items([{"i": i} for i in range(5)])
           .map_async(Doubler()))
     stats = ds.run_stream(log_every=0)
@@ -246,7 +246,7 @@ def test_stage_bound_deps_not_deepcopied():
             return row
 
     st = Toucher()
-    ctx = local_data()
+    ctx = DataAPI()
     ds = ctx.from_items([{"i": i} for i in range(4)]).map_async(st)
     ds.run_stream()
     assert st.counter.n == 4          # 同一实例（未深拷贝）
@@ -261,7 +261,7 @@ def test_map_async_actor_sync_call_and_label_default():
         def __call__(self, row):
             return [row, row] if row["i"] % 2 else None
 
-    ctx = local_data()
+    ctx = DataAPI()
     ds = ctx.from_items([{"i": i} for i in range(4)]).map_async(SyncPassthrough())
     stats = ds.run_stream()
     assert stats.emitted == 4
@@ -289,7 +289,7 @@ def test_stage_aclose_lifecycle_hook():
         def __call__(self, row):
             return row
 
-    ctx = local_data()
+    ctx = DataAPI()
     (ctx.from_items([{"i": 1}])
      .map_async(Plain()).map_async(Resourced())
      .run_stream())
@@ -309,7 +309,7 @@ def test_queue_factory_transport_seam():
 
     CountingQueue.puts = 0
 
-    ctx = local_data()
+    ctx = DataAPI()
 
     from demiflow.data.plan import StreamStage
 
@@ -329,7 +329,7 @@ def test_queue_factory_transport_seam():
 
 def test_map_async_plain_class_partial_fields():
     """普通类（零继承）漏声明部分策略字段：仍按 actor 解析，缺项走默认。"""
-    ctx = local_data()
+    ctx = DataAPI()
 
     class PlainActor:               # 无继承，只声明了 concurrency
         concurrency = 2

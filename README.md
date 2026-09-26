@@ -50,17 +50,16 @@ pip install -e .[collect]     # + 采集栈：crawl4ai（crawl）+ pillow（imag
 SearXNG 类**服务**依赖不是 Python 包（PyPI 同名包为占位包），由消费方
 自行部署（如 demiwtg-data 的 data_pipeline/webgate 模块），不进本库依赖。
 
-python smoke_standalone.py  # 惰性路径冒烟
+python smoke_standalone.py  # Dataset 惰性路径冒烟
 python -m pytest tests/ -q  # streaming 路径 10 用例
 ```
 
 ```python
-from demiflow.standalone import local_data
+from demiflow import data
 
-ctx = local_data()
 
 # 惰性路径
-out = (ctx.from_items([{"x": i} for i in range(10)])
+out = (data.from_items([{"x": i} for i in range(10)])
        .map(lambda r: {**r, "y": r["x"] * 2})
        .filter(lambda r: r["y"] > 5)
        .take_all())
@@ -72,13 +71,97 @@ def build(ds):
                        catch=(TransientError,), label="fetch")
             .map_async(score, concurrency=48, label="score"))
 
-stats = build(ctx.from_items(rows)).run_stream(
+stats = build(data.from_items(rows)).run_stream(
     on_progress=lambda s: print(s.summary()),
     on_drain=lambda s: cleanup(),
     log_every=100)
 ```
 
+## Dataset 入口与模型算子配置
+
+统一入口是 `from demiflow import data`，直接调用 `data.read_*`、`data.from_*`。
+返回 `Dataset`，在其上连接处理算子及 writer。普通脚本默认本地执行，打包 Pipeline 继承
+Driver 选择的 Local/Ray 执行器；`DataAPI` 仅为平台内部读接口实现，不再公开导出。
+删除 `demiflow.standalone.local_data`，不提供旧名转调。prompt 配置、调用参数和预算均属于算子。
+
+```python
+from demiflow import data
+
+(
+    data.read_lance(input_uri, version=input_version)
+    .map_prompt_async(
+        'design', config='prompts/tasks.yaml',
+        options={'timeout_s': 120, 'request_options': {'max_tokens': 4096}},
+        max_requests=20, inputs={'concept': 'concept'}, output='question',
+        concurrency=2,
+    )
+    .materialize()
+    .write_lance(output_uri, mode='overwrite', schema=output_schema)
+)
+```
+
+`map_prompt` 和 `map_prompt_async` 都接受 `config`、`options`、`max_requests`。
+`config` 是已解析的 `PromptPack` 或真实 YAML 路径，不是注册别名；声明时加载并绑定。
+普通脚本的相对路径基于当前工作目录，打包 Pipeline 的相对路径基于其资源目录。
+`options` 在声明时复制，作用于当前节点；同步调用同样支持 timeout、请求参数、offline 和日志复用。
+
+请求上限覆盖该节点的所有行、worker 和 schema 重试；同一节点重复执行继续累计，
+声明另一个节点有独立预算。缓存响应和 offline 不消耗新请求。调用日志可复用，
+但日志总行数不再作为多个节点的公共上限；重新建立节点不继承上次节点的内存计数。
+执行器的调用量统计只用于监控，不合并预算。Local 和 Ray 的同步节点均执行此预算规则；
+异步节点目前仍只支持 Local。打包 Pipeline 的静态资源检查仍要求 YAML 字面量路径。
+
 ## 双执行路径语义
+
+### Lance 写入
+
+`Dataset.write_lance()` 是同步 Dataset 的终结动作，默认 `mode='append'`。
+`mode='overwrite'` 用本次全部数据提交一个替换版本，不逐批覆盖；旧版本仍可按版本号读取。
+两种模式都可以创建尚不存在的目标。追加要求目标 schema 一致；覆盖可以使用新的 schema。
+
+```python
+import pyarrow as pa
+
+schema = pa.schema([('id', pa.int64()), ('text', pa.string())])
+data.from_items(rows).write_lance('results.lance', mode='overwrite', schema=schema)
+data.from_items(more_rows).write_lance('results.lance', mode='append', schema=schema)
+# 空输入必须显式给出 schema；覆盖时会得到有效的空表。
+data.from_items([]).write_lance('results.lance', mode='overwrite', schema=schema)
+```
+
+可选 `expected_version=N` 约束提交基于指定的当前版本；版本过期或写入期间发生竞争提交时拒绝写入。
+compare-and-append 仍要求至少一行；覆盖支持带 schema 的空输入。
+写入返回 `None`；提交结果不确定时抛出带回执的 `LanceWriteError`，不自动重试。
+平台不做主键合并、业务去重、运行冻结或完成状态管理。`write_lance` 不隐式运行异步链；
+需要固定异步结果再写表时，显式使用下面的 `materialize()`。
+
+### 固定异步结果
+
+local Dataset 的 `materialize()` 同时支持同步与异步链：
+
+```python
+cached = (
+    data.read_lance(source_uri, version=source_version)
+    .map_async(enrich, concurrency=4)
+    .map(project_result)
+    .materialize()
+)
+cached.write_lance(target_uri, mode='overwrite', schema=schema)
+# 再次读取缓存，不重新执行 enrich。
+count = cached.count()
+```
+
+这是同步 action，应在活动事件循环之外调用（notebook 可放到线程）。异步计划复用
+`run_stream()` 的有界队列、错误传播和 actor 关闭机制，只支持该执行器现有的流式算子；
+不因此扩展关系算子的流式支持，也不保证异步输出顺序。含 join / flat_map 等同步关系处理的
+前缀应先按现有方式物化，再接异步节点。
+
+缓存采用本地块缓存及原有内存限额，超出后溢写到临时文件。全部成功才返回
+`MaterializedDataset`；失败清理本次创建的溢写，其他缓存仍有效。执行器关闭时释放其缓存。
+物化不是持久 checkpoint，也不包含任何业务评分、指纹、去重或提交规则。
+
+
+### 执行方式
 
 | | 惰性路径（sync 算子） | 流式路径（`map_async`） |
 |---|---|---|
@@ -97,4 +180,4 @@ stats = build(ctx.from_items(rows)).run_stream(
 原为 Demiurge 的 `demiurge.demiflow` 子包；独立化时内联了两个共享模块
 （`demiflow/_compat/error_transport|observability`），补写了原仓快照缺失的
 `planning/__init__.py`，斩断了 Candidate/wheelhouse 平台耦合（零配置入口
-`demiflow.standalone.local_data`）。工程细节见各模块 docstring。
+`demiflow.data`）。工程细节见各模块 docstring。

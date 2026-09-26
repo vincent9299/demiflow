@@ -97,8 +97,15 @@ class LanceWriteSpec:
     uri: str
     expected_version: int | None = None
     storage_options: StorageOptions = ()
+    mode: Literal["append", "overwrite"] = "append"
+    schema: "pa.Schema | None" = None
 
     def __post_init__(self) -> None:
+        if self.mode not in ("append", "overwrite"):
+            raise InvalidLanceRequest("Lance write mode must be append or overwrite")
+        if self.schema is not None:
+            from .storage import schema_hash
+            schema_hash(self.schema)  # 显式 schema 也用于空输入，不依赖业务字段。
         object.__setattr__(self, "uri", normalize_lance_uri(self.uri))
         object.__setattr__(
             self, "expected_version",
@@ -107,11 +114,15 @@ class LanceWriteSpec:
         object.__setattr__(self, "storage_options", normalize_storage_options(self.storage_options))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "kind": "append", "uri": self.uri,
+        result = {
+            "kind": self.mode, "uri": self.uri,
             "expected_version": self.expected_version,
             "storage_options": dict(self.storage_options),
         }
+        if self.schema is not None:
+            from .storage import schema_hash
+            result["schema_hash"] = schema_hash(self.schema)
+        return result
 
     @property
     def content_hash(self) -> str:

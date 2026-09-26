@@ -2,7 +2,7 @@
 import json,threading
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 import pytest
-from demiflow.standalone import local_data
+from demiflow.data.api import DataAPI
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.operator_llm.errors import PromptPackError
 
@@ -39,8 +39,9 @@ def test_plain_text_http_and_journal_replay(tmp_path,monkeypatch,thinking):
     monkeypatch.setenv('TEXT_TEST_URL',f'http://127.0.0.1:{srv.server_port}/v1');monkeypatch.setenv('TEXT_TEST_KEY','local')
     try:
         for i in range(2):
-            ctx=local_data(prompt_packs={'p.yaml':parse_prompt_pack(PACK)},prompt_options={'journal_dir':str(tmp_path/'calls'),'request_options':{'response_format':{'type':'json_object'},'chat_template_kwargs':{'enable_thinking':thinking}},'require_finish_reason_stop':True})
-            rows=(ctx.from_items([{'input':'写文章'}]).map_prompt_async('write',config='p.yaml',inputs={'payload':'input'},output='article').checkpoint(tmp_path/f'out{i}.jsonl',version='v1').take_all())
+            ctx=DataAPI()
+            options={'journal_dir':str(tmp_path/'calls'),'request_options':{'response_format':{'type':'json_object'},'chat_template_kwargs':{'enable_thinking':thinking}},'require_finish_reason_stop':True}
+            rows=(ctx.from_items([{'input':'写文章'}]).map_prompt_async('write',config=parse_prompt_pack(PACK),options=options,inputs={'payload':'input'},output='article').checkpoint(tmp_path/f'out{i}.jsonl',version='v1').take_all())
             assert rows[0]['article']==article
         assert len(bodies)==1
         assert 'response_format' not in bodies[0]

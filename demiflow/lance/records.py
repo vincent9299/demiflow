@@ -6,6 +6,7 @@ locks are coordination files, never another authoritative data store.
 from __future__ import annotations
 import fcntl
 import json
+from .storage import resolve_local_uri
 from pathlib import Path
 from .control import control_directory, table_lock_path
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ class LanceRecordStore:
         if relative.is_absolute() or '..' in relative.parts:
             raise ValueError('record store URI must be relative to root')
         self.relative_uri = str(relative)
-        self.path = self.root / relative
+        self.path = resolve_local_uri(self.root / relative)
 
     def get(self, key, *, version=None):
         if not self.path.exists():

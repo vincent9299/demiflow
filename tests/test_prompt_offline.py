@@ -9,7 +9,7 @@ from demiflow.operator_llm.model import OperatorLLMRequest
 from demiflow.operator_llm.offline import submit_response
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.operator_llm.template import render_template
-from demiflow.standalone import local_data
+from demiflow.data.api import DataAPI
 
 PACK = '''
 schema_version: demiflow_prompt_pack_v2
@@ -32,15 +32,10 @@ prompts:
 '''
 
 
-def context(tmp_path):
-    return local_data(prompt_packs={'p.yaml': parse_prompt_pack(PACK)},
-                      prompt_options={'offline_dir': str(tmp_path)}, max_prompt_requests=0)
-
-
-def evaluate(ctx, images=()):
+def evaluate(ctx, tmp_path, images=()):
     rows = []
     (ctx.from_items([{'task': 'original context', 'images': list(images)}])
-        .map_prompt_async('author', config='p.yaml', inputs=['task', 'images'],
+        .map_prompt_async('author', config=parse_prompt_pack(PACK), options={'offline_dir':str(tmp_path)}, max_requests=0, inputs=['task', 'images'],
                           output='answer', call_output='call', error_output='error')
         .map(lambda row: {**row, 'applied': True})
         .map_async(lambda row: rows.append(row) or row).run_stream())
@@ -50,13 +45,13 @@ def evaluate(ctx, images=()):
 
 def test_pending_and_resume_use_native_schema_without_provider_call(tmp_path, monkeypatch):
     monkeypatch.delenv('OFFLINE_FIXTURE_KEY', raising=False)
-    ctx = context(tmp_path)
-    first = evaluate(ctx)
+    ctx = DataAPI()
+    first = evaluate(ctx, tmp_path)
     assert first['error']['type'] == 'PromptResponsePending'
     request = next((tmp_path / 'requests').glob('*.json'))
     response = tmp_path / 'responses' / request.name
     submit_response(request, response, {'result': 7}, model='fixture-author', metadata={'author': 'fixture'})
-    actual = evaluate(ctx)
+    actual = evaluate(ctx, tmp_path)
     assert actual['answer'] == 7
     assert actual['call']['offline_metadata'] == {'author': 'fixture'}
     assert ctx.prompt_usage()['provider_requests_started'] == 0
@@ -66,7 +61,7 @@ def test_pending_and_resume_use_native_schema_without_provider_call(tmp_path, mo
 def test_offline_and_http_context_are_identical_including_images(tmp_path, monkeypatch):
     monkeypatch.setenv('OFFLINE_FIXTURE_KEY', 'fixture-only')
     images = ['data:image/png;base64,aGVsbG8=', 'data:image/png;base64,d29ybGQ=']
-    evaluate(context(tmp_path), images)
+    evaluate(DataAPI(), tmp_path, images)
     offline = json.loads(next((tmp_path / 'requests').glob('*.json')).read_text())
     prompt = parse_prompt_pack(PACK).prompt_definitions['author']
     request = OperatorLLMRequest(prompt.name, prompt.version, prompt.model.name,
@@ -83,8 +78,8 @@ def test_offline_and_http_context_are_identical_including_images(tmp_path, monke
 
 @pytest.mark.parametrize('mutation', ['binding', 'model', 'schema'])
 def test_bad_submitted_responses_do_not_pass(tmp_path, mutation):
-    ctx = context(tmp_path)
-    evaluate(ctx)
+    ctx = DataAPI()
+    evaluate(ctx, tmp_path)
     request = next((tmp_path / 'requests').glob('*.json'))
     response = tmp_path / 'responses' / request.name
     submit_response(request, response, {'result': 7}, model='fixture-author')
@@ -93,14 +88,14 @@ def test_bad_submitted_responses_do_not_pass(tmp_path, mutation):
     if mutation == 'model': record['model'] = 'wrong'
     if mutation == 'schema': record['content'] = {'result': 'wrong'}
     response.write_text(json.dumps(record))
-    row = evaluate(ctx)
+    row = evaluate(ctx, tmp_path)
     assert 'error' in row and 'answer' not in row
     if mutation == 'schema': assert row['error']['type'] == 'PromptResponseContractError'
 
 
 def test_modified_request_and_conflicting_response_cannot_be_overwritten(tmp_path):
-    ctx = context(tmp_path)
-    evaluate(ctx)
+    ctx = DataAPI()
+    evaluate(ctx, tmp_path)
     request = next((tmp_path / 'requests').glob('*.json'))
     response = tmp_path / 'responses' / request.name
     submit_response(request, response, {'result': 7}, model='fixture-author')
@@ -111,11 +106,11 @@ def test_modified_request_and_conflicting_response_cannot_be_overwritten(tmp_pat
     request.write_text(json.dumps(record))
     with pytest.raises(ValueError, match='request changed'):
         submit_response(request, response, {'result': 7}, model='fixture-author')
-    assert 'error' in evaluate(ctx)
+    assert 'error' in evaluate(ctx, tmp_path)
 
 
 def test_sync_map_after_async_preserves_arguments_and_failure_boundary(tmp_path):
-    data = local_data()
+    data = DataAPI()
     def add(row, increment, *, suffix):
         return {'value': row['value'] + increment, 'label': suffix}
     actual = (data.from_items([{'value': 2}]).map_async(lambda row: row)

@@ -129,7 +129,7 @@ def execute_driver(request: PipelineDriverRequest) -> None:
         if request.backend == "local":
             dataset_executor = LocalDatasetExecutor(
                 workers=max(1,min(policy.max_parallelism,os.cpu_count() or 1)),
-                prompt_packs=prompt_packs,
+                resource_root=bundle_root / "pipeline",
                 planning_policy=policy,
                 candidate_execution=definition.execution,
             )
@@ -142,7 +142,7 @@ def execute_driver(request: PipelineDriverRequest) -> None:
                 )
             from .executors.ray import RayDatasetExecutor
             dataset_executor = RayDatasetExecutor(
-                prompt_packs=prompt_packs, planning_policy=policy,
+                resource_root=bundle_root / "pipeline", planning_policy=policy,
                 candidate_execution=definition.execution,
             )
         else:

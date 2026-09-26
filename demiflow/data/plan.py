@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import inspect
 import copy
+import uuid
+from ..operator_llm.model import PromptPack
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 from .native_options import NativeOptions
@@ -97,12 +99,16 @@ class BoundMapOp(LogicalOp):
 
 @dataclass(frozen=True)
 class OperatorLLMMapOp(LogicalOp):
+    """A model node owns its prompt, transport options and request budget."""
     prompt_name: str
-    config_path: str
+    config: PromptPack
     inputs: Mapping[str, str]
     output: Optional[str] = None
     outputs: Optional[Mapping[str, str]] = None
     native_options: NativeOptions | None = None
+    options: Mapping[str, Any] | None = None
+    max_requests: int | None = None
+    node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 @dataclass(frozen=True)

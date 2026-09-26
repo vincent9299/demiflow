@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextvars import ContextVar
+from contextlib import contextmanager
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from .dataset import Dataset, MaterializedDataset
@@ -21,10 +23,31 @@ from .sources import (
 )
 
 
+# Selected only by a Pipeline driver. Plain script readers create a local executor.
+# A ContextVar keeps concurrent runs and nested pipelines from changing each other.
+_current_executor = ContextVar('demiflow_dataset_executor', default=None)
+
+
+@contextmanager
+def _use_executor(executor):
+    token = _current_executor.set(executor)
+    try:
+        yield
+    finally:
+        _current_executor.reset(token)
+
+
 class DataAPI:
-    def __init__(self, executor: Any) -> None:
+    """Internal reader implementation bound to one executor; public readers live in demiflow.data."""
+    def __init__(self, executor: Any = None, *, workers: int = 4, block_size: int = 256) -> None:
+        """Create Dataset readers; default to the local executor.
+
+        workers/block_size configure local execution only. Prompt configuration,
+        transport options and request limits belong to each map_prompt node.
+        """
         if executor is None:
-            raise ValueError("DataAPI requires a Dataset executor")
+            from ..execution.executors.local import LocalDatasetExecutor
+            executor = LocalDatasetExecutor(workers=workers, block_size=block_size)
         self._executor = executor
 
     def prompt_usage(self) -> dict[str, int]:

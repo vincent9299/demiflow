@@ -1,5 +1,6 @@
 """Immutable content-addressed Blob writes and fixed-version reads."""
 from dataclasses import dataclass, asdict
+from .storage import resolve_local_uri
 from pathlib import Path
 from .control import control_directory, table_lock_path
 import hashlib
@@ -21,7 +22,7 @@ class BlobRef:
         if relative.is_absolute() or '..' in relative.parts: raise ValueError('Blob URI must be relative')
         if len(self.sha256) != 64 or any(c not in '0123456789abcdef' for c in self.sha256):
             raise ValueError('Invalid content SHA')
-        ds = lance.dataset(str(Path(root)/relative), version=self.version)
+        ds = lance.dataset(str(resolve_local_uri(Path(root)/relative)), version=self.version)
         matches = ds.scanner(columns=['sha256'], filter=f"sha256 = '{self.sha256}'", with_row_id=True).to_table()
         if matches.num_rows != 1: raise ValueError('Blob must resolve exactly one row')
         blob = ds.take_blobs(self.column, ids=[matches['_rowid'][0].as_py()])[0]
@@ -35,7 +36,7 @@ class LanceBlobStore:
         self.root, self.relative_uri = Path(root), relative_uri
         relative = Path(relative_uri)
         if relative.is_absolute() or '..' in relative.parts: raise ValueError('Blob URI must be relative')
-        self.path = self.root/relative
+        self.path = resolve_local_uri(self.root/relative)
 
     def put(self, data):
         import lance

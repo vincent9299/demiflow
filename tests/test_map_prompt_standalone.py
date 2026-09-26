@@ -1,7 +1,7 @@
 """demiflow map_prompt standalone 冒烟：脱离 Candidate 机制端到端验证。
 
 本地 HTTP mock 充当 OpenAI 兼容端点，验证 parse_prompt_pack →
-LocalDatasetExecutor(prompt_packs=...) → map_prompt → schema 校验输出
+DataAPI() → map_prompt(config=pack) → schema 校验输出
 全链路——二期富化管线直接按此形态使用。
 """
 
@@ -59,13 +59,13 @@ def test_map_prompt_standalone(monkeypatch):
         monkeypatch.setenv("MOCK_LLM_API_KEY", "test-key")
 
         from demiflow.operator_llm.parser import parse_prompt_pack
-        from demiflow.standalone import local_data
+        from demiflow.data.api import DataAPI
 
         pack = parse_prompt_pack(PACK_YAML)
-        ctx = local_data(prompt_packs={"enrich.yaml": pack})
+        ctx = DataAPI()
         rows = (ctx.from_items([{"entity": {"name": f"e{i}", "kind": "测试"}}
                                 for i in range(3)])
-                .map_prompt("enrich", config="enrich.yaml",
+                .map_prompt("enrich", config=pack,
                             inputs=["entity"], outputs={"summary": "summary"})
                 .take_all())
         assert len(rows) == 3
