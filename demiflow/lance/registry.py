@@ -1,10 +1,10 @@
 """数据集版本登记（catalog）、多表发布登记（releases）与登记式写入。
 
-- ``Catalog``：长期增量登记表（数据根 datasets/registry_datasets.lance）。登记行
+- ``Catalog``：长期增量登记表（数据根 _demiflow/registry/datasets.lance）。登记行
   以（dataset_id, relative_uri, lance_version）为主键；完全重复幂等跳过，
   同主键不同内容是冲突，必须报错而不是覆盖。显式 schema、单写者文件锁、
   批量追加、登记前查重对账。
-- ``ReleaseRegistry``：发布登记（datasets/registry_releases.lance）。一次发布＝多张
+- ``ReleaseRegistry``：发布登记（_demiflow/registry/releases.lance）。一次发布＝多张
   表的固定版本组合；登记是可见边界，登记前逐引用核验（catalog 在册＋固定
   版本可读＋schema/行数一致），任何不符在写入可见行之前失败。
 - ``write_registered_table``：checkpoint_lance 原子提交＋回执读取＋引用
@@ -29,8 +29,8 @@ from .control import control_directory, table_lock_path
 from .refs import DatasetRef
 from .storage import open_lance_dataset, schema_hash as lance_schema_hash
 
-REGISTRY_RELATIVE = "datasets/registry_datasets.lance"
-RELEASES_RELATIVE = "datasets/registry_releases.lance"
+REGISTRY_RELATIVE = "_demiflow/registry/datasets.lance"
+RELEASES_RELATIVE = "_demiflow/registry/releases.lance"
 
 _REGISTRY_FIELDS = (
     "dataset_id", "store_id", "relative_uri", "lance_version",

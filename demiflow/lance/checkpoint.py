@@ -144,20 +144,19 @@ def checkpoint_lance(
 
 
 def _iter_dataset_rows(dataset, max_rows_per_batch: int):
-    """Yield plan rows for the checkpoint writer, bridging async operators.
+    """Bridge streaming maps/actors/batches through a bounded row queue.
 
-    R6: a plan containing AsyncMapOp cannot run through the synchronous
-    executor. Mirror the native JSONL checkpoint bridge: execute the prefix
-    before the first async op synchronously, then drive the remainder with
-    run_stream in a worker thread, pumping rows through a bounded queue.
+    Execute the synchronous prefix normally, then drive the remainder in a
+    worker thread. Closing the consumer cancels the action and joins its
+    cleanup; in-flight Python thread calls still need their own deadlines.
     """
-    from ..data.plan import AsyncMapOp, LogicalPlan
+    from ..data.plan import is_stream_operation, LogicalPlan
     from ..data.dataset import Dataset
     from ..data.api import DataAPI
 
     ops = dataset._plan.operations
     first = next(
-        (i for i, op in enumerate(ops) if isinstance(op, AsyncMapOp)), None,
+        (i for i, op in enumerate(ops) if is_stream_operation(op)), None,
     )
     if first is None:
         yield from dataset.iter_rows()
@@ -168,17 +167,40 @@ def _iter_dataset_rows(dataset, max_rows_per_batch: int):
     import threading
 
     q: queue_mod.Queue = queue_mod.Queue(maxsize=64)
-    done_marker = object()
+    done = threading.Event()
     failure: dict = {}
 
-    async def _pump(row):
-        while True:
-            try:
-                q.put_nowait(row)
-                break
-            except queue_mod.Full:
-                await asyncio.sleep(0.02)
-        return row
+    class Pump:
+        concurrency = 1
+        queue_depth = 1
+        loop = None
+        task = None
+
+        async def astart(self):
+            # StreamResources starts actors in the action task. Retain that
+            # task, not a row worker, so a closed writer stops the whole graph.
+            self.loop = asyncio.get_running_loop()
+            self.task = asyncio.current_task()
+
+        async def __call__(self, row):
+            while True:
+                try:
+                    q.put_nowait(row)
+                    return row
+                except queue_mod.Full:
+                    await asyncio.sleep(0.02)
+
+        def cancel(self):
+            if self.loop is not None and not done.is_set():
+                try:
+                    self.loop.call_soon_threadsafe(self.task.cancel)
+                except RuntimeError:
+                    # The action may finish between checking done and closing
+                    # its event loop. join below still waits for final cleanup.
+                    if not self.loop.is_closed():
+                        raise
+
+    pump = Pump()
 
     def _run():
         try:
@@ -190,11 +212,12 @@ def _iter_dataset_rows(dataset, max_rows_per_batch: int):
                 source._source, LogicalPlan(ops[first:]), dataset._executor,
                 dataset._stages,
             )
-            stream.map_async(_pump).run_stream(log_every=0)
-            q.put(done_marker)
+            stream.map_async(pump).run_stream(log_every=0)
         except BaseException as exc:  # noqa: BLE001 - transported to consumer
             failure["exc"] = exc
-            q.put(done_marker)
+        finally:
+            # Completion cannot block behind rows after the writer has failed.
+            done.set()
 
     worker = threading.Thread(
         target=_run, name="demiflow-lance-checkpoint-bridge", daemon=True,
@@ -202,14 +225,18 @@ def _iter_dataset_rows(dataset, max_rows_per_batch: int):
     worker.start()
     try:
         while True:
-            item = q.get()
-            if item is done_marker:
-                if "exc" in failure:
-                    raise failure["exc"]
-                return
+            try:
+                item = q.get(timeout=0.05)
+            except queue_mod.Empty:
+                if done.is_set() and q.empty():
+                    if "exc" in failure:
+                        raise failure["exc"]
+                    return
+                continue
             yield item
     finally:
-        worker.join(timeout=30.0)
+        pump.cancel()
+        worker.join()
 
 
 def _write_attempt(
@@ -222,12 +249,13 @@ def _write_attempt(
     allowed = frozenset(names)
     rows = 0
     validation_error: InvalidLanceRequest | None = None
+    row_iter = _iter_dataset_rows(dataset, max_rows_per_batch)
 
     def record_batches():
         nonlocal rows, validation_error
         try:
             chunk: list[dict] = []
-            for row in _iter_dataset_rows(dataset, max_rows_per_batch):
+            for row in row_iter:
                 if not isinstance(row, Mapping):
                     raise InvalidLanceRequest("checkpoint rows must be mappings")
                 unknown = set(row) - allowed
@@ -257,7 +285,8 @@ def _write_attempt(
     pending_path = control_directory(uri) / ('pending-' + attempt_id + '.json')
     if attempt_dir.exists():
         shutil.rmtree(attempt_dir, ignore_errors=True)
-    reader = pa.RecordBatchReader.from_batches(schema, record_batches())
+    batches = record_batches()
+    reader = pa.RecordBatchReader.from_batches(schema, batches)
     try:
         committed = require_lance().write_dataset(
             reader, str(attempt_dir), mode="overwrite", commit_lock=None,
@@ -269,6 +298,14 @@ def _write_attempt(
         if validation_error is not None:
             raise validation_error
         raise
+    finally:
+        # Arrow/Lance may stop consuming before generator exhaustion. Explicit
+        # ownership avoids relying on CPython destruction to stop the producer.
+        try:
+            row_iter.close()
+        finally:
+            batches.close()
+            reader.close()
     version = getattr(committed, "version", None)
     if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
         shutil.rmtree(attempt_dir, ignore_errors=True)

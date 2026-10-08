@@ -147,8 +147,10 @@ def _iter_scan(
         raise InvalidLanceRequest("Lance exact-version schema differs from partition plan")
     _validate_columns(schema, query.columns)
     scanner = dataset.scanner(
-        columns=list(query.columns) or None, filter=query.filter,
-        limit=query.limit, batch_size=batch_size, fragments=fragments,
+        columns=dict(query.projection) if query.projection else (list(query.columns) or None), filter=query.filter,
+        limit=query.limit, batch_size=query.batch_size or batch_size, fragments=fragments,
+        **{name: getattr(query, name) for name in ('batch_readahead', 'fragment_readahead')
+           if getattr(query, name) is not None},
     )
     yield from _validated_batches(scanner.to_batches(), scanner.projected_schema)
 

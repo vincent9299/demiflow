@@ -1,0 +1,297 @@
+{
+  "status": "passed",
+  "baseline_adapters": 257,
+  "named_sources": 344,
+  "platform_sources": 1,
+  "metrics": {
+    "search_requests": 1,
+    "source_attempts": 1,
+    "http_requests": 0,
+    "reused": 0,
+    "worker_starts": 1,
+    "source_peak": 1,
+    "source_active": 0,
+    "http_peak": 0,
+    "http_active": 0,
+    "worker_count": 1,
+    "hosts": {}
+  },
+  "candidate_count": 0,
+  "imports_from_installed_wheel": true,
+  "vendor_absent_in_pipeline_interpreter": true,
+  "live": {
+    "rows": [
+      {
+        "requests": [
+          {
+            "request_id": "installed-live",
+            "query": "Ginkgo biloba",
+            "bindings": []
+          }
+        ],
+        "found": [
+          {
+            "request_id": "installed-live",
+            "query": "Ginkgo biloba",
+            "bindings": [],
+            "status": "ok",
+            "reason": "",
+            "candidates": [
+              {
+                "url": "https://en.wikipedia.org/wiki/Ginkgo_biloba",
+                "title": "Ginkgo biloba",
+                "snippet": "Ginkgo biloba, commonly known as ginkgo (/ˈɡɪŋkoʊ, ˈɡɪŋkɡoʊ/ GINK-oh, -⁠goh), also known as the maidenhair tree, and often misspelled \"gingko\" (see Taxonomy",
+                "engines": [
+                  "wikisearch",
+                  "wikipedia"
+                ],
+                "result_kind": "result"
+              },
+              {
+                "url": "https://en.wikipedia.org/wiki/Ginkgo",
+                "title": "Ginkgo",
+                "snippet": "surviving species, Ginkgo biloba, is found in the wild only in China, but is cultivated around the world. The relationships between ginkgos and other groups",
+                "engines": [
+                  "wikisearch"
+                ],
+                "result_kind": "result"
+              },
+              {
+                "url": "https://en.wikipedia.org/wiki/Gingo_biloba",
+                "title": "Gingo biloba",
+                "snippet": "\"Gingo biloba\" (originally \"Ginkgo biloba\") is a poem written in September 1815 by the German poet Johann Wolfgang von Goethe. Written as a show of friendship",
+                "engines": [
+                  "wikisearch"
+                ],
+                "result_kind": "result"
+              },
+              {
+                "url": "https://en.wikipedia.org/wiki/Out_of_danger_species",
+                "title": "Out of danger species",
+                "snippet": "lists because the species' survival has been relatively secured, e.g. Ginkgo biloba. Often known as a delisted species, these animals have been moved out",
+                "engines": [
+                  "wikisearch"
+                ],
+                "result_kind": "result"
+              },
+              {
+                "url": "https://en.wikipedia.org/wiki/Ginkgotoxin",
+                "title": "Ginkgotoxin",
+                "snippet": "Ginkgotoxin (4'-O-methylpyridoxine) is a neurotoxin naturally occurring in Ginkgo biloba. It is an antivitamin structurally related to vitamin B6 (pyridoxine)",
+                "engines": [
+                  "wikisearch"
+                ],
+                "result_kind": "result"
+              }
+            ],
+            "response_json": "{\"answers\": [], \"corrections\": [], \"engine_data\": {}, \"infoboxes\": [{\"attributes\": [], \"category\": \"\", \"content\": \"Ginkgo biloba, commonly known as ginkgo, also known as the maidenhair tree, and often misspelled \\\"gingko\\\" is a species of gymnosperm tree native to East Asia. It is the last living species in the order Ginkgoales, which first appeared over 290 million years ago. Fossils similar to the living species, belonging to the genus Ginkgo, extend back to the Middle Jurassic epoch about 170 million years ago. The tree was cultivated early in human history, remains commonly planted, and is widely regarded as a living fossil.\", \"engine\": \"wikipedia\", \"engines\": [\"wikipedia\"], \"id\": \"https://en.wikipedia.org/wiki/Ginkgo_biloba\", \"iframe_src\": null, \"img_src\": \"https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e0/GINKGOBAUM-2.jpg/330px-GINKGOBAUM-2.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail\", \"infobox\": \"Ginkgo biloba\", \"parsed_url\": null, \"positions\": \"\", \"priority\": \"\", \"publishedDate\": null, \"score\": 0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"\", \"url\": null, \"urls\": [{\"title\": \"Wikipedia\", \"url\": \"https://en.wikipedia.org/wiki/Ginkgo_biloba\"}]}], \"paging\": false, \"results\": [{\"category\": \"general\", \"content\": \"<span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>, commonly known as <span class=\\\"searchmatch\\\">ginkgo</span> (/ˈɡɪŋkoʊ, ˈɡɪŋkɡoʊ/ GINK-oh, -⁠goh), also known as the maidenhair tree, and often misspelled &quot;gingko&quot; (see Taxonomy\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Ginkgo_biloba\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Ginkgo biloba\", \"url\": \"https://en.wikipedia.org/wiki/Ginkgo_biloba\"}, {\"category\": \"general\", \"content\": \"surviving species, <span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>, is found in the wild only in China, but is cultivated around the world. The relationships between <span class=\\\"searchmatch\\\">ginkgos</span> and other groups\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Ginkgo\", \"\", \"\", \"\"], \"positions\": [2], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Ginkgo\", \"url\": \"https://en.wikipedia.org/wiki/Ginkgo\"}, {\"category\": \"general\", \"content\": \"&quot;Gingo <span class=\\\"searchmatch\\\">biloba</span>&quot; (originally &quot;<span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>&quot;) is a poem written in September 1815 by the German poet Johann Wolfgang von Goethe. Written as a show of friendship\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Gingo_biloba\", \"\", \"\", \"\"], \"positions\": [3], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Gingo biloba\", \"url\": \"https://en.wikipedia.org/wiki/Gingo_biloba\"}, {\"category\": \"general\", \"content\": \"lists because the species&#039; survival has been relatively secured, e.g. <span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>. Often known as a delisted species, these animals have been moved out\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Out_of_danger_species\", \"\", \"\", \"\"], \"positions\": [4], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Out of danger species\", \"url\": \"https://en.wikipedia.org/wiki/Out_of_danger_species\"}, {\"category\": \"general\", \"content\": \"Ginkgotoxin (4&#039;-O-methylpyridoxine) is a neurotoxin naturally occurring in <span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>. It is an antivitamin structurally related to vitamin B6 (pyridoxine)\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Ginkgotoxin\", \"\", \"\", \"\"], \"positions\": [5], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Ginkgotoxin\", \"url\": \"https://en.wikipedia.org/wiki/Ginkgotoxin\"}, {\"category\": \"general\", \"content\": \"Tebonin, Tramisal) is a standardised extract of the leaves of the tree <span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>, containing flavonoid glycosides and terpene lactones, and used in some\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/EGb-761\", \"\", \"\", \"\"], \"positions\": [6], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.16666666666666666, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"EGb-761\", \"url\": \"https://en.wikipedia.org/wiki/EGb-761\"}, {\"category\": \"general\", \"content\": \"bearing resemblance to the only living member of the Ginkgoaceae, <span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>. <span class=\\\"searchmatch\\\">Ginkgo</span> huttonii is known largely by compression fossils of its leaves.\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Ginkgo_huttonii\", \"\", \"\", \"\"], \"positions\": [7], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.14285714285714285, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Ginkgo huttonii\", \"url\": \"https://en.wikipedia.org/wiki/Ginkgo_huttonii\"}, {\"category\": \"general\", \"content\": \"Ginkgoales are a gymnosperm order containing only one extant species: <span class=\\\"searchmatch\\\">Ginkgo</span> <span class=\\\"searchmatch\\\">biloba</span>, the <span class=\\\"searchmatch\\\">ginkgo</span> tree. The order has a long fossil record extending back to the\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Ginkgoales\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Ginkgoales\", \"url\": \"https://en.wikipedia.org/wiki/Ginkgoales\"}], \"suggestions\": []}",
+            "engine_receipts": [
+              {
+                "engine": "wikisearch",
+                "status": "ok",
+                "reason": "",
+                "ignored_parameters": [
+                  "language"
+                ],
+                "capabilities": {
+                  "paging": false,
+                  "max_page": 0,
+                  "time_range_support": false,
+                  "safesearch": false,
+                  "language_support": false,
+                  "language": "",
+                  "engine_type": "online"
+                },
+                "attempts": [
+                  {
+                    "attempt": 1,
+                    "status": "ok",
+                    "http_status": 200,
+                    "reason": "",
+                    "elapsed_s": 2.1741189043968916,
+                    "http": [
+                      {
+                        "host": "en.wikipedia.org",
+                        "method": "GET",
+                        "http_status": 200,
+                        "retry_after": null,
+                        "bytes": 4793,
+                        "elapsed_s": 0.8364876639097929
+                      }
+                    ]
+                  }
+                ],
+                "receipt_id": "9a6f47831a23132bb5415044fd8b7306aac507bc838d3b8218a4dcb6f77c3bcd"
+              },
+              {
+                "engine": "wikipedia",
+                "status": "ok",
+                "reason": "",
+                "ignored_parameters": [],
+                "capabilities": {
+                  "paging": false,
+                  "max_page": 0,
+                  "time_range_support": false,
+                  "safesearch": false,
+                  "language_support": true,
+                  "language": "",
+                  "engine_type": "online"
+                },
+                "attempts": [
+                  {
+                    "attempt": 1,
+                    "status": "ok",
+                    "http_status": 200,
+                    "reason": "",
+                    "elapsed_s": 1.3351122122257948,
+                    "http": [
+                      {
+                        "host": "en.wikipedia.org",
+                        "method": "GET",
+                        "http_status": 200,
+                        "retry_after": null,
+                        "bytes": 2511,
+                        "elapsed_s": 0.5840111877769232
+                      }
+                    ]
+                  }
+                ],
+                "receipt_id": "724dc8272876a5e6d832fd61299f58a37aaa8f510f9979230ce448a8cf330154"
+              }
+            ],
+            "attempts": [
+              {
+                "attempt": 1,
+                "status": "ok",
+                "http_status": 200,
+                "reason": "",
+                "elapsed_s": 2.1741189043968916,
+                "http": [
+                  {
+                    "host": "en.wikipedia.org",
+                    "method": "GET",
+                    "http_status": 200,
+                    "retry_after": null,
+                    "bytes": 4793,
+                    "elapsed_s": 0.8364876639097929
+                  }
+                ]
+              },
+              {
+                "attempt": 1,
+                "status": "ok",
+                "http_status": 200,
+                "reason": "",
+                "elapsed_s": 1.3351122122257948,
+                "http": [
+                  {
+                    "host": "en.wikipedia.org",
+                    "method": "GET",
+                    "http_status": 200,
+                    "retry_after": null,
+                    "bytes": 2511,
+                    "elapsed_s": 0.5840111877769232
+                  }
+                ]
+              }
+            ],
+            "runtime": "native-search-1",
+            "profile": "796918270992f5e77cfab49ecfcfc2d8b7f5927262b01e49a83199e5713a0953",
+            "parameters_json": "{\"engine_data\": {}, \"language\": \"en\", \"network\": \"default\", \"pageno\": 1, \"safesearch\": 0, \"time_range\": null}"
+          }
+        ]
+      }
+    ],
+    "metrics": {
+      "stages": {
+        "search_web": {
+          "in": 1,
+          "emitted": 1
+        },
+        "<lambda>": {
+          "in": 1,
+          "emitted": 1
+        }
+      },
+      "stage_processing_latency": {
+        "search_web": {
+          "count": 1,
+          "total_s": 2.1839344892650843,
+          "bucket_s": 0.25,
+          "overflow_count": 0,
+          "p50_upper_s": 2.25,
+          "p95_upper_s": 2.25
+        },
+        "<lambda>": {
+          "count": 1,
+          "total_s": 1.6704201698303223e-05,
+          "bucket_s": 0.25,
+          "overflow_count": 0,
+          "p50_upper_s": 0.25,
+          "p95_upper_s": 0.25
+        }
+      },
+      "queues": [
+        {
+          "stage": "search_web",
+          "capacity": 8,
+          "peak": 1,
+          "wait": {
+            "count": 1,
+            "total_s": 3.452785313129425e-05,
+            "bucket_s": 0.25,
+            "overflow_count": 0,
+            "p50_upper_s": 0.25,
+            "p95_upper_s": 0.25
+          }
+        },
+        {
+          "stage": "<lambda>",
+          "capacity": 1,
+          "peak": 1,
+          "wait": {
+            "count": 1,
+            "total_s": 2.131052315235138e-05,
+            "bucket_s": 0.25,
+            "overflow_count": 0,
+            "p50_upper_s": 0.25,
+            "p95_upper_s": 0.25
+          }
+        }
+      ],
+      "resources": {
+        "WebSession:0": {
+          "search_requests": 2,
+          "fetch_attempts": 0,
+          "native_search": {
+            "search_requests": 1,
+            "source_attempts": 2,
+            "http_requests": 2,
+            "reused": 0,
+            "worker_starts": 2,
+            "source_peak": 2,
+            "source_active": 0,
+            "http_peak": 1,
+            "http_active": 0,
+            "worker_count": 2,
+            "hosts": {
+              "en.wikipedia.org": {
+                "peak": 1,
+                "active": 0,
+                "admitted": 2
+              }
+            }
+          },
+          "search_queries": 1,
+          "search_http_requests": 2,
+          "reused": 0
+        }
+      },
+      "models": {},
+      "native_journal_totals": {},
+      "journal_totals_scope": "Entire journal, including earlier actions; models describes this action only"
+    }
+  },
+  "wheel": "demiflow-0.2.0-py3-none-any.whl",
+  "validation_scope": "Implementation-stage installed-wheel live evidence before final paging and interruption-receipt corrections; see native-search-validation.md."
+}

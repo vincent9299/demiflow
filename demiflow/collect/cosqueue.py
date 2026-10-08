@@ -22,7 +22,7 @@
 - ``produce(rows, rows_per_batch)``：流式切批上传，返回批 id 列表；
 - ``claim(worker)``：条件创建认领一个待办批，空返回 None；
 - ``complete(handle, rc=0)`` / ``release(handle)``：归属校验后生效；
-- ``fetch_batch(handle)``：下载+解压+逐行解析（坏行容忍跳过）；
+- ``fetch_batch(handle)``：下载+解压+逐行解析（坏行明确失败）；
 - ``snapshot()``：{batches, claimed, done} 计数与集合；
 - ``requeue_stale(max_age_s)``：回收超龄未完成认领，返回回收批 id。
 """
@@ -33,6 +33,7 @@ import io
 import json
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional
 
@@ -91,8 +92,10 @@ class COSQueue:
         幂等性由 skip_existing 的 HEAD 咨询与重跑的同 bid 同内容覆盖共同保证。
         返回按批号有序的批 id 列表。"""
         import concurrent.futures as cf
+        if rows_per_batch < 1 or upload_workers < 1 or start_index < 0:
+            raise ValueError('Invalid queue production limits')
         out, buf, n = [], [], start_index
-        futures = []
+        futures = deque()
         with cf.ThreadPoolExecutor(upload_workers) as ex:
             def emit(batch_rows, idx):
                 return ex.submit(self._upload_batch, idx, batch_rows,
@@ -102,6 +105,8 @@ class COSQueue:
                 if len(buf) >= rows_per_batch:
                     futures.append(emit(buf, n))
                     buf, n = [], n + 1
+                    if len(futures) >= upload_workers * 2:
+                        out.append(futures.popleft().result())
             if buf:
                 futures.append(emit(buf, n))
             for f in futures:
@@ -148,7 +153,8 @@ class COSQueue:
             if st in (200, 204):
                 return BatchHandle(bid, self._k(f"batches/{bid}.jsonl.gz"),
                                    claim_key, worker, token=token)
-            continue                              # 已被他人认领或本次未成
+            if st != 412:
+                raise RuntimeError(f'Claim PUT failed: HTTP {st}')
         return None
 
     def _current_claim(self, handle: BatchHandle) -> Optional[dict]:
@@ -180,11 +186,15 @@ class COSQueue:
         归属校验失败（租约过期被回收/新 owner 接管）抛 _NotClaimOwner，
         不写 done——防止旧 worker 把新 owner 正在执行的批标记完成。
         """
+        if rc != 0:
+            raise ValueError('Only successful batches may be completed')
         self._require_owner(handle)
         body = json.dumps({"worker": handle.worker, "token": handle.token,
                            "ts": self._clock(), "rc": rc}).encode()
-        self.io.call("PUT", self._k(f"done/{handle.bid}"),
-                     data=body, timeout=60.0)
+        status, _, _ = self.io.call("PUT", self._k(f"done/{handle.bid}"),
+                                   data=body, timeout=60.0)
+        if status not in (200, 204):
+            raise RuntimeError(f'Completion PUT failed: HTTP {status}; inspect before retrying')
 
     def release(self, handle: BatchHandle) -> None:
         """释放认领（执行失败 / 主动放弃）。
@@ -203,7 +213,7 @@ class COSQueue:
         self.io.delete(handle.claim_key)
 
     def fetch_batch(self, handle: BatchHandle) -> list:
-        """下载批 → jsonl 解析；坏行容忍跳过（与追加清单读端口径一致）。"""
+        """下载批 → jsonl 解析；坏行明确失败，不把缺任务的批次记为完成。"""
         raw = self.io.get_bytes(handle.key)
         if raw is None:
             raise RuntimeError(f"批对象不存在：{handle.key}")
@@ -215,8 +225,8 @@ class COSQueue:
                     continue
                 try:
                     rows.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+                except json.JSONDecodeError as error:
+                    raise ValueError(f'Invalid task in batch {handle.bid}') from error
         return rows
 
     # ---- 巡检 ----

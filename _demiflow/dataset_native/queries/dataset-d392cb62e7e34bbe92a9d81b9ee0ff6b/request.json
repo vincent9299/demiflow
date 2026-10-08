@@ -1,0 +1,35 @@
+{
+  "sql": "SELECT * FROM v14 ORDER BY k0 ASC NULLS LAST, o2 ASC NULLS LAST, o9 ASC NULLS LAST",
+  "sources": {
+    "t5": {
+      "uri": "/tmp/demiflow-dataset-_djz7xv7/input4.lance",
+      "version": 1
+    },
+    "t12": {
+      "uri": "/tmp/demiflow-dataset-_djz7xv7/input11.lance",
+      "version": 1
+    }
+  },
+  "views": {
+    "v6": "SELECT k0, valid1, o2, payload3 FROM t5",
+    "v13": "SELECT k7, valid8, o9, payload10 FROM t12",
+    "v14": "SELECT l.*, r.* FROM v6 l INNER JOIN v13 r ON l.k0=r.k7 AND l.valid1 AND r.valid8"
+  },
+  "options": {
+    "memory_bytes": 8589934592,
+    "max_rss_bytes": 25769803776,
+    "max_scratch_bytes": 137438953472,
+    "partitions": 2,
+    "threads": 8,
+    "batch_rows": 8192,
+    "timeout_s": 3600,
+    "admission_timeout_s": 3600,
+    "cgroup_headroom_bytes": 2147483648,
+    "prefer_hash_join": false
+  },
+  "directory": "/tmp/demiflow-dataset-_djz7xv7/demiflow-datafusion-2pw80hts/dataset-d392cb62e7e34bbe92a9d81b9ee0ff6b",
+  "diagnostic": "/yzp/zhaozy/yangzepeng/0905/demiflow/_demiflow/dataset_native/queries/dataset-d392cb62e7e34bbe92a9d81b9ee0ff6b",
+  "parent_pid": 54814,
+  "slot": 0,
+  "lance_index": null
+}

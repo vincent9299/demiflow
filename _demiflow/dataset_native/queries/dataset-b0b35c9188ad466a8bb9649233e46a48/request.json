@@ -1,0 +1,36 @@
+{
+  "sql": "SELECT * FROM v19 ORDER BY k17 ASC NULLS LAST, o12 ASC NULLS LAST",
+  "sources": {
+    "t0": {
+      "uri": "/tmp/demiflow-stream-map-regression/test_union_preserves_child_ord1/source.lance",
+      "version": 1
+    },
+    "t10": {
+      "uri": "/tmp/demiflow-stream-map-regression/test_union_preserves_child_ord1/source.lance",
+      "version": 1
+    }
+  },
+  "views": {
+    "v5": "SELECT \"key\" AS c3, \"n\" AS c4, TRUE AS p1, _rowaddr AS o2 FROM t0",
+    "v9": "SELECT *, key_fn6(c3, p1) AS k7, (c3 IS NOT NULL AND coalesce(p1, FALSE)) AS valid8 FROM v5",
+    "v15": "SELECT \"key\" AS c13, \"n\" AS c14, TRUE AS p11, _rowaddr AS o12 FROM t10",
+    "v19": "SELECT *, key_fn16(c13, p11) AS k17, (c13 IS NOT NULL AND coalesce(p11, FALSE)) AS valid18 FROM v15"
+  },
+  "options": {
+    "memory_bytes": 8589934592,
+    "max_rss_bytes": 25769803776,
+    "max_scratch_bytes": 137438953472,
+    "partitions": 2,
+    "threads": 8,
+    "batch_rows": 8192,
+    "timeout_s": 3600,
+    "admission_timeout_s": 3600,
+    "cgroup_headroom_bytes": 2147483648,
+    "prefer_hash_join": false
+  },
+  "directory": "/tmp/demiflow-dataset-wqa2myc8/demiflow-datafusion-0jf52a7_/dataset-b0b35c9188ad466a8bb9649233e46a48",
+  "diagnostic": "/yzp/zhaozy/yangzepeng/0905/demiflow/_demiflow/dataset_native/queries/dataset-b0b35c9188ad466a8bb9649233e46a48",
+  "parent_pid": 54814,
+  "slot": 0,
+  "lance_index": null
+}

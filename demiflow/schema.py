@@ -23,6 +23,18 @@ class SchemaValidationError(ValueError):
     pass
 
 
+def _schema_kind(value: Any, path: str) -> str:
+    """Accept a concrete JSON type, optionally unioned with null only."""
+    if isinstance(value, list):
+        if (len(value)==2 and all(isinstance(k,str) for k in value)
+                and len(set(value))==2 and 'null' in value and set(value)<=_TYPES):
+            return next(k for k in value if k!='null')
+        raise SchemaError(f'{path}.type supports one concrete type or [type, "null"]')
+    if not isinstance(value,str) or value not in _TYPES:
+        raise SchemaError(f'{path}.type must be one of {sorted(_TYPES)}')
+    return value
+
+
 def _compile_schema_strict(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise SchemaError("schema must be an object")
@@ -53,8 +65,10 @@ def inspect_schema(value: Any) -> tuple[dict[str, Any] | None, tuple[tuple[str, 
         if kind is None:
             if path == "$": issues.append((f"{path}.type", "schema root requires type"))
             return
-        if kind not in _TYPES:
-            issues.append((f"{path}.type", f"{path}.type must be one of {sorted(_TYPES)}"))
+        try:
+            kind = _schema_kind(kind, path)
+        except SchemaError as exc:
+            issues.append((f"{path}.type", str(exc)))
             return
         if "enum" in raw and (not isinstance(raw["enum"], list) or not raw["enum"]):
             issues.append((f"{path}.enum", f"{path}.enum must be a non-empty array"))
@@ -121,8 +135,7 @@ def _compile(schema: dict[str, Any], path: str, depth: int, nodes: list[int]) ->
         if path == "$":
             raise SchemaError("schema root requires type")
         return schema
-    if kind not in _TYPES:
-        raise SchemaError(f"{path}.type must be one of {sorted(_TYPES)}")
+    kind = _schema_kind(kind, path)
     if "enum" in schema and (not isinstance(schema["enum"], list) or not schema["enum"]):
         raise SchemaError(f"{path}.enum must be a non-empty array")
     for name in ("minItems", "maxItems", "minLength", "maxLength"):
@@ -172,7 +185,9 @@ def _validate(value: Any, schema: Mapping[str, Any], path: str, label: str) -> N
     kind_value = schema.get("type")
     if kind_value is None:
         return
-    kind = str(kind_value)
+    kind = _schema_kind(kind_value, path)
+    if value is None and isinstance(kind_value,list) and 'null' in kind_value:
+        kind = 'null'
     valid = {
         "object": isinstance(value, Mapping),
         "array": isinstance(value, list),

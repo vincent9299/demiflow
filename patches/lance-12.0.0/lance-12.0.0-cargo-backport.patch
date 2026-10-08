@@ -1,0 +1,57 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -275,3 +275,6 @@
+ single_range_in_vec_init = "allow"
+ large_futures = "deny"
+ disallowed_macros = "deny"
++
++[patch.crates-io]
++arrow-data = { path = "vendor/arrow-data" }
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -288,8 +288,6 @@
+ [[package]]
+ name = "arrow-data"
+ version = "58.4.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2b24852db04738907e06c04ea61e42fe7fda962a34513022dc0d0e754fb7976b"
+ dependencies = [
+  "arrow-buffer",
+  "arrow-schema",
+--- a/python/Cargo.toml
++++ b/python/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "pylance"
+-version = "12.0.0"
++version = "12.0.0+demiflow.arrowfix1"
+ edition = "2024"
+ authors = ["Lance Devs <dev@lance.org>"]
+ license = "Apache-2.0"
+@@ -107,3 +107,6 @@
+ 
+ [lints.clippy]
+ disallowed_macros = "deny"
++
++[patch.crates-io]
++arrow-data = { path = "../vendor/arrow-data" }
+--- a/python/Cargo.lock
++++ b/python/Cargo.lock
+@@ -265,8 +265,6 @@
+ [[package]]
+ name = "arrow-data"
+ version = "58.4.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2b24852db04738907e06c04ea61e42fe7fda962a34513022dc0d0e754fb7976b"
+ dependencies = [
+  "arrow-buffer",
+  "arrow-schema",
+@@ -6055,7 +6053,7 @@
+ 
+ [[package]]
+ name = "pylance"
+-version = "12.0.0"
++version = "12.0.0+demiflow.arrowfix1"
+ dependencies = [
+  "alloc-stdlib",
+  "arrow",

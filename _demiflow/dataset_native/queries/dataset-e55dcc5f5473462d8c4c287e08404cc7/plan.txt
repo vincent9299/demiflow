@@ -1,0 +1,15 @@
+SortMergeJoinExec: join_type=Inner, on=[(k6@0, k14@4)]
+  SortExec: expr=[k6@0 ASC], preserve_partitioning=[true]
+    RepartitionExec: partitioning=Hash([k6@0], 2), input_partitions=2
+      FFI_ExecutionPlan: ProjectionExec, number_of_children=1
+        FFI_ExecutionPlan: FilteredReadExec, number_of_children=1
+          RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
+            FFI_ExecutionPlan: FilteredReadExec, number_of_children=0
+  SortExec: expr=[k14@4 ASC], preserve_partitioning=[true]
+    RepartitionExec: partitioning=Hash([k14@4], 2), input_partitions=2
+      ProjectionExec: expr=[c3@0 as c3, c4@1 as c4, p1@2 as p1, o2@3 as o2, key_fn13(c3@0, p1@2) as k14, c3@0 IS NOT NULL AND p1@2 as valid15]
+        ProjectionExec: expr=[concept@0 as c3, image@1 as c4, true as p1, _rowaddr@2 as o2]
+          FFI_ExecutionPlan: ProjectionExec, number_of_children=1
+            FFI_ExecutionPlan: FilteredReadExec, number_of_children=1
+              RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
+                FFI_ExecutionPlan: FilteredReadExec, number_of_children=0

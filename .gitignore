@@ -4,3 +4,10 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+
+.venv/
+install*.log
+.validation/
+
+.validation-*.log
+dependency-seed.json

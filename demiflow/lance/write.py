@@ -29,6 +29,9 @@ def write_lance(
     batches: Iterable[pa.RecordBatch | pa.Table],
 ) -> LanceWriteReceipt:
     """执行一次表写入；覆盖始终一次提交，不逐批清空目标。"""
+    if spec.mode == 'merge':
+        from .mutate import merge_lance
+        return merge_lance(spec, batches)
     if spec.schema is not None:
         batches = (table.cast(spec.schema) for table in _normalize_tables(batches))
     if spec.expected_version is None or spec.mode == "overwrite":

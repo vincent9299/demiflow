@@ -1,0 +1,105 @@
+--- a/src/data.rs
++++ b/src/data.rs
+@@ -597,19 +597,23 @@
+         assert!(end <= self.len());
+ 
+         if let DataType::Struct(_) = self.data_type() {
+-            // Slice into children
+-            let new_offset = self.offset + offset;
++            // A struct has no buffers of its own, and reading child element `i`
++            // combines this array's offset with the child's own offset. Applying
++            // the slice to both would count it twice, so the cumulative offset
++            // goes to the children and this array's offset is reset to 0.
++            let child_offset = self.offset + offset;
+             ArrayData {
+                 data_type: self.data_type().clone(),
+                 len: length,
+-                offset: new_offset,
++                offset: 0,
+                 buffers: self.buffers.clone(),
+-                // Slice child data, to propagate offsets down to them
+                 child_data: self
+                     .child_data()
+                     .iter()
+-                    .map(|data| data.slice(offset, length))
++                    .map(|data| data.slice(child_offset, length))
+                     .collect(),
++                // `nulls` belongs to this array rather than to the children, so
++                // it is sliced by `offset` alone.
+                 nulls: self.nulls.as_ref().map(|x| x.slice(offset, length)),
+             }
+         } else {
+@@ -915,14 +919,6 @@
+                 )));
+             }
+ 
+-            let actual_len = nulls.validity().len();
+-            let needed_len = bit_util::ceil(len_plus_offset, 8);
+-            if actual_len < needed_len {
+-                return Err(ArrowError::InvalidArgumentError(format!(
+-                    "null_bit_buffer size too small. got {actual_len} needed {needed_len}",
+-                )));
+-            }
+-
+             if nulls.len() != self.len {
+                 return Err(ArrowError::InvalidArgumentError(format!(
+                     "null buffer incorrect size. got {} expected {}",
+@@ -2705,4 +2701,58 @@
+             assert!(array.is_null(i));
+         }
+     }
++    #[test]
++    fn null_buffer_offset_is_independent_of_data_offset() {
++        // 100 values sliced down to the last 50, so the data has offset 50.
++        let int_data = ArrayData::builder(DataType::UInt32)
++            .offset(50)
++            .len(50)
++            .add_buffer(Buffer::from_vec(vec![0_u32; 100]))
++            .build()
++            .unwrap();
++        int_data.validate().unwrap();
++
++        // A null buffer that happens to share the data's offset.
++        let nulls = NullBuffer::new(BooleanBuffer::from(vec![false; 100]).slice(0, 50));
++        let with_sliced_nulls = int_data
++            .clone()
++            .into_builder()
++            .nulls(Some(nulls))
++            .build()
++            .unwrap();
++        with_sliced_nulls.validate().unwrap();
++
++        // The same 50 nulls at offset 0. ArrayData::offset does not apply to the
++        // null buffer, so this is just as valid and must not be rejected.
++        let nulls = NullBuffer::new(BooleanBuffer::from(vec![false; 50]));
++        let with_unsliced_nulls = int_data.into_builder().nulls(Some(nulls)).build().unwrap();
++        with_unsliced_nulls.validate().unwrap();
++        assert_eq!(with_unsliced_nulls.null_count(), 50);
++    }
++
++    #[test]
++    fn demiflow_nested_struct_slice_applies_offsets_once() {
++        let leaf = ArrayData::builder(DataType::Int32)
++            .len(6).add_buffer(Buffer::from_vec(vec![0_i32, 1, 2, 3, 4, 5]))
++            .build().unwrap();
++        let inner_type = DataType::Struct(Fields::from(vec![Field::new("value", DataType::Int32, true)]));
++        let inner = ArrayData::builder(inner_type.clone()).len(6)
++            .child_data(vec![leaf]).build().unwrap();
++        let outer_type = DataType::Struct(Fields::from(vec![Field::new("inner", inner_type, true)]));
++        let outer = ArrayData::builder(outer_type).len(5).offset(1)
++            .child_data(vec![inner])
++            .nulls(Some(NullBuffer::from(vec![true, false, true, true, true])))
++            .build().unwrap();
++        let sliced = outer.slice(1, 3);
++        sliced.validate_full().unwrap();
++        assert_eq!(sliced.offset(), 0);
++        assert_eq!(sliced.child_data()[0].offset(), 0);
++        let child = &sliced.child_data()[0].child_data()[0];
++        assert_eq!(child.offset(), 2);
++        assert_eq!(child.len(), 3);
++        assert!(sliced.is_null(0));
++        assert!(sliced.is_valid(1));
++        assert_eq!(&child.buffers()[0].typed_data::<i32>()[child.offset()..child.offset()+child.len()], &[2, 3, 4]);
++    }
++
+ }

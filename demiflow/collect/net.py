@@ -458,3 +458,14 @@ async def stream(
         yield resp
     finally:
         await resp.aclose()
+
+
+async def _close_stream_pool():
+    try:
+        await close_client()
+    finally:
+        _gates.clear()
+
+
+from ..execution.resource_registry import register_stream_cleanup as _register_cleanup
+_register_cleanup('collect.net', _close_stream_pool)

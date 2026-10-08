@@ -135,7 +135,8 @@ def test_mode_and_schema_are_part_of_write_identity(tmp_path):
 
 @pytest.mark.parametrize('empty', [False, True])
 @pytest.mark.parametrize('expected', [False, True])
-def test_ray_direct_sink_submits_one_overwrite(tmp_path, monkeypatch, empty, expected):
+@pytest.mark.parametrize('mode', ['overwrite', 'merge'])
+def test_ray_direct_sink_submits_one_overwrite(tmp_path, monkeypatch, empty, expected, mode):
     """只模拟 Ray 的调度边界，真实验证 sink 对多批/空输入的一次 Lance 提交。"""
     import importlib.util
     import sys
@@ -154,16 +155,20 @@ def test_ray_direct_sink_submits_one_overwrite(tmp_path, monkeypatch, empty, exp
     uri = str(tmp_path / 'ray_sink.lance')
     DataAPI().from_items([{'value': -1}]).write_lance(uri)
     version = lance.dataset(uri).version
-    spec = LanceWriteSpec(uri, mode='overwrite', schema=pa.schema([('value', pa.int64())]),
-                          expected_version=version if expected else None)
+    spec = LanceWriteSpec(uri, mode=mode, schema=pa.schema([('value', pa.int64())]),
+                          expected_version=version if expected else None,
+                          **({'on': 'value', 'when_not_matched': 'insert'} if mode == 'merge' else {}))
     owner = module._RayLanceDirectWriteSink(spec)
     adapter = owner.ray_datasink()
     assert adapter.supports_distributed_writes is False
     returns = [] if empty else [adapter.write(iter([pa.table({'value': [1]}), pa.table({'value': [2]})]), None)]
     adapter.on_write_complete(SimpleNamespace(write_returns=returns))
     assert owner.receipt.status == 'committed'
-    assert owner.receipt.committed_version == version + 1
-    assert lance.dataset(uri).to_table().to_pylist() == ([] if empty else [{'value': 1}, {'value': 2}])
+    assert owner.receipt.committed_version == version + int(mode == 'overwrite' or not empty)
+    expected_rows = ([] if empty else [{'value': 1}, {'value': 2}])
+    if mode == 'merge':
+        expected_rows.insert(0, {'value': -1})
+    assert lance.dataset(uri).to_table().sort_by('value').to_pylist() == expected_rows
 
     # 即便给定 expected_version，覆盖仍走单 writer，而不是分片追加提交。
     executor = object.__new__(module.RayDatasetExecutor)
@@ -171,3 +176,21 @@ def test_ray_direct_sink_submits_one_overwrite(tmp_path, monkeypatch, empty, exp
     monkeypatch.setattr(executor, '_write_lance_direct', lambda *args, **kwargs: selected.append(args[2]))
     executor.write_lance(None, None, spec)
     assert selected == [spec]
+
+
+def test_create_mode_never_overwrites_an_existing_or_racing_table(tmp_path,monkeypatch):
+    from demiflow import data
+    from demiflow.errors import LanceWriteError,InvalidLanceRequest
+    uri=str(tmp_path/'create.lance')
+    original=lance.write_dataset
+    raced=[False]
+    def race(reader,path,**kwargs):
+        if str(path)==uri and not raced[0]:
+            raced[0]=True
+            original(pa.table({'id':[99]}),uri)
+        return original(reader,path,**kwargs)
+    monkeypatch.setattr(lance,'write_dataset',race)
+    with pytest.raises(LanceWriteError): data.from_items([{'id':1}]).write_lance(uri,mode='create')
+    assert lance.dataset(uri).version==1
+    assert lance.dataset(uri).to_table()['id'].to_pylist()==[99]
+    with pytest.raises(InvalidLanceRequest): data.from_items([{'id':1}]).write_lance(uri,mode='create',expected_version=1)

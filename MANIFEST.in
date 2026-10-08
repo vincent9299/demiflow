@@ -1,0 +1,8 @@
+include THIRD_PARTY_NOTICES.md
+include BASELINE.json
+recursive-include docs *.md *.json *.csv
+recursive-include tests *.py *.json
+recursive-include tools *.py
+recursive-include demiflow/_vendor/searxng *
+global-exclude *.pyc
+global-exclude __pycache__

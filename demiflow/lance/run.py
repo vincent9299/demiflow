@@ -4,7 +4,7 @@ The application provides a row schema and pure row encoders. This class stores
 run identity, stage references and revisions; it does not schedule business steps.
 """
 from pathlib import Path
-from .records import LanceRecordStore
+from ..execution.run_journal import RunJournal
 from .refs import DatasetRef
 from .registry import Catalog
 from .checkpoint import read_checkpoint_record
@@ -19,8 +19,12 @@ class LanceRun:
         self.storage_root, self.relative = Path(root), relative
         self.row_schema, self.schema_name, self.schema_version = schema, schema_name, schema_version
         self.encode_row, self.decode_row = encode_row, decode_row
-        self.records = LanceRecordStore(root, relative + '/metadata.lance')
-        self.records.put('manifest', manifest)
+        from .legacy import read_legacy_record
+        prior = read_legacy_record(root, relative + '/metadata.lance', 'manifest')
+        if prior is not None and prior != manifest:
+            raise ValueError('Historical run manifest differs; use a new run')
+        self.journal = RunJournal(Path(root) / relative)
+        self.journal.initialize(manifest)
         self.manifest = manifest
         self.previous = self.version = digest(manifest)
         self.stages, self.reused, self.new = {}, [], []
@@ -59,7 +63,7 @@ class LanceRun:
                                           fingerprint=args['fingerprint'])
         record = read_checkpoint_record(args['uri'])
         self.commit_stage_ref(name, args, record['committed_version'], record['row_count'])
-        self.records.put('revision/' + args['version'], {'stages': self.stages})
+        self.journal.stage(name, args['version'], self.stages[name]['dataset_ref'])
         return result.map(self.decode_row)
 
     def replay_stage(self, name, data=None):
@@ -70,5 +74,5 @@ class LanceRun:
     def finish(self):
         state = {'branch': self.branch, 'stages': self.stages,
                  'reused_stages': self.reused, 'new_stages': self.new}
-        self.records.put('latest', state, immutable=False)
+        self.journal.finish(state)
         return state

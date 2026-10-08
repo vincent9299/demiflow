@@ -6,8 +6,8 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.lance.blobs import LanceBlobStore
-from demiflow.lance.records import LanceRecordStore
+from demiflow.lance.blobs import BlobRef
+from demiflow.operator_llm.call_ref import read_call
 from demiflow.lance.refs import DatasetRef
 from demiflow.lance.registry import Catalog
 from demiflow.lance.storage import normalize_lance_uri, resolve_local_uri, schema_hash
@@ -41,15 +41,22 @@ def test_frozen_versions_survive_and_new_writer_uses_same_table(tmp_path):
     assert not (tmp_path / old).exists()
 
 
-def test_record_and_blob_references_survive(tmp_path):
-    records = LanceRecordStore(tmp_path, 'old/records.lance')
-    pinned = records.put('case', {'state': 'before'})
-    records.put('case', {'state': 'after'}, immutable=False)
-    blob = LanceBlobStore(tmp_path, 'old/blobs.lance').put(b'original pixels')
+def test_legacy_call_and_blob_references_survive(tmp_path):
+    path = tmp_path / 'old/records.lance'
+    schema = pa.schema([('key', pa.string()), ('payload', pa.large_string()), ('written_version', pa.int64())])
+    lance.write_dataset(pa.Table.from_pylist([{'key':'case', 'payload':'{"state":"before"}', 'written_version':1}], schema=schema), str(path))
+    pinned = {'relative_uri':'old/records.lance', 'version':1, 'key':'case'}
+    lance.write_dataset(pa.Table.from_pylist([{'key':'case', 'payload':'{"state":"after"}', 'written_version':2}], schema=schema), str(path),mode='overwrite')
+    import hashlib
+    value = b'original pixels'
+    sha = hashlib.sha256(value).hexdigest()
+    schema = pa.schema([('sha256', pa.string()), lance.blob_field('data')])
+    lance.write_dataset(pa.Table.from_arrays([pa.array([sha]), lance.blob_array([value])], schema=schema), str(tmp_path / 'old/blobs.lance'))
+    blob = BlobRef('old/blobs.lance', 1, sha)
     relocate(tmp_path, {'old/records.lance': 'pipeline/datasets/records.lance',
                         'old/blobs.lance': 'pipeline/datasets/blobs.lance'})
-    assert pinned.read(tmp_path) == {'state': 'before'}
-    assert LanceRecordStore(tmp_path, 'old/records.lance').get('case') == {'state': 'after'}
+    assert read_call(pinned, tmp_path) == {'state': 'before'}
+    assert read_call({**pinned, 'version':2}, tmp_path) == {'state':'after'}
     assert blob.read(tmp_path) == b'original pixels'
 
 

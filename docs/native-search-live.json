@@ -1,0 +1,1085 @@
+{
+  "date_utc": "2026-10-01T13:50:37.796223+00:00",
+  "elapsed_s": 11.52529576048255,
+  "configuration": {
+    "engines": [
+      "google",
+      "wikisearch",
+      "wikipedia",
+      "mwmbl"
+    ],
+    "language": null,
+    "workers": 4,
+    "request_concurrency": 2,
+    "host_concurrency": 1,
+    "host_interval_s": 1,
+    "source_interval_s": 0.0,
+    "timeout_s": 25,
+    "startup_timeout_s": 30.0,
+    "retries": 0,
+    "retry_delay_s": 1.0,
+    "failure_limit": 3,
+    "suspend_s": 60.0,
+    "max_bytes": 4194304,
+    "max_results": 500,
+    "max_redirects": 5,
+    "proxy": {
+      "secret_env": "https_proxy"
+    },
+    "networks": {}
+  },
+  "rows": [
+    {
+      "id": "1",
+      "requests": [
+        {
+          "request_id": "1",
+          "query": "天牛",
+          "language": "zh-CN",
+          "bindings": []
+        }
+      ],
+      "search": [
+        {
+          "request_id": "1",
+          "query": "天牛",
+          "language": "zh-CN",
+          "bindings": [],
+          "status": "ok",
+          "reason": "",
+          "candidates": [
+            {
+              "url": "https://bih.gov.hk/sc/resource-centre/species-guides-illustrations/longhorn-beetles/index.html",
+              "title": "香港天牛篇 - HKBIH",
+              "snippet": "香港天牛篇. 香港天牛篇. 香港天牛篇 1.52MBDownload · 星天牛 266KB Download · 黄八星白条天牛 284KB Download · 澳门绿虎天牛 352KB Download · 眉斑并脊天牛 325KB ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.ecomanbiotech.com/h-pd-268.html",
+              "title": "天牛智能监测系统 - 依科曼生物",
+              "snippet": "依科曼天牛远程实时监测系统针对松墨天牛的生物学特点，利用松墨天牛对特定引诱剂的敏感特性，开发了基于化学引诱的远程实时监测系统。通过运用昆虫引诱技术、电子机榄 ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://zh.wikipedia.org/wiki/天牛科",
+              "title": "天牛科",
+              "snippet": "天牛科（學名：Cerambycidae），其物種通称作天牛，是鞘翅目昆虫的一個科。已知26,000种以上，分佈於全世界，當中有稍微多於一半分佈於東半球。這些物種以食草动物為主，包括多種嚴重的害蟲。其物種的幼体會鑽進木材裡，不單會破壞林木，連木構建的建筑物亦會被破壞。當中以北美家天牛（Hylotrupes",
+              "engines": [
+                "wikisearch"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://tower.jp/artist/799030/天牛-将富",
+              "title": "天牛 将富 - TOWER RECORDS ONLINE",
+              "snippet": "",
+              "engines": [
+                "mwmbl"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.stheadline.com/zh-hans/renovation/3460222/%E9%BB%84%E9%BB%91%E8%89%B2%E5%B7%A8%E8%99%AB%E8%82%86%E8%99%90%E6%B2%99%E7%94%B0%E6%B0%91%E5%B1%85-%E4%B8%93%E5%AE%B6%E6%8C%87%E5%B1%9E%E8%9B%80%E6%9C%A8%E5%AE%B3%E8%99%AB-%E5%AE%B6%E5%B1%85%E5%BF%85%E5%AD%A6%E4%B8%89%E5%A4%A7%E9%A2%84%E9%98%B2%E6%8E%AA%E6%96%BD",
+              "title": "黄黑色巨虫肆虐沙田民居专家指属蛀木害虫家居必学三大预防措施",
+              "snippet": "2025年6月1日 · 有昆虫专家向《星岛头条》表示，这种昆虫名为虎天牛，虽然对健康无害，不过因其属于蛀木害虫，会蛀食木质家具，长期以往易导致木质腐烂坍塌，建议住户见到 ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://zh.wikipedia.org/wiki/星天牛",
+              "title": "星天牛",
+              "snippet": "星天牛（學名：Anoplophora chinensis）是華南及東南亞特有的一種鞘翅目天牛科星天牛屬昆虫，分佈於中國亞熱帶地區（以福建省及江蘇省為主）、香港、越南、馬來西亞、大韩民国、臺灣、及日本，因其幼虫蛀食树干，导致树木衰弱死亡，一般都被當地認為是害蟲。入侵北美洲和欧洲地区，已被欧洲和北美的一些地区列为检疫性有害生物。",
+              "engines": [
+                "wikisearch"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.yuwenmi.com/zw/325474.html",
+              "title": "天牛",
+              "snippet": "",
+              "engines": [
+                "mwmbl"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.greening.gov.hk/hk2022iufc/assets/pdf/Identification_and_Control_Wen_Xiujun.pdf",
+              "title": "[PDF] 华南地区主要园林害虫识别与防治 - Greening",
+              "snippet": "2022年7月3日 · ：天牛类、小蠹虫类、吉丁虫类、象. 甲类等. ：螟蛾类、木蠹蛾类、透翅 ... ：松墨天牛、桑天牛、星天牛、斜纹. 拟木蠹蛾、豹纹木蠹蛾、麻楝蛀斑螟 ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            }
+          ],
+          "response_json": "{\"answers\": [], \"corrections\": [], \"engine_data\": {}, \"infoboxes\": [{\"attributes\": [], \"category\": \"\", \"content\": \"天牛科，其物種通称作天牛，是鞘翅目昆虫的一個科。已知26,000种以上，分佈於全世界，當中有稍微多於一半分佈於東半球。這些物種以食草动物為主，包括多種嚴重的害蟲。其物種的幼体會鑽進木材裡，不單會破壞林木，連木構建的建筑物亦會被破壞。當中以北美家天牛 在室內引起的問題尤為嚴重。有不少物種會在其外形模仿其他物種，例如：蚂蚁、蜂族及黄蜂等，儘管絕大多數都會依靠保護色。來自南美洲東北部的泰坦大天牛 一般都公認為體型最大的天牛，其已知最大的體長可達16.7 cm（6.6英寸）。 天牛科物種皆為完全变态的昆蟲，其一生會經歷由卵→幼虫→蛹→成蟲四個階段。成蟲的身體前後細長，其觸角、腿及一對大顎十分顯眼。\", \"engine\": \"wikipedia\", \"engines\": [\"wikipedia\"], \"id\": \"https://zh.wikipedia.org/wiki/%E5%A4%A9%E7%89%9B%E7%A7%91\", \"iframe_src\": null, \"img_src\": \"https://thumb.wikimedia.org/wikipedia/commons/thumb/9/93/Batus_barbicornis_MHNT_femelle.jpg/330px-Batus_barbicornis_MHNT_femelle.jpg?utm_source=zh.wikipedia.org&utm_campaign=api&utm_content=thumbnail\", \"infobox\": \"天牛科\", \"parsed_url\": null, \"positions\": \"\", \"priority\": \"\", \"publishedDate\": null, \"score\": 0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"\", \"url\": null, \"urls\": [{\"title\": \"Wikipedia\", \"url\": \"https://zh.wikipedia.org/wiki/%E5%A4%A9%E7%89%9B%E7%A7%91\"}]}], \"paging\": false, \"results\": [{\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"香港天牛篇. 香港天牛篇. 香港天牛篇 1.52MBDownload · 星天牛 266KB Download · 黄八星白条天牛 284KB Download · 澳门绿虎天牛 352KB Download · 眉斑并脊天牛 325KB ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"bih.gov.hk\", \"/sc/resource-centre/species-guides-illustrations/longhorn-beetles/index.html\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTrgYpdauJ69mrLkM2yS0LIU2H4Rsw92lUf6Wu9Hept9aAXyx5LKn_Hbuw&s\", \"title\": \"香港天牛篇 - HKBIH\", \"url\": \"https://bih.gov.hk/sc/resource-centre/species-guides-illustrations/longhorn-beetles/index.html\", \"views\": \"\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"依科曼天牛远程实时监测系统针对松墨天牛的生物学特点，利用松墨天牛对特定引诱剂的敏感特性，开发了基于化学引诱的远程实时监测系统。通过运用昆虫引诱技术、电子机榄 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.ecomanbiotech.com\", \"/h-pd-268.html\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS4E_pUAVWlvXIVF_VX_CSNI7hC-uUcwftE8wRfdqbczj3nOoNVqk3Fu6k&s\", \"title\": \"天牛智能监测系统 - 依科曼生物\", \"url\": \"https://www.ecomanbiotech.com/h-pd-268.html\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"<span class=\\\"searchmatch\\\">天牛</span>科（學名：Cerambycidae），其物種通称作<span class=\\\"searchmatch\\\">天</span><span class=\\\"searchmatch\\\">牛</span>，是鞘翅目昆虫的一個科。已知26,000种以上，分佈於全世界，當中有稍微多於一半分佈於東半球。這些物種以食草动物為主，包括多種嚴重的害蟲。其物種的幼体會鑽進木材裡，不單會破壞林木，連木構建的建筑物亦會被破壞。當中以北美家<span class=\\\"searchmatch\\\">天牛</span>（Hylotrupes\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/天牛科\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"天牛科\", \"url\": \"https://zh.wikipedia.org/wiki/天牛科\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"tower.jp\", \"/artist/799030/天牛-将富\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"天牛 将富 - TOWER RECORDS ONLINE\", \"url\": \"https://tower.jp/artist/799030/天牛-将富\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"2025年6月1日 · 有昆虫专家向《星岛头条》表示，这种昆虫名为虎天牛，虽然对健康无害，不过因其属于蛀木害虫，会蛀食木质家具，长期以往易导致木质腐烂坍塌，建议住户见到 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.stheadline.com\", \"/zh-hans/renovation/3460222/%E9%BB%84%E9%BB%91%E8%89%B2%E5%B7%A8%E8%99%AB%E8%82%86%E8%99%90%E6%B2%99%E7%94%B0%E6%B0%91%E5%B1%85-%E4%B8%93%E5%AE%B6%E6%8C%87%E5%B1%9E%E8%9B%80%E6%9C%A8%E5%AE%B3%E8%99%AB-%E5%AE%B6%E5%B1%85%E5%BF%85%E5%AD%A6%E4%B8%89%E5%A4%A7%E9%A2%84%E9%98%B2%E6%8E%AA%E6%96%BD\", \"\", \"\", \"\"], \"positions\": [2], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"黄黑色巨虫肆虐沙田民居专家指属蛀木害虫家居必学三大预防措施\", \"url\": \"https://www.stheadline.com/zh-hans/renovation/3460222/%E9%BB%84%E9%BB%91%E8%89%B2%E5%B7%A8%E8%99%AB%E8%82%86%E8%99%90%E6%B2%99%E7%94%B0%E6%B0%91%E5%B1%85-%E4%B8%93%E5%AE%B6%E6%8C%87%E5%B1%9E%E8%9B%80%E6%9C%A8%E5%AE%B3%E8%99%AB-%E5%AE%B6%E5%B1%85%E5%BF%85%E5%AD%A6%E4%B8%89%E5%A4%A7%E9%A2%84%E9%98%B2%E6%8E%AA%E6%96%BD\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"星<span class=\\\"searchmatch\\\">天牛</span>（學名：Anoplophora chinensis）是華南及東南亞特有的一種鞘翅目<span class=\\\"searchmatch\\\">天牛</span>科星<span class=\\\"searchmatch\\\">天牛</span>屬昆虫，分佈於中國亞熱帶地區（以福建省及江蘇省為主）、香港、越南、馬來西亞、大韩民国、臺灣、及日本，因其幼虫蛀食树干，导致树木衰弱死亡，一般都被當地認為是害蟲。入侵北美洲和欧洲地区，已被欧洲和北美的一些地区列为检疫性有害生物。\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/星天牛\", \"\", \"\", \"\"], \"positions\": [2], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"星天牛\", \"url\": \"https://zh.wikipedia.org/wiki/星天牛\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"www.yuwenmi.com\", \"/zw/325474.html\", \"\", \"\", \"\"], \"positions\": [2], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"天牛\", \"url\": \"https://www.yuwenmi.com/zw/325474.html\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"2022年7月3日 · ：天牛类、小蠹虫类、吉丁虫类、象. 甲类等. ：螟蛾类、木蠹蛾类、透翅 ... ：松墨天牛、桑天牛、星天牛、斜纹. 拟木蠹蛾、豹纹木蠹蛾、麻楝蛀斑螟 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.greening.gov.hk\", \"/hk2022iufc/assets/pdf/Identification_and_Control_Wen_Xiujun.pdf\", \"\", \"\", \"\"], \"positions\": [3], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"[PDF] 华南地区主要园林害虫识别与防治 - Greening\", \"url\": \"https://www.greening.gov.hk/hk2022iufc/assets/pdf/Identification_and_Control_Wen_Xiujun.pdf\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"長牙大<span class=\\\"searchmatch\\\">天牛</span>（學名：Macrodontia cervicornis 英文名：Sabertooth longhorn beetle），或称巨顎大<span class=\\\"searchmatch\\\">天</span><span class=\\\"searchmatch\\\">牛</span>、長夾大<span class=\\\"searchmatch\\\">天</span><span class=\\\"searchmatch\\\">牛</span>、巨顎<span class=\\\"searchmatch\\\">天</span><span class=\\\"searchm\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/長牙大天牛\", \"\", \"\", \"\"], \"positions\": [3], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"長牙大天牛\", \"url\": \"https://zh.wikipedia.org/wiki/長牙大天牛\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"2011年3月15日 · 天牛是鞘翅目天牛科昆虫。在分类上属于较大的昆虫类群，世界上已记载有20000多种 ，我国约有2000多种。典型的天牛种类体呈长圆柱形，略扁平，身体多呈 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"http\", \"www.jkzhx.com\", \"/ns_detail.asp\", \"\", \"id=500078&nowmenuid=500040&previd=0\", \"\"], \"positions\": [4], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"天牛 - 桂林市永华白蚁害虫防治有限公司\", \"url\": \"http://www.jkzhx.com/ns_detail.asp?id=500078&nowmenuid=500040&previd=0\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"花<span class=\\\"searchmatch\\\">天牛</span>亚科（學名：Lepturinae ）是<span class=\\\"searchmatch\\\">天牛</span>科昆蟲的一個亚科，在全世界包括9個族、約150個屬，當中有在中國分佈的有4族63属173种。 這一血統在北半球最為多樣化。過往Necydalinae（英语：Necydalinae）亞科的物種被併入本亞科，但近年再被認為是一個單獨的亞科。\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/花天牛亚科\", \"\", \"\", \"\"], \"positions\": [4], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"花天牛亚科\", \"url\": \"https://zh.wikipedia.org/wiki/花天牛亚科\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"防治虫鼠事务谘询组曾处理之动物品种纪录. 分享: 竹绿虎天牛Chlorophorus annularis. dorsal view 背面. lateral view 侧面. 采集日期: 2015年6月8日.\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.fehd.gov.hk\", \"/sc_chi/pestcontrol/photo_page2/Cerambycidae/Chlorophorus%20annularis.html\", \"\", \"\", \"\"], \"positions\": [5], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"竹绿虎天牛Chlorophorus annularis\", \"url\": \"https://www.fehd.gov.hk/sc_chi/pestcontrol/photo_page2/Cerambycidae/Chlorophorus%20annularis.html\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"已经发现的最大泰坦大<span class=\\\"searchmatch\\\">天牛</span>長17.6公分(厘米)，有人的手掌大小，長牙大<span class=\\\"searchmatch\\\">天</span><span class=\\\"searchmatch\\\">牛</span>的長度大約有17公分(厘米)，有的雄性长戟大兜虫的长度最長約18.1公分(厘米)，因為它有很长的尖角。不過兩者的體型都比泰坦<span class=\\\"searchmatch\\\">天牛</span>小。泰坦大<span class=\\\"searchmatch\\\">天牛</span>尖銳的颚可以轻松截断鉛筆，也可以刺破人的皮肤。成蟲不\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/泰坦大天牛\", \"\", \"\", \"\"], \"positions\": [5], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"泰坦大天牛\", \"url\": \"https://zh.wikipedia.org/wiki/泰坦大天牛\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"锯天牛科，沟胫天牛科，天牛科，木叶甲科，美洲叶甲科，曲胫叶甲科，负泥虫科，隐头叶甲科，瘤叶甲科，大肢叶甲科，锯角叶甲科，叶甲科，卵形叶甲科，肖叶甲科， ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.ztflh.com\", \"/\", \"\", \"c=17149\", \"\"], \"positions\": [6], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.16666666666666666, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"天牛总科- 中图分类号查询- 中国图书馆分类法\", \"url\": \"https://www.ztflh.com/?c=17149\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"华花<span class=\\\"searchmatch\\\">天牛</span>属（学名：Sinostrangalis）为<span class=\\\"searchmatch\\\">天牛</span>科的一个属。 本属包括以下物种： Sinostrangalis clermonti (Pic, 1927) Sinostrangalis ikedai (Mitono &amp; Tamanuki, 1939) Sinostrangalis leptus\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/华花天牛属\", \"\", \"\", \"\"], \"positions\": [6], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.16666666666666666, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"华花天牛属\", \"url\": \"https://zh.wikipedia.org/wiki/华花天牛属\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"2010年6月23日 · 天牛是危害多种果树和林木的一大害虫。油橄榄园地的天牛大都来自附近的果园与林地。常见的天牛有云斑天牛、星天牛、桑天牛和光肩星天牛4种，而以前2种危害 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"http\", \"www.schuaou.com\", \"/article-662-1125.html\", \"\", \"\", \"\"], \"positions\": [7], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.14285714285714285, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"油橄榄天牛防治\", \"url\": \"http://www.schuaou.com/article-662-1125.html\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"<span class=\\\"searchmatch\\\">天牛</span>属（学名：Anoplophora）也称星<span class=\\\"searchmatch\\\">天牛</span>属，为<span class=\\\"searchmatch\\\">天牛</span>科的一个属。 本属包括以下物种： 柳州星<span class=\\\"searchmatch\\\">天牛</span> Anoplophora albopicta (Matsushita, 1933) Anoplophora amoena (Jordan, 1895) Anoplophora asuanga Schultze\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/天牛属\", \"\", \"\", \"\"], \"positions\": [7], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.14285714285714285, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"天牛属\", \"url\": \"https://zh.wikipedia.org/wiki/天牛属\"}, {\"category\": \"general\", \"content\": \"松墨<span class=\\\"searchmatch\\\">天牛</span>（學名：Monochamus alternatus），又名松斑<span class=\\\"searchmatch\\\">天</span><span class=\\\"searchmatch\\\">牛</span>、松褐<span class=\\\"searchmatch\\\">天</span><span class=\\\"searchmatch\\\">牛</span>，是鞘翅目<span class=\\\"searchmatch\\\">天牛</span>科溝脛<span class=\\\"searchmatch\\\">天牛</span>亞科沟胫<span class\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/松墨天牛\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"松墨天牛\", \"url\": \"https://zh.wikipedia.org/wiki/松墨天牛\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"京东JD.COM是国内专业的网上购物商城，为您提供活体天牛合集成虫幼虫甲虫昆虫活体长戟大兜虫宠物彩虹锹甲独角仙温馨提示介意价格、图片、品牌、评论、等相关信息.\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"item.m.jd.com\", \"/product/10229566722522.html\", \"\", \"\", \"\"], \"positions\": [9], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.1111111111111111, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"活体天牛合集成虫幼虫甲虫昆虫活体长戟大兜虫宠物彩虹锹甲独 ...\", \"url\": \"https://item.m.jd.com/product/10229566722522.html\", \"views\": \"\"}], \"suggestions\": []}",
+          "engine_receipts": [
+            {
+              "engine": "google",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [],
+              "capabilities": {
+                "paging": true,
+                "max_page": 50,
+                "time_range_support": true,
+                "safesearch": true,
+                "language_support": true,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 4.081942968070507,
+                  "http": [
+                    {
+                      "host": "www.google.com",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 28455,
+                      "elapsed_s": 1.1728833224624395
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "286a75db163c61caa01c30a6047d23f31fc577003955da7580af6812e6ee63f3"
+            },
+            {
+              "engine": "wikisearch",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [
+                "language"
+              ],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": false,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 5.057340797036886,
+                  "http": [
+                    {
+                      "host": "zh.wikipedia.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 7013,
+                      "elapsed_s": 1.0158184245228767
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "c5ad718e1c06dd050b5615855ad063e186e6cc60c43ba3377a664278eb280459"
+            },
+            {
+              "engine": "wikipedia",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": true,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 3.9450725112110376,
+                  "http": [
+                    {
+                      "host": "zh.wikipedia.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 3507,
+                      "elapsed_s": 1.77814731746912
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "e9ff06d16201a188421b5cedbf0e68de7a7470809f807f936f711b9fbee0e744"
+            },
+            {
+              "engine": "mwmbl",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [
+                "language"
+              ],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": false,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 2.316926335915923,
+                  "http": [
+                    {
+                      "host": "api.mwmbl.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 367,
+                      "elapsed_s": 0.8792237173765898
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "04dd1629bdcee1b2679136044d5b95585e9dbaa0745b28c209b7f843265de603"
+            }
+          ],
+          "attempts": [
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 4.081942968070507,
+              "http": [
+                {
+                  "host": "www.google.com",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 28455,
+                  "elapsed_s": 1.1728833224624395
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 5.057340797036886,
+              "http": [
+                {
+                  "host": "zh.wikipedia.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 7013,
+                  "elapsed_s": 1.0158184245228767
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 3.9450725112110376,
+              "http": [
+                {
+                  "host": "zh.wikipedia.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 3507,
+                  "elapsed_s": 1.77814731746912
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 2.316926335915923,
+              "http": [
+                {
+                  "host": "api.mwmbl.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 367,
+                  "elapsed_s": 0.8792237173765898
+                }
+              ]
+            }
+          ],
+          "runtime": "native-search-1",
+          "profile": "c015f755b1c9e03e060c4f38481eccc986e9e36fb6765fa088421fc38b8f8c00",
+          "parameters_json": "{\"engine_data\": {}, \"language\": \"zh-CN\", \"network\": \"default\", \"pageno\": 1, \"safesearch\": 0, \"time_range\": null}"
+        }
+      ]
+    },
+    {
+      "id": "0",
+      "requests": [
+        {
+          "request_id": "0",
+          "query": "Crassula ovata",
+          "language": "en",
+          "bindings": []
+        }
+      ],
+      "search": [
+        {
+          "request_id": "0",
+          "query": "Crassula ovata",
+          "language": "en",
+          "bindings": [],
+          "status": "ok",
+          "reason": "",
+          "candidates": [
+            {
+              "url": "https://en.wikipedia.org/wiki/Crassula_ovata",
+              "title": "Crassula ovata - Wikipedia",
+              "snippet": "Crassula ovata, commonly known as jade plant, lucky plant, money plant or money tree, is a succulent plant with small pink or white flowers that is native",
+              "engines": [
+                "google",
+                "wikisearch",
+                "wikipedia"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://pza.sanbi.org/crassula-ovata",
+              "title": "Crassula ovata - PlantZAfrica |",
+              "snippet": "A large well-branched, compact, rounded, evergreen shrub 1 - 3 m tall with glossy, dark grey-green, oval, succulent leaves and rounded heads of pink flowers",
+              "engines": [
+                "google",
+                "mwmbl"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.lovethegarden.com/uk-en/article/money-plant-jade-plant-crassula-ovata",
+              "title": "How To Grow and Care For Crassula Ovata (Jade Plant)",
+              "snippet": "Crassula ovata prefers a brightly lit position, preferably a south-facing or west-facing aspect, but it will grow in darker conditions. It",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.plantsavvy.com/blog/caring-for-your-jade-plant-crassula-ovata-basic-care-tips",
+              "title": "Caring For Your Jade Plant: Crassula Ovata Basic Care Tips",
+              "snippet": "29 Jan 2026 · Crassula ovata aka the jade plant is a beautiful houseplant succulent that's a resilient bad biddy! Easy to propagate and even easier to grow, ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.gardenersworld.com/house-plants/how-to-grow-a-jade-plant-crassula-ovata/?srsltid=AU7gw4Uad1gIK3Rrm3oglzBPiniFBM6CGp4IoBaGFkkG3BsglJGRga-w",
+              "title": "How to grow a jade plant (Crassula ovata)",
+              "snippet": "28 Apr 2021 · Crassula ovata (or Crassula argentea) is a succulent sub-shrub native to southern Africa. It looks rather like a bonsai tree, with jade green, ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.plantdavenir.com/en/products/crassula-ovata?srsltid=AU7gw4XauB_1NepqCeZEK-ahxB7XKVQXFU0a7DxhueDwBX2re9omHt2J",
+              "title": "Crassula ovata - Jade Plant Succulent - plant d'Avenir",
+              "snippet": "Crassula ovata, commonly known jade plant, is a drought tolerant and low-maintenance succulent. Beloved for its fleshy, evergreen leaves and tree-like growth ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.nparks.gov.sg/florafaunaweb/flora/2/1/2169",
+              "title": "Crassula ovata (Mill.) Druce - National Parks Board (NParks)",
+              "snippet": "Rounded, evergreen shrub with a highly branched, bushy growth form. They are dark grey-green and often have a reddish, grows well in full sun or semi-shade, it ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://en.wikipedia.org/wiki/Crassula",
+              "title": "Crassula - Wikipedia",
+              "snippet": "Crassula is a genus of succulent plants containing about 200 accepted species, including the popular jade plant (Crassula ovata). They are members of",
+              "engines": [
+                "mwmbl",
+                "wikisearch"
+              ],
+              "result_kind": "result"
+            }
+          ],
+          "response_json": "{\"answers\": [], \"corrections\": [], \"engine_data\": {}, \"infoboxes\": [{\"attributes\": [], \"category\": \"\", \"content\": \"Crassula ovata, commonly known as jade plant, lucky plant, money plant or money tree, is a succulent plant with small pink or white flowers that is native to the KwaZulu-Natal and Eastern Cape provinces of South Africa, and Mozambique; it is common as a houseplant worldwide. Much of its popularity stems from the low levels of care needed; the jade plant requires little water and can survive in most indoor conditions. It is sometimes referred to as the money tree; however, Pachira aquatica also has this nickname.\", \"engine\": \"wikipedia\", \"engines\": [\"wikipedia\"], \"id\": \"https://en.wikipedia.org/wiki/Crassula_ovata\", \"iframe_src\": null, \"img_src\": \"https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5a/Crassula_ovata_700.jpg/330px-Crassula_ovata_700.jpg?utm_source=en.wikipedia.org&utm_campaign=api&utm_content=thumbnail\", \"infobox\": \"Crassula ovata\", \"parsed_url\": null, \"positions\": \"\", \"priority\": \"\", \"publishedDate\": null, \"score\": 0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"\", \"url\": null, \"urls\": [{\"title\": \"Wikipedia\", \"url\": \"https://en.wikipedia.org/wiki/Crassula_ovata\"}]}], \"paging\": false, \"results\": [{\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"<span class=\\\"searchmatch\\\">Crassula</span> <span class=\\\"searchmatch\\\">ovata</span>, commonly known as jade plant, lucky plant, money plant or money tree, is a succulent plant with small pink or white flowers that is native\", \"engine\": \"google\", \"engines\": [\"google\", \"wikisearch\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Crassula_ovata\", \"\", \"\", \"\"], \"positions\": [1, 1], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 4.0, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSIlZBPrYKlOv96Zd1XCvmdoIsbKY90wh8vQSZCqg9AedSgDQpjS8sNmoA&s\", \"title\": \"Crassula ovata - Wikipedia\", \"url\": \"https://en.wikipedia.org/wiki/Crassula_ovata\", \"views\": \"\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"A large well-branched, compact, rounded, evergreen shrub 1 - 3 m tall with glossy, dark grey-green, oval, succulent leaves and rounded heads of pink flowers\", \"engine\": \"google\", \"engines\": [\"google\", \"mwmbl\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"pza.sanbi.org\", \"/crassula-ovata\", \"\", \"\", \"\"], \"positions\": [7, 6], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.6190476190476191, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTzAJwGQGCojU0_2n81m9kPVVYG47gAD-ZyR_d5-wwagFyqPyYVi4vdLbI&s\", \"title\": \"Crassula ovata - PlantZAfrica |\", \"url\": \"https://pza.sanbi.org/crassula-ovata\", \"views\": \"\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"Crassula ovata prefers a brightly lit position, preferably a south-facing or west-facing aspect, but it will grow in darker conditions. It\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.lovethegarden.com\", \"/uk-en/article/money-plant-jade-plant-crassula-ovata\", \"\", \"\", \"\"], \"positions\": [2], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTyhWmQtBZaagzi-OuC_7CIr1CxJsbAw0W8O6gMEebOxllg6blDE9SqfNg&s\", \"title\": \"How To Grow and Care For Crassula Ovata (Jade Plant)\", \"url\": \"https://www.lovethegarden.com/uk-en/article/money-plant-jade-plant-crassula-ovata\", \"views\": \"\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"29 Jan 2026 · Crassula ovata aka the jade plant is a beautiful houseplant succulent that's a resilient bad biddy! Easy to propagate and even easier to grow, ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.plantsavvy.com\", \"/blog/caring-for-your-jade-plant-crassula-ovata-basic-care-tips\", \"\", \"\", \"\"], \"positions\": [3], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYjPx4Vy_r93XX73SIp7chbLg2FLEbbVuzrPOYsKTd22hpWB4VD1VnBoc&s\", \"title\": \"Caring For Your Jade Plant: Crassula Ovata Basic Care Tips\", \"url\": \"https://www.plantsavvy.com/blog/caring-for-your-jade-plant-crassula-ovata-basic-care-tips\", \"views\": \"\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"28 Apr 2021 · Crassula ovata (or Crassula argentea) is a succulent sub-shrub native to southern Africa. It looks rather like a bonsai tree, with jade green, ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.gardenersworld.com\", \"/house-plants/how-to-grow-a-jade-plant-crassula-ovata/\", \"\", \"srsltid=AU7gw4Uad1gIK3Rrm3oglzBPiniFBM6CGp4IoBaGFkkG3BsglJGRga-w\", \"\"], \"positions\": [5], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTssmhQMt5fB1s1N90Qv1nCghhMNImDKJdERgTuEwSTfiJtPYL66ke9Mfc&s\", \"title\": \"How to grow a jade plant (Crassula ovata)\", \"url\": \"https://www.gardenersworld.com/house-plants/how-to-grow-a-jade-plant-crassula-ovata/?srsltid=AU7gw4Uad1gIK3Rrm3oglzBPiniFBM6CGp4IoBaGFkkG3BsglJGRga-w\", \"views\": \"\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"Crassula ovata, commonly known jade plant, is a drought tolerant and low-maintenance succulent. Beloved for its fleshy, evergreen leaves and tree-like growth ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.plantdavenir.com\", \"/en/products/crassula-ovata\", \"\", \"srsltid=AU7gw4XauB_1NepqCeZEK-ahxB7XKVQXFU0a7DxhueDwBX2re9omHt2J\", \"\"], \"positions\": [6], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.16666666666666666, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTmWnCejOyWaZSNGbSGqzxdWX_nsFTyCwvfxzoh28ukpsKnvWQlkxyRJYA&s\", \"title\": \"Crassula ovata - Jade Plant Succulent - plant d'Avenir\", \"url\": \"https://www.plantdavenir.com/en/products/crassula-ovata?srsltid=AU7gw4XauB_1NepqCeZEK-ahxB7XKVQXFU0a7DxhueDwBX2re9omHt2J\", \"views\": \"\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"Rounded, evergreen shrub with a highly branched, bushy growth form. They are dark grey-green and often have a reddish, grows well in full sun or semi-shade, it ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.nparks.gov.sg\", \"/florafaunaweb/flora/2/1/2169\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSd7U2iw0yfw-AyD1MRTP__C3pPha3KuExMt9CfcWAP5zZn9C2TH5tt2Xg&s\", \"title\": \"Crassula ovata (Mill.) Druce - National Parks Board (NParks)\", \"url\": \"https://www.nparks.gov.sg/florafaunaweb/flora/2/1/2169\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"<span class=\\\"searchmatch\\\">Crassula</span> is a genus of succulent plants containing about 200 accepted species, including the popular jade plant (<span class=\\\"searchmatch\\\">Crassula</span> <span class=\\\"searchmatch\\\">ovata</span>). They are members of\", \"engine\": \"wikisearch\", \"engines\": [\"mwmbl\", \"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Crassula\", \"\", \"\", \"\"], \"positions\": [2, 15], \"priority\": \"\", \"publishedDate\": null, \"score\": 1.1333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula - Wikipedia\", \"url\": \"https://en.wikipedia.org/wiki/Crassula\"}, {\"category\": \"general\", \"content\": \"Crassula ovata, commonly known as jade plant, lucky plant, money plant or money tree, is a succulent plant with small pink or white flowers that is nativ…\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"http\", \"en.wikipedia.org\", \"/wiki/Jade_plant\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata - Wikipedia\", \"url\": \"http://en.wikipedia.org/wiki/Jade_plant\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"http\", \"www.ncbi.nlm.nih.gov\", \"/sites/entrez\", \"\", \"db=nuccore&term=Crassula+ovata\", \"\"], \"positions\": [2], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata - Nucleotide - NCBI\", \"url\": \"http://www.ncbi.nlm.nih.gov/sites/entrez?db=nuccore&term=Crassula+ovata\"}, {\"category\": \"general\", \"content\": \"with leaves have a diameter of 7 to 10 millimeters. Unlike the related <span class=\\\"searchmatch\\\">Crassula</span> <span class=\\\"searchmatch\\\">ovata</span> (more commonly-referred to as &#039;jade&#039;), C. arborescens has rounded, red-edged\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Crassula_arborescens\", \"\", \"\", \"\"], \"positions\": [3], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula arborescens\", \"url\": \"https://en.wikipedia.org/wiki/Crassula_arborescens\"}, {\"category\": \"general\", \"content\": \"Crassula is a genus of succulent plants containing about 200 accepted species, including the popular jade plant (Crassula ovata).[1] They are members of …\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"http\", \"mdwiki.org\", \"/wiki/Crassula\", \"\", \"\", \"\"], \"positions\": [3], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula - WikiProjectMed\", \"url\": \"http://mdwiki.org/wiki/Crassula\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"Jade plant is a subtropical, broadleaf evergreen, flowering, succulent shrub in the stonecrop family. It is a native of South Africa and a popular, low ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"plants.ces.ncsu.edu\", \"/plants/crassula-ovata/\", \"\", \"\", \"\"], \"positions\": [4], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata - Plant Toolbox - NC State University\", \"url\": \"https://plants.ces.ncsu.edu/plants/crassula-ovata/\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"&#039;Swartzkopf&#039;. Well-known genera and species include the many forms of <span class=\\\"searchmatch\\\">Crassula</span> <span class=\\\"searchmatch\\\">ovata</span> (&#039;Jade&#039;, &#039;Money Plant&#039; or &#039;Friendship Tree&#039;), Kalanchoe blossfeldiana\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Crassulaceae\", \"\", \"\", \"\"], \"positions\": [4], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassulaceae\", \"url\": \"https://en.wikipedia.org/wiki/Crassulaceae\"}, {\"category\": \"general\", \"content\": \"Crassula ovata (Jade Plant) Crassula ovata is probably one of the most popular succulents in the genus Crassula. It is commonly seen as a houseplant worl…\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"worldofsucculents.com\", \"/crassula-ovata/\", \"\", \"\", \"\"], \"positions\": [4], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata (Jade Plant) - World of Succulents\", \"url\": \"https://worldofsucculents.com/crassula-ovata/\"}, {\"category\": \"general\", \"content\": \"orbiculata L. var. spuria (L.) Toelken, endemic Cotyledon <span class=\\\"searchmatch\\\">ovata</span> Mill. accepted as <span class=\\\"searchmatch\\\">Crassula</span> <span class=\\\"searchmatch\\\">ovata</span> (Mill.) Druce, indigenous Cotyledon papillaris L.f. indigenous\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/List_of_Saxifragales_of_South_Africa\", \"\", \"\", \"\"], \"positions\": [5], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"List of Saxifragales of South Africa\", \"url\": \"https://en.wikipedia.org/wiki/List_of_Saxifragales_of_South_Africa\"}, {\"category\": \"general\", \"content\": \"Colin is a Horticulturist and Horticultural Consultant with experience in a range of practical and managerial roles across heritage, commercial and public…\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"horticulture.co.uk\", \"/crassula/\", \"\", \"\", \"\"], \"positions\": [5], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula Ovata 'Money Plant' Care | Horticulture.co.uk\", \"url\": \"https://horticulture.co.uk/crassula/\"}, {\"category\": \"general\", \"content\": \"<span class=\\\"searchmatch\\\">Crassula</span> nyikensis Baker <span class=\\\"searchmatch\\\">Crassula</span> oblanceolata Schönland &amp; Baker f. <span class=\\\"searchmatch\\\">Crassula</span> obovata Haw. <span class=\\\"searchmatch\\\">Crassula</span> obtusa Haw. <span class=\\\"searchmatch\\\">Crassula</span> orbicularis\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/List_of_Crassula_species\", \"\", \"\", \"\"], \"positions\": [6], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.16666666666666666, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"List of Crassula species\", \"url\": \"https://en.wikipedia.org/wiki/List_of_Crassula_species\"}, {\"category\": \"general\", \"content\": \"species. <span class=\\\"searchmatch\\\">Crassula</span> <span class=\\\"searchmatch\\\">ovata</span>: The jade plant is a very robust and drought-resistant house plant. The miniature cultivars like the baby jade plant (C. <span class=\\\"searchmatch\\\">ovata</span> arborescens)\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Indoor_bonsai\", \"\", \"\", \"\"], \"positions\": [7], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.14285714285714285, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Indoor bonsai\", \"url\": \"https://en.wikipedia.org/wiki/Indoor_bonsai\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"drugs.ncats.io\", \"/drug/47Z0U94FXT\", \"\", \"\", \"\"], \"positions\": [7], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.14285714285714285, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"CRASSULA OVATA WHOLE\", \"url\": \"https://drugs.ncats.io/drug/47Z0U94FXT\"}, {\"category\": \"general\", \"content\": \"succulent leaves. Nor are all succulents xerophytes, as plants such as <span class=\\\"searchmatch\\\">Crassula</span> helmsii are both succulent and aquatic. Some who grow succulents as a hobby\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"en.wikipedia.org\", \"/wiki/Succulent_plant\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Succulent plant\", \"url\": \"https://en.wikipedia.org/wiki/Succulent_plant\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"http\", \"wikidata.org\", \"/wiki/Q157299\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata - Wikidata\", \"url\": \"http://wikidata.org/wiki/Q157299\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"Crassula ovata, commonly called jade plant, is native to South Africa. It is a popular branched succulent shrub that may grow to 6' tall. In St. Louis, it is a ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"plantfinder.mobot.org\", \"/PlantFinderDetails.aspx\", \"\", \"kempercode=b586\", \"\"], \"positions\": [9], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.1111111111111111, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata - Plant Finder - Missouri Botanical Garden\", \"url\": \"https://plantfinder.mobot.org/PlantFinderDetails.aspx?kempercode=b586\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"European Union funding: EPPO has been awarded EU grant agreements for the further development of the EPPO Code system (agreement nb: SANTE/2018/G5/EPPO/S…\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"gd.eppo.int\", \"/taxon/CSBOV\", \"\", \"\", \"\"], \"positions\": [9], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.1111111111111111, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata (CSBOV)[Overview]| EPPO Global Database\", \"url\": \"https://gd.eppo.int/taxon/CSBOV\"}, {\"category\": \"general\", \"content\": \"Analyze this sequence Opens the Highlight Feature Bar and highlights feature annotations from the FEATURES table of the record. The Highlight Feature Bar…\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"http\", \"www.ncbi.nlm.nih.gov\", \"/nuccore/MH503704.1\", \"\", \"report=genbank\", \"\"], \"positions\": [10], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.1, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata voucher Bruyns 9322 (BOL) external transcribed sp…\", \"url\": \"http://www.ncbi.nlm.nih.gov/nuccore/MH503704.1?report=genbank\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"www.ipni.org\", \"/n/273350-1\", \"\", \"\", \"\"], \"positions\": [11], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.09090909090909091, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata | International Plant Names Index\", \"url\": \"https://www.ipni.org/n/273350-1\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"www.gbif.org\", \"/species/5362063\", \"\", \"\", \"\"], \"positions\": [12], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.08333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata (Mill.) Druce\", \"url\": \"https://www.gbif.org/species/5362063\"}, {\"category\": \"general\", \"content\": \"Analyze this sequence Opens the Highlight Feature Bar and highlights feature annotations from the FEATURES table of the record. The Highlight Feature Bar…\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"http\", \"www.ncbi.nlm.nih.gov\", \"/nuccore/MH503576.1\", \"\", \"report=genbank\", \"\"], \"positions\": [13], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.07692307692307693, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula ovata voucher Bruyns 9322 (BOL) small subunit ribosomal…\", \"url\": \"http://www.ncbi.nlm.nih.gov/nuccore/MH503576.1?report=genbank\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"imgur.com\", \"/a/MsokDK0\", \"\", \"\", \"\"], \"positions\": [14], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.07142857142857142, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Crassula Ovata \\\"Hobbit\\\" jun 2021 - Album on Imgur\", \"url\": \"https://imgur.com/a/MsokDK0\"}], \"suggestions\": [\"crassula ovata benefits\", \"crassula ovata bonsai\", \"crassula ovata care\", \"crassula ovata gollum\", \"crassula ovata hobbit\", \"crassula ovata jade plant\", \"crassula ovata plant\", \"crassula ovata propagation\"]}",
+          "engine_receipts": [
+            {
+              "engine": "google",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [],
+              "capabilities": {
+                "paging": true,
+                "max_page": 50,
+                "time_range_support": true,
+                "safesearch": true,
+                "language_support": true,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 2.167638398706913,
+                  "http": [
+                    {
+                      "host": "www.google.com",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 32898,
+                      "elapsed_s": 1.3236559871584177
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "f4146797fa67f8b1278e76a2ac303be9a943685bb46bc2f7f90292172a1c629a"
+            },
+            {
+              "engine": "wikisearch",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [
+                "language"
+              ],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": false,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 2.3775497004389763,
+                  "http": [
+                    {
+                      "host": "en.wikipedia.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 5115,
+                      "elapsed_s": 0.6137067917734385
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "18e8200a006f7becd517f7e79f4039b227d64c9db6f26d94df7c58b492576d89"
+            },
+            {
+              "engine": "wikipedia",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": true,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 2.906726999208331,
+                  "http": [
+                    {
+                      "host": "en.wikipedia.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 2555,
+                      "elapsed_s": 2.024560710415244
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "5f3d1d573ec2a0dc52b5775e68727a3870f679cce372b9e6dcce060ebb632727"
+            },
+            {
+              "engine": "mwmbl",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [
+                "language"
+              ],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": false,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 4.720696588978171,
+                  "http": [
+                    {
+                      "host": "api.mwmbl.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 6536,
+                      "elapsed_s": 3.9341386761516333
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "e89957a2f49223dba8e1bd85ceab00c98461827b0d8e61e96486262b4d48f106"
+            }
+          ],
+          "attempts": [
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 2.167638398706913,
+              "http": [
+                {
+                  "host": "www.google.com",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 32898,
+                  "elapsed_s": 1.3236559871584177
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 2.3775497004389763,
+              "http": [
+                {
+                  "host": "en.wikipedia.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 5115,
+                  "elapsed_s": 0.6137067917734385
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 2.906726999208331,
+              "http": [
+                {
+                  "host": "en.wikipedia.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 2555,
+                  "elapsed_s": 2.024560710415244
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 4.720696588978171,
+              "http": [
+                {
+                  "host": "api.mwmbl.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 6536,
+                  "elapsed_s": 3.9341386761516333
+                }
+              ]
+            }
+          ],
+          "runtime": "native-search-1",
+          "profile": "c015f755b1c9e03e060c4f38481eccc986e9e36fb6765fa088421fc38b8f8c00",
+          "parameters_json": "{\"engine_data\": {}, \"language\": \"en\", \"network\": \"default\", \"pageno\": 1, \"safesearch\": 0, \"time_range\": null}"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "requests": [
+        {
+          "request_id": "2",
+          "query": "文氏图",
+          "language": "zh-CN",
+          "bindings": []
+        }
+      ],
+      "search": [
+        {
+          "request_id": "2",
+          "query": "文氏图",
+          "language": "zh-CN",
+          "bindings": [],
+          "status": "ok",
+          "reason": "",
+          "candidates": [
+            {
+              "url": "https://seo.ichartcool.com/m/tbjc/twjc/321.html",
+              "title": "韦恩图在线制作 - ichartcool",
+              "snippet": "2024年1月8日 · 韦恩图也被称作文氏图，用于表示集合论中各个集合之间的数学或逻辑关系的图示方法。韦恩图使用重叠的圆圈或其他形状来展示不同集合之间的共同元素和不同之 ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://zh.wikipedia.org/wiki/文氏图",
+              "title": "文氏图",
+              "snippet": "文氏图（英語：Venn diagram），或译温氏图、Venn圖、范恩圖、维恩圖</s",
+              "engines": [
+                "wikisearch"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://zh.m.wikipedia.org/wiki/%E6%96%87%E6%B0%8F%E5%9B%BE",
+              "title": "文氏图 - 维基百科，自由的百科全书",
+              "snippet": "",
+              "engines": [
+                "mwmbl"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "http://www.jiaodui.org/bbs/read.php?tid=27474",
+              "title": "Venn Diagram：【文氏图】【维恩图】【韦恩图】【凡恩图】",
+              "snippet": "X-小茶(4406807) 15:54:18 请教：Venn Diagram翻译成“文氏图”和“维恩图”，哪个更规范？网上两种说法都有X-小茶(4406807) 16:02:59 苏教版高中教科书必修一， ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://zh.wikipedia.org/wiki/欧拉图",
+              "title": "欧拉图",
+              "snippet": "欧拉图，部分文稿也称欧氏图，是类似文氏图的一种图，但是不必须包含所有的区。所以欧拉图<",
+              "engines": [
+                "wikisearch"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.szrmjy.com/nd.jsp?id=642",
+              "title": "士兵提干分析推理技巧：类比推理之文氏图问题- 网站",
+              "snippet": "所谓文氏图，简单来说就是表示集合的一种草图。其实这类题目并不是很难，关键是清楚这种题型所考查的考点——概念间的关系。 考试当中概念间的关系一共有四种： 一、全同 ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://zh.wikipedia.org/wiki/包拯",
+              "title": "包拯",
+              "snippet": "氏、董氏和媵孫氏（媵指陪嫁婢女，或可指妾侍）。妻子董氏於宋神宗趙頊熙寧元年（1068年）病逝於合肥，與包拯合葬。 包拯與董氏生有一子包繶，但他婚後兩年染病身亡，其子（即包拯孫子）包文輔於五歲時夭折，長媳崔",
+              "engines": [
+                "wikisearch"
+              ],
+              "result_kind": "result"
+            },
+            {
+              "url": "https://www.hkedcity.net/uploaded_files/ttv/201503/1427170883.35.428584635.pdf",
+              "title": "[PDF] 资讯科技支持下学与教方式的变革 - 香港教育城",
+              "snippet": "达思维过程的工具。 □ 第二类，常用的图形化思考工具。它的基本图形就是箭头与框图，在本. 项目中包括有韦恩图（又称文氏图）、Y/X/W线图、鱼骨图、金字塔图. 、蝴蝶图等 ...",
+              "engines": [
+                "google"
+              ],
+              "result_kind": "result"
+            }
+          ],
+          "response_json": "{\"answers\": [], \"corrections\": [], \"engine_data\": {}, \"infoboxes\": [{\"attributes\": [], \"category\": \"\", \"content\": \"文氏图，或译温氏图、Venn圖、范恩圖、维恩圖、维恩图解、范氏圖、韦恩图、卞氏圖表等，是在集合论（或者类的理论）数学分支中，在不太严格的意义下用以表示集合（或类）的一种图解。它们用于展示在不同的事物群组（集合）之间的数学或逻辑联系，尤其适合用来表示集合（或）类之间的“大致关系”，它也常常被用来帮助推导（或理解推导过程）关于集合运算（或类运算）的一些规律。\", \"engine\": \"wikipedia\", \"engines\": [\"wikipedia\"], \"id\": \"https://zh.wikipedia.org/wiki/%E6%96%87%E6%B0%8F%E5%9B%BE\", \"iframe_src\": null, \"img_src\": null, \"infobox\": \"文氏图\", \"parsed_url\": null, \"positions\": \"\", \"priority\": \"\", \"publishedDate\": null, \"score\": 0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"\", \"url\": null, \"urls\": [{\"title\": \"Wikipedia\", \"url\": \"https://zh.wikipedia.org/wiki/%E6%96%87%E6%B0%8F%E5%9B%BE\"}]}], \"paging\": false, \"results\": [{\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"2024年1月8日 · 韦恩图也被称作文氏图，用于表示集合论中各个集合之间的数学或逻辑关系的图示方法。韦恩图使用重叠的圆圈或其他形状来展示不同集合之间的共同元素和不同之 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"seo.ichartcool.com\", \"/m/tbjc/twjc/321.html\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRcO8hPwT3eBWdIeBIGYmj2BfZm0seWRfMCLUSj5x5_jzZ0JXfAYVEkgFA&s\", \"title\": \"韦恩图在线制作 - ichartcool\", \"url\": \"https://seo.ichartcool.com/m/tbjc/twjc/321.html\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"<span class=\\\"searchmatch\\\">文</span><span class=\\\"searchmatch\\\">氏</span><span class=\\\"searchmatch\\\">图</span>（英語：Venn diagram），或译温<span class=\\\"searchmatch\\\">氏</span><span class=\\\"searchmatch\\\">图</span>、Venn<span class=\\\"searchmatch\\\">圖</span>、范恩<span class=\\\"searchmatch\\\">圖</span>、维恩<span class=\\\"searchmatch\\\">圖</s\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/文氏图\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"文氏图\", \"url\": \"https://zh.wikipedia.org/wiki/文氏图\"}, {\"category\": \"general\", \"content\": \"\", \"engine\": \"mwmbl\", \"engines\": [\"mwmbl\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.m.wikipedia.org\", \"/wiki/%E6%96%87%E6%B0%8F%E5%9B%BE\", \"\", \"\", \"\"], \"positions\": [1], \"priority\": \"\", \"publishedDate\": null, \"score\": 1.0, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"文氏图 - 维基百科，自由的百科全书\", \"url\": \"https://zh.m.wikipedia.org/wiki/%E6%96%87%E6%B0%8F%E5%9B%BE\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"X-小茶(4406807) 15:54:18 请教：Venn Diagram翻译成“文氏图”和“维恩图”，哪个更规范？网上两种说法都有X-小茶(4406807) 16:02:59 苏教版高中教科书必修一， ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"http\", \"www.jiaodui.org\", \"/bbs/read.php\", \"\", \"tid=27474\", \"\"], \"positions\": [2], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"Venn Diagram：【文氏图】【维恩图】【韦恩图】【凡恩图】\", \"url\": \"http://www.jiaodui.org/bbs/read.php?tid=27474\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"欧拉<span class=\\\"searchmatch\\\">图</span>，部分文稿也称欧<span class=\\\"searchmatch\\\">氏</span><span class=\\\"searchmatch\\\">图</span>，是类似<span class=\\\"searchmatch\\\">文</span><span class=\\\"searchmatch\\\">氏</span><span class=\\\"searchmatch\\\">图</span>的一种<span class=\\\"searchmatch\\\">图</span>，但是不必须包含所有的区。所以欧拉<span class=\\\"searchmatch\\\">图<\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/欧拉图\", \"\", \"\", \"\"], \"positions\": [2], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.5, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"欧拉图\", \"url\": \"https://zh.wikipedia.org/wiki/欧拉图\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"所谓文氏图，简单来说就是表示集合的一种草图。其实这类题目并不是很难，关键是清楚这种题型所考查的考点——概念间的关系。 考试当中概念间的关系一共有四种： 一、全同 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.szrmjy.com\", \"/nd.jsp\", \"\", \"id=642\", \"\"], \"positions\": [3], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"士兵提干分析推理技巧：类比推理之文氏图问题- 网站\", \"url\": \"https://www.szrmjy.com/nd.jsp?id=642\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"<span class=\\\"searchmatch\\\">氏</span>、董<span class=\\\"searchmatch\\\">氏</span>和媵孫<span class=\\\"searchmatch\\\">氏</span>（媵指陪嫁婢女，或可指妾侍）。妻子董<span class=\\\"searchmatch\\\">氏</span>於宋神宗趙頊熙寧元年（1068年）病逝於合肥，與包拯合葬。 包拯與董<span class=\\\"searchmatch\\\">氏</span>生有一子包繶，但他婚後兩年染病身亡，其子（即包拯孫子）包<span class=\\\"searchmatch\\\">文</span>輔於五歲時夭折，長媳崔\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/包拯\", \"\", \"\", \"\"], \"positions\": [3], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.3333333333333333, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"包拯\", \"url\": \"https://zh.wikipedia.org/wiki/包拯\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"达思维过程的工具。 □ 第二类，常用的图形化思考工具。它的基本图形就是箭头与框图，在本. 项目中包括有韦恩图（又称文氏图）、Y/X/W线图、鱼骨图、金字塔图. 、蝴蝶图等 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.hkedcity.net\", \"/uploaded_files/ttv/201503/1427170883.35.428584635.pdf\", \"\", \"\", \"\"], \"positions\": [4], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"[PDF] 资讯科技支持下学与教方式的变革 - 香港教育城\", \"url\": \"https://www.hkedcity.net/uploaded_files/ttv/201503/1427170883.35.428584635.pdf\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"河南独孤<span class=\\\"searchmatch\\\">氏</span>世系<span class=\\\"searchmatch\\\">图</span> 中国士族世系<span class=\\\"searchmatch\\\">图</span>列表 《隋书·卷五十五·列传第二十》　 《隋书·卷七十一·列传第三十六·诚节》 《北史·卷七十三·列传第六十一》 《旧唐书·卷五十二·列传第二·后妃下》 《新唐书·卷七十七·列传第二·后妃下》 《元和姓纂四校记·卷十·110、111、112》 王化昆 《北朝隋唐时期独孤<span class=\\\"searchmatch\\\">氏</span>与洛阳的渊源》\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/京兆独孤氏世系图\", \"\", \"\", \"\"], \"positions\": [4], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.25, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"京兆独孤氏世系图\", \"url\": \"https://zh.wikipedia.org/wiki/京兆独孤氏世系图\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"... 文氏图（如图1）的形式展开概念教学，帮助学生把握特殊与整体的关系，进一步理解抽象概念。 图片3.png. 图1：正整数的分类. 又如：在沪教版数学八年级第二学期第22章 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"www.quaeduc.com\", \"/index.php/lbd-2-11-744\", \"\", \"\", \"\"], \"positions\": [5], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"集合思想在初中数学教学中的渗透\", \"url\": \"https://www.quaeduc.com/index.php/lbd-2-11-744\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"算机硬件和软件中有很多应用。在1937年，克劳德·艾尔伍德·香农展示了布尔逻辑如何在电子学中使用。 使用集合代数作为介绍布尔逻辑的一种方式。还使用<span class=\\\"searchmatch\\\">文</span><span class=\\\"searchmatch\\\">氏</span><span class=\\\"searchmatch\\\">图</span>来展示各种布尔逻辑陈述所描述的集合联系。 设X是一个集合： 元素是一个集合的成员。表示为 ∈ {\\\\displaystyle \\\\in } 。如果它不是这个集合的元素，表示为\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/布尔逻辑\", \"\", \"\", \"\"], \"positions\": [5], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.2, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"布尔逻辑\", \"url\": \"https://zh.wikipedia.org/wiki/布尔逻辑\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"新私学顶尖名师免费公开课 ; 8月12日. 梁丽萍. 列表连线法祝你一臂之力 ; 8月13日. 王长旭. 文氏图在行测中的妙用 ; 8月14日. 王长旭. 图形推理高分技巧 ; 8月15日. 于浩. 资料 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"http\", \"www.shgkw.org\", \"/2015/0803/8145.html\", \"\", \"\", \"\"], \"positions\": [6], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.16666666666666666, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"新私学顶尖名师免费公开课_上海公务员考试网\", \"url\": \"http://www.shgkw.org/2015/0803/8145.html\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"河南元<span class=\\\"searchmatch\\\">氏</span>世系<span class=\\\"searchmatch\\\">图</span> (神元帝、平<span class=\\\"searchmatch\\\">文</span>帝系) 河南元<span class=\\\"searchmatch\\\">氏</span>世系<span class=\\\"searchmatch\\\">图</span> (昭成帝系) 河南元<span class=\\\"searchmatch\\\">氏</span>世系<span class=\\\"searchmatch\\\">图</span> (道武帝系) 河南元<span class=\\\"sear\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/元魏皇帝世系图\", \"\", \"\", \"\"], \"positions\": [6], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.16666666666666666, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"元魏皇帝世系图\", \"url\": \"https://zh.wikipedia.org/wiki/元魏皇帝世系图\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"3、文氏图：用一条封闭的曲线的内部来表示一个集合的方法。 注：何时用列举法？何时用描述法？ （1） 有些集合的公共属性不明显，难以概括，不便用描述法表示，只能用 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"http\", \"www.goesnet.org\", \"/Article/knowledgedetail/id/228327\", \"\", \"\", \"\"], \"positions\": [7], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.14285714285714285, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"问题: 高一数学 - 侨谊留学\", \"url\": \"http://www.goesnet.org/Article/knowledgedetail/id/228327\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"還可以通过构造<span class=\\\"searchmatch\\\">文</span><span class=\\\"searchmatch\\\">氏</span><span class=\\\"searchmatch\\\">图</span>的方法得到有效形式。因为有三种项，<span class=\\\"searchmatch\\\">文</span><span class=\\\"searchmatch\\\">氏</span><span class=\\\"searchmatch\\\">图</span>需要三个交叠的圓圈来表示每一个类。首先，为小项构造一个圓圈。临近小项的圓圈的是同小項有着交叠的大项的圓圈。在这两个圓圈之上是中项的圓圈。它应当在\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/直言三段论\", \"\", \"\", \"\"], \"positions\": [7], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.14285714285714285, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"直言三段论\", \"url\": \"https://zh.wikipedia.org/wiki/直言三段论\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"文氏图法(Venn diagrams)：用于描述集合间的关系及其运算，其特点是直观、形象、信息量大且富有启发性。一般用矩形表示全集U，用圆表示U的子集A，B，C等等。 查看全文.\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"https\", \"wenwen.sogou.com\", \"/z/q96048029.htm\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"什么是文氏图？\", \"url\": \"https://wenwen.sogou.com/z/q96048029.htm\", \"views\": \"\"}, {\"category\": \"general\", \"content\": \"症、穢語症、注意力缺失與過動症等。其確診亦不能以單一抽動症狀的發生而斷言之。另外，妥瑞<span class=\\\"searchmatch\\\">氏</span>症常被誤診為氣喘、眼睛過敏或呼吸道綜合症等，在（被）診斷時需格外留意。 1885年，妥瑞<span class=\\\"searchmatch\\\">氏</span>症首先由法国医生乔治·吉勒·德拉<span class=\\\"searchmatch\\\">图</span>雷特发现并描述，是一种非常严重的抽動性疾病，包括运动抽動、声音抽動以及综合抽動。诊断标\", \"engine\": \"wikisearch\", \"engines\": [\"wikisearch\"], \"iframe_src\": null, \"img_src\": \"\", \"parsed_url\": [\"https\", \"zh.wikipedia.org\", \"/wiki/妥瑞氏症\", \"\", \"\", \"\"], \"positions\": [8], \"priority\": \"\", \"publishedDate\": null, \"score\": 0.125, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"妥瑞氏症\", \"url\": \"https://zh.wikipedia.org/wiki/妥瑞氏症\"}, {\"audio_src\": \"\", \"author\": \"\", \"category\": \"general\", \"close_group\": false, \"content\": \"三段论主要考两个题型，一个叫结论型，顾名思义它让我们根据前提得结论，这个时候我们就要借助文氏图的手段来解题了。但是具有“所有”、“有些”那些句间关系实在扑朔迷离，那 ...\", \"engine\": \"google\", \"engines\": [\"google\"], \"iframe_src\": \"\", \"img_src\": \"\", \"length\": null, \"metadata\": \"\", \"open_group\": false, \"parsed_url\": [\"http\", \"www.cqgwy.org\", \"/2019/0227/35217.html\", \"\", \"\", \"\"], \"positions\": [9], \"priority\": \"\", \"pubdate\": \"\", \"publishedDate\": null, \"score\": 0.1111111111111111, \"template\": \"default.html\", \"thumbnail\": \"\", \"title\": \"2019上半年重庆公务员考试行测技巧：三段论题目技巧-文氏图_重庆 ...\", \"url\": \"http://www.cqgwy.org/2019/0227/35217.html\", \"views\": \"\"}], \"suggestions\": []}",
+          "engine_receipts": [
+            {
+              "engine": "google",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [],
+              "capabilities": {
+                "paging": true,
+                "max_page": 50,
+                "time_range_support": true,
+                "safesearch": true,
+                "language_support": true,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 1.9477840643376112,
+                  "http": [
+                    {
+                      "host": "www.google.com",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 24463,
+                      "elapsed_s": 1.9279147759079933
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "b7e94f1366a6263d11f124c8619922937f7bcc6e3eedc5d35d4434847519aee8"
+            },
+            {
+              "engine": "wikisearch",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [
+                "language"
+              ],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": false,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 1.8314565643668175,
+                  "http": [
+                    {
+                      "host": "zh.wikipedia.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 8169,
+                      "elapsed_s": 1.0134073551744223
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "a31d570b1900eaeab5a980ecaeae63ffd35f3b00b6ade71ea77c4684f70f4c57"
+            },
+            {
+              "engine": "wikipedia",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": true,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 3.0052286814898252,
+                  "http": [
+                    {
+                      "host": "zh.wikipedia.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 2420,
+                      "elapsed_s": 1.2176684327423573
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "13852c9c56c849a591bad329db852d19f77da2e46d20f8decc4c6ee0169ded01"
+            },
+            {
+              "engine": "mwmbl",
+              "status": "ok",
+              "reason": "",
+              "ignored_parameters": [
+                "language"
+              ],
+              "capabilities": {
+                "paging": false,
+                "max_page": 0,
+                "time_range_support": false,
+                "safesearch": false,
+                "language_support": false,
+                "language": "",
+                "engine_type": "online"
+              },
+              "attempts": [
+                {
+                  "attempt": 1,
+                  "status": "ok",
+                  "http_status": 200,
+                  "reason": "",
+                  "elapsed_s": 0.37805270589888096,
+                  "http": [
+                    {
+                      "host": "api.mwmbl.org",
+                      "method": "GET",
+                      "http_status": 200,
+                      "retry_after": null,
+                      "bytes": 275,
+                      "elapsed_s": 0.37589564733207226
+                    }
+                  ]
+                }
+              ],
+              "receipt_id": "ea5fb84f3b47add32857f26bfbdd656684ab2cf786890c6866059d30741e3521"
+            }
+          ],
+          "attempts": [
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 1.9477840643376112,
+              "http": [
+                {
+                  "host": "www.google.com",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 24463,
+                  "elapsed_s": 1.9279147759079933
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 1.8314565643668175,
+              "http": [
+                {
+                  "host": "zh.wikipedia.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 8169,
+                  "elapsed_s": 1.0134073551744223
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 3.0052286814898252,
+              "http": [
+                {
+                  "host": "zh.wikipedia.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 2420,
+                  "elapsed_s": 1.2176684327423573
+                }
+              ]
+            },
+            {
+              "attempt": 1,
+              "status": "ok",
+              "http_status": 200,
+              "reason": "",
+              "elapsed_s": 0.37805270589888096,
+              "http": [
+                {
+                  "host": "api.mwmbl.org",
+                  "method": "GET",
+                  "http_status": 200,
+                  "retry_after": null,
+                  "bytes": 275,
+                  "elapsed_s": 0.37589564733207226
+                }
+              ]
+            }
+          ],
+          "runtime": "native-search-1",
+          "profile": "c015f755b1c9e03e060c4f38481eccc986e9e36fb6765fa088421fc38b8f8c00",
+          "parameters_json": "{\"engine_data\": {}, \"language\": \"zh-CN\", \"network\": \"default\", \"pageno\": 1, \"safesearch\": 0, \"time_range\": null}"
+        }
+      ]
+    }
+  ],
+  "metrics": {
+    "stages": {
+      "search_web": {
+        "in": 3,
+        "emitted": 3
+      },
+      "<lambda>": {
+        "in": 3,
+        "emitted": 3
+      }
+    },
+    "stage_processing_latency": {
+      "search_web": {
+        "count": 3,
+        "total_s": 20.15050566382706,
+        "bucket_s": 0.25,
+        "overflow_count": 0,
+        "p50_upper_s": 8.5,
+        "p95_upper_s": 8.75
+      },
+      "<lambda>": {
+        "count": 3,
+        "total_s": 6.228499114513397e-05,
+        "bucket_s": 0.25,
+        "overflow_count": 0,
+        "p50_upper_s": 0.25,
+        "p95_upper_s": 0.25
+      }
+    },
+    "queues": [
+      {
+        "stage": "search_web",
+        "capacity": 2,
+        "peak": 2,
+        "wait": {
+          "count": 3,
+          "total_s": 8.2629171628505,
+          "bucket_s": 0.25,
+          "overflow_count": 0,
+          "p50_upper_s": 0.25,
+          "p95_upper_s": 8.5
+        }
+      },
+      {
+        "stage": "<lambda>",
+        "capacity": 1,
+        "peak": 1,
+        "wait": {
+          "count": 3,
+          "total_s": 0.00012958981096744537,
+          "bucket_s": 0.25,
+          "overflow_count": 0,
+          "p50_upper_s": 0.25,
+          "p95_upper_s": 0.25
+        }
+      }
+    ],
+    "resources": {
+      "WebSession:0": {
+        "search_requests": 0,
+        "fetch_attempts": 0,
+        "native_search": {
+          "search_requests": 3,
+          "source_attempts": 12,
+          "http_requests": 12,
+          "reused": 0,
+          "worker_starts": 12,
+          "source_peak": 4,
+          "source_active": 0,
+          "http_peak": 2,
+          "http_active": 0,
+          "worker_count": 4,
+          "hosts": {
+            "api.mwmbl.org": {
+              "peak": 1,
+              "active": 0,
+              "admitted": 3
+            },
+            "en.wikipedia.org": {
+              "peak": 1,
+              "active": 0,
+              "admitted": 2
+            },
+            "www.google.com": {
+              "peak": 1,
+              "active": 0,
+              "admitted": 3
+            },
+            "zh.wikipedia.org": {
+              "peak": 1,
+              "active": 0,
+              "admitted": 4
+            }
+          }
+        }
+      }
+    },
+    "models": {},
+    "native_journal_totals": {},
+    "journal_totals_scope": "Entire journal, including earlier actions; models describes this action only"
+  },
+  "baseline_id": "bf277e831957f44df001778742432e4155c50017229084f6414b38e385291fae",
+  "validation_scope": "Three explicit-language queries, 12 attempts, four sources, no retries. Implementation-stage evidence before final receipt/paging fixes; not a sustained load test. See native-search-validation.md."
+}

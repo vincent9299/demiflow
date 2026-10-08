@@ -1,0 +1,40 @@
+{
+  "sql": "SELECT * FROM v21 ORDER BY k0 ASC NULLS LAST, o2 ASC NULLS LAST",
+  "sources": {
+    "t10": {
+      "uri": "/tmp/demiflow-dataset-2abhj_6k/input9.lance",
+      "version": 1
+    },
+    "t17": {
+      "uri": "/tmp/demiflow-dataset-2abhj_6k/input16.lance",
+      "version": 1
+    },
+    "t20": {
+      "uri": "/tmp/demiflow-dataset-2abhj_6k/input4.lance",
+      "version": 1
+    }
+  },
+  "views": {
+    "v11": "SELECT k5, valid6, o7, payload8 FROM t10",
+    "v18": "SELECT k12, valid13, o14, payload15 FROM t17",
+    "v19": "SELECT l.*, r.* FROM v11 l INNER JOIN v18 r ON l.k5=r.k12 AND l.valid6 AND r.valid13",
+    "v21": "SELECT k0, valid1, o2, payload3 FROM t20"
+  },
+  "options": {
+    "memory_bytes": 8589934592,
+    "max_rss_bytes": 25769803776,
+    "max_scratch_bytes": 137438953472,
+    "partitions": 2,
+    "threads": 8,
+    "batch_rows": 8192,
+    "timeout_s": 3600,
+    "admission_timeout_s": 3600,
+    "cgroup_headroom_bytes": 2147483648,
+    "prefer_hash_join": false
+  },
+  "directory": "/tmp/demiflow-dataset-2abhj_6k/demiflow-datafusion-o9_rfia5/dataset-cd5dbb571d0f42c6920f4b2836ae474f",
+  "diagnostic": "/yzp/zhaozy/yangzepeng/0905/demiflow/_demiflow/dataset_native/queries/dataset-cd5dbb571d0f42c6920f4b2836ae474f",
+  "parent_pid": 54814,
+  "slot": 0,
+  "lance_index": null
+}

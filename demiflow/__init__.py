@@ -2,6 +2,8 @@
 
 from . import data
 from .pipeline import Pipeline, PipelineProgram, ResourceAPI
+from .execution.stream_checkpoint import StreamCheckpoint
+from .execution.stream_admission import AdmissionQuotaReader
 from .data import (
     Dataset,
     MaterializedDataset,
@@ -37,6 +39,8 @@ __all__ = [
     "Pipeline",
     "PipelineProgram",
     "ResourceAPI",
+    "StreamCheckpoint",
+    "AdmissionQuotaReader",
     "data",
     "Dataset",
     "MaterializedDataset",

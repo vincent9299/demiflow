@@ -1,22 +1,27 @@
-"""Immutable named evidence backed by fixed Lance Blob references.
+"""Named evidence metadata with independent object URIs and content hashes.
 
 Logical names are identifiers, never filesystem fallbacks. Exact original
 bytes are retained for reproducibility; one blob may serve many evidence roles.
 """
-from .storage import resolve_local_uri
 from pathlib import PurePosixPath
 import hashlib
 import json
 import mimetypes
 import pyarrow as pa
 from .refs import DatasetRef
-from .blobs import BlobRef
+from ..objects import ObjectRef
 
 ARTIFACTS = pa.schema([
     pa.field('path', pa.string(), nullable=False),
     pa.field('sha256', pa.string(), nullable=False),
     pa.field('byte_size', pa.int64(), nullable=False),
     ('media_type', pa.string()), ('role', pa.string()),
+    pa.field('object_uri', pa.string(), nullable=False),
+])
+
+# Frozen evidence remains readable; new writers only use ARTIFACTS above.
+_LEGACY_ARTIFACTS = pa.schema([
+    *list(ARTIFACTS)[:-1],
     pa.field('blob_uri', pa.string(), nullable=False),
     pa.field('blob_version', pa.int64(), nullable=False),
     pa.field('blob_column', pa.string(), nullable=False),
@@ -36,7 +41,8 @@ class ArtifactSet:
         self.root = root
         self.ref = reference if isinstance(reference, DatasetRef) else DatasetRef.from_dict(reference)
         ds = self.ref.open(root)
-        if not ds.schema.equals(ARTIFACTS, check_metadata=True):
+        self._legacy = ds.schema.equals(_LEGACY_ARTIFACTS, check_metadata=True)
+        if not self._legacy and not ds.schema.equals(ARTIFACTS, check_metadata=True):
             raise ValueError('Unexpected artifact schema')
         entries = ds.to_table().to_pylist()
         self.entries = {r['path']: r for r in entries}
@@ -52,13 +58,19 @@ class ArtifactSet:
         if path not in self.entries: raise KeyError(path)
         return {'artifact_set': self.ref.to_dict(), 'path': path}
 
-    def blob_ref(self, path):
+    def object_ref(self, path):
+        if self._legacy:
+            raise ValueError('Migrate legacy artifacts to independent object URIs before publishing references')
         row = self.entries[logical_path(path)]
-        return BlobRef(row['blob_uri'], row['blob_version'], row['sha256'], row['blob_column'])
+        return ObjectRef(row['object_uri'], row['sha256'])
 
     def read_bytes(self, path):
         row = self.entries[logical_path(path)]
-        raw = self.blob_ref(path).read(self.root)
+        if self._legacy:
+            from .blobs import BlobRef
+            raw = BlobRef(row['blob_uri'], row['blob_version'], row['sha256'], row['blob_column']).read(self.root)
+        else:
+            raw = self.object_ref(path).read()
         if len(raw) != row['byte_size']: raise ValueError('Artifact size changed')
         return raw
 
@@ -71,33 +83,24 @@ class ArtifactSet:
         return [json.loads(line) for line in self.read_text(path).splitlines() if line.strip()]
 
     def verify(self):
-        import lance
-        from collections import defaultdict
-        from pathlib import Path
-        groups = defaultdict(dict)
+        if self._legacy:
+            # Historical audit only; this branch cannot produce new references.
+            seen = set()
+            for path, row in self.entries.items():
+                self.read_bytes(path)
+                seen.add((row['blob_uri'], row['blob_version'], row['sha256'], row['blob_column']))
+            return {'artifacts': len(self.entries), 'verified_blobs': len(seen)}
+        objects = {}
         for row in self.entries.values():
-            key = (row['blob_uri'], row['blob_version'], row['blob_column'])
-            prior = groups[key].get(row['sha256'])
+            key = (row['object_uri'], row['sha256'])
+            prior = objects.get(key)
             if prior is not None and prior != row['byte_size']:
                 raise ValueError('Conflicting artifact size')
-            groups[key][row['sha256']] = row['byte_size']
-        count = 0
-        for (uri, version, column), wanted in groups.items():
-            ds = lance.dataset(str(resolve_local_uri(Path(self.root)/uri)), version=version)
-            keys = sorted(wanted)
-            for at in range(0, len(keys), 128):
-                chunk = keys[at:at+128]
-                predicate = 'sha256 IN (' + ','.join("'"+key+"'" for key in chunk) + ')'
-                found = ds.scanner(columns=['sha256'], filter=predicate, with_row_id=True).to_table()
-                if sorted(found['sha256'].to_pylist()) != chunk:
-                    raise ValueError('Missing or duplicate evidence Blob')
-                blobs = ds.take_blobs(column, ids=found['_rowid'].to_pylist())
-                for key, blob in zip(found['sha256'].to_pylist(), blobs):
-                    raw = blob if isinstance(blob, bytes) else blob.read()
-                    if len(raw) != wanted[key] or hashlib.sha256(raw).hexdigest() != key:
-                        raise ValueError('Artifact content or size changed')
-                    count += 1
-        return {'artifacts': len(self.entries), 'verified_blobs': count}
+            objects[key] = row['byte_size']
+        for (uri, sha256), size in objects.items():
+            if ObjectRef(uri, sha256).verify() != size:
+                raise ValueError('Artifact content or size changed')
+        return {'artifacts': len(self.entries), 'verified_objects': len(objects)}
 
 
 def read_artifact(root, reference):

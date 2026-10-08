@@ -41,6 +41,21 @@ def test_sync_fn_supported():
     assert stats.emitted == 10
 
 
+def test_repeated_nodes_keep_distinct_counts_and_processing_times():
+    async def same(row):
+        await asyncio.sleep(.01)
+        return row
+    stats = (DataAPI().from_items([{'i':i} for i in range(3)])
+             .map_async(same, concurrency=2)
+             .map_async(same, concurrency=1).run_stream())
+    assert list(stats.stages) == ['same','same#2']
+    assert [v['emitted'] for v in stats.stages.values()] == [3,3]
+    assert stats.emitted == 3
+    for value in stats.timing_summary().values():
+        assert value['count'] == 3 and value['total_s'] >= .025
+        assert value['p95_upper_s'] >= .01
+
+
 def test_unordered_emission_no_head_of_line_blocking():
     """无序发射：首行 sleep 不阻塞后续行（保序滑窗会有队头阻塞）。"""
     ctx, items = build(6)

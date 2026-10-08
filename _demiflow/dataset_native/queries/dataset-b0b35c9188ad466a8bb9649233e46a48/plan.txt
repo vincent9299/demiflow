@@ -1,0 +1,5 @@
+SortExec: expr=[k17@4 ASC NULLS LAST, o12@3 ASC NULLS LAST], preserve_partitioning=[false]
+  ProjectionExec: expr=[c13@0 as c13, c14@1 as c14, p11@2 as p11, o12@3 as o12, key_fn16(c13@0, p11@2) as k17, c13@0 IS NOT NULL AND p11@2 as valid18]
+    ProjectionExec: expr=[key@0 as c13, n@1 as c14, true as p11, _rowaddr@2 as o12]
+      CooperativeExec
+        FFI_ExecutionPlan: FilteredReadExec, number_of_children=0

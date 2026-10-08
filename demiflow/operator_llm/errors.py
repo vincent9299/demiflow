@@ -75,9 +75,34 @@ class PromptBudgetExceededError(PromptError, RuntimeError):
     pass
 
 
+class PromptReplayMissError(PromptError, RuntimeError):
+    """Read-only replay has no saved response for the exact request."""
+
+
 class PromptResponseParseError(PromptError, ValueError):
     pass
 
 
 class PromptResponseContractError(PromptError, ValueError):
     pass
+
+
+class PromptStreamError(PromptError, RuntimeError):
+    """The HTTP response did not deliver one complete supported SSE completion."""
+
+
+def error_category(error):
+    """Stable technical categories, including legacy serialized error records.
+
+    These are execution outcomes, not business review states. HTTP failure takes
+    precedence over parse/contract errors caused by a provider error envelope.
+    """
+    if not isinstance(error,dict):
+        error={'type':type(error).__name__,'call':getattr(error,'call',{})}
+    if error.get('category'): return error['category']
+    status=(error.get('call') or {}).get('http_status')
+    if status is not None and status!=200: return 'provider_error'
+    return {'PromptResponsePending':'pending_response','PromptResponseContractError':'invalid_response',
+            'PromptResponseParseError':'invalid_response','InputTokenBudgetExceeded':'input_budget',
+            'PromptBudgetExceededError':'request_budget','UncertainPromptCall':'uncertain_call',
+            'PromptStreamError':'incomplete_response'}.get(error.get('type'),'provider_error')

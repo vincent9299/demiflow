@@ -1,4 +1,4 @@
-"""Explicit local-table retirement with release protection and a Lance audit log.
+"""Explicit local-table retirement with release protection and durable ordinary JSON audit files.
 
 Callers own retention policy and must establish that selected tables are inactive.
 The platform validates exact paths, blocks surviving publication references, and
@@ -12,9 +12,10 @@ import json
 import re
 import shutil
 
-from .records import LanceRecordStore
+from ..execution.artifacts import immutable, read
 from .registry import Catalog, ReleaseRegistry
 from .storage import resolve_local_uri
+from .legacy import read_legacy_record
 
 
 def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
@@ -31,7 +32,8 @@ def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
                 or p.parts[0] == 'registry'
                 or resolve_local_uri(root/p) in {Path(Catalog(root).uri), Path(ReleaseRegistry(root).uri)} or not (root/p).resolve().is_relative_to(root)):
             raise ValueError('Unsafe retirement URI: ' + uri)
-    journal = LanceRecordStore(root, f'datasets/records__{operation_id}.lance')
+    journal = root / '_demiflow' / 'maintenance' / operation_id
+    journal.mkdir(parents=True, exist_ok=True)
     spec = {'table_uris': uris, 'release_ids': ids, 'reason': reason}
     catalog, releases = Catalog(root), ReleaseRegistry(root)
     with ExitStack() as locks:
@@ -47,7 +49,11 @@ def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
             if any(uri in serialized for uri in uris) or row.get('previous_release_id') in ids:
                 raise ValueError('Surviving release protects retirement input: ' + row['release_id'])
         removed = [row for row in rows if row['relative_uri'] in uris]
-        prior = journal.get('plan')
+        prior = (read(journal / 'plan.json') if (journal / 'plan.json').exists() else None)
+        if prior is None:
+            prior = read_legacy_record(root, f'datasets/records__{operation_id}.lance', 'plan')
+            if prior is not None:
+                immutable(journal / 'plan.json', prior)
         if prior is not None:
             if prior['selection'] != spec:
                 raise ValueError('Retirement operation selection changed')
@@ -58,9 +64,13 @@ def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
                 raise ValueError('Every table must be registered before retirement')
             if set(ids) - {row['release_id'] for row in published}:
                 raise ValueError('Unknown release selected for retirement')
-            journal.put('plan', {'selection': spec, 'catalog_rows': removed,
+            immutable(journal / 'plan.json', {'selection': spec, 'catalog_rows': removed,
                                 'release_rows': [row for row in published if row['release_id'] in ids]})
-        complete = journal.get('complete')
+        complete = (read(journal / 'complete.json') if (journal / 'complete.json').exists() else None)
+        if complete is None:
+            complete = read_legacy_record(root, f'datasets/records__{operation_id}.lance', 'complete')
+            if complete is not None:
+                immutable(journal / 'complete.json', complete)
         if complete is not None and not removed and not any(row['release_id'] in ids for row in published):
             if any(resolve_local_uri(root/uri).exists() for uri in uris):
                 raise ValueError('Retired table path exists again')
@@ -77,16 +87,16 @@ def retire_tables(root, *, table_uris, release_ids=(), operation_id, reason):
         if len(kept) != len(rows):
             ds = lance.dataset(catalog.uri)
             lance.write_dataset(pa.Table.from_pylist(kept, schema=ds.schema), catalog.uri, mode='overwrite')
-        journal.put('registrations_retired', True)
+        immutable(journal / 'registrations_retired.json', True)
         for uri in uris:
             path = resolve_local_uri(root/uri)
             if path.exists(): shutil.rmtree(path)
             (control_directory(path)/'checkpoint.json').unlink(missing_ok=True)
-        journal.put('complete', {'tables': len(uris), 'releases': len(ids)})
+        immutable(journal / 'complete.json', {'tables': len(uris), 'releases': len(ids)})
     # Release locks before deleting their idle files.
     for uri in uris:
         directory = control_directory(resolve_local_uri(root/uri))
         (directory/'write.lock').unlink(missing_ok=True)
         if directory.exists() and not any(directory.iterdir()): directory.rmdir()
         if directory.parent.exists() and not any(directory.parent.iterdir()): directory.parent.rmdir()
-    return journal.get('complete')
+    return (read(journal / 'complete.json') if (journal / 'complete.json').exists() else None)

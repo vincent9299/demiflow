@@ -1,0 +1,47 @@
+{
+  "sql": "SELECT * FROM v30",
+  "sources": {
+    "t5": {
+      "uri": "/tmp/demiflow-dataset-2199j1ve/input4.lance",
+      "version": 1
+    },
+    "t12": {
+      "uri": "/tmp/demiflow-dataset-2199j1ve/input11.lance",
+      "version": 1
+    },
+    "t20": {
+      "uri": "/tmp/demiflow-dataset-2199j1ve/input19.lance",
+      "version": 1
+    },
+    "t27": {
+      "uri": "/tmp/demiflow-dataset-2199j1ve/input26.lance",
+      "version": 1
+    }
+  },
+  "views": {
+    "v6": "SELECT k0, valid1, o2, payload3 FROM t5",
+    "v13": "SELECT k7, valid8, o9, payload10 FROM t12",
+    "v14": "SELECT l.*, r.* FROM v6 l INNER JOIN v13 r ON l.k0=r.k7 AND l.valid1 AND r.valid8",
+    "v21": "SELECT k15, valid16, o17, payload18 FROM t20",
+    "v28": "SELECT k22, valid23, o24, payload25 FROM t27",
+    "v29": "SELECT l.*, r.* FROM v21 l INNER JOIN v28 r ON l.k15=r.k22 AND l.valid16 AND r.valid23",
+    "v30": "SELECT l.*, r.* FROM v14 l INNER JOIN v29 r ON l.k0=r.k15 AND l.valid1 AND r.valid16"
+  },
+  "options": {
+    "memory_bytes": 8589934592,
+    "max_rss_bytes": 25769803776,
+    "max_scratch_bytes": 137438953472,
+    "partitions": 2,
+    "threads": 8,
+    "batch_rows": 8192,
+    "timeout_s": 3600,
+    "admission_timeout_s": 3600,
+    "cgroup_headroom_bytes": 2147483648,
+    "prefer_hash_join": false
+  },
+  "directory": "/tmp/demiflow-dataset-2199j1ve/demiflow-datafusion-6thted6z/dataset-41cc7fad2205470e918c80ab4ebc8c1a",
+  "diagnostic": "/yzp/zhaozy/yangzepeng/0905/demiflow/_demiflow/dataset_native/queries/dataset-41cc7fad2205470e918c80ab4ebc8c1a",
+  "parent_pid": 61379,
+  "slot": 0,
+  "lance_index": null
+}

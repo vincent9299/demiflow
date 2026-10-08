@@ -99,3 +99,41 @@ def test_batch_materialize_reuses_complete_batches():
     assert cached.map(lambda row: {'total': row['total'] * 2}).count() == 3
     assert calls == [2, 2, 1]
     executor.close()
+
+
+def test_wide_rows_spill_before_row_limit_and_restore_individually(monkeypatch):
+    import pickle
+    from demiflow.execution.executors import local
+    executor = LocalDatasetExecutor(workers=1, block_size=256, materialize_memory_limit=1024)
+    def rows():
+        for i in range(6):
+            if i:
+                assert executor._spill_paths, 'wide row must spill before requesting the next row'
+            yield {'i': i, 'payload': str(i) * 2048, 'nested': [i]}
+    cached = DataAPI(executor).from_iter(rows).materialize()
+    restored = []
+    original = pickle.load
+    def record_load(stream):
+        value = original(stream)
+        restored.append(value)
+        assert isinstance(value, dict), 'spill reader must not restore a tuple of wide rows'
+        return value
+    monkeypatch.setattr(local.pickle, 'load', record_load)
+    assert cached.take(1)[0]['i'] == 0
+    assert len(restored) == 1
+    assert cached.count() == 6
+    executor.close()
+
+
+def test_materialization_retains_snapshot_for_reused_mutable_input():
+    executor = LocalDatasetExecutor(workers=1, block_size=256)
+    def rows():
+        row = {'value': []}
+        for i in range(4):
+            row['value'][:] = [i]
+            yield row
+    cached = DataAPI(executor).from_iter(rows).materialize()
+    assert cached.take_all() == [{'value': [i]} for i in range(4)]
+    cached.take_all()[0]['value'].append('consumer mutation')
+    assert cached.take_all()[0] == {'value': [0]}
+    executor.close()

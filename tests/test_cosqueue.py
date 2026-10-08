@@ -230,7 +230,7 @@ def test_requeue_stale_only_old_unfinished():
     assert fresh.bid in snap.claimed          # 新鲜认领不动
 
 
-def test_fetch_batch_tolerates_bad_lines():
+def test_fetch_batch_rejects_bad_lines_before_completion():
     fake = FakeCOS()
     io = mkio(fake)
     raw = b'{"i": 1}\nnot-json\n\n{"i": 2}\n'
@@ -239,9 +239,9 @@ def test_fetch_batch_tolerates_bad_lines():
         gz.write(raw)
     io.put_bytes("queue/batches/b000000.jsonl.gz", buf.getvalue())
     q = COSQueue(io, "queue")
-    rows = q.fetch_batch(type("H", (), {"bid": "b000000",
-                                        "key": "queue/batches/b000000.jsonl.gz"})())
-    assert rows == [{"i": 1}, {"i": 2}]
+    with pytest.raises(ValueError, match="Invalid task"):
+        q.fetch_batch(type("H", (), {"bid": "b000000",
+                                    "key": "queue/batches/b000000.jsonl.gz"})())
 
 
 # ---- queue_runner：成功才 complete ----
@@ -334,3 +334,37 @@ def test_build_host_env_override(monkeypatch):
     assert build_host("b", "ap-x") == "custom.endpoint"
     monkeypatch.delenv("COS_HOST")
     assert build_host("b", "ap-x") == "b.cos.ap-x.myqcloud.com"
+
+
+def test_two_fleet_hosts_never_claim_the_same_live_batch():
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    fake=FakeCOS()
+    transport=fake.transport
+    lock=threading.Lock()
+    def atomic_transport(*args,**kwargs):
+        with lock:
+            return transport(*args,**kwargs)
+    fake.transport=atomic_transport
+    first,second=COSQueue(mkio(fake),'fleet'),COSQueue(mkio(fake),'fleet')
+    first.produce([{'i':i} for i in range(80)],rows_per_batch=1)
+    def consume(queue,host):
+        ids=[]
+        while handle:=queue.claim(host):
+            ids.append(handle.bid)
+            assert len(queue.fetch_batch(handle))==1
+            queue.complete(handle)
+        return ids
+    with ThreadPoolExecutor(2) as executor:
+        a=executor.submit(consume,first,'host-a')
+        b=executor.submit(consume,second,'host-b')
+        left,right=a.result(),b.result()
+    assert len(left+right)==len(set(left+right))==80
+
+
+def test_failed_batch_cannot_write_done():
+    fake=FakeCOS();queue=COSQueue(mkio(fake),'queue')
+    queue.produce([{'id':1}]);handle=queue.claim('worker')
+    with pytest.raises(ValueError,match='successful'):
+        queue.complete(handle,rc=1)
+    assert not queue.snapshot().done

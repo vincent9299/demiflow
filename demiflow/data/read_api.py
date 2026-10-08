@@ -12,6 +12,43 @@ from .api import DataAPI, _current_executor
 from .dataset import Dataset, MaterializedDataset
 
 
+def read_queue(config, *, pool='default', stop=None, idle_timeout_s=1800) -> Dataset:
+    """Consume embedded SQLiteQueue tasks; run_stream defaults to one-row delivery.
+
+    Producer opens/seals its named channel explicitly. Stored completions replay
+    in _queue_result; fresh payloads carry _queue_delivery until ack_queue.
+    """
+    from ..execution.sqlite_channel import QueueReader, channel_config
+    if type(idle_timeout_s) not in (int,float) or not 0<idle_timeout_s<=86400:
+        raise ValueError('Queue idle deadline must be in (0, 86400] seconds')
+    actor=QueueReader(channel_config(**config),pool,stop,idle_timeout_s)
+    ds=DataAPI(_current_executor.get()).from_iter(actor.rows)
+    return Dataset(ds._source,ds._plan,ds._executor,(actor,))
+
+
+def read_queue_records(config, *, pool, through, results=False) -> Dataset:
+    """Scan immutable queue records at an explicit sequence, without claiming."""
+    from ..execution.sqlite_channel import SQLiteChannel, channel_config
+    settings=channel_config(**config)
+    return DataAPI(_current_executor.get()).from_iter(
+        lambda:SQLiteChannel.read_only(**settings).scan(pool,through=through,results=results))
+
+
+def read_document_receipts(path: str, *, sha256: str, max_journal_bytes: int = 8*1024**3,
+                           max_receipt_bytes: int = 8*1024**2, max_rows: int = 2_000_000) -> Dataset:
+    """Read native fetch receipts from a closed SQLite backup pinned by SHA256.
+
+    Emits receipt_id/receipt (DOCUMENT_RESULT), including failed fetches. Reads
+    one JSON value at a time; bounds file/value/row growth and SQLite cache.
+    It neither fetches nor edits the original journal. Materialize to a fixed
+    Lance source before business joins. Limits are not a whole-process RSS cap.
+    """
+    from ..collect.receipt_source import document_receipt_factory
+    factory = document_receipt_factory(path,sha256=sha256,max_journal_bytes=max_journal_bytes,
+        max_receipt_bytes=max_receipt_bytes,max_rows=max_rows)
+    return DataAPI(_current_executor.get()).from_iter(factory)
+
+
 def from_items(items: list[Any]) -> MaterializedDataset:
     """Create a materialized Dataset from a bounded Driver list.
 
@@ -216,6 +253,10 @@ def read_lance(
     filter: str | None = None,
     limit: int | None = None,
     storage_options: Mapping[str, str] | None = None,
+    batch_size: int | None = None,
+    batch_readahead: int | None = None,
+    fragment_readahead: int | None = None,
+    projection: Mapping[str, str] | None = None,
     backend_options=None,
 ) -> Dataset:
     """Create a lazy Dataset from a Lance scan.
@@ -225,7 +266,12 @@ def read_lance(
     limited scan as one read task. ``storage_options`` contains only closed
     non-secret Lance connection values, while ``backend_options`` contains
     only Demiflow physical scheduling options. Formal Candidates should bind
-    fixed inputs to an exact version obtained from authorized inspection."""
+    fixed inputs to an exact version obtained from authorized inspection.
+    ``projection`` maps output names to Lance SQL expressions (for example
+    ``{'item_n': 'array_length(items)'}``), mutually exclusive with ``columns``.
+    Expressions execute in Lance; this does not promise storage-level pruning
+    of every referenced nested field. Nulls and projected Arrow types survive.
+    """
     return DataAPI(_current_executor.get()).read_lance(
         uri,
         version=version,
@@ -233,6 +279,10 @@ def read_lance(
         filter=filter,
         limit=limit,
         storage_options=storage_options,
+        batch_size=batch_size,
+        batch_readahead=batch_readahead,
+        fragment_readahead=fragment_readahead,
+        projection=projection,
         backend_options=backend_options,
     )
 

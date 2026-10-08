@@ -62,12 +62,23 @@ def write_registered_table(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
+def add_lance_columns(*args, **kwargs):
+    from .mutate import add_lance_columns as implementation
+    return implementation(*args, **kwargs)
+
+
+def ensure_lance_vector_index(*args, **kwargs):
+    from .index import ensure_lance_vector_index as implementation
+    return implementation(*args, **kwargs)
+
+
+def vector_index_config(*args, **kwargs):
+    from .index import vector_index_config as implementation
+    return implementation(*args, **kwargs)
+
+
 # 类型直接导入（这些模块顶层仅依赖 stdlib；类不能经函数包装转出，
 # 否则 isinstance / from_dict / 类型标注都会失效）。
-from .assets import (  # noqa: E402
-    AssetCorrupted, AssetError, AssetMissing, AssetReadError,
-    AssetResolution, BlobAssetReader,
-)
 from .refs import DatasetRef  # noqa: E402
 from .registry import (  # noqa: E402
     Catalog, CatalogConflict, ReleaseConflict, ReleaseRegistry,
@@ -75,8 +86,9 @@ from .registry import (  # noqa: E402
 
 
 __all__ = [
-    "AssetCorrupted", "AssetError", "AssetMissing", "AssetReadError",
-    "AssetResolution", "BlobAssetReader", "Catalog", "CatalogConflict",
+    'add_lance_columns',
+    'ensure_lance_vector_index', 'vector_index_config',
+    "Catalog", "CatalogConflict",
     "LanceInspection", "LanceQuerySpec", "LanceScanSpec",
     "LanceVectorSearchSpec", "LanceWriteReceipt", "LanceWriteSpec",
     "aggregate_digest_v1", "checkpoint_lance", "DatasetRef",

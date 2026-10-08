@@ -1,0 +1,36 @@
+{
+  "sql": "SELECT * FROM v17",
+  "sources": {
+    "t0": {
+      "uri": "/tmp/demiflow-stream-map-final/test_module_readers_join_and_w0/visuals",
+      "version": 1
+    },
+    "t11": {
+      "uri": "/tmp/demiflow-dataset-d0njg4tp/input10.lance",
+      "version": 1
+    }
+  },
+  "views": {
+    "v5": "SELECT \"concept\" AS c3, \"image\" AS c4, TRUE AS p1, _rowaddr AS o2 FROM t0",
+    "v12": "SELECT k6, valid7, o8, payload9 FROM t11",
+    "v16": "SELECT *, key_fn13(c3, p1) AS k14, (c3 IS NOT NULL AND coalesce(p1, FALSE)) AS valid15 FROM v5",
+    "v17": "SELECT l.*, r.* FROM v12 l INNER JOIN v16 r ON l.k6=r.k14 AND l.valid7 AND r.valid15"
+  },
+  "options": {
+    "memory_bytes": 8589934592,
+    "max_rss_bytes": 25769803776,
+    "max_scratch_bytes": 137438953472,
+    "partitions": 2,
+    "threads": 8,
+    "batch_rows": 8192,
+    "timeout_s": 3600,
+    "admission_timeout_s": 3600,
+    "cgroup_headroom_bytes": 2147483648,
+    "prefer_hash_join": false
+  },
+  "directory": "/tmp/demiflow-dataset-d0njg4tp/demiflow-datafusion-kmypaxg6/dataset-e55dcc5f5473462d8c4c287e08404cc7",
+  "diagnostic": "/yzp/zhaozy/yangzepeng/0905/demiflow/_demiflow/dataset_native/queries/dataset-e55dcc5f5473462d8c4c287e08404cc7",
+  "parent_pid": 62129,
+  "slot": 0,
+  "lance_index": null
+}

@@ -1,0 +1,22 @@
+SortPreservingMergeExec: [k0@0 ASC NULLS LAST, o2@2 ASC NULLS LAST]
+  SortExec: expr=[k0@0 ASC NULLS LAST, o2@2 ASC NULLS LAST], preserve_partitioning=[true]
+    SortMergeJoinExec: join_type=LeftAnti, on=[(k0@0, k15@0)], filter=valid1@0
+      SortMergeJoinExec: join_type=LeftSemi, on=[(k0@0, k7@0)]
+        SortExec: expr=[k0@0 ASC], preserve_partitioning=[true]
+          RepartitionExec: partitioning=Hash([k0@0], 2), input_partitions=2
+            FFI_ExecutionPlan: ProjectionExec, number_of_children=1
+              FFI_ExecutionPlan: FilteredReadExec, number_of_children=1
+                RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
+                  FFI_ExecutionPlan: FilteredReadExec, number_of_children=0
+        SortExec: expr=[k7@0 ASC], preserve_partitioning=[true]
+          RepartitionExec: partitioning=Hash([k7@0], 2), input_partitions=2
+            FFI_ExecutionPlan: ProjectionExec, number_of_children=1
+              FFI_ExecutionPlan: FilteredReadExec, number_of_children=1
+                RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
+                  FFI_ExecutionPlan: FilteredReadExec, number_of_children=0
+      SortExec: expr=[k15@0 ASC], preserve_partitioning=[true]
+        RepartitionExec: partitioning=Hash([k15@0], 2), input_partitions=2
+          FFI_ExecutionPlan: ProjectionExec, number_of_children=1
+            FFI_ExecutionPlan: FilteredReadExec, number_of_children=1
+              RepartitionExec: partitioning=RoundRobinBatch(2), input_partitions=1
+                FFI_ExecutionPlan: FilteredReadExec, number_of_children=0

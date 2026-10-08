@@ -13,9 +13,9 @@ from ..errors import PhysicalPlanningError
 def plan_action(
     *, backend, action_kind, source, operations, terminal_node,
     terminal_traits, policy, snapshot, work_units=None, work_units_by_stage=None,
-    terminal_native_options=None, parallelism_caps_by_stage=None,
+    terminal_native_options=None, parallelism_caps_by_stage=None, operation_traits_fn=operation_traits,
 ):
-    nodes=[(source,source_traits(source)),*((op,operation_traits(op)) for op in operations),(terminal_node,terminal_traits)]
+    nodes=[(source,source_traits(source)),*((op,operation_traits_fn(op)) for op in operations),(terminal_node,terminal_traits)]
     bounds=_normalize_work_units(len(nodes),work_units,work_units_by_stage)
     caps=_normalize_parallelism_caps(len(nodes),parallelism_caps_by_stage)
     stages=[]

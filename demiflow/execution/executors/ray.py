@@ -286,6 +286,8 @@ class RayDatasetExecutor(DatasetExecutor):
         terminal_native_options=None, source_parallelism_cap=None,
         terminal_parallelism_cap=None,
     ):
+        from ...data.plan import reject_streaming_map_options
+        reject_streaming_map_options(plan, 'Ray')
         self._ensure_ray()
         native=(getattr(source,"native_options",None) is not None or any(getattr(operation,"native_options",None) is not None for operation in plan.operations) or terminal_native_options is not None)
         if native and (self._candidate_execution is None or self._candidate_execution.mode != "native"):
@@ -370,6 +372,8 @@ class RayDatasetExecutor(DatasetExecutor):
         return options
 
     def _compile(self, source: SourcePlan, plan: LogicalPlan, *, action_kind="execute", terminal_category="action", terminal_native_options=None, physical_plan=None):
+        from ...data.plan import reject_streaming_map_options
+        reject_streaming_map_options(plan, 'Ray')
         physical=physical_plan or self.plan(source,plan,action_kind,terminal_category=terminal_category,terminal_native_options=terminal_native_options)
         self._active_physical_plan=physical
         stages={stage.ordinal:stage for stage in physical.transforms}
@@ -639,8 +643,8 @@ class RayDatasetExecutor(DatasetExecutor):
             raise
 
     def write_lance(self, source, plan, spec, *, native_options=None):
-        # 覆盖由单个 writer 提交整个新快照；显式 schema 也在同一路径统一转换。
-        if spec.expected_version is None or spec.mode == "overwrite" or spec.schema is not None:
+        # 覆盖和部分列 merge 由单个 writer 一次提交；显式 schema 同样集中转换。
+        if spec.expected_version is None or spec.mode != "append" or spec.schema is not None:
             return self._write_lance_direct(
                 source, plan, spec, native_options=native_options,
             )

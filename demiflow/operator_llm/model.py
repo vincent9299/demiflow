@@ -106,6 +106,8 @@ class PromptDefinition:
     response_schema: Mapping[str, Any]
     schema_retries: int = 0
     response_format: str = "json"
+    input_mode: str = "template"
+    message_limits: Mapping[str, int] = field(default_factory=dict)
 
     @property
     def response_keys(self) -> tuple[str, ...]:
@@ -115,7 +117,7 @@ class PromptDefinition:
     @property
     def input_modalities(self) -> tuple[str, ...]:
         values = ["text"]
-        if any(item.kind in {PlaceholderKind.IMAGE, PlaceholderKind.NUMBERED_IMAGE} for item in self.template.placeholders):
+        if self.input_mode == 'messages' or any(item.kind in {PlaceholderKind.IMAGE, PlaceholderKind.NUMBERED_IMAGE} for item in self.template.placeholders):
             values.append("image")
         return tuple(values)
 
@@ -176,6 +178,7 @@ class OperatorLLMRequest:
     schema_attempt: int = 1
     validation_feedback: str = ""
     response_format: str = "json"
+    messages: tuple[Mapping[str, Any], ...] | None = None
 
     def __post_init__(self) -> None:
         if self.schema_attempt < 1:

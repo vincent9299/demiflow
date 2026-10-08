@@ -253,15 +253,20 @@ def test_missing_pack_and_unsupported_executor_fail_at_declaration():
     with pytest.raises(NotImplementedError):prompt(ds)
 
 
-def test_bundle_discovers_async_prompt_configuration(tmp_path,monkeypatch):
+@pytest.mark.parametrize('method', ['map_prompt_async', 'agentmap_async'])
+def test_bundle_discovers_async_prompt_configuration(tmp_path,monkeypatch,method):
     from types import SimpleNamespace
     import demiflow.pipeline
     import demiflow.execution.pipeline_sources
     from demiflow.operator_llm.parser import load_referenced_prompt_packs
     pipeline=tmp_path/'pipeline';pipeline.mkdir()
     source=pipeline/'main.py'
-    source.write_text('data.map_prompt_async("enrich", config="p.yaml", inputs=["payload"], output="answer")')
+    source.write_text(f'data.{method}("enrich", config="p.yaml", inputs=["payload"], output="answer")')
     (pipeline/'p.yaml').write_text(PACK)
+    if method == 'agentmap_async':
+        from test_agent_config import entries
+        agent_path, _, _ = entries(pipeline)
+        (pipeline/'p.yaml').write_text(agent_path.read_text())
     monkeypatch.setattr(demiflow.pipeline,'discover_pipeline_definition',lambda root:SimpleNamespace(entrypoint='main.py'))
     monkeypatch.setattr(demiflow.execution.pipeline_sources,'reachable_pipeline_sources',lambda root,entrypoint:[source])
     assert set(load_referenced_prompt_packs(tmp_path))=={'p.yaml'}
@@ -285,6 +290,16 @@ def test_durable_replay_budget_and_uncertain_call(server,tmp_path):
     __import__('pathlib').Path(row['call']['response_path']).unlink()
     with pytest.raises(UncertainPromptCall):prompt(DataAPI().from_items([{'item':1}]), options=options).checkpoint(tmp_path/(__import__("uuid").uuid4().hex+".jsonl"),version="test").take_all()
     assert len(server['requests'])==2
+
+
+def test_explicit_sqlite_lifetime_budget_survives_new_node(server,tmp_path):
+    options={'sqlite_journal':{'path':str(tmp_path/'calls.sqlite'),'max_requests':1}}
+    prompt(DataAPI().from_items([{'item':1}]),options=options,max_requests=1).run_stream()
+    prompt(DataAPI().from_items([{'item':1}]),options=options,max_requests=1).run_stream()
+    assert len(server['requests'])==1
+    with pytest.raises(PromptBudgetExceededError,match='Persistent'):
+        prompt(DataAPI().from_items([{'item':2}]),options=options,max_requests=1).run_stream()
+    assert len(server['requests'])==1
 
 
 def test_prompt_skip_and_error_rows_keep_original_data(server,tmp_path):

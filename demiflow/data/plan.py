@@ -68,9 +68,47 @@ class LogicalOp:
 
 
 @dataclass(frozen=True)
+class MapStreamOptions:
+    """Explicit local streaming policy; absence preserves ordinary lazy map."""
+
+    concurrency: int = 1
+    queue_depth: int | None = None
+    execution: str = "inline"
+    catch: Tuple[type[Exception], ...] = ()
+    label: str | None = None
+    callable_scope: str = "stage"
+
+    def __post_init__(self):
+        for name in ("concurrency", "queue_depth"):
+            value = getattr(self, name)
+            if name == "queue_depth" and value is None:
+                continue
+            if type(value) is not int or value < 1:
+                raise ValueError(f"map {name} must be a positive integer")
+        if self.execution not in ("inline", "thread"):
+            raise ValueError("map execution must be 'inline' or 'thread'")
+        if self.callable_scope not in ("stage", "worker"):
+            raise ValueError("map callable_scope must be 'stage' or 'worker'")
+        if self.label is not None and (not isinstance(self.label, str) or not self.label.strip()):
+            raise ValueError("map label must be a non-empty string")
+        if not isinstance(self.catch, tuple) or any(
+            not isinstance(exc, type) or not issubclass(exc, Exception) for exc in self.catch
+        ):
+            raise TypeError("map catch must be a tuple of Exception classes; cancellation is never caught")
+
+    def validate_callable(self, spec):
+        if self.callable_scope == "worker" and not spec.is_class:
+            raise TypeError("map callable_scope='worker' requires a callable class and fn_constructor_args/kwargs")
+        target = spec.target
+        if inspect.iscoroutinefunction(target) or inspect.iscoroutinefunction(getattr(target, '__call__', None)):
+            raise TypeError("map requires a synchronous callable; use map_async for async work")
+
+
+@dataclass(frozen=True)
 class MapOp(LogicalOp):
     callable: CallableSpec
     native_options: NativeOptions | None = None
+    stream_options: MapStreamOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +133,7 @@ class BoundMapOp(LogicalOp):
     output: Optional[str] = None
     outputs: Optional[Mapping[str, str]] = None
     native_options: NativeOptions | None = None
+    stream_options: MapStreamOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -156,10 +195,10 @@ class AsyncMapOp(LogicalOp):
 
     fn(row) -> row | None | list[row]：None=认缺丢弃并计数；list=展开
     （flat 语义合一）。concurrency=该级 worker 数（并发封顶）；
-    queue_depth=下游缓冲深度（None=concurrency；载字节载荷时深度即
-    内存上界）；catch=认缺异常白名单（命中只计数不断链，白名单外
+    queue_depth=本级输入缓冲行数（None=concurrency，不是字节或 RSS 上限）；
+    catch=认缺异常白名单（命中只计数不断链，白名单外
     异常终止整链）；label=统计名（缺省取函数名）。
-    仅由 Dataset.run_stream() 消费；惰性路径遇到本算子将显式拒绝。
+    Dataset.run_stream() 或本地 materialize() 消费；普通惰性路径显式拒绝。
     """
     callable: CallableSpec
     concurrency: int = 1
@@ -167,6 +206,21 @@ class AsyncMapOp(LogicalOp):
     catch: Tuple[type[BaseException], ...] = ()
     label: str | None = None
     hard_timeout: float | None = None   # 单行硬超时；超时计 miss（活性层）
+    execution: str = "inline"          # thread: 同步阻塞 fn，由本级专用线程池执行
+
+
+@dataclass(frozen=True)
+class DeduplicateOp(AsyncMapOp):
+    """Online keyed uniqueness, retaining durable first-arrival ownership."""
+    on: Tuple[str, ...] = ()
+    key: str = ''
+    output: str = 'deduplication'
+
+
+@dataclass(frozen=True)
+class AgentMapOp(AsyncMapOp):
+    """One outer async node, with a declared row-local operator environment."""
+    environment: Any = None
 
 
 @dataclass(frozen=True)
@@ -189,6 +243,31 @@ class BatchMapOp(LogicalOp):
     catch: Tuple[type[BaseException], ...] = ()
     label: str | None = None
     hard_timeout: float | None = None     # 单批调用硬超时；同 AsyncMapOp
+
+
+@dataclass(frozen=True)
+class EmbeddingMapOp(BatchMapOp):
+    """Native batched embedding node using the shared local streaming substrate."""
+    model_contract: Mapping[str, Any] = field(default_factory=dict)
+    inputs: Mapping[str, str] = field(default_factory=dict)
+    output: str = 'embedding'
+
+
+@dataclass(frozen=True)
+class StreamGroupBatchesOp(BatchMapOp):
+    on: Tuple[str, ...] = ()
+    output: str = 'items'
+    chunk_bytes: int = 32 * 1024**2
+    max_groups: int = 64
+    buffer_bytes: int = 64 * 1024**2
+
+
+@dataclass(frozen=True)
+class StreamPrependOp(AsyncMapOp):
+    """Read a finite synchronous Dataset at this node before its upstream rows."""
+    source_dataset: Any = None
+    max_rows: int = 100000
+    max_row_bytes: int = 1024**2
 
 
 @dataclass(frozen=True)
@@ -353,6 +432,10 @@ class BoundCallable:
             **kwargs,
             **dict(self._operation.callable.call_kwargs),
         )
+        if self._operation.stream_options is not None and inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise TypeError('map synchronous callable returned an awaitable; use map_async')
         if self._operation.output is not None:
             return {**row, self._operation.output: result}
         if self._operation.outputs is not None:
@@ -384,3 +467,88 @@ class StandardCallable:
 
     def __call__(self, row: Any) -> Any:
         return self._fn(row, *self._spec.call_args, **dict(self._spec.call_kwargs))
+
+
+def is_stream_operation(operation) -> bool:
+    """One dispatch predicate shared by streaming actions and checkpoint bridges."""
+    return isinstance(operation, (AsyncMapOp, BatchMapOp)) or (
+        isinstance(operation, (MapOp, BoundMapOp)) and operation.stream_options is not None
+    )
+
+
+def reject_streaming_map_options(plan, backend):
+    """Reject before reading sources, constructing workers or opening a sink."""
+    if any(isinstance(op, (MapOp, BoundMapOp)) and op.stream_options is not None
+           for op in plan.operations):
+        from ..errors import UnsupportedExecutionOptionError
+        raise UnsupportedExecutionOptionError(
+            f"Dataset.map streaming options are not supported by {backend} lazy execution; "
+            "use local run_stream(), materialize() or checkpoint()"
+        )
+
+
+@dataclass(frozen=True)
+class VectorSearchOp(AsyncMapOp):
+    """One query vector per row, with a candidate list added to that row."""
+    query: str = ''
+    output: str = ''
+    search_spec: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SearchWebOp(AsyncMapOp):
+    """Native web search node; request/result fields are recorded in the plan."""
+    requests: str = ''
+    output: str = ''
+    checkpoint: str | None = None
+    checkpoint_operator: str = 'search_web'
+    checkpoint_lease_s: float = 300.0
+
+
+@dataclass(frozen=True)
+class FetchDocumentsOp(AsyncMapOp):
+    requests: str = ''
+    output: str = ''
+
+
+@dataclass(frozen=True)
+class FetchImagesOp(AsyncMapOp):
+    requests: str = ''
+    output: str = ''
+
+
+@dataclass(frozen=True)
+class RegisterDocumentsOp(AsyncMapOp):
+    request: str = ''
+    output: str = ''
+
+
+@dataclass(frozen=True)
+class RegisterDocumentsBatchOp(BatchMapOp):
+    request: str = ''
+    output: str = ''
+
+
+@dataclass(frozen=True)
+class ReadDocumentsOp(AsyncMapOp):
+    request: str = ''
+    output: str = ''
+
+
+@dataclass(frozen=True)
+class SaveLanceOp(BatchMapOp):
+    uri: str = ''
+    stage: str = ''
+    key: str = ''
+    output_ref: str | None = None
+    mode: str = 'overwrite'
+
+
+@dataclass(frozen=True)
+class ImageMapOp(AsyncMapOp):
+    """Native image model request with a mandatory versioned template."""
+    template: Mapping[str, Any] = field(default_factory=dict)
+    model_contract: Mapping[str, Any] = field(default_factory=dict)
+    inputs: Mapping[str, str] = field(default_factory=dict)
+    output: str = ''
+    image_encoding: str = 'png'

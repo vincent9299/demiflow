@@ -30,20 +30,49 @@ class LanceScanSpec:
     filter: str | None = None
     limit: int | None = None
     storage_options: StorageOptions = ()
+    batch_size: int | None = None
+    batch_readahead: int | None = None
+    fragment_readahead: int | None = None
+    projection: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "uri", normalize_lance_uri(self.uri))
         object.__setattr__(self, "version", _optional_positive_int(self.version, "version"))
         object.__setattr__(self, "columns", normalize_columns(self.columns))
+        projection = self.projection
+        if isinstance(projection, Mapping):
+            projection = tuple(projection.items())
+        if projection is None:
+            projection = ()
+        try:
+            projection = tuple(projection)
+            if any(not isinstance(item, (tuple, list)) for item in projection):
+                raise TypeError('projection entries must be pairs')
+            projection = tuple(tuple(item) for item in projection)
+        except TypeError as exc:
+            raise InvalidLanceRequest("projection must map output names to SQL expressions") from exc
+        if any(len(item) != 2 or any(not isinstance(v, str) or not v.strip() for v in item)
+               for item in projection):
+            raise InvalidLanceRequest("projection requires nonempty names and SQL expressions")
+        if len({item[0] for item in projection}) != len(projection):
+            raise InvalidLanceRequest("projection output names must be unique")
+        if projection and self.columns:
+            raise InvalidLanceRequest("columns and projection are mutually exclusive")
+        object.__setattr__(self, "projection", projection)
         object.__setattr__(self, "filter", normalize_filter(self.filter))
         object.__setattr__(self, "limit", _optional_positive_int(self.limit, "limit"))
         object.__setattr__(self, "storage_options", normalize_storage_options(self.storage_options))
+        for name in ('batch_size', 'batch_readahead', 'fragment_readahead'):
+            object.__setattr__(self, name, _optional_positive_int(getattr(self, name), name))
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": "scan", "uri": self.uri, "version": self.version,
             "columns": list(self.columns), "filter": self.filter,
             "limit": self.limit, "storage_options": dict(self.storage_options),
+            **({"projection": dict(self.projection)} if self.projection else {}),
+            **{name: getattr(self, name) for name in
+               ('batch_size', 'batch_readahead', 'fragment_readahead') if getattr(self, name) is not None},
         }
 
     @property
@@ -97,12 +126,30 @@ class LanceWriteSpec:
     uri: str
     expected_version: int | None = None
     storage_options: StorageOptions = ()
-    mode: Literal["append", "overwrite"] = "append"
+    mode: Literal["create", "append", "overwrite", "merge"] = "append"
     schema: "pa.Schema | None" = None
+    on: tuple[str, ...] = ()
+    update_columns: tuple[str, ...] | None = None
+    when_not_matched: str | None = None
 
     def __post_init__(self) -> None:
-        if self.mode not in ("append", "overwrite"):
-            raise InvalidLanceRequest("Lance write mode must be append or overwrite")
+        if self.mode not in ("create", "append", "overwrite", "merge"):
+            raise InvalidLanceRequest("Lance write mode must be create, append, overwrite or merge")
+        if self.mode == "create" and self.expected_version is not None:
+            raise InvalidLanceRequest("Create requires an absent table, not expected_version")
+        object.__setattr__(self, "on", normalize_columns((self.on,) if isinstance(self.on, str) else self.on))
+        if self.update_columns is not None:
+            object.__setattr__(self, "update_columns", normalize_columns(self.update_columns))
+        if self.mode == "merge":
+            if not self.on:
+                raise InvalidLanceRequest("Lance merge requires explicit matching columns: on")
+            if set(self.on) & set(self.update_columns or ()):
+                raise InvalidLanceRequest("Merge keys cannot be update columns")
+            object.__setattr__(self, "when_not_matched", "error" if self.when_not_matched is None else self.when_not_matched)
+            if self.when_not_matched not in {"error", "ignore", "insert"}:
+                raise InvalidLanceRequest("when_not_matched must be error, ignore or insert")
+        elif self.on or self.update_columns is not None or self.when_not_matched is not None:
+            raise InvalidLanceRequest("Matching keys and update columns require mode=merge")
         if self.schema is not None:
             from .storage import schema_hash
             schema_hash(self.schema)  # 显式 schema 也用于空输入，不依赖业务字段。
@@ -122,6 +169,9 @@ class LanceWriteSpec:
         if self.schema is not None:
             from .storage import schema_hash
             result["schema_hash"] = schema_hash(self.schema)
+        if self.mode == "merge":
+            result.update(on=list(self.on), update_columns=list(self.update_columns) if self.update_columns is not None else None,
+                          when_not_matched=self.when_not_matched)
         return result
 
     @property
@@ -164,6 +214,7 @@ class LanceWriteReceipt:
     schema_hash: str
     status: WriteStatus
     error: Mapping[str, Any] | None = None
+    merge_stats: Mapping[str, int] | None = None
 
     def __post_init__(self) -> None:
         _normalized_text(self.request_hash, "request_hash")
@@ -185,7 +236,15 @@ class LanceWriteReceipt:
         if self.status == "committed":
             if self.committed_version is None or self.written_rows is None:
                 raise InvalidLanceRequest("committed Lance receipt is incomplete")
-            if self.written_rows != self.input_rows:
+            if self.merge_stats is not None:
+                if set(self.merge_stats) != {"updated_rows", "inserted_rows", "ignored_rows"}:
+                    raise InvalidLanceRequest("Invalid merge receipt statistics")
+                for key, value in self.merge_stats.items():
+                    _nonnegative_int(value, key)
+                if (self.merge_stats['updated_rows'] + self.merge_stats['inserted_rows'] != self.written_rows
+                        or self.written_rows + self.merge_stats['ignored_rows'] != self.input_rows):
+                    raise InvalidLanceRequest("Merge receipt row counts differ")
+            elif self.written_rows != self.input_rows:
                 raise InvalidLanceRequest("committed Lance row counts differ")
             if self.error is not None:
                 raise InvalidLanceRequest("committed Lance receipt must not contain an error")
@@ -195,8 +254,8 @@ class LanceWriteReceipt:
             object.__setattr__(self, "error", validate_error(self.error))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": "demiflow_lance_write_receipt_v1",
+        result = {
+            "schema_version": "demiflow_lance_write_receipt_v2" if self.merge_stats is not None else "demiflow_lance_write_receipt_v1",
             "request_hash": self.request_hash, "uri": self.uri,
             "expected_version": self.expected_version,
             "committed_version": self.committed_version,
@@ -204,6 +263,9 @@ class LanceWriteReceipt:
             "schema_hash": self.schema_hash, "status": self.status,
             "error": dict(self.error) if self.error is not None else None,
         }
+        if self.merge_stats is not None:
+            result['merge_stats'] = dict(self.merge_stats)
+        return result
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "LanceWriteReceipt":
@@ -212,9 +274,11 @@ class LanceWriteReceipt:
             "committed_version", "input_rows", "written_rows", "schema_hash",
             "status", "error",
         }
+        if isinstance(value, Mapping) and value.get('schema_version') == 'demiflow_lance_write_receipt_v2':
+            fields.add('merge_stats')
         if not isinstance(value, Mapping) or set(value) != fields:
             raise InvalidLanceRequest("Lance write receipt fields are unsupported")
-        if value.get("schema_version") != "demiflow_lance_write_receipt_v1":
+        if value.get("schema_version") not in {"demiflow_lance_write_receipt_v1", "demiflow_lance_write_receipt_v2"}:
             raise InvalidLanceRequest("unsupported Lance write receipt schema")
         return cls(
             request_hash=value["request_hash"], uri=value["uri"],
@@ -223,6 +287,7 @@ class LanceWriteReceipt:
             input_rows=value["input_rows"], written_rows=value["written_rows"],
             schema_hash=value["schema_hash"], status=value["status"],
             error=value["error"],
+            merge_stats=value.get('merge_stats'),
         )
 
 

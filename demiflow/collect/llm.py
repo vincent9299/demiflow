@@ -160,3 +160,16 @@ async def close_all_llm() -> None:
         await client.aclose()
     _ENDPOINT_CLIENTS.clear()
     _INJECTED.clear()
+
+
+async def _close_stream_pool():
+    # Only module-created endpoint clients belong to the stream's pool.
+    # Injected clients keep their explicitly declared external ownership.
+    clients = list(_ENDPOINT_CLIENTS.values())
+    _ENDPOINT_CLIENTS.clear()
+    for client in clients:
+        await client.aclose()
+
+
+from ..execution.resource_registry import register_stream_cleanup as _register_cleanup
+_register_cleanup('collect.llm', _close_stream_pool)

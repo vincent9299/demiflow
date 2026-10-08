@@ -1,0 +1,23 @@
+--- a/python/src/lib.rs
++++ b/python/src/lib.rs
+@@ -355,7 +355,9 @@
+     m.add_wrapped(wrap_pyfunction!(debug::format_manifest))?;
+     m.add_wrapped(wrap_pyfunction!(debug::format_fragment))?;
+     m.add_wrapped(wrap_pyfunction!(debug::list_transactions))?;
+-    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
++    // Preserve the upstream API version for frozen, already-running consumers.
++    m.add("__version__", "12.0.0")?;
++    m.add("__build_version__", env!("CARGO_PKG_VERSION"))?;
+ 
+     register_datagen(py, m)?;
+     register_indices(py, m)?;
+--- a/python/python/lance/__init__.py
++++ b/python/python/lance/__init__.py
+@@ -38,6 +38,7 @@
+ )
+ from .fragment import FragmentMetadata, LanceFragment
+ from .lance import (
++    __build_version__,
+     CleanupCandidateFile,
+     CleanupExplanation,
+     CleanupReferencedBranch,

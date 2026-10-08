@@ -1,0 +1,29 @@
+{
+  "sql": "SELECT * FROM v6 ORDER BY k0 ASC NULLS LAST, o2 ASC NULLS LAST",
+  "sources": {
+    "t5": {
+      "uri": "/tmp/demiflow-dataset-59v8ak3_/input4.lance",
+      "version": 1
+    }
+  },
+  "views": {
+    "v6": "SELECT k0, valid1, o2, payload3 FROM t5"
+  },
+  "options": {
+    "memory_bytes": 8589934592,
+    "max_rss_bytes": 25769803776,
+    "max_scratch_bytes": 137438953472,
+    "partitions": 2,
+    "threads": 8,
+    "batch_rows": 8192,
+    "timeout_s": 3600,
+    "admission_timeout_s": 3600,
+    "cgroup_headroom_bytes": 2147483648,
+    "prefer_hash_join": false
+  },
+  "directory": "/tmp/demiflow-dataset-59v8ak3_/demiflow-datafusion-0ba463e4/dataset-c7de10e4f2a74152aea7800bb78d0b49",
+  "diagnostic": "/yzp/zhaozy/yangzepeng/0905/demiflow/_demiflow/dataset_native/queries/dataset-c7de10e4f2a74152aea7800bb78d0b49",
+  "parent_pid": 54814,
+  "slot": 0,
+  "lance_index": null
+}

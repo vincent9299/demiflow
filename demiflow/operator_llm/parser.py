@@ -100,14 +100,14 @@ def parse_prompt_pack(text: str) -> PromptPack:
     )
 
 
-def _inspect_prompt(name: str, raw: Any) -> tuple[PromptDefinition | None, tuple[PromptContractDiagnostic, ...]]:
+def _inspect_prompt(name: str, raw: Any, *, model=None) -> tuple[PromptDefinition | None, tuple[PromptContractDiagnostic, ...]]:
     issues: list[PromptContractDiagnostic] = []
     if not name or not isinstance(raw, Mapping):
         return None, (PromptContractDiagnostic(
             "prompt_definition_invalid", f"invalid prompt: {name!r}",
             f"$.prompts.{name}", name,
         ),)
-    for field in sorted(set(raw) - {"version", "model", "response_schema", "schema_retries", "template", "response_format"}):
+    for field in sorted(set(raw) - {"version", "model", "response_schema", "schema_retries", "template", "response_format", "input_mode", "message_limits"}):
         issues.append(PromptContractDiagnostic(
             "prompt_field_unsupported",
             f"prompt {name!r} has unsupported field: {field}",
@@ -119,12 +119,27 @@ def _inspect_prompt(name: str, raw: Any) -> tuple[PromptDefinition | None, tuple
             "prompt_version_required", f"{name!r} requires non-empty version",
             f"$.prompts.{name}.version", name,
         ))
-    model, model_issues = inspect_prompt_model(
-        raw.get("model"), label=f"prompt {name!r} model", prompt=name,
-    )
-    issues.extend(model_issues)
-    template, template_issues = inspect_template(raw.get("template"), prompt=name)
-    issues.extend(template_issues)
+    if model is None:
+        model, model_issues = inspect_prompt_model(
+            raw.get("model"), label=f"prompt {name!r} model", prompt=name,
+        )
+        issues.extend(model_issues)
+    from .model import CompiledTemplate
+    from .messages import message_limits
+    mode, limits = raw.get('input_mode', 'template'), {}
+    if mode == 'messages':
+        template = CompiledTemplate('', ())
+        try:
+            if 'template' in raw or raw.get('schema_retries', 0) != 0:
+                raise ValueError('messages mode forbids template and automatic schema retries')
+            limits = message_limits(raw.get('message_limits'))
+        except ValueError as exc:
+            issues.append(PromptContractDiagnostic('prompt_messages_invalid', str(exc), 'input_mode', name))
+    else:
+        template, template_issues = inspect_template(raw.get("template"), prompt=name)
+        issues.extend(template_issues)
+        if mode != 'template' or 'message_limits' in raw:
+            issues.append(PromptContractDiagnostic('prompt_input_mode_invalid', 'message_limits requires messages mode; input_mode must be template or messages', 'input_mode', name))
     schema, schema_issues = inspect_schema(raw.get("response_schema"))
     issues.extend(PromptContractDiagnostic(
         "prompt_response_schema_invalid", f"prompt {name!r} response_schema invalid: {message}",
@@ -145,7 +160,7 @@ def _inspect_prompt(name: str, raw: Any) -> tuple[PromptDefinition | None, tuple
         ))
     if issues or model is None or template is None or schema is None:
         return None, tuple(issues)
-    return PromptDefinition(name, version, model, template, schema, retries, response_format), ()
+    return PromptDefinition(name, version, model, template, schema, retries, response_format, mode, limits), ()
 
 def load_prompt_pack(path: str | Path) -> PromptPack:
     target = Path(path)
@@ -168,19 +183,26 @@ def load_referenced_prompt_packs(bundle_root: str | Path) -> dict[str, PromptPac
     from demiflow.execution.pipeline_sources import reachable_pipeline_sources
     root=Path(bundle_root).resolve(); pipeline=root/"pipeline"
     entrypoint=discover_pipeline_definition(root).entrypoint
-    values=set()
+    values={}
     for source_path in reachable_pipeline_sources(root,entrypoint):
         tree=ast.parse(source_path.read_text(encoding="utf-8"),filename=str(source_path))
         for node in ast.walk(tree):
-            if not isinstance(node,ast.Call) or not isinstance(node.func,ast.Attribute) or node.func.attr not in {"map_prompt", "map_prompt_async"}: continue
+            if not isinstance(node,ast.Call) or not isinstance(node.func,ast.Attribute) or node.func.attr not in {"map_prompt", "map_prompt_async", "agentmap_async"}: continue
             keywords={item.arg:item.value for item in node.keywords if item.arg}; value=keywords.get("config")
             if not isinstance(value,ast.Constant) or not isinstance(value.value,str): raise PromptPackError("map_prompt config must be a string literal")
             name=value.value; path=Path(name)
             if path.is_absolute() or len(path.parts)!=1 or path.suffix not in {".yaml",".yml"}: raise PromptPackError("map_prompt config must be a top-level pipeline YAML file")
-            values.add(name)
+            family = 'agent' if node.func.attr == 'agentmap_async' else 'prompt'
+            if name in values and values[name] != family:
+                raise PromptPackError('agentmap and map_prompt require distinct configuration entries')
+            values[name] = family
     result={}
     for name in sorted(values):
         target=pipeline/name
         if target.is_symlink(): raise PromptPackError("map_prompt config symlinks are forbidden")
-        result[name]=load_prompt_pack(target)
+        if values[name] == 'agent':
+            from demiflow.agent import load_agent_config
+            result[name] = load_agent_config(target).prompt_pack
+        else:
+            result[name]=load_prompt_pack(target)
     return result

@@ -123,14 +123,24 @@ def lance_commit_conflict_error():
 def open_lance_dataset(
     uri: str, version: int | None,
     storage_options: tuple[tuple[str, str], ...] = (),
+    *, index_cache_size_bytes: int | None = None,
+    metadata_cache_size_bytes: int | None = None,
 ):
     normalized = normalize_lance_uri(uri)
     resolved_version = _optional_version(version)
     if _local_dataset_missing(normalized):
         raise LanceResourceNotFound(f"Lance dataset not found: {normalized}")
+    caches = {}
+    for name, value in (("index_cache_size_bytes", index_cache_size_bytes),
+                        ("metadata_cache_size_bytes", metadata_cache_size_bytes)):
+        if value is not None:
+            if type(value) is not int or value < 0:
+                raise InvalidLanceRequest(f"{name} must be a nonnegative integer")
+            caches[name] = value
     return require_lance().dataset(
         normalized, version=resolved_version,
         storage_options=dict(normalize_storage_options(storage_options)) or None,
+        **caches,
     )
 
 

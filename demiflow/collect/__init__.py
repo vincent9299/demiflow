@@ -19,7 +19,7 @@ import sys as _sys
 
 _LAZY = ("net", "fetch", "store", "resume", "crawl", "images", "search",
          "llm", "exec_curl", "fleet", "cosio", "cosqueue", "queue_runner",
-         "relay", "pan123", "supervisor")
+         "relay", "pan123", "supervisor", "sqlite_queue", "embedded_worker", "network_config")
 
 
 def __getattr__(name):
@@ -38,3 +38,6 @@ def __dir__():
 
 
 __all__ = list(_LAZY)
+
+# Declarative native search configuration; vendor code loads only in workers.
+from .native_search import SearchConfig, Secret, search_source_inventory

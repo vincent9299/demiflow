@@ -2,7 +2,7 @@ import lance
 import pyarrow as pa
 import pytest
 from demiflow.lance.maintenance import retire_tables
-from demiflow.lance.records import LanceRecordStore
+from demiflow.execution.artifacts import read
 from demiflow.lance.refs import DatasetRef
 from demiflow.lance.registry import Catalog, ReleaseRegistry
 from demiflow.lance.storage import schema_hash
@@ -33,7 +33,7 @@ def test_retirement_is_audited_and_repeatable(tmp_path):
     assert not (tmp_path/ref.relative_uri).exists()
     assert Catalog(tmp_path).registered() == []
     assert ReleaseRegistry(tmp_path).get('old') is None
-    record = LanceRecordStore(tmp_path, 'datasets/records__cleanup.lance').get('plan')
+    record = read(tmp_path / '_demiflow/maintenance/cleanup/plan.json')
     assert record['catalog_rows'][0]['relative_uri'] == ref.relative_uri
     assert retire_tables(tmp_path, **kw) == {'tables': 1, 'releases': 1}
 
@@ -46,7 +46,7 @@ def test_reference_in_validation_is_protected(tmp_path):
         retire_tables(tmp_path, table_uris=[old.relative_uri], operation_id='blocked', reason='test')
 
 
-@pytest.mark.parametrize('uri', ['../bad.lance', '/tmp/bad.lance', 'registry/datasets.lance', 'datasets/registry_datasets.lance', 'datasets/registry_releases.lance'])
+@pytest.mark.parametrize('uri', ['../bad.lance', '/tmp/bad.lance', 'registry/datasets.lance', '_demiflow/registry/datasets.lance', '_demiflow/registry/releases.lance'])
 def test_retirement_rejects_unsafe_paths(tmp_path, uri):
     with pytest.raises(ValueError, match='Unsafe'):
         retire_tables(tmp_path, table_uris=[uri], operation_id='bad', reason='test')

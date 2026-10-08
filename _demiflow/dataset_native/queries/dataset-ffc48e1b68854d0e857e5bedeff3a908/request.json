@@ -1,0 +1,29 @@
+{
+  "sql": "SELECT * FROM v6 ORDER BY k0 ASC NULLS LAST, o2 ASC NULLS LAST",
+  "sources": {
+    "t5": {
+      "uri": "/tmp/demiflow-stream-map-regression/test_fused_map_shuffle_reduce_1/demiflow-dataset-_p6wj0f5/input4.lance",
+      "version": 1
+    }
+  },
+  "views": {
+    "v6": "SELECT k0, valid1, o2, payload3 FROM t5"
+  },
+  "options": {
+    "memory_bytes": 8589934592,
+    "max_rss_bytes": 25769803776,
+    "max_scratch_bytes": 137438953472,
+    "partitions": 2,
+    "threads": 8,
+    "batch_rows": 8192,
+    "timeout_s": 3600,
+    "admission_timeout_s": 3600,
+    "cgroup_headroom_bytes": 2147483648,
+    "prefer_hash_join": false
+  },
+  "directory": "/tmp/demiflow-stream-map-regression/test_fused_map_shuffle_reduce_1/demiflow-dataset-_p6wj0f5/demiflow-datafusion-knvt6ivu/dataset-ffc48e1b68854d0e857e5bedeff3a908",
+  "diagnostic": "/yzp/zhaozy/yangzepeng/0905/demiflow/_demiflow/dataset_native/queries/dataset-ffc48e1b68854d0e857e5bedeff3a908",
+  "parent_pid": 54814,
+  "slot": 0,
+  "lance_index": null
+}

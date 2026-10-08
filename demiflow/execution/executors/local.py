@@ -31,6 +31,7 @@ from ...data.plan import (
     OperatorLLMMapOp, RandomSampleOp, RenameColumnsOp, SelectColumnsOp,
     RandomShuffleOp, RandomizeBlockOrderOp, RepartitionOp, SortOp,
     StandardCallable,
+    reject_streaming_map_options,
 )
 from ...operator_llm.runtime import BoundOperatorLLMMap, InProcessOperatorLLMCoordinator, OperatorLLMRuntime
 from ...data.sources import DatasourceSource, FileSource, IterableSource, ItemsSource, LanceSource, MaterializedSource, RangeSource, SourcePlan, SqlSource
@@ -42,15 +43,25 @@ from ...planning import BackendResourceSnapshot, ResourceBundle, plan_action
 from ...planning.traits import terminal_traits
 
 
-@dataclass(frozen=True)
+@dataclass
 class _LocalMaterializedHandle:
     blocks: tuple[Any, ...]
     row_count: int
+    released: bool = False
+
+    def check_open(self):
+        if self.released:
+            raise RuntimeError('Materialized Dataset was released')
 
 
 @dataclass(frozen=True)
 class _SpilledBlock:
     path: str
+
+
+@dataclass(frozen=True)
+class _EncodedBlock:
+    rows: tuple[bytes, ...]
 
 
 class _ThreadLocalRuntime:
@@ -82,11 +93,25 @@ class LocalDatasetExecutor(DatasetExecutor):
         usage_callback=None,
         planning_policy=None,
         candidate_execution=None,
+        local_kernel=None,
+        sort_workers: int | None = None,
     ) -> None:
         self._workers = max(1, int(workers))
+        if sort_workers is None:
+            sort_workers = os.environ.get('DEMIFLOW_LOCAL_SORT_WORKERS',
+                           os.environ.get('DEMIWFLOW_LOCAL_SORT_WORKERS', self._workers))
+        if (isinstance(sort_workers, bool) or not isinstance(sort_workers, (int, str))
+                or not str(sort_workers).isdigit() or int(sort_workers) < 1):
+            raise ValueError('sort_workers must be a positive integer')
+        self._sort_workers = int(sort_workers)
         from ...planning.policy import parse_platform_planning_policy
         self._planning_policy = planning_policy or parse_platform_planning_policy(None)
         self._candidate_execution = candidate_execution
+        self._local_kernel = local_kernel
+        self._local_kernel_closed = False
+        self._local_kernel_stats = {}
+        if local_kernel is not None and local_kernel.workers > self._planning_policy.max_parallelism:
+            raise ValueError('local kernel workers exceed the platform max_parallelism')
         self._active_physical_plan = None
         self._block_size = max(1, int(block_size))
         self._materialize_memory_limit = max(1, int(materialize_memory_limit))
@@ -105,10 +130,10 @@ class LocalDatasetExecutor(DatasetExecutor):
             InProcessOperatorLLMCoordinator(operation.max_requests, on_change=self._usage_callback),
         )
 
-    def prompt_actor(self, operation):
+    def prompt_actor(self, operation, *, service=None):
         from ...operator_llm.runtime import PromptActor
         return PromptActor(operation, operation.config,
-                           self._prompt_coordinator(operation), operation.options)
+                           self._prompt_coordinator(operation), operation.options, service=service)
 
     def operator_llm_usage(self) -> dict[str, int]:
         # Aggregate monitoring only; it does not impose a common request budget.
@@ -123,6 +148,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         terminal_native_options=None, source_parallelism_cap=None,
         terminal_parallelism_cap=None,
     ):
+        reject_streaming_map_options(plan, 'local')
         native=(getattr(source,"native_options",None) is not None or any(getattr(operation,"native_options",None) is not None for operation in plan.operations) or terminal_native_options is not None)
         if native and (self._candidate_execution is None or self._candidate_execution.mode != "native"):
             raise ValueError("Native options require Pipeline execution mode native")
@@ -132,7 +158,9 @@ class LocalDatasetExecutor(DatasetExecutor):
         bounds=(*analyze_stage_work_units(source,plan),None)
         if isinstance(source,LanceSource): source_parallelism_cap=1
         caps=stage_parallelism_caps(plan,source_cap=source_parallelism_cap,terminal_cap=terminal_parallelism_cap)
-        return plan_action(backend="local",action_kind=action_kind,source=source,operations=plan.operations,terminal_node=marker,terminal_traits=terminal_traits(terminal_category),policy=self._planning_policy,snapshot=snapshot,work_units_by_stage=bounds,terminal_native_options=terminal_native_options,parallelism_caps_by_stage=caps)
+        from ...planning.traits import operation_traits, partition_operation_traits
+        return plan_action(backend="local",action_kind=action_kind,source=source,operations=plan.operations,terminal_node=marker,terminal_traits=terminal_traits(terminal_category),policy=self._planning_policy,snapshot=snapshot,work_units_by_stage=bounds,terminal_native_options=terminal_native_options,parallelism_caps_by_stage=caps,
+                           operation_traits_fn=partition_operation_traits if self._local_kernel is not None else operation_traits)
 
     @property
     def executor(self) -> ThreadPoolExecutor:
@@ -180,7 +208,16 @@ class LocalDatasetExecutor(DatasetExecutor):
             return
         if isinstance(block, _SpilledBlock):
             with open(block.path, "rb") as fh:
-                yield from pickle.load(fh)
+                while True:
+                    try:
+                        row = pickle.load(fh)
+                    except EOFError:
+                        return
+                    yield row
+            return
+        if isinstance(block, _EncodedBlock):
+            for payload in block.rows:
+                yield pickle.loads(payload)
             return
         if isinstance(block, (list, tuple)):
             yield from block
@@ -202,6 +239,7 @@ class LocalDatasetExecutor(DatasetExecutor):
                 handle = source.handle
                 if not isinstance(handle, _LocalMaterializedHandle):
                     raise UnsupportedSourceError("materialized source belongs to another backend")
+                handle.check_open()
                 for block in handle.blocks:
                     yield from self._iter_block_rows(block)
                 return
@@ -333,6 +371,10 @@ class LocalDatasetExecutor(DatasetExecutor):
                 yield (raw_path, data) if include_paths else {"bytes": data}
             return
         if source.format == "csv":
+            if options and not (set(options) - {'read_options', 'parse_options', 'convert_options'}):
+                from ..csv_source import arrow_csv_rows
+                yield from arrow_csv_rows(source)
+                return
             if options:
                 raise TypeError(f"unsupported local read_csv options: {sorted(options)}")
             for raw_path in source.paths:
@@ -480,7 +522,21 @@ class LocalDatasetExecutor(DatasetExecutor):
             if keep:
                 yield row
 
-    def _apply_plan(self, source: SourcePlan, plan: LogicalPlan, *, action_kind="iter_rows", terminal_category="action", terminal_native_options=None, physical_plan=None) -> Iterator[Any]:
+    def _apply_plan(self, source: SourcePlan, plan: LogicalPlan, *, action_kind="iter_rows", terminal_category="action", terminal_native_options=None, physical_plan=None, _native=True) -> Iterator[Any]:
+        reject_streaming_map_options(plan, 'local')
+        if _native:
+            from ..dataset_native import has_relational, execute
+            if has_relational(source, plan):
+                self.plan(source, plan, action_kind, terminal_category=terminal_category, terminal_native_options=terminal_native_options)
+                yield from execute(self, source, plan)
+                return
+        if self._local_kernel is not None:
+            from ..local_tasks import execute
+            # Validate terminal options before starting any partition task.
+            self.plan(source, plan, action_kind, terminal_category=terminal_category,
+                      terminal_native_options=terminal_native_options)
+            yield from execute(self, source, plan)
+            return
         physical=physical_plan or self.plan(source,plan,action_kind,terminal_category=terminal_category,terminal_native_options=terminal_native_options)
         self._active_physical_plan=physical
         widths={stage.ordinal:stage.initial_workers for stage in physical.transforms}
@@ -652,7 +708,7 @@ class LocalDatasetExecutor(DatasetExecutor):
 
     def _rows_as_batches(
         self, rows, *, batch_size: int | None = 256,
-        batch_format: str | None = "default", drop_last: bool = False,
+        batch_format: str | None = "default", drop_last: bool = False, schema=None,
     ):
         size = max(1, int(batch_size or self._block_size))
         iterator = iter(rows)
@@ -663,7 +719,11 @@ class LocalDatasetExecutor(DatasetExecutor):
             if batch_format in ("pyarrow", "default"):
                 try:
                     import pyarrow as pa
-                    yield pa.Table.from_pylist(rows)
+                    if schema is not None:
+                        allowed = set(schema.names)
+                        if any(set(row) - allowed for row in rows):
+                            raise ValueError('Row has fields outside the declared sink schema')
+                    yield pa.Table.from_pylist(rows, schema=schema)
                     continue
                 except ImportError:
                     if batch_format == "pyarrow":
@@ -688,37 +748,48 @@ class LocalDatasetExecutor(DatasetExecutor):
         blocks = []
         rows_count = 0
         current = []
+        current_bytes = 0
         memory_bytes = 0
         created_spills = []
+        # Row count alone cannot bound wide Python rows. Serialize each row once,
+        # cap encoded blocks by bytes, and restore spilled rows one at a time.
+        block_bytes = max(1, min(self._materialize_memory_limit, 4 * 1024 * 1024))
 
-        def finish_block(rows):
+        def finish_block(rows, size):
             nonlocal memory_bytes
-            block = tuple(rows)
-            size = len(pickle.dumps(block, protocol=pickle.HIGHEST_PROTOCOL))
             if memory_bytes + size <= self._materialize_memory_limit:
                 memory_bytes += size
-                return block
+                return _EncodedBlock(tuple(rows))
             fd, path = tempfile.mkstemp(prefix="demiflow-block-", suffix=".pkl")
             os.close(fd)
             created_spills.append(path)
             with open(path, "wb") as fh:
-                pickle.dump(block, fh, protocol=pickle.HIGHEST_PROTOCOL)
+                for payload in rows:
+                    fh.write(payload)
             self._spill_paths.add(path)
             return _SpilledBlock(path)
 
         def append(row):
-            nonlocal current, rows_count
-            current.append(row)
-            rows_count += 1
-            if len(current) >= self._block_size:
-                blocks.append(finish_block(current))
+            nonlocal current, current_bytes, rows_count
+            payload = pickle.dumps(row, protocol=pickle.HIGHEST_PROTOCOL)
+            size = len(payload) + 64  # bytes object + tuple slot allowance
+            if current and current_bytes + size > block_bytes:
+                blocks.append(finish_block(current, current_bytes))
                 current = []
+                current_bytes = 0
+            current.append(payload)
+            current_bytes += size
+            rows_count += 1
+            if len(current) >= self._block_size or current_bytes >= block_bytes:
+                blocks.append(finish_block(current, current_bytes))
+                current = []
+                current_bytes = 0
             return row
 
         try:
             execute(append)
             if current:
-                blocks.append(finish_block(current))
+                blocks.append(finish_block(current, current_bytes))
         except BaseException:
             for path in created_spills:
                 try:
@@ -736,12 +807,16 @@ class LocalDatasetExecutor(DatasetExecutor):
         if isinstance(source, MaterializedSource) and plan.is_empty:
             handle = source.handle
             if isinstance(handle, _LocalMaterializedHandle):
+                handle.check_open()
                 return handle.row_count
         return super().count(source, plan)
 
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,
     ) -> list[dict[str, Any]]:
+        reject_streaming_map_options(plan, 'local')
+        if self._local_kernel is not None:
+            plan = plan.append(LimitOp(limit))
         return list(itertools.islice(self.iter_rows(source, plan), limit))
 
     def take_batch(
@@ -840,7 +915,19 @@ class LocalDatasetExecutor(DatasetExecutor):
         handle = source.handle
         if not isinstance(handle, _LocalMaterializedHandle):
             raise UnsupportedSourceError("materialized source belongs to another backend")
+        handle.check_open()
         return len(handle.blocks)
+
+    def release(self, source):
+        handle = source.handle
+        if not isinstance(handle, _LocalMaterializedHandle):
+            raise UnsupportedSourceError('materialized source belongs to another backend')
+        for block in handle.blocks:
+            if isinstance(block, _SpilledBlock):
+                Path(block.path).unlink(missing_ok=True)
+                self._spill_paths.discard(block.path)
+        handle.blocks = ()
+        handle.released = True
 
     def stats(self, source: SourcePlan, plan: LogicalPlan) -> str:
         if self._last_metadata is None:
@@ -884,8 +971,38 @@ class LocalDatasetExecutor(DatasetExecutor):
             raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
         physical=self.plan(source,plan,"write_lance",terminal_category="sink",terminal_parallelism_cap=1)
         from ...lance.write import write_lance
+        if isinstance(source, LanceSource) and not plan.operations and source.native_options is None:
+            # A pure Lance copy already has typed Arrow batches. Preserve the
+            # pinned query and avoid nested rows -> Python -> Arrow round trips.
+            from ...lance.read import iter_lance_batches
+            from ...lance.model import LanceScanSpec
+            from ...lance.storage import open_lance_dataset
+            query = source.query
+            source_rows = None
+            if (spec.mode == 'merge' and isinstance(query, LanceScanSpec)
+                    and query.version is not None and query.filter is None and not query.projection):
+                # Metadata-only cardinality of this exact scan. Do not consume
+                # callbacks or issue an extra filtered scan to guess density.
+                source_rows = open_lance_dataset(query.uri, query.version, query.storage_options).count_rows()
+                if query.limit is not None:
+                    source_rows = min(source_rows, query.limit)
+                from ..lance_merge import try_column_merge
+                receipt = try_column_merge(self, spec, query, source_rows)
+                if receipt is not None:
+                    return receipt
+            return write_lance(spec, iter_lance_batches(query, batch_size=self._block_size))
+        from ..arrow_batch_sink import eligible, execute as arrow_batch_sink
+        if eligible(self, source, plan, spec):
+            from contextlib import closing
+            with closing(arrow_batch_sink(self, source, plan, spec.schema)) as batches:
+                return write_lance(spec, batches)
+        from ..dataset_native import has_relational, execute
+        if has_relational(source, plan):
+            from contextlib import closing
+            with closing(execute(self, source, plan, arrow=True, sink_schema=spec.schema)) as batches:
+                return write_lance(spec, batches)
         rows=self._apply_plan(source,plan,action_kind="write_lance",terminal_category="sink",physical_plan=physical)
-        batches=self._rows_as_batches(rows,batch_size=self._block_size,batch_format="pyarrow")
+        batches=self._rows_as_batches(rows,batch_size=self._block_size,batch_format="pyarrow",schema=spec.schema)
         return write_lance(spec,batches)
 
     def write_file(

@@ -254,6 +254,9 @@ class DataAPI:
         self, uri: str, *, version: int | None = None,
         columns: Sequence[str] | None = None, filter: str | None = None,
         limit: int | None = None, storage_options: Mapping[str, str] | None = None,
+        batch_size: int | None = None, batch_readahead: int | None = None,
+        fragment_readahead: int | None = None,
+        projection: Mapping[str, str] | None = None,
         backend_options=None,
     ) -> Dataset:
         """Create a lazy Dataset from a Lance scan.
@@ -264,12 +267,17 @@ class DataAPI:
         non-secret Lance connection values, while ``backend_options`` contains
         only Demiflow physical scheduling options. Formal Candidates should bind
         fixed inputs to an exact version obtained from authorized inspection.
+        The optional positive scan batch/readahead limits bound wide-row reads;
+        they do not change the selected rows or the backend worker count.
         """
         from ..lance.model import LanceScanSpec
 
         query = LanceScanSpec(
             uri=uri, version=version, columns=columns, filter=filter,
             limit=limit, storage_options=storage_options,
+            batch_size=batch_size, batch_readahead=batch_readahead,
+            fragment_readahead=fragment_readahead,
+            projection=projection,
         )
         return Dataset(
             LanceSource(

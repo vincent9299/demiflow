@@ -41,6 +41,16 @@ def plan_summary(plan: Any) -> list[dict[str, Any]]:
         concurrency = getattr(operation, "concurrency", None)
         if concurrency is not None:
             item["concurrency"] = concurrency
+        stream_options = getattr(operation, 'stream_options', None)
+        if stream_options is not None:
+            item['streaming'] = {
+                'concurrency': stream_options.concurrency,
+                'queue_depth': stream_options.queue_depth or stream_options.concurrency,
+                'execution': stream_options.execution,
+                'callable_scope': stream_options.callable_scope,
+                'label': stream_options.label,
+                'catch': [f'{exc.__module__}.{exc.__qualname__}' for exc in stream_options.catch],
+            }
         inputs = getattr(operation, "inputs", None)
         if inputs:
             item["inputs"] = dict(inputs)

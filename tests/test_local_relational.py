@@ -112,3 +112,179 @@ def test_checkpoint_async_in_running_loop_resume_and_version(tmp_path):
         sync = await ds([{'n':3}]).checkpoint_async(tmp_path/'sync.jsonl', version='v1')
         assert sync.take_all() == [{'n':3}]
     asyncio.run(notebook())
+
+
+def assert_same_rows(actual, expected):
+    """Compare small test multisets, including duplicate rows and nested values."""
+    import json
+    key = lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True, default=repr)
+    assert sorted(actual, key=key) == sorted(expected, key=key)
+
+
+def _oracle_join(left, right, lk, rk, how):
+    """朴素参考算法独立于优化实现，保留旧 canonical 排序和组内稳定次序。"""
+    import json
+    def key(row, fields):
+        return json.dumps([row[f] for f in fields], ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    out = []
+    for row in sorted(left, key=lambda r: key(r, lk)):
+        matches = [r for r in right if key(row, lk) == key(r, rk)
+                   and all(row[f] is not None for f in lk)]
+        if how == 'semi':
+            if matches: out.append(dict(row))
+        elif how == 'anti':
+            if not matches: out.append(dict(row))
+        elif not matches:
+            if how == 'left': out.append(dict(row))
+        else:
+            for other in matches:
+                value = dict(row)
+                for k, v in other.items():
+                    if k in lk and k in rk and k in value and value[k] == v:
+                        continue
+                    value[k if k not in value else k + '_right'] = v
+                out.append(value)
+    return out
+
+
+@pytest.mark.parametrize('budget', [1, 1000, 32*1024*1024])
+@pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])
+def test_relational_hash_spill_match_oracle(budget, how):
+    import random
+    from datetime import datetime, timezone
+    rng = random.Random(917)
+    values = [None, True, False, 1, 1.0, '1', '中"文', ['nested'], {'k': 2}]
+    left = [{'a': rng.choice(values), 'b': i % 3, 'v': i,
+             'native': datetime(2026, 1, 1, tzinfo=timezone.utc), 'bytes': b'\x00\xff'} for i in range(60)]
+    right = [{'x': rng.choice(values), 'y': i % 3, 'v': [i]} for i in range(55)]
+    actual = ds(left).join(ds(right), on=['a', 'b'], right_on=['x', 'y'], how=how,
+                           chunk_bytes=budget).take_all()
+    assert_same_rows(actual, _oracle_join(left, right, ['a', 'b'], ['x', 'y'], how))
+
+
+def test_join_group_order_reuse_and_callback_invalidation(monkeypatch):
+    from demiflow.data import local_relational as rel
+    calls = []
+    original = rel.sorted_rows
+    def tracked(*args, **kwargs):
+        calls.append(tuple(args[1]))
+        return original(*args, **kwargs)
+    monkeypatch.setattr(rel, 'sorted_rows', tracked)
+    def plan():
+        return ds([{'k': 2, 'v': 'a'}, {'k': 1, 'v': 'b'}, {'k': 2, 'v': 'c'}]).join(
+            ds([{'k': 1}, {'k': 2}]), on='k')
+    def reducer(acc, row):
+        return {'k': row['k'], 'vs': (acc or {}).get('vs', '') + row['v']}
+    assert plan().reduce_by_key('k', reducer).take_all() == [{'k':1,'vs':'b'}, {'k':2,'vs':'ac'}]
+    assert calls == []  # Dataset relations no longer use Python external sorting
+    calls.clear()
+    batches = plan().group_batches('k', max_rows=1).take_all()
+    assert len(batches) == 3 and calls == []
+    calls.clear()
+    changed = plan().map(lambda row: {**row, 'k': 3-row['k']}).reduce_by_key('k', reducer).take_all()
+    assert changed == [{'k':1,'vs':'ac'}, {'k':2,'vs':'b'}]
+    assert calls == []
+
+
+@pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])
+def test_normal_join_groups_do_not_spool(tmp_path, monkeypatch, how):
+    from demiflow.data import local_relational as rel
+    writes = []
+    original = rel._write_records
+    def tracked(path, records):
+        writes.append(str(path))
+        return original(path, records)
+    monkeypatch.setattr(rel, '_write_records', tracked)
+    left = [{'k': i} for i in range(100)]
+    # right table exceeds budget, individual keys fit: use sort/merge without group files
+    right = [{'k': i, 'v': 'x'*50} for i in range(100)]
+    assert_same_rows(ds(left).join(ds(right), on='k', how=how, chunk_bytes=1000).take_all(), _oracle_join(left, right, ['k'], ['k'], how))
+    assert writes == []  # native relations do not spool Python key-group files
+
+
+def test_hot_key_cartesian_product_and_no_aliasing(tmp_path, monkeypatch):
+    from demiflow.data import local_relational as rel
+    writes = []
+    original = rel._write_records
+    def tracked(path, records):
+        writes.append(str(path))
+        return original(path, records)
+    monkeypatch.setattr(rel, '_write_records', tracked)
+    left = [{'k': 1, 'l': i} for i in range(3)]
+    right = [{'k': 1, 'nested': [i]} for i in range(40)]
+    result = ds(left).join(ds(right), on='k', chunk_bytes=500).take_all()
+    assert_same_rows(result, _oracle_join(left, right, ['k'], ['k'], 'inner'))
+    assert writes == []
+    result[0]['nested'].append('mutated')
+    assert all('mutated' not in row['nested'] for row in result[1:])
+
+
+def test_large_stable_sort_multiple_merge_passes(tmp_path):
+    from demiflow.data.local_relational import sorted_rows, key_of
+    rows = [{'k': i % 7, 'i': i} for i in range(1100)]
+    assert [r for _, r in sorted_rows(iter(rows), ['k'], tmp_path, 1)] == sorted(rows, key=lambda r: key_of(r, ['k']))
+
+
+def test_parallel_sort_matches_serial(tmp_path):
+    from demiflow.data.local_relational import sorted_rows
+    a = tmp_path/'serial'; a.mkdir()
+    b = tmp_path/'parallel'; b.mkdir()
+    rows = [{'k': (i*7919)%37, 'i':i, 'payload':'x'*256} for i in range(40000)]
+    assert list(sorted_rows(iter(rows), ['k'], a, 8*1024*1024, workers=1)) == list(
+        sorted_rows(iter(rows), ['k'], b, 8*1024*1024, workers=2))
+
+
+def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
+    from demiflow.data import local_relational as rel
+    original = rel.tempfile.TemporaryDirectory
+    paths = []
+    def directory(*args, **kwargs):
+        kwargs.setdefault('dir', tmp_path)
+        result = original(*args, **kwargs)
+        paths.append(result.name)
+        return result
+    monkeypatch.setattr(rel.tempfile, 'TemporaryDirectory', directory)
+    def fail(state, row):
+        raise RuntimeError('consumer failed')
+    with pytest.raises(RuntimeError, match='consumer failed'):
+        ds([{'k':1}]*50).join(ds([{'k':1}]*50), on='k', chunk_bytes=1).reduce_by_key('k', fail).take_all()
+    from pathlib import Path
+    assert paths and all(not Path(path).exists() for path in paths)
+
+
+@pytest.mark.parametrize('how,expected_rows', [('inner', 2), ('semi', 2), ('left', 100), ('anti', 100)])
+def test_native_join_does_not_call_python_sort(monkeypatch, how, expected_rows):
+    from demiflow.data import local_relational as rel
+    original = rel.sorted_rows
+    scanned = []
+    def track(rows, *args, **kwargs):
+        def counted():
+            for row in rows:
+                scanned.append(row['k'])
+                yield row
+        return original(counted(), *args, **kwargs)
+    monkeypatch.setattr(rel, 'sorted_rows', track)
+    left = [{'k':i, 'payload':'wide'*100} for i in reversed(range(100))]
+    right = [{'k':1}, {'k':4}]
+    assert_same_rows(ds(left).join(ds(right), on='k', how=how).take_all(), _oracle_join(left, right, ['k'], ['k'], how))
+    assert scanned == []
+
+
+def test_wide_sort_writes_payload_once_across_merge_passes(tmp_path, monkeypatch):
+    from demiflow.data import local_relational as rel
+    monkeypatch.setattr(rel, '_MERGE_FAN_IN', 2)
+    original = rel._write_records
+    encoded_sizes = []
+    def track(path, records):
+        def checked():
+            for key, payload in records:
+                encoded_sizes.append(len(payload))
+                yield key, payload
+        return original(path, checked())
+    monkeypatch.setattr(rel, '_write_records', track)
+    rows = [{'k': i % 3, 'i': i, 'wide': str(i) * 8192} for i in reversed(range(20))]
+    actual = [row for _, row in rel.sorted_rows(iter(rows), ['k'], tmp_path, 512)]
+    assert actual == sorted(rows, key=lambda r: rel.key_of(r, ['k']))
+    assert len(encoded_sizes) > len(rows)  # Multiple merge passes really occurred.
+    assert max(encoded_sizes) == 9  # Only offsets, never wide payload copies.
+    assert (tmp_path / 'payloads.pickle').stat().st_size < sum(len(r['wide']) for r in rows) + 4096

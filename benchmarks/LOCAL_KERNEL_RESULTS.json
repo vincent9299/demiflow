@@ -1,0 +1,1005 @@
+{
+  "date": "2026-09-27",
+  "python": "3.11.16",
+  "host_cpu_count": 192,
+  "cgroup_cpu_max": "3200000 100000",
+  "measurement": "3 sequential runs per mode; action wall time includes worker startup/shutdown and spill, excludes synthetic data generation and result digest; shared host; parent RSS includes fixture generation and excludes worker RSS",
+  "medians_seconds": {
+    "map_reduce": {
+      "legacy": 8.811,
+      "thread": 7.21,
+      "process": 4.401
+    },
+    "join_reduce": {
+      "legacy": 3.331,
+      "thread": 0.791,
+      "process": 2.682
+    }
+  },
+  "trials": [
+    {
+      "mode": "legacy",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 9.092,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 730328,
+      "stats": null,
+      "repeat": 1
+    },
+    {
+      "mode": "thread",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 7.274,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 713444,
+      "stats": {
+        "worker_mode": "thread",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            39911,
+            140123080439360
+          ],
+          [
+            39911,
+            140123072046656
+          ],
+          [
+            39911,
+            140123063653952
+          ],
+          [
+            39911,
+            140123055261248
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 21.277101036161184,
+            "rows_input": 300000,
+            "rows_output": 300000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [
+              "MapOp"
+            ],
+            "key_filter": null
+          },
+          {
+            "name": "reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 7.290881434455514,
+            "rows_input": 300000,
+            "rows_output": 15000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 7.24297771602869
+      },
+      "repeat": 1
+    },
+    {
+      "mode": "process",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 4.401,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 644708,
+      "stats": {
+        "worker_mode": "process",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            40914,
+            140678404015936
+          ],
+          [
+            40911,
+            140031266608960
+          ],
+          [
+            40915,
+            139928637667136
+          ],
+          [
+            40916,
+            139706040596288
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 5.269724611192942,
+            "rows_input": 300000,
+            "rows_output": 300000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [
+              "MapOp"
+            ],
+            "key_filter": null
+          },
+          {
+            "name": "reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 1.8540815133601427,
+            "rows_input": 300000,
+            "rows_output": 15000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 4.3661759700626135
+      },
+      "repeat": 1
+    },
+    {
+      "mode": "legacy",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 8.811,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 735256,
+      "stats": null,
+      "repeat": 2
+    },
+    {
+      "mode": "thread",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 7.21,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 708640,
+      "stats": {
+        "worker_mode": "thread",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            42693,
+            139678481061440
+          ],
+          [
+            42693,
+            139678472668736
+          ],
+          [
+            42693,
+            139678464276032
+          ],
+          [
+            42693,
+            139678455883328
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 20.108798246830702,
+            "rows_input": 300000,
+            "rows_output": 300000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [
+              "MapOp"
+            ],
+            "key_filter": null
+          },
+          {
+            "name": "reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 7.906196208670735,
+            "rows_input": 300000,
+            "rows_output": 15000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 7.178943870589137
+      },
+      "repeat": 2
+    },
+    {
+      "mode": "process",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 4.487,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 646076,
+      "stats": {
+        "worker_mode": "process",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            43699,
+            139854348146496
+          ],
+          [
+            43700,
+            140438324651840
+          ],
+          [
+            43695,
+            140210000172864
+          ],
+          [
+            43698,
+            140027619501888
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 5.353877052664757,
+            "rows_input": 300000,
+            "rows_output": 300000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [
+              "MapOp"
+            ],
+            "key_filter": null
+          },
+          {
+            "name": "reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 1.9121053218841553,
+            "rows_input": 300000,
+            "rows_output": 15000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 4.456246973946691
+      },
+      "repeat": 2
+    },
+    {
+      "mode": "legacy",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 8.532,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 734480,
+      "stats": null,
+      "repeat": 3
+    },
+    {
+      "mode": "thread",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 7.026,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 711208,
+      "stats": {
+        "worker_mode": "thread",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            45339,
+            139841668806208
+          ],
+          [
+            45339,
+            139841182365248
+          ],
+          [
+            45339,
+            139841173972544
+          ],
+          [
+            45339,
+            139841165579840
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 19.829770488664508,
+            "rows_input": 300000,
+            "rows_output": 300000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [
+              "MapOp"
+            ],
+            "key_filter": null
+          },
+          {
+            "name": "reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 7.794588616117835,
+            "rows_input": 300000,
+            "rows_output": 15000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 7.00025306083262
+      },
+      "repeat": 3
+    },
+    {
+      "mode": "process",
+      "workload": "map_reduce",
+      "workers": 4,
+      "rows": 300000,
+      "loops": 200,
+      "match_stride": 4,
+      "seconds": 4.367,
+      "output_rows": 15000,
+      "sha256": "28401883a18dadfac7a568a69b0c42fec1a7a9017fe096efa28df551f645dcdf",
+      "parent_peak_rss_kib": 644884,
+      "stats": {
+        "worker_mode": "process",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            46388,
+            139928495748928
+          ],
+          [
+            46390,
+            140009979623232
+          ],
+          [
+            46389,
+            140288061298496
+          ],
+          [
+            46385,
+            140280107673408
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 5.3163487408310175,
+            "rows_input": 300000,
+            "rows_output": 300000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [
+              "MapOp"
+            ],
+            "key_filter": null
+          },
+          {
+            "name": "reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 1.882842404767871,
+            "rows_input": 300000,
+            "rows_output": 15000,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 4.338491979986429
+      },
+      "repeat": 3
+    },
+    {
+      "mode": "legacy",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 3.213,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1330992,
+      "stats": null,
+      "repeat": 1
+    },
+    {
+      "mode": "thread",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 0.791,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1594068,
+      "stats": {
+        "worker_mode": "thread",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            47619,
+            140176498042432
+          ],
+          [
+            47619,
+            140176489649728
+          ],
+          [
+            47619,
+            140176472864320
+          ],
+          [
+            47619,
+            140175300613696
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 1,
+            "completed": 1,
+            "worker_seconds": 0.00907079316675663,
+            "rows_input": 1352,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": null
+          },
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 1.5285293627530336,
+            "rows_input": 1000000,
+            "rows_output": 27040,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": "bloom"
+          },
+          {
+            "name": "join+reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 1.298696493729949,
+            "rows_input": 28392,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 0.7603253498673439
+      },
+      "repeat": 1
+    },
+    {
+      "mode": "process",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 2.682,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1320204,
+      "stats": {
+        "worker_mode": "process",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            48258,
+            140328003114816
+          ],
+          [
+            48257,
+            140497732740928
+          ],
+          [
+            48256,
+            140221282801472
+          ],
+          [
+            48253,
+            140279914497856
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 1,
+            "completed": 1,
+            "worker_seconds": 0.02333727665245533,
+            "rows_input": 1352,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": null
+          },
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 0.38185165263712406,
+            "rows_input": 1000000,
+            "rows_output": 27040,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": "bloom"
+          },
+          {
+            "name": "join+reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 0.280369583517313,
+            "rows_input": 28392,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 2.6513468995690346
+      },
+      "repeat": 1
+    },
+    {
+      "mode": "legacy",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 3.48,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1327412,
+      "stats": null,
+      "repeat": 2
+    },
+    {
+      "mode": "thread",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 0.812,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1597112,
+      "stats": {
+        "worker_mode": "thread",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            49453,
+            140005835998784
+          ],
+          [
+            49453,
+            140005827606080
+          ],
+          [
+            49453,
+            140005819213376
+          ],
+          [
+            49453,
+            140005810820672
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 1,
+            "completed": 1,
+            "worker_seconds": 0.009464200586080551,
+            "rows_input": 1352,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": null
+          },
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 1.715022450312972,
+            "rows_input": 1000000,
+            "rows_output": 27040,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": "bloom"
+          },
+          {
+            "name": "join+reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 1.2656546737998724,
+            "rows_input": 28392,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 0.7855821754783392
+      },
+      "repeat": 2
+    },
+    {
+      "mode": "process",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 2.662,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1321028,
+      "stats": {
+        "worker_mode": "process",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            50116,
+            139661243692864
+          ],
+          [
+            50115,
+            140669734012736
+          ],
+          [
+            50111,
+            139856017897280
+          ],
+          [
+            50114,
+            140171316275008
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 1,
+            "completed": 1,
+            "worker_seconds": 0.019039535894989967,
+            "rows_input": 1352,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": null
+          },
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 0.37467411160469055,
+            "rows_input": 1000000,
+            "rows_output": 27040,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": "bloom"
+          },
+          {
+            "name": "join+reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 0.26538130827248096,
+            "rows_input": 28392,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 2.6274056658148766
+      },
+      "repeat": 2
+    },
+    {
+      "mode": "legacy",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 3.331,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1330204,
+      "stats": null,
+      "repeat": 3
+    },
+    {
+      "mode": "thread",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 0.764,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1571060,
+      "stats": {
+        "worker_mode": "thread",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            51286,
+            140215580616256
+          ],
+          [
+            51286,
+            140215572223552
+          ],
+          [
+            51286,
+            140215563830848
+          ],
+          [
+            51286,
+            140215555438144
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 1,
+            "completed": 1,
+            "worker_seconds": 0.006652608513832092,
+            "rows_input": 1352,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": null
+          },
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 1.4245386440306902,
+            "rows_input": 1000000,
+            "rows_output": 27040,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": "bloom"
+          },
+          {
+            "name": "join+reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 1.294324154034257,
+            "rows_input": 28392,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 0.7336371522396803
+      },
+      "repeat": 3
+    },
+    {
+      "mode": "process",
+      "workload": "join_reduce",
+      "workers": 4,
+      "rows": 1000000,
+      "loops": 200,
+      "match_stride": 37,
+      "seconds": 2.777,
+      "output_rows": 1352,
+      "sha256": "7a9bdc78b7ac4544e1a5eb230745e3a2553744cc04c0b1905fd12a232eb7e2e5",
+      "parent_peak_rss_kib": 1321020,
+      "stats": {
+        "worker_mode": "process",
+        "workers": 4,
+        "partitions": 16,
+        "peak_pending_tasks": 8,
+        "workers_used": [
+          [
+            51961,
+            140289387419456
+          ],
+          [
+            51956,
+            140145182152512
+          ],
+          [
+            51959,
+            140434642990912
+          ],
+          [
+            51960,
+            140572326655808
+          ]
+        ],
+        "stages": [
+          {
+            "name": "map+shuffle",
+            "submitted": 1,
+            "completed": 1,
+            "worker_seconds": 0.018890397623181343,
+            "rows_input": 1352,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": null
+          },
+          {
+            "name": "map+shuffle",
+            "submitted": 8,
+            "completed": 8,
+            "worker_seconds": 0.3846199940890074,
+            "rows_input": 1000000,
+            "rows_output": 27040,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16,
+            "operators": [],
+            "key_filter": "bloom"
+          },
+          {
+            "name": "join+reduce",
+            "submitted": 16,
+            "completed": 16,
+            "worker_seconds": 0.33491974882781506,
+            "rows_input": 28392,
+            "rows_output": 1352,
+            "keys": [
+              "key"
+            ],
+            "partitions": 16
+          }
+        ],
+        "status": "complete",
+        "seconds": 2.7453971318900585
+      },
+      "repeat": 3
+    }
+  ]
+}

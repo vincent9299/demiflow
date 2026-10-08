@@ -1,0 +1,26 @@
+{
+  "complete": true,
+  "success": true,
+  "rows": 5,
+  "phase": "finished",
+  "datafusion_version": "54.0.0",
+  "lance_version": "12.0.0",
+  "lance_build_version": "12.0.0+demiflow.arrowfix1",
+  "schema": "k0: string\nvalid1: bool\no2: uint64\npayload3: large_binary",
+  "cpu_affinity": [
+    184,
+    185,
+    186,
+    187,
+    188,
+    189,
+    190,
+    191
+  ],
+  "worker_source_sha256": "af66989b9df7b89bc30abf274acaed900c5cac3256af0c5b794935f3f538fd49",
+  "seconds": 0.1377398930490017,
+  "query_seconds": 0.07731466740369797,
+  "writer_batch_rows": 8192,
+  "writer_batch_bytes": 8388608,
+  "version": 1
+}
