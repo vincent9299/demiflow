@@ -542,13 +542,3 @@ class SaveLanceOp(BatchMapOp):
     key: str = ''
     output_ref: str | None = None
     mode: str = 'overwrite'
-
-
-@dataclass(frozen=True)
-class ImageMapOp(AsyncMapOp):
-    """Native image model request with a mandatory versioned template."""
-    template: Mapping[str, Any] = field(default_factory=dict)
-    model_contract: Mapping[str, Any] = field(default_factory=dict)
-    inputs: Mapping[str, str] = field(default_factory=dict)
-    output: str = ''
-    image_encoding: str = 'png'

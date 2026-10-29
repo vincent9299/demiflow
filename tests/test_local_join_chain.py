@@ -2,6 +2,9 @@
 import pytest
 from demiflow import data
 from demiflow.data.api import DataAPI
+from tests.test_local_relational import assert_same_rows
+
+pytestmark = pytest.mark.slow
 
 
 @pytest.mark.parametrize('first_how',['left','inner','semi','anti'])
@@ -32,7 +35,7 @@ def test_reuse_join_partitions_on_both_sides_and_reject_changed_keys(mode):
     for change in (False,True):
         expected=build(DataAPI(),change).take_all()
         with data.local_execution(workers=2,worker_mode=mode,partitions=3,batch_rows=1) as local:
-            assert build(data,change).take_all()==expected
+            assert_same_rows(build(data,change).take_all(), expected)
             queries=sum(s['name']=='datafusion' for s in local.stats['stages'])
             assert queries==(2 if change else 1)
 

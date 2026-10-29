@@ -217,23 +217,47 @@ class Dataset:
         from .local_relational import group_batches
         return group_batches(self,on,max_rows,output,chunk_bytes)
 
-    def map_cached(self, fn, *, cache_dir, version, synchronous=False, cache_when=None):
+    def map_cached(self, fn, *, cache_dir, version, synchronous=False, cache_when=None,
+                   inputs=None, output=None, outputs=None, when=None, namespace='default',
+                   wait_timeout_s=120., max_input_bytes=8*1024**2,
+                   max_result_bytes=8*1024**2, max_entries=2_000_000,
+                   max_cache_bytes=8*1024**3, concurrency=None, queue_depth=None):
         """Map with atomic per-input results and separate error records.
 
         The default accepts async callables. ``synchronous=True`` accepts only
         synchronous callables and runs as a normal map, including in the local
-        process kernel. Inputs and outputs must be JSON-compatible. Version plus the entire input defines cache identity.
+        process kernel. Inputs and outputs must be JSON-compatible. Namespace,
+        version, actual inputs and optional callable.cache_identity define the
+        identity. With inputs/output(s), cache only the callable return value
+        and attach it to the current row, preserving unrelated fields.
         Optional cache_when(output) selects completed results to persist/reuse;
         false still delivers the row, e.g. a budget-exhausted item never submitted.
         """
-        from .local_relational import CachedMap, CachedSyncMap
+        from .result_cache import CachedMap, CachedSyncMap
         if type(synchronous) is not bool:
             raise TypeError('synchronous must be a boolean')
         if cache_when is not None and not callable(cache_when):
             raise TypeError('cache_when must be a synchronous callable or None')
+        options = dict(cache_when=cache_when, inputs=inputs, output=output, outputs=outputs,
+            when=when, namespace=namespace, wait_timeout_s=wait_timeout_s,
+            max_input_bytes=max_input_bytes, max_result_bytes=max_result_bytes,
+            max_entries=max_entries, max_cache_bytes=max_cache_bytes)
         if synchronous:
-            return self.map(CachedSyncMap(fn, cache_dir, version, cache_when=cache_when))
-        return self.map_async(CachedMap(fn,cache_dir,version,cache_when=cache_when))
+            if concurrency is not None or queue_depth is not None:
+                raise ValueError('synchronous map_cached uses normal map execution policy')
+            return self.map(CachedSyncMap(fn, cache_dir, version, **options))
+        return self.map_async(CachedMap(fn, cache_dir, version, **options),
+                              concurrency=concurrency, queue_depth=queue_depth)
+
+    def lookup(self, source, *, key, output='lookup', when=None, concurrency=1, queue_depth=1):
+        """Read one KV value per input row; missing is {hit: False, value: None}.
+
+        Source is an explicit resource with get(key). Errors propagate, reads
+        never fetch/parse/register, and one input always produces one output.
+        """
+        from ..kv import Lookup
+        return self.map(Lookup(source, key, output, when), execution='thread',
+                        concurrency=concurrency, queue_depth=queue_depth, label='lookup')
 
     def union(self, *others):
         """Concatenate datasets lazily, retaining this Dataset's execution context.
@@ -1249,45 +1273,6 @@ class Dataset:
         """
         return self.map_embeddings(model=model, inputs={'document': document}, **kwargs)
 
-    def map_image_async(self, *, template, model, inputs, output, call_output,
-                        error_output, journal_path, object_store, max_requests,
-                        when=None, concurrency=1, queue_depth=1, limits=None,
-                        service=None, image_encoding='png', label='map_image_async'):
-        """Render a versioned template and generate one image per row.
-
-        Template is {name, version, template}; it uses the standard prompt
-        renderer. Model selects diffusers or an explicit image HTTP API.
-        Inputs bind row fields to placeholders; images are bounded binary lists.
-        image_encoding='preserve' keeps validated single-frame JPEG/PNG/WebP
-        bytes; other formats become PNG. Default 'png' retains legacy encoding.
-        The actor owns transport/model lifetime, exact input artifacts,
-        finite persistent request budget and uncertain-call protection.
-        Optional service=ManagedHTTPService(...) owns a lazy HTTP deployment;
-        HTTP requests may overlap, while direct Diffusers execution is serial.
-        No retries or provider fallbacks. Local streaming only; use separate
-        nodes/processes with explicitly placed GPUs for parallel model arms.
-        See docs/image_generation.md for resource and cancellation boundaries.
-        """
-        from ..image_generation import ImageGenerator
-        from .plan import ImageMapOp
-        if getattr(self._executor, 'prompt_actor', None) is None:
-            raise NotImplementedError('map_image_async requires local streaming')
-        if type(concurrency) is not int or not 1 <= concurrency <= 8 or type(queue_depth) is not int or not 1 <= queue_depth <= 8:
-            raise ValueError('Image actor concurrency and queue_depth must be in 1..8')
-        if model.get('backend') == 'diffusers' and concurrency != 1:
-            raise ValueError('Diffusers actor concurrency must be 1; use explicitly placed independent GPU nodes')
-        actor = ImageGenerator(template=template, model=model, inputs=inputs,
-            output=output, call_output=call_output, error_output=error_output,
-            journal_path=journal_path, object_store=object_store,
-            max_requests=max_requests, when=when, limits=limits, service=service,
-            image_encoding=image_encoding)
-        declared = self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label)
-        operation = declared._plan.operations[-1]
-        typed = ImageMapOp(**vars(operation), template=actor.spec,
-                           model_contract=actor.config, inputs=actor.inputs, output=output,
-                           image_encoding=actor.image_encoding)
-        return Dataset(self._source, self._plan.append(typed), self._executor, declared._stages)
-
     def map_prompt_async(
         self, prompt: str, *, config: str | Path | PromptPack,
         inputs: Mapping[str, str] | Sequence[str],
@@ -1302,6 +1287,15 @@ class Dataset:
         """Native streaming prompt actor, sharing map_prompt's prompt-pack contract.
 
         Same template, model, inputs/output(s), JSON schema and schema_retries.
+        A prompt-pack definition with response_format='image' uses the native
+        image backend and returns an ObjectRef instead of text/JSON. It requires
+        output (or outputs={'image': ...}), call_output, error_output and finite
+        max_requests. options declares sqlite_journal.path, object_store and
+        optional image_encoding/limits. Image concurrency is 1..8 (Diffusers 1),
+        queue_depth defaults to 1 and is at most 8. Transport, ordered image
+        inputs, exact request identity and service lifecycle are preserved.
+        Image output does not support routes, request gates, token budgets,
+        offline/Codex options or schema retries. See docs/image_generation.md.
         Adds map_async worker/queue/error policies. Execute with run_stream()
         or checkpoint(); checkpoint before later joins or lazy transforms.
         Configuration and limits belong to this node. Non-local executors
@@ -1352,6 +1346,28 @@ class Dataset:
         still stop the action. Upstream assignment must bound route backlog to
         avoid filling all workers with one route's waiting rows.
         """
+        from ..operator_llm.parser import resolve_prompt
+        if isinstance(config, (str, Path)):
+            config = load_prompt_pack(Path(getattr(self._executor, 'resource_root', Path.cwd())) / config)
+        if not isinstance(config, PromptPack):
+            raise TypeError('config must be a PromptPack or YAML path')
+        definition = resolve_prompt(config, str(prompt or '').strip())
+        if definition.response_format == 'image':
+            from ..operator_llm.media import execution_options
+            if (routes is not None or route is not None or isolate_route_failures
+                    or request_gate is not None or request_policy is not None or token_budget is not None):
+                raise ValueError('Image prompts do not support routing, request gates or token budgets')
+            if type(concurrency) is not int or not 1 <= concurrency <= 8:
+                raise ValueError('Image prompt concurrency must be in 1..8')
+            if queue_depth is None:
+                queue_depth = 1
+            if type(queue_depth) is not int or not 1 <= queue_depth <= 8:
+                raise ValueError('Image prompt queue_depth must be in 1..8')
+            if definition.model.transport == 'diffusers' and concurrency != 1:
+                raise ValueError('Diffusers prompt concurrency must be 1')
+            if not call_output or not error_output:
+                raise ValueError('Image prompts require call_output and error_output')
+            options = execution_options(definition, options, max_requests)
         if routes is not None:
             from ..operator_llm.routed import RoutedPromptActor
             if (not isinstance(routes, dict) or not 1 <= len(routes) <= 32
@@ -1376,6 +1392,8 @@ class Dataset:
                     outputs=outputs, when=when, call_output=call_output, error_output=error_output,
                     queue_depth=1, label=(label or prompt)+':'+name)
                 actors[name] = declared._stages[-1]
+                if actors[name]._prompt.response_format == 'image':
+                    raise ValueError('Image prompts cannot be used as prompt routes')
                 actors[name].label = (label or prompt)+':'+name
                 limits[name] = capacity
             if type(concurrency) is not int or not 1 <= concurrency <= 512:
@@ -1395,8 +1413,9 @@ class Dataset:
             raise TypeError('token_budget must validate actual OperatorLLMRequest messages')
         if service is not None:
             from ..services import VLLMService, ManagedHTTPService
-            if not isinstance(service, (VLLMService, ManagedHTTPService)):
-                raise TypeError('service must be VLLMService, ManagedHTTPService or None')
+            from ..services.shared_http import SharedHTTPService
+            if not isinstance(service, (VLLMService, ManagedHTTPService, SharedHTTPService)):
+                raise TypeError('service must be a supported HTTP service declaration or None')
             if any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
                 raise ValueError('Managed service requires online HTTP prompt execution')
         declared = self.map_prompt(prompt, config=config, inputs=inputs,
@@ -1730,7 +1749,9 @@ class Dataset:
         Use for bounded sampling or inspection. Fewer rows may be returned, and
         global order is not stable without explicit sorting.
         """
-        maximum = max(0, int(limit))
+        maximum = int(limit)
+        if maximum < 0:
+            raise ValueError("Dataset.take limit must be non-negative")
         with observe_action("take", self._source, self._plan, self._executor) as observer:
             rows = self._executor.take(self._source, self._plan, maximum)
             observer.rows = len(rows)
@@ -1766,7 +1787,7 @@ class Dataset:
                     raise ValueError(
                         f"Dataset contains more than the take_all limit of {maximum} rows"
                     )
-                observer.complete(limit=limit)
+            observer.complete(limit=limit)
         return rows
 
     def take_batch(
@@ -1887,15 +1908,17 @@ class Dataset:
         batch_size: Optional[int] = 256,
         batch_format: Optional[str] = "default",
         drop_last: bool = False,
-        **_: Any,
     ) -> Iterable[Any]:
         """Execute and consume bounded blocks with executor-native batch formats."""
+        size = None if batch_size is None else int(batch_size)
+        if size is not None and size <= 0:
+            raise ValueError("Dataset.iter_batches batch_size must be positive or None")
         batches = self._executor.iter_batches(
             self._source,
             self._plan,
             prefetch_batches=prefetch_batches,
-            batch_size=batch_size,
-            batch_format=batch_format,
+            batch_size=size,
+            batch_format=_batch_format(batch_format),
             drop_last=drop_last,
         )
         return observe_batches(

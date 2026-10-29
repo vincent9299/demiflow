@@ -235,6 +235,10 @@ class WebSession:
         self._ensure_connections()
         return await self._client().fetch(url)
 
+    async def download(self, url, store):
+        self._ensure_connections()
+        return await self._client().download(url, store)
+
     async def fetch_image(self, request):
         self._ensure_connections()
         if self.image_library is None:

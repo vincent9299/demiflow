@@ -10,6 +10,7 @@ from demiflow import data
 from tests.test_local_relational import _oracle_join, assert_same_rows
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])
 def test_gzip_csv_join_keeps_original_strings_and_multiplicity(tmp_path, how):
     left = [{'id': 'b', 'n': 1}, {'id': 'a', 'n': 2}, {'id': 'a', 'n': 3}, {'id': None, 'n': 4},

@@ -22,9 +22,9 @@ def libraries(tmp_path):
 
 
 def body(library,name):
-    return library.prepare({'format':'wikitext_sections',
+    return library.prepare({'format':'text',
         'source':{'url':URL+name,'final_url':URL+name,'title':name,'retrieved_at':''},
-        'sections':[{'title':'Text','text':'Visible material '+name,'level':2}],
+        'text':'Visible material '+name,
         'source_id':'wiki:'+name,'revision':'1'},**LIMITS)
 
 

@@ -9,7 +9,7 @@ import re
 
 
 
-PROMPT_MODEL_TRANSPORTS = frozenset({"azure_openai", "openai_compatible"})
+PROMPT_MODEL_TRANSPORTS = frozenset({"azure_openai", "openai_compatible", "systemone"})
 PROMPT_MODEL_FIELDS = frozenset({
     "name", "transport", "base_url", "base_url_env", "api_key_env", "api_version",
 })
@@ -23,7 +23,7 @@ def parse_prompt_model(value: Any, *, label: str) -> "PromptModel":
         raise ValueError("; ".join(item.message for item in diagnostics))
     return model
 
-def inspect_prompt_model(value: Any, *, label: str, prompt: str = "") -> tuple["PromptModel | None", tuple[Any, ...]]:
+def inspect_prompt_model(value: Any, *, label: str, prompt: str = "", media=False) -> tuple["PromptModel | None", tuple[Any, ...]]:
     """Collect independent model configuration errors."""
     from .errors import PromptContractDiagnostic
     issues = []
@@ -32,14 +32,28 @@ def inspect_prompt_model(value: Any, *, label: str, prompt: str = "") -> tuple["
     if not isinstance(value, Mapping):
         issue("prompt_model_not_mapping", f"{label} must be a mapping", "model")
         return None, tuple(issues)
+    if media:
+        from copy import deepcopy
+        from .media import validate_provider
+        try:
+            validate_provider(value)
+        except (TypeError, ValueError) as exc:
+            issue('prompt_model_invalid', str(exc), 'model')
+            return None, tuple(issues)
+        return PromptModel(value.get('provider_model', value['model']),
+            'diffusers' if value['backend'] == 'diffusers' else 'openai_compatible',
+            api_key_env=value.get('api_key_env', ''), base_url=value.get('base_url', ''),
+            provider=deepcopy(dict(value))), ()
     extra = sorted(set(value) - PROMPT_MODEL_FIELDS)
     for name in extra:
         issue("prompt_model_field_unsupported", f"{label} contains unsupported field: {name}", f"model.{name}")
     normalized = {name: str(value.get(name) or "").strip() for name in PROMPT_MODEL_FIELDS}
-    for name in ("name", "transport", "api_key_env"):
+    for name in ("name", "transport"):
         if not normalized[name]:
             issue("prompt_model_field_required", f"{label} requires non-empty {name}", f"model.{name}")
     transport = normalized["transport"]
+    if transport != "systemone" and not normalized["api_key_env"]:
+        issue("prompt_model_field_required", f"{label} requires non-empty api_key_env", "model.api_key_env")
     if transport and transport not in PROMPT_MODEL_TRANSPORTS:
         issue("prompt_model_transport_invalid", f"{label} has unsupported transport: {transport}", "model.transport")
     base_url, base_url_env = normalized["base_url"], normalized["base_url_env"]
@@ -95,6 +109,7 @@ class PromptModel:
     api_key_env: str = ""
     base_url: str = ""
     api_version: str = ""
+    provider: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
 
 @dataclass(frozen=True)
@@ -108,6 +123,7 @@ class PromptDefinition:
     response_format: str = "json"
     input_mode: str = "template"
     message_limits: Mapping[str, int] = field(default_factory=dict)
+    systemone: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
     @property
     def response_keys(self) -> tuple[str, ...]:
@@ -179,6 +195,8 @@ class OperatorLLMRequest:
     validation_feedback: str = ""
     response_format: str = "json"
     messages: tuple[Mapping[str, Any], ...] | None = None
+    template: str = ""
+    systemone: Mapping[str, Any] = field(default_factory=dict, hash=False)
 
     def __post_init__(self) -> None:
         if self.schema_attempt < 1:

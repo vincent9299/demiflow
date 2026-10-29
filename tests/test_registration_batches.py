@@ -1,4 +1,4 @@
-"""Import fidelity and native Dataset reuse, including batch publication."""
+"""Generic text imports, native reuse and bounded batch publication."""
 from dataclasses import replace
 import sqlite3
 import pytest
@@ -12,8 +12,8 @@ URL='https://en.wikipedia.org/wiki/Example'
 LIMITS={'max_bytes':100000,'max_document_bytes':100000}
 
 def material(text='A [[bird|visible bird]] {{convert|10|cm}}.',url=URL):
-    return {'format':'wikitext_sections','source':{'url':url,'final_url':url,'title':'Example','retrieved_at':''},
-            'sections':[{'title':'Appearance','text':text,'level':2}], 'source_id':'wiki:1','revision':'3'}
+    return {'format':'text','source':{'url':url,'final_url':url,'title':'Example','retrieved_at':''},
+            'text':text, 'source_id':'source:1','revision':'3'}
 
 @pytest.fixture
 def library(tmp_path):
@@ -25,14 +25,14 @@ def collect(graph):
     return rows,stats
 
 def test_fidelity_unknown_time_and_raw_provenance(library):
-    text='10<sup>2</sup> and H<sub>2</sub>O. [[bird|bird]]\n\n{{box|name=two\n\nparagraphs}} <math>x^2</math>'
+    text='10<sup>2</sup> and H<sub>2</sub>O. [[bird|bird]]\n\nAnother literal paragraph.'
     receipt=library.register(material(text),**LIMITS)
     doc=read_document(receipt['document_ref'])
     body='\n'.join(b['text'] for b in doc['blocks'])
     assert '10<sup>2</sup>' in body and 'H<sub>2</sub>O' in body
-    assert '{{box|name=two\n\nparagraphs}}' in body and '<math>x^2</math>' in body
-    assert '[[bird' not in body and 'bird' in body
-    assert doc['parser']['template_expansion'].startswith('not_performed')
+    assert 'Another literal paragraph.' in body
+    assert '[[bird|bird]]' in body
+    assert doc['parser']['raw_format'].startswith('supplied extracted')
     assert receipt['retrieved_at']==''
     assert library.lookup(URL,**LIMITS)['document_ref']==receipt['document_ref']
     assert replace(library,max_age_s=999999999).lookup(URL,**LIMITS) is None

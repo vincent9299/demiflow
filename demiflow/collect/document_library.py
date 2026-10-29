@@ -19,7 +19,7 @@ import time
 from urllib.parse import urlsplit, urlunsplit
 
 from demiflow.collect.documents import DocumentError, PARSER_VERSION, canonical, read_document
-from demiflow.collect.document_formats import WIKI_PARSER_VERSION, normalize_material
+from demiflow.collect.document_formats import normalize_material
 from demiflow.objects import LocalObjectStore, ObjectRef, open_object
 
 
@@ -76,7 +76,7 @@ class DocumentLibrary:
     policy: str = 'reuse'
     max_age_s: float | None = None
     lock_timeout_s: float = 120.
-    parser_versions: tuple[str, ...] = (PARSER_VERSION, WIKI_PARSER_VERSION)
+    parser_versions: tuple[str, ...] = (PARSER_VERSION,)
     max_alias_hops: int = 8
 
     def __post_init__(self):

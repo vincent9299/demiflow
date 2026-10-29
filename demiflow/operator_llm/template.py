@@ -20,6 +20,7 @@ _PLACEHOLDER = re.compile(
 )
 _ANY_DELIMITER = re.compile(r"{{|}}")
 _DATA_URL = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,", re.IGNORECASE)
+_TEXT_SEGMENT = "{% text_segment %}"
 
 
 def _compile_template_strict(source: str) -> CompiledTemplate:
@@ -70,6 +71,11 @@ def inspect_template(source: Any, *, prompt: str = "") -> tuple[CompiledTemplate
             "template", prompt,
         ),)
     issues = []
+    if source.count(_TEXT_SEGMENT) > 255:
+        issues.append(PromptContractDiagnostic(
+            "prompt_template_segments_exceeded", "at most 255 explicit text segment boundaries are allowed",
+            "template", prompt,
+        ))
     kinds: dict[str, PlaceholderKind] = {}
     covered = []
     for match in _PLACEHOLDER.finditer(source):
@@ -128,7 +134,7 @@ def render_template(
     parts: list[OperatorLLMPart] = []
     cursor = 0
     for item in template.placeholders:
-        _append_text(parts, template.source[cursor:item.start])
+        _append_literal(parts, template.source[cursor:item.start])
         value = values[item.name]
         if item.kind is PlaceholderKind.TEXT:
             _append_text(parts, _render_text(item.name, value))
@@ -146,8 +152,8 @@ def render_template(
         else:
             parts.extend(_render_images(item.name, value, numbered=item.kind is PlaceholderKind.NUMBERED_IMAGE))
         cursor = item.end
-    _append_text(parts, template.source[cursor:])
-    return tuple(parts)
+    _append_literal(parts, template.source[cursor:])
+    return tuple(part for part in parts if not isinstance(part, TextPart) or part.text)
 
 
 def _render_text(name: str, value: Any) -> str:
@@ -218,3 +224,11 @@ def _append_text(parts: list[OperatorLLMPart], text: str) -> None:
         parts[-1] = TextPart(parts[-1].text + text)
     else:
         parts.append(TextPart(text))
+
+
+def _append_literal(parts: list[OperatorLLMPart], text: str) -> None:
+    """Static template directive keeps a text boundary; variable values stay literal."""
+    for index, chunk in enumerate(text.split(_TEXT_SEGMENT)):
+        if index:
+            parts.append(TextPart(""))
+        _append_text(parts, chunk)

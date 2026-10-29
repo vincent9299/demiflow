@@ -26,13 +26,20 @@ def _check(batch, schema):
 
 
 def bounded_record_batches(batches: Iterable[pa.RecordBatch], schema: pa.Schema, *,
-    batch_rows=LANCE_BATCH_ROWS, batch_bytes=ARROW_BATCH_BYTES) -> Iterator[pa.RecordBatch]:
+    batch_rows=LANCE_BATCH_ROWS, batch_bytes=ARROW_BATCH_BYTES,
+    max_row_bytes=None) -> Iterator[pa.RecordBatch]:
     """Split oversized batches without copying or combining small batches.
 
     Check nbytes before sink admission. Search fitting row prefixes using Arrow
-    metadata. An indivisible oversized row raises; no value is truncated.
+    metadata. An explicitly budgeted wide row is emitted alone; values above
+    that separate finite limit raise. No value is truncated. The default keeps
+    the strict single-row batch limit for callers that do not opt in.
     """
     _limits(batch_rows, batch_bytes)
+    if max_row_bytes is None:
+        max_row_bytes = batch_bytes
+    if type(max_row_bytes) is not int or max_row_bytes < batch_bytes:
+        raise ValueError('max_row_bytes must be an integer >= batch_bytes')
     for batch in batches:
         _check(batch, schema)
         if batch.num_rows <= batch_rows and batch.nbytes <= batch_bytes:
@@ -44,8 +51,14 @@ def bounded_record_batches(batches: Iterable[pa.RecordBatch], schema: pa.Schema,
             size = min(batch_rows, batch.num_rows-start)
             piece = batch.slice(start, size)
             if piece.nbytes > batch_bytes:
-                if batch.slice(start, 1).nbytes > batch_bytes:
-                    raise MemoryError(f'One Arrow row exceeds batch_bytes={batch_bytes}; cannot split the row')
+                single = batch.slice(start, 1)
+                if single.nbytes > batch_bytes:
+                    if single.nbytes > max_row_bytes:
+                        limit = f'batch_bytes={batch_bytes}' if max_row_bytes == batch_bytes else f'max_row_bytes={max_row_bytes}'
+                        raise MemoryError(f'One Arrow row exceeds {limit}; cannot split the row')
+                    yield single
+                    start += 1
+                    continue
                 low, high = 1, size
                 while low < high:
                     middle = (low+high+1)//2

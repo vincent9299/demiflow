@@ -170,12 +170,14 @@ def test_busy_and_cooling_workers_do_not_fill_ready_reserve(tmp_path,monkeypatch
 
 
 def pool(tmp_path,*,request_concurrency=2,adaptive=None,**policy):
+    session_pool=dict(factory=__name__+':factory',size=2,min_healthy=1,ttl_s=10,
+                      interval_s=.001,refill_interval_s=.001,replacement_delay_s=.001,
+                      acquisition_timeout_s=.2)
+    session_pool.update(policy)
     return RenewableSearchRoutePool(cache_path=tmp_path/'cache.sqlite',
         config=SearchConfig(engines=['google'],language='all',source_interval_s=0,request_concurrency=request_concurrency),
         routes=[],max_route_attempts=2,cooldown_s=.02,failure_limit=1,adaptive=adaptive,
-        session_pool=dict(factory=__name__+':factory',size=2,min_healthy=1,ttl_s=10,
-                          interval_s=.001,refill_interval_s=.001,replacement_delay_s=.001,
-                          acquisition_timeout_s=.2,**policy))
+        session_pool=session_pool)
 
 
 def test_primary_only_connection_reuse_and_expiry(tmp_path,monkeypatch):
@@ -212,11 +214,14 @@ def test_failed_completed_query_replays_after_retirement_and_restart(tmp_path,mo
                     'http':[{'host':'search.example','http_status':302,'elapsed_s':.001}]}
     monkeypatch.setattr(NativeSearchSession,'call',call)
     async def run():
-        first=pool(tmp_path)
+        first=pool(tmp_path,replacement_delay_s=60)
         result=await first.search('blocked')
         assert len(calls)==2 and first.state['retired_total']==2
         key=first.admission_key if first.admission else None
-        await asyncio.sleep(.03);await first.maintain()
+        for route in first.routes[first.anchor_count:]:
+            if route['entry']['retired']:
+                route['entry']['replace_after']=time.time()-1
+        await first.maintain()
         assert first.state['created_total']==3
         assert await first.search('blocked')==result and len(calls)==2
         await first.aclose()

@@ -107,7 +107,12 @@ def _inspect_prompt(name: str, raw: Any, *, model=None) -> tuple[PromptDefinitio
             "prompt_definition_invalid", f"invalid prompt: {name!r}",
             f"$.prompts.{name}", name,
         ),)
-    for field in sorted(set(raw) - {"version", "model", "response_schema", "schema_retries", "template", "response_format", "input_mode", "message_limits"}):
+    response_format = raw.get('response_format', 'json')
+    systemone = raw.get('systemone')
+    if response_format == 'image' and model is not None:
+        issues.append(PromptContractDiagnostic('prompt_image_invalid',
+            'Image output is not supported in agent tasks', 'model', name))
+    for field in sorted(set(raw) - {"version", "model", "response_schema", "schema_retries", "template", "response_format", "input_mode", "message_limits", "systemone"}):
         issues.append(PromptContractDiagnostic(
             "prompt_field_unsupported",
             f"prompt {name!r} has unsupported field: {field}",
@@ -122,6 +127,7 @@ def _inspect_prompt(name: str, raw: Any, *, model=None) -> tuple[PromptDefinitio
     if model is None:
         model, model_issues = inspect_prompt_model(
             raw.get("model"), label=f"prompt {name!r} model", prompt=name,
+            media=response_format == 'image',
         )
         issues.extend(model_issues)
     from .model import CompiledTemplate
@@ -140,14 +146,23 @@ def _inspect_prompt(name: str, raw: Any, *, model=None) -> tuple[PromptDefinitio
         issues.extend(template_issues)
         if mode != 'template' or 'message_limits' in raw:
             issues.append(PromptContractDiagnostic('prompt_input_mode_invalid', 'message_limits requires messages mode; input_mode must be template or messages', 'input_mode', name))
-    schema, schema_issues = inspect_schema(raw.get("response_schema"))
+    default_schema = None
+    if response_format == 'image':
+        from .media import IMAGE_RESPONSE_SCHEMA
+        default_schema = IMAGE_RESPONSE_SCHEMA
+        if (raw.get('response_schema', default_schema) != default_schema
+                or raw.get('schema_retries', 0) != 0 or mode != 'template'):
+            issues.append(PromptContractDiagnostic('prompt_image_invalid',
+                'Image output requires its fixed ObjectRef schema, template mode and zero schema retries',
+                'response_schema', name))
+    schema, schema_issues = inspect_schema(raw.get("response_schema", default_schema))
     issues.extend(PromptContractDiagnostic(
         "prompt_response_schema_invalid", f"prompt {name!r} response_schema invalid: {message}",
         f"$.prompts.{name}.response_schema{path.removeprefix('$')}", name,
     ) for path, message in schema_issues)
     response_format = raw.get("response_format", "json")
-    if response_format not in {"json", "text"}:
-        issues.append(PromptContractDiagnostic("prompt_response_format_invalid", "response_format must be json or text", f"$.prompts.{name}.response_format", name))
+    if response_format not in {"json", "text", "image"}:
+        issues.append(PromptContractDiagnostic("prompt_response_format_invalid", "response_format must be json, text or image", f"$.prompts.{name}.response_format", name))
     if response_format == "text" and schema is not None:
         if schema.get("required") != ["result"] or set(schema.get("properties", {})) != {"result"} or schema["properties"]["result"].get("type") != "string":
             issues.append(PromptContractDiagnostic("prompt_text_schema_invalid", "text format requires a single string result property", f"$.prompts.{name}.response_schema", name))
@@ -158,9 +173,22 @@ def _inspect_prompt(name: str, raw: Any, *, model=None) -> tuple[PromptDefinitio
             f"prompt {name!r} schema_retries must be 0 or 1",
             f"$.prompts.{name}.schema_retries", name,
         ))
+    if model is not None and model.transport == 'systemone':
+        if not isinstance(systemone, Mapping) or set(systemone) != {'type', 'instructions'}:
+            issues.append(PromptContractDiagnostic(
+                'prompt_systemone_invalid', 'SystemOne requires only type and instructions', 'systemone', name))
+        elif systemone.get('type') != 'noul' or not isinstance(systemone.get('instructions'), str) or not systemone['instructions'].strip():
+            issues.append(PromptContractDiagnostic(
+                'prompt_systemone_invalid', 'SystemOne supports noul with nonempty instructions', 'systemone', name))
+        if response_format != 'json' or retries != 0 or mode != 'template':
+            issues.append(PromptContractDiagnostic(
+                'prompt_systemone_invalid', 'SystemOne noul requires template mode, JSON output and zero schema retries', 'systemone', name))
+    elif systemone is not None:
+        issues.append(PromptContractDiagnostic(
+            'prompt_systemone_invalid', 'systemone requires model.transport=systemone', 'systemone', name))
     if issues or model is None or template is None or schema is None:
         return None, tuple(issues)
-    return PromptDefinition(name, version, model, template, schema, retries, response_format, mode, limits), ()
+    return PromptDefinition(name, version, model, template, schema, retries, response_format, mode, limits, systemone or {}), ()
 
 def load_prompt_pack(path: str | Path) -> PromptPack:
     target = Path(path)

@@ -66,6 +66,8 @@ class Worker:
                     raise
         finally:
             if directory is not None:
+                from .browser import drop_browser_tmp_alias
+                drop_browser_tmp_alias(directory.name)
                 directory.cleanup()
 
     async def send(self, message):

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from demiflow.objects import LocalObjectStore, ObjectRef, open_object
 
 SCHEMA_VERSION = 'demiflow.document.v1'
-PARSER_VERSION = 'structured-html-3'
+PARSER_VERSION = 'structured-html-4'
 
 
 def canonical(value):
@@ -99,7 +99,7 @@ def parse_document(body, *, url, final_url, content_type, retrieved_at=None, pdf
             raise DocumentError('captcha')
         # Malformed HTML may put real content inside <head>; remove metadata
         # elements, not their entire ancestor and any recovered article in it.
-        for tag in soup.select('title,meta,base,link,script,style,noscript,nav,footer,aside,form,iframe,[role="navigation"],[role="banner"],[role="contentinfo"],[aria-hidden="true"],.mw-portlet,.vector-header-container,.vector-page-toolbar,.mw-jump-link'):
+        for tag in soup.select('title,meta,base,link,script,style,noscript,nav,footer,aside,form,iframe,[role="navigation"],[role="banner"],[role="contentinfo"],[aria-hidden="true"]'):
             tag.decompose()
         # Layout classes such as has-sidebar, sidebar-right and ast-no-sidebar
         # describe the whole article/body. Only explicit widget classes are

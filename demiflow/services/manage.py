@@ -101,7 +101,7 @@ def start_service(root,name,configuration,*,reuse=False):
                 'base_url':declaration.base_url,'ready_url':f'{url.scheme}://{url.netloc}'+declaration.ready_path,
                 'started_at':time.time()}
         _write(directory/'state.json',record)
-    deadline=time.monotonic()+declaration.startup_timeout_s+5
+    deadline=time.monotonic()+declaration.startup_timeout_s+30
     while time.monotonic()<deadline:
         record=status_service(root,name)
         if record.get('state')=='absent':

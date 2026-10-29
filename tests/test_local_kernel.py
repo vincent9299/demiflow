@@ -8,7 +8,7 @@ import pytest
 from demiflow import data
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from tests.test_local_relational import _oracle_join
+from tests.test_local_relational import _oracle_join, assert_same_rows
 
 
 def _slow_map(row):
@@ -16,6 +16,7 @@ def _slow_map(row):
     return {'k': row['id'] % 13, 'v': row['id'], 'pid': os.getpid()}
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize('mode', ['thread', 'process'])
 def test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order(tmp_path, mode):
     with data.local_execution(workers=3, worker_mode=mode, partitions=7, batch_rows=12,
@@ -46,7 +47,7 @@ def test_join_matches_legacy_canonical_semantics(tmp_path, how, mode):
     with data.local_execution(workers=2, worker_mode=mode, partitions=5, batch_rows=7,
                               memory_bytes=2*65536, temp_directory=str(tmp_path)):
         result=data.from_items(left).join(data.from_items(right),on=['a','b'],right_on=['x','y'],how=how,chunk_bytes=150).take_all()
-    assert result == _oracle_join(left,right,['a','b'],['x','y'],how)
+    assert_same_rows(result, _oracle_join(left,right,['a','b'],['x','y'],how))
     assert list(tmp_path.iterdir()) == []
 
 

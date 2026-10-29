@@ -19,9 +19,14 @@ class PromptResponsePending(PromptError):
 
 def request_record(request):
     value = {"stage": request.prompt_name, "prompt_version": request.prompt_version,
-             "model": request.model, "messages": request_messages(request),
+             "model": request.model,
              "response_schema": dict(request.response_schema),
              "response_format": request.response_format, "schema_attempt": request.schema_attempt}
+    if request.systemone:
+        from .systemone import request_payload
+        value['payload'] = request_payload(request)
+    else:
+        value['messages'] = request_messages(request)
     return {**value, "request_sha256": hashlib.sha256(canonical(value).encode()).hexdigest()}
 
 

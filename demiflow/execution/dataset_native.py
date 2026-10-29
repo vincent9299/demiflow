@@ -107,6 +107,7 @@ class Engine:
         self.views, self.sources, self.key_functions = {}, {}, []
         self.counter = itertools.count()
         self._session = None
+        self.payload_sources = {}
         self.typed_cache = {}
         self.large = False
 
@@ -118,11 +119,10 @@ class Engine:
         self.views[name] = sql
         return name
 
-    @staticmethod
-    def batch_rows(rel):
+    def batch_rows(self, rel):
         # A join can carry one payload from each packed input in an output row.
         # Row count alone lets a native output batch grow to multiple GiB.
-        return min(8192, max(1, (8 * 2**20) // max(1, rel.payload_row_bytes)))
+        return min(self.session.options.batch_rows, max(1, (8 * 2**20) // max(1, rel.payload_row_bytes)))
 
     @property
     def session(self):
@@ -131,15 +131,16 @@ class Engine:
             self._session = self.stack.enter_context(dataset_session(
                 self.executor, self.directory,
                 prefer_hash_join=any(s.get('format') == 'csv' for s in self.sources.values())))
-        # Key-only operations using the session directly have no opaque payload.
-        self._session.options = replace(self._session.options, batch_rows=8192)
+        # The configured native batch target applies to keys and typed columns
+        # too; opaque payloads may tighten result hydration further per relation.
         return self._session
 
     def query(self, rel, sql, **kwargs):
         # A previously materialized sibling is not carried by this query.
         # Repacking also replaces its inputs, rather than adding their sizes.
         session = self.session
-        session.options = replace(session.options, batch_rows=self.batch_rows(rel))
+        # Opaque payloads stay in fixed private snapshots. Native joins carry
+        # keys, offsets and lengths; hydration has its own byte budget.
         return session.query(sql, **kwargs)
 
     def typed(self, item):
@@ -300,9 +301,11 @@ class Engine:
         import lance
         from ..lance.arrow_batches import LANCE_FILE_ROWS
         key, valid, ordinal, payload = (self.name(k) for k in ('k', 'valid', 'o', 'payload'))
+        length = self.name('payload_bytes')
         # Joins may duplicate/rebatch wide rows past Binary's 2 GiB offset range,
         # even though each input batch is small. Keep opaque payload offsets 64-bit.
-        schema = pa.schema([(key, pa.string()), (valid, pa.bool_()), (ordinal, pa.uint64()), (payload, pa.large_binary())])
+        schema = pa.schema([(key, pa.string()), (valid, pa.bool_()), (ordinal, pa.uint64()),
+                            (payload, pa.large_binary()), (length, pa.uint64())])
         path = self.directory / (self.name('input') + '.lance')
         max_row_bytes = 0
         def batches():
@@ -314,7 +317,7 @@ class Engine:
                     encoded = pickle.dumps(row, protocol=pickle.HIGHEST_PROTOCOL)
                     max_row_bytes = max(max_row_bytes, len(encoded))
                     chunk.append({key: key_of(row, fields), valid: all(row[k] is not None for k in fields),
-                        ordinal: i, payload: encoded})
+                        ordinal: i, payload: encoded, length: len(encoded)})
                     size += len(encoded)
                     if len(chunk) == 8192 or size >= 8 * 2**20:
                         yield pa.RecordBatch.from_pylist(chunk, schema=schema)
@@ -340,8 +343,12 @@ class Engine:
             raise
         table = self.name('t')
         self.sources[table] = {'uri': str(path), 'version': ds.version}
+        self.payload_sources[payload] = {'field': payload, 'size_field': length,
+                                        'source': self.sources[table]}
         self.large = self.large or ds.count_rows() >= SORT_STAGE_ROWS
-        rel = Relation(self.view(f'SELECT {key}, {valid}, {ordinal}, {payload} FROM {table}'), None,
+        # This private snapshot is immutable and has no deletions. Its stored
+        # ordinal is a global row offset suitable for Lance.take(), not _rowid.
+        rel = Relation(self.view(f'SELECT {key}, {valid}, {ordinal}, {ordinal} AS {payload}, {length} FROM {table}'), None,
             (ordinal,), ('payload', payload), {tuple(fields): (key, valid)}, payload_row_bytes=max_row_bytes)
         self.stats['stages'].append({'name': 'python_boundary', 'rows_output': ds.count_rows(),
             'max_payload_row_bytes': max_row_bytes, 'native_batch_rows': self.batch_rows(rel)})
@@ -420,7 +427,7 @@ class Engine:
         sql = f'SELECT * FROM {rel.view}'
         if ordered:
             sql += f' ORDER BY {self.order_sql(rel)}'
-        separate_sort = ordered and self.large
+        separate_sort = ordered and self.large and not rel.payload_row_bytes
         if separate_sort:
             # Only keys and row IDs enter the final sort. Carrying opaque or
             # nested payloads through it can exhaust merge workspace even when
@@ -440,7 +447,8 @@ class Engine:
         else:
             result = self.query(rel, sql, sources=self.sources, views=self.views,
                 label='dataset', schema=schema, batch_transform=transform,
-                _dataset_spec={'keys': self.key_functions, 'transform_batch_rows': transform_batch_rows})
+                _dataset_spec={'keys': self.key_functions, 'transform_batch_rows': transform_batch_rows,
+                               'opaque_payloads': list(self.payload_sources.values())})
             self.record(result, 'combined')
         yield from lance.dataset(**result.source()).to_batches(batch_size=self.batch_rows(rel), batch_readahead=1, fragment_readahead=1)
 

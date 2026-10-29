@@ -36,6 +36,32 @@ read-only replay and cancellation remain shared. Regression coverage:
 
 The public entry is the existing `Dataset.map_prompt_async` API. It does not add a token Dataset, a business HTTP client or another pipeline entry. `map_prompt(..., options=...)` shares the HTTP/response contract through its existing synchronous adapter; synchronous calls do not gain the asynchronous node's shared pool.
 
+## SystemOne noul decisions
+
+`map_prompt_async` also accepts `model.transport=systemone` for text-only `noul` decisions. This is the same prompt-pack and Dataset contract, not another configuration family or Dataset API. The existing `template` renders the single text `state`; `systemone` declares only `type: noul` and a nonempty `instructions` string. The prompt name is the question key. `api_key_env` is optional for unauthenticated local endpoints; `base_url` or `base_url_env` remains required.
+
+```yaml
+model: {name: AutoTrust-JEV-27B-v1.1, transport: systemone, base_url: http://127.0.0.1:8104/v1}
+systemone: {type: noul, instructions: Does the text define the same concept and scope?}
+schema_retries: 0
+response_schema:
+  type: object
+  required: [result]
+  properties:
+    result:
+      type: object
+      required: [type, noul]
+      properties:
+        type: {type: string, enum: [noul]}
+        noul: {type: number, minimum: 0, maximum: 1}
+template: |
+  {{ payload | json }}
+```
+
+The HTTP request is `POST {base_url}/systemone` with `model`, `state` and `questions`; no chat messages or generation parameters are added. The response must contain `answers.<prompt-name>` with `type=noul` and a finite probability in `[0,1]`, returned as the ordinary `result` object and checked by the same response schema. This is decision-head output, not a model-written confidence value. SystemOne currently supports template mode, one text part, JSON output, zero schema retries and `stream=False`; images, `choice`, `score` and `input_mode=messages` are not implicitly enabled.
+
+Request journals store the actual SystemOne payload and reuse complete responses under the existing request-identity, quota, timeout and cancellation rules. Offline request materialization uses the same SystemOne body. Regression coverage: `tests/test_prompt_systemone.py` plus the existing prompt/offline suites.
+
 `Dataset.agentmap_async` with `runtime: demiflow` uses this same transport for every model turn. Put these execution options in the agent YAML's `options` mapping; node options only supply storage/replay. See [agent HTTP streaming configuration](operator_environment.md#http-流式配置). An async Dataset operator does not implicitly enable HTTP SSE.
 
 ```python

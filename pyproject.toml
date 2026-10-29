@@ -43,3 +43,10 @@ exclude = ["demiflow._vendor.searxng*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "slow: long-running or high-resource stress coverage",
+    "network: requires real external network; mocks and loopback are excluded",
+    "gpu: requires a physical GPU or real model weights",
+    "ray: contacts a real Ray runtime or cluster",
+]

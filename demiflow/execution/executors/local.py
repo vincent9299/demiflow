@@ -700,10 +700,14 @@ class LocalDatasetExecutor(DatasetExecutor):
         batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
     ) -> Iterable[Any]:
         del prefetch_batches
+        rows = self._apply_plan(source, plan, action_kind="iter_batches")
+        if batch_format in {"numpy", "pandas"}:
+            batches = self._rows_as_batches(
+                rows, batch_size=batch_size, batch_format="list", drop_last=drop_last,
+            )
+            return (self._rows_to_batch(batch, batch_format) for batch in batches)
         return self._rows_as_batches(
-            self._apply_plan(source, plan, action_kind="iter_batches"),
-            batch_size=batch_size, batch_format=batch_format,
-            drop_last=drop_last,
+            rows, batch_size=batch_size, batch_format=batch_format, drop_last=drop_last,
         )
 
     def _rows_as_batches(

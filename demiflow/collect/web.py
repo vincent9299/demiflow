@@ -581,6 +581,36 @@ class WebClient(URLPolicy):
             return saved
         return None
 
+    async def download(self, url, store):
+        """Download one raw snapshot to the caller's store; no parse or index IO."""
+        from demiflow.objects import LocalObjectStore
+        if not isinstance(store, LocalObjectStore):
+            raise TypeError('download requires an explicit LocalObjectStore')
+        reason = self.exclusion_reason(url)
+        if reason:
+            return {'url': url, 'status': 'excluded', 'reason': reason, 'raw_ref': None, 'attempts': []}
+        identity = [url, self.max_bytes, self.redirects, self.retries, self.timeout_s,
+                    self.proxy_identity(url), str(store.directory)]
+        async def execute():
+            result = await self._get(url)
+            if result['status'] != 'ok':
+                return {**result, 'url': url, 'raw_ref': None}
+            task = asyncio.create_task(asyncio.to_thread(store.put, result['body']))
+            try:
+                ref = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                await asyncio.gather(task, return_exceptions=True)
+                raise
+            return {'url': url, 'final_url': result['final_url'],
+                    'content_type': result['headers'].get('content-type', ''),
+                    'retrieved_at': datetime.now(timezone.utc).isoformat(),
+                    'status': 'ok', 'reason': '', 'raw_ref': ref.to_dict(), 'attempts': result['attempts']}
+        result = await self._once('raw_download', identity, execute)
+        reason = self.exclusion_reason(result.get('final_url') or url)
+        if reason:
+            return {'url': url, 'status': 'excluded', 'reason': reason, 'raw_ref': None, 'attempts': []}
+        return result
+
     async def fetch(self,url):
         excluded_reason = self.exclusion_reason(url)
         if excluded_reason:

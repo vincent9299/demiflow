@@ -16,6 +16,7 @@ def test_join_many_to_many_and_nulls():
     assert {r['k'] for r in left.join(right,on='k',how='anti').take_all()}=={2,None}
 
 
+@pytest.mark.slow
 def test_group_spill_batches_and_composite_keys():
     data=ds([{'a':'x','b':1,'n':i} for i in range(100)])
     batches=data.group_batches(['a','b'],max_rows=7,chunk_bytes=1).take_all()
@@ -225,6 +226,7 @@ def test_large_stable_sort_multiple_merge_passes(tmp_path):
     assert [r for _, r in sorted_rows(iter(rows), ['k'], tmp_path, 1)] == sorted(rows, key=lambda r: key_of(r, ['k']))
 
 
+@pytest.mark.slow
 def test_parallel_sort_matches_serial(tmp_path):
     from demiflow.data.local_relational import sorted_rows
     a = tmp_path/'serial'; a.mkdir()

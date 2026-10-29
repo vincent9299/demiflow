@@ -213,6 +213,12 @@ def _response_contract_instruction(request: OperatorLLMRequest) -> str:
 
 def request_messages(request: OperatorLLMRequest) -> list[dict[str, Any]]:
     """The exact model-visible context shared by HTTP and offline transports."""
+    if request.systemone:
+        from .systemone import request_payload
+        payload = request_payload(request)
+        return [{"role": "user", "content": payload['state'] + '\n' + json.dumps(
+            payload['questions'], ensure_ascii=False, sort_keys=True,
+        )}]
     if request.messages is not None:
         return list(request.messages)
     return [{"role": "system", "content": _response_contract_instruction(request)},
@@ -233,6 +239,11 @@ class AsyncOperatorLLMClient:
         from .journal import PromptJournal
         from .http_options import validate_http_options, request_options, gateway_credentials
         self.options=validate_http_options(options);self.model=model;self.checked=False
+        self.transport_context = None
+        self._native = None
+        if model.transport == 'diffusers':
+            from .diffusers_transport import DiffusersTransport
+            self._native = DiffusersTransport(model.provider, self.options)
         self._gateway_credentials = gateway_credentials(self.options)
         self._verification_lock = asyncio.Lock()
         revision = self.options.get('model_revision')
@@ -254,16 +265,24 @@ class AsyncOperatorLLMClient:
             if (not isinstance(self.journal, SQLitePromptJournal) or self.journal.read_only
                     or type(self.journal.limit) is not int or self.journal.limit < 0):
                 raise ValueError('HTTP error retry requires a writable SQLite journal with finite nonnegative max_requests')
-        names=tuple(name for name in (model.base_url_env,model.api_key_env) if name)
+        names=(() if model.transport == 'diffusers' else
+               tuple(name for name in (model.base_url_env,model.api_key_env) if name))
         values=required_environment(names)
-        self.base=(model.base_url or values[model.base_url_env]).rstrip('/')
-        key=values[model.api_key_env]
+        self.base=(model.base_url or values.get(model.base_url_env, '')).rstrip('/')
+        key=values.get(model.api_key_env, '')
         if model.transport=='azure_openai':
             self.url=f'{self.base}/openai/deployments/{quote(model.name,safe="")}/chat/completions'
             self.params={'api-version':model.api_version};headers={'api-key':key};self.temperature=1.0
         elif model.transport=='openai_compatible':
             self.url=f'{self.base}/chat/completions';self.params=None
-            headers={'Authorization':f'Bearer {key}'};self.temperature=0
+            headers={'Authorization':f'Bearer {key}'} if key else {};self.temperature=0
+        elif model.transport=='systemone':
+            if self.options.get('stream'):
+                raise ValueError('SystemOne requires stream=False')
+            self.url=f'{self.base}/systemone';self.params=None
+            headers={'Authorization':f'Bearer {key}'} if key else {};self.temperature=0
+        elif model.transport == 'diffusers':
+            self.url='diffusers';self.params=None;headers={};self.temperature=0
         else:raise PromptProviderUnavailableError(f'unsupported Operator LLM transport: {model.transport}')
         self._headers = headers
         self._client = None
@@ -304,9 +323,17 @@ class AsyncOperatorLLMClient:
     def record(self,request):
         if isinstance(request, _PreparedCall):
             return request.source
+        if request.response_format == 'image':
+            from .media import request_record
+            from .journal import RequestRecord
+            return RequestRecord(request_record(request, self.model, self.options))
         from .journal import RequestRecord
-        payload={'model':request.model,'messages':request_messages(request),
-            'temperature':self.temperature,**self.request_options}
+        if request.systemone:
+            from .systemone import request_payload
+            payload = request_payload(request)
+        else:
+            payload={'model':request.model,'messages':request_messages(request),
+                'temperature':self.temperature,**self.request_options}
         if request.response_format == 'text':
             if request.messages is not None:
                 payload['response_format'] = {'type': 'text'}
@@ -345,6 +372,20 @@ class AsyncOperatorLLMClient:
     def decode(self,request,record,reused=False,refs=None):
         from .errors import PromptResponseContractError
         source=self.record(request)
+        if self.model.provider:
+            image = record.get('image') or (record.get('body') or {}).get('image')
+            metadata = {**(refs or {}), 'reused': reused, 'model': self.model.name,
+                'input_ref': record.get('input_ref'),
+                'seconds': record.get('seconds', record.get('elapsed_s', 0)),
+                'elapsed_s': record.get('seconds', record.get('elapsed_s', 0)),
+                'template_name': source['template']['name'],
+                'template_version': source['template']['version'],
+                **record.get('transport_metadata', {})}
+            if image is None:
+                error = PromptResponseContractError('Saved image response has no image ObjectRef')
+                error.call = metadata
+                raise error
+            return OperatorLLMResponse({'image': image}, endpoint=source['endpoint'], metadata=metadata)
         paths=self.journal.paths(source) if self.journal and hasattr(self.journal, 'paths') else {}
         body=record['body']
         metadata={'request_path':str(paths['request']) if paths else None,
@@ -364,6 +405,10 @@ class AsyncOperatorLLMClient:
             metadata.update(record.get('_journal_refs', {}))
         try:
             if record['status_code']!=200:raise PromptResponseContractError(f'HTTP {record["status_code"]}; full response saved')
+            if self.model.transport == 'systemone':
+                from .systemone import response_result
+                return OperatorLLMResponse(response_result(request, body),
+                    OperatorLLMRequestUsage.from_value(body.get('usage')), endpoint=self.url, metadata=metadata)
             choice=body['choices'][0]
             message = choice['message']
             reasoning = message.get('reasoning_content') or message.get('reasoning')
@@ -394,6 +439,21 @@ class AsyncOperatorLLMClient:
         return None
 
     async def execute(self, request):
+        if self._native is not None:
+            task = asyncio.create_task(self._execute(request))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                    except BaseException:
+                        break
+                if not task.cancelled():
+                    task.exception()
+                raise
         # A service circuit stops new scheduling, but another service's failure
         # must not discard a paid response already in flight. Keep the original
         # request deadline and persist its outcome; do not publish a row after
@@ -440,6 +500,14 @@ class AsyncOperatorLLMClient:
         metadata = {'transport': 'sse' if assembler else 'json'}
         raw_log_path = None
         try:
+            input_ref = None
+            if self.model.provider:
+                from pathlib import Path
+                from demiflow.execution.file_ref import save_json_artifact
+                artifact = await self._journal_pool.run(save_json_artifact,
+                    Path(self.options['sqlite_journal']['path']).with_suffix('.inputs'), source)
+                input_ref = artifact.to_dict()
+                metadata['input_ref'] = input_ref
             if assembler and self.options.get('stream_log_dir'):
                 from pathlib import Path
                 from uuid import uuid4
@@ -452,52 +520,27 @@ class AsyncOperatorLLMClient:
                 await self._journal_pool.run(open_log)
                 raw_log_path = path
                 metadata['stream_log_path'] = str(path.resolve())
-            async with asyncio.timeout(self.options.get('timeout_s',120)):
-                # Credentials are added only to the outgoing wire payload. The
-                # durable request and its identity remain free of secrets.
-                wire_payload = {**source['payload'], **self._gateway_credentials}
-                async with self.client.stream('POST', self.url, params=self.params, json=wire_payload) as response:
-                    metadata['http_status'] = response.status_code
-                    metadata['headers_received_s'] = time.monotonic() - started
-                    metadata['response_headers'] = {key: value for key, value in response.headers.items()
-                        if key.lower() in {'content-type', 'content-encoding', 'cf-ray', 'x-request-id', 'request-id',
-                            'x-litellm-call-id', 'x-litellm-attempted-retries', 'x-litellm-attempted-fallbacks', 'x-litellm-timeout'}}
-                    is_sse = (assembler is not None and response.status_code == 200
-                              and response.headers.get('content-type', '').split(';')[0].strip().lower() == 'text/event-stream')
-                    chunks = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        if is_sse:
-                            if raw_log_path is not None:
-                                # Logging is opt-in and subject to the same bounded wire budget.
-                                remaining = assembler.max_bytes - assembler.metrics['bytes_received']
-                                def append_log(data):
-                                    with raw_log_path.open('ab') as log:
-                                        log.write(data)
-                                await self._journal_pool.run(append_log, chunk[:max(0, remaining)])
-                            assembler.feed(chunk, time.monotonic() - started)
-                        else:
-                            if len(chunks) + len(chunk) > self.options.get('max_response_bytes', 8 * 1024 * 1024):
-                                metadata['partial_body'] = bytes(chunks).decode('utf-8', errors='replace')
-                                raise PromptStreamError('HTTP response exceeds max_response_bytes')
-                            chunks.extend(chunk)
-                    if is_sse:
-                        body = assembler.complete()
-                        metadata.update(transport='sse', stream=dict(assembler.metrics), stream_complete=True)
-                    else:
-                        body = await self._response_pool.run(_response_body, chunks)
-                        if assembler is not None and response.status_code == 200:
-                            metadata['partial_body'] = body
-                            raise PromptStreamError('Expected text/event-stream for stream=True; no automatic non-stream fallback')
-                        # aiter_bytes already decoded Content-Encoding. The detached
-                        # response contains decoded bytes, so do not decompress twice
-                        # or retain the compressed Content-Length/transfer framing.
-                        decoded_headers = {key: value for key, value in response.headers.items()
-                            if key.lower() not in {'content-encoding', 'content-length', 'transfer-encoding'}}
-                        # Keep the ordinary HTTPStatusError contract without retaining an open response.
-                        response = httpx.Response(response.status_code, content=bytes(chunks),
-                                                  headers=decoded_headers, request=response.request)
+            from contextlib import AsyncExitStack
+            async with AsyncExitStack() as transport_stack:
+                if self.transport_context is not None:
+                    await transport_stack.enter_async_context(self.transport_context())
+                await transport_stack.enter_async_context(asyncio.timeout(self.options.get('timeout_s',120)))
+                if self._native is not None:
+                    from .media import store_image
+                    raw = await self._native.execute(source)
+                    image = await self._response_pool.run(store_image, raw, self.options)
+                    body = {'image': image}
+                    response = httpx.Response(200, json=body,
+                        request=httpx.Request('POST', 'http://local.invalid/diffusers'))
+                else:
+                    response, body = await self._exchange_http(source, metadata, assembler, raw_log_path, started)
+                if self.model.provider and self._native is None:
+                    response.raise_for_status()
+                    body = await self._materialize_media(body)
             record={'status_code':response.status_code,'body':body,'elapsed_s':time.monotonic()-started,
                     'transport_metadata': metadata}
+            if input_ref is not None:
+                record['input_ref'] = input_ref
         except BaseException as exc:
             if assembler is not None:
                 metadata.update(assembler.snapshot())
@@ -530,6 +573,83 @@ class AsyncOperatorLLMClient:
                 raise
         return await self._response_pool.run(self.decode, request, record, False, refs)
 
+    async def _materialize_media(self, body):
+        import httpx
+        from pathlib import Path
+        from demiflow.execution.file_ref import save_json_artifact
+        from .media import response_location, store_image, media_limits
+        location = await self._response_pool.run(response_location, body, self.model.provider, self.options)
+        raw = location
+        if isinstance(location, str):
+            download = httpx.Request('GET', location)
+            response = await self.client.send(download, stream=True, auth=None)
+            try:
+                response.raise_for_status()
+                payload = bytearray()
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    if len(payload) + len(chunk) > media_limits(self.options)['max_image_bytes']:
+                        raise ValueError('Downloaded image exceeds max_image_bytes')
+                    payload.extend(chunk)
+                raw = bytes(payload)
+            finally:
+                await response.aclose()
+        provider_ref = await self._journal_pool.run(save_json_artifact,
+            Path(self.options['sqlite_journal']['path']).with_suffix('.inputs') / 'responses', body)
+        image = await self._response_pool.run(store_image, raw, self.options)
+        return {'image': image, 'provider_response_ref': provider_ref.to_dict()}
+
+    async def _exchange_http(self, source, metadata, assembler, raw_log_path, started):
+        import httpx
+        from .errors import PromptStreamError
+        if self.model.provider:
+            from .media import wire_request
+            url = self.base + source['endpoint']
+            wire = await self._prepare_pool.run(wire_request, source, self.model.provider)
+        else:
+            url = self.url
+            wire = {'json': {**source['payload'], **self._gateway_credentials}}
+        async with self.client.stream('POST', url, params=self.params, **wire) as response:
+            metadata['http_status'] = response.status_code
+            metadata['headers_received_s'] = time.monotonic() - started
+            metadata['response_headers'] = {key: value for key, value in response.headers.items()
+                if key.lower() in {'content-type', 'content-encoding', 'cf-ray', 'x-request-id', 'request-id',
+                    'x-litellm-call-id', 'x-litellm-attempted-retries', 'x-litellm-attempted-fallbacks', 'x-litellm-timeout'}}
+            is_sse = (assembler is not None and response.status_code == 200
+                      and response.headers.get('content-type', '').split(';')[0].strip().lower() == 'text/event-stream')
+            chunks = bytearray()
+            async for chunk in response.aiter_bytes():
+                if is_sse:
+                    if raw_log_path is not None:
+                        # Logging is opt-in and subject to the same bounded wire budget.
+                        remaining = assembler.max_bytes - assembler.metrics['bytes_received']
+                        def append_log(data):
+                            with raw_log_path.open('ab') as log:
+                                log.write(data)
+                        await self._journal_pool.run(append_log, chunk[:max(0, remaining)])
+                    assembler.feed(chunk, time.monotonic() - started)
+                else:
+                    if len(chunks) + len(chunk) > self.options.get('max_response_bytes', 8 * 1024 * 1024):
+                        metadata['partial_body'] = bytes(chunks).decode('utf-8', errors='replace')
+                        raise PromptStreamError('HTTP response exceeds max_response_bytes')
+                    chunks.extend(chunk)
+            if is_sse:
+                body = assembler.complete()
+                metadata.update(transport='sse', stream=dict(assembler.metrics), stream_complete=True)
+            else:
+                body = await self._response_pool.run(_response_body, chunks)
+                if assembler is not None and response.status_code == 200:
+                    metadata['partial_body'] = body
+                    raise PromptStreamError('Expected text/event-stream for stream=True; no automatic non-stream fallback')
+                # aiter_bytes already decoded Content-Encoding. The detached
+                # response contains decoded bytes, so do not decompress twice
+                # or retain the compressed Content-Length/transfer framing.
+                decoded_headers = {key: value for key, value in response.headers.items()
+                    if key.lower() not in {'content-encoding', 'content-length', 'transfer-encoding'}}
+                # Keep the ordinary HTTPStatusError contract without retaining an open response.
+                response = httpx.Response(response.status_code, content=bytes(chunks),
+                                          headers=decoded_headers, request=response.request)
+        return response, body
+
     async def aclose(self):
         pools = (self._prepare_pool, self._journal_pool, self._response_pool)
         try:
@@ -537,6 +657,8 @@ class AsyncOperatorLLMClient:
                 await self._client.aclose()
         finally:
             try:
+                if self._native is not None:
+                    await self._native.aclose()
                 for pool in pools:
                     await pool.drain()
                 if self.journal and hasattr(self.journal, 'close'):

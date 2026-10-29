@@ -21,6 +21,20 @@ DEFAULTS = dict(max_requests=48, max_total_bytes=8*1024*1024,
                 proxy_connections_per_worker=8, ready_timeout_s=12.)
 
 
+def browser_tmp_alias(worker_directory):
+    from hashlib import sha256
+    from pathlib import Path
+    key = sha256(str(worker_directory).encode()).hexdigest()[:12]
+    return Path('/tmp') / f'df-{key}'
+
+
+def drop_browser_tmp_alias(worker_directory):
+    from pathlib import Path
+    alias = browser_tmp_alias(worker_directory)
+    if alias.is_symlink() and alias.readlink() == Path(worker_directory):
+        alias.unlink()
+
+
 def browser_options(value):
     if not isinstance(value, dict) or set(value)-set(DEFAULTS):
         raise ValueError('Invalid browser options')
@@ -53,6 +67,12 @@ class BrowserTransport:
         self.pw = self.browser = self.context = None
         self.queries = 0
         self.context_key = None
+        self._tmp_alias = None
+
+    def _drop_tmp_alias(self):
+        alias, self._tmp_alias = self._tmp_alias, None
+        if alias is not None:
+            drop_browser_tmp_alias(self.config['worker_directory'])
 
     async def start(self, proxy, language):
         key = (proxy, language)
@@ -64,12 +84,18 @@ class BrowserTransport:
                 from playwright.async_api import async_playwright
             except ImportError:
                 raise BrowserFailure('dependency_error', 'Install demiflow[search-browser] and its Chromium binary') from None
-            # The driver creates Chromium profiles via its TMPDIR. Keep them
-            # under the parent's owned directory, including on forced cleanup.
+            # Chromium Unix sockets need short paths; the alias still targets
+            # the worker-owned directory and is removed with this transport.
+            alias = browser_tmp_alias(self.config['worker_directory'])
+            alias.symlink_to(self.config['worker_directory'], target_is_directory=True)
+            self._tmp_alias = alias
             old_tmp = os.environ.get('TMPDIR')
-            os.environ['TMPDIR'] = self.config['worker_directory']
+            os.environ['TMPDIR'] = str(alias)
             try:
                 self.pw = await async_playwright().start()
+            except BaseException:
+                self._drop_tmp_alias()
+                raise
             finally:
                 if old_tmp is None: os.environ.pop('TMPDIR', None)
                 else: os.environ['TMPDIR'] = old_tmp
@@ -82,6 +108,7 @@ class BrowserTransport:
             except Exception:
                 await self.pw.stop()
                 self.pw = None
+                self._drop_tmp_alias()
                 raise BrowserFailure('dependency_error', 'Chromium could not start; verify browser installation and OS dependencies') from None
         if self.context is None:
             options = dict(service_workers='block', accept_downloads=False,
@@ -117,6 +144,7 @@ class BrowserTransport:
             self.loop.run_until_complete(shutdown())
         finally:
             self.loop.close()
+            self._drop_tmp_alias()
 
     async def _fetch(self, url, proxy, language, allowed_hosts, ready_script):
         from .worker_network import http_receipts

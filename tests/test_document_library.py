@@ -318,6 +318,7 @@ def test_redirect_final_url_is_reused(tmp_path,library,fast_parser):
     assert calls==[URL,final]
 
 
+@pytest.mark.slow
 def test_two_processes_download_same_url_once(tmp_path,library):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     requests=[]

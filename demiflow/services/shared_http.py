@@ -18,7 +18,9 @@ class SharedHTTPService:
         self.stop_when_idle=stop_when_idle
         _directory(root,name)  # validate name, no filesystem access
 
-    def bind(self): return _SharedOwner(self)
+    def bind(self, model=None):
+        ManagedHTTPService(**{**self.configuration, 'root': self.root}).bind(model)
+        return _SharedOwner(self)
 
 
 class _SharedOwner:

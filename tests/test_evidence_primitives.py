@@ -86,16 +86,28 @@ def test_isolated_parse_deadline_is_a_handled_technical_failure(tmp_path,monkeyp
 
 def test_explicit_fetch_proxy_does_not_proxy_search(tmp_path,monkeypatch):
     original=httpx.AsyncClient;settings=[]
+    class Transport:
+        def __init__(self, *, proxy=None, limits):
+            self.proxy=proxy
+            self.mock=httpx.MockTransport(self.handle)
+        def handle(self,req):
+            if req.url.path=='/search':
+                assert self.proxy is None
+                return response(b'{"results":[]}',**{'content-type':'application/json'})
+            assert self.proxy=='http://proxy.example:3128'
+            return response(b'Actual document',**{'content-type':'text/plain'})
+        async def handle_async_request(self,req):
+            return await self.mock.handle_async_request(req)
+        def connection_counts(self):
+            return {'connections':0,'idle_connections':0,'active_connections':0,'waiting_requests':0}
+        async def reap_idle_connections(self):
+            return 0
+        async def aclose(self):
+            pass
+    monkeypatch.setattr('demiflow.collect.http_transport.RetrievalTransport',Transport)
     def client(**kwargs):
         settings.append(dict(kwargs))
-        proxy=kwargs.pop('proxy',None)
-        def handle(req):
-            if req.url.path=='/search':
-                assert proxy is None
-                return response(b'{"results":[]}',**{'content-type':'application/json'})
-            assert proxy=='http://proxy.example:3128'
-            return response(b'Actual document',**{'content-type':'text/plain'})
-        return original(**kwargs,transport=httpx.MockTransport(handle))
+        return original(**kwargs)
     monkeypatch.setattr(httpx,'AsyncClient',client)
     async def run():
         web=WebClient(cache_path=tmp_path/'ledger',object_directory=tmp_path/'objects',

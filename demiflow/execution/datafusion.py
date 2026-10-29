@@ -83,12 +83,15 @@ class DataFusionOptions:
     # Large build-side payloads may exceed the pool even with partitioned hash
     # joins. False asks DataFusion to choose spillable sort-merge equijoins.
     prefer_hash_join: bool = True
+    # Keep prior positional arguments stable. Ordinary batches remain at 8 MiB;
+    # Dataset sessions choose this separate, finite single-row allowance.
+    max_row_bytes: int = 8 * 1024**2
 
     def __post_init__(self):
         if type(self.prefer_hash_join) is not bool:
             raise ValueError('prefer_hash_join must be a bool')
         for key in ('memory_bytes', 'max_rss_bytes', 'max_scratch_bytes',
-                    'partitions', 'threads', 'batch_rows', 'cgroup_headroom_bytes'):
+                    'partitions', 'threads', 'batch_rows', 'max_row_bytes', 'cgroup_headroom_bytes'):
             if type(getattr(self, key)) is not int or getattr(self, key) <= 0:
                 raise ValueError(f'{key} must be a positive integer')
         for key in ('timeout_s', 'admission_timeout_s'):
@@ -97,6 +100,8 @@ class DataFusionOptions:
                 raise ValueError(f'{key} must be a finite positive number')
         if self.memory_bytes >= self.max_rss_bytes:
             raise ValueError('max_rss_bytes must leave room beyond the DataFusion pool')
+        if self.max_row_bytes < 8 * 1024**2:
+            raise ValueError('max_row_bytes must be at least the 8 MiB batch budget')
 
 
 class DataFusionQueryError(RuntimeError):
@@ -187,7 +192,7 @@ class DataFusionSession:
     not kernel RSS limits. No query or Python batch transform is retried.
     """
     def __init__(self, *, resource_directory, options=None, max_concurrent=1,
-                 temp_directory=None, diagnostics_directory=None):
+                 temp_directory=None, diagnostics_directory=None, slot_capacity=None):
         if not sys.platform.startswith('linux'):
             raise ValueError('Managed DataFusion currently requires Linux process/lock support')
         self.options = options or DataFusionOptions()
@@ -196,6 +201,14 @@ class DataFusionSession:
         if type(max_concurrent) is not int or max_concurrent < 1:
             raise ValueError('max_concurrent must be a positive integer')
         self.max_concurrent = max_concurrent
+        capacity = ({'max_rss_bytes_per_slot': self.options.max_rss_bytes,
+                     'threads_per_slot': self.options.threads} if slot_capacity is None else slot_capacity)
+        if (not isinstance(capacity, dict) or set(capacity) != {'max_rss_bytes_per_slot', 'threads_per_slot'}
+                or any(type(v) is not int or v < 1 for v in capacity.values())
+                or capacity['max_rss_bytes_per_slot'] < self.options.max_rss_bytes
+                or capacity['threads_per_slot'] < self.options.threads):
+            raise ValueError('Invalid DataFusion slot capacity')
+        self._slot_capacity = dict(capacity)
         self.resources = Path(resource_directory).resolve()
         self.diagnostics = Path(diagnostics_directory).resolve() if diagnostics_directory else self.resources / 'queries'
         self.temp_directory = temp_directory
@@ -208,12 +221,11 @@ class DataFusionSession:
         import fcntl
         if self._temporary is not None:
             raise RuntimeError('A DataFusion session can be entered only once')
-        capacity = {'slots': self.max_concurrent, 'max_rss_bytes_per_slot': self.options.max_rss_bytes,
-                    'threads_per_slot': self.options.threads}
-        if self.options.threads * self.max_concurrent > _cpu_capacity():
+        capacity = {'slots': self.max_concurrent, **self._slot_capacity}
+        if capacity['threads_per_slot'] * self.max_concurrent > _cpu_capacity():
             raise ValueError('DataFusion slots exceed the container CPU allowance')
         memory = _cgroup_memory()
-        if memory and self.options.max_rss_bytes * self.max_concurrent + self.options.cgroup_headroom_bytes >= memory[1]:
+        if memory and capacity['max_rss_bytes_per_slot'] * self.max_concurrent + self.options.cgroup_headroom_bytes >= memory[1]:
             raise ValueError('DataFusion slot reservations exceed the container memory allowance')
         self.resources.mkdir(parents=True, exist_ok=True)
         self.diagnostics.mkdir(parents=True, exist_ok=True)
@@ -227,6 +239,36 @@ class DataFusionSession:
         self._temporary = tempfile.TemporaryDirectory(prefix='demiflow-datafusion-', dir=self.temp_directory)
         self._closed = False
         return self
+
+    def _reservation(self, slot):
+        """Read only a bounded record. Legacy/corrupt busy slots reserve capacity.
+
+        Call under capacity.lock, and only after the slot lock is found busy.
+        Free-slot records have no authority, including after a process crash.
+        """
+        import fcntl
+        fallback = (self._slot_capacity['max_rss_bytes_per_slot'], self.options.cgroup_headroom_bytes)
+        try:
+            with (self.resources / f'slot-{slot}.json').open('rb') as stream:
+                raw = stream.read(4097)
+            if len(raw) > 4096:
+                return fallback
+            record = json.loads(raw)
+            rss, headroom = record['max_rss_bytes'], record['cgroup_headroom_bytes']
+            if (type(rss) is not int or not 0 < rss <= fallback[0]
+                    or type(headroom) is not int or headroom <= 0):
+                return fallback
+            # A separate, parent-owned lease authenticates the live record.
+            # Old processes only own the slot lock: they must not inherit a
+            # stale small reservation left by a crashed newer process.
+            with (self.resources / f'slot-{slot}.lease').open('a+b') as lease:
+                try:
+                    fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return rss, headroom
+            return fallback[0], max(fallback[1], headroom)
+        except (OSError, ValueError, KeyError, TypeError):
+            return fallback
 
     @contextmanager
     def _admit(self, slots_required=1):
@@ -244,29 +286,59 @@ class DataFusionSession:
             with (self.resources / 'capacity.lock').open('a+b') as capacity:
                 fcntl.flock(capacity, fcntl.LOCK_EX)
                 free = []
-                busy = 0
+                reserved = 0
+                headroom = self.options.cgroup_headroom_bytes
                 for slot in range(self.max_concurrent):
                     lock = (self.resources / f'slot-{slot}.lock').open('a+b')
                     try:
                         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                         free.append((slot, lock))
                     except BlockingIOError:
-                        busy += 1
+                        rss, extra = self._reservation(slot)
+                        reserved += rss
+                        headroom = max(headroom, extra)
                         lock.close()
                 memory = _cgroup_memory()
                 # Existing RSS may be counted twice: deliberate conservative
                 # admission, not a claim to accurately measure available RAM.
-                needed = (busy + slots_required) * self.options.max_rss_bytes + self.options.cgroup_headroom_bytes
+                needed = reserved + slots_required * self.options.max_rss_bytes + headroom
                 if len(free) >= slots_required and (not memory or memory[0] + needed < memory[1]):
                     chosen, free = free[:slots_required], free[slots_required:]
+                    token = uuid.uuid4().hex
+                    leases = []
+                    try:
+                        for slot, _ in chosen:
+                            lease = (self.resources / f'slot-{slot}.lease').open('a+b')
+                            leases.append(lease)
+                            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            _save(self.resources / f'slot-{slot}.json', {
+                                'max_rss_bytes': self.options.max_rss_bytes,
+                                'cgroup_headroom_bytes': self.options.cgroup_headroom_bytes,
+                                'pid': os.getpid(), 'token': token})
+                    except BaseException:
+                        for lease in leases:
+                            lease.close()
+                        for _, lock in chosen + free:
+                            lock.close()
+                        raise
                 for _, lock in free:
                     lock.close()
             if chosen:
                 try:
                     yield chosen[0][0], tuple(lock for _, lock in chosen)
                 finally:
-                    for _, lock in chosen:
-                        lock.close()
+                    try:
+                        with (self.resources / 'capacity.lock').open('a+b') as capacity:
+                            fcntl.flock(capacity, fcntl.LOCK_EX)
+                            for slot, _ in chosen:
+                                # We still own the slot locks. An old worker may
+                                # leave a record; it is ignored once unlocked.
+                                (self.resources / f'slot-{slot}.json').unlink(missing_ok=True)
+                    finally:
+                        for lease in leases:
+                            lease.close()
+                        for _, lock in chosen:
+                            lock.close()
                 return
             if time.monotonic() >= deadline:
                 raise TimeoutError('DataFusion resource admission timed out; no query was launched')

@@ -95,3 +95,23 @@ def test_exact_callback_groups_use_chunks_and_admit_before_python(monkeypatch):
     wide = pa.table({'s':['x'*100]*4})
     with pytest.raises(MemoryError, match='callback group'):
         next(fixed_row_tables(wide.to_batches(max_chunksize=2), wide.schema, batch_rows=4, batch_bytes=300))
+
+
+def test_wide_single_row_allowance_keeps_regular_batches_small():
+    table = pa.table({'value': ['a'*90, 'b', 'c'*90, 'd'*400, 'e', 'f'*200]})
+    original = table.to_batches()[0]
+    batches = list(bounded_record_batches([original], table.schema,
+        batch_rows=8, batch_bytes=128, max_row_bytes=512))
+    assert pa.Table.from_batches(batches).equals(table)
+    assert any(batch.nbytes > 128 for batch in batches)
+    assert all(batch.nbytes <= 128 or (batch.num_rows == 1 and batch.nbytes <= 512)
+               for batch in batches)
+    assert all(batch.column(0).buffers()[2].address == original.column(0).buffers()[2].address
+               for batch in batches)
+    oversized = pa.table({'value': ['x'*600]})
+    with pytest.raises(MemoryError, match='max_row_bytes=512'):
+        list(bounded_record_batches(oversized.to_batches(), oversized.schema,
+             batch_bytes=128, max_row_bytes=512))
+    for invalid in (0, 127, True, 512.0):
+        with pytest.raises(ValueError, match='max_row_bytes'):
+            list(bounded_record_batches([], table.schema, batch_bytes=128, max_row_bytes=invalid))

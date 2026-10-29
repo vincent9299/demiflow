@@ -255,15 +255,20 @@ async def test_browser_authenticated_proxy_and_no_server_credential_leak(tmp_pat
 
 async def test_browser_parent_pipe_closure_releases_children(site,tmp_path):
     import psutil
+    from demiflow.collect.native_search.browser import browser_tmp_alias
     s=NativeSearchSession(cache_path=tmp_path/'parent.sqlite',config=config(site,'browser'))
+    alias = None
     try:
         assert (await s.search('plain'))['status']=='ok'
         worker=s.workers[0]
+        alias=browser_tmp_alias(worker.directory.name)
+        assert alias.is_symlink()
         children=psutil.Process(worker.process.pid).children(recursive=True)
         worker.process.stdin.close()
         await asyncio.wait_for(worker.process.wait(),10)
         assert all(not p.is_running() or p.status()=='zombie' for p in children)
     finally:await s.aclose()
+    assert alias is not None and not alias.is_symlink()
 
 
 async def test_browser_connect_proxy_tls_failure_is_prompt(tmp_path,monkeypatch):
@@ -304,6 +309,10 @@ async def test_cdp_connect_auth_event_replay_does_not_deadlock(monkeypatch):
     """Replay the two Fetch IDs/one Network ID seen in the real Google trace."""
     from types import SimpleNamespace
     from demiflow.collect.native_search.browser import BrowserTransport
+    monkeypatch.setattr('psutil.Process', lambda pid: SimpleNamespace(
+        memory_info=lambda: SimpleNamespace(rss=1024),
+        children=lambda recursive: [], is_running=lambda: True,
+    ))
     sent=[];continued={key:asyncio.Event() for key in ('first','restart')}
     class CDP:
         def __init__(self):self.handlers={}

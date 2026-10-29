@@ -275,3 +275,44 @@ def test_private_writer_rejects_indivisible_row_without_result(tmp_path):
         assert 'One Arrow row exceeds batch_bytes=8388608' in worker['message']
     # The failed private output is not a committed business result.
     assert not list((tmp_path/'resources').rglob('output.lance'))
+
+
+def test_private_writer_admits_explicit_wide_row_and_still_rejects_over_budget(tmp_path):
+    schema = pa.schema([('text', pa.string())])
+    with DataFusionSession(resource_directory=tmp_path/'resources',
+            options=options(max_row_bytes=16 * 1024**2)) as session:
+        result = session.query('SELECT 1 AS ignored', sources={}, schema=schema,
+                               batch_transform=oversized_private_row)
+        assert result.row_count == 1
+        assert result.dataset().take(1) == [{'text': 'x' * (9 * 1024**2)}]
+        assert result.report['worker']['writer_batch_bytes'] == 8 * 1024**2
+        assert result.report['worker']['writer_max_row_bytes'] == 16 * 1024**2
+    with DataFusionSession(resource_directory=tmp_path/'reject',
+            options=options(max_row_bytes=8 * 1024**2 + 1024)) as session:
+        with pytest.raises(DataFusionQueryError) as caught:
+            session.query('SELECT 1 AS ignored', sources={}, schema=schema,
+                          batch_transform=oversized_private_row)
+        assert 'max_row_bytes=8389632' in caught.value.report['worker']['message']
+        assert not caught.value.report['success']
+    assert not list((tmp_path/'reject').rglob('output.lance'))
+    for invalid in (0, True, 8.0, 1024):
+        with pytest.raises(ValueError, match='max_row_bytes'):
+            options(max_row_bytes=invalid)
+
+
+def test_row_budget_preserves_prior_positional_options_and_old_parent_requests(tmp_path, monkeypatch):
+    import demiflow.execution.datafusion as native
+    prior = DataFusionOptions(128 * 2**20, 2 * 2**30, 64 * 2**30, 2, 1, 8192, 15, 15, 2 * 2**30, False)
+    assert prior.timeout_s == 15 and prior.prefer_hash_join is False
+    assert prior.max_row_bytes == 8 * 2**20
+    original = native.asdict
+    def old_options(value):
+        encoded = original(value)
+        if isinstance(value, DataFusionOptions):
+            encoded.pop('max_row_bytes')
+        return encoded
+    monkeypatch.setattr(native, 'asdict', old_options)
+    with DataFusionSession(resource_directory=tmp_path/'resources', options=prior) as session:
+        result = session.query('SELECT 1 AS k', sources={})
+        assert result.dataset().take(1) == [{'k': 1}]
+        assert result.report['worker']['writer_max_row_bytes'] == 8 * 2**20

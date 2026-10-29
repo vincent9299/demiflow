@@ -3,7 +3,6 @@
 from .dataset import Dataset, MaterializedDataset
 from .datasource import BlockMetadata, Datasource, ReadTask
 from .datasink import Datasink, WriteResult
-from .plan import normalize_bound_inputs, normalize_outputs
 from .aggregate import AbsMax, AggregateFnV2, Count, Max, Mean, Min, Std, Sum
 from ..execution.local_kernel import local_execution
 from ..lance import add_lance_columns, ensure_lance_vector_index
@@ -69,6 +68,4 @@ __all__ = [
     "Min",
     "Std",
     "Sum",
-    "normalize_bound_inputs",
-    "normalize_outputs",
 ]

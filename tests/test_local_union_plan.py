@@ -7,6 +7,7 @@ class Parse:
         return [{'key':row['value'],'n':1}]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize('joined',[False,True])
 @pytest.mark.parametrize('mode',['thread','process'])
 def test_single_worker_class_callbacks_have_no_resident_actor_reservation(tmp_path,joined,mode):
@@ -59,6 +60,7 @@ def test_union_rejects_unsupported_child_before_any_source_read(tmp_path):
     assert called == [] and not list(tmp_path.iterdir())
 
 
+@pytest.mark.slow
 def test_many_plain_unions_do_not_allocate_identity_worker_layers(tmp_path, monkeypatch):
     import lance
     import pyarrow as pa

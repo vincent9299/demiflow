@@ -77,6 +77,8 @@ def main():
         import lance
         import pyarrow as pa
         from ..lance.arrow_batches import bounded_record_batches, fixed_row_tables, LANCE_FILE_ROWS, LANCE_BATCH_ROWS, ARROW_BATCH_BYTES
+        # Requests from already running parents may predate this option.
+        max_row_bytes = options.get('max_row_bytes', ARROW_BATCH_BYTES)
         from datafusion import RuntimeEnvBuilder, SessionConfig, SessionContext
         from datafusion.context import SQLOptions
         if datafusion.__version__ != '54.0.0' or getattr(lance, '__build_version__', None) != '12.0.0+demiflow.arrowfix1':
@@ -86,6 +88,7 @@ def main():
         spill = directory / 'spill'
         spill.mkdir()
         payload_read = (request.get('dataset_spec') or {}).get('payload_read')
+        opaque_payloads = (request.get('dataset_spec') or {}).get('opaque_payloads') or []
         # Key sorting and payload hydration have independent batch budgets.
         # A rare wide payload must not create millions of tiny key-sort batches.
         query_batch_rows = 8192 if payload_read else options['batch_rows']
@@ -115,7 +118,13 @@ def main():
             context.register_view(name, context.sql(sql, options=sql_options))
         frame = context.sql(request['sql'], options=sql_options)
         (diagnostic / 'plan.txt').write_text(str(frame.execution_plan()))
-        schema = request['schema'] if request['schema'] is not None else frame.schema()
+        from .opaque_payloads import payload_schema, hydrate_payloads
+        hydrated_schema, opaque_payloads = payload_schema(frame.schema(), opaque_payloads)
+        schema = request['schema'] if request['schema'] is not None else hydrated_schema
+        if opaque_payloads:
+            result['opaque_payload_read'] = {'columns': [ref['field'] for ref in opaque_payloads],
+                'rows': 0, 'batches': 0, 'max_batch_bytes': 0, 'max_lookup_bytes': 0,
+                'query_payload_columns': 0}
         payload_snapshot = None
         if payload_read:
             ref = request['sources'][payload_read['source']]
@@ -132,6 +141,9 @@ def main():
         with pa.OSFile(str(ipc), 'wb') as stream:
             with pa.ipc.new_file(stream, schema) as writer:
                 native_batches = (item.to_pyarrow() for item in frame.execute_stream())
+                if opaque_payloads:
+                    native_batches = hydrate_payloads(native_batches, opaque_payloads,
+                        max_row_bytes=max_row_bytes, stats=result['opaque_payload_read'])
                 if payload_read:
                     def hydrate(batches):
                         for batch in batches:
@@ -146,7 +158,7 @@ def main():
                                 values['batches'] += 1
                                 values['max_lookup_bytes'] = max(values['max_lookup_bytes'], table.nbytes)
                                 for part in bounded_record_batches(table.to_batches(), payload_snapshot.schema,
-                                        batch_rows=payload_read['batch_rows']):
+                                        batch_rows=payload_read['batch_rows'], max_row_bytes=max_row_bytes):
                                     values['max_batch_bytes'] = max(values['max_batch_bytes'], part.nbytes)
                                     yield part
                     native_batches = hydrate(native_batches)
@@ -175,7 +187,8 @@ def main():
         # Batch sizes no longer need to divide the file row count.
         writer_batch_rows = min(LANCE_BATCH_ROWS, options['batch_rows'])
         note(phase='private_write', query_seconds=time.monotonic()-started,
-             writer_batch_rows=writer_batch_rows, writer_batch_bytes=ARROW_BATCH_BYTES)
+             writer_batch_rows=writer_batch_rows, writer_batch_bytes=ARROW_BATCH_BYTES,
+             writer_max_row_bytes=max_row_bytes)
         for ref in request['sources'].values():
             if ref.get('format') == 'csv':
                 assert_csv_unchanged(ref)
@@ -189,7 +202,8 @@ def main():
             reader = pa.ipc.open_file(stream)
             batches = (reader.get_batch(i) for i in range(reader.num_record_batches))
             output = lance.write_dataset(pa.RecordBatchReader.from_batches(
-                schema, bounded_record_batches(batches, schema, batch_rows=writer_batch_rows)),
+                schema, bounded_record_batches(batches, schema, batch_rows=writer_batch_rows,
+                                                max_row_bytes=max_row_bytes)),
                 str(directory / 'output.lance'), mode='create', schema=schema,
                 max_rows_per_file=LANCE_FILE_ROWS)
         if output.count_rows() != result['rows']:

@@ -43,7 +43,7 @@
     提供本机持久交接，`read_queue_records` 按固定序号独立归档到 Lance；
     `demiflow.queue` 管理有界通道、预算和只读进度，不需要独立队列服务进程；
   - 调度：`data.plan.StreamStage` 规范算子（策略字段随算子声明）+
-    `Dataset.map_stage` + `execution.stream.run_stages`（stage 列表一步执行 +
+    `Dataset.map_async` + `Dataset.run_stream`（流式 stage 执行 +
     退出期平台资源统一收尾）；
 - **惰性批式路径**：Ray Data 兼容超集的 Dataset API（`from_items/map/filter/take_all/write_*`），
   确定性物理计划 + 本地线程池执行器；Ray 为可选 extras；
@@ -70,9 +70,29 @@ pip install -e .[collect]     # + 采集栈：crawl4ai（crawl）+ pillow（imag
 无需 SearXNG 服务地址、端口、源码目录或独立解释器。旧显式 HTTP 接口仅作兼容保留。
 完整接口、契约及服务配置见 [网页文档 Dataset API](docs/web_evidence.md)。
 
-python smoke_standalone.py  # Dataset 惰性路径冒烟
-python -m pytest tests/ -q  # streaming 路径 10 用例
+python smoke_standalone.py  # Dataset 惰性路径与写入冒烟
+python -m pytest tests/test_dataset_api_contract.py tests/test_data_module.py -q
+python -m pytest tests/ -q -m 'not slow'  # 常规完整套件
+python -m pytest tests/ -q -m slow        # 高资源/慢速边界单独验收
 ```
+
+如果 shell 为 HTTP 流量配置了代理，本地 HTTP fixture 需要显式设置
+`NO_PROXY=127.0.0.1,localhost`（以及对应小写变量），避免回环请求离开本机。
+SQLite WAL 队列测试要求本地文件系统；网络文件系统不能作为测试临时目录。
+在这类工作区中，使用本地 scratch 运行完整套件（仓库路径保持不变）：
+
+```bash
+repo=$PWD
+scratch=$(mktemp -d /tmp/demiflow-test.XXXXXX)
+mkdir -p "$scratch/tmp" "$scratch/cwd"
+cd "$scratch/cwd"
+PYTHONPATH="$repo" TMPDIR="$scratch/tmp" \
+NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+python -m pytest -c "$repo/pyproject.toml" --rootdir="$repo" "$repo/tests" -q
+```
+
+真实浏览器用例还需要与 `search-browser` extra 对应的 Chromium；安装方式见
+[原生搜索文档](docs/native-search.md)。mock 和回环 HTTP 不等于公网、真实 GPU 或 Ray 集群验收。
 
 ```python
 from demiflow import data
@@ -102,6 +122,7 @@ stats = build(data.from_items(rows)).run_stream(
 统一入口是 `from demiflow import data`，直接调用 `data.read_*`、`data.from_*`。
 返回 `Dataset`，在其上连接处理算子及 writer。普通脚本默认本地执行，打包 Pipeline 继承
 Driver 选择的 Local/Ray 执行器；`DataAPI` 仅为平台内部读接口实现，不再公开导出。
+计划绑定辅助函数保留在内部模块，不从根包或 `data` 转导。
 删除 `demiflow.standalone.local_data`，不提供旧名转调。prompt 配置、调用参数和预算均属于算子。
 
 ```python

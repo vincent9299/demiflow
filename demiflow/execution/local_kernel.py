@@ -21,6 +21,7 @@ class LocalKernelOptions:
     batch_rows: int = 8192
     memory_bytes: int = 256 * 1024 * 1024
     temp_directory: str | None = None
+    native_resources: Any = None
 
     def __post_init__(self):
         for name in ("workers", "partitions", "batch_rows", "memory_bytes"):
@@ -33,6 +34,8 @@ class LocalKernelOptions:
             raise ValueError("local_execution supports at most 256 shuffle partitions")
         if self.memory_bytes < self.workers * 64 * 1024:
             raise ValueError("memory_bytes must provide at least 64 KiB per worker")
+        from .native_resources import parse_native_resources
+        object.__setattr__(self, 'native_resources', parse_native_resources(self.native_resources))
 
 
 @dataclass(frozen=True)
@@ -110,7 +113,7 @@ class LocalExecutionSession:
 @contextmanager
 def local_execution(*, workers=4, worker_mode="process", partitions=None,
                     batch_rows=8192, memory_bytes=256 * 1024 * 1024,
-                    temp_directory=None):
+                    temp_directory=None, native_resources=None):
     """Bind existing Dataset readers to a single-machine partition executor.
 
     Callbacks must be partition-local: no driver side effects or dependence on
@@ -118,13 +121,15 @@ def local_execution(*, workers=4, worker_mode="process", partitions=None,
     notebook functions; thread mode is for I/O or code releasing the GIL. Row
     order and within-key fold order are preserved. No retry of arbitrary UDFs.
     Actions must run inside this context; it closes all owned worker resources.
+    native_resources optionally tightens native query limits separately from
+    Python workers/memory_bytes; shared admission and sampled guards remain.
     """
     from ..data.api import _current_executor, _use_executor
     from .executors.local import LocalDatasetExecutor
     if _current_executor.get() is not None:
         raise ValueError("local_execution cannot replace a bound Pipeline or nested executor")
     options = LocalKernelOptions(workers, worker_mode, workers * 4 if partitions is None else partitions,
-                                 batch_rows, memory_bytes, temp_directory)
+                                 batch_rows, memory_bytes, temp_directory, native_resources)
     try:
         import cloudpickle  # noqa: F401
     except ImportError as exc:

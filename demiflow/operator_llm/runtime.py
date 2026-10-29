@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
@@ -111,6 +112,8 @@ class OperatorLLMRuntime:
         self._local = threading.local()
 
     def call(self, prompt_name: str, values: Mapping[str, Any]) -> dict[str, Any]:
+        if resolve_prompt(self.config, prompt_name).response_format == 'image':
+            raise ValueError('Image output requires Dataset.map_prompt_async')
         if self.options is not None:
             # The synchronous worker uses the same option-aware transport,
             # including offline responses and journals, and closes it per call.
@@ -161,6 +164,8 @@ class OperatorLLMRuntime:
                 schema_attempt=attempt + 1,
                 validation_feedback=validation_feedback,
                 messages=messages,
+                template=prompt.template.source,
+                systemone=prompt.systemone,
             )
             self.coordinator.attempted()
             cached = None
@@ -292,6 +297,19 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
         self.token_budget = None
         self.concurrency = 1
 
+    @asynccontextmanager
+    async def transport_context(self, model):
+        if self._service is not None:
+            if self._service_owner is None:
+                self._service_owner = self._service.bind(model)
+            await self._service_owner.ensure_ready()
+        slot = getattr(self._service_owner, 'request_slot', None)
+        if slot is None:
+            yield
+        else:
+            async with slot():
+                yield
+
     async def call(self, prompt_name, values):
         result, _ = await self.call_with_trace(prompt_name,values)
         return result
@@ -300,6 +318,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                               response_parser=None, client_override=None):
         prompt = prompt_override or resolve_prompt(self.config, prompt_name)
         from .messages import render_input
+        if prompt.response_format == 'image':
+            from .media import bounded_values
+            values = bounded_values(prompt, values, self.options)
         parts, messages = render_input(prompt, values)
         client = client_override if client_override is not None else self._clients.get(prompt.model)
         if client is None:
@@ -309,6 +330,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                 configure = getattr(client, 'configure_capacity', None)
                 if configure is not None:
                     configure(self.concurrency)
+                if hasattr(client, 'transport_context'):
+                    from functools import partial
+                    client.transport_context = partial(self.transport_context, prompt.model)
             except Exception as exc:
                 if self.request_gate is not None:
                     self.request_gate.result(fatal=f'model client configuration failed: {type(exc).__name__}: {exc}')
@@ -333,7 +357,7 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                                 else await _journal_io(_prepare_lookup, client, request.request))
                 else:
                     # Cache hits never load a model or consume a new-call budget.
-                    if self._service is not None:
+                    if self._service is not None and not hasattr(client, 'transport_context'):
                         if self._service_owner is None:
                             self._service_owner = self._service.bind(prompt.model)
                         await self._service_owner.ensure_ready()
@@ -443,6 +467,8 @@ class PromptActor(BoundOperatorLLMMap):
             self._observe_call(trace)
             out=self.merge(row,result)
             if self.call_output:out[self.call_output]=trace
+            if self._prompt.response_format == 'image' and self.error_output:
+                out[self.error_output] = None
             return out
         except Exception as exc:
             self._observe_call(getattr(exc,'call',{}), error=True)
@@ -452,6 +478,10 @@ class PromptActor(BoundOperatorLLMMap):
             if isinstance(exc, (ModelServiceError, ServiceStopped, OSError, sqlite3.Error)) and not isinstance(exc, TimeoutError):
                 raise
             if not self.error_output:raise
+            if self._prompt.response_format == 'image':
+                out = self.merge(row, {'image': None})
+                return {**out, self.error_output: f'{type(exc).__name__}: {exc}',
+                        self.call_output: getattr(exc, 'call', None)}
             from .errors import error_category
             return {**row,self.error_output:{'category':error_category(exc),'type':type(exc).__name__,'detail':str(exc),'call':getattr(exc,'call',{})}}
 

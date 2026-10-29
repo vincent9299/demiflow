@@ -14,6 +14,7 @@ HTTP_OPTIONS = set(CALL_OPTION_DEFAULTS) | {
     'max_response_bytes', 'max_event_bytes', 'max_stream_events',
     'gateway_credentials_env',
     'http_error_retry', 'nonfatal_http_errors',
+    'object_store', 'image_encoding', 'limits',
 }
 
 

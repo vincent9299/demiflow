@@ -133,16 +133,22 @@ def test_missing_projection_and_collision_only_on_matched_rows(tmp_path):
         missing.join(c,on='next_key').take_all()
 
 
-def test_large_join_chain_checkpoint_preserves_multiplicity_and_field_presence(tmp_path, monkeypatch):
+@pytest.mark.parametrize('opaque', [False, True])
+def test_large_join_chain_checkpoint_preserves_multiplicity_and_field_presence(tmp_path, monkeypatch, opaque):
     import demiflow.execution.dataset_native as native
     monkeypatch.setattr(native, 'SORT_STAGE_ROWS', 1)
     source = api(tmp_path)
     values = [{'k':2, 'v':'a'}, {'k':1, 'v':'b'}, {'k':2, 'v':'c'}, {'k':None, 'v':None}]
     rows = read(source, tmp_path/'base', values)
+    if opaque:
+        rows = rows.map(lambda row: row)
     expected = values
     for i in range(5):
         right = [{'k':2, f'r{i}':{'flag':None}}, {'k':2, f'r{i}':{'flag':True}}]
-        rows = rows.join(read(source, tmp_path/f'right{i}', right), on='k', how='left')
+        other = read(source, tmp_path/f'right{i}', right)
+        if opaque:
+            other = other.map(lambda row: row)
+        rows = rows.join(other, on='k', how='left')
         expected = _oracle_join(expected, right, ['k'], ['k'], 'left')
     calls = []
     def observe(row):
@@ -156,6 +162,7 @@ def test_large_join_chain_checkpoint_preserves_multiplicity_and_field_presence(t
         'relation_checkpoint', 'relation_checkpoint', 'combined']
 
 
+@pytest.mark.slow
 def test_udf_boundary_runs_once_and_resorts_changed_keys(tmp_path):
     source = api(tmp_path)
     calls=[]
@@ -251,6 +258,7 @@ def test_partition_callbacks_preserve_task_state_and_failure_before_commit(tmp_p
     assert lance.dataset(str(target)).version==1
 
 
+@pytest.mark.slow
 def test_large_group_orders_only_keys_and_preserves_sequential_reducer(tmp_path, monkeypatch):
     """80 MiB of opaque input under a 32 MiB engine pool; no wide final sort."""
     from dataclasses import replace
@@ -278,16 +286,16 @@ def test_large_group_orders_only_keys_and_preserves_sequential_reducer(tmp_path,
     assert result.take_all() == [dict(k=k, n=len(range(k,count,3)),
         total=sum(range(k,count,3)), first=k, last=list(range(k,count,3))[-1]) for k in range(3)]
     reports = native_reports(result)
-    ordered = [r for r in reports if r['purpose']=='stable_order_and_callbacks']
+    ordered = [r for r in reports if r['purpose']=='combined']
     assert len(ordered)==1
     directory = Path(ordered[0]['query'])
     request = json.loads((directory/'request.json').read_text())
     worker = json.loads((directory/'worker_result.json').read_text())
-    assert request['sql'].startswith('SELECT _rowid AS selected_row_id FROM stage ORDER BY ')
-    assert 'payload' not in request['sql']
-    assert worker['payload_read']['rows']==count
-    assert worker['payload_read']['sort_payload_columns']==0
-    assert worker['payload_read']['max_batch_bytes'] <= 8*1024**2
+    assert 'ORDER BY' in request['sql']
+    assert worker['opaque_payload_read']['rows']==count
+    assert worker['opaque_payload_read']['query_payload_columns']==0
+    assert worker['opaque_payload_read']['max_batch_bytes'] <= 8 * 2**20
+    assert worker['opaque_payload_read']['max_batch_bytes'] <= 8*1024**2
     assert not list(tmp_path.glob('demiflow-dataset-*'))
 
 
@@ -302,15 +310,23 @@ def test_narrow_group_batches_are_not_shrunk_by_an_unrelated_wide_input(tmp_path
         return {'k': row['k'], 'n': (state or {}).get('n', 0)+1,
             'last': row['seq']}
     grouped = source.from_items(narrow).reduce_by_key('k', fold)
-    result = source.from_items(wide).join(grouped, on='k')
+    # Execute one wide query first, then a narrow sibling in the same engine.
+    # Neither query batches nor hydration budgets leak into its narrow sibling.
+    wide_query = source.from_items(wide).join(
+        source.from_items([{'k': k} for k in range(4)]), on='k').map(lambda row: row)
+    result = wide_query.join(grouped, on='k')
     assert_same_rows(result.take_all(), [
         {**row, 'n': 1000, 'last': 3996+row['k']} for row in wide])
     reports = native_reports(result)
-    ordered = next(r for r in reports if r['purpose']=='stable_order_and_callbacks')
+    ordered = next(r for r in reports if 'ORDER BY' in (Path(r['query'])/'query.sql').read_text())
     worker = json.loads((Path(ordered['query'])/'worker_result.json').read_text())
-    assert worker['payload_read']['rows'] == 4000
-    assert worker['payload_read']['batches'] <= 2
-    final = json.loads((Path(reports[-1]['query'])/'request.json').read_text())
-    # The final result still carries the wide payload and retains its small bound.
-    assert final['options']['batch_rows'] <= 16
+    ordered_options = json.loads((Path(ordered['query'])/'request.json').read_text())['options']
+    assert ordered_options['partitions'] == min(2, ordered_options['threads'])
+    assert worker['opaque_payload_read']['rows'] == 4000
+    assert worker['opaque_payload_read']['batches'] <= 2
+    final = json.loads((Path(reports[-1]['query'])/'result.json').read_text())
+    # The final result hydrates the wide payload within its separate byte budget.
+    assert final['options']['batch_rows'] == 8192
+    assert final['options']['partitions'] == min(2, final['options']['threads'])
+    assert final['worker']['opaque_payload_read']['max_batch_bytes'] <= 8 * 2**20
     assert not list(tmp_path.glob('demiflow-dataset-*'))
