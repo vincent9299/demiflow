@@ -88,32 +88,35 @@ journal、逐请求 FULL、逐请求文件租约、共享慢盘”组合。
   --log /tmp/canary.jsonl
 ```
 
-干净跑（2026-10-30，`AutoTrust-JEV-27B-v1.1`，本地 vLLM `127.0.0.1:8090`）：
+干净跑（2026-10-31，`AutoTrust-JEV-27B-v1.1`，本地 vLLM `127.0.0.1:8090`）：
 
 ```text
-requests=1000  seconds=8.114  requests_per_second=123.2
-row_p50=533.8 ms  row_p95=615.4 ms  errors=0
+requests=1000  seconds=8.683  requests_per_second=115.2
+row_p50=540.3 ms  row_p95=694.9 ms
+http_ok=valid=committed=1000  reused=0  errors=0
 journal={'requests':1000,'responses':1000,'uncertain':0}
-batches=107  batch_rows_max=64  commit_mean=1.4 ms  queue_wait_max=157.8 ms
-queued_bytes_max=52 KiB（上限 64 MiB）
+batches=124  batch_rows_max=64  commit_mean=1.2 ms  queue_wait_max=78.8 ms
 ```
 
-达到原目标 `>= 100 次/秒`，且 1000 次全部是真实 HTTP 调用，没有缓存或模拟。
+达到原目标 `>= 100 次/秒`，1000 次全部是真实 HTTP 调用，且都通过 2xx + 响应契约校验。
+证据：`benchmarks/canary_runs/clean_20261031.{json,jsonl}`。
 
-崩溃恢复（提交 600 条后 `os._exit(0)`，不执行 close）：
+崩溃恢复（提交 600 条后 `os._exit(0)`，不执行 close，同一 journal 重开）：
 
 ```text
-第一轮：committed=600，另有 63 条已预留但未提交（进程被杀）
-第二轮：reused=600（未发任何 HTTP），recovered=63（显式 requeue 旧租约），called=400
-        journal={'requests':1000,'responses':1000,'uncertain':0}
-日志：committed ids = 1000 个，unique = 1000，覆盖 0..999
+第一轮崩溃快照：已提交 600 个 id
+第二轮：reused=614（未发 HTTP）、recovered=9（显式 requeue）、新提交 386
+journal: requests=1000  responses=1000  request_count=1009
+vLLM request_success_total: before=2047  after=3047 → 本次 1000 个请求恰好 1000 次 provider 调用
 ```
 
-即响应已提交的 600 条重开后直接复用，零重复模型调用；剩下 400 条（含 63 条待恢复）
-各调用一次；两次运行合计每个 request id 恰好一次。未提交的 63 条保持 uncertain，
-只有显式 `requeue_uncertain` 才重新发送。
+已提交响应绝不重调；崩溃时未提交的 9 个预留只有显式 `requeue_uncertain` 才重发。
+这次 9 个首次请求都在 POST 之前被杀，所以 provider 计数仍是 1000。若某个预留已经
+到达 provider 但响应未提交，显式恢复会再调用一次——这是 uncertain 语义，不是
+“已提交响应被重复调用”。证据：
+`benchmarks/canary_runs/{crash_20261031.jsonl,resume_20261031.json,crash_20261031_accounting.json}`。
 
-### canary 成功判定与证据留档（2026-10-31 review 修正）
+### canary 成功判定（2026-10-31 review 修正）
 
 早期脚本只要拿到 HTTP 响应就计成功，非 2xx 或结构错误的 200 也可能被当成模型答案。
 现在只有 `2xx` 且 body 满足声明的 chat completion 契约（`choices[0].message.content`
@@ -124,18 +127,8 @@ queued_bytes_max=52 KiB（上限 64 MiB）
 exit=1  committed=1  http_ok=1  valid=1  errors=2  journal={'requests':3,'responses':1,'uncertain':2}
 ```
 
-真实 provider canary 需要 AutoTrust 服务（`127.0.0.1:8090/8104`）在线。2026-10-31
-复查时该服务已停止（进程和监听端口都不存在，GPU 0/1 显存为 0），所以本轮**没有
-重新跑真实 canary**；上面的 123.2 req/s 和 600+400 恢复数据来自 2026-10-30 的运行，
-原始 JSONL 已随临时目录清理，不能独立重放。服务恢复后用下面命令重跑，把
-`--summary`/`--log` 留在 `benchmarks/canary_runs/`（只含 request id 和计数，不含模型正文）：
-
-```bash
-../env/bin/python -B benchmarks/journal_canary.py --url http://127.0.0.1:8090/v1 \
-  --model AutoTrust-JEV-27B-v1.1 --requests 1000 --concurrency 64 \
-  --journal /tmp/canary-clean.sqlite --log benchmarks/canary_runs/clean.jsonl \
-  --summary benchmarks/canary_runs/clean.json
-```
+`--summary` 和 `--log` 写入 `benchmarks/canary_runs/`，只保留 request id、HTTP 状态和计数，
+不保留模型正文；`--crash-after` 只写一个崩溃快照，由显式 requeue 决定是否恢复未提交预留。
 
 ## 3. 2026-10-31 review 收尾
 

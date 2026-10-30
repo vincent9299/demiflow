@@ -86,7 +86,7 @@ def main():
     committed, latencies = [], []
     lock = threading.Lock()
     state = {'committed': 0, 'reused': 0, 'http_ok': 0, 'valid': 0, 'errors': 0,
-             'recovered': len(uncertain)}
+             'recovered': len(uncertain), 'crashing': False}
 
     def fail(request, message, elapsed):
         with lock:
@@ -145,8 +145,11 @@ def main():
             state['committed'] += 1
             committed.append(request['call'])
             latencies.append(finished - row_started)
-            crash = (list(committed) if args.crash_after
-                     and state['committed'] >= args.crash_after else None)
+            crash = None
+            if (args.crash_after and state['crashing'] is False
+                    and state['committed'] >= args.crash_after):
+                state['crashing'] = True
+                crash = list(committed)
         if crash is not None:
             with open(args.log, 'a') as stream:
                 stream.write(json.dumps({'phase': 'crashed', 'committed': crash}) + '\n')
