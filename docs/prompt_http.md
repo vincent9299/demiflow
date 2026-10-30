@@ -111,6 +111,99 @@ node's `max_requests` must also be None. This removes the cumulative call cap,
 not the concurrency or payload bounds. Existing reservations and responses
 remain in the same journal and its cumulative count is never reset.
 
+## Batched journal storage (opt-in)
+
+`sqlite_journal.throughput=None` (the default) keeps the historic layout: one
+SQLite file, one `FULL`-synchronous commit per request, and one
+`.leases/<key>` file per active reservation. An explicit mapping enables the
+batched storage without a second journal API, a different request identity or a
+change to business outputs:
+
+```python
+'sqlite_journal': {
+    'path': '/local/fast/path/review.sqlite',
+    'max_requests': 100,
+    'throughput': {
+        'shards': 4,
+        'batch_size': 64,
+        'flush_interval_s': 0.01,
+        'queue_size': 256,
+        'max_record_bytes': 8 * 1024 * 1024,
+        'max_queue_bytes': 64 * 1024 * 1024,
+        'wal': True,
+    },
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `shards` | 1 | 1..8 native SQLite files. A multi-shard journal is `review.sqlite.d/` containing `manifest.json` and `000.sqlite`...; a key is routed by `int(key[:16],16) % shards` and never migrates. Legacy Lance import requires one shard. |
+| `batch_size` | 64 | 1..4096 operations per group commit. |
+| `flush_interval_s` | 0.01 | Maximum wait before committing a partial batch. A smaller value lowers latency and commit size. |
+| `queue_size` | 256 | 1..4096 queued operations per shard. Producers wait when it is full. |
+| `max_record_bytes` | 8 MiB | 1 KiB..64 MiB encoded size of one serialized request metadata or response. A larger record raises `PromptBudgetExceededError` before it is queued; it is never truncated or silently admitted. |
+| `max_queue_bytes` | 64 MiB | Must be at least `max_record_bytes`, at most 512 MiB. Encoded bytes of all queued, batched and in-flight operations; admission blocks above it. |
+| `wal` | False | Explicit opt-in. `synchronous` always stays `FULL`; `OFF` is never used. |
+
+Each shard owns exactly one writer thread, one bounded queue and one SQLite
+connection. `reserve` returns only after its `calls` row, its lease row and the
+persistent request counter are committed; `response`/`failed` returns only after
+the payload and the lease release are committed. A response committed by a
+crashed process is therefore reusable on reopen without another provider call,
+an unanswered reservation stays `uncertain` and is never automatically resent,
+and a business row is published only after the response is durable.
+
+Leases are rows in `writer_leases` (owner token, owner pid and the
+`/proc/<pid>/stat` start time), not per-request files. A live owner blocks
+another processor's reservation and explicit recovery. A lease whose owner pid
+is gone (or whose start time changed, i.e. pid reuse) can be replaced, but only
+when a reservation or an explicit `requeue_uncertain`/`requeue_http_errors`
+re-establishes ownership; a plain lookup never resends an unanswered call. A
+lease row written by the intermediate uncommitted layout, which has no owner
+identity, is treated as stale. Opening a classic journal with `throughput` set
+is an additive migration (adds `calls.ordinal` and the lease owner columns);
+existing history stays valid and multi-shard mode must start from a new
+directory.
+
+One batch is one transaction with one savepoint per operation. A failed
+operation rolls back only its own statements and fails only its own future; the
+other operations still commit. A failed outer `BEGIN`/commit/connection fails
+every accepted future exactly once and leaves neither a persisted row nor an
+in-memory owner, so the caller can retry. Completion work (reference building)
+runs inside the operation's savepoint, so an error there rolls that operation
+back instead of killing the writer thread. `close()` drains the queue; a closed
+journal, a full queue or a failed writer raises instead of leaving a caller
+waiting forever. Queue and batch payload bytes share `max_queue_bytes`, so
+throughput never buys itself unbounded memory.
+
+`journal.throughput_metrics()` returns bounded counters and maxima per shard:
+queued/committed reserve and response counts, failed operations, batch count,
+batch rows and bytes, group-commit seconds, queue wait and current/peak queued
+bytes. No per-request history is retained.
+
+Recovery boundaries for several shards: `requeue_uncertain` and
+`requeue_http_errors` first run a read-only preflight over every affected shard,
+so a key that can never be recovered fails before any shard is mutated. Actual
+application is per shard and is **not** a cross-file transaction; if one shard
+fails, retrying with the same `operation_id` applies only the remaining shards
+and is idempotent (`reused` becomes true once every shard has recorded it). A
+single-shard journal still applies a multi-key recovery atomically.
+`max_requests` is coordinated inside one process, not a distributed quota.
+`call_snapshot`, `journal_totals` and `journal_observation` read independent
+shard files and are not one cross-file snapshot; `journal_observation` merges
+raw timing rows before computing mean/P50/P95. `call_page` keeps global recency
+order through the reservation ordinal and caps `offset + limit` at 1024
+candidates, returning oversized rows as explicit omitted entries.
+
+Shared project filesystems (for example `/yzp/...`) should keep `wal=False`:
+SQLite WAL needs shared-memory coordination and is only recommended on a local
+low-latency filesystem. Multi-shard offline materialization remains unsupported
+because it uses the direct single-shard connection; this is rejected rather than
+silently routed to shard 0. Measured storage A/B and the real-provider canary
+are recorded in [JOURNAL_THROUGHPUT.md](../benchmarks/JOURNAL_THROUGHPUT.md).
+
+
+
 ## Configuration and ownership
 
 | Dataset configuration | Behavior and default |

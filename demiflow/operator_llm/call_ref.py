@@ -70,18 +70,41 @@ def read_call(ref, root=None):
     return json.loads(rows[0]['payload'])
 
 
-def journal_options(root=None, relative_uri=None, *, path=None, timeout_s=30, legacy_source=None):
+def _journal_paths(path):
+    native = resolve_local_artifact(path)
+    if native.exists():
+        return [native]
+    directory = native.with_name(native.name + '.d')
+    manifest = directory / 'manifest.json'
+    if not manifest.exists():
+        return []
+    value = json.loads(manifest.read_text())
+    shards = value.get('shards')
+    paths = value.get('paths')
+    if (value.get('format') != 'demiflow-sqlite-journal-v1'
+            or type(shards) is not int or not 1 <= shards <= 8
+            or not isinstance(paths, list) or len(paths) != shards):
+        raise ValueError('Invalid journal shard manifest')
+    if any(not isinstance(name, str) or Path(name).name != name for name in paths):
+        raise ValueError('Journal shard paths must be relative filenames')
+    return [directory / name for name in paths]
+
+
+def journal_options(root=None, relative_uri=None, *, path=None, timeout_s=30,
+                    legacy_source=None, throughput=None):
     """Bind the new journal and, if present, one fixed legacy source snapshot.
 
     The first journal access atomically imports existing calls before any request
     can be sent. This function only inspects metadata; it never starts a model.
     """
+    extra = {'throughput': throughput} if throughput is not None else {}
     if path is not None:
         if root is not None or relative_uri is not None:
             raise ValueError('Use path or a legacy source locator')
-        return {'path': str(path), 'timeout_s': timeout_s, **({'legacy_source': legacy_source} if legacy_source else {})}
+        return {'path': str(path), 'timeout_s': timeout_s,
+                **({'legacy_source': legacy_source} if legacy_source else {}), **extra}
     path = Path(root).resolve() / relative_uri
-    options = {'path': str(path.with_suffix('.sqlite'))}
+    options = {'path': str(path.with_suffix('.sqlite')), **extra}
     if path.suffix == '.lance' and path.exists():
         import lance
         options['legacy_source'] = {'root': str(Path(root).resolve()),
@@ -90,25 +113,30 @@ def journal_options(root=None, relative_uri=None, *, path=None, timeout_s=30, le
 
 
 def call_snapshot(*, path=None, root=None, relative_uri=None):
-    """Read one consistent monitoring snapshot without opening a writer/importer.
+    """Read one monitoring snapshot without opening a writer/importer.
 
     HTTP requests contain compact metadata. Offline requests are returned with
     external binary references, so monitoring does not load all input images.
     A legacy locator is used only when its replacement SQLite file is absent.
+    A sharded journal is read shard by shard: the merged dictionaries are not a
+    cross-file transaction, so a concurrent writer may appear in one shard
+    before another.
     """
     legacy = Path(root or '.') / relative_uri if relative_uri else None
     native = resolve_local_artifact(Path(path) if path is not None else legacy.with_suffix('.sqlite'))
+    native_paths = _journal_paths(native)
     result = {'requests': {}, 'responses': {}, 'errors': {}}
-    if native.exists():
-        db = sqlite3.connect(native.resolve().as_uri() + '?mode=ro', uri=True)
-        try:
-            for key, request, response, error in db.execute(
-                    'SELECT request_key, request_json, response_json, error_json FROM calls'):
-                for kind, value in zip(result, (request, response, error)):
-                    if value is not None or kind == 'requests':
-                        result[kind][key] = json.loads(value) if value is not None else {}
-        finally:
-            db.close()
+    if native_paths:
+        for path in native_paths:
+            db = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)
+            try:
+                for key, request, response, error in db.execute(
+                        'SELECT request_key, request_json, response_json, error_json FROM calls'):
+                    for kind, value in zip(result, (request, response, error)):
+                        if value is not None or kind == 'requests':
+                            result[kind][key] = json.loads(value) if value is not None else {}
+            finally:
+                db.close()
     elif legacy is not None and legacy.exists():
         import lance
         ds = lance.dataset(str(legacy))
@@ -132,8 +160,16 @@ def journal_totals(path):
 
     Counts cover the entire native journal, including earlier invocations.
     Missing provider usage remains unknown rather than an invented zero bill.
+    A sharded journal is summed over independent shard reads, not one
+    cross-file transaction.
     """
-    path = resolve_local_artifact(path)
+    paths = _journal_paths(path)
+    if len(paths) != 1:
+        keys = ('requests', 'responses', 'transport_errors', 'provider_responses',
+                'usage_records', 'input_tokens', 'output_tokens', 'http_successes', 'http_errors')
+        values = [journal_totals(item) for item in paths]
+        return {key: sum(value[key] for value in values) for key in keys}
+    path = paths[0]
     if not path.exists():
         return {'requests':0,'responses':0,'transport_errors':0,'provider_responses':0,
                 'usage_records':0,'input_tokens':0,'output_tokens':0,
@@ -183,27 +219,12 @@ def _provider_cache_observation(rows):
             'reported_cached_share_all_inputs':cached/inputs if inputs else None}
 
 
-def journal_observation(path, *, since=None):
-    """Read compact timing/accounting metadata; never load prompts or retry calls.
-
-    ``since`` filters completed calls by the provider's creation timestamp.
-    Pending reservations have no timestamp and are reported separately for the
-    whole journal. They are not a measurement of active HTTP connections.
-    """
-    import statistics
-    path = resolve_local_artifact(path)
-    if not path.exists():
-        return {'totals': journal_totals(path), 'pending_reservations': 0,
-                'completed_in_window': 0, 'errors_in_window': 0,
-                'response_mean_s': None, 'response_p50_s': None,
-                'response_p95_s': None, 'window_timestamp': 'provider_created',
-                'provider_cache_total':_provider_cache_observation([]),
-                'provider_cache_window':_provider_cache_observation([])}
+def _observation_rows(path):
     with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True) as db:
         records = 'SELECT response_json,error_json,1 AS current_attempt FROM calls'
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery_events'").fetchone():
             records += f' UNION ALL SELECT {_archived_response_column(db)} AS response_json,error_json,0 AS current_attempt FROM recovery_events'
-        rows = db.execute('WITH attempts AS ('+records+''') SELECT response_json IS NOT NULL, error_json IS NOT NULL,
+        return db.execute('WITH attempts AS ('+records+''') SELECT response_json IS NOT NULL, error_json IS NOT NULL,
             json_extract(response_json,'$.elapsed_s'),
             COALESCE(json_extract(response_json,'$.body.created'),
                      json_extract(error_json,'$.call.partial_response.created')),current_attempt,
@@ -215,6 +236,21 @@ def journal_observation(path, *, since=None):
                      json_extract(response_json,'$.body.usage.cached_input_tokens'),
                      json_extract(response_json,'$.body.usage.cache_read_input_tokens'))
             FROM attempts''').fetchall()
+
+
+def journal_observation(path, *, since=None):
+    """Read compact timing/accounting metadata; never load prompts or retry calls.
+
+    ``since`` filters completed calls by the provider's creation timestamp.
+    Pending reservations have no timestamp and are reported separately for the
+    whole journal. They are not a measurement of active HTTP connections.
+    A sharded journal merges raw timing rows before computing mean/P50/P95; it
+    never averages per-shard percentiles, and its shard reads are not one
+    cross-file transaction.
+    """
+    import statistics
+    paths = _journal_paths(path)
+    rows = [row for item in paths for row in _observation_rows(item)]
     pending = sum(r[4] and not r[0] and not r[1] for r in rows)
     window = [r for r in rows if since is None or (isinstance(r[3], (float, int)) and r[3] >= since)]
     elapsed = sorted(r[2] for r in window if r[0] and isinstance(r[2], (float, int)))
