@@ -191,9 +191,15 @@ single-shard journal still applies a multi-key recovery atomically.
 `max_requests` is coordinated inside one process, not a distributed quota.
 `call_snapshot`, `journal_totals` and `journal_observation` read independent
 shard files and are not one cross-file snapshot; `journal_observation` merges
-raw timing rows before computing mean/P50/P95. `call_page` keeps global recency
-order through the reservation ordinal and caps `offset + limit` at 1024
-candidates, returning oversized rows as explicit omitted entries.
+raw timing rows before computing mean/P50/P95. `call_page` keeps recency order
+through the reservation ordinal and caps `offset + limit` at 1024 candidates,
+returning oversized rows as explicit omitted entries. The ordinal is allocated
+by one process and recovered from the largest stored value, so concurrent
+processes may allocate the same ordinal; the strict "newest first" guarantee is
+scoped to one coordinating process and ties fall back to the shard row id. A
+multi-shard page enforces its byte caps per shard read and again on the merged
+page, so intermediate candidates can briefly hold up to one page budget per
+shard even though the returned page respects the single `max_page_bytes` bound.
 
 Shared project filesystems (for example `/yzp/...`) should keep `wal=False`:
 SQLite WAL needs shared-memory coordination and is only recommended on a local

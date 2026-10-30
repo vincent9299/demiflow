@@ -457,7 +457,7 @@ class _SQLiteJournalShard:
                        (str(count + 1),))
             effects[key] = lease
             return True
-        key, column, payload_text, request = item.payload
+        key, column, payload_text = item.payload
         attempt = db.execute('SELECT COALESCE(MAX(attempt),0)+1 FROM recovery_events '
                              'WHERE request_key=?', (key,)).fetchone()[0]
         row = db.execute(f'SELECT {column} FROM calls WHERE request_key=?', (key,)).fetchone()
@@ -661,7 +661,9 @@ class _SQLiteJournalShard:
         self._require_writable()
         key, payload = request_key(request), canonical(value)
         if self.throughput is not None:
-            return self._enqueue('save', (key, column, payload, request),
+            # Queue only the serialized record: retaining the caller's request
+            # (which may hold a large data URI) would escape max_queue_bytes.
+            return self._enqueue('save', (key, column, payload),
                                  _payload_bytes(payload) + len(key))
         with self._lock:
             db = self._connect()
@@ -1065,13 +1067,25 @@ class SQLitePromptJournal:
                     raise ValueError('Journal shard manifest differs from the requested layout')
             else:
                 directory.mkdir(parents=True, exist_ok=True)
-                if manifest.exists():
-                    if json.loads(manifest.read_text()) != expected:
-                        raise ValueError('Journal shard manifest differs from the requested layout')
-                else:
+                if not manifest.exists():
+                    # First creation must be atomic: two processes may race
+                    # with different shard counts. Write the complete file
+                    # first and link it into place, so a visible manifest is
+                    # never partial and exactly one layout can win.
                     temporary = directory / ('manifest.' + uuid.uuid4().hex + '.tmp')
-                    temporary.write_text(json.dumps(expected, sort_keys=True))
-                    temporary.replace(manifest)
+                    try:
+                        with temporary.open('x') as stream:
+                            stream.write(json.dumps(expected, sort_keys=True))
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        try:
+                            os.link(temporary, manifest)
+                        except FileExistsError:
+                            pass
+                    finally:
+                        temporary.unlink(missing_ok=True)
+                if json.loads(manifest.read_text()) != expected:
+                    raise ValueError('Journal shard manifest differs from the requested layout')
             self._manifest_ready = True
 
     def _for_key(self, key):

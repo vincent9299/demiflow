@@ -3,6 +3,8 @@
 The white-box helpers build one batch explicitly so partial and whole-batch
 failures are deterministic instead of depending on batch timing.
 """
+import gc
+import json
 import os
 import sqlite3
 import subprocess
@@ -10,6 +12,7 @@ import sys
 import threading
 import time
 import uuid
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -343,6 +346,118 @@ def test_failed_batch_commit_fails_every_future_and_keeps_memory_consistent(tmp_
     assert journal.stats()['requests'] == 3
     assert shard._batch_thread.is_alive()
     journal.close()
+
+
+def test_fresh_reservation_conflict_rolls_back_its_half_write(tmp_path):
+    path = tmp_path / 'calls.sqlite'
+    journal = SQLitePromptJournal(path, throughput=options())
+    journal._connect()
+    fresh = {'item': 'fresh-conflict'}
+    fresh_key = request_key(fresh)
+    # The key has no calls row yet, but another live process already owns it.
+    with sqlite3.connect(path) as db:
+        db.execute(_LEASE_INSERT, (fresh_key, 'other-owner', os.getpid(), _process_start(os.getpid())))
+    shard = journal._shards[0]
+    peers = [{'item': f'peer-{index}'} for index in range(2)]
+    operations = [('reserve', (fresh_key, canonical(fresh), _DatabaseLease(uuid.uuid4().hex), None), 100)]
+    operations += [('reserve', (request_key(peer), canonical(peer), shard._lease(request_key(peer)), None), 100)
+                   for peer in peers]
+    items = one_batch(journal, operations)
+    assert isinstance(items[0].future.exception(), UncertainPromptCall)
+    assert all(item.future.result() is True for item in items[1:])
+    with sqlite3.connect(path) as db:
+        # The half-written calls row is gone, the live lease is untouched, and
+        # the two peer reservations committed normally.
+        assert db.execute('SELECT count(*) FROM calls WHERE request_key=?', (fresh_key,)).fetchone()[0] == 0
+        assert db.execute('SELECT owner_token FROM writer_leases WHERE request_key=?',
+                          (fresh_key,)).fetchone() == ('other-owner',)
+        assert db.execute('SELECT count(*) FROM calls').fetchone()[0] == 2
+        assert db.execute('SELECT count(*) FROM writer_leases').fetchone()[0] == 3
+    assert journal.stats() == {'requests': 2, 'responses': 0, 'uncertain': 2}
+    journal.close()
+
+
+def test_queued_response_does_not_retain_the_request(tmp_path):
+    path = tmp_path / 'calls.sqlite'
+    journal = SQLitePromptJournal(path, throughput=options(
+        max_record_bytes=1024 * 1024, max_queue_bytes=1024 * 1024))
+    class Request(dict):
+        pass
+
+    request = Request(item='image', image='data:image/png;base64,' + 'A' * 200_000)
+    reference = weakref.ref(request)
+    assert journal.reserve(request)
+    assert journal.response(request, {'body': {'ok': True, 'text': 'x' * 64}})
+    metrics = journal.throughput_metrics()
+    assert metrics['queued_bytes'] == 0
+    # Only the compact request metadata and the response were ever queued; the
+    # 200 KB data URI must not be retained by the writer queue.
+    assert metrics['queued_bytes_max'] < 10_000, metrics['queued_bytes_max']
+    del request
+    gc.collect()
+    assert reference() is None
+    journal.close()
+
+
+def test_manifest_first_creation_rejects_a_competing_layout(tmp_path):
+    for attempt in range(5):
+        target = tmp_path / f'race-{attempt}.sqlite'
+        journals = [SQLitePromptJournal(target, throughput=options(shards=shards))
+                    for shards in (3, 4)]
+        barrier, results = threading.Barrier(2), []
+        lock = threading.Lock()
+
+        def initialize(journal):
+            barrier.wait()
+            try:
+                journal._ensure_manifest()
+                outcome = 'ok'
+            except ValueError:
+                outcome = 'conflict'
+            with lock:
+                results.append((outcome, journal.shard_count))
+
+        threads = [threading.Thread(target=initialize, args=(journal,)) for journal in journals]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sorted(results)[0][0] == 'conflict', results
+        assert sorted(results)[1][0] == 'ok', results
+        directory = target.with_name(target.name + '.d')
+        manifest = json.loads((directory / 'manifest.json').read_text())
+        winner = results[[row[0] for row in results].index('ok')][1]
+        assert manifest == {'format': 'demiflow-sqlite-journal-v1', 'shards': winner,
+                            'paths': [f'{index:03d}.sqlite' for index in range(winner)]}
+        # The losing layout must fail before creating any of its shard files.
+        assert sorted(item.name for item in directory.iterdir()) == ['manifest.json']
+        for journal in journals:
+            journal.close()
+
+
+def test_manifest_first_creation_is_idempotent_for_one_layout(tmp_path):
+    target = tmp_path / 'same.sqlite'
+    journals = [SQLitePromptJournal(target, throughput=options(shards=3)) for _ in range(2)]
+    barrier = threading.Barrier(2)
+    errors = []
+
+    def initialize(journal):
+        barrier.wait()
+        try:
+            journal._ensure_manifest()
+        except BaseException as exc:  # noqa: BLE001 - the test records any failure
+            errors.append(exc)
+
+    threads = [threading.Thread(target=initialize, args=(journal,)) for journal in journals]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors, errors
+    directory = target.with_name(target.name + '.d')
+    assert sorted(item.name for item in directory.iterdir()) == ['manifest.json']
+    for journal in journals:
+        journal.close()
 
 
 def test_completion_failure_rolls_back_one_save_and_keeps_writer_alive(tmp_path):

@@ -42,7 +42,9 @@ cd /yzp/zhaozy/yangzepeng/0905/demiflow
 | 新 4 分片分组提交 | 1181.1 | 92.8 ms | 70.8 ms | 37.5 ms | 30 | 3.9 ms | 0 | 4.7 MiB | +12 MiB |
 
 本地快盘上单分片最快。4 分片各写一个文件，在本机 64 并发下每个分片只有约 16 个
-在途请求，批次更小、提交次数更多（132 组 vs 33 组），因此没有收益。
+在途请求，批次更小、提交次数更多（132 组 vs 33 组），因此没有收益。交接评审
+（2026-10-31）用同一脚本独立复测得到 legacy 968.6、单分片 2268.0、4 分片 1090.0
+req/s，结论一致。
 
 ### 共享项目文件系统（/yzp，dpc）
 
@@ -111,7 +113,48 @@ queued_bytes_max=52 KiB（上限 64 MiB）
 各调用一次；两次运行合计每个 request id 恰好一次。未提交的 63 条保持 uncertain，
 只有显式 `requeue_uncertain` 才重新发送。
 
-## 3. 未验证项
+### canary 成功判定与证据留档（2026-10-31 review 修正）
+
+早期脚本只要拿到 HTTP 响应就计成功，非 2xx 或结构错误的 200 也可能被当成模型答案。
+现在只有 `2xx` 且 body 满足声明的 chat completion 契约（`choices[0].message.content`
+是字符串）才计入 `valid/committed`；其他情况写入 `journal.failed` 并计入 `errors`，
+脚本以非零码退出。用本地假服务验证（3 个请求：有效 200、无效 200、HTTP 400）：
+
+```text
+exit=1  committed=1  http_ok=1  valid=1  errors=2  journal={'requests':3,'responses':1,'uncertain':2}
+```
+
+真实 provider canary 需要 AutoTrust 服务（`127.0.0.1:8090/8104`）在线。2026-10-31
+复查时该服务已停止（进程和监听端口都不存在，GPU 0/1 显存为 0），所以本轮**没有
+重新跑真实 canary**；上面的 123.2 req/s 和 600+400 恢复数据来自 2026-10-30 的运行，
+原始 JSONL 已随临时目录清理，不能独立重放。服务恢复后用下面命令重跑，把
+`--summary`/`--log` 留在 `benchmarks/canary_runs/`（只含 request id 和计数，不含模型正文）：
+
+```bash
+../env/bin/python -B benchmarks/journal_canary.py --url http://127.0.0.1:8090/v1 \
+  --model AutoTrust-JEV-27B-v1.1 --requests 1000 --concurrency 64 \
+  --journal /tmp/canary-clean.sqlite --log benchmarks/canary_runs/clean.jsonl \
+  --summary benchmarks/canary_runs/clean.json
+```
+
+## 3. 2026-10-31 review 收尾
+
+按交接文档第 9 节逐项修正，均只改平台代码/测试/文档，不动业务数据：
+
+- **response 队列不再保留原 request**（9.3）：`_save` 只把 `(key, column, serialized)`
+  放进队列，字节预算只计序列化文本；原请求（可能含大 data URI）不再被写线程持有。
+  新增弱引用 + `queued_bytes_max` 测试（200 KB data URI 下排队字节仍 < 10 KB）。
+- **分片 manifest 原子首建**（9.4）：先写完整临时文件（fsync），再用 `os.link` 排他
+  落名；已存在的 manifest 必须与请求布局完全一致，否则在看到任何 shard DB 前报错。
+  新增“不同 shard 数并发初始化”和“同一布局并发初始化”测试，确认只有一个布局生效、
+  另一进程明确失败且不产生混合文件。
+- **正式半写入用例**（9.5）：新增 fresh key（无 calls 行）+ 预置活跃 lease 的测试，
+  验证 calls 行回滚、活跃 lease 保留、同批其他请求正常提交、future 各完成一次。
+- **canary 成功判定与证据**（9.6）：见上一节。
+- **文档边界**（9.7）：`docs/prompt_http.md` 注明 ordinal 只在单协调进程内保证严格
+  新近序；多分片候选页的字节预算逐 shard、逐 chunk 执行后再对最终页限流。
+
+## 4. 未验证项
 
 - 没有在 `/yzp` 上做真实模型 canary：模型与 journal 都用本地快盘，测的是真实提交路径
   与真实模型；共享盘吞吐已由上表单独覆盖。
