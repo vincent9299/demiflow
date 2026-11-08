@@ -26,6 +26,11 @@ def read_document(ref, *, max_bytes=8 * 1024 * 1024):
         raise DocumentError('normalized_document_too_large')
     if hashlib.sha256(payload).hexdigest() != reference.sha256:
         raise DocumentError('document_sha256_mismatch')
+    return decode_document(payload)
+
+
+def decode_document(payload):
+    """Decode the existing normalized document format without object I/O."""
     try:
         doc = json.loads(payload)
         if doc.get('schema_version') != SCHEMA_VERSION:
@@ -45,6 +50,41 @@ def read_document(ref, *, max_bytes=8 * 1024 * 1024):
         raise DocumentError('invalid_document_shape') from exc
 
     return doc
+
+
+class DecodeDocument:
+    def __init__(self, **arguments):
+        from .flow_contract import normalize_document
+        self.arguments = normalize_document(arguments)
+
+    def snapshot_state(self):
+        # Each row decodes its own verified bytes. Configuration is bound by
+        # collect_facts; no parser, cursor or result survives between calls.
+        return {}
+
+    def restore_state(self, state):
+        if type(state) is not dict or state:
+            raise ValueError('Document decoder has no mutable semantic state')
+
+    def __call__(self, row):
+        from .flow_contract import row_result
+        a = self.arguments
+        raw = row[a['column']]
+        if raw is None:
+            return row_result(row, a, None)
+        try:
+            if not isinstance(raw, bytes) or len(raw) > a['max_bytes']:
+                raise DocumentError('normalized_document_too_large')
+            doc = decode_document(raw)
+            if len(doc['blocks']) > a['max_blocks']:
+                raise DocumentError('normalized_document_block_limit')
+            # The checked value contract exposes the stable normalized fields.
+            # Optional parser-specific metadata stays in the original object.
+            result = {'source': {k: doc['source'][k] for k in ('url', 'final_url', 'title', 'retrieved_at', 'content_type')},
+                      'blocks': [{k: b[k] for k in ('block_id', 'position', 'kind', 'text', 'headings')} for b in doc['blocks']]}
+        except (ValueError, TypeError, KeyError, RecursionError) as error:
+            return row_result(row, a, None, error)
+        return row_result(row, a, result)
 
 
 def parse_document(body, *, url, final_url, content_type, retrieved_at=None, pdf_parser=None):

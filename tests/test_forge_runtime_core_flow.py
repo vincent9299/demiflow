@@ -1,0 +1,265 @@
+"""Generic job onboarding and real execution through the authenticated UI.
+
+The fixture authors native files/data, but does not register entries, grant
+permissions, prepare or start a run on behalf of the browser.
+"""
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+from playwright.sync_api import expect
+
+from demiflow.workbench.projects import registry as console
+from demiflow.workbench.runs import manager as runs
+from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.platform import content_digest
+from test_forge_runs import base, root, wait
+from test_forge_public_api import request, service
+from test_forge_markdown_reading import browser
+from test_forge_web_redesign import opened, navigate, artifact
+
+
+@pytest.fixture(autouse=True)
+def private_runtime_domain(tmp_path,monkeypatch):
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'runtime-domain'))
+
+
+@pytest.fixture
+def unregistered(root):
+    control = ws.read_control(root / 'workspace.json')
+    expected = content_digest(control)
+    control['entries'] = {}
+    ws.write_control(root / 'workspace.json', control, expected=expected)
+    (root / 'operators/waiting.py').write_text('''def slow(text: str | None) -> str | None:
+    total = 0
+    for i in range(2000000000):
+        total = total + i
+    return text
+''')
+    (root / 'flows/waiting.py').write_text('''from demiflow import data
+from operators.waiting import slow
+def run(*, source, target, other):
+    d = data.read_lance(source['uri'], version=source['version'])
+    first = d.write_lance(target['uri'], mode='create', return_receipt=True)
+    second = d.map(slow, inputs={'text': 'question'}, output='waiting').write_lance(other['uri'], mode='create', return_receipt=True)
+    return first, second
+''')
+    (root / 'flows/waiting.json').write_text(json.dumps({
+        'format': 'demiflow_forge_flow_parameters_v1', 'arguments': {
+            'source': {'kind': 'table', 'alias': 'candidates'},
+            'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'first.lance'},
+            'other': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'slow.lance'}}}))
+    return root
+
+
+def test_http_registration_permissions_cas_and_no_execution(unregistered, tmp_path):
+    registry = tmp_path / 'registry.json'
+    key = console.add(registry, unregistered)['workspace_id']
+    prefix = f'/api/workspaces/{key}/'
+    body = {'entry': 'flows/questions.py:select', 'params': 'flows/select_a.json'}
+    original = registry.read_bytes()
+    expected = content_digest(console.load_registry(registry))
+    grant = dict(workspace_id=key, expected=expected, run_submit=True, run_control=True, attach=False)
+    for mode in ({}, {'control_only': True}):
+        with service(None, registry=registry, **mode) as app:
+            assert request(app, '/api/project-permissions', grant)[0] == 403
+            assert request(app, prefix+'flow-register', body)[0] == 403
+            assert registry.read_bytes() == original
+    with service(None, registry=registry, enable_runs=True) as app:
+        assert request(app, prefix+'flow-register', body)[0] == 403
+        assert request(app, '/api/project-permissions', grant, headers={'X-Forge-Token': 'bad'})[0] == 403
+        assert request(app, '/api/project-permissions', {**grant, 'run_submit': 1})[0] == 400
+        assert request(app, '/api/project-permissions', {**grant, 'expected': '0'*64})[0] == 409
+        assert request(app, '/api/project-permissions', grant)[0] == 200
+        assert request(app, '/api/project-permissions', grant)[0] == 409
+        before = (unregistered/'workspace.json').read_bytes()
+        for invalid in ({**body, 'entry': '../outside.py:run'}, {**body, 'params': '../bad.json'},
+                        {**body, 'entry': 'flows/questions.py:missing'}, {**body, 'extra': True}):
+            assert request(app, prefix+'flow-register', invalid)[0] in (400, 422)
+            assert (unregistered/'workspace.json').read_bytes() == before
+        # AST registration must never import or execute the user module.
+        (unregistered/'flows/never.py').write_text('raise RuntimeError("must not import")\ndef run():\n    pass\n')
+        assert request(app, prefix+'flow-register', {**body, 'entry': 'flows/never.py:run'})[0] == 200
+        assert request(app, prefix+'flow-register', body)[1]['status'] == 'registered'
+        assert request(app, prefix+'flow-register', body)[1]['status'] == 'unchanged'
+        assert request(app, prefix+'context')[1]['run_permissions'] == dict(run_submit=True, run_control=True, attach=False)
+        assert not list((unregistered/'.forge/runs').glob('*'))
+
+
+def register_from_page(page, entry, params):
+    settings=page.locator('.wb-settings')
+    if not settings.is_visible():page.get_by_role('button',name='接入与权限',exact=True).click()
+    settings.get_by_label('登记流程入口',exact=True).fill(entry)
+    settings.get_by_label('登记参数文件',exact=True).fill(params)
+    with page.expect_response('**/flow-register') as registered:
+        settings.get_by_role('button',name='登记原生流程',exact=True).click()
+    assert registered.value.ok,registered.value.text()
+    try:
+        expect(settings).not_to_be_visible(timeout=65000)
+    except AssertionError:
+        evidence=dict(registration_status=registered.value.status,registration=registered.value.json(),
+                      notice=page.locator('.wb-notice').inner_text(),body=page.locator('main').inner_text()[:6400])
+        Path('/yzp/zhaozy/yangzepeng/0905/_demiflow/forge_coordination_20261104/workflow_workbench_20261105/P1/registration-failure-R2.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
+        raise
+    expect(page.get_by_label('流程',exact=True)).to_have_value(entry,timeout=65000)
+    page.locator('.wb-node').first.wait_for()
+
+
+def finished(page,status='成功'):
+    expect(page.locator('.wb-run-bar')).to_be_visible(timeout=65000)
+    expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text(status,timeout=65000)
+
+
+def current_run(page):
+    return page.evaluate('ForgeView.decodeView(location.hash).run_id')
+
+
+def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path, browser):
+    registry = tmp_path / 'registry.json'
+    registry.write_text(json.dumps(dict(format=console.FORMAT, projects={})))
+    author_files = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for folder in ('flows', 'operators') for p in (unregistered/folder).iterdir() if p.is_file()}
+    active = None
+    with service(None, registry=registry, enable_runs=True) as app, opened(browser, app) as (page, requests):
+        page.set_default_timeout(65000)
+        page.get_by_role('button', name='注册已有项目', exact=True).click()
+        dialog = page.get_by_role('dialog')
+        dialog.get_by_label('项目目录', exact=True).fill(str(unregistered))
+        dialog.get_by_role('button', name='注册已有项目', exact=True).click()
+        navigate(page, '管道')
+        settings=page.locator('.wb-settings')
+        expect(settings.get_by_role('button', name='登记原生流程', exact=True)).to_be_disabled()
+        for name in ('接入与提交', '停止与核对', '保留结果为输入'):
+            settings.get_by_label(name, exact=True).check()
+        settings.get_by_role('button', name='保存运行权限', exact=True).click()
+        expect(page.locator('.wb-notice')).to_contain_text('运行权限已更新')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        for width in (1440, 390, 320):
+            page.set_viewport_size({'width': width, 'height': 1000})
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+            artifact(page, f'core-submit-{width}')
+        page.get_by_role('button', name='运行', exact=True).click()
+        finished(page)
+        first = current_run(page)
+        assert runs.show(unregistered, first)['outputs'][0]['result']['ref']['row_count'] == 2
+        page.get_by_role('button', name='输出结果',exact=True).click()
+        page.get_by_label('结果别名 target', exact=True).fill('selected')
+        page.get_by_role('button', name='保留为输入表', exact=True).click()
+        page.get_by_text('已保留固定版本引用：selected', exact=True).wait_for()
+        page.get_by_role('button', name='查看固定结果', exact=True).click()
+        page.get_by_text('c01', exact=True).first.wait_for()
+        navigate(page, '管道')
+        register_from_page(page, 'flows/waiting.py:run', 'flows/waiting.json')
+        expect(page.get_by_label('配置', exact=True)).to_have_value('flows/waiting.json')
+        page.get_by_text('本次运行设置',exact=True).click()
+        page.get_by_label('本次运行秒数上限', exact=True).fill('90')
+        try:
+            page.get_by_role('button', name='运行', exact=True).click()
+            page.locator('.wb-run-bar > strong').wait_for()
+            active = current_run(page)
+            page.get_by_text('部分输出已提交', exact=False).first.wait_for()
+            page.get_by_text('性能趋势 · 整次运行', exact=True).click()
+            page.get_by_role('img', name='整次运行的 CPU 核数趋势').wait_for()
+            artifact(page, 'core-running-320')
+            page.get_by_role('button', name='停止', exact=True).click()
+            page.get_by_text('所属执行已停止', exact=False).first.wait_for()
+            result = runs.show(unregistered, active)
+            assert result['status'] == 'cancelled' and result['state']['execution_stopped']
+            assert sum(bool(o['result']) for o in result['outputs']) == 1
+            artifact(page, 'core-stopped-320')
+            page.reload()
+            page.get_by_text('所属执行已停止', exact=False).first.wait_for()
+            assert page.evaluate('ForgeView.decodeView(location.hash).run_id') == active
+        finally:
+            if active and runs.show(unregistered, active)['status'] in runs.ACTIVE:
+                runs.cancel(unregistered, active)
+                wait(unregistered, active, timeout=20)
+        assert sum(method == 'POST' and url.endswith('/run-prepare') for method, url in requests) == 2
+    for path, digest in author_files.items():
+        assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == digest
+
+
+def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser):
+    with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
+        page.set_default_timeout(65000)
+        navigate(page, '管道')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        identities = []
+        page.on('request', lambda r: identities.append(r.post_data_json['request_id']) if r.method == 'POST' and r.url.endswith('/run-prepare') else None)
+
+        def drop_prepare(route):
+            response = route.fetch(timeout=65000)
+            assert response.ok, response.text()
+            route.abort('failed')
+            page.unroute('**/run-prepare', drop_prepare)
+
+        def drop_start(route):
+            response = route.fetch(timeout=65000)
+            assert response.ok, response.text()
+            route.abort('failed')
+            page.unroute('**/run-start', drop_start)
+
+        page.route('**/run-prepare', drop_prepare)
+        page.route('**/run-start', drop_start)
+        page.get_by_role('button', name='运行', exact=True).click()
+        page.locator('.error-box').last.wait_for()
+        page.reload()
+        page.get_by_role('button', name='以原请求重试准备', exact=True).click()
+        page.get_by_role('button', name='开始这次运行',exact=True).click()
+        page.get_by_role('button', name='刷新状态',exact=True).click()
+        finished(page)
+        assert len(identities) == 2 and identities[0] == identities[1]
+        assert len(list((unregistered/'.forge/runs').iterdir())) == 1
+        run_id = page.evaluate('ForgeView.decodeView(location.hash).run_id')
+        assert runs.show(unregistered, run_id)['status'] == 'succeeded'
+
+
+def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser):
+    with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
+        page.set_default_timeout(65000)
+        navigate(page, '管道')
+        # The file exists, but its arguments do not match this Flow signature.
+        register_from_page(page, 'flows/questions.py:select', 'flows/waiting.json')
+        page.get_by_role('button', name='运行', exact=True).click()
+        page.locator('.error-box').last.wait_for()
+        saved = page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))")
+        assert len(saved) == 1
+        receipt = json.loads((unregistered/'.forge/requests'/(saved[0]['request_id']+'.json')).read_text())
+        assert receipt['status'] == 'failed'
+        page.get_by_role('button', name='核对原请求', exact=True).click()
+        page.get_by_role('button', name='结束此失败请求', exact=True).click()
+        assert page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))") == []
+        assert not list((unregistered/'.forge/runs').glob('*'))
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        expect(page.get_by_label('配置', exact=True)).to_have_value('flows/select_a.json')
+        page.get_by_role('button', name='运行', exact=True).click()
+        finished(page)
+        # The failed receipt is preserved, and only the corrected request executes.
+        assert json.loads((unregistered/'.forge/requests'/(saved[0]['request_id']+'.json')).read_text()) == receipt
+        assert len(list((unregistered/'.forge/runs').iterdir())) == 1
+
+
+def test_reload_during_start(unregistered, browser):
+    with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
+        page.set_default_timeout(65000)
+        navigate(page, '管道')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        held=[]
+        page.route('**/run-start', lambda route: held.append(route))
+        with page.expect_request('**/run-start'):
+            page.get_by_role('button', name='运行', exact=True).click()
+        for _ in range(20):
+            if held: break
+            page.wait_for_timeout(50)
+        assert held
+        response=held[0].fetch(timeout=65000)
+        assert response.ok, response.text()
+        run_id=response.json()['run_id']
+        page.reload()
+        held[0].abort('failed')
+        page.locator('#sync-status').filter(has_text='最近同步').wait_for()
+        observed=page.evaluate('ForgeView.decodeView(location.hash)')
+        assert observed.get('run_id') == run_id, observed
+        finished(page)
+        assert len(list((unregistered/'.forge/runs').iterdir())) == 1

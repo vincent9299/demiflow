@@ -1,0 +1,69 @@
+{
+  "tests": {
+    "passed": 10,
+    "cases": {
+      "tests.test_forge_web_redesign::test_project_rows_have_independent_tabs_and_restore_history": true,
+      "tests.test_forge_web_redesign::test_narrow_navigation_keyboard_and_history_preserve_read_only_context": true,
+      "tests.test_forge_web_redesign::test_readme_safe_links_exact_source_and_responsive_layout": true,
+      "tests.test_forge_web_redesign::test_both_case_sources_use_field_reading_with_fixed_versions": true,
+      "tests.test_forge_web_redesign::test_four_first_states_and_single_project_permissions": true,
+      "tests.test_forge_web_redesign::test_static_asset_allowlist_csp_api_only_and_offline_file": true,
+      "tests.test_forge_web_redesign::test_case_change_disposes_reader_and_discards_late_worker": true,
+      "tests.test_forge_web_redesign::test_original_table_link_keeps_its_selection_in_a_mixed_project": true,
+      "tests.test_forge_project_removal::test_browser_cancel_conflict_two_clients_remove_last_and_register_again": true,
+      "tests.test_forge_project_browser::test_empty_console_observes_registration_from_cli": true
+    }
+  },
+  "live": {
+    "status": "read_only_verified",
+    "projects": 1,
+    "visited": [
+      "overview",
+      "flows",
+      "checks",
+      "runs",
+      "tables"
+    ],
+    "widths": [
+      1440,
+      390,
+      320
+    ],
+    "get_requests": 25,
+    "writes": 0,
+    "browser_errors": [],
+    "http_errors": [],
+    "controls_unchanged": true
+  },
+  "release": {
+    "status": "published",
+    "old_pid": 48042,
+    "new_pid": 8797,
+    "port": 59865,
+    "forwarded_port": 55971,
+    "files": 4,
+    "controls_unchanged": true
+  },
+  "files": {
+    "demiflow/forge/web/app.js": {
+      "sha256": "f2ebefc1d945d2b12cee08f2b431251bd9c409d211a9f1b4e315b2ac9cbc5e05",
+      "expected_formal": "187bc8c0c58704030b67f50c29054e313327cc118664c781ed27e0eec1172276"
+    },
+    "demiflow/forge/web/style.css": {
+      "sha256": "983f1cf9d6b893ce794ecad084712e246bfae6d16e935681364ea566a6dddc7e",
+      "expected_formal": "d71c7e780efe154732402779675a3d016cb35b3c12566883024851f54e8de5fb"
+    },
+    "tests/test_forge_project_removal.py": {
+      "sha256": "7453ef149608174172e6e66e5783433c8ac5c7e38d4424d91d95242396bc71e5",
+      "expected_formal": "552bbf85d4adbd7fd967f073011f2f6447e7b30984a7309f12d2fb08f9185842"
+    },
+    "tests/test_forge_web_redesign.py": {
+      "sha256": "119eee1f3660e4edd3ad5ce9eba424807fb6781243c93569bf801964e9f3f951",
+      "expected_formal": "acc1da30cc401e7b9c43c58db0546e0069bf773761be336f830633002a2a1a7e"
+    }
+  },
+  "tested_code_files": 1001,
+  "staging_unchanged": true,
+  "controls_unchanged": true,
+  "evidence": "/tmp/forge-project-tabs-20261104-5ef7zu7y/evidence"
+}

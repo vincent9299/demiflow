@@ -240,7 +240,27 @@ class AsyncOperatorLLMClient:
         from .http_options import validate_http_options, request_options, gateway_credentials
         self.options=validate_http_options(options);self.model=model;self.checked=False
         self.transport_context = None
+        self._batch_transport = None
+        self._batch_capability = None
+        self._batch_capability_lock = asyncio.Lock()
+        if self.options.get('systemone_batch') and model.transport != 'systemone':
+            raise ValueError('systemone_batch requires SystemOne transport')
+        if self.options.get('systemone_batch') and model.deployment is not None and model.deployment.get('replicas',1)>1:
+            raise ValueError('Replica deployments use independent single requests; disable systemone_batch')
+        if (self.options.get('systemone_batch') and model.deployment is not None
+                and 'cuda_graphs' in model.deployment.get('options',{})):
+            raise ValueError('CUDA graph execution uses independent single requests; disable systemone_batch')
+        if (self.options.get('systemone_batch') and model.deployment is not None
+                and model.deployment.get('profile')=='autotrust-jev'
+                and (model.deployment.get('options',{}).get('request_pipelining')
+                     or model.deployment.get('options',{}).get('max_num_seqs')==1)):
+            raise ValueError('JEV pipelining uses independent single requests; disable systemone_batch')
+        if self.options.get('systemone_batch') and (len(model.name.encode())>256 or any(ord(c)<32 for c in model.name)):
+            raise ValueError('Batch model name must fit 256 UTF-8 bytes and contain no control characters')
+        if self.options.get('systemone_batch') and (self.options.get('gateway') or self.options.get('request_options')):
+            raise ValueError('SystemOne batch does not support gateway or generation overrides')
         self._native = None
+        self.artifact_store = None
         if model.transport == 'diffusers':
             from .diffusers_transport import DiffusersTransport
             self._native = DiffusersTransport(model.provider, self.options)
@@ -285,6 +305,7 @@ class AsyncOperatorLLMClient:
             self.url='diffusers';self.params=None;headers={};self.temperature=0
         else:raise PromptProviderUnavailableError(f'unsupported Operator LLM transport: {model.transport}')
         self._headers = headers
+        if model.provider:self._headers['Accept-Encoding']='identity'
         self._client = None
         self._capacity = 100  # direct-client compatibility; Dataset supplies node concurrency
         from demiflow.execution.blocking_io import BlockingIOPool
@@ -339,11 +360,25 @@ class AsyncOperatorLLMClient:
                 payload['response_format'] = {'type': 'text'}
             else:
                 payload.pop('response_format', None)
-        return RequestRecord({**({'response_format': 'text'} if request.response_format == 'text' else {}), 'stage':request.prompt_name,'prompt_version':request.prompt_version,
+        record = RequestRecord({**({'response_format': 'text'} if request.response_format == 'text' else {}), 'stage':request.prompt_name,'prompt_version':request.prompt_version,
                 'endpoint':self.url,'params':self.params,'payload':payload,
                 'response_schema':dict(request.response_schema),'schema_attempt':request.schema_attempt,
+                **({'systemone_criteria_order':list(request.systemone['criteria'])}
+                   if request.systemone.get('type')=='choice' else {}),
                 **({'model_revision': self.options['model_revision']}
                    if self.options.get('model_revision') is not None else {})})
+        if 'questions' in request.systemone:
+            from .systemone import identity_fields
+            record.update(identity_fields(request))
+        if self.options.get('max_request_bytes') is not None:
+            from ..data.runtime_contract import check_size, RuntimeContractError
+            check_size(dict(record), self.options['max_request_bytes'])
+            total = 0
+            for chunk in json.JSONEncoder(ensure_ascii=False, allow_nan=False).iterencode(record):
+                total += len(chunk.encode('utf-8'))
+                if total > self.options['max_request_bytes']:
+                    raise RuntimeContractError('Serialized request exceeds max_request_bytes')
+        return record
 
     def prepare(self, request):
         """Build and hash once in the preparation pool, retain only for this call."""
@@ -354,10 +389,23 @@ class AsyncOperatorLLMClient:
 
     def _lookup_record(self, request):
         source = self.record(request)
+        lookup_with_references = getattr(self.journal, 'lookup_with_references', None)
+        if lookup_with_references is not None:
+            return lookup_with_references(source)
         saved = self.journal.lookup(source)
         refs = (self.journal.references(source) if saved is not None
                 and hasattr(self.journal, 'references') else None)
         return saved, refs
+
+    def _reserve_or_lookup(self, source, retry):
+        if retry is None:
+            reserved = self.journal.reserve(source)
+        else:
+            reserved = self.journal.reserve_http_retry(source,
+                expected_attempt=retry.expected_attempt, expected_status=retry.expected_status,
+                max_attempts=retry.max_attempts)
+        # Both operations are journal I/O and share one bounded pool slot.
+        return None if reserved else self._lookup_record(_PreparedCall(source))
 
     async def prepare_lookup(self, request):
         """Hash/prepare, durable lookup and response interpretation use separate pools."""
@@ -434,8 +482,8 @@ class AsyncOperatorLLMClient:
 
     def lookup(self,request):
         if self.journal:
-            saved=self.journal.lookup(self.record(request))
-            if saved is not None:return self.decode(request,saved,reused=True)
+            saved, refs = self._lookup_record(request)
+            if saved is not None:return self.decode(request,saved,reused=True,refs=refs)
         return None
 
     async def execute(self, request):
@@ -467,31 +515,27 @@ class AsyncOperatorLLMClient:
 
     async def _execute(self,request, *, retry=None):
         import httpx
+        from demiflow.services.contracts import served_model_names, bounded_metadata_get
         if getattr(self.journal, 'read_only', False):
             raise PermissionError('Read-only prompt replay cannot send provider requests')
-        source=await self._prepare_pool.run(self.record, request)
-        if self.options.get('verify_model') and not self.checked:
+        source = (request.source if isinstance(request, _PreparedCall)
+                  else await self._prepare_pool.run(self.record, request))
+        use_batch = bool(self.options.get('systemone_batch')) and retry is None
+        if self.options.get('verify_model') and not self.checked and self.model.deployment is None:
             async with self._verification_lock:
                 if not self.checked:
-                    response=await self.client.get(self.base+'/models');response.raise_for_status()
-                    names=[m['id'] for m in response.json()['data']]
+                    response=await bounded_metadata_get(self.client,self.base+'/models')
+                    names=served_model_names(response.json())
                     matched = (self.model.name in names if self.options['verify_model'] == 'listed'
                                else names == [self.model.name])
                     if not matched:raise ValueError(f'Endpoint model differs: {names}')
                     self.checked=True
         # Reserve before sending; commit the response before publishing it.
-        # Lookup, hashing and decode/reference work use the same I/O boundary.
+        # Keep hashing, journal I/O and response interpretation off the loop.
         if self.journal:
-            if retry is None:
-                reserved = await self._journal_pool.run(self.journal.reserve, source)
-            else:
-                from functools import partial
-                reserve_retry = partial(self.journal.reserve_http_retry,
-                    expected_attempt=retry.expected_attempt, expected_status=retry.expected_status,
-                    max_attempts=retry.max_attempts)
-                reserved = await self._journal_pool.run(reserve_retry, source)
-            if not reserved:
-                saved, refs = await self._journal_pool.run(self._lookup_record, _PreparedCall(source))
+            existing = await self._journal_pool.run(self._reserve_or_lookup, source, retry)
+            if existing is not None:
+                saved, refs = existing
                 return await self._response_pool.run(self.decode, request, saved, True, refs)
         from .http_stream import ChatCompletionStream
         from .errors import PromptStreamError
@@ -502,12 +546,8 @@ class AsyncOperatorLLMClient:
         try:
             input_ref = None
             if self.model.provider:
-                from pathlib import Path
-                from demiflow.execution.file_ref import save_json_artifact
-                artifact = await self._journal_pool.run(save_json_artifact,
-                    Path(self.options['sqlite_journal']['path']).with_suffix('.inputs'), source)
-                input_ref = artifact.to_dict()
-                metadata['input_ref'] = input_ref
+                from .journal import request_key
+                metadata['request_id'] = request_key(source)
             if assembler and self.options.get('stream_log_dir'):
                 from pathlib import Path
                 from uuid import uuid4
@@ -522,18 +562,38 @@ class AsyncOperatorLLMClient:
                 metadata['stream_log_path'] = str(path.resolve())
             from contextlib import AsyncExitStack
             async with AsyncExitStack() as transport_stack:
-                if self.transport_context is not None:
-                    await transport_stack.enter_async_context(self.transport_context())
+                transport_base = None
+                if self.transport_context is not None and not use_batch:
+                    transport_base = await transport_stack.enter_async_context(self.transport_context())
+                if self.model.deployment is not None and transport_base is None and not use_batch:
+                    raise ValueError('Managed deployment requires the operator service lifecycle')
                 await transport_stack.enter_async_context(asyncio.timeout(self.options.get('timeout_s',120)))
-                if self._native is not None:
+                if self.options.get('verify_model') and not self.checked and self.model.deployment is not None and not use_batch:
+                    async with self._verification_lock:
+                        if not self.checked:
+                            check = await bounded_metadata_get(self.client,transport_base.rstrip('/')+'/models')
+                            check.raise_for_status()
+                            names = served_model_names(check.json())
+                            if (self.model.name not in names if self.options['verify_model']=='listed'
+                                    else names != [self.model.name]):
+                                raise ValueError(f'Endpoint model differs: {names}')
+                            self.checked = True
+                if use_batch:
+                    response, body, batch_metadata = await self._exchange_batch(source)
+                    metadata.update(batch_metadata)
+                elif self._native is not None:
                     from .media import store_image
                     raw = await self._native.execute(source)
-                    image = await self._response_pool.run(store_image, raw, self.options)
+                    image = await self._response_pool.run(store_image, raw, self.options,store=self.artifact_store)
                     body = {'image': image}
                     response = httpx.Response(200, json=body,
                         request=httpx.Request('POST', 'http://local.invalid/diffusers'))
                 else:
-                    response, body = await self._exchange_http(source, metadata, assembler, raw_log_path, started)
+                    url = None
+                    if self.model.deployment is not None:
+                        url = transport_base.rstrip('/')+self.url[len(self.base):]
+                    exchange_args = {'url': url} if url is not None else {}
+                    response, body = await self._exchange_http(source, metadata, assembler, raw_log_path, started, **exchange_args)
                 if self.model.provider and self._native is None:
                     response.raise_for_status()
                     body = await self._materialize_media(body)
@@ -542,6 +602,9 @@ class AsyncOperatorLLMClient:
             if input_ref is not None:
                 record['input_ref'] = input_ref
         except BaseException as exc:
+            if getattr(exc,'batch_cancelled_before_dispatch',False):
+                metadata['batch_cancelled_before_dispatch']=True
+                metadata['request_sent']=False
             if assembler is not None:
                 metadata.update(assembler.snapshot())
                 metadata['stream_complete'] = False
@@ -573,32 +636,106 @@ class AsyncOperatorLLMClient:
                 raise
         return await self._response_pool.run(self.decode, request, record, False, refs)
 
+    async def _exchange_batch(self, source):
+        from .systemone_batch import BatchTransport, encode_payload
+        if self._batch_transport is None:
+            self._batch_transport = BatchTransport(self.options['systemone_batch'], self._send_batch)
+        encoded = await self._prepare_pool.run(encode_payload, source['payload'],
+            self.options['systemone_batch']['max_batch_bytes']-1024)
+        return await self._batch_transport.submit(encoded)
+
+    async def _send_batch(self, payloads):
+        from contextlib import AsyncExitStack
+        import httpx
+        import uuid
+        from .errors import PromptStreamError
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(asyncio.timeout(self.options.get('timeout_s',120)))
+            base = self.base
+            if self.transport_context is not None:
+                base = await stack.enter_async_context(self.transport_context()) or base
+            if self.model.deployment is not None and base == self.base:
+                raise ValueError('Managed batch requires the operator service lifecycle')
+            base=base.rstrip('/')
+            async with self._batch_capability_lock:
+                if self._batch_capability is None:
+                    async with self.client.stream('GET',base+'/models') as response:
+                        response.raise_for_status()
+                        raw=bytearray()
+                        async for chunk in response.aiter_bytes(chunk_size=65536):
+                            if len(raw)+len(chunk)>65536: raise ValueError('Capabilities exceed 64 KiB')
+                            raw.extend(chunk)
+                    models=json.loads(raw)['data']
+                    matches=[m for m in models if m['id']==self.model.name]
+                    if len(matches)!=1: raise ValueError('Batch endpoint model differs')
+                    capability=matches[0].get('capabilities',{})
+                    batch=capability.get('batch',{})
+                    revision=(self.model.deployment['revision'] if self.model.deployment is not None
+                              else self.options.get('model_revision'))
+                    if (not revision or capability.get('model_revision')!=revision
+                            or batch.get('supported') is not True or batch.get('quality_verified') is not True
+                            or not batch.get('evidence_sha256')
+                            or type(batch.get('max_size')) is not int
+                            or self.options['systemone_batch']['max_size']>batch['max_size']):
+                        raise ValueError('Batch requires matching model revision and validated service capability')
+                    self._batch_capability=capability
+            wire=b'{"model":'+json.dumps(self.model.name).encode()+b',"requests":['+b','.join(payloads)+b']}'
+            async with self.client.stream('POST',base+'/systemone_batch',content=wire,
+                                         headers={'Content-Type':'application/json'}) as response:
+                raw=bytearray()
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    if len(raw)+len(chunk)>self.options.get('max_response_bytes',8*1024**2):
+                        raise PromptStreamError('Batch response exceeds max_response_bytes')
+                    raw.extend(chunk)
+                body=_response_body(raw)
+                status=response.status_code
+                request=response.request
+        if status==200:
+            if (not isinstance(body,dict) or body.get('model')!=self.model.name
+                    or body.get('evidence_sha256')!=self._batch_capability['batch']['evidence_sha256']
+                    or not isinstance(body.get('responses'),list) or len(body['responses'])!=len(payloads)
+                    or any(not isinstance(item,dict) for item in body['responses'])):
+                raise PromptStreamError('Invalid or incomplete batch response')
+            items=body['responses']
+        else: items=[body]*len(payloads)
+        batch_id=uuid.uuid4().hex
+        results=[]
+        for index,item in enumerate(items):
+            row_status=status
+            if status==200 and 'error' in item:
+                row_status=item['error'].get('status') if isinstance(item['error'],dict) else None
+                if type(row_status) is not int or not 400<=row_status<=599:
+                    raise PromptStreamError('Invalid batch item error status')
+            metadata={'http_status':row_status,'transport':'systemone_batch',
+                      'batch':{'id':batch_id,'index':index,'size':len(payloads),
+                               'http_status':status,'evidence_sha256':self._batch_capability['batch']['evidence_sha256']}}
+            results.append((httpx.Response(row_status,json=item,request=request),item,metadata))
+        return results
+
     async def _materialize_media(self, body):
         import httpx
-        from pathlib import Path
-        from demiflow.execution.file_ref import save_json_artifact
         from .media import response_location, store_image, media_limits
         location = await self._response_pool.run(response_location, body, self.model.provider, self.options)
         raw = location
         if isinstance(location, str):
-            download = httpx.Request('GET', location)
+            download = httpx.Request('GET',location,headers={'Accept-Encoding':'identity'})
             response = await self.client.send(download, stream=True, auth=None)
             try:
                 response.raise_for_status()
+                if response.headers.get('content-encoding','identity').lower() not in {'','identity'}:
+                    raise ValueError('Compressed image download is not supported by the bounded image contract')
                 payload = bytearray()
-                async for chunk in response.aiter_bytes(chunk_size=65536):
+                async for chunk in response.aiter_raw(chunk_size=65536):
                     if len(payload) + len(chunk) > media_limits(self.options)['max_image_bytes']:
                         raise ValueError('Downloaded image exceeds max_image_bytes')
                     payload.extend(chunk)
                 raw = bytes(payload)
             finally:
                 await response.aclose()
-        provider_ref = await self._journal_pool.run(save_json_artifact,
-            Path(self.options['sqlite_journal']['path']).with_suffix('.inputs') / 'responses', body)
-        image = await self._response_pool.run(store_image, raw, self.options)
-        return {'image': image, 'provider_response_ref': provider_ref.to_dict()}
+        image = await self._response_pool.run(store_image, raw, self.options,store=self.artifact_store)
+        return {'image': image}
 
-    async def _exchange_http(self, source, metadata, assembler, raw_log_path, started):
+    async def _exchange_http(self, source, metadata, assembler, raw_log_path, started, *, url=None):
         import httpx
         from .errors import PromptStreamError
         if self.model.provider:
@@ -606,9 +743,11 @@ class AsyncOperatorLLMClient:
             url = self.base + source['endpoint']
             wire = await self._prepare_pool.run(wire_request, source, self.model.provider)
         else:
-            url = self.url
+            url = url or self.url
             wire = {'json': {**source['payload'], **self._gateway_credentials}}
         async with self.client.stream('POST', url, params=self.params, **wire) as response:
+            if self.model.provider and response.headers.get('content-encoding','identity').lower() not in {'','identity'}:
+                raise PromptStreamError('Compressed image response is not supported by the bounded image contract')
             metadata['http_status'] = response.status_code
             metadata['headers_received_s'] = time.monotonic() - started
             metadata['response_headers'] = {key: value for key, value in response.headers.items()
@@ -617,7 +756,8 @@ class AsyncOperatorLLMClient:
             is_sse = (assembler is not None and response.status_code == 200
                       and response.headers.get('content-type', '').split(';')[0].strip().lower() == 'text/event-stream')
             chunks = bytearray()
-            async for chunk in response.aiter_bytes():
+            iterator=response.aiter_raw(chunk_size=65536) if self.model.provider else response.aiter_bytes()
+            async for chunk in iterator:
                 if is_sse:
                     if raw_log_path is not None:
                         # Logging is opt-in and subject to the same bounded wire budget.
@@ -653,6 +793,8 @@ class AsyncOperatorLLMClient:
     async def aclose(self):
         pools = (self._prepare_pool, self._journal_pool, self._response_pool)
         try:
+            if self._batch_transport is not None:
+                await self._batch_transport.aclose()
             if self._client is not None:
                 await self._client.aclose()
         finally:

@@ -1,0 +1,90 @@
+.forge-reader {
+  color: var(--reading-text, var(--text, #202532));
+  font: inherit;
+  line-height: 1.7;
+  min-width: 0;
+}
+.forge-reader .reading-toolbar,
+.forge-reader .reading-source-nav {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.forge-reader button {
+  background: var(--reading-surface, #fff);
+  border: 1px solid var(--reading-border, var(--border, #dce0e7));
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 10px;
+}
+.forge-reader .reading-toolbar button[aria-pressed="true"] {
+  border-color: var(--reading-accent, var(--accent, #3b63cf));
+  color: var(--reading-accent, var(--accent, #3b63cf));
+  font-weight: 600;
+}
+.forge-reader button:disabled { cursor: default; opacity: .5; }
+.forge-reader :focus-visible {
+  outline: 2px solid var(--reading-accent, var(--accent, #3b63cf));
+  outline-offset: 3px;
+}
+.forge-reader .reading-status,
+.forge-reader .reading-source-nav,
+.forge-reader .reading-link-reason {
+  color: var(--reading-muted, var(--muted, #626b7b));
+  font-size: .85em;
+  overflow-wrap: anywhere;
+}
+.forge-reader .reading-content,
+.forge-reader .reader { min-width: 0; overflow-wrap: anywhere; }
+.forge-reader .reader { max-width: 76ch; }
+.forge-reader .reader > :first-child { margin-top: 0; }
+.forge-reader .reader h1,
+.forge-reader .reader h2,
+.forge-reader .reader h3,
+.forge-reader .reader h4,
+.forge-reader .reader h5,
+.forge-reader .reader h6 { line-height: 1.35; margin: 1.3em 0 .6em; }
+.forge-reader .reader blockquote {
+  border-left: 3px solid var(--reading-border, var(--border, #dce0e7));
+  margin-inline: 0;
+  padding-left: 16px;
+}
+.forge-reader .reader pre,
+.forge-reader .reading-source-chunk {
+  background: var(--reading-code-surface, #f6f7f9);
+  border: 1px solid var(--reading-border, var(--border, #dce0e7));
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: .9em;
+  margin: 0 0 12px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 12px;
+  white-space: pre;
+}
+.forge-reader .reading-source-chunk { tab-size: 4; }
+.forge-reader .reader :not(pre) > code {
+  background: var(--reading-code-surface, #f6f7f9);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.forge-reader .md-table-wrap { max-width: 100%; overflow-x: auto; }
+.forge-reader table { border-collapse: collapse; width: max-content; min-width: 50%; }
+.forge-reader th,
+.forge-reader td { border: 1px solid var(--reading-border, var(--border, #dce0e7)); padding: 6px 10px; }
+.forge-reader .reading-link {
+  color: var(--reading-accent, var(--accent, #3b63cf));
+  text-decoration: underline;
+}
+.forge-reader button.reading-link { background: none; border: 0; border-radius: 2px; padding: 0; }
+.forge-reader .reading-image-placeholder {
+  background: var(--reading-code-surface, #f6f7f9);
+  border: 1px dashed var(--reading-border, var(--border, #dce0e7));
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.forge-reader .reading-link-reason { margin-left: 4px; }

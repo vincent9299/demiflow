@@ -20,9 +20,28 @@ class ReadTask:
     metadata: BlockMetadata = BlockMetadata()
     schema: Any = None
     per_task_row_limit: Optional[int] = None
+    source_id: str | None = None
+    partition_id: str | None = None
+    start_position: int = 0
 
 
 class Datasource(ABC):
+    def snapshot_identity(self) -> Any:
+        """Return immutable JSON source facts, or None for bounded capture.
+
+        This declaration performs no acquisition or reads. Mutable/one-shot
+        sources are captured by the existing executor before downstream effects.
+        """
+        return None
+
+    def acknowledge(self, position: Any, context: Any) -> None:
+        """Idempotent source ACK, called only after the runtime confirms progress.
+
+        Ordinary replayable sources have no delivery obligation. Queue adapters
+        validate their delivery token/epoch atomically when overriding this.
+        """
+        return None
+
     def estimate_inmemory_data_size(self) -> Optional[int]:
         """Optionally estimate total in-memory source bytes without reading data rows."""
         return None

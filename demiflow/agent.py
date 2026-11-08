@@ -11,6 +11,8 @@ from .operator_llm.errors import PromptPackError
 from .operator_llm.model import PromptModel, PromptPack, PromptPackVersion, parse_prompt_model
 from .operator_llm.parser import _inspect_prompt
 
+__all__ = ["AgentConfig", "load_agent_config"]
+
 
 @dataclass(frozen=True)
 class AgentConfig:

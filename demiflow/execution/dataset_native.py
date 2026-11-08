@@ -307,6 +307,13 @@ class Engine:
         schema = pa.schema([(key, pa.string()), (valid, pa.bool_()), (ordinal, pa.uint64()),
                             (payload, pa.large_binary()), (length, pa.uint64())])
         path = self.directory / (self.name('input') + '.lance')
+        from .run_context import current_run
+        from .payload_limits import batch_target
+        from ..data.runtime_contract import check_size
+        run = current_run()
+        limits = run.limits
+        row_target = min(8192, limits["batch_rows"]) if "batch_rows" in run.explicit_limits else 8192
+        target = batch_target(limits)
         max_row_bytes = 0
         def batches():
             nonlocal max_row_bytes
@@ -314,12 +321,19 @@ class Engine:
             size = 0
             with closing(self.rows(item)) as rows:
                 for i, row in enumerate(rows):
+                    check_size(row, limits['max_row_bytes'])
                     encoded = pickle.dumps(row, protocol=pickle.HIGHEST_PROTOCOL)
+                    if len(encoded) > limits['max_row_bytes']:
+                        from .recovery_contract import RecoveryContractError
+                        raise RecoveryContractError('Encoded row exceeds byte budget')
+                    if chunk and size + len(encoded) > target:
+                        yield pa.RecordBatch.from_pylist(chunk, schema=schema)
+                        chunk, size = [], 0
                     max_row_bytes = max(max_row_bytes, len(encoded))
                     chunk.append({key: key_of(row, fields), valid: all(row[k] is not None for k in fields),
                         ordinal: i, payload: encoded, length: len(encoded)})
                     size += len(encoded)
-                    if len(chunk) == 8192 or size >= 8 * 2**20:
+                    if len(chunk) == row_target or size >= target:
                         yield pa.RecordBatch.from_pylist(chunk, schema=schema)
                         chunk = []
                         size = 0
@@ -332,9 +346,17 @@ class Engine:
             except Exception as exc:
                 callback_errors.append(exc)
                 raise
+        from .run_context import bind_iteration
         try:
-            ds = lance.write_dataset(pa.RecordBatchReader.from_batches(schema, guarded_batches()),
-                str(path), mode='create', schema=schema, max_rows_per_file=LANCE_FILE_ROWS)
+            # Arrow may pull and close the Python stream on different threads.
+            # Retain the existing run/checked scope at this native boundary.
+            with closing(bind_iteration(guarded_batches())) as bound:
+                reader = pa.RecordBatchReader.from_batches(schema, bound)
+                try:
+                    ds = lance.write_dataset(reader, str(path), mode='create',
+                        schema=schema, max_rows_per_file=LANCE_FILE_ROWS)
+                finally:
+                    reader.close()
         except Exception:
             # Arrow's C stream can wrap a Python source failure as an OSError.
             # Preserve the original callback error; never reinterpret storage errors.
@@ -501,7 +523,8 @@ class Engine:
                     with closing(self.render_keyed(rel, key)) as rows:
                         for _, row in _fold(rows, source.on, source.reducer, source.initial,
                             group_rows=source.max_rows if source.kind == 'groups' else None,
-                            output=source.output, encoded_keys=True):
+                            output=source.output, encoded_keys=True, reducer_contract=source.reducer_contract,
+                            reducer_kwargs=source.reducer_kwargs):
                             yield row
                 base = fold()
             with closing(base):
@@ -592,7 +615,9 @@ def execute(executor, source, plan, *, arrow=False, sink_schema=None):
             elif arrow:
                 # Arbitrary callbacks retain Python semantics and execution context.
                 with closing(engine.rows(item)) as rows:
-                    yield from executor._rows_as_batches(rows, batch_size=8192, batch_format='pyarrow', schema=sink_schema)
+                    from .run_context import current_run
+                    yield from executor._rows_as_batches(rows, batch_size=8192, batch_format='pyarrow', schema=sink_schema,
+                                                       byte_limits=current_run().limits)
             else:
                 with closing(engine.rows(item)) as rows:
                     yield from rows

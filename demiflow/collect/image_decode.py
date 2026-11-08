@@ -41,15 +41,17 @@ def verify_file(uri, expected_sha256, max_bytes):
     return size
 
 
-def decode_image(uri, sha256, policy):
+def decode_image(uri, sha256, policy, *, temporary_directory=None, allocate=None):
     """Validate encoded bytes without importing the framework in the child."""
     request = {'uri': uri, 'sha256': sha256, 'policy': {key: policy[key] for key in (
         'max_bytes', 'max_pixels', 'max_frames', 'decode_memory_bytes', 'decode_timeout_s')}}
     encoded = json.dumps(request).encode()
     if len(encoded) > 32 * 1024:
         raise ValueError('Image decoder request exceeds metadata budget')
-    with tempfile.TemporaryDirectory(prefix='demiflow-image-decode-') as name:
+    with tempfile.TemporaryDirectory(prefix='demiflow-image-decode-',dir=temporary_directory) as name:
         directory = Path(name)
+        if allocate is not None:
+            allocate(directory/'request.json');allocate(directory/'result.json')
         (directory / 'request.json').write_bytes(encoded)
         try:
             result = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve()), name],
@@ -102,6 +104,11 @@ def _decode(uri, sha256, policy):
 
 def _worker(directory):
     import resource
+    import os,signal,ctypes
+    parent=os.getppid()
+    if parent==1 or ctypes.CDLL(None,use_errno=True).prctl(1,signal.SIGKILL,0,0,0)!=0:
+        raise RuntimeError('Cannot bind isolated image work to its parent')
+    if os.getppid()!=parent:os._exit(1)
     with (directory / 'request.json').open('rb') as stream:
         raw = stream.read(32 * 1024 + 1)
     if len(raw) > 32 * 1024:

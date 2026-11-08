@@ -11,8 +11,6 @@ from pypdf.generic import DictionaryObject,NameObject,DecodedStreamObject,Encode
 
 from demiflow.collect.documents import DocumentError,parse_document,read_document
 from demiflow.collect.pdf_text import extract_pdf,pdf_policy
-from demiflow.collect.session import WebSession
-from demiflow.collect.web import WebClient
 
 
 def pdf(pages):
@@ -85,7 +83,7 @@ def test_declaration_is_lazy_and_bounded(tmp_path):
     assert pdf_policy(None) is None
     for bad in ({'max_pages':0},{'memory_mb':8192},{'extra':1},{'cpu_s':True}):
         with pytest.raises(ValueError):
-            WebSession(cache_path=tmp_path/'missing'/'cache.sqlite',object_directory=tmp_path/'objects',pdf_parser=bad)
+            pdf_policy(bad)
     assert not list(tmp_path.iterdir())
 
 
@@ -120,26 +118,20 @@ def test_stuck_parser_is_killed_and_reaped(monkeypatch):
 
 
 async def test_opt_in_reparses_saved_pdf_without_downloading_or_mutating_html(tmp_path):
-    calls=[];body=pdf(['knowledge from a retained PDF'])
-    class Stream(httpx.AsyncByteStream):
-        def __init__(self,value):self.value=value
-        async def __aiter__(self):yield self.value
-    async def handle(request):
-        calls.append(str(request.url))
-        is_pdf=request.url.path.endswith('.pdf')
-        return httpx.Response(200,headers={'content-type':'application/pdf' if is_pdf else 'text/html'},
-                              stream=Stream(body if is_pdf else b'<p>unchanged HTML evidence</p>'))
-    options=dict(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',host_interval_s=0,retries=0)
-    first=WebClient(**options);first.client=httpx.AsyncClient(transport=httpx.MockTransport(handle))
-    old_pdf=await first.fetch('https://example.test/a.pdf');old_html=await first.fetch('https://example.test/a.html')
+    from demiflow.collect.acquisition import ParseDocument
+    from demiflow.objects import LocalObjectStore
+    objects=LocalObjectStore(tmp_path/'raw');parsed=LocalObjectStore(tmp_path/'documents')
+    def request(body,kind):
+        return dict(raw_ref=objects.put(body).to_dict(),url='https://example.test/'+kind,
+            final_url='https://example.test/'+kind,content_type=kind,retrieved_at='fixed')
+    pdf_request=request(pdf(['knowledge from a retained PDF']),'application/pdf')
+    html_request=request(b'<p>unchanged HTML evidence</p>','text/html')
+    first=ParseDocument(store=parsed)
+    old_pdf=await first(pdf_request);old_html=await first(html_request)
     assert old_pdf['reason']=='unsupported_media_type:application/pdf' and old_pdf['raw_ref']
-    await first.aclose()
-    second=WebClient(**options,pdf_parser={});second.client=httpx.AsyncClient(transport=httpx.MockTransport(handle))
-    new_pdf=await second.fetch('https://example.test/a.pdf');new_html=await second.fetch('https://example.test/a.html')
+    second=ParseDocument(store=parsed,pdf_parser={})
+    new_pdf=await second(pdf_request);new_html=await second(html_request)
     assert new_pdf['status']=='ok' and new_pdf['raw_ref']==old_pdf['raw_ref']
-    assert new_html['document_ref']==old_html['document_ref'] and len(calls)==2
+    assert new_html['document_ref']==old_html['document_ref']
     assert read_document(new_pdf['document_ref'])['blocks'][0]['text']=='knowledge from a retained PDF'
-    await second.aclose()
-    legacy=WebClient(**options)
-    assert (await legacy.fetch('https://example.test/a.pdf'))==old_pdf
-    await legacy.aclose()
+    assert (await first(pdf_request))==old_pdf

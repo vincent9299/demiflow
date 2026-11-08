@@ -5,6 +5,8 @@ from .contracts import (
 from .readiness import inspect_pipeline_run_readiness
 from .target import PipelineExecutionTarget
 from .package_loader import BundlePackages, RUNTIME_PACKAGE_PATH, load_bundle_packages
+from .run_context import RunContext, current_run
+from .recovery_contract import RunRef, SourcePosition, RecoveryContractError, UnresolvedCommit
 
 
 def backend_for(bundle, execution_environment, target):
@@ -27,6 +29,7 @@ def backend_for(bundle, execution_environment, target):
 
 
 __all__ = [
+    "RunContext", "RunRef", "current_run", "SourcePosition", "RecoveryContractError", "UnresolvedCommit",
     "BundlePackages", "RUNTIME_PACKAGE_PATH", "load_bundle_packages",
     "PipelineBackend", "PipelineBundleRef", "PipelineExecutionEnvironment",
     "PipelineRunObservation", "PipelineRunObserver", "PipelineRunReadiness", "PipelineRunRequest", "PipelineRunResult", "PipelineExecutionTarget", "PlatformRuntimeIdentity", "inspect_pipeline_run_readiness", "backend_for",

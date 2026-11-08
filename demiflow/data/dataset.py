@@ -13,6 +13,14 @@ from ..operator_llm.parser import load_prompt_pack
 
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
+from .flow_contract import flow_api as _flow_api
+from ..operator_llm.flow_contract import normalize_prompt as _normalize_prompt, prompt_resources as _prompt_resources, analyze_prompt as _analyze_prompt
+from ..lance.flow_contract import normalize_lookup as _normalize_lookup, lookup_resources as _lookup_resources, analyze_lookup as _analyze_lookup
+from ..lance.flow_contract import normalize_save as _normalize_save, analyze_save as _analyze_save
+from ..collect import flow_contract as _collect_contract
+from ..collect import fetch_flow as _fetch_flow
+from ..execution import queue_flow as _queue_flow
+from ..operator_llm import packing as _prompt_packing
 from .datasink import Datasink, WriteResult, validate_write_result
 from .plan import (
     AddColumnOp,
@@ -122,6 +130,7 @@ class Dataset:
         # 惰性路径不带 stages，终结动作收尾为空操作）
         self._stages = tuple(stages)
 
+    @_flow_api("join", datasets=("self", "other"))
     def join(self, other, *, on, right_on=None, how="inner", suffix="_right", chunk_bytes=32*1024*1024):
         """Local equijoin. Checkpoint async inputs first; null keys do not match.
 
@@ -139,19 +148,21 @@ class Dataset:
         from .local_relational import join
         return join(self,other,on,right_on,how,suffix,chunk_bytes)
 
-    def reduce_by_key(self, on, reducer, *, initial=None, chunk_bytes=32*1024*1024):
+    @_flow_api('reduce', datasets=('self',), callable='reducer', version=2)
+    def reduce_by_key(self, on, reducer, *, initial=None, chunk_bytes=32*1024*1024, fn_kwargs=None):
         """Group by key with platform-managed spillable native ordering.
 
         The Python reducer runs in stable group order and owns its accumulator
         size; it is not assumed to be associative. Sorting runs in the native
         engine, while arbitrary reducers retain Python semantics and are not
         rewritten as parallel partial aggregates.
+        ``fn_kwargs`` binds explicit fixed parameters to the same row reducer.
         """
         if getattr(self._executor, 'NAME', None) == 'local':
             from ..execution.local_kernel import keyed_dataset
-            return keyed_dataset(self, 'reduce', on, reducer=reducer, initial=initial, chunk_bytes=chunk_bytes)
+            return keyed_dataset(self, 'reduce', on, reducer=reducer, initial=initial, chunk_bytes=chunk_bytes, reducer_kwargs=fn_kwargs)
         from .local_relational import reduce_by_key
-        return reduce_by_key(self,on,reducer,initial,chunk_bytes)
+        return reduce_by_key(self,on,reducer,initial,chunk_bytes,fn_kwargs=fn_kwargs)
 
     def exclude_keys(self, other, *, on):
         """Exclude matching keys from a local Lance scan, retaining scan order.
@@ -259,6 +270,7 @@ class Dataset:
         return self.map(Lookup(source, key, output, when), execution='thread',
                         concurrency=concurrency, queue_depth=queue_depth, label='lookup')
 
+    @_flow_api("union", datasets=("self", "others"))
     def union(self, *others):
         """Concatenate datasets lazily, retaining this Dataset's execution context.
 
@@ -287,46 +299,31 @@ class Dataset:
             return Dataset(UnionSource(tuple(inputs)), LogicalPlan(), self._executor)
         return DataAPI(self._executor).read_datasource(UnionDatasource((self,*others)))
 
+    @_flow_api("checkpoint", datasets=("self",), execution="action")
     def checkpoint(self, path, *, version):
-        """Execute to an atomic JSONL snapshot and return a replayable Dataset.
-
-        This is a terminal boundary. Reuse requires the same explicit version;
-        use map_cached before it to resume expensive per-row work after failure.
-        """
+        """Retired facade; execution-owned recovery uses the platform RunRef."""
+        from ..execution.capabilities import require_action
+        require_action('checkpoint')
         from .local_relational import checkpoint
         return checkpoint(self,path,version)
 
+    @_flow_api("checkpoint_async", datasets=("self",), execution="action")
     async def checkpoint_async(self, path, *, version):
-        """Await the native checkpoint from an existing event loop (e.g. Jupyter).
-
-        The synchronous executor runs in a worker thread, including its own loop.
-        Row caching, atomic output, version checks and exception propagation are
-        identical to checkpoint; this does not add another execution engine.
-        """
+        """Retired facade; reject before dispatching a worker thread."""
+        from ..execution.capabilities import require_action
+        require_action('checkpoint_async')
         import asyncio
         return await asyncio.to_thread(self.checkpoint, path, version=version)
 
+    @_flow_api("checkpoint_lance", datasets=("self",), execution="action")
     def checkpoint_lance(
         self, uri: str, *, schema, fingerprint: str,
         storage_options: Optional[Mapping[str, str]] = None,
         max_rows_per_batch: int = 8192,
     ) -> "Dataset":
-        """Execute to an atomic Lance snapshot and return a replayable Dataset.
-
-        This is a terminal boundary pinned to the committed Lance version. The
-        explicit ``schema`` is enforced on every row batch; a zero-row result
-        commits a valid empty table. Completion is registered in a sidecar
-        receipt next to the table: replays with the same ``fingerprint``
-        reopen the pinned version without re-executing the plan, while a
-        different fingerprint at the same location is an error. A receiptless
-        existing table at the target is never overwritten: it is either
-        recovered through a matching pending receipt or rejected explicitly.
-        Concurrent writers are rejected via an advisory file lock; only local
-        filesystem targets are supported. Expensive per-row work can resume
-        with map_cached before this boundary, as with checkpoint. Plans
-        containing async operators are bridged through the streaming
-        executor, matching the native JSONL checkpoint behavior.
-        """
+        """Retired facade; execution-owned recovery uses the platform RunRef."""
+        from ..execution.capabilities import require_action
+        require_action('checkpoint_lance')
         from ..lance.checkpoint import checkpoint_lance
         return checkpoint_lance(
             self, uri, schema=schema, fingerprint=fingerprint,
@@ -334,12 +331,15 @@ class Dataset:
             max_rows_per_batch=max_rows_per_batch,
         )
 
+    @_flow_api("checkpoint_lance_async", datasets=("self",), execution="action")
     async def checkpoint_lance_async(
         self, uri: str, *, schema, fingerprint: str,
         storage_options: Optional[Mapping[str, str]] = None,
         max_rows_per_batch: int = 8192,
     ) -> "Dataset":
-        """Await checkpoint_lance from an existing event loop (e.g. Jupyter)."""
+        """Retired facade; reject before dispatching a worker thread."""
+        from ..execution.capabilities import require_action
+        require_action('checkpoint_lance_async')
         import asyncio
         return await asyncio.to_thread(
             self.checkpoint_lance, uri, schema=schema, fingerprint=fingerprint,
@@ -347,6 +347,7 @@ class Dataset:
             max_rows_per_batch=max_rows_per_batch,
         )
 
+    @_flow_api("map", datasets=("self",), callable="fn")
     def map(
         self,
         fn: Callable[..., Any],
@@ -443,6 +444,7 @@ class Dataset:
             self._source, self._plan.append(operation), self._executor, self._stages,
         )
 
+    @_flow_api("flat_map", datasets=("self",), callable="fn")
     def flat_map(
         self, fn: Callable[..., Iterable[Mapping[str, Any]]], *,
         fn_args: Optional[Sequence[Any]] = None,
@@ -464,6 +466,7 @@ class Dataset:
             self._source, self._plan.append(operation), self._executor, self._stages,
         )
 
+    @_flow_api("map", datasets=("self",), callable="fn", execution="stream")
     def map_async(
         self,
         fn: Callable[..., Any],
@@ -508,35 +511,36 @@ class Dataset:
         I/O deadlines inside the callable; cancellation drains running calls
         before actor cleanup. The default 'inline' preserves existing behavior.
         """
-        # actor 检测（韧性鸭子）：任一策略属性在场即按 actor 解析，
-        # 缺失字段逐项回落默认——普通类漏声明一个字段不会被静默误判
-        # 为 fn（策略丢失无告警）；functools.partial 等无策略属性的
-        # 可调用对象照常走 fn 路径
+        from ..execution.capabilities import require_action
+        require_action('async_map', dict(checkpoint=checkpoint,
+            checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s))
+        import inspect
+        owner = fn.__self__ if inspect.ismethod(fn) else fn
         policy_attrs = ("label", "concurrency", "queue_depth", "catch",
                         "hard_timeout")
-        is_actor = any(hasattr(fn, a) for a in policy_attrs)
-        if is_actor:
+        is_actor = not inspect.isclass(owner) and not (
+            inspect.isfunction(owner) or inspect.isbuiltin(owner)
+        )
+        if any(hasattr(owner, a) for a in policy_attrs):
             conc = int(concurrency if concurrency is not None
-                       else getattr(fn, "concurrency", 1))
+                       else getattr(owner, "concurrency", 1))
             depth = (queue_depth if queue_depth is not None
-                     else getattr(fn, "queue_depth", None))
+                     else getattr(owner, "queue_depth", None))
             ctch = tuple(catch) if catch is not None \
-                else tuple(getattr(fn, "catch", ()))
-            lbl = label or getattr(fn, "label", None) or type(fn).__name__
+                else tuple(getattr(owner, "catch", ()))
+            lbl = label or getattr(owner, "label", None) or type(owner).__name__
             hto = (hard_timeout if hard_timeout is not None
-                   else getattr(fn, "hard_timeout", None))
+                   else getattr(owner, "hard_timeout", None))
         else:
             conc = int(concurrency if concurrency is not None else 1)
             depth = queue_depth
             ctch = tuple(catch) if catch is not None else ()
             lbl = label
             hto = hard_timeout
-        if conc < 1:
-            raise ValueError("map_async concurrency must be >= 1")
-        if depth is not None and int(depth) < 1:
-            raise ValueError("map_async queue_depth must be >= 1 or None")
-        if execution not in ('inline', 'thread'):
-            raise ValueError("map_async execution must be 'inline' or 'thread'")
+        from .flow_contract import normalize_stream_parameters
+        policy = normalize_stream_parameters(dict(concurrency=conc, queue_depth=depth,
+            hard_timeout=hto, execution=execution), effective=False)
+        conc, depth, hto = policy['concurrency'], policy['queue_depth'], policy['hard_timeout']
         if execution == 'thread':
             import inspect
             if hto is not None:
@@ -559,9 +563,10 @@ class Dataset:
             ledger = OperatorCheckpoint(Path(checkpoint_path),
                 operator=checkpoint_operator or lbl, lease_s=checkpoint_lease_s)
             fn = CheckpointedCallable(fn, ledger, checkpoint_operator or lbl)
+            owner = fn
             is_actor = True
         operation = AsyncMapOp(
-            CallableSpec.create(fn.__call__ if is_actor else fn),
+            CallableSpec.create(fn.__call__ if is_actor and not inspect.ismethod(fn) else fn),
             conc,
             None if depth is None else int(depth),
             ctch,
@@ -571,10 +576,11 @@ class Dataset:
         )
         return Dataset(
             self._source, self._plan.append(operation), self._executor,
-            self._stages + (fn,) if is_actor else self._stages,
+            self._stages + (owner,) if is_actor else self._stages,
         )
 
 
+    @_flow_api("batch_map", datasets=("self",), callable="fn", execution="stream")
     def batch_map(
         self,
         fn: Callable[..., Any],
@@ -598,8 +604,12 @@ class Dataset:
         记入 stats.dead_batches（幂等重跑即重试）。动机与契约详见
         plan.BatchMapOp；惰性路径遇到本算子将显式拒绝（同 AsyncMapOp）。
         """
-        if int(max_batch) < 1:
-            raise ValueError("batch_map max_batch must be >= 1")
+        from ..execution.capabilities import require_action
+        require_action('batch_map', dict(checkpoint=checkpoint,
+            checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s))
+        from .flow_contract import normalize_stream_parameters
+        policy = normalize_stream_parameters(dict(max_batch=max_batch, flush_interval=flush_interval,
+            concurrency=concurrency, queue_depth=queue_depth, hard_timeout=hard_timeout), batch=True, effective=False)
         if checkpoint is not None:
             from pathlib import Path
             from ..execution.operator_checkpoint import OperatorCheckpoint, CheckpointedCallable
@@ -615,19 +625,22 @@ class Dataset:
                 operator=checkpoint_operator or label or getattr(fn, '__name__', 'batch_map'),
                 lease_s=checkpoint_lease_s)
             fn = CheckpointedCallable(fn, ledger, checkpoint_operator or label or 'batch_map')
+        import inspect
+        owner = fn.__self__ if inspect.ismethod(fn) else fn
+        owns_instance = not inspect.isclass(owner) and not (inspect.isfunction(owner) or inspect.isbuiltin(owner))
         operation = BatchMapOp(
-            CallableSpec.create(fn.__call__ if checkpoint is not None else fn),
-            int(max_batch),
-            None if flush_interval is None else float(flush_interval),
-            int(concurrency),
-            None if queue_depth is None else int(queue_depth),
+            CallableSpec.create(fn.__call__ if owns_instance and not inspect.ismethod(fn) else fn),
+            policy['max_batch'],
+            policy['flush_interval'],
+            policy['concurrency'],
+            policy['queue_depth'],
             tuple(catch) if catch is not None else (),
             label,
-            None if hard_timeout is None else float(hard_timeout),
+            policy['hard_timeout'],
         )
         return Dataset(
             self._source, self._plan.append(operation), self._executor,
-            self._stages + ((fn,) if checkpoint is not None else ()),
+            self._stages + ((owner,) if owns_instance else ()),
         )
 
     # map_stage 已于 2026-09-07 移除：actor 形态输入由 map_async 多态承接
@@ -683,55 +696,78 @@ class Dataset:
                  checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s),
             concurrency, queue_depth, label)
 
-    def fetch_documents(self, *, requests, output, session, known=None, per_request=2,
-                        max_attempts=None, max_new_documents=None, request_concurrency=2,
-                        url_concurrency=2, concurrency=8, queue_depth=None, when=None, label='fetch_documents'):
-        """Acquire row-local {request_id,urls,bindings} groups into independent objects.
+    @_flow_api('read_object', datasets=('self',), execution='stream', effects=('objects',),
+               normalize=_collect_contract.normalize_object, resource_references=_collect_contract.object_resources,
+               analyze=_collect_contract.analyze_object)
+    def read_object(self, *, reference, output, root, relocations=(), layout='path', max_bytes=8 * 1024**2,
+                    error_output=None, concurrency=1, queue_depth=None, label='read_object'):
+        """Read SHA256-verified bytes under an explicit root, with no search/network.
 
-        Optional known column supplies existing document receipts. Reuse merges
-        bindings; row-wide quotas reserve in request order. Output contains
-        documents, request receipts and touched_urls, never document bodies.
+        A null reference propagates null without I/O. Explicit relocations map
+        complete directory roots; ambiguous roots and symlinks are rejected.
+        error_output retains bounded row errors; otherwise errors stop the action.
         """
-        from ..collect.operators import FetchDocuments
-        from .plan import FetchDocumentsOp
-        self._validate_web_node(requests, output, when, request_concurrency, url_concurrency)
-        if not callable(getattr(session,'fetch',None)) or not callable(getattr(session,'aclose',None)):
-            raise TypeError('fetch_documents session must provide fetch and aclose')
-        for value in (per_request,max_attempts,max_new_documents):
-            if value is not None and (type(value) is not int or value < 0):
-                raise ValueError('Document quotas must be nonnegative integers or None')
-        actor = FetchDocuments(requests, output, session, when, known, per_request,
-                               max_attempts,max_new_documents,request_concurrency,url_concurrency)
-        return self._native_web_node(actor, FetchDocumentsOp, dict(requests=requests,output=output), concurrency, queue_depth, label)
+        from ..objects import ReadLocalObject
+        actor = ReadLocalObject(reference=reference, output=output, root=root, relocations=relocations,
+            layout=layout, max_bytes=max_bytes, error_output=error_output,
+            concurrency=concurrency, queue_depth=queue_depth, label=label)
+        return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
 
-    def fetch_images(self, *, requests, output, session, request_concurrency=2,
-                     max_requests=64, max_request_bytes=256*1024,
-                     concurrency=8, queue_depth=None, when=None, label='fetch_images'):
-        """Acquire an ordered, bounded list of image requests in each row.
+    @_flow_api('decode_document', datasets=('self',), execution='stream',
+               normalize=_collect_contract.normalize_document, analyze=_collect_contract.analyze_document)
+    def decode_document(self, *, column, output, max_bytes=8 * 1024**2, max_blocks=16384,
+                        error_output=None, concurrency=1, queue_depth=None, label='decode_document'):
+        """Decode normalized document bytes into stable source/blocks records.
 
-        Requests contain request_id and url or expected sha256; optional
-        image_uri supplies a local object and bindings are opaque labels.
-        Optional declared_width/declared_height describe this exact URL and
-        allow pre-HTTP screening by image_policy.filters; omit if uncertain.
-        declared_file_bytes and mime_type similarly describe the selected file.
-        ImageFetchPolicy.declared_rejection provides the same pure preflight
-        for callers selecting candidates before applying their download quota.
-        Return the same request with a result containing an independent image
-        reference, dimensions, technical status and acquisition receipt. Search
-        pages and thumbnails must be selected explicitly by the consumer.
-        Shared content reuse, HTTP/decode limits, cache and cleanup are owned
-        by WebSession(image_library=..., image_policy=...). No semantic review.
+        No file reads or business text selection. Null bytes propagate null.
         """
-        from ..collect.image_fetch import FetchImages
-        from .plan import FetchImagesOp
-        self._validate_web_node(requests, output, when, request_concurrency, max_requests, max_request_bytes)
-        if max_requests > 4096 or max_request_bytes > 16*1024*1024:
-            raise ValueError('Image request row exceeds supported metadata limits')
-        if not callable(getattr(session, 'fetch_image', None)) or not callable(getattr(session, 'aclose', None)):
-            raise TypeError('fetch_images session must provide fetch_image and aclose')
-        actor = FetchImages(requests, output, session, when, request_concurrency, max_requests, max_request_bytes)
-        return self._native_web_node(actor, FetchImagesOp, dict(requests=requests, output=output),
-                                     concurrency, queue_depth, label)
+        from ..collect.documents import DecodeDocument
+        actor = DecodeDocument(column=column, output=output, max_bytes=max_bytes, max_blocks=max_blocks,
+            error_output=error_output, concurrency=concurrency, queue_depth=queue_depth, label=label)
+        return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
+
+    @_flow_api('encode_image', datasets=('self',), execution='stream',
+               normalize=_collect_contract.normalize_image, analyze=_collect_contract.analyze_image)
+    def encode_image(self, *, column, output, profile, max_side=1536, quality=90,
+                     max_source_pixels=160000000, max_bytes=32 * 1024**2, memory_bytes=1536 * 1024**2,
+                     timeout_s=45, error_output=None, concurrency=1, queue_depth=None, label='encode_image'):
+        """Encode verified bytes to JPEG data URL/SHA using an explicit profile.
+
+        Decoding runs in the existing bounded Pillow subprocess. Null inputs
+        propagate null. Original objects are never modified.
+        """
+        from ..collect.image_resize import EncodeImage
+        actor = EncodeImage(column=column, output=output, profile=profile, max_side=max_side, quality=quality,
+            max_source_pixels=max_source_pixels, max_bytes=max_bytes, memory_bytes=memory_bytes,
+            timeout_s=timeout_s, error_output=error_output, concurrency=concurrency, queue_depth=queue_depth, label=label)
+        return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
+
+    @_flow_api('parse_wikitext', datasets=('self',), execution='stream',
+               normalize=_collect_contract.normalize_wiki, analyze=_collect_contract.analyze_wiki)
+    def parse_wikitext(self, *, column, output, max_chars=262144, max_nodes=16384, max_depth=32,
+                       max_bytes=8 * 1024**2, error_output=None, concurrency=1, queue_depth=None, label='parse_wikitext'):
+        """Expose bounded flat syntax records; template policy remains business code."""
+        from ..collect.wiki_syntax import ParseWikitext
+        actor = ParseWikitext(column=column, output=output, max_chars=max_chars, max_nodes=max_nodes,
+            max_depth=max_depth, max_bytes=max_bytes, error_output=error_output,
+            concurrency=concurrency, queue_depth=queue_depth, label=label)
+        return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
+
+    @_flow_api('fetch',datasets=('self',),execution='stream',effects=('network','objects'),
+               normalize=_fetch_flow.normalize_fetch,resource_references=_fetch_flow.fetch_resources,
+               analyze=_fetch_flow.analyze_fetch)
+    def fetch(self, *, request='request', output='result', store, policy=None,
+              concurrency=4, queue_depth=None, label='fetch'):
+        """Acquire one complete raw HTTP(S)/COS object per input row.
+
+        Preserve input fields and append a bounded durable receipt. Object bytes
+        stay in the declared LocalObjectStore. Parsing and business acceptance
+        belong to subsequent ordinary functions/actors.
+        """
+        from ..execution.raw_fetch import RawFetch
+        actor = RawFetch(request=request, output=output, store=store, policy=policy,
+                         concurrency=concurrency, queue_depth=queue_depth, label=label)
+        return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label)
 
     def register_documents(self, *, request, output, library, max_bytes=2*1024*1024,
                            max_document_bytes=8*1024*1024, concurrency=4, queue_depth=None,
@@ -808,25 +844,28 @@ class Dataset:
         if when is not None and not callable(when): raise TypeError('when must be a row predicate')
         if any(type(v) is not int or v < 1 for v in limits): raise ValueError('Concurrency/size limits must be positive integers')
 
-    def enqueue(self, config, *, messages='messages', queue_depth=4):
-        """Persist bounded message lists to SQLiteQueue; no broker process.
+    @_flow_api('enqueue', datasets=('self',), execution='stream', effects=('queue',),
+               normalize=_queue_flow.normalize_enqueue, analyze=_queue_flow.analyze_untyped)
+    def enqueue(self, config, *, producer, messages='messages', queue_depth=1):
+        """Publish bounded task messages from a fixed source, one input unit at a time.
 
-        Each row has <=257 messages, split into atomic transactions of <=32
-        messages / 16 MiB. Stable identities make partial publication replayable.
-        The caller opens/seals channels; failure must not pretend producer EOF.
+        Open a ProducerRef first. Native progress records empty expansions and
+        actual source EOS; QueueChannel.seal then closes the producer explicitly.
         """
-        from ..execution.sqlite_channel import QueuePublisher, channel_config
-        actor=QueuePublisher(channel_config(**config),messages)
+        from ..execution.queue_producer import QueueProducer
+        actor=QueueProducer(config,producer=producer,messages=messages,queue_depth=queue_depth)
         return self.map_async(actor,concurrency=1,queue_depth=queue_depth,label='enqueue')
 
-    def ack_queue(self, config, *, result='queue_result', queue_depth=4, keep_row=False):
-        """Atomically persist the bounded result and acknowledge its queue task."""
-        from ..execution.sqlite_channel import QueueReader, QueueAcknowledger, channel_config
-        settings=channel_config(**config)
-        readers=[a for a in self._stages if isinstance(a,QueueReader) and a.config==settings]
-        if len(readers)!=1:raise ValueError('ack_queue requires its own read_queue source')
-        if type(keep_row) is not bool:raise ValueError('keep_row must be boolean')
-        actor=QueueAcknowledger(settings,result,readers[0],keep_row=keep_row)
+    @_flow_api('ack_queue', datasets=('self',), execution='stream', effects=('queue',),
+               normalize=_queue_flow.normalize_ack, analyze=_queue_flow.analyze_untyped)
+    def ack_queue(self, config, *, result='result', queue_depth=1, keep_row=True):
+        """Settle each task through native result commit at an explicit graph tail.
+
+        Requires read_queue(settlement='explicit') and run_stream. It uses the
+        same QueueResultSink and atomic source completion as automatic mode.
+        """
+        from ..execution.queue_ack import QueueAcknowledge
+        actor=QueueAcknowledge(config,result=result,queue_depth=queue_depth,keep_row=keep_row)
         return self.map_async(actor,concurrency=1,queue_depth=queue_depth,label='ack_queue')
 
     def admit_rows(self, *, path, key, unique_on=(), quotas=(), output='admission', when=None,
@@ -879,6 +918,8 @@ class Dataset:
         result = Dataset(self._source, self._plan.append(typed), self._executor, declared._stages)
         return result if keep_duplicates else result.filter(lambda r: r[output]['status'] != 'duplicate')
 
+    @_flow_api('lookup', datasets=('self',), execution='stream', effects=('read_table',),
+               normalize=_normalize_lookup, resource_references=_lookup_resources, analyze=_analyze_lookup)
     def lookup_lance(self, source, *, on, columns=None, output='matches', max_matches=1, max_bytes=1024**2):
         """Attach bounded exact-key matches from a fixed Lance version per row.
 
@@ -913,9 +954,12 @@ class Dataset:
             source_dataset=other, max_rows=max_rows, max_row_bytes=max_row_bytes)),
             self._executor, self._stages)
 
+    @_flow_api('save_lance', datasets=('self',), effects=('write_table',), execution='stream',
+               normalize=_normalize_save, analyze=_analyze_save,
+               callable_ports=({'name': 'when', 'role': 'predicate', 'optional': True},))
     def save_lance(self, uri, *, schema, key, stage, max_batch=32, flush_interval=5., queue_depth=64,
                    output_ref=None, mode='overwrite', when=None, max_rows=1000000,
-                   max_row_bytes=16*1024**2, max_key_bytes=4096):
+                   max_row_bytes=16*1024**2, max_key_bytes=4096, max_index_bytes=512*1024**2):
         """Commit verified microbatches and pass rows downstream, with one writer.
 
         Declaration performs no I/O. run_stream owns target locks, initial empty
@@ -936,13 +980,14 @@ class Dataset:
             raise ValueError('save_lance flush_interval must be positive and finite')
         actor = StreamLanceSink(uri,schema,key=key,stage=stage,output_ref=output_ref,
             mode=mode, when=when, max_rows=max_rows, max_row_bytes=max_row_bytes,
-            max_key_bytes=max_key_bytes)
+            max_key_bytes=max_key_bytes, max_index_bytes=max_index_bytes)
         declared = self.batch_map(actor.__call__,max_batch=max_batch,flush_interval=flush_interval,
                                   concurrency=1,queue_depth=queue_depth,label='save_'+stage)
         op = declared._plan.operations[-1]
         return Dataset(self._source,self._plan.append(SaveLanceOp(**vars(op),uri=actor.uri,stage=stage,key=key,output_ref=output_ref,mode=mode)),
                        self._executor,self._stages+(actor,))
 
+    @_flow_api("run_stream", datasets=("self",), execution="action")
     def run_stream(
         self,
         *,
@@ -965,22 +1010,86 @@ class Dataset:
         收尾钩子在完成与 Ctrl-C/异常路径都执行——钩子内必须落盘的同步
         写放最前（await 段在中断路径可能被取消截断，契约见 stream.py）。
         """
+        from ..execution.checked import action
+        from ..execution.checked import current
+        checkpoint_facts = checkpoint
+        arguments = dict(on_progress=on_progress, on_drain=on_drain, log_every=log_every,
+                         cancellation=cancellation, queue_factory=queue_factory,
+                         stall_timeout=stall_timeout, stop_file=stop_file,
+                         source_batch_size=source_batch_size, checkpoint=checkpoint_facts)
+        with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+            stats = self._run_stream(
+                source=checked.source, plan=checked.plan,
+                on_progress=on_progress, on_drain=on_drain, log_every=log_every,
+                cancellation=cancellation, queue_factory=queue_factory,
+                stall_timeout=stall_timeout, stop_file=stop_file,
+                source_batch_size=source_batch_size, checkpoint=checkpoint,
+            )
+            checked.streamed(stats)
+            return stats
+
+    def _run_stream(self, *, source=None, plan=None, consume=None, on_progress=None,
+                    on_drain=None, log_every=0, cancellation=None, queue_factory=None,
+                    stall_timeout=None, stop_file=None, source_batch_size=None,
+                    checkpoint=None, progress=None, source_iter=None):
+        """One native driver for public consumption and internal materialization."""
         from ..execution.stream import run_stream as _run_stream
+        from ..execution.capabilities import validate_stream_plan
+        source = self._source if source is None else source
+        plan = self._plan if plan is None else plan
+        validate_stream_plan(plan)
         if getattr(self._executor, 'NAME', None) != 'local':
             from ..errors import UnsupportedExecutionOptionError
             raise UnsupportedExecutionOptionError('run_stream is only supported by the local executor')
         import inspect
         from ..execution.stream_resources import StreamResources
-        from ..execution.sqlite_channel import QueueReader
-        queue_source=any(isinstance(actor,QueueReader) for actor in self._stages)
-        if source_batch_size is None:source_batch_size=1 if queue_source else 256
-        if queue_source and source_batch_size!=1:
-            raise ValueError('Queue sources require source_batch_size=1 to avoid waiting for future messages')
-        resources = StreamResources(self._stages,queue_factory)
+        if source_batch_size is None:source_batch_size=1
+        from ..execution.queue_execution import queue_source as native_queue_source
+        task_source = native_queue_source(source)
+        if task_source is not None and source_batch_size!=1:
+            from ..execution.recovery_contract import RecoveryContractError
+            raise RecoveryContractError('Queue sources require source_batch_size=1 before claiming tasks')
+        explicit_queue = task_source is not None and task_source.parent is None
+        if explicit_queue:
+            from ..execution.queue_execution import configure_explicit
+            from ..execution.run_context import current_action
+            configure_explicit(task_source,plan,current_action())
+            source_iter=task_source.rows()
+        resources = StreamResources(((task_source,) if task_source is not None else ()) + self._stages,queue_factory)
+        from ..execution.queue_producer import producer_actor
+        producer_node = producer_actor(plan)
+        unit_driver = None
+        if producer_node is not None:
+            if source_batch_size!=1:
+                from ..execution.recovery_contract import RecoveryContractError
+                raise RecoveryContractError('Incremental producers require source_batch_size=1')
+            from ..execution.run_context import current_action
+            unit_driver = producer_node[1]
+            unit_driver.configure(current_action(), source, plan)
+            source_iter = unit_driver.rows()
+            source_batch_size = 1
+        artifact_outputs=None
+        if progress is None:
+            from ..execution.run_context import current_action
+            active=current_action()
+            if active is not None:
+                from ..execution.object_sink import image_object_specs,ObjectRowsSink
+                specs=image_object_specs(plan)
+                if specs and not hasattr(active,'object_sinks'):
+                    holder=ObjectRowsSink(active,object_specs=specs)
+                    active.object_sinks=holder.object_sinks
+                    artifact_outputs={store.sink_id:(store,None) for store in holder.object_sinks.values()}
+                for index,actor in enumerate(resources.actors):
+                    bind=getattr(actor,'bind_execution',None)
+                    if bind is not None:bind(active.context,active.action_id+'-node-'+str(index))
+        from ..execution.checked import current
+        from ..execution.run_context import admit_stream
+        admit_stream(plan, source_batch_size=source_batch_size)
         if checkpoint is not None:
             from ..execution.stream_checkpoint import StreamCheckpoint
             if not isinstance(checkpoint, StreamCheckpoint):
                 raise TypeError('checkpoint requires StreamCheckpoint')
+            checkpoint.validate_sinks([a for a in resources.actors if getattr(a, 'is_stream_sink', False)])
             sink_names = {a.stage for a in resources.actors if getattr(a, 'is_stream_sink', False)}
             if set(checkpoint.state['outputs']) - sink_names:
                 raise ValueError('Checkpoint stages are missing from the resumed graph')
@@ -993,18 +1102,37 @@ class Dataset:
             raise ValueError('source_batch_size must be 1..256')
         async def drain(stats):
             resources.snapshot(stats)
+            checked = current()
+            if checkpoint is not None and checked is not None:
+                with checkpoint.lock:
+                    checkpoint.validate_ownership()
+                    checked.record(checked.active, 'checkpoint_commits', {
+                        'checkpoint': checked.checkpoint_facts(checkpoint),
+                        'outputs': dict(checkpoint.state['outputs']), 'revision': checkpoint.state['revision'],
+                        'pending': checkpoint.state['pending'] is not None})
+                    checked.checkpoint_commits(checkpoint)
             if on_drain is not None:
                 result = on_drain(stats)
                 if inspect.isawaitable(result): await result
 
-        rows = self._executor.iter_rows(self._source, LogicalPlan())
-        return _run_stream(
-            rows, self._plan,
+        rows = self._executor.iter_rows(source, LogicalPlan()) if source_iter is None else source_iter
+        stats = _run_stream(
+            rows, plan, consume=consume,
             on_progress=on_progress, on_drain=drain, log_every=log_every,
             cancellation=cancellation, queue_factory=resources.make_queue,
             on_start=resources.prepare, on_close=resources.close, stall_timeout=stall_timeout,
-            stop_file=stop_file, source_batch_size=source_batch_size,
+            stop_file=stop_file, source_batch_size=source_batch_size, progress=progress, unit_driver=unit_driver,
+            on_stop=task_source.request_stop if task_source is not None else None,
         )
+        if explicit_queue:
+            task_source.assert_settled()
+            active=current_action()
+            active.complete(dict(kind='run_stream',queue=task_source.snapshot_metrics()))
+        if artifact_outputs is not None:
+            from ..execution.commit import CommitCoordinator
+            from ..execution.recovery_contract import SourcePosition
+            CommitCoordinator(active).commit(1,outputs=artifact_outputs,position=SourcePosition(active.semantic_id,1))
+        return stats
 
     def map_batches(
         self, fn: Callable[..., Any], *, batch_size: Optional[int] = None,
@@ -1273,6 +1401,33 @@ class Dataset:
         """
         return self.map_embeddings(model=model, inputs={'document': document}, **kwargs)
 
+    @_flow_api('pack_prompt_inputs', datasets=('self',), execution='stream',
+               normalize=_prompt_packing.normalize_packing, resource_references=_prompt_packing.packing_resources,
+               analyze=_prompt_packing.analyze_packing)
+    def pack_prompt_inputs(self, prompt, *, config, inputs, item_argument, output, max_items,
+                           max_input_chars, max_request_bytes, max_expansion_bytes,
+                           max_input_items=10000, max_measure_bytes=256 * 1024**2,
+                           concurrency=1, queue_depth=None, label='pack_prompt_inputs'):
+        """Measure greedy contiguous input ranges with the native Prompt renderer.
+
+        Returns start/stop/error ranges in original order. Oversized individual
+        items retain their own error range; none are truncated or silently lost.
+        No model calls, business IDs or acceptance decisions. Work/count and wire
+        budgets are explicit; character counts make no token-capacity claim.
+        """
+        if type(config) is not str:
+            raise TypeError('Prompt packing requires a declared configuration path')
+        pack = load_prompt_pack(Path(getattr(self._executor, 'resource_root', Path.cwd())) / config)
+        actor = _prompt_packing.PackPromptInputs(pack, prompt=prompt, config=config, inputs=inputs,
+            item_argument=item_argument, output=output, max_items=max_items, max_input_chars=max_input_chars,
+            max_request_bytes=max_request_bytes, max_expansion_bytes=max_expansion_bytes,
+            max_input_items=max_input_items, max_measure_bytes=max_measure_bytes,
+            concurrency=concurrency, queue_depth=queue_depth, label=label)
+        return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
+
+    @_flow_api('prompt', datasets=('self',), execution='stream', effects=('network',),
+               callable_ports=({'name': 'when', 'role': 'predicate', 'optional': True},),
+               normalize=_normalize_prompt, resource_references=_prompt_resources, analyze=_analyze_prompt, version=2)
     def map_prompt_async(
         self, prompt: str, *, config: str | Path | PromptPack,
         inputs: Mapping[str, str] | Sequence[str],
@@ -1290,7 +1445,7 @@ class Dataset:
         A prompt-pack definition with response_format='image' uses the native
         image backend and returns an ObjectRef instead of text/JSON. It requires
         output (or outputs={'image': ...}), call_output, error_output and finite
-        max_requests. options declares sqlite_journal.path, object_store and
+        max_requests. options declares object_store and
         optional image_encoding/limits. Image concurrency is 1..8 (Diffusers 1),
         queue_depth defaults to 1 and is at most 8. Transport, ordered image
         inputs, exact request identity and service lifecycle are preserved.
@@ -1306,18 +1461,18 @@ class Dataset:
         actor. Missing responses produce PromptResponsePending; no HTTP call
         or provider-budget reservation occurs in offline mode.
 
-        ``options={'sqlite_journal': {'path': 'calls.sqlite', 'timeout_s': 30}}``
-        durably reuses exact HTTP requests without logging image base64. Call
-        metadata includes request_id/journal_path; lookup and commits stay off
-        the event loop. Unanswered reservations are not silently retried.
+        Request journals are not accepted. Managed execution checkpoints progress
+        at the downstream materialize boundary after committing output batches.
+        The actor only returns results; it never persists requests or responses.
+        Recovery may repeat an uncommitted batch. Unmanaged run_stream has no
+        automatic durable boundary and repeated actions may repeat model calls.
 
         ``options={'stream': True}`` receives SSE internally and publishes one
         complete, schema-validated response per row. Default False retains the
         ordinary JSON request. One HTTP client/pool is shared by this node;
         default max_connections equals concurrency. connect_timeout_s,
         read_timeout_s (idle gap), write_timeout_s and pool_timeout_s are distinct
-        from timeout_s (total HTTP exchange). Truncated streams are journaled
-        as uncertain failures without retries. ``gateway='litellm'`` explicitly
+        from timeout_s (total HTTP exchange). Truncated streams fail without implicit retries. ``gateway='litellm'`` explicitly
         sends zero-retry/no-fallback controls. Generic endpoints receive none.
         See docs/prompt_http.md for bounds, logs and recovery semantics.
 
@@ -1346,6 +1501,8 @@ class Dataset:
         still stop the action. Upstream assignment must bound route backlog to
         avoid filling all workers with one route's waiting rows.
         """
+        if any(key in (options or {}) for key in ('sqlite_journal', 'journal_dir')):
+            raise ValueError('map_prompt_async recovery is execution-owned; remove journal options')
         from ..operator_llm.parser import resolve_prompt
         if isinstance(config, (str, Path)):
             config = load_prompt_pack(Path(getattr(self._executor, 'resource_root', Path.cwd())) / config)
@@ -1368,6 +1525,12 @@ class Dataset:
             if not call_output or not error_output:
                 raise ValueError('Image prompts require call_output and error_output')
             options = execution_options(definition, options, max_requests)
+            from ..objects import _local_path
+            value=str(options['object_store'])
+            location=_local_path(value) if value.startswith('file:') else Path(value)
+            if not location.is_absolute():
+                location=Path(getattr(self._executor,'resource_root',Path.cwd()))/location
+            options['object_store']=str(location.absolute())
         if routes is not None:
             from ..operator_llm.routed import RoutedPromptActor
             if (not isinstance(routes, dict) or not 1 <= len(routes) <= 32
@@ -1407,15 +1570,16 @@ class Dataset:
             raise ValueError('route/isolate_route_failures require routes')
         from ..inference import _resolve_request_gate
         request_gate = _resolve_request_gate(policy=request_policy, gate=request_gate, concurrency=concurrency)
+        if isinstance(token_budget, Mapping):
+            from ..operator_llm.tokens import input_budget
+            token_budget = input_budget(token_budget, resource_root=getattr(self._executor, 'resource_root', Path.cwd()))
         if request_gate is not None and not callable(getattr(request_gate, 'enter', None)):
             raise TypeError('request_gate must provide an async admission context')
         if token_budget is not None and not callable(getattr(token_budget, 'validate', None)):
             raise TypeError('token_budget must validate actual OperatorLLMRequest messages')
         if service is not None:
-            from ..services import VLLMService, ManagedHTTPService
-            from ..services.shared_http import SharedHTTPService
-            if not isinstance(service, (VLLMService, ManagedHTTPService, SharedHTTPService)):
-                raise TypeError('service must be a supported HTTP service declaration or None')
+            from ..services.contracts import validate_service
+            validate_service(service)
             if any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
                 raise ValueError('Managed service requires online HTTP prompt execution')
         declared = self.map_prompt(prompt, config=config, inputs=inputs,
@@ -1500,6 +1664,7 @@ class Dataset:
         agent_op = AgentMapOp(**{**vars(operation), 'label': actor.label}, environment=environment)
         return Dataset(self._source, self._plan.append(agent_op), self._executor, declared._stages)
 
+    @_flow_api("filter", datasets=("self",), callable="fn")
     def filter(
         self,
         fn: Callable[..., bool],
@@ -1526,6 +1691,7 @@ class Dataset:
             self._source, self._plan.append(operation), self._executor, self._stages,
         )
 
+    @_flow_api("limit", datasets=("self",))
     def limit(self, limit: int) -> "Dataset":
         """Append an early-stop limit; Local stops upstream iteration promptly."""
         value = int(limit)
@@ -1535,6 +1701,7 @@ class Dataset:
             self._source, self._plan.append(LimitOp(value)), self._executor,
         )
 
+    @_flow_api("project", datasets=("self",))
     def select_columns(
         self, cols: str | list[str],
     ) -> "Dataset":
@@ -1543,8 +1710,9 @@ class Dataset:
         operation = SelectColumnsOp(
             columns,
         )
-        return Dataset(self._source, self._plan.append(operation), self._executor)
+        return Dataset(self._source, self._plan.append(operation), self._executor, self._stages)
 
+    @_flow_api("drop", datasets=("self",))
     def drop_columns(
         self, cols: str | Sequence[str],
     ) -> "Dataset":
@@ -1555,8 +1723,9 @@ class Dataset:
         if len(columns) != len(set(columns)):
             raise ValueError("Dataset.drop_columns columns must be unique")
         operation = DropColumnsOp(columns)
-        return Dataset(self._source, self._plan.append(operation), self._executor)
+        return Dataset(self._source, self._plan.append(operation), self._executor, self._stages)
 
+    @_flow_api("rename", datasets=("self",))
     def rename_columns(
         self, names: Sequence[str] | Mapping[str, str],
     ) -> "Dataset":
@@ -1578,7 +1747,7 @@ class Dataset:
         else:
             normalized = _columns(tuple(names), "Dataset.rename_columns")
         operation = RenameColumnsOp(normalized)
-        return Dataset(self._source, self._plan.append(operation), self._executor)
+        return Dataset(self._source, self._plan.append(operation), self._executor, self._stages)
 
     def add_column(
         self, col: str, fn: Callable[..., Any], *,
@@ -1710,6 +1879,7 @@ class Dataset:
             self._executor,
         )
 
+    @_flow_api("materialize", datasets=("self",), effects=("materialize",), execution="bridge")
     def materialize(self) -> "MaterializedDataset":
         """Execute and pin this Dataset for reuse in the current run.
 
@@ -1721,15 +1891,17 @@ class Dataset:
         The handle is current-run only and
         must not be returned from ``PipelineProgram.run``.
         """
-        with observe_action("materialize", self._source, self._plan, self._executor) as observer:
+        from ..execution.checked import action
+        with action("materialize", self._source, self._plan) as checked, observe_action("materialize", self._source, self._plan, self._executor) as observer:
             if any(is_stream_operation(op) for op in self._plan.operations):
                 # 异步链复用本地流式执行器；缓存由 executor 管理，不把行交回业务层收集。
                 execute = getattr(self._executor, "materialize_stream", None)
                 if execute is None:
                     raise NotImplementedError("async materialize is only supported by the local executor")
-                handle = execute(self)
+                handle = execute(self, source=checked.source, plan=checked.plan)
             else:
-                handle = self._executor.materialize(self._source, self._plan)
+                handle = self._executor.materialize(checked.source, checked.plan)
+            checked.materialized(handle)
             known_row_count = getattr(handle, "row_count", None)
             row_count = int(known_row_count or 0)
             block_count = len(getattr(handle, "blocks", ()) or ())
@@ -1809,13 +1981,70 @@ class Dataset:
             observer.complete(batch_size=size, batch_format=batch_format)
         return batch
 
+    @_flow_api('require_columns', datasets=('self',), role='action', execution='action')
+    def require_columns(self, columns: list[str], *, exact: bool = True) -> None:
+        """Require an exact set (or subset) of columns before later actions.
+
+        This checks names, not physical types or row values. Use on the fixed
+        input before projection when newly added source fields must be rejected.
+        Fetching a computed Dataset schema follows the backend's normal behavior.
+        """
+        from .flow_contract import normalize_arguments
+        from ..execution.checked import action
+        arguments = normalize_arguments('require_columns', 'action', dict(columns=columns, exact=exact))
+        with action('require_columns', self._source, self._plan, arguments=arguments) as checked:
+            actual = self._executor.columns(checked.source, checked.plan, fetch_if_missing=True)
+            if actual is None or len(actual) > 2048:
+                raise ValueError('Dataset columns are unknown or exceed metadata budget')
+            expected = set(arguments['columns'])
+            if not expected <= set(actual) or exact and expected != set(actual):
+                raise ValueError('Dataset columns differ from the explicit prerequisite')
+            checked.value(None)
+
+    @_flow_api('count', datasets=('self',), role='query', execution='action')
     def count(self) -> int:
         """Execute the lazy plan and count rows without returning row payloads."""
-        with observe_action("count", self._source, self._plan, self._executor) as observer:
-            count = self._executor.count(self._source, self._plan)
+        from ..execution.checked import action
+        with action('count', self._source, self._plan, arguments={}) as checked, observe_action("count", self._source, self._plan, self._executor) as observer:
+            count = self._executor.count(checked.source, checked.plan)
+            checked.value(count)
             observer.rows = int(count)
             observer.complete()
         return count
+
+    @_flow_api('collect_summary', datasets=('self',), role='query', execution='action')
+    def collect_summary(self, *, max_rows: int, max_bytes: int = 65536) -> list[dict]:
+        """Collect an explicitly bounded summary; overflow fails, never truncates.
+
+        Use after aggregation/reduction. At most 128 JSON rows / 256 KiB are retained;
+        the native reader and process budget still bound individual allocations.
+        """
+        from .flow_contract import normalize_arguments
+        from .runtime_contract import check_size
+        from ..execution.checked import action
+        arguments = normalize_arguments('collect_summary', 'action', dict(max_rows=max_rows, max_bytes=max_bytes))
+        with action('collect_summary', self._source, self._plan, arguments=arguments) as checked:
+            result, used = [], 0
+            rows = iter(self._executor.iter_rows(checked.source, checked.plan))
+            try:
+                for row in rows:
+                    if len(result) >= max_rows:
+                        raise ValueError('Summary row budget exceeded')
+                    used += check_size(row, max_bytes)
+                    if used > max_bytes:
+                        raise ValueError('Summary byte budget exceeded')
+                    result.append(row)
+                check_size(result, max_bytes)
+                import json
+                raw = json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode() + b'\n'
+                if len(raw) > max_bytes:
+                    raise ValueError('Summary encoded byte budget exceeded')
+                checked.value(result)
+                return result
+            finally:
+                close = getattr(rows, 'close', None)
+                if close is not None:
+                    close()
 
     def aggregate(self, *aggs: Any) -> Any:
         """Aggregate values using mergeable functions; this is a terminal action."""
@@ -1959,7 +2188,12 @@ class Dataset:
     ) -> None:
         """Execute the lazy plan through a formal Datasink."""
         target = ""
-        with observe_action(
+        from ..execution.checked import action
+        from ..execution.recovery_contract import RecoveryContractError
+        if not callable(getattr(datasink, 'recovery_identity', None)):
+            raise RecoveryContractError('A durable Datasink needs its immutable recovery_identity')
+        with action('write_datasink', self._source, self._plan,
+                    arguments={'sink': datasink.recovery_identity()}), observe_action(
             "write_datasink", self._source, self._plan, self._executor,
             sink_type=type(datasink).__name__, sink_target=target,
         ) as observer:
@@ -1975,6 +2209,7 @@ class Dataset:
             )
         return None
 
+    @_flow_api("write_table", datasets=("self",), effects=("write_table",), execution="action", version=2)
     def write_lance(
         self, uri: str, *, expected_version: int | None = None,
         storage_options: Mapping[str, str] | None = None,
@@ -2008,14 +2243,16 @@ class Dataset:
             on=on or (), update_columns=update_columns, when_not_matched=when_not_matched,
         )
         target = spec.uri
-        with observe_action(
+        from ..execution.checked import action
+        with action("write_table", self._source, self._plan, spec) as checked, observe_action(
             "write_lance", self._source, self._plan, self._executor,
             sink_type="LanceWrite", sink_target=target,
         ) as observer:
             receipt = self._executor.write_lance(
-                self._source, self._plan, spec,
+                checked.source, checked.plan, spec,
                 native_options=parse_native_options(backend_options, family="sink"),
             )
+            checked.receipt(receipt)
             if receipt.status == "indeterminate":
                 from ..errors import LanceWriteError
                 raise LanceWriteError(receipt)

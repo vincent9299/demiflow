@@ -66,58 +66,8 @@ def test_gate_limits_and_service_stop():
     asyncio.run(run())
 
 
-def test_isolated_parse_deadline_is_a_handled_technical_failure(tmp_path,monkeypatch):
-    import time
-    from demiflow.execution.isolation import run_isolated
-    with pytest.raises(TimeoutError,match='exceeded'):
-        run_isolated(time.sleep, 10, timeout_s=.2)
-    def stalled(*args,**kwargs):
-        return run_isolated(time.sleep, 10, timeout_s=.2)
-    monkeypatch.setattr('demiflow.collect.web.run_isolated',stalled)
-    async def run():
-        client=WebClient(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',search_url='https://example.org/search',host_interval_s=0)
-        client.client=httpx.AsyncClient(transport=httpx.MockTransport(lambda req:response(b'body',**{'content-type':'text/plain'})))
-        result=await client.fetch('https://example.org/page')
-        assert result['status']=='parse_error' and result['raw_ref'] and result['document_ref'] is None
-        assert client.snapshot_metrics()['outcomes']=={'download:ok':1,'fetch:parse_error':1}
-        await client.aclose()
-    asyncio.run(run())
 
 
-def test_explicit_fetch_proxy_does_not_proxy_search(tmp_path,monkeypatch):
-    original=httpx.AsyncClient;settings=[]
-    class Transport:
-        def __init__(self, *, proxy=None, limits):
-            self.proxy=proxy
-            self.mock=httpx.MockTransport(self.handle)
-        def handle(self,req):
-            if req.url.path=='/search':
-                assert self.proxy is None
-                return response(b'{"results":[]}',**{'content-type':'application/json'})
-            assert self.proxy=='http://proxy.example:3128'
-            return response(b'Actual document',**{'content-type':'text/plain'})
-        async def handle_async_request(self,req):
-            return await self.mock.handle_async_request(req)
-        def connection_counts(self):
-            return {'connections':0,'idle_connections':0,'active_connections':0,'waiting_requests':0}
-        async def reap_idle_connections(self):
-            return 0
-        async def aclose(self):
-            pass
-    monkeypatch.setattr('demiflow.collect.http_transport.RetrievalTransport',Transport)
-    def client(**kwargs):
-        settings.append(dict(kwargs))
-        return original(**kwargs)
-    monkeypatch.setattr(httpx,'AsyncClient',client)
-    async def run():
-        web=WebClient(cache_path=tmp_path/'ledger',object_directory=tmp_path/'objects',
-            search_url='http://localhost/search',fetch_proxy_url='http://proxy.example:3128',host_interval_s=0)
-        assert (await web.search('q'))['status']=='no_results'
-        assert (await web.fetch('https://example.org/body'))['status']=='ok'
-        await web.aclose()
-        assert web.client.is_closed and web.proxy_client.is_closed
-    asyncio.run(run())
-    assert len(settings)==2 and all(s['trust_env'] is False for s in settings)
 
 
 def test_explicit_role_counting_scales_with_system_content():
@@ -133,64 +83,10 @@ def test_explicit_role_counting_scales_with_system_content():
     assert counter.messages(messages)-base==2*difference
 
 
-def test_http_byte_caps_retry_and_cache(tmp_path):
-    async def run():
-        attempts=[]
-        def handler(req):
-            attempts.append(str(req.url))
-            if req.url.path=='/search':return response(b'{"results":[]}',**{'content-type':'application/json'})
-            if req.url.path=='/large':return response(gzip.compress(b'x'*10000),**{'content-encoding':'gzip','content-type':'text/plain'})
-            if req.url.path=='/429':return response(code=429,**{'retry-after':'90'})
-            if req.url.path=='/retry':return response(code=503)
-            return response(b'Actual body.',**{'content-type':'text/plain'})
-        client=WebClient(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',search_url='https://example.org/search',
-            max_bytes=1000,retry_delay_s=0,host_interval_s=0)
-        client.client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        one,two=await asyncio.gather(client.search('q'),client.search('q'))
-        assert one['status']=='no_results' and one==two and len(attempts)==1
-        assert (await client.search('q'))==one and len(attempts)==1
-        large=await client.fetch('https://example.org/large')
-        assert large['status']=='content_error' and 'decoded' in large['reason']
-        limited=await client.fetch('https://example.org/429')
-        assert limited['status']=='rate_limited' and len(limited['attempts'])==1
-        bad=await client.fetch('https://example.org/retry')
-        assert bad['status']=='http_error' and len(bad['attempts'])==2
-        good=await client.fetch('https://example.org/body')
-        assert good['status']=='ok' and read_document(good['document_ref'])['blocks'][0]['text']=='Actual body.'
-        await client.aclose()
-    asyncio.run(run())
 
 
-def test_parser_failure_preserves_raw_snapshot_and_does_not_retry(tmp_path):
-    async def run():
-        calls=[]
-        def handler(req):
-            calls.append(str(req.url));return response(b'%PDF-1.7',**{'content-type':'application/pdf'})
-        client=WebClient(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',search_url='https://example.org/search',host_interval_s=0)
-        client.client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        r=await client.fetch('https://example.org/file')
-        assert r['status']=='parse_error' and r['document_ref'] is None
-        from demiflow.objects import ObjectRef
-        assert ObjectRef(**r['raw_ref']).read()==b'%PDF-1.7'
-        assert await client.fetch('https://example.org/file')==r and len(calls)==1
-        await client.aclose()
-    asyncio.run(run())
 
 
-def test_cross_host_redirects_release_host_permits_and_limit_hops(tmp_path):
-    async def run():
-        def handler(req):
-            if req.url.path=='/loop':return response(code=302,location=str(req.url))
-            if req.url.host=='a.example':return response(code=302,location='https://b.example/done')
-            return response(b'ok',**{'content-type':'text/plain'})
-        client=WebClient(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',search_url='https://s.example/search',host_interval_s=0,host_concurrency=1,timeout_s=1)
-        client.client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        out=await client.fetch('https://a.example/start')
-        assert out['status']=='ok' and read_document(out['document_ref'])['source']['final_url']=='https://b.example/done'
-        before=client.metrics['http_hops'];bad=await client.fetch('https://a.example/loop')
-        assert bad['reason']=='redirect_limit' and client.metrics['http_hops']-before==4
-        await client.aclose()
-    asyncio.run(run())
 
 
 def test_unknown_stream_append_is_reconciled_before_delivery(tmp_path,monkeypatch):
@@ -219,7 +115,7 @@ def test_request_gate_host_pacing_is_not_hidden_concurrency():
 
 def test_empty_results_with_engine_failures_are_not_normal_no_results(tmp_path):
     async def run():
-        client=WebClient(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',search_url='https://s.example/search',host_interval_s=0)
+        client=WebClient(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',search_url='https://s.example/search')
         client.client=httpx.AsyncClient(transport=httpx.MockTransport(lambda r:response(
             b'{"results":[],"unresponsive_engines":[["engine","timeout"]]}',**{'content-type':'application/json'})))
         result=await client.search('q')
@@ -271,4 +167,24 @@ def test_search_pacing_is_shared_by_queries_and_cache_does_not_consume_slots(tmp
             await client.search('0')
             assert len(starts)==4 and client.search_gate.admitted==4
         finally:await client.aclose()
+    asyncio.run(run())
+
+
+def test_search_initial_pacing_is_outside_network_deadline_but_redirect_wait_is_inside(tmp_path):
+    async def run():
+        web=WebClient(cache_path=tmp_path/'search.sqlite',search_url='https://search.example/',
+                      search_interval_s=.05,timeout_s=.01,retries=0)
+        calls=[]
+        async def hop(url,totals,params=None,**kwargs):
+            calls.append(url)
+            if url.endswith('/redirect'):return 302,{'location':'/final'},b'',url
+            return 200,{},b'{"results":[]}',url
+        web._hop=hop
+        try:
+            assert (await web.search('one'))['status']=='no_results'
+            assert (await web.search('two'))['status']=='no_results'
+            result=await web._get('https://search.example/redirect')
+            assert result['status']=='network_error'
+            assert calls==['https://search.example/','https://search.example/','https://search.example/redirect']
+        finally:await web.aclose()
     asyncio.run(run())

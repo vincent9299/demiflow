@@ -26,7 +26,7 @@ def install(config, send, receive):
             follow = kwargs.pop('allow_redirects', True)
             limit = min(kwargs.pop('max_redirects', self.max_redirects), config['max_redirects'])
             if kwargs.get('stream'):
-                raise ValueError('Streaming responses belong to fetch_documents')
+                raise ValueError('Raw object streaming belongs to Dataset.fetch')
             total_bytes = 0
             for hop in range(limit + 1):
                 self.check_url(url)

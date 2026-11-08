@@ -88,7 +88,7 @@ def test_merge_race_after_native_staging_is_not_rebased(target, monkeypatch):
     execute = builder.execute_uncommitted
     def race(self, *args, **kwargs):
         result = execute(self, *args, **kwargs)
-        data.from_items([{'id': 3, 'value': 'competitor', 'other': 'safe'}]).write_lance(target)
+        lance.write_dataset(pa.Table.from_pylist([{'id': 3, 'value': 'competitor', 'other': 'safe'}]), target, mode='append')
         return result
     monkeypatch.setattr(builder, 'execute_uncommitted', race)
     with pytest.raises(LanceWriteConflict):

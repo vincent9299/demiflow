@@ -2,7 +2,8 @@
 import asyncio
 import pytest
 
-from demiflow.collect.web import WebClient
+from demiflow.collect.connection_manager import ConnectionManager
+import httpx
 
 
 @pytest.mark.parametrize('failure',['invalid_tls','handshake_timeout'])
@@ -29,17 +30,15 @@ async def test_failed_connect_tls_releases_capacity_for_other_origins(tmp_path,f
             writer.close();await writer.wait_closed();handlers.discard(task)
     server=await asyncio.start_server(serve,'127.0.0.1',0)
     proxy=f'http://127.0.0.1:{server.sockets[0].getsockname()[1]}'
-    web=WebClient(cache_path=tmp_path/'requests.sqlite',object_directory=tmp_path/'objects',
-        retries=0,timeout_s=.3,connect_timeout_s=.15,host_interval_s=0,
-        fetch_proxy_routes={'*':{'pool':[{'name':'local','proxy':proxy,'interval_s':0,
-            'concurrency':2,'reuse_connections':False}], 'health_scope':'host'}})
+    manager=ConnectionManager()
+    client=manager.client('proxy',proxy=proxy,capacity=2,keepalive=0,
+        timeout=httpx.Timeout(.3,connect=.15),headers={})
     try:
         for host in ('failed-one.example','failed-two.example'):
-            result=await web._get('https://'+host+'/image')
-            assert result['status']=='network_error'
-        result=await web._get('http://healthy.example/image')
-        assert result['status']=='ok' and result['body']==b'body'
+            with pytest.raises(httpx.TransportError):await client.get('https://'+host+'/image')
+        result=await client.get('http://healthy.example/image')
+        assert result.status_code==200 and result.content==b'body'
         assert methods==[b'CONNECT',b'CONNECT',b'GET']
     finally:
-        await web.aclose();server.close();await server.wait_closed()
+        await manager.aclose();server.close();await server.wait_closed()
         await asyncio.gather(*tuple(handlers),return_exceptions=True)

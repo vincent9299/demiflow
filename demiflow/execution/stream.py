@@ -29,14 +29,40 @@ import inspect
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Mapping
 
-from ..data.plan import AsyncMapOp, BatchMapOp, BoundMapOp, FilterOp, MapOp, FlatMapOp, LogicalPlan, StandardCallable, StreamGroupBatchesOp, StreamPrependOp, is_stream_operation
+from ..data.plan import AsyncMapOp, BatchMapOp, BoundMapOp, FilterOp, MapOp, FlatMapOp, SelectColumnsOp, DropColumnsOp, RenameColumnsOp, LogicalPlan, StandardCallable, StreamGroupBatchesOp, StreamPrependOp, is_stream_operation
 from .stream_map import StreamMapRuntime
+from ..data.runtime_contract import RuntimeContractError, validator
+from .request_limits import ServiceStopped
 
 from ..errors import StallError
 
+from .row_scope import ScopedRow, RowScope, set_row_scope
+
 SENTINEL = object()
+
+
+class _BatchBoundary:
+    """Internal barrier: all workers finish a batch before its sink confirms it."""
+    def __init__(self, stages, queues, commit):
+        self.stages, self.queues, self.commit = stages, queues, commit
+        self.arrivals = {}
+        self.done = asyncio.Event()
+
+    async def arrive(self, stage):
+        index = self.stages.index(stage)
+        self.arrivals[index] = self.arrivals.get(index, 0) + 1
+        if self.arrivals[index] == stage.concurrency:
+            if index + 1 < len(self.stages):
+                for _ in range(self.stages[index + 1].concurrency):
+                    await self.queues[index + 1].put(self)
+            else:
+                result = self.commit()
+                if inspect.isawaitable(result):
+                    await result
+                self.done.set()
+        await self.done.wait()
 _FEED_CHUNK = 256            # 源头同步迭代器的分块拉取粒度（每块一次线程切换）
 _WATCHDOG_INTERVAL = 0.2     # 真异常收敛巡检周期（秒）
 _DRAIN_TIMEOUT = 2.0         # 取消后等待在飞任务平息的上限（秒）
@@ -89,7 +115,7 @@ class StreamStats:
 class _Stage:
     __slots__ = ("name", "fn", "concurrency", "queue_depth", "catch",
                  "pre_filters", "post_filters", "hard_timeout",
-                 "max_batch", "flush_interval", "execution", "executor", "pending", "flat_map", "grouping", "prefix")
+                 "max_batch", "flush_interval", "execution", "executor", "pending", "flat_map", "grouping", "prefix", "validation", "observation")
 
     def __init__(self, name, fn, concurrency, queue_depth, catch,
                  pre_filters, post_filters, hard_timeout=None,
@@ -110,48 +136,48 @@ class _Stage:
         self.flat_map=flat_map
         self.grouping = None
         self.prefix = None
+        self.validation = None
+        self.observation = None
 
 
 def _materialize(plan: LogicalPlan) -> list[_Stage]:
     """Lower async actors and their row-wise synchronous maps to bounded stages."""
-    if not any(is_stream_operation(op) for op in plan.operations):
-        raise ValueError('run_stream requires map_async/batch_map or explicit map streaming options')
-    # Validate the whole graph before instantiating any user callable. A map
-    # policy must never be silently ignored on an unsupported lowering path.
-    for op in plan.operations:
-        if not isinstance(op, (AsyncMapOp, BatchMapOp, FilterOp, MapOp, FlatMapOp, BoundMapOp)):
-            raise ValueError(f'streaming does not support {type(op).__name__}; materialize the synchronous prefix first')
-        if getattr(op, 'native_options', None) is not None:
-            raise ValueError('streaming does not support backend_options')
-        if isinstance(op, BoundMapOp) and op.stream_options is None:
-            raise ValueError('field-bound streaming map requires explicit streaming options')
-        if isinstance(op, (MapOp, BoundMapOp)) and op.stream_options is not None:
-            op.stream_options.validate_callable(op.callable)
+    from .capabilities import validate_stream_plan
+    validate_stream_plan(plan)
     stages: list[_Stage] = []
     head_filters: list[Callable] = []
+    from .checked import current
+    checked = current()
     for op in plan.operations:
+        count_before = len(stages)
         if isinstance(op, AsyncMapOp):
             name = op.label or op.callable.name
             stages.append(_Stage(
-                name, op.callable.instantiate(), op.concurrency,
+                name, StreamMapRuntime(op) if op.callable.is_class else op.callable.instantiate(), op.concurrency,
                 op.queue_depth or op.concurrency, op.catch,
                 head_filters if not stages else [], [],
                 op.hard_timeout, execution=op.execution))
+            if not op.callable.is_class:
+                stages[-1].validation = validator(stages[-1].fn, op.callable.runtime_contract)
             if isinstance(op, StreamPrependOp):
                 stages[-1].prefix = op
             head_filters = []
         elif isinstance(op, BatchMapOp):
             name = op.label or op.callable.name
             stages.append(_Stage(
-                name, op.callable.instantiate(), op.concurrency,
+                name, StreamMapRuntime(op) if op.callable.is_class else op.callable.instantiate(), op.concurrency,
                 op.queue_depth or op.concurrency, op.catch,
                 head_filters if not stages else [], [],
                 op.hard_timeout, op.max_batch, op.flush_interval))
+            if not op.callable.is_class:
+                stages[-1].validation = validator(stages[-1].fn, op.callable.runtime_contract)
             if isinstance(op, StreamGroupBatchesOp):
                 stages[-1].grouping = op
             head_filters = []
         elif isinstance(op, FilterOp):
-            pred = op.callable.instantiate()
+            pred = StandardCallable(op.callable)
+            if checked is not None:
+                checked.progress(checked.operation_bindings.get(id(op)), rows_input=0, rows_output=0, calls=0)
             if stages:
                 stages[-1].post_filters.append(pred)
             else:
@@ -163,6 +189,29 @@ def _materialize(plan: LogicalPlan) -> list[_Stage]:
                                  options.catch, head_filters if not stages else [], [],
                                  execution=options.execution))
             head_filters = []
+        elif isinstance(op, SelectColumnsOp):
+            def project(row,columns=op.columns):
+                return {name:row[name] for name in columns}
+            stages.append(_Stage('select_columns',project,1,1,(),head_filters if not stages else [],[]))
+            head_filters=[]
+        elif isinstance(op, DropColumnsOp):
+            def drop(row,columns=op.columns):
+                missing=set(columns)-row.keys()
+                if missing:raise KeyError(f'columns not found: {sorted(missing)}')
+                return {k:v for k,v in row.items() if k not in columns}
+            stages.append(_Stage('drop_columns',drop,1,1,(),head_filters if not stages else [],[]))
+            head_filters=[]
+        elif isinstance(op, RenameColumnsOp):
+            def rename(row,names=op.names):
+                targets=[names.get(k,k) for k in row] if isinstance(names,Mapping) else names
+                if len(targets)!=len(row) or len(set(targets))!=len(targets):
+                    raise ValueError('rename_columns must preserve width and unique names')
+                return dict(zip(targets,row.values()))
+            stages.append(_Stage('rename_columns',rename,1,1,(),head_filters if not stages else [],[]))
+            head_filters=[]
+        elif isinstance(op, BoundMapOp) or isinstance(op,MapOp) and not inspect.isfunction(op.callable.target):
+            stages.append(_Stage(op.callable.name,StreamMapRuntime(op),1,1,(),head_filters if not stages else [],[]))
+            head_filters=[]
         elif isinstance(op, (MapOp,FlatMapOp)):
             # Pure row validation/application can follow a native prompt actor;
             # callers should not have to disguise it as asynchronous work.
@@ -173,6 +222,9 @@ def _materialize(plan: LogicalPlan) -> list[_Stage]:
             raise ValueError(
                 f"streaming 路径支持 map_async、batch_map、map、flat_map 与 filter，"
                 f"遇到 {type(op).__name__}（惰性动作走 take/write 系列则不支持本算子组合）")
+        if checked is not None and len(stages) > count_before:
+            stages[-1].observation = checked.operation_bindings.get(id(op))
+            checked.progress(stages[-1].observation, rows_input=0, rows_output=0, calls=0)
     if not stages:
         raise ValueError("run_stream 需要至少一个 map_async 算子")
     # Repeated functions/prompts are distinct nodes. Collapsing their names
@@ -237,32 +289,90 @@ async def _drain_threads(stages):
                 stage.executor = None
 
 
+def _predicate(predicate, row):
+    from .checked import current
+    checked = current()
+    contract = predicate._spec.runtime_contract if isinstance(predicate, StandardCallable) else None
+    key = contract.get('observation') if contract else None
+    if checked is not None:
+        checked.progress(key, calls=1, rows_input=1, rows_output=0)
+    try:
+        result = predicate(row)
+    except BaseException:
+        if checked is not None:
+            checked.progress(key, errors=1)
+        raise
+    if checked is not None:
+        checked.progress(key, rows_output=int(bool(result)), dropped=int(not result))
+    return result
+
+
 def _post_filter(filters, out):
     """输出后过滤：保持 None/list 语义，全滤掉返回 None。"""
     if out is None or not filters:
         return out
     outs = out if isinstance(out, list) else [out]
-    kept = [r for r in outs if all(p(r) for p in filters)]
+    kept = [r for r in outs if all(_predicate(p, r) for p in filters)]
     if not kept:
         return None
     return kept if isinstance(out, list) else kept[0]
 
 
 def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
-                 stats: StreamStats, on_progress, log_every: int):
+                 stats: StreamStats, on_progress, log_every: int, consume=None, unit_driver=None):
     name = stage.name
     map_worker = stage.fn.new_worker() if isinstance(stage.fn, StreamMapRuntime) else None
+    from .checked import current
+    checked = current()
+    from .run_context import current_run
+    run = current_run()
+    batch_limits = checked.limits if checked is not None else run.limits if run is not None else None
+
+    def progress(**counts):
+        if checked is not None:
+            checked.progress(stage.observation, **counts)
+
+    def check_row(row):
+        if checked is not None:
+            from ..data.runtime_contract import check_size
+            checked.check_stop()
+            check_size(row, checked.limits['max_row_bytes'])
+
+    # Each worker has one invocation in flight. Keep deadline provenance local
+    # to that worker; TimeoutError alone says nothing about who raised it.
+    hard_timeout_expired = False
 
     async def invoke(value, *, batch=False):
+        nonlocal hard_timeout_expired
+        hard_timeout_expired = False
         started = time.monotonic()
         try:
-            call = _call(stage.fn, value) if batch else _call_stage(stage, value, map_worker)
-            return (await asyncio.wait_for(call, stage.hard_timeout)
-                    if stage.hard_timeout is not None else await call)
+            if stage.hard_timeout is None:
+                return await _call_stage(stage, value, map_worker)
+            callback_timeout = None
+
+            async def call():
+                nonlocal callback_timeout
+                try:
+                    return await _call_stage(stage, value, map_worker)
+                except asyncio.TimeoutError as exc:
+                    callback_timeout = exc
+                    raise
+
+            try:
+                return await asyncio.wait_for(call(), stage.hard_timeout)
+            except asyncio.TimeoutError as exc:
+                # wait_for forwards callback exceptions, including TimeoutError
+                # during cancellation. Only its own expiry is a runtime miss.
+                hard_timeout_expired = exc is not callback_timeout
+                raise
         finally:
             # Service/gate time belongs to the operator; input queue waiting,
             # batch collection and downstream backpressure do not.
-            stats.observe_duration(name, time.monotonic() - started)
+            elapsed = time.monotonic() - started
+            stats.observe_duration(name, elapsed)
+            if checked is not None:
+                checked.duration(stage.observation, elapsed)
 
     async def worker():
         st = stats.stage(name)
@@ -302,49 +412,82 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             row = await q_in.get()
             if row is SENTINEL:
                 return
+            if isinstance(row, _BatchBoundary):
+                await row.arrive(stage)
+                continue
+            scope = row.scope if type(row) is ScopedRow else None
+            row = row.row if type(row) is ScopedRow else row
+            set_row_scope(scope)
+            check_row(row)
             st["in"] += 1
-            if any(not p(row) for p in stage.pre_filters):
+            if any(not _predicate(p, row) for p in stage.pre_filters):
                 stats.add_miss(f"{name}:filtered")
             else:
                 if map_worker is not None:
                     # Constructor/start failures are lifecycle failures, never
                     # row misses even if catch includes Exception.
                     await map_worker.prepare()
+                if stage.validation is not None:
+                    stage.validation.inputs((row,), {})
+                progress(calls=1, rows_input=1, rows_output=0)
                 try:
                     out = await invoke(row)
+                except (RuntimeContractError, ServiceStopped):
+                    progress(errors=1)
+                    raise
                 except stage.catch as exc:   # noqa: PERF203 - 认缺白名单
+                    progress(errors=1, dropped=1)
                     stats.add_miss(f"{name}:{type(exc).__name__}")
                 except asyncio.TimeoutError:
-                    if map_worker is not None:
-                        # Synchronous map has no enforceable hard timeout.
-                        # A callback TimeoutError follows its declared catch.
+                    if not hard_timeout_expired:
+                        progress(errors=1)
                         raise
                     stats.add_miss(f"{name}:hard_timeout")   # 活性层：必醒
+                    progress(errors=1, dropped=1)
                 else:
+                    if scope is not None and scope.delivery is not None and type(out) is not dict:
+                        raise RuntimeContractError('Task callbacks must return exactly one record; drop/expansion cannot settle a task')
+                    if stage.validation is not None:
+                        stage.validation.output(out)
                     if stage.flat_map:
                         # Pull one child at a time under downstream backpressure;
                         # never turn an arbitrary expansion iterator into a list.
                         children=iter(out)
                         try:
                             for index,child in enumerate(children):
+                                check_row(child)
+                                if unit_driver is not None:unit_driver.observe_expansion(name, child)
+                                progress(rows_output=1)
                                 if index and index%256==0:await asyncio.sleep(0)
-                                if not all(p(child) for p in stage.post_filters):
+                                if not all(_predicate(p, child) for p in stage.post_filters):
                                     stats.add_miss(f"{name}:filtered")
                                     continue
-                                if q_out is not None:await q_out.put(child)
+                                if q_out is not None:await q_out.put(ScopedRow(child,scope.child(index)) if scope else child)
+                                elif consume is not None:
+                                    set_row_scope(scope.child(index) if scope else None)
+                                    await _call(consume, child)
+                                    set_row_scope(scope)
                                 st["emitted"]+=1
                         finally:
                             close=getattr(children,'close',None)
                             if close is not None:close()
                     else:
+                        progress(rows_output=0 if out is None else len(out) if isinstance(out, list) else 1)
                         out = _post_filter(stage.post_filters, out)
                         if out is None:
                             stats.add_miss(f"{name}:drop")
                         else:
                             rows = out if isinstance(out, list) else (out,)
-                            for r in rows:
+                            for child_index,r in enumerate(rows):
+                                child_scope = scope.child(child_index) if scope and isinstance(out,list) else scope
+                                check_row(r)
+                                if unit_driver is not None:unit_driver.observe_expansion(name, r)
                                 if q_out is not None:
-                                    await q_out.put(r)
+                                    await q_out.put(ScopedRow(r,child_scope) if child_scope else r)
+                                elif consume is not None:
+                                    set_row_scope(child_scope)
+                                    await _call(consume, r)
+                                    set_row_scope(scope)
                                 st["emitted"] += 1
             # 进度钩子挂首级消费口径（chain 的「实例进度」同位）
             if (log_every and stage is FIRST_STAGE_REF.get()
@@ -357,16 +500,24 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             return
         outs = out if isinstance(out, list) else [out]
         for r in outs:
-            if not all(p(r) for p in stage.post_filters):
+            check_row(r)
+            if not all(_predicate(p, r) for p in stage.post_filters):
                 continue
             if q_out is not None:
                 await q_out.put(r)
+            elif consume is not None:
+                await _call(consume, r)
             st["emitted"] += 1
 
     def _record_dead(batch, reason):
         if len(stats.dead_batches) < 1000:
-            stats.dead_batches.append(
-                {"stage": name, "reason": reason, "rows": batch})
+            if checked is not None:
+                # Managed diagnostics retain counts, not arbitrary business
+                # payload. Durable domain evidence remains in its own ledger.
+                stats.dead_batches.append({'stage': name[:128], 'reason': reason[:128],
+                                           'row_count': len(batch), 'payload': 'not_retained'})
+            else:
+                stats.dead_batches.append({"stage": name, "reason": reason, "rows": batch})
         else:
             stats.dead_batches_dropped += 1
 
@@ -377,7 +528,7 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             return
         loop = asyncio.get_running_loop()
         while True:
-            batch, deadline = [], None
+            batch, deadline, batch_bytes = [], None, 64
             while True:
                 timeout = None
                 if batch and stage.flush_interval is not None:
@@ -393,6 +544,15 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                     if batch:
                         await _flush(batch)
                     return                           # 尾批已刷，退役
+                check_row(row)
+                if any(not _predicate(p, row) for p in stage.pre_filters):
+                    stats.add_miss(f'{name}:filtered')
+                    continue
+                if batch_limits is not None:
+                    from ..data.runtime_contract import check_size
+                    batch_bytes += check_size(row, batch_limits['max_row_bytes']) + 16
+                    if batch_bytes > batch_limits['max_batch_bytes']:
+                        raise RuntimeContractError('Stream batch byte budget exceeded')
                 if not batch:
                     if stage.flush_interval is not None:
                         deadline = loop.time() + stage.flush_interval
@@ -432,7 +592,7 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                     await flush(key)
                 return
             st['in'] += 1
-            if any(not predicate(row) for predicate in stage.pre_filters):
+            if any(not _predicate(predicate, row) for predicate in stage.pre_filters):
                 stats.add_miss(f'{name}:filtered')
                 continue
             size = row_size(row, op.chunk_bytes)
@@ -450,15 +610,31 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
 
     async def _flush(batch):
         st = stats.stage(name)
+        if map_worker is not None:
+            await map_worker.prepare()
+        if stage.validation is not None:
+            stage.validation.inputs((batch,), {})
+        progress(calls=1, rows_input=len(batch), rows_output=0)
         try:
             out = await invoke(batch, batch=True)
+        except (RuntimeContractError, ServiceStopped):
+            progress(errors=1)
+            raise
         except stage.catch as exc:
+            progress(errors=1, dropped=len(batch))
             stats.add_miss(f"{name}:{type(exc).__name__}")
             _record_dead(batch, type(exc).__name__)
         except asyncio.TimeoutError:
+            if not hard_timeout_expired:
+                progress(errors=1)
+                raise
+            progress(errors=1, dropped=len(batch))
             stats.add_miss(f"{name}:hard_timeout")
             _record_dead(batch, "hard_timeout")
         else:
+            if stage.validation is not None:
+                stage.validation.output(out)
+            progress(rows_output=0 if out is None else len(out) if isinstance(out, list) else 1)
             if out is None:
                 stats.add_miss(f"{name}:drop")
                 _record_dead(batch, "drop")
@@ -478,20 +654,33 @@ def _local_queue(depth: int):
 
 async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                 log_every, cancellation, queue_factory=None,
-                stall_timeout=None, stop_file=None, source_batch_size=_FEED_CHUNK) -> None:
+                stall_timeout=None, stop_file=None, source_batch_size=_FEED_CHUNK, consume=None,
+                progress=None, unit_driver=None, on_stop=None) -> None:
     from pathlib import Path
     from .request_limits import ServiceStopped
+    from .checked import current
+    checked = current()
     stop_path = Path(stop_file) if stop_file is not None else None
     if stop_path is not None and await asyncio.to_thread(stop_path.exists):
         raise ServiceStopped('operator_stop_file')
     make_queue = queue_factory or _local_queue
     queues = [make_queue(s.queue_depth) for s in stages]
+    whole_source = progress is not None and progress.whole_source
+    from .raw_fetch import RawFetch
+    from ..collect.operators import SearchWeb
+    track_occurrences = any(type(getattr(s.fn, '__self__', s.fn)) in {RawFetch,SearchWeb} for s in stages)
+    if track_occurrences and any(s.max_batch is not None or s.grouping is not None or s.prefix is not None for s in stages):
+        raise RuntimeContractError('Raw acquisition requires a row-local stream; materialize buffered transformations first')
+    if progress is not None and any(
+            s.grouping is not None or s.prefix is not None or
+            s.max_batch is not None and not whole_source for s in stages):
+        raise RuntimeContractError('Automatic stream progress requires row-local stages; grouped state needs its own commit contract')
     for stage in stages:
         stats.stage(stage.name)
         stats.stage_policies[stage.name] = {
             'concurrency': stage.concurrency, 'queue_depth': stage.queue_depth,
             'execution': stage.execution,
-            'callable_scope': (stage.fn.operation.stream_options.callable_scope
+            'callable_scope': (stage.fn.scope
                                if isinstance(stage.fn, StreamMapRuntime) else 'stage'),
             'catch': [f'{exc.__module__}.{exc.__qualname__}' for exc in stage.catch],
         }
@@ -513,23 +702,62 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         remaining[id(owner)] -= 1
         stop = getattr(owner, 'astop', None)
         if remaining[id(owner)] == 0 and stop is not None:
-            result = stop()
-            if inspect.isawaitable(result):
-                await result
+            completed = False
+            try:
+                result = stop()
+                if inspect.isawaitable(result):
+                    await result
+                completed = True
+            finally:
+                if checked is not None:
+                    checked.actor_lifecycle(owner, 'stopped', completed)
 
     async def feed():
         it = iter(source_iter)
         # Resume a generator in the same Context across worker threads.
         feed_context = contextvars.copy_context()
+        batch_keys = []
+        ordinal = 0
+        async def confirm():
+            from functools import partial
+            boundary = _BatchBoundary(stages, queues, partial(progress.confirm, list(batch_keys)))
+            for _ in range(stages[0].concurrency):
+                await queues[0].put(boundary)
+            await boundary.done.wait()
+            batch_keys.clear()
         while True:
+            if checked is not None:
+                checked.check_stop()
             if cancellation is not None and cancellation.requested:
+                if unit_driver is not None:raise ServiceStopped('producer_cancelled_before_eos')
                 break
             chunk = await asyncio.to_thread(
                 feed_context.run, lambda: [r for _, r in zip(range(source_batch_size), it)])
             if not chunk:
                 break
             for row in chunk:
+                if unit_driver is not None:unit_driver.begin_unit()
+                source_ordinal = ordinal
+                ordinal += 1
+                if progress is not None:
+                    key = progress.select(row)
+                    if key is None:
+                        continue
+                    if not whole_source:
+                        batch_keys.append(key)
+                if track_occurrences and type(row) is not ScopedRow:
+                    from .recovery_contract import identity
+                    row = ScopedRow(row, RowScope(identity(['source-occurrence',source_ordinal])))
                 await queues[0].put(row)
+                if unit_driver is not None:
+                    boundary = _BatchBoundary(stages, queues, unit_driver.end_unit)
+                    for _ in range(stages[0].concurrency):await queues[0].put(boundary)
+                    await boundary.done.wait()
+                if progress is not None and len(batch_keys) >= getattr(progress,'batch_rows',512):
+                    await confirm()
+        if batch_keys:
+            await confirm()
+        if unit_driver is not None:await unit_driver.end_source()
         # Durable operator work is replayed after the live source is exhausted.
         # This keeps recovery independent of upstream re-feeding: each stage
         # may expose opaque recovery_rows(), while the platform remains unaware
@@ -553,7 +781,7 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
     for i, s in enumerate(stages):
         q_out = queues[i + 1] if i + 1 < len(stages) else None
         stage_tasks.append([asyncio.create_task(
-            _make_worker(s, queues[i], q_out, stats, on_progress, log_every)())
+            _make_worker(s, queues[i], q_out, stats, on_progress, log_every, consume, unit_driver)())
             for _ in range(s.concurrency)])
     feed_task = asyncio.create_task(feed())
     all_tasks = [feed_task, *(t for g in stage_tasks for t in g)]
@@ -579,6 +807,7 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         return ServiceStopped('pipeline_failed:' + type(fatal[0]).__name__)
 
     def _cancel_all() -> None:
+        if on_stop is not None:on_stop()
         for t in all_tasks:
             if not t.done() and not t.cancelling():
                 # Stop row scheduling immediately. Native journaled model
@@ -596,6 +825,14 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         last_progress, last_tick = -1, time.monotonic()
         while True:
             await asyncio.sleep(_WATCHDOG_INTERVAL)
+            if checked is not None:
+                try:
+                    checked.check_stop()
+                    checked.flush_observations()
+                except BaseException as exc:
+                    fatal.append(exc)
+                    _cancel_all()
+                    return
             if stop_path is not None and await asyncio.to_thread(stop_path.exists):
                 fatal.append(ServiceStopped('operator_stop_file'))
                 _cancel_all()
@@ -696,7 +933,15 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                 raise ex
             if any(t.cancelled() for t in group):
                 raise asyncio.CancelledError('stream worker cancelled')
-            await stop_stage(stages[i])
+            if not whole_source:
+                await stop_stage(stages[i])
+        if whole_source:
+            # All batch workers have flushed their ordinary EOF tails and all
+            # downstream work has drained. Commit before lifecycle teardown;
+            # no intermediate barrier flushes or changes logical batch groups.
+            await progress.confirm_source()
+            for stage in stages:
+                await stop_stage(stage)
     except BaseException as exc:
         from .request_limits import ServiceStopped
         if isinstance(exc, Exception) and not fatal:
@@ -744,7 +989,7 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
 def run_stream(source_iter, plan: LogicalPlan, *,
                on_progress=None, on_drain=None, log_every: int = 0,
                cancellation=None, queue_factory=None, on_start=None, on_close=None, stall_timeout=None,
-               stop_file=None, source_batch_size=_FEED_CHUNK) -> StreamStats:
+               stop_file=None, source_batch_size=_FEED_CHUNK, consume=None, progress=None, unit_driver=None, on_stop=None) -> StreamStats:
     """同步驱动入口：建事件循环跑至完成（或 Ctrl-C/异常终止），返回 StreamStats。
 
     queue_factory(depth) 是行传输缝（调度层内部，算子/编排零感知）：
@@ -762,14 +1007,18 @@ def run_stream(source_iter, plan: LogicalPlan, *,
             if on_drain is not None: await _call(on_drain, result)
         try:
             stages = _materialize(plan)
+            if progress is not None:
+                progress.bind_stages(stages)
             if on_start is not None:
                 result = on_start()
                 if inspect.isawaitable(result): await result
+            if progress is not None:
+                await progress.restore_stages()
             await _arun(source_iter, stages, stats,
                         on_progress=on_progress, on_drain=drain,
                         log_every=log_every, cancellation=cancellation,
                         queue_factory=queue_factory, stall_timeout=stall_timeout, stop_file=stop_file,
-                        source_batch_size=source_batch_size)
+                        source_batch_size=source_batch_size, consume=consume, progress=progress, unit_driver=unit_driver,on_stop=on_stop)
         finally:
             try:
                 if not drained: await drain(stats)

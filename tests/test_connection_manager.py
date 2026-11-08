@@ -49,7 +49,7 @@ async def test_real_idle_socket_is_reaped_without_another_request():
             assert response.content == b'body'
             assert manager.snapshot_metrics()['idle_connections'] == 1
             async with asyncio.timeout(1):
-                while manager.snapshot_metrics()['idle_connections']:
+                while not manager.snapshot_metrics()['idle_connections_closed']:
                     await asyncio.sleep(.01)
             assert manager.snapshot_metrics()['idle_connections_closed'] == 1
             assert not c.is_closed
@@ -117,24 +117,17 @@ async def test_request_cancellation_and_close_leave_no_owned_connections():
         await asyncio.gather(*tuple(handlers), return_exceptions=True)
 
 
-async def test_local_pool_timeout_does_not_cool_proxy_exit(tmp_path):
-    web = WebClient(cache_path=tmp_path/'calls.sqlite', object_directory=tmp_path/'objects',
-        fetch_proxy_routes={'*': {'pool': [{'name': 'fixture', 'proxy': 'http://proxy.example:3128',
-            'concurrency': 1, 'interval_s': 0}], 'health_scope': 'host'}},
-        host_interval_s=0, retries=2)
-    calls = []
-    async def hop(*args, **kwargs):
-        calls.append(1)
-        raise httpx.PoolTimeout('local wait only')
-    web._hop = hop
+async def test_local_pool_timeout_is_not_a_remote_search_failure(tmp_path):
+    web=WebClient(cache_path=tmp_path/'calls.sqlite',search_url='https://search.example/',retries=2)
+    calls=[]
+    async def hop(*args,**kwargs):
+        calls.append(1);raise httpx.PoolTimeout('local wait only')
+    web._hop=hop
     try:
-        result = await web._get('https://example.org/a')
-        assert result['status'] == 'capacity_error' and len(calls) == 1
-        with web._db() as db:
-            assert db.execute('select count(*) from fetch_route_host_health').fetchone()[0] == 0
-        assert web.fetch_route_pools['*'].routes[0]['busy'] == 0
-    finally:
-        await web.aclose()
+        result=await web.search('query')
+        assert result['status']=='capacity_error' and len(calls)==1
+        assert web.search_gate.consecutive==0
+    finally:await web.aclose()
 
 
 async def test_failed_close_does_not_free_capacity(tmp_path, monkeypatch):

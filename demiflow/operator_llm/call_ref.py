@@ -14,7 +14,15 @@ class PromptRecordRef:
     attempt: int = 1
 
     def to_dict(self):
-        value = asdict(self)
+        # Native references contain immutable scalars. Avoid recursively copying
+        # them for every row; keep asdict semantics for subclasses/other values.
+        if (type(self) is PromptRecordRef and type(self.journal_path) is str
+                and type(self.request_id) is str and type(self.kind) is str
+                and type(self.attempt) is int):
+            value = {'journal_path': self.journal_path, 'request_id': self.request_id,
+                     'kind': self.kind, 'attempt': self.attempt}
+        else:
+            value = asdict(self)
         if self.attempt == 1:
             value.pop('attempt')
         return value
@@ -23,33 +31,51 @@ class PromptRecordRef:
     def from_dict(cls, value):
         return cls(**value)
 
-    def read(self, root=None):
+    def read(self, root=None, *, max_bytes=None, restore_inputs=True, resolve_locations=True):
         column = {'request': 'request_json', 'response': 'response_json', 'error': 'error_json'}[self.kind]
+        if max_bytes is not None and (type(max_bytes) is not int or not 1 <= max_bytes <= 16 * 1024**2):
+            raise ValueError('Invalid call evidence byte budget')
         path = Path(self.journal_path)
         if not path.is_absolute():
             path = Path(root or '.') / path
-        db = sqlite3.connect(resolve_local_artifact(path).as_uri() + '?mode=ro', uri=True)
+        path = resolve_local_artifact(path) if resolve_locations else path.absolute()
+        db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5)
         try:
+            if max_bytes is not None:
+                import time
+                deadline = time.monotonic() + 5
+                db.set_progress_handler(lambda: int(time.monotonic() > deadline), 10000)
+                db.execute('PRAGMA cache_size=-2048')
+                db.execute('PRAGMA mmap_size=0')
+                db.execute('PRAGMA trusted_schema=OFF')
+            db.execute('BEGIN')
             if type(self.attempt) is not int or self.attempt < 1:
                 raise ValueError('A call reference attempt must be positive')
             archives = db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery_events'").fetchone()
-            response_column = _archived_response_column(db) if archives else 'NULL'
-            archived = (db.execute(f'SELECT request_json,error_json,{response_column} FROM recovery_events '
-                'WHERE request_key=? AND attempt=?', (self.request_id,self.attempt)).fetchone()
-                if archives else None)
+            archived = (db.execute('SELECT 1 FROM recovery_events WHERE request_key=? AND attempt=?',
+                                  (self.request_id, self.attempt)).fetchone() if archives else None)
             if archived is not None:
-                # An HTTP rejection is a complete failed response. Old refs
-                # remain bound to that attempt even after a later success.
-                row = (archived[{'request':0,'error':1,'response':2}[self.kind]],)
+                selected = _archived_response_column(db) if self.kind == 'response' else column
+                query = ' FROM recovery_events WHERE request_key=? AND attempt=?'
+                parameters = (self.request_id, self.attempt)
             else:
                 current = (db.execute('SELECT COALESCE(MAX(attempt),0)+1 FROM recovery_events '
-                    'WHERE request_key=?',(self.request_id,)).fetchone()[0] if archives else 1)
-                row = (db.execute(f'SELECT {column} FROM calls WHERE request_key=?', (self.request_id,)).fetchone()
-                       if current == self.attempt else None)
+                    'WHERE request_key=?', (self.request_id,)).fetchone()[0] if archives else 1)
+                if current != self.attempt:
+                    raise KeyError(self.request_id + '/' + self.kind)
+                selected, query, parameters = column, ' FROM calls WHERE request_key=?', (self.request_id,)
+            if max_bytes is not None:
+                size = db.execute('SELECT length(CAST(' + selected + ' AS BLOB))' + query, parameters).fetchone()
+                if size and size[0] is not None and size[0] > max_bytes:
+                    raise ValueError('Call evidence exceeds byte budget')
+            row = db.execute('SELECT ' + selected + query, parameters).fetchone()
             if row is None or row[0] is None:
                 raise KeyError(self.request_id + '/' + self.kind)
-            from .sqlite_offline import restore
-            return restore(json.loads(row[0]))
+            value = json.loads(row[0])
+            if restore_inputs:
+                from .sqlite_offline import restore
+                return restore(value)
+            return value
         finally:
             db.close()
 

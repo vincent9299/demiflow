@@ -25,7 +25,7 @@ KeyOf = Callable[[dict], list]
 
 
 def atomic_write_bytes(path: str, data: bytes) -> None:
-    """原子写字节：pid 唯一临时文件 + os.replace（同目录同文件系统）。
+    """原子写字节：UUID 唯一临时文件 + os.replace（同目录同文件系统）。
 
     内容寻址 blob 的并发同内容写安全：不同进程临时名互不碰撞，
     replace 后发者胜且内容相同；不同内容同路径只可能来自哈希碰撞
@@ -33,20 +33,23 @@ def atomic_write_bytes(path: str, data: bytes) -> None:
     blob 用（跨节点并发写的原子性由本函数保证）。
     """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "wb") as f:
-        f.write(data)
+    import uuid
+    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
     try:
-        os.replace(tmp, path)
-    except OSError:
-        # cosfs 等对象存储 FUSE 的 rename 语义缺陷（tmp 刚写完即改名可
-        # ENOENT）。回退直写终径：内容寻址下同内容并发写良性（同字节流
-        # 自偏移 0 顺序写，任意交错终态一致；异内容同径=哈希碰撞，忽略）
-        with open(path, "wb") as f:
+        with open(tmp, "xb") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        descriptor = os.open(os.path.dirname(path) or ".", os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
         try:
             os.unlink(tmp)
-        except OSError:
+        except FileNotFoundError:
             pass
 
 

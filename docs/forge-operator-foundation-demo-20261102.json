@@ -1,0 +1,244 @@
+{
+  "format": "forge_operator_foundation_acceptance_v1",
+  "date": "2026-11-02",
+  "installed_demo": {
+    "workspace": "/tmp/forge-foundation-release-o6t54b37/venv-final-demo",
+    "run_id": "r03902866a291418f8ffcf00a",
+    "status": "succeeded",
+    "rows": [
+      {
+        "_rowid": "0",
+        "case_id": "c01",
+        "text": "示例 case 一",
+        "variant": "demo-A"
+      },
+      {
+        "_rowid": "1",
+        "case_id": "c01",
+        "text": "示例 case 一",
+        "variant": "demo-B"
+      },
+      {
+        "_rowid": "2",
+        "case_id": "c02",
+        "text": "示例 case 二",
+        "variant": "demo-A"
+      },
+      {
+        "_rowid": "3",
+        "case_id": "c02",
+        "text": "示例 case 二",
+        "variant": "demo-B"
+      },
+      {
+        "_rowid": "4",
+        "case_id": "c03",
+        "text": "示例 case 三",
+        "variant": "demo-A"
+      },
+      {
+        "_rowid": "5",
+        "case_id": "c03",
+        "text": "示例 case 三",
+        "variant": "demo-B"
+      }
+    ],
+    "observations": [
+      {
+        "action_id": "2dba14640615a4bc",
+        "node_id": "2dba14640615a4bc",
+        "occurrence": 0,
+        "calls": 1,
+        "rows_input": null,
+        "rows_output": 6,
+        "sequence": 3,
+        "state": "succeeded",
+        "timing_scope": "unknown",
+        "run_id": "r03902866a291418f8ffcf00a",
+        "completeness": "recorded"
+      },
+      {
+        "action_id": "2dba14640615a4bc",
+        "node_id": "730b807cbe0b6147",
+        "occurrence": 0,
+        "calls": null,
+        "rows_input": null,
+        "rows_output": 6,
+        "sequence": 3,
+        "state": "reused",
+        "timing_scope": "unknown",
+        "run_id": "r03902866a291418f8ffcf00a",
+        "completeness": "recorded"
+      },
+      {
+        "action_id": "730b807cbe0b6147",
+        "node_id": "484fbc4591f1aa87",
+        "occurrence": 0,
+        "calls": 3,
+        "elapsed_s": 0.00011668354272842407,
+        "rows_input": 3,
+        "rows_output": 6,
+        "sequence": 15,
+        "state": "succeeded",
+        "timing_scope": "node",
+        "run_id": "r03902866a291418f8ffcf00a",
+        "completeness": "recorded"
+      },
+      {
+        "action_id": "730b807cbe0b6147",
+        "node_id": "5076f3ce8228f434",
+        "occurrence": 0,
+        "calls": 6,
+        "elapsed_s": 1.738220453262329e-05,
+        "lifecycle": {
+          "closed": true,
+          "created": true,
+          "started": true,
+          "stopped": null
+        },
+        "rows_input": 6,
+        "rows_output": 6,
+        "sequence": 24,
+        "state": "succeeded",
+        "timing_scope": "node",
+        "run_id": "r03902866a291418f8ffcf00a",
+        "completeness": "recorded"
+      },
+      {
+        "action_id": "730b807cbe0b6147",
+        "node_id": "5708168e6cd17cc0",
+        "occurrence": 0,
+        "calls": null,
+        "rows_input": null,
+        "rows_output": 3,
+        "sequence": 6,
+        "state": "succeeded",
+        "timing_scope": "unknown",
+        "run_id": "r03902866a291418f8ffcf00a",
+        "completeness": "recorded"
+      },
+      {
+        "action_id": "730b807cbe0b6147",
+        "node_id": "730b807cbe0b6147",
+        "occurrence": 0,
+        "calls": 1,
+        "rows_input": null,
+        "rows_output": 6,
+        "sequence": 3,
+        "state": "succeeded",
+        "timing_scope": "unknown",
+        "run_id": "r03902866a291418f8ffcf00a",
+        "completeness": "recorded"
+      }
+    ]
+  },
+  "performance": [
+    {
+      "mode": "native",
+      "rows": 100000,
+      "seconds": 0.6838458217680454,
+      "rows_s": 146231.7920455455,
+      "analysis_s": 0.023977037519216537,
+      "peak_rss": 274669568,
+      "peak_scratch": 2970345,
+      "read_bytes": 0,
+      "write_bytes": 3416064,
+      "observations_bytes": 0,
+      "root": "/tmp/forge-measure-native-9d6wx7ff",
+      "iteration": 1
+    },
+    {
+      "mode": "checked",
+      "rows": 100000,
+      "seconds": 1.5077643170952797,
+      "rows_s": 66323.36291964438,
+      "analysis_s": 0.02554846927523613,
+      "peak_rss": 277454848,
+      "peak_scratch": 2954439,
+      "read_bytes": 0,
+      "write_bytes": 3416064,
+      "observations_bytes": 0,
+      "root": "/tmp/forge-measure-checked-lhcb30fr",
+      "iteration": 1
+    },
+    {
+      "mode": "observed",
+      "rows": 100000,
+      "seconds": 1.6333582997322083,
+      "rows_s": 61223.55396020283,
+      "analysis_s": 0.024155035614967346,
+      "peak_rss": 281161728,
+      "peak_scratch": 2946486,
+      "read_bytes": 0,
+      "write_bytes": 3489792,
+      "observations_bytes": 803,
+      "root": "/tmp/forge-measure-observed-0nxan_jv",
+      "iteration": 1
+    },
+    {
+      "mode": "native",
+      "rows": 100000,
+      "seconds": 0.685729157179594,
+      "rows_s": 145830.1706336949,
+      "analysis_s": 0.024778351187705994,
+      "peak_rss": 278773760,
+      "peak_scratch": 2811285,
+      "read_bytes": 0,
+      "write_bytes": 3416064,
+      "observations_bytes": 0,
+      "root": "/tmp/forge-measure-native-dairzvrn",
+      "iteration": 2
+    },
+    {
+      "mode": "checked",
+      "rows": 100000,
+      "seconds": 1.6100806072354317,
+      "rows_s": 62108.691670849774,
+      "analysis_s": 0.025555331259965897,
+      "peak_rss": 274599936,
+      "peak_scratch": 2882862,
+      "read_bytes": 0,
+      "write_bytes": 3416064,
+      "observations_bytes": 0,
+      "root": "/tmp/forge-measure-checked-9b4ssfwj",
+      "iteration": 2
+    },
+    {
+      "mode": "observed",
+      "rows": 100000,
+      "seconds": 1.7042969688773155,
+      "rows_s": 58675.22023809839,
+      "analysis_s": 0.02540050819516182,
+      "peak_rss": 278781952,
+      "peak_scratch": 2954439,
+      "read_bytes": 0,
+      "write_bytes": 3489792,
+      "observations_bytes": 803,
+      "root": "/tmp/forge-measure-observed-4b6bsp58",
+      "iteration": 2
+    }
+  ],
+  "model_demo": {
+    "workspace": "/tmp/forge-foundation-release-o6t54b37/final-model-demo",
+    "requests": 2,
+    "result_rows": 2,
+    "provider": "loopback fixture only",
+    "browser_read_requests_added": 0
+  },
+  "screenshots_root": "/yzp/zhaozy/yangzepeng/0905/.codex-home/visualizations/2026/11/02/forge-foundation",
+  "wheel_sha256": "9dbb6975b172b8809da0f61dd9f7ad14333311b5882d2cd2dfc24800099ee7ba",
+  "managed_cancellation": {
+    "seconds": 2.177460040897131,
+    "requests": 1,
+    "status": "cancelled",
+    "response_recorded": false,
+    "error_recorded": true
+  },
+  "test_summary": {
+    "selection": "tests; not network and not gpu and not ray",
+    "current_test_count": 2211,
+    "passed_unique": 2211,
+    "method": "Staged source snapshots: initial whole-suite outcomes, explicit failure/skip rerun, remaining-case continuation, and final affected/new-case suites. This is not an uninterrupted all-tests run of the final revision.",
+    "evidence_path": "/tmp/forge-foundation-release-o6t54b37/aggregate-tests.json"
+  }
+}

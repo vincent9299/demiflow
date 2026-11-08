@@ -1,0 +1,144 @@
+{
+  "format": "demiflow_analysis_resource_profile_v1",
+  "revision": "P2-candidate-1",
+  "status": "not_allocated_not_calibrated",
+  "activation_allowed": false,
+  "memory": {
+    "analysis": 3221225472,
+    "jobs": 3053453312,
+    "kernel": 1610612736,
+    "native": 1073741824,
+    "media": 268435456,
+    "controller": 134217728,
+    "watchdog": 33554432,
+    "jobs_headroom": 100663296
+  },
+  "pids": {
+    "analysis": 64,
+    "jobs": 56,
+    "kernel": 32,
+    "native": 16,
+    "media": 8,
+    "controller": 6,
+    "watchdog": 2
+  },
+  "cpu_max": {
+    "analysis": "200000 100000",
+    "jobs": "200000 100000",
+    "kernel": "100000 100000",
+    "native": "100000 100000",
+    "media": "50000 100000"
+  },
+  "memory_swap_max": 0,
+  "native_options": {
+    "memory_bytes": 268435456,
+    "max_rss_bytes": 536870912,
+    "max_scratch_bytes": 201326592,
+    "partitions": 1,
+    "threads": 1,
+    "batch_rows": 1024,
+    "timeout_s": 30,
+    "admission_timeout_s": 2,
+    "cgroup_headroom_bytes": 134217728,
+    "prefer_hash_join": false,
+    "max_row_bytes": 1048576
+  },
+  "native_session": {
+    "resource_directory": "/var/lib/demiflow-analysis/native-slots",
+    "max_concurrent": 1,
+    "slot_capacity": {
+      "max_rss_bytes_per_slot": 536870912,
+      "threads_per_slot": 1
+    },
+    "temp_directory": "/scratch/native",
+    "diagnostics_directory": "/scratch/diagnostics",
+    "managed_diagnostics": true
+  },
+  "native_tmpfs": {
+    "bytes": 268435456,
+    "inodes": 4096
+  },
+  "native_rlimits": {
+    "RLIMIT_FSIZE": 67108864,
+    "RLIMIT_NOFILE": 128
+  },
+  "native_environment": {
+    "TOKIO_WORKER_THREADS": "1",
+    "RAYON_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "LANCE_CPU_THREADS": "1"
+  },
+  "payload_limits": {
+    "arrow_chunk_bytes": 1048576,
+    "max_rows": 100000,
+    "max_logical_bytes": 33554432,
+    "max_encoded_lance_bytes": 67108864,
+    "publish_reserved_bytes": 134217728,
+    "project_artifact_bytes": 268435456,
+    "global_artifact_bytes": 2147483648
+  },
+  "isolation": {
+    "network": "none",
+    "namespace_types": [
+      "user",
+      "mount",
+      "pid",
+      "network",
+      "ipc",
+      "uts",
+      "cgroup"
+    ],
+    "host_root_user_allowed": false,
+    "no_new_privileges_in_job": true,
+    "job_capabilities": "empty",
+    "kernel_can_see_helper_socket": false,
+    "helper_arbitrary_host_commands": false,
+    "cgroup_view": "per-job leaf root, read-only",
+    "unsupported_controls": "disabled_no_silent_fallback"
+  },
+  "outer_supervisor": "mandatory fixed owned-job cleanup on controller/watchdog failure; actual proof required",
+  "native_work_tmpfs": {
+    "bytes": 1048576,
+    "inodes": 64,
+    "memory_accounting": "same native leaf cgroup"
+  },
+  "database": {
+    "main_bytes": 134217728,
+    "wal_bytes": 33554432,
+    "backup_bytes_each": 134217728,
+    "backup_copies": 2,
+    "region_reserved_bytes": 469762048,
+    "owner": "dedicated outer controller; normal writes under WAL file rlimit; no Arrow/ZMQ decode"
+  },
+  "kernel": {
+    "idle_seconds": 600,
+    "lifetime_seconds": 3600,
+    "cell_seconds": 120,
+    "cancel_mode": "generation_stops",
+    "gateway": "inside kernel namespace/cgroup; raw ZMQ not in controller"
+  },
+  "role_tmpfs": {
+    "kernel": {
+      "scratch_bytes": 268435456,
+      "scratch_inodes": 4096
+    },
+    "native": {
+      "scratch_bytes": 268435456,
+      "scratch_inodes": 4096
+    },
+    "media": {
+      "scratch_bytes": 67108864,
+      "scratch_inodes": 512
+    }
+  },
+  "shared_role_tmpfs": {
+    "work_bytes": 1048576,
+    "work_inodes": 64,
+    "dev_bytes": 1048576,
+    "dev_inodes": 16,
+    "accounting": "all charged to the same owning role cgroup, no separate memory allowance"
+  }
+}

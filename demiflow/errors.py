@@ -8,6 +8,10 @@ class DemiflowError(Exception):
     pass
 
 
+class ExecutionConflict(DemiflowError, ValueError):
+    """The observed execution attempt or revision is no longer current."""
+
+
 class UnsupportedSourceError(DemiflowError):
     pass
 

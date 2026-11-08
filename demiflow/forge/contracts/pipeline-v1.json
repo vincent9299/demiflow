@@ -1,0 +1,48 @@
+{
+  "schema_version": "demiflow_forge_contract_v1",
+  "contract_id": "demiflow.pipeline.map",
+  "version": "1.0.0",
+  "nodes": ["read_lance", "map", "write_lance"],
+  "layout": {
+    "root_files": [
+      "project.json",
+      "request.json",
+      "contract.lock.json",
+      "pipeline.py",
+      "manifest.json",
+      "run.example.json",
+      "README.md"
+    ],
+    "source_dirs": ["operators", "tests"],
+    "runtime_dirs": ["datasets", "runs"],
+    "ignored_dirs": [".git", "__pycache__", ".pytest_cache", ".ipynb_checkpoints"]
+  },
+  "platform_objects": [
+    {"module": "demiflow.data", "path": "read_lance"},
+    {"module": "demiflow.data", "path": "Dataset.map"},
+    {"module": "demiflow.data", "path": "Dataset.write_lance"}
+  ],
+  "operator_imports": [
+    "base64",
+    "collections",
+    "datetime",
+    "decimal",
+    "functools",
+    "hashlib",
+    "itertools",
+    "json",
+    "math",
+    "re",
+    "statistics",
+    "string",
+    "typing"
+  ],
+  "limits": {
+    "max_files": 512,
+    "max_file_bytes": 2097152,
+    "max_total_bytes": 16777216,
+    "max_timeout_seconds": 600,
+    "output_tail_bytes": 65536,
+    "output_hard_limit_bytes": 1048576
+  }
+}

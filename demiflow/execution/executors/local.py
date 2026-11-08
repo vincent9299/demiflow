@@ -39,6 +39,7 @@ from ...data.constraints import SourceReadConstraints, analyze_source_constraint
 from ...observability import current_action_observer
 from ...data.stats import ExecutionMetadata, StageStats
 from .base import DatasetExecutor
+from ..run_context import native_rows, native_file_action
 from ...planning import BackendResourceSnapshot, ResourceBundle, plan_action
 from ...planning.traits import terminal_traits
 
@@ -48,6 +49,7 @@ class _LocalMaterializedHandle:
     blocks: tuple[Any, ...]
     row_count: int
     released: bool = False
+    recovery_reference: Any = None
 
     def check_open(self):
         if self.released:
@@ -57,6 +59,7 @@ class _LocalMaterializedHandle:
 @dataclass(frozen=True)
 class _SpilledBlock:
     path: str
+    durable: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,6 +122,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         self._pool: Optional[ThreadPoolExecutor] = None
         self._last_metadata: Optional[ExecutionMetadata] = None
         self._spill_paths: set[str] = set()
+        self._spill_bytes = 0
         self.resource_root = Path(resource_root or '.').resolve()
         self._prompt_coordinators = {}
         self._usage_callback = usage_callback
@@ -522,6 +526,7 @@ class LocalDatasetExecutor(DatasetExecutor):
             if keep:
                 yield row
 
+    @native_rows
     def _apply_plan(self, source: SourcePlan, plan: LogicalPlan, *, action_kind="iter_rows", terminal_category="action", terminal_native_options=None, physical_plan=None, _native=True) -> Iterator[Any]:
         reject_streaming_map_options(plan, 'local')
         if _native:
@@ -543,8 +548,15 @@ class LocalDatasetExecutor(DatasetExecutor):
         rows: Iterable[Any] = self._iter_source(
             source, constraints=analyze_source_constraints(plan),
         )
+        from ..checked import current
+        checked = current()
+        if checked is not None:
+            rows = checked.rows(rows, checked.source_bindings.get(id(source)), 'rows_output')
         stage_stats = []
         for operation_index, operation in enumerate(plan.operations, start=1):
+            key = checked.operation_bindings.get(id(operation)) if checked is not None else None
+            if key is not None:
+                rows = checked.rows(rows, key, 'rows_input')
             width=widths[operation_index]
             started = time.monotonic()
             if isinstance(operation, BoundMapOp):
@@ -589,12 +601,18 @@ class LocalDatasetExecutor(DatasetExecutor):
                             raise TypeError(
                                 "flat_map callable must return an iterable of rows"
                             )
-                        for item in values:
-                            if not isinstance(item, Mapping):
-                                raise TypeError(
-                                    "flat_map output rows must be mappings"
-                                )
-                            yield dict(item)
+                        iterator = iter(values)
+                        try:
+                            for item in iterator:
+                                if not isinstance(item, Mapping):
+                                    raise TypeError(
+                                        "flat_map output rows must be mappings"
+                                    )
+                                yield dict(item)
+                        finally:
+                            close = getattr(iterator, 'close', None)
+                            if close is not None:
+                                close()
                 rows = flatten()
             elif isinstance(operation, MapBatchesOp):
                 rows = self._map_batches_stage(rows, operation, width)
@@ -685,6 +703,8 @@ class LocalDatasetExecutor(DatasetExecutor):
                 self._require_ray_backend(operation)
             else:
                 raise TypeError(f"unknown logical operation: {type(operation).__name__}")
+            if key is not None:
+                rows = checked.rows(rows, key, 'rows_output')
             stage_stats.append(StageStats(type(operation).__name__, elapsed_seconds=time.monotonic() - started))
         # Metadata is completed by actions that consume rows.
         self._last_metadata = ExecutionMetadata(
@@ -693,6 +713,10 @@ class LocalDatasetExecutor(DatasetExecutor):
         yield from rows
 
     def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[dict[str, Any]]:
+        from ..stream_materialize import has_stream
+        if has_stream(plan):
+            from ..stream_delivery import iter_stream_rows
+            return iter_stream_rows(self,source,plan)
         return self._apply_plan(source, plan, action_kind="iter_rows")
 
     def iter_batches(
@@ -700,6 +724,10 @@ class LocalDatasetExecutor(DatasetExecutor):
         batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
     ) -> Iterable[Any]:
         del prefetch_batches
+        from ..stream_materialize import has_stream,bounded_stream_batches
+        if has_stream(plan):
+            return bounded_stream_batches(self,self.iter_rows(source,plan),batch_size=batch_size,
+                batch_format=batch_format,drop_last=drop_last)
         rows = self._apply_plan(source, plan, action_kind="iter_batches")
         if batch_format in {"numpy", "pandas"}:
             batches = self._rows_as_batches(
@@ -712,12 +740,32 @@ class LocalDatasetExecutor(DatasetExecutor):
 
     def _rows_as_batches(
         self, rows, *, batch_size: int | None = 256,
-        batch_format: str | None = "default", drop_last: bool = False, schema=None,
+        batch_format: str | None = "default", drop_last: bool = False, schema=None, byte_limits=None,
     ):
         size = max(1, int(batch_size or self._block_size))
         iterator = iter(rows)
-        while True:
-            rows = list(itertools.islice(iterator, size))
+        def groups():
+            if byte_limits is None:
+                while batch := list(itertools.islice(iterator, size)):
+                    yield batch
+                return
+            from ...data.runtime_contract import check_size
+            from ..payload_limits import batch_target
+            target = batch_target(byte_limits)
+            batch, retained = [], 0
+            for row in iterator:
+                cost = check_size(row, byte_limits['max_row_bytes'])
+                if batch and (len(batch) == size or retained + cost > target):
+                    yield batch
+                    batch, retained = [], 0
+                batch.append(row)
+                retained += cost
+                if len(batch) == size or retained >= target:
+                    yield batch
+                    batch, retained = [], 0
+            if batch:
+                yield batch
+        for rows in groups():
             if not rows or (drop_last and len(rows) < size):
                 return
             if batch_format in ("pyarrow", "default"):
@@ -735,17 +783,64 @@ class LocalDatasetExecutor(DatasetExecutor):
             yield rows
 
     def materialize(self, source: SourcePlan, plan: LogicalPlan) -> _LocalMaterializedHandle:
-        """按同步迭代器执行计划，缓存块和溢写策略与异步入口共用。"""
-        def execute(append):
-            for row in self._apply_plan(source, plan, action_kind="materialize"):
-                append(row)
-        return self._materialize_blocks(source, execute)
+        """Use the existing pull executor and the same durable terminal protocol."""
+        from ..run_context import current_action
+        from ..source_snapshot import capture_source, freeze_source
+        from ..block_sink import BlockSink
+        from ..commit import CommitCoordinator
+        from ..recovery_contract import SourcePosition
+        action = current_action()
+        if action is None:
+            raise RuntimeError("Materialization requires the native action context")
+        self._run_ref = action.context.ref
+        source = freeze_source(action, source)
+        _, snapshot = capture_source(action, lambda: self.iter_rows(source, LogicalPlan()))
+        sink = BlockSink(action)
+        coordinator = CommitCoordinator(action)
+        facts = coordinator.recover({"output": sink})
+        if not facts or facts[-1]["status"] == "pending":
+            data = snapshot["data"]
+            handle = _LocalMaterializedHandle(tuple(_SpilledBlock(
+                str(action.context.directory / b["path"]), durable=True) for b in data["blocks"]),
+                data["rows"], recovery_reference={"source_id": snapshot["source_id"]})
+            held = MaterializedSource(handle, data["rows"])
+            for row in self._apply_plan(held, plan, action_kind="materialize"):
+                sink.append(row)
+            fact = coordinator.commit(1, outputs={"output": (sink, None)},
+                position=SourcePosition(snapshot["source_id"], data["rows"]))
+        else:
+            fact = facts[-1]
+        data = fact["receipts"]["output"]["data"]
+        action.complete(dict(kind="materialized", rows=data["rows"],
+                             inputs=snapshot["data"]["rows"], commits=1))
+        return _LocalMaterializedHandle(tuple(_SpilledBlock(
+            str(action.context.directory / b["path"]), durable=True) for b in data["blocks"]),
+            data["rows"], recovery_reference=dict(run_id=action.context.ref.run_id,
+                action_id=action.action_id, semantic_id=action.semantic_id))
 
-    def materialize_stream(self, dataset) -> _LocalMaterializedHandle:
+    def materialize_stream(self, dataset, *, source=None, plan=None) -> _LocalMaterializedHandle:
         """以既有有界流式执行器驱动异步链，完整排空并关闭 actor 后才发布缓存。"""
-        def execute(append):
-            dataset.map_async(append, concurrency=1, queue_depth=1, label="materialize").run_stream()
-        return self._materialize_blocks(dataset._source, execute)
+        from ..run_context import current_action
+        from ..stream_materialize import StreamMaterialization
+        from ..source_snapshot import freeze_source
+        action = current_action()
+        if action is None:
+            raise RuntimeError("Materialization requires the native action context")
+        from ..run_context import admit_stream
+        admit_stream(dataset._plan if plan is None else plan)
+        selected = freeze_source(action, dataset._source if source is None else source)
+        from ..object_sink import image_object_specs
+        terminal = StreamMaterialization(action, lambda: self.iter_rows(selected, LogicalPlan()),
+            object_specs=image_object_specs(dataset._plan if plan is None else plan))
+        self._run_ref = action.context.ref
+        if not terminal.complete:
+            dataset._run_stream(source=selected, plan=plan, consume=terminal.append,
+                                progress=terminal, source_iter=terminal.source_rows())
+            terminal.finish()
+        return _LocalMaterializedHandle(
+            tuple(_SpilledBlock(path, durable=True) for path in terminal.blocks), terminal.rows,
+            recovery_reference=dict(run_id=action.context.ref.run_id, action_id=action.action_id,
+                                    semantic_id=action.semantic_id))
 
     def _materialize_blocks(self, source, execute) -> _LocalMaterializedHandle:
         """通用块缓存；失败时清理本次溢写，不返回部分结果或删除其他缓存。"""
@@ -764,6 +859,12 @@ class LocalDatasetExecutor(DatasetExecutor):
             if memory_bytes + size <= self._materialize_memory_limit:
                 memory_bytes += size
                 return _EncodedBlock(tuple(rows))
+            from ..checked import current as checked_current
+            checked = checked_current()
+            payload_bytes = sum(len(payload) for payload in rows)
+            if checked is not None and self._spill_bytes + payload_bytes > checked.limits['max_scratch_bytes']:
+                from ...data.runtime_contract import RuntimeContractError
+                raise RuntimeContractError('Materialize spill reservation exceeds scratch budget')
             fd, path = tempfile.mkstemp(prefix="demiflow-block-", suffix=".pkl")
             os.close(fd)
             created_spills.append(path)
@@ -771,10 +872,19 @@ class LocalDatasetExecutor(DatasetExecutor):
                 for payload in rows:
                     fh.write(payload)
             self._spill_paths.add(path)
+            self._spill_bytes += payload_bytes
             return _SpilledBlock(path)
 
         def append(row):
             nonlocal current, current_bytes, rows_count
+            from ..checked import current as checked_current
+            checked = checked_current()
+            if checked is not None:
+                from ...data.runtime_contract import check_size
+                checked.check_stop()
+                check_size(row, checked.limits['max_row_bytes'])
+                if rows_count >= checked.limits['max_output_rows']:
+                    raise ValueError('Materialize row budget exceeded')
             payload = pickle.dumps(row, protocol=pickle.HIGHEST_PROTOCOL)
             size = len(payload) + 64  # bytes object + tuple slot allowance
             if current and current_bytes + size > block_bytes:
@@ -797,6 +907,8 @@ class LocalDatasetExecutor(DatasetExecutor):
         except BaseException:
             for path in created_spills:
                 try:
+                    if path in self._spill_paths:
+                        self._spill_bytes -= os.stat(path).st_size
                     os.unlink(path)
                 except FileNotFoundError:
                     pass
@@ -818,6 +930,10 @@ class LocalDatasetExecutor(DatasetExecutor):
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,
     ) -> list[dict[str, Any]]:
+        from ..stream_materialize import has_stream
+        if has_stream(plan):
+            from ..stream_delivery import iter_stream_rows
+            return list(iter_stream_rows(self,source,plan,limit=limit))
         reject_streaming_map_options(plan, 'local')
         if self._local_kernel is not None:
             plan = plan.append(LimitOp(limit))
@@ -888,6 +1004,11 @@ class LocalDatasetExecutor(DatasetExecutor):
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
         if not fetch_if_missing:
             return None
+        if isinstance(source, LanceSource) and plan.is_empty:
+            from ...lance.model import LanceScanSpec
+            from ...lance.read import lance_scan_schema
+            if isinstance(source.query, LanceScanSpec):
+                return lance_scan_schema(source.query)
         rows = list(itertools.islice(self._apply_plan(source, plan, action_kind="schema"), 1))
         if not rows:
             return None
@@ -927,7 +1048,9 @@ class LocalDatasetExecutor(DatasetExecutor):
         if not isinstance(handle, _LocalMaterializedHandle):
             raise UnsupportedSourceError('materialized source belongs to another backend')
         for block in handle.blocks:
-            if isinstance(block, _SpilledBlock):
+            if isinstance(block, _SpilledBlock) and not block.durable:
+                if block.path in self._spill_paths and Path(block.path).exists():
+                    self._spill_bytes -= Path(block.path).stat().st_size
                 Path(block.path).unlink(missing_ok=True)
                 self._spill_paths.discard(block.path)
         handle.blocks = ()
@@ -939,7 +1062,10 @@ class LocalDatasetExecutor(DatasetExecutor):
         return str(self._last_metadata)
 
     def execution_metadata(self, source: SourcePlan, plan: LogicalPlan) -> ExecutionMetadata | None:
-        return self._last_metadata
+        from dataclasses import replace
+        if self._last_metadata is not None:
+            return replace(self._last_metadata, run_ref=getattr(self, '_run_ref', None))
+        return None
 
     def write_datasink(
         self, source: SourcePlan, plan: LogicalPlan, datasink: Datasink,
@@ -947,34 +1073,81 @@ class LocalDatasetExecutor(DatasetExecutor):
     ) -> WriteResult:
         if native_options is not None:
             raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
-        physical=self.plan(source,plan,"write_datasink",terminal_category="sink")
-        try:
-            datasink.on_write_start(self.schema(source, plan, fetch_if_missing=False))
-            rows=self._apply_plan(source,plan,action_kind="write_datasink",terminal_category="sink",physical_plan=physical)
-            blocks=self._rows_as_batches(rows,batch_format="pyarrow")
-            raw = datasink.write(blocks, WriteContext(task_index=0))
-            if isinstance(raw, WriteResult):
-                result = raw
-            elif isinstance(raw, int):
-                result = WriteResult(written_rows=raw)
-            elif isinstance(raw, Mapping):
-                result = WriteResult(**raw)
+        from ..run_context import current_action
+        from ..commit import CommitCoordinator
+        from ..recovery_contract import SourcePosition
+        action = current_action()
+        if action is None:
+            raise RuntimeError('A durable Datasink requires the execution action context')
+        from ..queue_execution import queue_source, write_queue_datasink
+        if queue_source(source) is not None:
+            return write_queue_datasink(self,source,plan,datasink,action)
+        coordinator = CommitCoordinator(action)
+        sink_id = getattr(datasink, 'sink_id', 'output')
+        from ..stream_materialize import has_stream,prepare_stream_blocks
+        from ..object_sink import image_object_specs,ObjectRowsSink
+        streamed=has_stream(plan)
+        objects=image_object_specs(plan)
+        if streamed:
+            underlying=datasink
+            datasink=ObjectRowsSink(action,object_specs=objects,
+                rows_sink=underlying,input_factory=lambda context:prepare_stream_blocks(self,source,plan,action,context))
+            datasink.sink_id=sink_id
+            action.object_sinks=datasink.object_sinks
+        facts = coordinator.recover({sink_id: datasink})
+        if facts and facts[-1]['status'] == 'acked':
+            fact = facts[-1]
+        else:
+            if streamed:blocks=None
             else:
-                raise TypeError("Datasink.write must return WriteResult, int, or mapping")
-            datasink.on_write_complete(result)
-            return result
-        except Exception as exc:
-            try:
-                datasink.on_write_failed(exc)
-            except Exception:
-                pass
-            raise
+                physical = self.plan(source, plan, 'write_datasink', terminal_category='sink')
+                rows = self._apply_plan(source, plan, action_kind='write_datasink', terminal_category='sink', physical_plan=physical)
+                from ..run_context import current_run
+                blocks = self._rows_as_batches(rows, batch_format='pyarrow', byte_limits=current_run().limits)
+            fact = coordinator.commit(1, outputs={sink_id: (datasink, blocks)},
+                position=SourcePosition(action.semantic_id, 1))
+        result_data=fact['receipts'][sink_id]['data']
+        result = WriteResult(**(result_data['rows'] if streamed else result_data))
+        action.complete(dict(kind='write_datasink', receipt=fact['receipts'][sink_id]))
+        return result
 
     def write_lance(self, source, plan, spec, *, native_options=None):
         if native_options is not None:
             raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
-        physical=self.plan(source,plan,"write_lance",terminal_category="sink",terminal_parallelism_cap=1)
-        from ...lance.write import write_lance
+        from ..stream_materialize import has_stream,prepare_stream_blocks
+        streamed=has_stream(plan)
+        physical=None if streamed else self.plan(source,plan,"write_lance",terminal_category="sink",terminal_parallelism_cap=1)
+        from ..run_context import current_action
+        from ..commit import CommitCoordinator
+        from ..lance_sink import LanceSink
+        from ..recovery_contract import SourcePosition
+        action = current_action()
+        if action is None:
+            raise RuntimeError("A native write requires the execution action context")
+        from ..source_snapshot import freeze_source
+        source = freeze_source(action, source)
+        self._run_ref = action.context.ref
+        native_merge = None
+        def write_lance(spec, batches):
+            sink = LanceSink(action, spec, native_merge=native_merge)
+            if streamed:
+                from ..object_sink import image_object_specs,ObjectRowsSink
+                sink=ObjectRowsSink(action,object_specs=image_object_specs(plan),rows_sink=sink,
+                    input_factory=lambda context:prepare_stream_blocks(self,source,plan,action,context))
+                action.object_sinks=sink.object_sinks
+            coordinator = CommitCoordinator(action)
+            facts = coordinator.recover({"lance": sink})
+            if facts and facts[-1]["status"] == "acked":
+                fact = facts[-1]
+            else:
+                fact = coordinator.commit(1, outputs={"lance": (sink, batches)},
+                    position=SourcePosition(action.semantic_id, 1))
+            data=fact['receipts']['lance']['data']
+            if streamed:data=data['rows']
+            action.complete(dict(kind="write_lance", receipt=data))
+            from ...lance.model import LanceWriteReceipt
+            return LanceWriteReceipt.from_dict(data)
+        if streamed:return write_lance(spec,None)
         if isinstance(source, LanceSource) and not plan.operations and source.native_options is None:
             # A pure Lance copy already has typed Arrow batches. Preserve the
             # pinned query and avoid nested rows -> Python -> Arrow round trips.
@@ -982,18 +1155,13 @@ class LocalDatasetExecutor(DatasetExecutor):
             from ...lance.model import LanceScanSpec
             from ...lance.storage import open_lance_dataset
             query = source.query
-            source_rows = None
             if (spec.mode == 'merge' and isinstance(query, LanceScanSpec)
                     and query.version is not None and query.filter is None and not query.projection):
-                # Metadata-only cardinality of this exact scan. Do not consume
-                # callbacks or issue an extra filtered scan to guess density.
                 source_rows = open_lance_dataset(query.uri, query.version, query.storage_options).count_rows()
                 if query.limit is not None:
                     source_rows = min(source_rows, query.limit)
                 from ..lance_merge import try_column_merge
-                receipt = try_column_merge(self, spec, query, source_rows)
-                if receipt is not None:
-                    return receipt
+                native_merge = lambda effective: try_column_merge(self, effective, query, source_rows)
             return write_lance(spec, iter_lance_batches(query, batch_size=self._block_size))
         from ..arrow_batch_sink import eligible, execute as arrow_batch_sink
         if eligible(self, source, plan, spec):
@@ -1006,9 +1174,12 @@ class LocalDatasetExecutor(DatasetExecutor):
             with closing(execute(self, source, plan, arrow=True, sink_schema=spec.schema)) as batches:
                 return write_lance(spec, batches)
         rows=self._apply_plan(source,plan,action_kind="write_lance",terminal_category="sink",physical_plan=physical)
-        batches=self._rows_as_batches(rows,batch_size=self._block_size,batch_format="pyarrow",schema=spec.schema)
+        from ..run_context import current_run
+        batches=self._rows_as_batches(rows,batch_size=self._block_size,batch_format="pyarrow",schema=spec.schema,
+                                     byte_limits=current_run().limits)
         return write_lance(spec,batches)
 
+    @native_file_action
     def write_file(
         self, source: SourcePlan, plan: LogicalPlan, format_name: str,
         path: str, options: dict[str, Any],
@@ -1091,6 +1262,7 @@ class LocalDatasetExecutor(DatasetExecutor):
             except OSError:
                 pass
             self._spill_paths.discard(path)
+        self._spill_bytes = 0
 
 def _host_memory_bytes():
     try:

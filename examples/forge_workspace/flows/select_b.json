@@ -1,0 +1,19 @@
+{
+  "format": "demiflow_forge_flow_parameters_v1",
+  "arguments": {
+    "candidates": {
+      "kind": "table",
+      "alias": "candidates"
+    },
+    "scores": {
+      "kind": "table",
+      "alias": "scores"
+    },
+    "target": {
+      "kind": "output",
+      "location_id": "local",
+      "relative_uri": "selected_b.lance"
+    },
+    "minimum": 0.9
+  }
+}

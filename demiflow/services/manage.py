@@ -20,7 +20,7 @@ import uuid
 from .http import ManagedHTTPService
 from ..execution.artifacts import read, run_lock
 from contextlib import suppress
-from ..collect.sqlite_queue import process_identity
+from ..execution.local_storage import process_identity
 
 
 def _directory(root, name):

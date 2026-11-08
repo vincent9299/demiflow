@@ -1,5 +1,26 @@
 # demiflow 开发约束
 
+## Forge / 工作台的工作位置与修改范围
+
+2026-11-08 真人明确：后续 Forge / 工作台任务直接在本主仓 checkout 修改，不使用 worktree；可以按需新建 Git 分支。当前基线已新增 `demiflow/workbench/`，并完整替换 `demiflow/forge/`。
+
+- 产品代码范围为 `demiflow/workbench/`、`demiflow/forge/`。工作台公共进程支持在 `workbench/process.py`，Pipeline 运行管理在 `workbench/runs/`；Notebook、数据读取和开发对话不依赖 Pipeline 运行管理。
+- 必要配套范围包括 `demiflow/cli.py` 的入口装配、`pyproject.toml`/`MANIFEST.in` 的对应打包配置、相关测试、工作台/Forge 文档与 README、相关示例、`tools/forge_analysis/` 和 `integrations/coding-agent/demiflow-workspace/`。只改与当前交付直接相关的部分。
+- 本类任务不得修改计算底座、算子、SDK 或 `demiflow/execution/` 引擎实现，也不覆盖其他任务的修改及 Git 暂存区。原项目 `.forge` 数据、Notebook 输出与开发历史保持。其他独立且明确授权的引擎任务按其自身范围执行。
+- 核心是满足用户原始意图；无关完善和重复检查不作为交付前置。自动唤起已由用户关闭，不自行恢复。
+
+## 架构意图基线
+
+平台架构、Forge边界和实现Review以[架构总意图v1](docs/architecture-master-intent-v1.md)为当前已定版基线，原产品root意图保持。Forge负责context/tools与开发、运维工作流；Pipeline运行管理及交互应用保留各自状态。现有包名/命令兼容路径不等于领域归属。SQL当前可随Notebook，当前版交付不等待新引擎；后续适配遵守双方C1–C6/R1–R4约定。定版不表示已重构，历史准入、权限与数据保护继续有效。
+
+## Forge 契约开发边界
+
+`demiflow.forge` 是独立的契约开发与生命周期层，不读取或依赖 DemiForge、Demiurge 或业务仓配置。内置契约、当前平台上下文、静态检查、行为测试、Review 和 Freeze 必须绑定同一实现 revision；不得为了通过任务放宽契约或复用陈旧证据。真实 Forge 运行只复用现有 Dataset 执行，不新增第二套调度或执行引擎。可执行范围由当前原生能力、入口检查和同 revision 的验收证据共同限定；早期“仅项目内固定 Lance”描述属于历史阶段，不能代替当前能力表，也不能据此放开未验收的外部写入。统一运行基础的阶段范围见 [P0–P2 契约](docs/execution-foundation-contract.json)，其中 P3–P6 适配和切换项不得标为已完成。详见 [Forge 契约](docs/forge-contract.md) 与 [生命周期](docs/forge-lifecycle.md)。
+
+2026-11-04 用户补充原项目识别闭环：登记后可只读解析已支持、版本化的公开项目声明及其明确引用，展示原入口、配置、算子、数据与运行信息和缺口。此项覆盖上段“不读取业务配置”的旧限制；不导入或调用 Demiurge 实现、不执行声明中的命令、不导入业务代码，不从识别结果授予检查通过或执行权限。检查继续复用平台现有统一检查器，原项目只报告问题，修正需用户确认。支持格式、读取预算与权限边界见 [原项目识别](docs/forge-project-discovery.md)。
+
+同日用户授权将原 DemiForge 开发工具、版本化标准和 Skill 合入本仓的 `demiflow.forge.development`，统一在 demiflow 演进；公开入口为 `demiflow forge dev`，业务项目保留 `.demiforge/forge` 薄入口及原任务记录。上文独立层边界适用于原生 Forge 契约、工作区和执行链；开发工具按项目声明与 Skill 管理授权开发和验证。Web/原项目识别只解析支持的公开声明，受管执行继续复用原生 Dataset，两者均不导入开发工具去执行声明命令。历史规则内容、任务基线和收据保留原值；历史结果按原始快照读取，当前绑定与证据有效性独立校验。整合范围和验证见 [迁移方案](docs/demiforge-consolidation-plan-20261104.md)。
+
 ## 模型与环境的交互仍然算子化
 
 用户于 2026-10-03 明确：Dataset／流及其上的算子是统一抽象，算子同时是模型的工具与环境接口。单行内多轮交互使用 `agentmap_async`；模型输出与公开算子契约对齐的结构化方法和参数，由平台校验并执行同一算子实现。不得为每次工具请求创建子 Dataset／流，也不得在业务行函数另写工具循环。`map_prompt_async` 保留单次完成语义。实现范围、预算与限制见 [算子环境](docs/operator_environment.md)。

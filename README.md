@@ -14,6 +14,14 @@
 图片/文本向量使用原生 [`Dataset.map_embeddings`](docs/embeddings.md)，复用流式批处理、请求准入、服务生命周期和 SQLite HTTP 日志。
 逐行向量检索使用 [`Dataset.search_vectors`](docs/vector_search.md)：每行输入一个查询向量，Lance 原生检索后将候选列表写回该行，可直接连接编码与下游任务节点。
 
+`demiflow workbench console` 提供新建项目、原地注册与移除登记；原 pipeline 目录就是项目。平台按实际入口、配置和调用关系检查代码，目录名称不决定职责。注册后可只读识别受支持的公开项目声明，查看原入口、配置、数据引用及覆盖缺口；登记、识别和静态检查各自报告结果。详见 [工作区指南](docs/forge-workspace.md)、[原项目识别](docs/forge-project-discovery.md) 和 [当前推进记录](docs/forge-roadmap-20261101.md)。
+
+`demiflow forge platform` 提供独立的动态接口目录、平台快照与差异检查。接口来自当前公开代码，工程标准不规定业务节点数量或拓扑。用 `platform list` 查询、`platform show ID` 查看原始签名和文档、`platform snapshot --out FILE` 保存身份、`platform check FILE` 检查变化。详见 [平台发现与快照](docs/forge-platform.md)。
+
+`demiflow workbench` 组织项目的入口、配置、固定版本数据与运行记录。通过 `workspace check` 查看项目检查覆盖，通过 `flow inspect` 检查已明确绑定的原生接线；受管运行复用现有 Dataset 执行及 prepare/start/resume 准入，Web、HTTP 和 CLI 读取同一项目事实。识别旧入口不自动获得执行能力；静态检查通过也不等于整体认证或生产放行。使用方式与边界见 [工作区指南](docs/forge-workspace.md) 和 [HTTP 契约](docs/forge-http-api.md)。
+
+旧 `demiflow forge new/check/verify/review/freeze/run` 保留 v1 的 `read_lance → map → write_lance` 契约和历史证据，与当前项目管理入口分别使用。详见 [v1 契约](docs/forge-contract.md)、[开发接口](docs/forge-authoring.md) 和 [v1 生命周期与 CLI](docs/forge-lifecycle.md)；参考项目位于 `examples/forge_text_map/`。
+
 ## 定位
 
 - **采集底座**（`demiflow.collect`，2026-09-04 起，机制归引擎、策略归消费方）：
@@ -35,13 +43,10 @@
     出口唯一身份（VM 长跑场景 asyncio 静默断连的解）；
   - `fleet`（2026-09-18）：worker_plan 分配 + systemd-run 托管发射 +
     幂等守卫 + 巡检（ssh argv 直传，无引号地狱）；
-  - `cosio` / `cosqueue` / `queue_runner`（2026-09-20，第三代队列沉淀）：
-    COS 签名对象存取（瞬态 403/429 退避重试）→ COS 任务队列（分批生产/
-    认领校验/**成功才 complete**/超龄认领回收）→ 认领-算子-完成常驻循环
-    （身份 KEY=VALUE env 注入，值可含括号；消费方只写批算子）；
-  - [Dataset SQLiteQueue](docs/sqlite-dataset-queue.md)：`enqueue/read_queue/ack_queue`
-    提供本机持久交接，`read_queue_records` 按固定序号独立归档到 Lance；
-    `demiflow.queue` 管理有界通道、预算和只读进度，不需要独立队列服务进程；
+  - `cosio`：独立 COS 签名对象存取；原 COSQueue/queue_runner 已退役；
+  - [原始对象获取与原生队列](docs/dataset-fetch.md)：统一 `Dataset.fetch`，
+    `enqueue/read_queue/QueueResultSink/ack_queue` 复用原生提交与恢复；
+    SQLite 供本机盘，PostgreSQL 提供多 worker fencing，固定 Snapshot 独立读历史；
   - 调度：`data.plan.StreamStage` 规范算子（策略字段随算子声明）+
     `Dataset.map_async` + `Dataset.run_stream`（流式 stage 执行 +
     退出期平台资源统一收尾）；
@@ -62,7 +67,7 @@ pip install -e .[collect]     # + 采集栈：crawl4ai（crawl）+ pillow（imag
 ```
 
 依赖口径：crawl4ai 等重依赖全部 extras 化、机制内惰性 import——核心安装零重物。
-网页搜索、文档获取与阅读使用原生 `Dataset.search_web/fetch_documents/read_documents`；图片原始字节获取与共享 CAS 复用使用 [`Dataset.fetch_images`](docs/image-acquisition.md)；
+网页搜索使用 `Dataset.search_web`，原始字节统一用 [`Dataset.fetch`](docs/dataset-fetch.md)；文档解析、图片解码和 `read_documents` 分别执行，已有对象库及历史读取保留。
 `save_lance` 在流中小批提交，`run_stream` 负责资源生命周期及技术观测。
 `admit_rows` 在同一流中逐行执行持久去重及多个按键配额，返回准入回执；
 它不攒齐分组、不排序行、不识别业务含义，详见 [在线准入](docs/web_evidence.md#在线准入与持久配额)。

@@ -1,0 +1,33 @@
+{
+  "name": "markdown-it",
+  "version": "14.1.0",
+  "source": "https://registry.npmjs.org/markdown-it/-/markdown-it-14.1.0.tgz",
+  "source_repository": "https://github.com/markdown-it/markdown-it/tree/14.1.0",
+  "license": "MIT",
+  "tarball_sha256": "7c4fab4d4d39fe98206a7fbbed4b1e3578f2b70b6b69d309413e33eec140e19f",
+  "file_sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68",
+  "runtime_dependencies": {
+    "argparse": "^2.0.1",
+    "entities": "^4.4.0",
+    "linkify-it": "^5.0.0",
+    "mdurl": "^2.0.0",
+    "punycode.js": "^2.3.1",
+    "uc.micro": "^2.1.0"
+  },
+  "provenance_scope": "Unmodified official 14.1.0 browser distribution copied from the reviewed design baseline. Dependency notice source versions match manifest ranges; the upstream tarball has no build lockfile. This record is not a verified complete binary SBOM or a reproducible-build assertion.",
+  "baseline": "docs/assets/forge-web-redesign-20261104/vendor/",
+  "files": {
+    "markdown-it.min.js": {
+      "bytes": 123618,
+      "sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68"
+    },
+    "markdown-it.LICENSE.txt": {
+      "bytes": 1073,
+      "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+    },
+    "markdown-it.NOTICES.txt": {
+      "bytes": 8182,
+      "sha256": "822151a3210d4accfb3bc9653275aa399e33ff7d8582cdaeecbbd9c231c626a2"
+    }
+  }
+}

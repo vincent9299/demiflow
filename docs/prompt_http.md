@@ -1,5 +1,42 @@
 # Prompt Dataset operators: HTTP streaming and connection lifecycle
 
+## Async execution and recovery (2026-11-04)
+
+`map_prompt_async` no longer accepts `sqlite_journal` or `journal_dir`. Remove
+these options when migrating a caller. The actor performs inference and forwards
+results through bounded in-memory queues; it does not persist requests, replies,
+reservations or lease files. Legacy journals remain readable through the separate
+journal inspection API. The synchronous prompt API is outside this change.
+
+For a managed row-local stream ending at the existing `materialize()` boundary,
+the execution layer commits downstream output blocks and then confirms progress,
+automatically. There is no business checkpoint argument or model-owned result
+cache. Every 512 source rows forms a commit epoch; buffers flush at 4 MiB. Progress
+stores input fingerprints with duplicate multiplicity because native joins are
+unordered. Resume skips confirmed inputs and returns committed downstream rows;
+unconfirmed work may run again. Fixed graph/config/operator/source identity binds
+recovery. Complete materialization can be reused without model calls.
+
+The recovery index reserves at most min(512 MiB, memory budget / 8); blocks,
+queues, encoding copies, input/output rows and scratch have separate admission.
+The index rejects overflow. There are at most 16,384 batches and 1,024 output
+blocks per batch. Each commit publishes blocks, a batch receipt, then progress
+with atomic replacement and fsync. Failed publication never confirms the batch.
+Model concurrency is preserved within each epoch; downstream backpressure and
+commit drain may briefly pause admission between epochs.
+
+Automatic recovery currently requires a managed execution context and a row-local
+stream terminal. Stateful/grouped/batch stages are rejected before model work;
+unmanaged `run_stream()` has no implicit durable sink. These are implementation
+limits, not guarantees of recovery for arbitrary Dataset graphs. Final Lance
+publication remains the ordinary downstream business action. Existing sections
+about per-request journals describe the synchronous/direct-client legacy APIs,
+not the async Dataset operator.
+
+Validation: `test_prompt_stream_recovery.py` covers process loss before/after
+progress publication and during inference, duplicate rows and downstream failure;
+`test_prompt_without_journal.py` covers image output without request artifacts.
+
 ## Caller-owned messages (single completion)
 
 A prompt definition can explicitly select `input_mode: messages` instead of a
@@ -38,7 +75,7 @@ The public entry is the existing `Dataset.map_prompt_async` API. It does not add
 
 ## SystemOne noul decisions
 
-`map_prompt_async` also accepts `model.transport=systemone` for text-only `noul` decisions. This is the same prompt-pack and Dataset contract, not another configuration family or Dataset API. The existing `template` renders the single text `state`; `systemone` declares only `type: noul` and a nonempty `instructions` string. The prompt name is the question key. `api_key_env` is optional for unauthenticated local endpoints; `base_url` or `base_url_env` remains required.
+`map_prompt_async` also accepts `model.transport=systemone` for text and image `noul` decisions. This is the same prompt-pack and Dataset contract, not another configuration family or Dataset API. The existing `template` renders the single text `state` and optional image placeholders; `systemone` declares only `type: noul` and a nonempty `instructions` string. The prompt name is the question key. `api_key_env` is optional for unauthenticated local endpoints; `base_url` or `base_url_env` remains required.
 
 ```yaml
 model: {name: AutoTrust-JEV-27B-v1.1, transport: systemone, base_url: http://127.0.0.1:8104/v1}
@@ -58,9 +95,70 @@ template: |
   {{ payload | json }}
 ```
 
-The HTTP request is `POST {base_url}/systemone` with `model`, `state` and `questions`; no chat messages or generation parameters are added. The response must contain `answers.<prompt-name>` with `type=noul` and a finite probability in `[0,1]`, returned as the ordinary `result` object and checked by the same response schema. This is decision-head output, not a model-written confidence value. SystemOne currently supports template mode, one text part, JSON output, zero schema retries and `stream=False`; images, `choice`, `score` and `input_mode=messages` are not implicitly enabled.
+The HTTP request is `POST {base_url}/systemone` with `model`, `state`, `questions` and optional `images` data URLs; no chat messages or generation parameters are added. The response must contain `answers.<prompt-name>` with `type=noul` and a finite probability in `[0,1]`, returned as the ordinary `result` object and checked by the same response schema. This is decision-head output, not a model-written confidence value. SystemOne supports template mode, one text state, optional images, JSON output, zero schema retries and `stream=False`. An explicit `type: choice` with 1..255 named `criteria` also validates the returned choice and probability distribution. Non-data image URIs, `score` and `input_mode=messages` are not enabled.
 
 Request journals store the actual SystemOne payload and reuse complete responses under the existing request-identity, quota, timeout and cancellation rules. Offline request materialization uses the same SystemOne body. Regression coverage: `tests/test_prompt_systemone.py` plus the existing prompt/offline suites.
+
+### Several questions about the same state and images
+
+The existing `systemone` definition can repeat its versioned question over a
+bounded row binding. This uses one native `/systemone` request with one state,
+one images array, and ordered question IDs. It is independent of cross-request
+`systemone_batch`, and does not change service scheduling or model math.
+
+```yaml
+systemone:
+  type: noul
+  instructions: 'Does the image depict {{ concept }}?'
+  for_each:
+    input: candidates
+    key: concept_id
+    max_questions: 50
+    max_bytes: 131072
+schema_retries: 0
+response_schema:
+  type: object
+  required: [result]
+  properties:
+    result:
+      type: object
+      required: [answers, errors]
+      properties:
+        answers: {type: object, additionalProperties: true}
+        errors: {type: object, additionalProperties: true}
+template: |
+  Evaluate each concept independently from the visible image.
+  {{ image | image }}
+```
+
+Bind `inputs={'image': 'image', 'candidates': 'candidates'}` on the same prompt
+node. A candidate is, for example, `{'concept_id': 'C1', 'concept': 'scissors'}`.
+Instruction placeholders accept text/JSON fields from each item; they are not
+recursively evaluated. The question type and optional `choice` criteria remain
+owned by the YAML. Single-question definitions keep their existing behavior and
+journal identities. Repeated definitions, including a one-item chunk, return
+`result={'answers': {id: native_answer}, 'errors': {id: error_code}}`.
+
+Missing or invalid individual answers are absent from `answers` and explicitly
+marked `missing_answer` or `invalid_answer`. Valid answers from the same response
+are retained. An invalid envelope or unknown answer ID fails the call. Raw HTTP
+responses remain in the native journal. Business policy must handle these errors;
+the platform never supplies a zero score or invents a negative decision.
+
+Limits are required: 1..128 questions and 1..1 MiB of question data/rendered JSON,
+with depth/node limits before serialization and a reservation before repeated
+template expansion. Empty inputs must be skipped by the caller, and duplicate
+IDs are rejected before HTTP. State/image bytes, decoded pixels, model encoding
+capacity, concurrency, queues, timeouts and storage retain separate budgets.
+Character counting includes rendered questions but excludes image tokens; it is
+not a claim about a native model's total token consumption. The service's native
+encoding admission still applies. Native multi-question behavior and performance
+require a real-model pilot; mock tests cannot establish equivalence or throughput.
+
+The request identity includes ordered question IDs and criterion order as well
+as the actual state, image, rendered question text, prompt and model revision.
+`max_requests` counts HTTP calls, not questions. Separate models require separate
+prompt nodes/journals. Regression: `tests/test_prompt_systemone_questions.py`.
 
 `Dataset.agentmap_async` with `runtime: demiflow` uses this same transport for every model turn. Put these execution options in the agent YAML's `options` mapping; node options only supply storage/replay. See [agent HTTP streaming configuration](operator_environment.md#http-流式配置). An async Dataset operator does not implicitly enable HTTP SSE.
 
@@ -207,7 +305,6 @@ low-latency filesystem. Multi-shard offline materialization remains unsupported
 because it uses the direct single-shard connection; this is rejected rather than
 silently routed to shard 0. Measured storage A/B and the real-provider canary
 are recorded in [JOURNAL_THROUGHPUT.md](../benchmarks/JOURNAL_THROUGHPUT.md).
-
 
 
 ## Configuration and ownership

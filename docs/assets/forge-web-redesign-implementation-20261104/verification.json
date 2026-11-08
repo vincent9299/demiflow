@@ -1,0 +1,383 @@
+{
+  "vendor_audit": {
+    "checked_at": "2026-11-04T11:17:37.992177+00:00",
+    "scope": "official pinned distribution and complete included notice-source license texts; no binary dependency-lock/SBOM or reproducible-build assertion",
+    "sources": {
+      "markdown-it": {
+        "version": "14.1.0",
+        "url": "https://registry.npmjs.org/markdown-it/-/markdown-it-14.1.0.tgz",
+        "tarball_bytes": 218468,
+        "tarball_sha256": "7c4fab4d4d39fe98206a7fbbed4b1e3578f2b70b6b69d309413e33eec140e19f",
+        "declared_license": "MIT",
+        "license_file_sha256": {
+          "package/LICENSE": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+        }
+      },
+      "entities": {
+        "version": "4.4.0",
+        "url": "https://registry.npmjs.org/entities/-/entities-4.4.0.tgz",
+        "tarball_bytes": 69861,
+        "tarball_sha256": "259d977a75c6af00edcc2f69fd4a180d14e0cc6186c0817bce027c92b6995ba4",
+        "declared_license": "BSD-2-Clause",
+        "license_file_sha256": {
+          "package/LICENSE": "cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164"
+        }
+      },
+      "linkify-it": {
+        "version": "5.0.0",
+        "url": "https://registry.npmjs.org/linkify-it/-/linkify-it-5.0.0.tgz",
+        "tarball_bytes": 12745,
+        "tarball_sha256": "6144c5a52d26c2bb917bc320d707cf4a41c94514ce856b8b1baf934d3fb27aa9",
+        "declared_license": "MIT",
+        "license_file_sha256": {
+          "package/LICENSE": "95e3f7f0e81e9b4940cdfaa1956aaff5e4dfd2fb1565041e7c78eb9a606f23e3"
+        }
+      },
+      "mdurl": {
+        "version": "2.0.0",
+        "url": "https://registry.npmjs.org/mdurl/-/mdurl-2.0.0.tgz",
+        "tarball_bytes": 7998,
+        "tarball_sha256": "8e0ccb320730dad17981e2a4cc97f34f072366442d000de97070fd1ea21321b5",
+        "declared_license": "MIT",
+        "license_file_sha256": {
+          "package/LICENSE": "6b6a356c4337e2446841f30f3cdf7e7023af8c5260b5e347c0f987b9f6aa2644"
+        }
+      },
+      "punycode.js": {
+        "version": "2.3.1",
+        "url": "https://registry.npmjs.org/punycode.js/-/punycode.js-2.3.1.tgz",
+        "tarball_bytes": 7601,
+        "tarball_sha256": "8768d89aa6359164220014ba575e1464e3ddff11bedff1cc268e39a21f7324a8",
+        "declared_license": "MIT",
+        "license_file_sha256": {
+          "package/LICENSE-MIT.txt": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a"
+        }
+      },
+      "uc.micro": {
+        "version": "2.1.0",
+        "url": "https://registry.npmjs.org/uc.micro/-/uc.micro-2.1.0.tgz",
+        "tarball_bytes": 4180,
+        "tarball_sha256": "a31660c690ddac370fe4b17fe6a3a73b8df094f99194ac90d0668d797dabf69b",
+        "declared_license": "MIT",
+        "license_file_sha256": {
+          "package/LICENSE.txt": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a"
+        }
+      }
+    },
+    "browser_distribution_exact": true,
+    "runtime_license_and_all_notice_source_texts_retained": true
+  },
+  "formal_code_match": {
+    "formal_nonweb_reimported": true,
+    "tested_code_files": 1001,
+    "exact_same_code_as_67_passed_tests": true,
+    "cold_fix_files": {
+      "demiflow/__init__.py": "496d2cf0828fe2b73b2c5f738270e4827e04e155695ffa4c2dd239b1ed647e92",
+      "demiflow/data/__init__.py": "77b83b05d32ab25e422bd04132ecc1b83ee9b2d55f59792cefc864d2b9013ac0",
+      "demiflow/forge/development/resources.py": "8ad3445e049eb40ceb2e44970d0eb664eac62e3bbed510e2ac01711a7cb8a4dc",
+      "demiflow/forge/platform.py": "ba10787e8edc346ea6a04799eaf28a69298ad8b6660b5608d7cb54b92ed8197c",
+      "tests/test_forge_platform_discovery.py": "3c82617a5b764a503637b4aa95d0475f9362636aeca0e4a763da67c09025eb89",
+      "tests/test_package_cold_imports.py": "9b23fd21f4f19c84bd36d21fc130735aa74f85609c242f7bcbd3730c8e1d4b1b",
+      "tests/fixtures/data-public-exports.json": "f0fcd9f12d23bdd87e569cca622f3debbf84f2aba6da2124f24b4bca8eec3cdc"
+    }
+  },
+  "cold_fix_handoff": {
+    "demiflow/forge/platform.py": {
+      "sha256": "ba10787e8edc346ea6a04799eaf28a69298ad8b6660b5608d7cb54b92ed8197c",
+      "bytes": 17496
+    },
+    "demiflow/data/__init__.py": {
+      "sha256": "77b83b05d32ab25e422bd04132ecc1b83ee9b2d55f59792cefc864d2b9013ac0",
+      "bytes": 2456
+    },
+    "demiflow/__init__.py": {
+      "sha256": "496d2cf0828fe2b73b2c5f738270e4827e04e155695ffa4c2dd239b1ed647e92",
+      "bytes": 2186
+    },
+    "demiflow/forge/development/resources.py": {
+      "sha256": "8ad3445e049eb40ceb2e44970d0eb664eac62e3bbed510e2ac01711a7cb8a4dc",
+      "bytes": 1965
+    },
+    "tests/test_forge_platform_discovery.py": {
+      "sha256": "3c82617a5b764a503637b4aa95d0475f9362636aeca0e4a763da67c09025eb89",
+      "bytes": 13850
+    },
+    "tests/test_package_cold_imports.py": {
+      "sha256": "9b23fd21f4f19c84bd36d21fc130735aa74f85609c242f7bcbd3730c8e1d4b1b",
+      "bytes": 5698
+    },
+    "tests/fixtures/data-public-exports.json": {
+      "sha256": "f0fcd9f12d23bdd87e569cca622f3debbf84f2aba6da2124f24b4bca8eec3cdc",
+      "bytes": 4192
+    }
+  },
+  "tests": {
+    "tests": "67",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "1177.306"
+  },
+  "release": {
+    "status": "published",
+    "old_pid": 64057,
+    "new_pid": 48042,
+    "port": 59865,
+    "forwarded_port": 55971,
+    "files": 25,
+    "registry_token_and_bound_snapshots_unchanged": true,
+    "rollback": "/tmp/forge-web-implementation-20261104-7_yvkx32/evidence/rollback"
+  },
+  "live": {
+    "status": "read_only_verified",
+    "widths": [
+      1440,
+      390,
+      320
+    ],
+    "requests": 21,
+    "writes": 0,
+    "browser_errors": [],
+    "http_errors": [],
+    "visited": [
+      "overview",
+      "flows",
+      "checks",
+      "runs",
+      "tables"
+    ],
+    "registry_and_token_not_changed": true
+  },
+  "package": {
+    "module": "/tmp/forge-web-implementation-20261104-7_yvkx32/evidence/package/wheel-extracted/demiflow/__init__.py",
+    "assets": {
+      "index.html": {
+        "bytes": 467,
+        "sha256": "a5528002786b5b604b19c6013756919206d5d4582cb757edccf8f44e21a48b04"
+      },
+      "app.js": {
+        "bytes": 104333,
+        "sha256": "187bc8c0c58704030b67f50c29054e313327cc118664c781ed27e0eec1172276"
+      },
+      "style.css": {
+        "bytes": 11543,
+        "sha256": "d71c7e780efe154732402779675a3d016cb35b3c12566883024851f54e8de5fb"
+      },
+      "view.js": {
+        "bytes": 5528,
+        "sha256": "49dcab272f2c9033931f88c6261cb27a867b6044f99192eab25471d90a8c2a3e"
+      },
+      "reading.js": {
+        "bytes": 25443,
+        "sha256": "aa081d828bdc29682875026c520d0551cb186974e473390ce9af76d38b2de70e"
+      },
+      "reading.css": {
+        "bytes": 3001,
+        "sha256": "90a269c46458967c7d16e2e22b03f1a966ce9cb911880ab5ef3a6e55aa9eb786"
+      },
+      "markdown-worker.js": {
+        "bytes": 228,
+        "sha256": "5502dd763def7b7fbd680537e258c40a3454a4b579a633de8fe2952ca5362ac0"
+      },
+      "markdown-it.min.js": {
+        "bytes": 123618,
+        "sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68"
+      },
+      "markdown-it.LICENSE.txt": {
+        "bytes": 1073,
+        "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+      },
+      "markdown-it.NOTICES.txt": {
+        "bytes": 8182,
+        "sha256": "822151a3210d4accfb3bc9653275aa399e33ff7d8582cdaeecbbd9c231c626a2"
+      },
+      "markdown-it.provenance.json": {
+        "bytes": 1407,
+        "sha256": "142e9baf5f5ad664aa8bf5a482a1f615f1c0ee93b30b43a20aeb1ccbebf8aea5"
+      }
+    },
+    "development_standards": 9,
+    "owned_run": {
+      "run_id": "rb53f5731cf804ca6891bfd9a",
+      "status": "succeeded",
+      "output_rows": 2
+    },
+    "offline": {
+      "status": "exported",
+      "path": "/tmp/forge-web-implementation-20261104-7_yvkx32/evidence/package/final-offline.html",
+      "digest": "52396692197d22a3ba6b193d932fada5e1513c9da71246443bee2361d52ddba8",
+      "samples_included": false,
+      "current_binding": "not_live"
+    },
+    "browser_errors": [],
+    "offline_requests": [],
+    "online_worker": true,
+    "exports_have_no_samples": true
+  },
+  "archives": {
+    "wheel": {
+      "path": "/tmp/forge-web-implementation-20261104-7_yvkx32/evidence/package/demiflow-0.3.0-py3-none-any.whl",
+      "bytes": 13497661,
+      "sha256": "91ff81e79407d96acc15586cb6e94a9498fd584571589a9fe4edf8e687b24b79"
+    },
+    "sdist": {
+      "path": "/tmp/forge-web-implementation-20261104-7_yvkx32/evidence/package/demiflow-0.3.0.tar.gz",
+      "web_assets_match": true,
+      "final_hash_evidence": "/tmp/forge-web-implementation-20261104-7_yvkx32/evidence/package/archive-verification.json"
+    },
+    "web_assets": {
+      "demiflow/forge/web/app.js": "187bc8c0c58704030b67f50c29054e313327cc118664c781ed27e0eec1172276",
+      "demiflow/forge/web/index.html": "a5528002786b5b604b19c6013756919206d5d4582cb757edccf8f44e21a48b04",
+      "demiflow/forge/web/markdown-it.LICENSE.txt": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473",
+      "demiflow/forge/web/markdown-it.NOTICES.txt": "822151a3210d4accfb3bc9653275aa399e33ff7d8582cdaeecbbd9c231c626a2",
+      "demiflow/forge/web/markdown-it.min.js": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68",
+      "demiflow/forge/web/markdown-it.provenance.json": "142e9baf5f5ad664aa8bf5a482a1f615f1c0ee93b30b43a20aeb1ccbebf8aea5",
+      "demiflow/forge/web/markdown-worker.js": "5502dd763def7b7fbd680537e258c40a3454a4b579a633de8fe2952ca5362ac0",
+      "demiflow/forge/web/reading.css": "90a269c46458967c7d16e2e22b03f1a966ce9cb911880ab5ef3a6e55aa9eb786",
+      "demiflow/forge/web/reading.js": "aa081d828bdc29682875026c520d0551cb186974e473390ce9af76d38b2de70e",
+      "demiflow/forge/web/style.css": "d71c7e780efe154732402779675a3d016cb35b3c12566883024851f54e8de5fb",
+      "demiflow/forge/web/view.js": "49dcab272f2c9033931f88c6261cb27a867b6044f99192eab25471d90a8c2a3e"
+    },
+    "development_resources": {
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.7.md": "400cb43cf220816401e2f1ba72e68f7b03405e7592deac8164bcdc1517a8ea4c",
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.5.md": "396c9fb4db0bb61387ff77feb26cfb20b4f4a76d681398f18cfdc84064636f0e",
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.9.md": "dd8e310063075fb44a9f7dcc7f7c3182e99a5d041ed687ccfb8940e40132bb88",
+      "demiflow/forge/development/standards/pipeline-v1.md": "d557524065ed0d7ff7ebb803c4237f013fedb2d69e6e9b546b9a6d338690682f",
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.2.md": "1b166b4b4289be809f685d9bcb5e8cb451917918761aaa7479f616b51490b4bb",
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.6.md": "2abd2945f79084ad0806e89fa770f20d668eb180868aa18b19b520f423fa7fd5",
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.3.md": "d072039aa106d052f680f57c181cd0a99ed0573d27128e8061d84dcfdc75f335",
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.4.md": "539f9a05618e3b4f6a71428a23864003a0327eba639c93c885360e85f3f74ad4",
+      "demiflow/forge/development/standards/pipeline-v1.0.0-candidate.8.md": "f832af006509fec2f911f9e05975e7ffb26e8944a5794b63bbde8dae5bd13b6a",
+      "demiflow/forge/development/skill/SKILL.md": "9778ab888c05299a03ba93d46304b5a9f6882ce1f4b3821abfde2afc02710b97",
+      "demiflow/forge/development/skill/scripts/forge.py": "86dd3ed33d45f84fe176604b97872d9076628ac54b77772a547804e7f7f12ba3"
+    }
+  },
+  "baseline_sha256": "ce6f56e7a81be6420d9eea0b7d8ed7f3c62a0f3228f89402cad21739eed70b2d",
+  "source_files": {
+    "MANIFEST.in": {
+      "sha256": "941eb9cee1e6e0b90b5f55eb744a50c9f407a247a2e988512d5cb967bedffb26",
+      "bytes": 571,
+      "expected_formal": "bb3ccb6abc6265d626e2786e0b38d3722d0d8f1d57f6b7f7498280cc8deb12a0"
+    },
+    "demiflow/forge/web/app.js": {
+      "sha256": "187bc8c0c58704030b67f50c29054e313327cc118664c781ed27e0eec1172276",
+      "bytes": 104333,
+      "expected_formal": "5e48da985b8e78416eaf5293cf6d3606fc8d59de6c463b29b8c8e89d14314163"
+    },
+    "demiflow/forge/web/index.html": {
+      "sha256": "a5528002786b5b604b19c6013756919206d5d4582cb757edccf8f44e21a48b04",
+      "bytes": 467,
+      "expected_formal": "631b4ae457a4660ba6af948c99590350333408b2563b30ad0b41545271b394fa"
+    },
+    "demiflow/forge/web/markdown-it.LICENSE.txt": {
+      "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473",
+      "bytes": 1073,
+      "expected_formal": null
+    },
+    "demiflow/forge/web/markdown-it.NOTICES.txt": {
+      "sha256": "822151a3210d4accfb3bc9653275aa399e33ff7d8582cdaeecbbd9c231c626a2",
+      "bytes": 8182,
+      "expected_formal": null
+    },
+    "demiflow/forge/web/markdown-it.min.js": {
+      "sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68",
+      "bytes": 123618,
+      "expected_formal": null
+    },
+    "demiflow/forge/web/markdown-it.provenance.json": {
+      "sha256": "142e9baf5f5ad664aa8bf5a482a1f615f1c0ee93b30b43a20aeb1ccbebf8aea5",
+      "bytes": 1407,
+      "expected_formal": null
+    },
+    "demiflow/forge/web/markdown-worker.js": {
+      "sha256": "5502dd763def7b7fbd680537e258c40a3454a4b579a633de8fe2952ca5362ac0",
+      "bytes": 228,
+      "expected_formal": null
+    },
+    "demiflow/forge/web/reading.css": {
+      "sha256": "90a269c46458967c7d16e2e22b03f1a966ce9cb911880ab5ef3a6e55aa9eb786",
+      "bytes": 3001,
+      "expected_formal": null
+    },
+    "demiflow/forge/web/reading.js": {
+      "sha256": "aa081d828bdc29682875026c520d0551cb186974e473390ce9af76d38b2de70e",
+      "bytes": 25443,
+      "expected_formal": null
+    },
+    "demiflow/forge/web/style.css": {
+      "sha256": "d71c7e780efe154732402779675a3d016cb35b3c12566883024851f54e8de5fb",
+      "bytes": 11543,
+      "expected_formal": "13b5b7b973e2a1cdda2828cc2692e66f8fac49ad2d6782279aad893b5ed71f47"
+    },
+    "demiflow/forge/web/view.js": {
+      "sha256": "49dcab272f2c9033931f88c6261cb27a867b6044f99192eab25471d90a8c2a3e",
+      "bytes": 5528,
+      "expected_formal": "49dcab272f2c9033931f88c6261cb27a867b6044f99192eab25471d90a8c2a3e"
+    },
+    "demiflow/forge/workspace_view.py": {
+      "sha256": "9dee59b3d4e39f14d6335e1c87beb809645418285b2b5d268030ab10cdb787a4",
+      "bytes": 28730,
+      "expected_formal": "5a07309a2115473f90bcdc8be32c6491466b12d48db8baab377e5e264fbdec7a"
+    },
+    "pyproject.toml": {
+      "sha256": "e4a97f21cb9e47c33932d27d79defd26c0297f92a7ed3e1c24998afaa663e7ec",
+      "bytes": 2565,
+      "expected_formal": "4c21103d6cfcdd670a86f3bcd82df769b2968dc48cad7e2e9677752f700a10dc"
+    },
+    "tests/test_forge_markdown_reading.py": {
+      "sha256": "954cf01c730895270fa8ec243f4554bb2dcd01f218fd869948319b36ca85280d",
+      "bytes": 23456,
+      "expected_formal": null
+    },
+    "tests/test_forge_onboarding_browser.py": {
+      "sha256": "6cf3625ac1401066abd2c535d9a6c9250c605fd390029840693cd2e4c8be6b21",
+      "bytes": 3885,
+      "expected_formal": "29ad8e1e01517371bc8136d8d0271205c4b7d6ba994cd3b50f003a9a21da4e0c"
+    },
+    "tests/test_forge_panel_browser.py": {
+      "sha256": "144479890d8069ad67a1411c7425eaa05355bfff640a05a116725b8bec85dac1",
+      "bytes": 10012,
+      "expected_formal": "7bdbfbcad8aa31932d9a2cf958c2cbea75daec146a999d29d51a1b04f88ddbd4"
+    },
+    "tests/test_forge_project_browser.py": {
+      "sha256": "e0901ebe5d71f00936086d72389a6deddde9652b3f546ee2f2b7adb99a2c3561",
+      "bytes": 7707,
+      "expected_formal": "9dd1da606282b42f14ce3a1deb76cf74cd78d3de42713e5c5836eaaa7bf48f30"
+    },
+    "tests/test_forge_project_discovery_browser.py": {
+      "sha256": "90a79e11c358878a8b3fa20838179638b4534d4ada017c032f78ec898900753f",
+      "bytes": 4168,
+      "expected_formal": "84562ce0453e7d9b86ce2bd9479b3d30c970487545ea8b84ef4d67c3ec1211c2"
+    },
+    "tests/test_forge_project_removal.py": {
+      "sha256": "552bbf85d4adbd7fd967f073011f2f6447e7b30984a7309f12d2fb08f9185842",
+      "bytes": 7923,
+      "expected_formal": "b20cda61d84511d90d11b12db1930e548aa7e4d9f607f8e15271b0a6eb3e957b"
+    },
+    "tests/test_forge_public_browser.py": {
+      "sha256": "2df3cb5398bc9069475fedfa3bfbe6cedc2b621ada6fe16f082baff15601e496",
+      "bytes": 6144,
+      "expected_formal": "2da078de77c13ca0611338a0fbaf6f64eeb9c7c54a0d207329fcb2d62450381f"
+    },
+    "tests/test_forge_run_browser.py": {
+      "sha256": "4c50d6dbf49c7f9e96c69dc4c88ac790a2604a3b64ad2a8536037b4da7a47634",
+      "bytes": 14865,
+      "expected_formal": "7745291feae4ddfbde3000f180cf308d1706843019e5fafb2e34f1c4fd285ea1"
+    },
+    "tests/test_forge_web_redesign.py": {
+      "sha256": "acc1da30cc401e7b9c43c58db0546e0069bf773761be336f830633002a2a1a7e",
+      "bytes": 21252,
+      "expected_formal": null
+    },
+    "tests/test_forge_workspace_browser.py": {
+      "sha256": "bffba930856582a59c00e2e80eb25c2842f8e6911f81e9166b84490c99906c07",
+      "bytes": 7620,
+      "expected_formal": "cd970c61e40ef4f3ae181a97630a9300eafcc5ed5015e0116d9761a3a7da03f7"
+    },
+    "tests/test_forge_workspace_sync_browser.py": {
+      "sha256": "64cfe7bfdaa480002a318e7d6c86401b8203a9fca75a390d550492685ee4cd8d",
+      "bytes": 11162,
+      "expected_formal": "52993f059ee4526d9ecffa4a6166b3e769de684cee74294d956657780361964e"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-"""Lazy resources shared by Dataset search/fetch nodes; no row/business policy."""
+"""Lazy search resources; raw object acquisition belongs to Dataset.fetch."""
 import asyncio
 import inspect
 import math
@@ -11,38 +11,16 @@ class WebSession:
                  search_routes=(), search_route_cooldown_s=1800, search_route_attempts=2,
                  search_route_failure_limit=2, search_adaptive=None, search_session_pool=None,
                  search_failure_scope="pool",
-                 search_fallback=None, fetch_session_pool=None, connection_policy=None,
-                 proxy_policies=None,
-                 image_library=None, image_policy=None, **options):
+                 search_fallback=None, connection_policy=None,
+                 proxy_policies=None, **options):
         if proxy_policies is not None:
-            if (search_routes or search_session_pool or fetch_session_pool
-                    or options.get('fetch_proxy_routes') is not None
-                    or options.get('fetch_proxy_url') is not None):
+            if search_routes or search_session_pool:
                 raise ValueError('Choose proxy_policies or legacy proxy declarations')
             from .proxy_policy import compile_proxy_policies
             compiled = compile_proxy_policies(proxy_policies)
             selected = compiled['selected']
             search_routes = selected.get('search_routes', ())
             search_session_pool = selected.get('search_session_pool')
-            if 'fetch_proxy_routes' in selected:
-                options['fetch_proxy_routes'] = selected['fetch_proxy_routes']
-            if 'fetch_session_pool' in selected:
-                fetch_session_pool = selected['fetch_session_pool']
-        from .image_library import ImageLibrary
-        from .image_fetch import ImageFetchPolicy
-        if image_library is not None and not isinstance(image_library, ImageLibrary):
-            raise TypeError('image_library must be an ImageLibrary declaration')
-        if isinstance(image_policy, dict):
-            image_policy = ImageFetchPolicy(**image_policy)
-        if image_policy is not None and not isinstance(image_policy, ImageFetchPolicy):
-            raise TypeError('image_policy must be ImageFetchPolicy')
-        self.image_library = image_library
-        self.image_policy = image_policy or ImageFetchPolicy()
-        self.image_client = None
-        if image_library is not None:
-            from pathlib import Path
-            if Path(options['cache_path']).resolve() == Path(image_library.index_path).resolve():
-                raise ValueError('Run journal and shared image index must be separate')
         from .native_search import SearchConfig
         if isinstance(search, dict):
             search = SearchConfig.from_mapping(search)
@@ -99,37 +77,10 @@ class WebSession:
         # layer can tighten pacing without invalidating completed search receipts.
         self.search_request_interval_s = search_request_interval_s
         self.native = None
-        if fetch_session_pool is not None:options['fetch_session_pool']=fetch_session_pool
         # Declaration validates arguments without creating directories/clients.
         if '_connection_manager' in options:
             raise ValueError('Connection manager is owned by operator execution')
         inspect.signature(WebClient).bind(**options)
-        limit=options.get('fetch_attempt_limit')
-        if limit is not None and (type(limit) is not int or not 1<=limit<=options.get('retries',1)+1):
-            raise ValueError('fetch_attempt_limit must be between 1 and retries + 1')
-        from .web import normalized_blocked_domains, normalized_url_rules
-        if 'blocked_domains' in options:
-            options['blocked_domains'] = list(normalized_blocked_domains(options['blocked_domains']))
-        if 'fetch_url_rules' in options:
-            options['fetch_url_rules'] = normalized_url_rules(options['fetch_url_rules'])
-        if 'pdf_parser' in options:
-            from .pdf_text import pdf_policy
-            options['pdf_parser']=pdf_policy(options['pdf_parser'])
-        from .fetch_routes import proxy_routes
-        from .native_search.config import public
-        if options.get('fetch_session_pool') is not None and options.get('fetch_proxy_url') is not None:
-            raise ValueError('Choose fetch_session_pool or fetch_proxy_url as the default fetch transport')
-        if 'fetch_proxy_routes' in options or 'fetch_session_pool' in options:
-            options['fetch_proxy_routes'] = public(proxy_routes(options.get('fetch_proxy_routes'),
-                default_session_pool=options.pop('fetch_session_pool',None)))
-        from .document_library import DocumentLibrary
-        library = options.get('document_library')
-        if library is not None:
-            from pathlib import Path
-            if not isinstance(library, DocumentLibrary):
-                raise TypeError('document_library must be a DocumentLibrary declaration')
-            if Path(options['cache_path']).resolve() == Path(library.index_path):
-                raise ValueError('Run journal and shared document index must be separate')
         for key, value in options.items():
             if key.endswith(('_concurrency', '_bytes', '_s')) or key in {'redirects','retries','failure_limit'}:
                 if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
@@ -199,7 +150,9 @@ class WebSession:
         if self.search_config is not None:
             if self.native is None:
                 from .native_search import NativeSearchSession
-                self.native = NativeSearchSession(cache_path=self.options['cache_path'], config=self.search_config)
+                self.native = NativeSearchSession(cache_path=self.options['cache_path'], config=self.search_config,
+                    execution_admission=getattr(self,'_native_execution_admission',None),
+                    control_bytes=getattr(self,'_native_control_bytes',None),max_hosts=getattr(self,'_native_max_hosts',None))
                 if self.search_routes or self.search_session_pool:
                     from .search_routes import SearchRoutePool
                     pool_type=SearchRoutePool
@@ -231,30 +184,10 @@ class WebSession:
             raise ValueError('External search requires an explicit deployment profile revision')
         return await self._client().search(query, **parameters)
 
-    async def fetch(self, url):
-        self._ensure_connections()
-        return await self._client().fetch(url)
-
-    async def download(self, url, store):
-        self._ensure_connections()
-        return await self._client().download(url, store)
-
-    async def fetch_image(self, request):
-        self._ensure_connections()
-        if self.image_library is None:
-            raise ValueError('fetch_images requires an explicit ImageLibrary')
-        if self.image_client is None:
-            from .image_fetch import ImageClient
-            options = {**self.options, 'object_directory': self.image_library.object_directory,
-                       'document_library': None, 'max_bytes': self.image_policy.max_bytes,
-                       'fetch_concurrency': self.image_policy.concurrency}
-            self.image_client = ImageClient(WebClient(**options, _connection_manager=self.connections), self.image_library, self.image_policy)
-        return await self.image_client.fetch(request)
-
     def snapshot_metrics(self):
         if self._last_metrics is not None:
             return self._last_metrics
-        result = self.client.snapshot_metrics() if self.client else {'search_requests':0,'fetch_attempts':0}
+        result = self.client.snapshot_metrics() if self.client else {'search_requests':0}
         result['operator_users'] = len(self._operator_owners)
         result['connections'] = self.connections.snapshot_metrics() if self.connections is not None else None
         if self.native is not None:
@@ -264,14 +197,11 @@ class WebSession:
             result['search_queries'] = native['search_requests']
             result['search_http_requests'] = native['http_requests']
             result['reused'] = result.get('reused', 0) + native['reused']
-        if self.image_client is not None:
-            result['images'] = {**self.image_client.metrics, 'transport': self.image_client.web.snapshot_metrics()}
         return result
 
     async def _close(self):
         errors = []
-        for resource in (self.native, self.client,
-                         self.image_client.web if self.image_client else None, self.owner):
+        for resource in (self.native, self.client, self.owner):
             if resource is not None:
                 try:
                     await resource.aclose()
@@ -293,7 +223,6 @@ class WebSession:
         self.client = None
         self.owner = None
         self.native = None
-        self.image_client = None
         if errors:
             raise errors[0]
 

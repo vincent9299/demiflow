@@ -1,11 +1,20 @@
-"""Public embedded queue controls; Dataset owns publication, reading and ACKs."""
-from .execution.sqlite_channel import SQLiteChannel, channel_config, bounded_json
-
-def queue_status(config, *, pool='default'):
-    """Read bounded counts and archive cursors without initializing/writing a queue."""
-    queue=SQLiteChannel.read_only(**config)
-    return {**queue.state(pool),'input_sequence':queue.high_water(pool),
-            'result_sequence':queue.high_water(pool,results=True)}
+"""Public native SQLite/PostgreSQL task channels and bounded history declarations."""
+from .execution.queue import (QueueChannel,QueueConfig,QueueLimits,ProducerSourceSpec,ProducerRef,
+    QueueSnapshot,HistoryReadLimits,QueueIncomplete,QueueIdleTimeout,StaleQueueOwner,
+    ArtifactDomainUnavailable,HistoryReadLimit,task_message)
+from .execution.queue_sinks import QueueResultSink
+from .execution.queue_contract import ProducerWindowLimit
 
 
-__all__ = ['SQLiteChannel', 'channel_config', 'bounded_json', 'queue_status']
+def queue_status(config,*,pool='default'):
+    """Read existing native counts and stable publication prefixes without writes."""
+    channel=QueueChannel(config)
+    state=channel.state(pool)
+    return {**state,'tasks_snapshot':channel.snapshot(pool,kind='tasks'),
+            'results_snapshot':channel.snapshot(pool,kind='results'),
+            'observations_snapshot':channel.snapshot(pool,kind='observations')}
+
+
+__all__=['QueueChannel','QueueConfig','QueueLimits','ProducerSourceSpec','ProducerRef',
+    'QueueSnapshot','HistoryReadLimits','QueueResultSink','QueueIncomplete','QueueIdleTimeout',
+    'ProducerWindowLimit','StaleQueueOwner','ArtifactDomainUnavailable','HistoryReadLimit','task_message','queue_status']

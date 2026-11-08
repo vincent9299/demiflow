@@ -1,0 +1,14 @@
+{
+  "format": "demiflow_forge_standard_v1",
+  "id": "demiflow.forge.engineering",
+  "version": "1.0.0",
+  "rules": [
+    {"id":"FE-01","requirement":"Platform facts come from trusted current public code. Discovery does not grant execution permission.","scope":"platform inspection","verification":["static","behavior"],"coverage":"stage1"},
+    {"id":"FE-02","requirement":"Use one explicit business entrypoint and native Dataset composition; ordinary functions and actors retain their native interfaces.","scope":"business implementation","verification":["static","review"],"coverage":"pending_stage2"},
+    {"id":"FE-03","requirement":"Model requests use native prompt or agent nodes. Business callbacks must not hide model clients, schedulers or nested pipelines.","scope":"model boundaries","verification":["static","behavior","review"],"coverage":"pending_stage3"},
+    {"id":"FE-04","requirement":"Pin input identity and scope. Preserve the business denominator and distinguish rejection, empty results, technical failure and completion.","scope":"business delivery","verification":["behavior","review"],"coverage":"pending_stage3"},
+    {"id":"FE-05","requirement":"Prompt and model configuration use native versioned formats. Review actual rendered inputs and independent review boundaries.","scope":"model configuration","verification":["behavior","review"],"coverage":"pending_stage3"},
+    {"id":"FE-06","requirement":"Declare finite resources, failure, cleanup, reuse and publication boundaries. Native budgets and journals are not replaced by business infrastructure.","scope":"execution","verification":["behavior","review"],"coverage":"pending_stage3"},
+    {"id":"FE-07","requirement":"Acceptance binds the requirement, rules, code, prompts, configuration, platform and verification implementation. Changes require renewed evidence.","scope":"verification lifecycle","verification":["behavior","review"],"coverage":"platform_identity_stage1_lifecycle_pending_stage3"}
+  ]
+}

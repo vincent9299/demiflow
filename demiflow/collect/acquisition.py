@@ -1,41 +1,14 @@
-"""Independent single-request raw fetch and body parse callables.
+"""Independent body parsing and normalized document publication.
 
-Neither callable queries or registers a document library. They can be used
-directly or with the standard map_cached input/output binding.
+Raw acquisition is Dataset.fetch. Parsing never queries a document library.
 """
 import asyncio
 import math
 
-from .connection_manager import WebOperatorLifecycle
 from .documents import DocumentError, PARSER_VERSION, parse_document, read_document
 from .pdf_text import pdf_policy, pdf_identity
 from ..objects import LocalObjectStore, ObjectRef
 from ..execution.isolation import run_isolated
-
-
-class Download(WebOperatorLifecycle):
-    label = 'download'
-    concurrency = 1
-    queue_depth = 1
-    catch = ()
-
-    def __init__(self, *, session, store):
-        if not callable(getattr(session, 'download', None)):
-            raise TypeError('Download requires session.download(url, store)')
-        if not isinstance(store, LocalObjectStore):
-            raise TypeError('Download requires an explicit LocalObjectStore')
-        self.session, self.store = session, store
-        self.resources = (session,)
-        options = getattr(session, 'options', {})
-        fields = ('max_bytes', 'redirects', 'retries', 'timeout_s', 'connect_timeout_s',
-                  'fetch_proxy_url', 'fetch_proxy_routes', 'blocked_domains', 'fetch_url_rules')
-        self.cache_identity = {'store': str(store.directory),
-                               'transport': {key: options[key] for key in fields if key in options}}
-
-    async def __call__(self, request):
-        if not isinstance(request, dict) or set(request) != {'url'}:
-            raise ValueError('Download request requires exactly url')
-        return await self.session.download(request['url'], self.store)
 
 
 def publish_document(store, document, raw_ref, *, max_document_bytes):

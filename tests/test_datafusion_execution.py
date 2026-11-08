@@ -295,7 +295,7 @@ def test_private_writer_admits_explicit_wide_row_and_still_rejects_over_budget(t
         assert 'max_row_bytes=8389632' in caught.value.report['worker']['message']
         assert not caught.value.report['success']
     assert not list((tmp_path/'reject').rglob('output.lance'))
-    for invalid in (0, True, 8.0, 1024):
+    for invalid in (0, True, 8.0, -1):
         with pytest.raises(ValueError, match='max_row_bytes'):
             options(max_row_bytes=invalid)
 

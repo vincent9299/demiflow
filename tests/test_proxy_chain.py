@@ -7,7 +7,6 @@ import pytest
 from demiflow.collect.proxy import ProxyPool,proxy_declaration,proxy_routes
 from demiflow.collect.native_search import SearchConfig
 from demiflow.collect.native_search.runtime import NativeSearchSession
-from demiflow.collect.web import WebClient
 
 
 def test_proxy_policy_declarations_are_lazy_and_secret_only(monkeypatch):
@@ -82,17 +81,9 @@ def test_relay_is_authenticated_and_destination_scoped():
     asyncio.run(run())
 
 
-def test_route_matching_and_search_identity_survive_new_relay_port(tmp_path,monkeypatch):
+def test_search_identity_survives_new_relay_port(tmp_path,monkeypatch):
     monkeypatch.setenv('PROXY_CHAIN_TEST','http://sample:example_password@second.example:8080')
     policy={'chain':['http://127.0.0.1:1',{'secret_env':'PROXY_CHAIN_TEST'}],'allowed_domains':['target.example']}
-    web=WebClient(cache_path=tmp_path/'fetch.sqlite',object_directory=tmp_path/'objects',fetch_proxy_url='http://company.example:3128',
-                  fetch_proxy_routes={'target.example':policy,'special.target.example':'http://special.example:3128'})
-    assert web.route_for('https://sub.target.example/a')=='target.example'
-    assert web.route_for('https://special.target.example/a')=='special.target.example'
-    assert web.route_for('https://target.example.evil/a') is None
-    assert web.proxy_identity('https://other.example/a')=='http://company.example:3128'
-    identity=json.dumps(web.proxy_identity('https://target.example/a'))
-    assert 'example_password' not in identity and 'secret_env' in identity
     cfg=SearchConfig.from_mapping({'engines':['google'],'proxy':policy})
     async def run():
         values=[]

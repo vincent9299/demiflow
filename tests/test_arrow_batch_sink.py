@@ -47,11 +47,17 @@ def test_arrow_callback_failure_does_not_publish_or_retry(tmp_path):
         if batch['id'][0].as_py() == 3:
             raise ValueError('deliberate callback failure')
         return batch
-    with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)) as session:
-        with pytest.raises(Exception, match='deliberate callback failure'):
-            data.read_lance(source, version=1).map_batches(fail, batch_size=2, batch_format='pyarrow').write_lance(
-                target, mode='overwrite', expected_version=1, schema=table.schema)
-        assert session.stats['status'] == 'failed'
+    from demiflow.execution import RecoveryContractError
+    from demiflow.execution.run_journal import RunJournal
+    # Catching the callback locally must not turn its incomplete action into a
+    # successful enclosing native run. Preserve both failure boundaries.
+    with pytest.raises(RecoveryContractError, match='unconfirmed actions'):
+        with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)) as session:
+            with pytest.raises(Exception, match='deliberate callback failure'):
+                data.read_lance(source, version=1).map_batches(fail, batch_size=2, batch_format='pyarrow').write_lance(
+                    target, mode='overwrite', expected_version=1, schema=table.schema)
+            assert session.stats['status'] == 'failed'
+    assert RunJournal(session.run_ref.directory).execution_status()['status'] == 'failed'
     assert calls.read_text().splitlines() == ['1', '3']
     assert lance.dataset(target).version == 1
     assert lance.dataset(target).to_table().equals(table.slice(0, 1))

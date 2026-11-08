@@ -96,34 +96,16 @@ def validate_options(options):
 
 
 def _encode(value, limit):
-    """Bound encoded accumulation, including JSON escaping and image data URLs."""
-    chunks, size = [], 0
-    for part in json.JSONEncoder(ensure_ascii=False, separators=(',', ':'), allow_nan=False).iterencode(value):
-        encoded = part.encode('utf-8')
-        size += len(encoded)
-        if size > limit:
-            raise PromptBudgetExceededError('Codex message exceeds configured byte budget')
-        chunks.append(encoded)
-    return b''.join(chunks)
+    from demiflow.agent_transport import encode
+    try:
+        return encode(value, limit)
+    except ValueError as exc:
+        if str(exc) == 'Codex message exceeds configured byte budget':
+            raise PromptBudgetExceededError(str(exc)) from exc
+        raise
 
 
-def _strict_json(raw):
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ValueError('Duplicate JSON key: ' + key)
-            result[key] = value
-        return result
-    def constant(value):
-        raise ValueError('Non-finite JSON value: ' + value)
-    def number(value):
-        parsed = float(value)
-        if not math.isfinite(parsed):
-            raise ValueError('Non-finite JSON number')
-        return parsed
-    return json.loads(raw, object_pairs_hook=pairs, parse_constant=constant, parse_float=number)
-
+from demiflow.agent_transport import strict_json as _strict_json
 
 class CodexAgentClient:
     def __init__(self, options, scope, prompt, values, max_requests):

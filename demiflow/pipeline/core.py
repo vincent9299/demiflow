@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Mapping
 from urllib.parse import urlsplit
 
 from demiflow._compat.observability import log_event
-from ..data.api import _use_executor
 
 if TYPE_CHECKING:
     from ..execution.executors.base import DatasetExecutor
@@ -92,15 +91,19 @@ class Pipeline:
             executor=getattr(dataset_executor, "NAME", type(dataset_executor).__name__),
             entrypoint=self.entrypoint,
         )
+        from ..data.api import _use_executor
+
         started = time.monotonic()
         from .context import ProgramContext
+        from ..execution.run_context import execution_scope
         try:
-            with _use_executor(dataset_executor):
+            with execution_scope() as run, _use_executor(dataset_executor):
+                dataset_executor._run_ref = run.ref
                 value = self.program.run(ProgramContext(
                     dataset_executor=dataset_executor, resource_root=self.resource_root,
                 ))
-            if value is not None:
-                raise TypeError("PipelineProgram.run must return None")
+                if value is not None:
+                    raise TypeError("PipelineProgram.run must return None")
         except Exception as exc:
             log_event(
                 logger, "demiflow.pipeline.failed", level=logging.ERROR,

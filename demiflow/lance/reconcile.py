@@ -108,3 +108,43 @@ def _entry_version(entry) -> int | None:
 
 
 __all__ = ["find_committed_append", "reconcile_lance_append"]
+
+
+def reconcile_lance_create(uri: str, *, request_hash: str, operation_id: str) -> LanceWriteReceipt | None:
+    """Read the initial create version only; absence of evidence stays unknown.
+
+    The caller durably records a unique operation_id before the action. A request
+    hash alone cannot distinguish competing creates with the same write spec.
+    No history scan,
+    writer retry, latest-version substitution or assumption about missing files.
+    """
+    return _reconcile_fixed_write(uri, request_hash, operation_id, expected_version=None)
+
+
+def reconcile_lance_overwrite(uri: str, *, request_hash: str, operation_id: str,
+                              expected_version: int) -> LanceWriteReceipt | None:
+    """Inspect only the exact CAS successor and this writer's unique marker."""
+    if type(expected_version) is not int or expected_version < 1:
+        raise ValueError('Overwrite recovery requires its fixed expected version')
+    return _reconcile_fixed_write(uri, request_hash, operation_id, expected_version)
+
+
+def _reconcile_fixed_write(uri, request_hash, operation_id, expected_version):
+    from .preview import describe_table
+    from .storage import schema_hash
+
+    if not isinstance(operation_id, str) or not 1 <= len(operation_id) <= 128:
+        raise ValueError('A recorded write operation_id is required')
+    version = 1 if expected_version is None else expected_version + 1
+    description = describe_table(uri, version)
+    dataset = open_lance_dataset(uri, version, ())
+    transaction = dataset.read_transaction(version)
+    marker = (transaction.transaction_properties or {}).get('__lance_commit_message')
+    if marker != 'demiflow-lance:' + operation_id:
+        return None
+    return LanceWriteReceipt(
+        request_hash=request_hash, uri=uri, expected_version=expected_version,
+        committed_version=version, input_rows=description['row_count'],
+        written_rows=description['row_count'], schema_hash=schema_hash(dataset.schema),
+        status='committed',
+    )

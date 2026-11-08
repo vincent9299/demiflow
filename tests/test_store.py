@@ -125,13 +125,15 @@ async def test_index_rebuild_and_bad_line_tolerance():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_atomic_write_rename_fallback(tmp_path, monkeypatch):
-    """FUSE rename 失败回退直写（cosfs 语义缺陷场景）。"""
-    import os as _os
+def test_atomic_write_rename_failure_preserves_target(tmp_path, monkeypatch):
+    """A failed atomic publish must never fall back to a partial final write."""
+    import os
+    import pytest
     from demiflow.collect.store import atomic_write_bytes
-    monkeypatch.setattr(_os, "replace",
-                        lambda a, b: (_ for _ in ()).throw(OSError(2, "noent")))
-    target = str(tmp_path / "x" / "ca" / "blob.bin")
-    atomic_write_bytes(target, b"payload")
-    assert open(target, "rb").read() == b"payload"
-    assert not [p for p in tmp_path.rglob("*.tmp")]    # 临时文件已清
+    target = tmp_path / 'blob.bin'
+    target.write_bytes(b'original')
+    monkeypatch.setattr(os, 'replace', lambda a, b: (_ for _ in ()).throw(OSError('rename failed')))
+    with pytest.raises(OSError, match='rename failed'):
+        atomic_write_bytes(str(target), b'payload')
+    assert target.read_bytes() == b'original'
+    assert not list(tmp_path.glob('*.tmp'))

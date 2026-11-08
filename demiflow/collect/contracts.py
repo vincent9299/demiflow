@@ -1,4 +1,4 @@
-"""Arrow result components for Dataset.search_web/fetch_documents/read_documents.
+"""Arrow components for historical search, document and image-library receipts.
 
 Consumers compose business stage schemas around these components. No business
 question type, review verdict, round number or adoption schema is defined here.

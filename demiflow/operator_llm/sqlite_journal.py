@@ -30,6 +30,8 @@ from pathlib import Path
 from .errors import PromptBudgetExceededError, PromptError
 from .journal import UncertainPromptCall, canonical, request_key
 
+MAX_DISK_BYTES = 32 * 1024**3
+
 
 _LEASE_INSERT = ('INSERT INTO writer_leases(request_key,owner_token,owner_pid,owner_start) '
                  'VALUES (?,?,?,?)')
@@ -81,10 +83,13 @@ def _process_alive(pid, start):
 
 class _DatabaseLease:
     """Owner identity for one reservation; the row is written by the commit."""
-    def __init__(self, token):
+    def __init__(self, token, *, owner=None):
         self.token = token
-        self.pid = os.getpid()
-        self.start = _process_start(self.pid)
+        if owner is None:
+            self.pid = os.getpid()
+            self.start = _process_start(self.pid)
+        else:
+            self.pid, self.start = owner
 
     def __enter__(self):
         return self
@@ -189,7 +194,7 @@ class _SQLiteJournalShard:
     Opening is lazy: async clients do all journal I/O in their I/O executor.
     """
     def __init__(self, path, max_requests=None, *, timeout_s=30, legacy_source=None,
-                 read_only=False, throughput=None):
+                 read_only=False, throughput=None, max_disk_bytes=None):
         if type(read_only) is not bool:
             raise ValueError('read_only must be a boolean')
         if read_only and legacy_source:
@@ -199,9 +204,13 @@ class _SQLiteJournalShard:
         self.path = resolve_local_artifact(path)
         self.limit = max_requests
         self.timeout_s = timeout_s
+        if max_disk_bytes is not None and (type(max_disk_bytes) is not int or not 4 * 1024**2 <= max_disk_bytes <= MAX_DISK_BYTES):
+            raise ValueError('Journal max_disk_bytes must be 4 MiB..32 GiB')
+        self.max_disk_bytes = max_disk_bytes
         self._lock = threading.RLock()
         self._db = None
         self._leases = {}
+        self._owner_identity = None
         self.legacy_source = legacy_source
         self.throughput = None if throughput is None else dict(throughput)
         config = self.throughput or {}
@@ -211,6 +220,8 @@ class _SQLiteJournalShard:
         self.flush_interval_s = config.get('flush_interval_s', .01)
         self.queue_size = config.get('queue_size', 256)
         self.wal = config.get('wal', False)
+        if max_disk_bytes is not None and self.wal:
+            raise ValueError('Bounded journal disk requires DELETE journaling')
         self.max_record_bytes = config.get('max_record_bytes', 8 * 1024 * 1024)
         self.max_queue_bytes = config.get('max_queue_bytes', 64 * 1024 * 1024)
         for name, value in (('batch_size', self.batch_size), ('queue_size', self.queue_size)):
@@ -256,6 +267,16 @@ class _SQLiteJournalShard:
             db = sqlite3.connect(self.path, timeout=self.timeout_s, check_same_thread=False)
             db.execute('PRAGMA journal_mode=' + ('WAL' if self.wal else 'DELETE'))
             db.execute('PRAGMA synchronous=FULL')
+            if self.max_disk_bytes is not None:
+                # Cap database pages before writing. The remaining three
+                # quarters reserve rollback pages, headers and filesystem
+                # overhead; the owning run also monitors physical disk usage.
+                page_size = db.execute('PRAGMA page_size').fetchone()[0]
+                pages = (self.max_disk_bytes - 65536) // (4 * page_size)
+                actual = db.execute('PRAGMA max_page_count=' + str(pages)).fetchone()[0]
+                if actual > pages:
+                    db.close()
+                    raise ValueError('Existing journal exceeds max_disk_bytes')
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS calls (
                     request_key TEXT PRIMARY KEY,
@@ -324,7 +345,14 @@ class _SQLiteJournalShard:
         if self.throughput is not None:
             if key in self._leases:
                 raise UncertainPromptCall('Request still has an active writer: ' + key)
-            return _DatabaseLease(uuid.uuid4().hex)
+            pid = os.getpid()
+            owner = self._owner_identity
+            if owner is None or owner[0] != pid:
+                owner = (pid, _process_start(pid))
+                # A process start time cannot change while that PID is ours.
+                # Retry unreadable identities, and never reuse across a fork.
+                self._owner_identity = owner if owner[1] else None
+            return _DatabaseLease(uuid.uuid4().hex, owner=owner)
         directory = self.path.with_name(self.path.name + '.leases')
         directory.mkdir(parents=True, exist_ok=True)
         stream = (directory / key).open('a')
@@ -529,34 +557,46 @@ class _SQLiteJournalShard:
             self._finish_item(item, result=result)
 
     def lookup(self, request):
+        return self._lookup(request, with_references=False)[0]
+
+    def lookup_with_references(self, request):
+        """Read the result and its attempt in one SQLite statement snapshot."""
+        return self._lookup(request, with_references=True)
+
+    def _lookup(self, request, *, with_references):
+        key = request_key(request)
+        fields = 'response_json, legacy_refs_json, request_json IS NULL, error_json'
+        if with_references:
+            fields += (', (SELECT COALESCE(MAX(attempt),0)+1 FROM recovery_events '
+                       'WHERE recovery_events.request_key=calls.request_key)')
         with self._lock:
             db = self._connect()
             row = db.execute(
-                'SELECT response_json, legacy_refs_json, request_json IS NULL, error_json FROM calls WHERE request_key=?',
-                (request_key(request),)).fetchone()
+                'SELECT ' + fields + ' FROM calls WHERE request_key=?', (key,)).fetchone()
             if row is not None and row[2] and not self.read_only:
                 # A legacy import deliberately skipped full request payloads.
                 # The caller now supplies this exact identity; store its compact
                 # metadata so a newly returned native request_ref is readable.
                 with db:
                     db.execute('UPDATE calls SET request_json=? WHERE request_key=? AND request_json IS NULL',
-                               (canonical(_metadata(request)), request_key(request)))
+                               (canonical(_metadata(request)), key))
         if row is None:
-            return None
+            return None, None
+        refs = self._references_at(key, row[4]) if with_references else None
         if row[0] is None:
-            from .call_ref import PromptRecordRef
-            error = UncertainPromptCall('Request reserved without complete response: ' + request_key(request))
+            error = UncertainPromptCall('Request reserved without complete response: ' + key)
             saved = json.loads(row[3]) if row[3] else {}
             error.call = {key: value for key, value in (saved.get('call') or {}).items()
                           if key not in {'partial_response', 'partial_body', 'pending_event', 'provider_error', 'last_event'}}
-            refs = self.references(request)
+            if refs is None:
+                refs = self.references(request)
             error.call.update(refs, reused=True,
                 error_ref={**refs['request_ref'],'kind':'error'})
             raise error
         result = json.loads(row[0])
         if row[1]:
             result = {**result, '_legacy_refs': json.loads(row[1])}
-        return result
+        return result, refs
 
     def registered_keys(self, *, max_keys=100000):
         """Bounded snapshot of all reservations, including errors/unknowns.
@@ -669,7 +709,10 @@ class _SQLiteJournalShard:
             db = self._connect()
             with db:
                 db.execute('BEGIN IMMEDIATE')
-                row = db.execute(f'SELECT {column} FROM calls WHERE request_key=?', (key,)).fetchone()
+                row = db.execute(
+                    f'SELECT {column}, (SELECT COALESCE(MAX(attempt),0)+1 FROM recovery_events '
+                    'WHERE recovery_events.request_key=calls.request_key) FROM calls WHERE request_key=?',
+                    (key,)).fetchone()
                 if row is None:
                     raise ValueError('Response/error has no reserved request: ' + key)
                 if row[0] is not None and row[0] != payload:
@@ -681,7 +724,9 @@ class _SQLiteJournalShard:
             lease = self._leases.pop(key, None)
             if lease is not None:
                 lease.close()
-        return self.references(request)
+        # Keep the ref bound to the committed response even if another client
+        # reserves its next HTTP attempt immediately after this commit.
+        return self._references_at(key, row[1])
 
     def response(self, request, record):
         return self._save(request, 'response_json', record)
@@ -1014,7 +1059,7 @@ class SQLitePromptJournal:
     """
 
     def __init__(self, path, max_requests=None, *, timeout_s=30, legacy_source=None,
-                 read_only=False, throughput=None):
+                 read_only=False, throughput=None, max_disk_bytes=None):
         if type(read_only) is not bool:
             raise ValueError('read_only must be a boolean')
         if read_only and legacy_source:
@@ -1023,11 +1068,16 @@ class SQLitePromptJournal:
         self.path = resolve_local_artifact(path)
         self.limit = max_requests
         self.timeout_s = timeout_s
+        if max_disk_bytes is not None and (type(max_disk_bytes) is not int or not 4 * 1024**2 <= max_disk_bytes <= MAX_DISK_BYTES):
+            raise ValueError('Journal max_disk_bytes must be 4 MiB..32 GiB')
+        self.max_disk_bytes = max_disk_bytes
         self.read_only = read_only
         config = None if throughput is None else dict(throughput)
         self.shard_count = 1 if config is None else config.pop('shards', 1)
         if type(self.shard_count) is not int or not 1 <= self.shard_count <= 8:
             raise ValueError('Journal throughput shards must be in 1..8')
+        if self.shard_count > 1 and max_disk_bytes is not None:
+            raise ValueError('Bounded journal disk requires one shard')
         if self.shard_count > 1 and legacy_source:
             raise ValueError('Legacy import requires a single journal shard')
         if self.shard_count == 1:
@@ -1038,7 +1088,7 @@ class SQLitePromptJournal:
         self._shards = [_SQLiteJournalShard(
             shard_path, max_requests if self.shard_count == 1 else None,
             timeout_s=timeout_s, legacy_source=legacy_source,
-            read_only=read_only, throughput=config) for shard_path in paths]
+            read_only=read_only, throughput=config, max_disk_bytes=max_disk_bytes) for shard_path in paths]
         self._lock = self._shards[0]._lock if self.shard_count == 1 else None
         self._manifest_lock = threading.Lock()
         self._manifest_ready = self.shard_count == 1
@@ -1162,6 +1212,9 @@ class SQLitePromptJournal:
 
     def lookup(self, request):
         return self._for_request(request).lookup(request)
+
+    def lookup_with_references(self, request):
+        return self._for_request(request).lookup_with_references(request)
 
     def reserve(self, request):
         key = request_key(request)

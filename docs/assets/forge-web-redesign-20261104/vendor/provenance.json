@@ -1,0 +1,17 @@
+{
+  "name": "markdown-it",
+  "version": "14.1.0",
+  "source": "https://registry.npmjs.org/markdown-it/-/markdown-it-14.1.0.tgz",
+  "source_repository": "https://github.com/markdown-it/markdown-it/tree/14.1.0",
+  "license": "MIT",
+  "tarball_sha256": "7c4fab4d4d39fe98206a7fbbed4b1e3578f2b70b6b69d309413e33eec140e19f",
+  "file_sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68",
+  "runtime_dependencies": {
+    "argparse": "^2.0.1",
+    "entities": "^4.4.0",
+    "linkify-it": "^5.0.0",
+    "mdurl": "^2.0.0",
+    "punycode.js": "^2.3.1",
+    "uc.micro": "^2.1.0"
+  }
+}

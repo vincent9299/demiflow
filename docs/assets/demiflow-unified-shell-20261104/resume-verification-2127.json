@@ -1,0 +1,61 @@
+{
+  "request_marker": "forge_sidebar_resume:20261104-2127",
+  "checked_at": "2026-11-04T21:29:55+08:00",
+  "status": "already_delivered_and_currently_verified",
+  "pid": 58813,
+  "port": 59865,
+  "forwarded_port": 55971,
+  "served_assets_match": {
+    "index.html": "1343cfac92597c7f81fe0bd059bda6e9db73c2d982ce5bd1c19330ba71efaf61",
+    "app.js": "befc996700c4e1ea571ade2d8c587013eaadab3f05918bfb469405801528f96c",
+    "style.css": "43ba0d0fdd28a03251969cc77730050fd745c992780d32ede1a77dde33918570"
+  },
+  "contract": "demiflow_forge_http_v1",
+  "read_requests": 4,
+  "writes": 0,
+  "controls_unchanged": true,
+  "staging_unchanged": true,
+  "delivery_files": [
+    {
+      "path": "demiflow/forge/web/app.js",
+      "added": 36,
+      "removed": 18,
+      "sha256": "befc996700c4e1ea571ade2d8c587013eaadab3f05918bfb469405801528f96c"
+    },
+    {
+      "path": "demiflow/forge/web/style.css",
+      "added": 15,
+      "removed": 13,
+      "sha256": "43ba0d0fdd28a03251969cc77730050fd745c992780d32ede1a77dde33918570"
+    },
+    {
+      "path": "demiflow/forge/web/index.html",
+      "added": 1,
+      "removed": 1,
+      "sha256": "1343cfac92597c7f81fe0bd059bda6e9db73c2d982ce5bd1c19330ba71efaf61"
+    },
+    {
+      "path": "tests/test_forge_web_redesign.py",
+      "added": 61,
+      "removed": 2,
+      "sha256": "e7dbeaecf31893d4da4a0ed576647824243a0a19644b50fde9546437c07238ac"
+    },
+    {
+      "path": "tests/test_forge_project_browser.py",
+      "added": 2,
+      "removed": 2,
+      "sha256": "da9097be77e8efa014b46bfa3bd1b46d0569fa8fa30f41ccc6b343832da3e4f4"
+    },
+    {
+      "path": "tests/test_forge_project_removal.py",
+      "added": 1,
+      "removed": 1,
+      "sha256": "79f2b4bc60bc8e8648f76896a334bf1de00c6606d2ba3c2664c8f79291d1bb40"
+    }
+  ],
+  "other_frozen_files_changed_since_delivery": [],
+  "diff_base": "Per-file backup immediately before the unified-shell release; not Git HEAD",
+  "patch_sha256": "b19084cf273c1cfb4f6221a5514d514884ace64b6e4ee39fab53d772b3232599",
+  "screenshots": 7,
+  "patch_roundtrip_verified": true
+}

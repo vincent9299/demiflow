@@ -148,7 +148,12 @@ def execute_driver(request: PipelineDriverRequest) -> None:
         else:
             raise ValueError(f"unsupported Driver backend: {request.backend}")
         resources.callback(dataset_executor.close)
-        pipeline.run(dataset_executor=dataset_executor)
+        from .run_context import RunContext
+        with RunContext.start(entry_identity={
+                'launcher_run_id': request.run_id, 'bundle_digest': bundle.content_digest,
+                'entrypoint': definition.entrypoint, 'backend': request.backend,
+                'planning_policy_digest': request.planning_policy_digest}):
+            pipeline.run(dataset_executor=dataset_executor)
 
 
 def main(argv=None) -> int:

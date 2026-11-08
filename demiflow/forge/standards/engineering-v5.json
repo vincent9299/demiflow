@@ -1,0 +1,538 @@
+{
+  "format": "demiflow_forge_standard_v1",
+  "id": "demiflow.forge.engineering",
+  "version": "2.4.0",
+  "rules": [
+    {
+      "id": "FE-01",
+      "requirement": "Platform facts come from trusted current public code. Discovery does not grant execution permission.",
+      "scope": "platform inspection",
+      "verification": [
+        "static",
+        "behavior"
+      ],
+      "coverage": "stage1"
+    },
+    {
+      "id": "FE-02",
+      "requirement": "Use one explicit business entrypoint and native Dataset composition; ordinary functions and actors retain their native interfaces.",
+      "scope": "business implementation",
+      "verification": [
+        "static",
+        "review"
+      ],
+      "coverage": "static_stage2_local_sync_experiments_stage3"
+    },
+    {
+      "id": "FE-03",
+      "requirement": "Model requests use native prompt or agent nodes. Business callbacks must not hide model clients, schedulers or nested pipelines.",
+      "scope": "model boundaries",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "bounded_native_prompt_http_json; agent_execution_unknown"
+    },
+    {
+      "id": "FE-04",
+      "requirement": "Pin input identity and scope. Preserve the business denominator and distinguish rejection, empty results, technical failure and completion.",
+      "scope": "business delivery",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_experiments_stage3_formal_delivery_pending"
+    },
+    {
+      "id": "FE-05",
+      "requirement": "Prompt and model configuration use native versioned formats. Review actual rendered inputs and independent review boundaries.",
+      "scope": "model configuration",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "sealed_native_prompt_config_and_exact_call_evidence; semantic_quality_not_verified"
+    },
+    {
+      "id": "FE-06",
+      "requirement": "Declare finite resources, failure, cleanup, reuse and publication boundaries. Native budgets and journals are not replaced by business infrastructure.",
+      "scope": "execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_experiments_stage3_formal_delivery_pending"
+    },
+    {
+      "id": "FE-07",
+      "requirement": "Acceptance binds the requirement, rules, code, prompts, configuration, platform and verification implementation. Changes require renewed evidence.",
+      "scope": "verification lifecycle",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "experiment_identity_stage3_formal_lifecycle_pending_stage4"
+    },
+    {
+      "id": "FL-01",
+      "requirement": "入口和 helper 的实际定义与依赖可解析；职责由调用契约确定，不由业务目录名称确定；没有隐含环境输入或共享可变状态",
+      "scope": "入口与来源",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-02",
+      "requirement": "主数据节点解析到已绑定平台 API；helper 展开后仍全部合规",
+      "scope": "平台调用",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-03",
+      "requirement": "依据原生签名校验必需参数、名称、重复绑定和可确定值约束",
+      "scope": "参数绑定",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-04",
+      "requirement": "每条 Dataset 的来源、多输入、去向和终结动作可识别",
+      "scope": "完整接线",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-05",
+      "requirement": "每个表输入绑定允许位置与固定版本，实际引用可读且元数据吻合",
+      "scope": "数据身份",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-06",
+      "requirement": "依据原生规则传播字段的存在性、null、类型和来源，并核对端口兼容",
+      "scope": "字段与结构",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-07",
+      "requirement": "读写、模型、查询与物化效果明确；运行时值只来自原生查询/回执并用于受限参数和前置检查；不用于改变接线拓扑",
+      "scope": "效果与控制",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-08",
+      "requirement": "接线遵守原生同步/流式、后端及物化约束",
+      "scope": "原生执行限制",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-09",
+      "requirement": "自有目标、明确模式/条件/回执；多写入和读写交叠具有原生支持的顺序与版本语义",
+      "scope": "输出提交",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "FL-10",
+      "requirement": "绑定准确源码/配置/资源/平台/标准闭包和所用工作区权限；无关登记变化不使检查失效；检查器自身具有有限预算",
+      "scope": "身份与预算",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-01",
+      "requirement": "实际定义可定位，依赖闭包和构造参数可绑定",
+      "scope": "实现归属",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-02",
+      "requirement": "形参、字段绑定、固定参数与 sync/async/actor 协议一致",
+      "scope": "调用协议",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-03",
+      "requirement": "输入输出结构明确，nullable、返回字段和基数与节点匹配",
+      "scope": "端口声明",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-04",
+      "requirement": "不接收/创建/执行嵌套 Dataset，不负责表级调度",
+      "scope": "单节点职责",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-05",
+      "requirement": "模型、网络、表写入、服务、进程和调度不藏在计算节点",
+      "scope": "外部效果",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-06",
+      "requirement": "解析实际符号、接收者和调用闭包；每项外部能力有绑定版本的效果边界",
+      "scope": "调用来源与效果可判定",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-07",
+      "requirement": "无初始化资源副作用；节点协议和预算配置合法，未验证的执行保证单列",
+      "scope": "生命周期协议与资源配置",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "OP-08",
+      "requirement": "阻断已知异常抑制模式；原生错误策略显式可见；不静态证明业务失败语义",
+      "scope": "错误处理结构与策略",
+      "verification": [
+        "static"
+      ],
+      "coverage": "supported_source_subset_stage2_runtime_not_run"
+    },
+    {
+      "id": "EX-01",
+      "requirement": "Execution binds sealed source, effective parameters, fixed input references and platform/environment identity.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-02",
+      "requirement": "Only declared native local semantics with supported backend composition, bound resources and finite run admission may execute; unknown paths block.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-03",
+      "requirement": "Read registered fixed versions or versions from verified native receipts. Create declared targets or overwrite an explicitly permitted target against a fixed CAS baseline; never follow an unbound latest version.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-04",
+      "requirement": "Match the actual native plan and validate consumed callable inputs and actual return values without coercion.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-05",
+      "requirement": "Persist action intent and native write receipts; verify committed versions before registering outputs; uncertain commits stay unknown.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-06",
+      "requirement": "Apply finite admission, process, data, disk and time budgets; cancel owned work and preserve submitted results.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-07",
+      "requirement": "Track each independent action and preserve partial commits; whole-run success requires every expected action and output.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-08",
+      "requirement": "Results are fixed DatasetRefs backed by native receipts; case comparison uses explicit keys and continuation pins the selected version.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-09",
+      "requirement": "Start, cancel and reconciliation are idempotent control operations; a retry of the same run must not execute it twice.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "EX-10",
+      "requirement": "UI, CLI and Python share run facts; unknown progress, interrupted ownership and missing output versions are explicit.",
+      "scope": "local experiment execution",
+      "verification": [
+        "behavior",
+        "review"
+      ],
+      "coverage": "local_checked_v3_per_run_evidence"
+    },
+    {
+      "id": "UC-01",
+      "requirement": "Native API and pure semantic handlers must come from the bound platform implementation; catalogue JSON cannot grant callable authority.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-02",
+      "requirement": "Discovery, complete contract facts, backend support and workspace admission are distinct. Unknown capability is never supported by default.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-03",
+      "requirement": "Bind machine-readable defaults and declared resources; display repr is not a binding protocol.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-04",
+      "requirement": "Static and actual native execution use the same backend composition rules without a second executor.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-05",
+      "requirement": "Actual source, operation, callable, resource and action facts are independently extracted and checked before effects.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-06",
+      "requirement": "Check actual input, awaited output, emitted rows and bounded expansion against declared structure.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-07",
+      "requirement": "Contract, resource, cancellation and service failures cannot become business misses.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-08",
+      "requirement": "Actor ownership, scope and lifecycle remain native; start failures and partial initialization require owned cleanup.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-09",
+      "requirement": "The checked source and plan reach the action; internal materialization consumers create no business nodes or nested actions.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-10",
+      "requirement": "Admission bounds source, queues, in-flight calls, batches, expansion, diagnostics, disk and time; third-party allocations retain process protection.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-11",
+      "requirement": "Repeated actions have distinct execution instances and cumulative effect budgets; shared upstream does not imply single execution.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-12",
+      "requirement": "Cancellation stops new scheduling, drains bounded work and records incomplete cleanup or uncertain effects without fabricated success.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-13",
+      "requirement": "Request and commit evidence uses exact native references under declared owned roots, with bounded read-only access.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-14",
+      "requirement": "Observations have stable logical identity, monotonic sequence, truthful scope and pre-reserved bounded terminal storage.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-15",
+      "requirement": "A real additional native API with shared semantics must execute without API-name branches in Forge or the UI.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-16",
+      "requirement": "Verify multiple semantic families against independent expected outputs and actual failure boundaries.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-17",
+      "requirement": "Python, CLI and browser use the same admission and facts; read-only viewing never executes an operator.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    },
+    {
+      "id": "UC-18",
+      "requirement": "Old reports and runs remain read-only; changed protocols require new inspection and cannot inherit old execution authority.",
+      "scope": "generic operator foundation",
+      "verification": [
+        "static",
+        "behavior",
+        "review"
+      ],
+      "coverage": "foundation"
+    }
+  ]
+}

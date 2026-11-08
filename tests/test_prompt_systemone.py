@@ -93,6 +93,38 @@ def test_systemone_noul_uses_existing_prompt_node_and_journal(server, tmp_path):
     assert 'messages' not in request['body']
 
 
+def review_image(ctx, journal=None):
+    options = {'trust_env': False}
+    if journal is not None:
+        options['journal_dir'] = str(journal)
+    pack = PACK.replace('{{ payload | json }}', '{{ payload | json }}\n      {{ image | image }}')
+    row = {'item': {'concept_name': '剪刀'}, 'image': 'data:image/png;base64,aW1hZ2U='}
+    return ctx.from_items([row]).map_prompt_async(
+        'match', config=parse_prompt_pack(pack), options=options,
+        inputs={'payload': 'item', 'image': 'image'}, output='answer',
+    )
+
+
+def test_systemone_noul_sends_images_and_reuses_actual_payload(server, tmp_path):
+    journal = tmp_path / 'image-calls'
+    first = review_image(DataAPI(), journal).checkpoint(tmp_path / 'image-first.jsonl', version='v1').take_all()
+    second = review_image(DataAPI(), journal).checkpoint(tmp_path / 'image-second.jsonl', version='v1').take_all()
+    assert first[0]['answer'] == second[0]['answer'] == {'type': 'noul', 'noul': 0.875}
+    assert len(server['requests']) == 1
+    body = server['requests'][0]['body']
+    assert body['images'] == ['data:image/png;base64,aW1hZ2U=']
+    assert json.loads(body['state']) == {'concept_name': '剪刀'}
+
+
+def test_systemone_rejects_non_data_image_uri(server, tmp_path):
+    pack = PACK.replace('{{ payload | json }}', '{{ payload | json }}\n      {{ image | image }}')
+    rows = DataAPI().from_items([{'item': {'concept_name': '剪刀'}, 'image': 'https://example.com/image.png'}])
+    with pytest.raises(ValueError, match='image data URLs'):
+        rows.map_prompt_async('match', config=parse_prompt_pack(pack),
+            inputs={'payload': 'item', 'image': 'image'}, output='answer',
+        ).checkpoint(tmp_path / 'invalid-image.jsonl', version='v1').take_all()
+
+
 def test_systemone_rejects_invalid_probability(server, tmp_path):
     server['probability'] = 1.2
     with pytest.raises(PromptResponseContractError, match='noul'):

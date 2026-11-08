@@ -23,3 +23,4 @@ class ExecutionMetadata:
     bytes_read: Optional[int] = None
     blocks_output: Optional[int] = None
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    run_ref: Any = None

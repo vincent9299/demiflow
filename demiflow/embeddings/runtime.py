@@ -14,7 +14,7 @@ from demiflow.execution.blocking_io import BlockingIOPool
 from demiflow.execution.stream_resources import CallMetrics
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
-from demiflow.services import ManagedHTTPService, VLLMService
+from demiflow.services.contracts import validate_service, service_request_slot
 from .model import EmbeddingModel
 from .payload import EmbeddingProtocolError, _add, prepare, prepare_batches, response_record, vectors
 
@@ -61,8 +61,7 @@ class EmbeddingActor:
             raise ValueError('Embedding output columns must be nonempty and distinct')
         if max_requests is not None and (type(max_requests) is not int or max_requests < 1):
             raise ValueError('max_requests must be a positive integer or None')
-        if service is not None and not isinstance(service, (VLLMService, ManagedHTTPService)):
-            raise TypeError('service must be VLLMService, ManagedHTTPService or None')
+        validate_service(service)
         if request_gate is not None and not isinstance(request_gate, RequestGate):
             raise TypeError('request_gate must be RequestGate or AdaptiveRequestGate')
         self.model = replace(model)  # Copy nested declaration mappings at plan time.
@@ -191,7 +190,8 @@ class EmbeddingActor:
         journal = self._journal
         started = time.monotonic()
         try:
-            status, raw = await self._http(encoded)
+            async with service_request_slot(self._owner):
+                status, raw = await self._http(encoded)
             _add(timings, 'http_s', time.monotonic() - started)
             record = await self._io(response_record, status, raw,
                                     _phase='response_parse', _timings=timings, _response=True)

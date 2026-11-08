@@ -2,7 +2,9 @@ import asyncio
 import httpx
 import threading
 import pytest
-from demiflow.collect.acquisition import Download, ParseDocument
+from demiflow.collect.acquisition import ParseDocument
+from demiflow import data
+from demiflow.collect import FetchPolicy
 from demiflow.collect.documents import read_document
 from demiflow.collect.session import WebSession
 from demiflow.objects import LocalObjectStore
@@ -20,17 +22,14 @@ def test_raw_download_then_offline_parse_use_independent_stores(tmp_path, monkey
         calls.append(str(request.url))
         return httpx.Response(200, headers={'content-type':'text/html'}, stream=Body())
     monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(**{**kw,'transport':httpx.MockTransport(handler)}))
-    web = WebSession(cache_path=tmp_path/'journal.sqlite', object_directory=tmp_path/'unused', retries=0)
     raw_store, body_store = LocalObjectStore(tmp_path/'raw'), LocalObjectStore(tmp_path/'body')
-    async def run():
-        try:
-            raw = await Download(session=web, store=raw_store)({'url':'https://example.org/a'})
-        finally:
-            await web.aclose()
-        assert raw['raw_ref'] and 'document_ref' not in raw
-        request = {k:raw[k] for k in ('url','final_url','content_type','retrieved_at','raw_ref')}
-        return await ParseDocument(store=body_store)(request), raw
-    parsed, raw = asyncio.run(run())
+    row=data.from_items([{'request':{'uri':'https://example.org/a'}}]).fetch(
+        store=raw_store,policy=FetchPolicy(max_object_bytes=65536)).take(1)[0]
+    raw=row['result']
+    assert raw['raw_ref'] and 'document_ref' not in raw
+    request=dict(url=raw['source']['uri'],final_url=raw['source']['final_uri'],
+        content_type=raw['source']['content_type'],retrieved_at=raw['retrieved_at'],raw_ref=raw['raw_ref'])
+    parsed=asyncio.run(ParseDocument(store=body_store)(request))
     assert len(calls) == 1 and parsed['status'] == 'ok'
     assert str(tmp_path/'raw') in raw['raw_ref']['uri']
     assert str(tmp_path/'body') in parsed['document_ref']['uri']

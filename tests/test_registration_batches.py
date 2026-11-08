@@ -1,12 +1,11 @@
 """Generic text imports, native reuse and bounded batch publication."""
 from dataclasses import replace
+import asyncio
 import sqlite3
 import pytest
 from demiflow import data
 from demiflow.collect.document_library import DocumentLibrary
 from demiflow.collect.documents import read_document
-from demiflow.collect.session import WebSession
-from demiflow.collect.web import WebClient
 
 URL='https://en.wikipedia.org/wiki/Example'
 LIMITS={'max_bytes':100000,'max_document_bytes':100000}
@@ -48,17 +47,10 @@ def test_batch_native_registration_and_fetch_no_http(library,tmp_path,monkeypatc
     got,_=collect(graph)
     assert sorted(r['receipt']['status'] for r in got)==['invalid_document','ok','redirect_registered','redirect_registered','skipped']
     assert library.lookup(URL+'Alias2',**LIMITS)['final_url']==URL
-    async def no_http(*args,**kwargs):raise AssertionError('local import made HTTP request')
-    monkeypatch.setattr(WebClient,'_get',no_http)
-    session=WebSession(cache_path=tmp_path/'run.sqlite',object_directory=tmp_path/'unused',
-                       document_library=library,search_url='https://search.example')
-    got,stats=collect(data.from_items([{'requests':[{'request_id':'q','urls':[URL+'Alias2'],'bindings':['fact']}]}])
-        .fetch_documents(requests='requests',output='out',session=session))
-    assert got[0]['out']['documents'][0]['acquisition']['kind']=='shared_library'
-    assert stats.metrics['resources']['WebSession:0']['fetch_attempts']==0
-    db=sqlite3.connect(library.index_path)
-    assert db.execute('SELECT count(*) FROM documents').fetchone()[0]==1
-    db.close()
+    result=library.lookup(URL+'Alias2',**LIMITS)
+    assert result['acquisition']['kind']=='shared_library'
+    assert read_document(result['document_ref'])['blocks']
+
 
 def test_redirect_missing_cycles_conflicts_and_bad_shape(library):
     library.register({'format':'redirect','url':URL,'target_url':URL+'1'},**LIMITS)

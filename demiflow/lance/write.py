@@ -27,20 +27,51 @@ _COMMIT_TIMEOUT_SECONDS = 1800
 def write_lance(
     spec: LanceWriteSpec,
     batches: Iterable[pa.RecordBatch | pa.Table],
+    *, limits=None, check_stop=None, operation_id=None,
 ) -> LanceWriteReceipt:
     """执行一次表写入；覆盖始终一次提交，不逐批清空目标。"""
+    if operation_id is not None:
+        if spec.mode not in {'create', 'overwrite', 'append'} or not isinstance(operation_id, str) or not 1 <= len(operation_id) <= 128 or not operation_id.isascii() or not all(c.isalnum() or c in '-_' for c in operation_id):
+            raise InvalidLanceRequest('Explicit write operation_id requires create/overwrite/append and 1..128 ASCII letters, digits, hyphens or underscores')
+    if limits is not None:
+        batches = _bounded_batches(batches, limits, check_stop)
     if spec.mode == 'merge':
         from .mutate import merge_lance
         return merge_lance(spec, batches)
     if spec.schema is not None:
         batches = (table.cast(spec.schema) for table in _normalize_tables(batches))
     if spec.expected_version is None or spec.mode == "overwrite":
+        if operation_id is not None:
+            return _write_direct(spec, batches, operation_id=operation_id)
         return _write_direct(spec, batches)
     prepared = prepare_lance_append(spec)
     if prepared is None:
         raise AssertionError("expected-version Lance append was not prepared")
+    if operation_id is not None:
+        from dataclasses import replace
+        prepared = replace(prepared, operation_id=operation_id)
     fragment = write_lance_fragment(prepared, task_index=0, batches=batches)
     return commit_lance_append(prepared, (fragment,))
+
+
+def _bounded_batches(batches, limits, check_stop):
+    """Reject excess rows/bytes before yielding them to the native writer.
+
+    Total Arrow bytes are a conservative logical output budget, not encoded disk
+    bytes or RSS. The enclosing process also guards allocations and actual disk.
+    """
+    from ..execution.payload_limits import arrow_batches
+    rows = size = 0
+    for batch in arrow_batches(batches, limits):
+        if check_stop is not None:
+            check_stop()
+        if not isinstance(batch, (pa.Table, pa.RecordBatch)):
+            raise InvalidLanceRequest('Lance write requires Arrow batches')
+        rows += batch.num_rows
+        size += batch.nbytes
+        if rows > limits['max_output_rows'] or size > limits['max_output_bytes']:
+            raise InvalidLanceRequest('Output row/byte budget exceeded')
+        yield batch
 
 
 def prepare_lance_append(
@@ -195,6 +226,7 @@ def verify_committed_append(
 def _write_direct(
     spec: LanceWriteSpec,
     batches: Iterable[pa.RecordBatch | pa.Table],
+    *, operation_id=None,
 ) -> LanceWriteReceipt:
     # 覆盖的版本检查先于消费输入；提交时还会由 Lance 原子检查同一版本。
     if spec.expected_version is not None:
@@ -230,7 +262,7 @@ def _write_direct(
             committed = lance.write_dataset(
                 reader, spec.uri, mode=spec.mode, commit_lock=None,
                 storage_options=dict(spec.storage_options) or None,
-                commit_message=f"demiflow-lance:{spec.content_hash}",
+                commit_message=f"demiflow-lance:{operation_id or spec.content_hash}",
             )
         else:
             # 先写未提交的数据文件，再以 expected_version 原子替换快照；
@@ -243,7 +275,7 @@ def _write_direct(
                 spec.uri, lance.LanceOperation.Overwrite(input_schema, fragments),
                 read_version=spec.expected_version, max_retries=0,
                 storage_options=dict(spec.storage_options) or None,
-                commit_message=f"demiflow-lance:{spec.content_hash}",
+                commit_message=f"demiflow-lance:{operation_id or spec.content_hash}",
                 commit_timeout=timedelta(seconds=_COMMIT_TIMEOUT_SECONDS),
             )
     except CommitConflictError as exc:

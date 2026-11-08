@@ -324,14 +324,13 @@ def test_watchdog_feed_defers_fire():
 def test_watchdog_feed_throttles_within_gap():
     """节流：距布防不足 min_gap_s 的喂狗是 no-op，不重布定时器。"""
     from demiflow.collect.relay import Watchdog
-    wd = Watchdog(deadline_s=60)
-    wd._armed_at = time.time()
-    armed0, timer0 = wd._armed_at, wd._t
-    wd.feed()                                # 刚布防就喂 → 忽略
-    assert wd._armed_at == armed0 and wd._t is timer0
-    wd._armed_at -= 61                       # 假装 61s 前布防
-    wd.feed()
-    assert wd._armed_at > armed0 and wd._t is not timer0
+    with Watchdog(deadline_s=60) as wd:
+        armed0, timer0 = wd._armed_at, wd._t
+        wd.feed()                            # 刚布防就喂 → 忽略
+        assert wd._armed_at == armed0 and wd._t is timer0
+        wd._armed_at -= 61                   # 假装 61s 前布防
+        wd.feed()
+        assert wd._armed_at > armed0 and wd._t is not timer0
 
 
 def test_pan123_upload_reports_slice_progress(monkeypatch, tmp_path):

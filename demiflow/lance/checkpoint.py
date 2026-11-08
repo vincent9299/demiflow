@@ -1,4 +1,7 @@
-"""Atomic, replayable Lance checkpoints with an enforced explicit schema.
+"""Retired Lance checkpoint implementation; entry points reject all execution.
+
+The historical implementation below remains for P6 removal. It cannot be
+selected as an alternative to unified run recovery. Historical semantics:
 
 A checkpoint writes one fresh attempt table into an exclusive
 ``<uri>.attempt-<id>`` directory, verifies the commit, records a pending
@@ -64,14 +67,9 @@ def checkpoint_lance(
     storage_options: Mapping[str, str] | None = None,
     max_rows_per_batch: int = _DEFAULT_MAX_ROWS_PER_BATCH,
 ):
-    """Execute ``dataset`` into ``uri`` and return a version-pinned Dataset.
-
-    ``schema`` is enforced on every row: unknown fields and incompatible
-    values fail the attempt, and a zero-row result commits a valid empty
-    table. ``fingerprint`` is the caller's logical identity for the attempt;
-    replays must repeat it exactly. See the module docstring for the
-    completion, retry, and concurrency contract.
-    """
+    """Retired entry; legacy sidecars never select an execution/recovery path."""
+    from ..execution.capabilities import require_action
+    require_action('checkpoint_lance')
     import pyarrow as pa
 
     if not isinstance(schema, pa.Schema):

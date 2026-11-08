@@ -122,6 +122,15 @@ STOP、外部取消及其他节点失败会停止后续投喂，并等待已启�
 这一等待不保证固定上限，不能用 stage watchdog 冒充线程硬超时。
 `map_async(execution='thread')` 仍拒绝 hard_timeout 和其 operator checkpoint 组合。
 
+`map_async` 和 `batch_map` 中，回调自行抛出的 `TimeoutError`（包括
+`asyncio.to_thread` 转交的异常）同样只按显式 `catch` 处理；没有匹配规则时
+必须终止流，原生 materialize/write_lance 不完成失败 action 或发布空结果。
+配置了尚未触发的 `hard_timeout` 也不改变回调异常的来源。运行时自己的
+`asyncio.wait_for` deadline 到期仍按原契约计 `hard_timeout` miss，整批认缺
+保留 dead_batches；显式 catch 优先。取消过程中回调返回值或抛出的异常
+沿用 `wait_for` 语义，不能仅凭耗时推断 deadline。同步阻塞线程仍须自行
+设置有限 I/O deadline，运行时超时不承诺强杀线程或限定全部清理时间。
+
 ## 顺序和恢复
 
 concurrency=1 的 inline 同步节点按收到行的顺序调用；上游并发可能已经打乱顺序。

@@ -1,0 +1,324 @@
+"""Project binding, bounded admission, persistent intent and owned workers."""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import threading
+import time
+
+from demiflow.workbench.conversations.common import directory_bytes
+from demiflow.workbench.conversations.common import digest
+from demiflow.workbench.conversations.common import identifier
+from demiflow.workbench.process import process_identity
+from demiflow.workbench.conversations.common import reject
+from demiflow.workbench.conversations.common import root_identity
+from demiflow.workbench.conversations.common import wire
+from demiflow.workbench.conversations.policy import Deployment
+from demiflow.workbench.conversations.policy import proxy_environment
+from demiflow.workbench.conversations.store import Store
+from demiflow.workbench.conversations.store import StorageUnavailable
+from demiflow.workbench.conversations.provider import adapter_for
+from demiflow.execution.process_observation import unit_stopped
+
+
+class Service:
+    remote = False
+
+    def __init__(self, config_path):
+        self.deployment = Deployment.load(config_path)
+        self.root = self.deployment.state
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.root.is_symlink() or self.root.stat().st_mode & 0o077:
+            reject('Development state must be a private physical directory')
+        self.owner = os.open(self.root / 'service.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try: fcntl.flock(self.owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(self.owner); reject('Development state already belongs to a service', 'busy')
+        try:
+            self._initialize_state()
+        except BaseException:
+            os.close(self.owner)
+            raise
+
+    def _initialize_state(self):
+        if self.root.stat().st_dev != Path(self.deployment.value['host_budget']['device_path']).stat().st_dev:
+            reject('Development state is outside the declared disk device partition')
+        self.store = Store(self.root, self.deployment.limits, initialize=True)
+        self.lock, self.workers, self.closed = threading.Lock(), {}, False
+        self.worker_targets = {}
+        # Exact non-secret deployment snapshot. Existing sessions bind this hash;
+        # changing a grant requires a new session, never an implicit permission upgrade.
+        value = json.loads(wire(self.deployment.value))
+        for p in value['projects'].values(): p.pop('identity', None)
+        self.policy_hash = digest(value)
+        self.config_path = self.root / (self.policy_hash + '.json')
+        if not self.config_path.exists():
+            deadline = time.monotonic() + 3
+            snapshots = 0
+            with os.scandir(self.root) as entries:
+                for count, entry in enumerate(entries):
+                    if count >= self.deployment.limits.sessions + 64 or time.monotonic() > deadline:
+                        reject('Development policy inventory exceeds budget', 'resource_limit')
+                    if entry.name.endswith('.json'):
+                        snapshots += 1
+                    if snapshots >= 32:
+                        reject('Development policy history is full; explicit maintenance required', 'resource_limit')
+            fd = os.open(self.config_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'wb') as stream: stream.write(wire(value, 65536))
+        for t in self.store.unresolved():
+            self.store.interrupt_unresolved(t['id'])
+
+    def project(self, workspace, root):
+        return self.deployment.project(workspace, root)
+
+    def capabilities(self, workspace, root):
+        return self.deployment.capabilities(workspace, root)
+
+    def create(self, workspace, root, request_id, provider_id):
+        self.project(workspace, root)
+        identifier(provider_id)
+        if provider_id not in self.deployment.providers: reject('Provider is not configured')
+        return self.store.create(workspace, root_identity(root), provider_id, request_id, self.policy_hash)
+
+    def conversation(self, workspace, root):
+        self.project(workspace,root)
+        session=self.store.primary(workspace,root_identity(root),self.policy_hash)
+        return dict(session=self.show(workspace,session['id']) if session else None)
+
+    def create_project(self, workspace, root, request_id, provider_id):
+        self.project(workspace,root);identifier(provider_id)
+        if provider_id not in self.deployment.providers:reject('Provider is not configured')
+        return self.store.ensure_project(workspace,root_identity(root),provider_id,request_id,self.policy_hash)
+
+    def start_project(self, workspace, root, session_id, submission_id, expected_revision, text):
+        self._require_primary(workspace,root,session_id)
+        return self.start(workspace,root,session_id,submission_id,expected_revision,text)
+
+    def _require_primary(self, workspace, root, session_id):
+        self.project(workspace,root)
+        session=self.store.show(workspace,session_id)
+        primary=self.create_project(workspace,root,'project-bind',session['provider'])
+        if primary['id']!=session_id:reject('This is a read-only earlier conversation', 'conflict')
+
+    def compact(self, workspace, root, session_id, submission_id, expected_revision):
+        self._require_primary(workspace,root,session_id)
+        session=self.store.session(session_id)
+        if not session['provider_session'] or not self.store.has_dispatched(session_id):
+            reject('No provider conversation is available to compact', 'conflict')
+        return self.start(workspace,root,session_id,submission_id,expected_revision,'压缩上下文',operation='compact')
+
+    def start(self, workspace, root, session_id, submission_id, expected_revision, text, *, operation="message"):
+        self.project(workspace, root)
+        caps = self.capabilities(workspace, root)
+        session = self.store.show(workspace, session_id)
+        if not caps['start'] or not any(p['id'] == session['provider'] and p['available'] for p in caps['providers']):
+            reject('Development provider is unavailable in this deployment')
+        with self.lock:
+            if self.closed: reject('Development service is stopping', 'busy')
+            self._reap()
+            self.deployment.validate_runtime(admit=True)
+            if (self.root / 'storage-pressure').exists():
+                reject('Development storage reserve was consumed; explicit maintenance is required', 'busy')
+            fs = os.statvfs(self.root)
+            if fs.f_bavail * fs.f_frsize < self.deployment.limits.provider_bytes + self.deployment.limits.output_bytes:
+                reject('Insufficient free space for the development turn reservation', 'resource_limit')
+            # Retained provider homes count after completion too. A new active
+            # turn reserves a full private allowance before it can spawn.
+            existing = self.store.submission(session_id, submission_id)
+            if existing is not None:
+                if existing['body_hash'] != digest({'text':text,**({'operation':operation} if operation!='message' else {})}): reject('Submission key has different text', 'conflict')
+                return self.store.public_turn(existing)
+            homes = {}
+            scan_deadline = time.monotonic() + 3
+            with os.scandir(self.root) as entries:
+                for count, entry in enumerate(entries):
+                    if count > self.deployment.limits.sessions + 64 or time.monotonic() > scan_deadline:
+                        reject('State inventory exceeds entry/time budget', 'resource_limit')
+                    if entry.is_dir(follow_symlinks=False):
+                        homes[entry.name] = directory_bytes(entry.path)
+            used = sum(homes.values())
+            allowance = self.deployment.limits.provider_bytes
+            reserved = sum(max(0, allowance - homes.get(t['session'], 0)) for t in self.store.unresolved())
+            if used + reserved + max(0, allowance - homes.get(session_id, 0)) > self.deployment.limits.private_total_bytes:
+                reject('Retained provider homes exhaust private disk reservation', 'resource_limit')
+            value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), self.policy_hash, operation=operation)
+            if not fresh: return self.store.public_turn(value)
+            tid = value['id']
+            lease = self.root / session_id / (tid + '.unit')
+            fd = read_fd = write_fd = None
+            try:
+                try:
+                    # Admission durably says no spawn has been attempted. All
+                    # allocation failures before spawning are safely recoverable.
+                    lease.parent.mkdir(mode=0o700, exist_ok=True)
+                    fd = os.open(lease, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                    fcntl.flock(fd, fcntl.LOCK_SH)
+                    info = os.fstat(fd)
+                    os.fsync(fd)
+                    from demiflow.forge.io import fsync_directory
+                    fsync_directory(lease.parent)
+                    fsync_directory(self.root)
+                    ownership = dict(unit_path=str(lease), unit_identity=dict(device=info.st_dev, inode=info.st_ino), nonce=value['epoch'])
+                    self.store.update(tid, process=wire(ownership).decode())
+                    read_fd, write_fd = os.pipe()
+                    worker = Path(__file__).with_name('worker.py')
+                    env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
+                    if self.deployment.value.get('runtime_domain'):
+                        env['DEMIFLOW_FORGE_DOMAIN'] = self.deployment.value['runtime_domain']
+                    for config in self.deployment.providers.values():
+                        if config.get('credential_env') and config['credential_env'] in os.environ:
+                            env[config['credential_env']] = os.environ[config['credential_env']]
+                        env.update(proxy_environment(config))
+                    # Must commit uncertainty before Popen: absence of a returned
+                    # Popen object does not prove absence of a real child.
+                    self.store.update(tid, launch_phase='spawning')
+                    self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
+                    process = subprocess.Popen([sys.executable, '-I', '-B', str(worker), str(self.config_path), tid, str(fd), str(read_fd)],
+                        cwd=self.root, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        pass_fds=(fd, read_fd), start_new_session=True)
+                    self.workers[tid] = (process, write_fd)
+                finally:
+                    try:
+                        if read_fd is not None: os.close(read_fd)
+                    finally:
+                        if fd is not None: os.close(fd)
+            except BaseException:
+                if write_fd is not None:
+                    os.close(write_fd)
+                    if tid in self.workers:
+                        self.workers[tid] = (self.workers[tid][0], -1)
+                if tid not in self.workers: self.worker_targets.pop(tid, None)
+                # A lost constructor return closes the parent pipe, so a real
+                # child drains itself. Until then the inherited unit stays held.
+                try: self._finish_unstarted(self.store.turn(tid))
+                except Exception: pass  # Durable phase permits later recovery.
+                raise
+            return self.store.public_turn(self.store.turn(tid))
+
+    def _finish_unstarted(self, turn):
+        if turn['cleanup'] == 'complete': return True
+        if turn['launch_phase'] == 'admitted':
+            return self.store.finish_unstarted(turn)
+        if turn['launch_phase'] == 'spawning':
+            ownership = json.loads(turn['process'] or '{}')
+            lease = self.root / turn['session'] / (turn['id'] + '.unit')
+            if (ownership.get('nonce') != turn['epoch'] or ownership.get('unit_path') != str(lease)
+                    or not ownership.get('unit_identity') or ownership.get('supervisor')):
+                return False
+            try: stopped = unit_stopped(lease, ownership['unit_identity'])
+            except OSError: return False
+            # Workers claim before running any tool. An unclaimed, unlocked
+            # matching unit proves no worker remains able to enter that phase.
+            if stopped: return self.store.finish_unstarted(turn)
+        # Once claimed, require the worker's descendant-drain receipt. An absent
+        # PID or unlocked fence alone cannot prove arbitrary tools were drained.
+        return False
+
+    def _reap(self):
+        for tid, (process, life) in list(self.workers.items()):
+            if process.poll() is not None:
+                if life >= 0: os.close(life)
+                del self.workers[tid]
+                self.worker_targets.pop(tid, None)
+                if self.store.turn(tid)['cleanup'] != 'complete':
+                    if not self._finish_unstarted(self.store.turn(tid)):
+                        self.store.update(tid, state='interrupted', cleanup='unknown')
+
+    def show(self, workspace, sid):
+        with self.lock:
+            self._reap()
+            return self.store.show(workspace, sid)
+
+    def input(self, workspace, root, session_id, turn_id, pending_request_id, expected_digest, answer):
+        self.project(workspace, root)
+        self.store.show(workspace, session_id)
+        pending = next((p for p in self.store.pending(turn_id) if p['id'] == pending_request_id), None)
+        if pending:
+            adapter_for(self.store.session(session_id)['provider']).answer(json.loads(pending['request']), answer)
+        return self.store.respond(workspace, session_id, turn_id, pending_request_id, expected_digest, answer)
+
+    def cancel(self, workspace, root, session_id, turn_id, request_id):
+        self.project(workspace, root); identifier(request_id)
+        identifier(session_id); identifier(turn_id)
+        with self.lock:
+            target = self.worker_targets.get(turn_id)
+            if target and (target[:2] != (workspace, session_id) or json.loads(target[3]) != root_identity(root)):
+                reject('Turn does not belong to session/project', 'not_found')
+            try:
+                return self.store.cancel(workspace, session_id, turn_id)
+            except StorageUnavailable:
+                # Only a confirmed immutable owned target and a persistence
+                # failure may use the independent stop channel. Rejections do not.
+                owned = self.workers.get(turn_id)
+                if target and owned and owned[1] >= 0:
+                    os.close(owned[1])
+                    self.workers[turn_id] = (owned[0], -1)
+                raise
+
+    def recover(self, workspace, root, session_id, expected_revision):
+        self.project(workspace, root)
+        with self.lock:
+            self._reap()
+            value = self.store.show(workspace, session_id)
+            if value['revision'] != expected_revision: reject('Session revision changed', 'conflict')
+            turn = value['turn']
+            if turn and turn['cleanup'] != 'complete':
+                saved = self.store.turn(turn['id']); process = json.loads(saved['process'] or '{}')
+                if self._finish_unstarted(saved):
+                    value = self.store.show(workspace, session_id)
+                    value['recovery'] = dict(status='clean', can_continue=True)
+                    return value
+                supervisor = process.get('supervisor')
+                value['recovery'] = dict(status='live' if supervisor and process_identity(supervisor['pid']) == supervisor else 'ownership_unknown',
+                    can_continue=False, reason='No new prompt will be sent; missing descendant cleanup proof retains the project lease')
+            else: value['recovery'] = dict(status='clean', can_continue=True)
+            return value
+
+    def close(self):
+        failure = None
+        with self.lock:
+            if self.closed:
+                return
+            self.closed = True
+            for tid, (_, life) in self.workers.items():
+                try:
+                    t = self.store.turn(tid); s = self.store.session(t['session'])
+                    self.store.cancel(s['workspace'], s['id'], tid)
+                except Exception:
+                    # The parent pipe is an independent stop path when control
+                    # persistence is unavailable. Do not abandon live workers.
+                    if life >= 0:
+                        os.close(life)
+                        self.workers[tid] = (self.workers[tid][0], -1)
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            with self.lock:
+                try:
+                    self._reap()
+                except Exception as exc:
+                    failure = exc
+                if not self.workers: break
+            time.sleep(0.05)
+        for _, life in self.workers.values():
+            if life >= 0: os.close(life)
+        self.workers.clear()
+        self.worker_targets.clear()
+        os.close(self.owner)
+        if failure is not None:
+            reject('Development shutdown could not read final cleanup state', 'busy')
+
+
+def connect(config_path):
+    """Choose a closed backend without constructing a second local owner."""
+    from demiflow.workbench.conversations.common import read_file
+    from demiflow.workbench.conversations.common import strict_json
+    from demiflow.workbench.conversations.existing_http import ExistingHTTP
+    from demiflow.workbench.conversations.existing_http import FORMAT
+    value = strict_json(read_file(config_path, 65536))
+    if type(value) is not dict:
+        reject('Invalid development deployment fields')
+    return ExistingHTTP(config_path) if value.get('format') == FORMAT else Service(config_path)

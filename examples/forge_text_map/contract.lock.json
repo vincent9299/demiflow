@@ -1,0 +1,102 @@
+{
+  "context_digest": "6c04e7d0ed27e48eebbb3d024b60c14a4ecd0522f19f3a561105513e1de97c05",
+  "contract": {
+    "contract_id": "demiflow.pipeline.map",
+    "layout": {
+      "ignored_dirs": [
+        ".git",
+        "__pycache__",
+        ".pytest_cache",
+        ".ipynb_checkpoints"
+      ],
+      "root_files": [
+        "project.json",
+        "request.json",
+        "contract.lock.json",
+        "pipeline.py",
+        "manifest.json",
+        "run.example.json",
+        "README.md"
+      ],
+      "runtime_dirs": [
+        "datasets",
+        "runs"
+      ],
+      "source_dirs": [
+        "operators",
+        "tests"
+      ]
+    },
+    "limits": {
+      "max_file_bytes": 2097152,
+      "max_files": 512,
+      "max_timeout_seconds": 600,
+      "max_total_bytes": 16777216,
+      "output_hard_limit_bytes": 1048576,
+      "output_tail_bytes": 65536
+    },
+    "nodes": [
+      "read_lance",
+      "map",
+      "write_lance"
+    ],
+    "operator_imports": [
+      "base64",
+      "collections",
+      "datetime",
+      "decimal",
+      "functools",
+      "hashlib",
+      "itertools",
+      "json",
+      "math",
+      "re",
+      "statistics",
+      "string",
+      "typing"
+    ],
+    "platform_objects": [
+      {
+        "module": "demiflow.data",
+        "path": "read_lance"
+      },
+      {
+        "module": "demiflow.data",
+        "path": "Dataset.map"
+      },
+      {
+        "module": "demiflow.data",
+        "path": "Dataset.write_lance"
+      }
+    ],
+    "schema_version": "demiflow_forge_contract_v1",
+    "version": "1.0.0"
+  },
+  "platform": [
+    {
+      "doc": "Create a lazy Dataset from a Lance scan.\n\n``version`` selects an exact positive Lance version; ``None`` resolves\nthe head when the action starts. ``limit`` is global, so Ray executes a\nlimited scan as one read task. ``storage_options`` contains only closed\nnon-secret Lance connection values, while ``backend_options`` contains\nonly Demiflow physical scheduling options. Formal Candidates should bind\nfixed inputs to an exact version obtained from authorized inspection.\n``projection`` maps output names to Lance SQL expressions (for example\n``{'item_n': 'array_length(items)'}``), mutually exclusive with ``columns``.\nExpressions execute in Lance; this does not promise storage-level pruning\nof every referenced nested field. Nulls and projected Arrow types survive.",
+      "id": "demiflow.data:read_lance",
+      "module": "demiflow.data",
+      "path": "read_lance",
+      "signature": "(uri: 'str', *, version: 'int | None' = None, columns: 'Sequence[str] | None' = None, filter: 'str | None' = None, limit: 'int | None' = None, storage_options: 'Mapping[str, str] | None' = None, batch_size: 'int | None' = None, batch_readahead: 'int | None' = None, fragment_readahead: 'int | None' = None, projection: 'Mapping[str, str] | None' = None, backend_options=None) -> 'Dataset'",
+      "source_sha256": "1cdf42a1362a1105e19efd8fd552004e5b979bb3fadcc4a575c3eca0dd20631c"
+    },
+    {
+      "doc": "Append a synchronous Python row transformation and optional stream policy.\n\nWithout ``inputs``, ``fn`` receives the complete row mapping and its\nreturned mapping becomes the complete output row. With ``inputs``, the\nmapping direction is callable argument name to Dataset row field name;\nexisting fields are preserved. ``output`` stores the complete callable\nreturn value in one row field. ``outputs`` maps callable return keys to\ndestination row fields. Use at most one of ``output`` and ``outputs``.\nDemiflow plans worker resources and parallelism at action time.\n\n普通惰性动作按需向上游要行，算子同步组合、无级间队列；\n流式动作使用每级 worker 协程及有界队列，支持级间并发与背压。\nmap 接收同步 callable；map_async 接收同步或异步 callable。\nA map in a streaming chain defaults to one inline worker and one queued\nrow. Explicit concurrency/queue_depth/execution/catch/label/callable_scope\nselect local streaming execution, including a map-only run_stream().\nOrdinary lazy actions and Ray reject explicit streaming options; local\nmaterialize() and checkpoint actions bridge through run_stream().\n\nexecution='thread' moves synchronous calls to a stage-owned bounded\nthread pool. concurrency defaults to 1, queue_depth to concurrency,\ncatch to (), and callable_scope to 'stage'. Stage-scoped callables and\nexplicit arguments are shared and must be thread-safe. 'worker' requires\na callable class: each logical worker lazily constructs its own instance\nusing fn_constructor_args/kwargs. Constructors and astart/astop/aclose\nhooks run on the event loop; thread affinity is not guaranteed. Hooks\nmust be nonblocking, and thread calls must have their own I/O deadlines.\nCancellation drains calls before cleanup; threads cannot be killed.\n\nConcurrent output is unordered. catch only accepts Exception subclasses;\nlisted row errors are dropped and counted, other errors stop the stream.\nThis API does not add operator checkpoint or hard_timeout support; the\nexisting run_stream(checkpoint=...) sink recovery remains available.\nQueues bound row counts, not payload bytes or arbitrary callback memory.\nSee docs/streaming-map.md for lifecycle, resource and replay contracts.",
+      "id": "demiflow.data:Dataset.map",
+      "module": "demiflow.data",
+      "path": "Dataset.map",
+      "signature": "(self, fn: 'Callable[..., Any]', *, inputs: 'Optional[Mapping[str, str] | Sequence[str]]' = None, output: 'Optional[str]' = None, outputs: 'Optional[Mapping[str, str]]' = None, fn_args: 'Optional[Sequence[Any]]' = None, fn_kwargs: 'Optional[Mapping[str, Any]]' = None, fn_constructor_args: 'Optional[Sequence[Any]]' = None, fn_constructor_kwargs: 'Optional[Mapping[str, Any]]' = None, backend_options=None, concurrency: 'Optional[int]' = None, queue_depth: 'Optional[int]' = None, execution: 'Optional[str]' = None, catch: 'Optional[tuple]' = None, label: 'Optional[str]' = None, callable_scope: 'Optional[str]' = None) -> \"'Dataset'\"",
+      "source_sha256": "79f163549e0cdedd1cf37fee9816e4e9740c5bc2e4338838060b616c07232468"
+    },
+    {
+      "doc": "将 Dataset 以追加、覆盖或部分列 merge 提交到 Lance。\n\n``mode='create'`` 只创建不存在的表，原子拒绝已存在的表，不接受 expected_version。\n``mode='append'`` 保留默认的创建/追加行为，已有表要求 schema 一致；\n``mode='overwrite'`` 用本次数据及 schema 替换当前内容，旧版本仍可读取。\n显式 ``schema`` 约束 Arrow 类型，并允许无数据时创建或覆盖为空表；\n无 schema 的空输入仍报错。``expected_version`` 在提交时检查并发冲突；\ncompare-and-append 仍要求至少一行。返回值为 ``None``，提交结果不确定时\n抛出带回执的 ``LanceWriteError``，不自动重试或去重。\n这是同步 Dataset 的终结动作；异步算子仍通过 ``run_stream()`` 执行。\n\n``mode='merge'`` 按 ``on`` 主键更新已有表，只更新输入中的非主键列；\n``update_columns`` 可显式限定列，输入多列或缺列时报错。未提交列保留，\n显式 null 清空。键要求唯一且非空。``when_not_matched`` 默认 error，\n也可 ignore 或 insert；插入时省略的目标列为 null。新增字段须先使用\n``data.add_lance_columns``。整个 Dataset 一次提交，不按 worker 提交。\n``return_receipt=True`` 返回含实际固定版本的写入回执，默认仍返回 None。",
+      "id": "demiflow.data:Dataset.write_lance",
+      "module": "demiflow.data",
+      "path": "Dataset.write_lance",
+      "signature": "(self, uri: 'str', *, expected_version: 'int | None' = None, storage_options: 'Mapping[str, str] | None' = None, mode: 'str' = 'append', schema=None, on=None, update_columns=None, when_not_matched=None, return_receipt=False, backend_options=None)",
+      "source_sha256": "79f163549e0cdedd1cf37fee9816e4e9740c5bc2e4338838060b616c07232468"
+    }
+  ],
+  "schema_version": "demiflow_forge_context_v1"
+}

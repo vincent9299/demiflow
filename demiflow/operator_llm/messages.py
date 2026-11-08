@@ -89,4 +89,84 @@ def render_input(prompt, values):
             raise ValueError('messages mode requires only the messages binding')
         return (), validate_messages(values['messages'], prompt.message_limits)
     from .template import render_template
-    return render_template(prompt.template, values), None
+    if set(values) != set(prompt.arguments):
+        from .errors import PromptArgumentMissingError, PromptArgumentUnexpectedError
+        missing = set(prompt.arguments) - set(values)
+        if missing:
+            raise PromptArgumentMissingError(f'missing prompt arguments: {sorted(missing)}')
+        raise PromptArgumentUnexpectedError(f'unexpected prompt arguments: {sorted(set(values) - set(prompt.arguments))}')
+    return render_template(prompt.template, {key: values[key] for key in prompt.template.arguments}), None
+
+
+def template_input_limits(value):
+    """Image counts/encoded image bytes are independent of text/token budgets."""
+    ceilings = {'max_images': 64, 'max_image_bytes': 64 * 1024**2, 'max_total_image_bytes': 128 * 1024**2}
+    if type(value) is not dict or set(value) != set(ceilings):
+        raise ValueError('input_limits requires max_images/max_image_bytes/max_total_image_bytes')
+    if any(type(v) is not int or not (0 if k == 'max_images' else 1) <= v <= ceilings[k] for k, v in value.items()):
+        raise ValueError('Image input limits exceed deployment ceilings')
+    if value['max_image_bytes'] > value['max_total_image_bytes']:
+        raise ValueError('Single image budget exceeds total image budget')
+    return dict(value)
+
+
+def admit_template(prompt, values, options):
+    """Bound expansion before rendering; client still checks the exact wire body.
+
+    Explicit image limits cover already loaded bytes/data URLs. Without them,
+    legacy HTTP URLs retain wire-size accounting only. Decoded pixels belong to
+    the native image reader's separate limits.
+    """
+    from ..data.runtime_contract import check_size, RuntimeContractError
+    maximum = options.get('max_request_bytes')
+    if maximum is None:
+        return
+    if prompt.input_mode != 'template' or set(prompt.input_modalities) - {'text', 'image'}:
+        raise RuntimeContractError('Bounded rendering requires a text/image template')
+    limits = template_input_limits(options['input_limits']) if 'input_limits' in options else None
+    from .model import ImageValue
+    image_names = {p.name for p in prompt.template.placeholders if p.kind.value in {'image', 'numbered_image'}}
+    measured = dict(values)
+    for name in image_names:
+        images = values.get(name)
+        images = images if type(images) in (list, tuple) else (images,)
+        if len(images) > (limits['max_images'] if limits else 64):
+            raise RuntimeContractError('Image input count budget exceeded')
+        measured[name] = [(image.data if image.data is not None else image.uri) if type(image) is ImageValue else image for image in images]
+    check_size(measured, maximum)
+    reserved = 6 * len(prompt.template.source) + 512
+    count = total = 0
+    for placeholder in prompt.template.placeholders:
+        value = values.get(placeholder.name)
+        if placeholder.kind.value in {'image', 'numbered_image'}:
+            images = value if type(value) in (list, tuple) else (value,)
+            count += len(images)
+            if count > (limits['max_images'] if limits else 64):
+                raise RuntimeContractError('Image input count budget exceeded')
+            for image in images:
+                if type(image) is ImageValue:
+                    image = image.data if image.data is not None else image.uri
+                if type(image) is bytes:
+                    size, wire = len(image), 4 * ((len(image) + 2) // 3) + 64
+                elif type(image) is str:
+                    comma = image.find(',', 0, 129)
+                    prefix = image[:comma] if comma >= 0 else ''
+                    if limits is None and image.startswith(('http://', 'https://')):
+                        size, wire = 0, 6 * len(image)
+                    elif not prefix.startswith('data:image/') or not prefix.endswith(';base64') or not image.isascii():
+                        raise RuntimeContractError('Bounded image inputs require bytes or image data URLs')
+                    else:
+                        # No decode or payload substring before admission.
+                        size, wire = (len(image) - comma - 1 + 3) // 4 * 3, len(image)
+                else:
+                    raise RuntimeContractError('Bounded image inputs require bytes or image data URLs')
+                total += size
+                if limits and (size > limits['max_image_bytes'] or total > limits['max_total_image_bytes']):
+                    raise RuntimeContractError('Image input byte budget exceeded')
+                reserved += wire + 128
+        else:
+            reserved += 6 * (len(value) if type(value) is str else check_size(value, maximum))
+        if reserved > maximum:
+            raise RuntimeContractError('Rendered prompt reservation exceeds max_request_bytes')
+    if reserved > maximum:
+        raise RuntimeContractError('Rendered prompt reservation exceeds max_request_bytes')

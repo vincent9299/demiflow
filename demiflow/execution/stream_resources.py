@@ -42,7 +42,17 @@ class StreamResources:
         if len(set(names)) != len(names): raise ValueError('Duplicate save_lance stage name')
 
     def make_queue(self, depth):
-        q = self.queue_factory(depth) if self.queue_factory else ObservedQueue(depth)
+        from .run_context import current_run
+        from .recovery_contract import RecoveryContractError
+        run = current_run()
+        if run is None:
+            raise RecoveryContractError('Native bounded queues require a run context')
+        if self.queue_factory is not None:
+            raise RecoveryContractError('Execution requires native byte-bounded queues; custom transports need their adapter')
+        if type(depth) is not int or not 1 <= depth <= 256:
+            raise RecoveryContractError('Stream queue depth exceeds admission budget')
+        maximum = run.limits['max_row_bytes']
+        q = ObservedQueue(depth, max_item_bytes=maximum, max_bytes=depth * maximum)
         self.queues.append(q)
         return q
 
@@ -56,7 +66,15 @@ class StreamResources:
             begin = getattr(actor, 'astart', None)
             if begin is not None:
                 self.started.append(actor)
-                await begin()
+                from .checked import current
+                checked = current()
+                completed = False
+                try:
+                    await begin()
+                    completed = True
+                finally:
+                    if checked is not None:
+                        checked.actor_lifecycle(actor, 'started', completed)
 
     def snapshot(self, stats):
         started_ids={id(a) for a in self.started}
@@ -66,6 +84,7 @@ class StreamResources:
             'stages':stats.stages, 'stage_processing_latency':stats.timing_summary(),
             'stage_policies': stats.stage_policies,
             'queues':[{'stage':name, 'capacity':q.maxsize, 'peak':getattr(q,'peak',None),
+                       'peak_bytes':getattr(q,'peak_bytes',None), 'max_bytes':getattr(q,'max_bytes',None),
                        'wait':q.wait.summary() if hasattr(q,'wait') else None}
                       for name,q in zip(stats.stages,self.queues)],
             'resources':{f'{type(r).__name__}:{i}':r.snapshot_metrics() for i,r in enumerate(self.resources)
@@ -98,10 +117,17 @@ class StreamResources:
         for resource in reversed(owned):
             close = getattr(resource, 'aclose', None)
             if close is not None:
+                from .checked import current
+                checked = current()
+                completed = False
                 try:
                     result = close()
                     if inspect.isawaitable(result): await result
+                    completed = True
                 except Exception as exc: errors.append(exc)
+                finally:
+                    if checked is not None:
+                        checked.actor_lifecycle(resource, 'closed', completed)
         from .resource_registry import stream_cleanups
         for cleanup in stream_cleanups() if action_cleanups else ():
             try:

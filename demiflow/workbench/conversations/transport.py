@@ -1,0 +1,128 @@
+"""One bounded stdio reader; independent RPC responses and server requests."""
+from __future__ import annotations
+
+from collections import deque
+import os
+import selectors
+import time
+
+from demiflow.agent_transport import strict_json
+from demiflow.workbench.conversations.common import reject
+from demiflow.workbench.conversations.common import wire
+
+
+def decode(raw):
+    # Count lexical structure before JSON allocates containers. String literals
+    # and escapes are skipped; the strict parser handles syntax/duplicates.
+    depth = count = 0; quoted = escaped = False
+    for char in raw:
+        if quoted:
+            if escaped: escaped = False
+            elif char == 92: escaped = True
+            elif char == 34: quoted = False
+        elif char == 34: quoted = True
+        elif char in (91, 123):
+            depth += 1; count += 1
+            if depth > 64: reject('Provider JSON nesting exceeds budget', 'resource_limit')
+        elif char in (93, 125): depth -= 1
+        elif char in (44, 58): count += 1
+        if count > 50000: reject('Provider JSON structure exceeds budget', 'resource_limit')
+    value = strict_json(raw)
+    if type(value) is not dict: reject('Provider frame is not an object')
+    return value
+
+
+class Transport:
+    def __init__(self, process, limits, *, acp=False):
+        self.process, self.limits, self.acp = process, limits, acp
+        self.selector = selectors.DefaultSelector()
+        self.buffer = bytearray(); self.stderr = bytearray(); self.stderr_total = 0
+        self.events, self.queued_bytes = deque(), 0
+        self.pending, self.responses, self.next_id = set(), {}, 0
+        self.response_bytes, self.response_sizes = 0, {}
+        self.output_bytes = self.frame_count = 0
+        self.out = bytearray(); self.closed = False
+        for name, stream in (('stdout', process.stdout), ('stderr', process.stderr)):
+            os.set_blocking(stream.fileno(), False)
+            self.selector.register(stream, selectors.EVENT_READ, name)
+        os.set_blocking(process.stdin.fileno(), False)
+
+    def send(self, value):
+        if self.acp: value = dict(jsonrpc='2.0', **value)
+        raw = wire(value, self.limits.frame_bytes) + b'\n'
+        if len(self.out) + len(raw) > 2 * self.limits.frame_bytes:
+            reject('Provider write queue exceeded budget', 'resource_limit')
+        self.out.extend(raw)
+        deadline = time.monotonic() + 5
+        while self.out:
+            try:
+                written = os.write(self.process.stdin.fileno(), self.out)
+                del self.out[:written]
+            except BlockingIOError:
+                if time.monotonic() > deadline: reject('Provider input backpressure timeout', 'resource_limit')
+                self.poll(0.05)
+
+    def request(self, method, params):
+        if len(self.pending) >= 16: reject('Too many provider RPC requests', 'resource_limit')
+        self.next_id += 1
+        key = 'client-' + str(self.next_id)
+        self.pending.add(key)
+        self.send(dict(id=key, method=method, params=params))
+        return key
+
+    def take(self, key):
+        if key not in self.responses: return None
+        response = self.responses.pop(key); self.pending.remove(key)
+        self.response_bytes -= self.response_sizes.pop(key)
+        if 'error' in response: reject('Provider RPC failed: ' + str(response['error'])[:2048])
+        return response['result']
+
+    def poll(self, timeout=0.1):
+        for key, _ in self.selector.select(timeout):
+            maximum = self.limits.frame_bytes + 1 - len(self.buffer) if key.data == 'stdout' else 65536
+            chunk = os.read(key.fd, min(65536, maximum))
+            if not chunk:
+                self.selector.unregister(key.fileobj)
+                if key.data == 'stdout': self.closed = True
+                continue
+            if key.data == 'stderr':
+                self.stderr_total += len(chunk)
+                if self.stderr_total > self.limits.stderr_bytes:
+                    reject('Provider stderr exceeded budget', 'resource_limit')
+                self.stderr.extend(chunk)
+                continue
+            self.output_bytes += len(chunk)
+            if self.output_bytes > self.limits.output_bytes:
+                reject('Provider total stdout byte budget exceeded', 'resource_limit')
+            self.buffer.extend(chunk)
+            while b'\n' in self.buffer:
+                end = self.buffer.index(10)
+                raw = bytes(self.buffer[:end]); del self.buffer[:end + 1]
+                if not raw: continue
+                self.frame_count += 1
+                if self.frame_count > self.limits.events_per_turn:
+                    reject('Provider total frame budget exceeded', 'resource_limit')
+                event = decode(raw)
+                if 'id' in event and 'method' not in event:
+                    identity = event['id']
+                    if type(identity) is not str or identity not in self.pending or identity in self.responses:
+                        reject('Unknown or duplicate provider response identity')
+                    if self.response_bytes + len(raw) > 2 * self.limits.frame_bytes:
+                        reject('Provider response map byte budget exceeded', 'resource_limit')
+                    self.response_bytes += len(raw); self.response_sizes[identity] = len(raw)
+                    self.responses[identity] = event
+                else:
+                    if len(self.events) >= 128 or self.queued_bytes + len(raw) > 2 * self.limits.frame_bytes:
+                        reject('Provider event queue exceeded budget', 'resource_limit')
+                    self.events.append((event, len(raw))); self.queued_bytes += len(raw)
+            if len(self.buffer) > self.limits.frame_bytes:
+                reject('Provider frame exceeded byte budget', 'resource_limit')
+
+    def pop(self):
+        event, size = self.events.popleft(); self.queued_bytes -= size
+        return event
+
+    def close(self):
+        self.selector.close()
+        for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+            stream.close()

@@ -7,6 +7,8 @@ Used by batch_map (concurrency=1), without materializing the whole stream.
 import asyncio
 import hashlib
 import json
+import sqlite3
+import tempfile
 from pathlib import Path
 import lance
 import pyarrow as pa
@@ -22,11 +24,13 @@ def _canonical(row):
 class StreamLanceWriter:
     def __init__(self, uri, schema, *, key, transient_columns=(), output_ref=None,
                  mode='overwrite', when=None, max_rows=1000000,
-                 max_row_bytes=16*1024**2, max_key_bytes=4096):
+                 max_row_bytes=16*1024**2, max_key_bytes=4096, max_index_bytes=512*1024**2):
         self.uri, self.schema, self.key = str(uri), schema, tuple(key) if isinstance(key, (list, tuple)) else key
         self.transient_columns = tuple(transient_columns)
         self.version = None
-        self.seen = set()
+        self._index = None
+        self._index_directory = None
+        self._index_failed = False
         self.rows = 0
         if output_ref is not None and (not isinstance(output_ref,str) or not 1<=len(output_ref)<=128
                                        or output_ref in schema.names):
@@ -34,13 +38,65 @@ class StreamLanceWriter:
         self.output_ref=output_ref
         if mode not in {'overwrite', 'append'} or when is not None and not callable(when):
             raise ValueError('Invalid stream save mode/when')
-        for name, value, ceiling in [('max_rows', max_rows, 10000000),
-                ('max_row_bytes', max_row_bytes, 64*1024**2), ('max_key_bytes', max_key_bytes, 65536)]:
+        for name, value, ceiling in [('max_rows', max_rows, 100000000),
+                ('max_row_bytes', max_row_bytes, 64*1024**2), ('max_key_bytes', max_key_bytes, 65536),
+                ('max_index_bytes', max_index_bytes, 16*1024**3)]:
             if type(value) is not int or not 1 <= value <= ceiling:
                 raise ValueError('Invalid stream save bound: ' + name)
         self.mode, self.when = mode, when
         self.checkpoint = None
         self.max_rows, self.max_row_bytes, self.max_key_bytes = max_rows, max_row_bytes, max_key_bytes
+        self.max_index_bytes = max_index_bytes
+        self._call_validations = {}
+
+    def _close_index(self):
+        if self._index is not None:
+            self._index.close()
+            self._index = None
+        if self._index_directory is not None:
+            self._index_directory.cleanup()
+            self._index_directory = None
+
+    def _open_index(self):
+        """Rebuildable membership index; fixed cache, bounded pages, no key set."""
+        self._close_index()
+        from .checked import current
+        checked = current()
+        directory = (checked.work_root / 'indexes' if checked is not None and checked.work_root is not None
+                     else Path(self.uri).with_suffix('.stream-writer'))
+        directory.mkdir(parents=True, exist_ok=True)
+        self._index_directory = tempfile.TemporaryDirectory(prefix='keys-', dir=directory)
+        try:
+            self._index = sqlite3.connect(Path(self._index_directory.name) / 'keys.sqlite', check_same_thread=False)
+            self._index.execute('PRAGMA journal_mode=OFF')
+            self._index.execute('PRAGMA synchronous=OFF')
+            self._index.execute('PRAGMA cache_size=-2048')
+            self._index.execute('PRAGMA mmap_size=0')
+            self._index.execute('PRAGMA temp_store=FILE')
+            page = self._index.execute('PRAGMA page_size').fetchone()[0]
+            if self.max_index_bytes < 2 * page:
+                raise ValueError('Stream key index budget is too small')
+            self._index.execute('PRAGMA max_page_count=' + str(self.max_index_bytes // page))
+            self._index.execute('CREATE TABLE keys (digest BLOB PRIMARY KEY) WITHOUT ROWID')
+            self._index_failed = False
+        except BaseException:
+            self._close_index()
+            raise
+
+    def _contains(self, digest):
+        if self._index_failed or self._index is None:
+            raise ValueError('Stream key index requires initialization after failure')
+        return self._index.execute('SELECT 1 FROM keys WHERE digest=?', (digest,)).fetchone() is not None
+
+    def _remember(self, digests):
+        try:
+            self._index.executemany('INSERT INTO keys VALUES(?)', ((d,) for d in digests))
+            self._index.commit()
+        except sqlite3.DatabaseError as exc:
+            # This disposable index has no journal. Never reuse partial state;
+            # a new execution rebuilds it from the fixed committed table.
+            self._index_failed = True
+            raise ValueError('Stream key index exceeds its disk budget or has duplicate keys') from exc
 
     def key_digest(self, key):
         if any(v is None or v == '' or not isinstance(v, (str, int, bool)) for v in key):
@@ -55,10 +111,10 @@ class StreamLanceWriter:
     def initialize(self):
         """Start an explicitly new delivery; caller owns the run/target lock."""
         Path(self.uri).parent.mkdir(parents=True, exist_ok=True)
-        self.seen.clear(); self.rows=0
+        self._open_index(); self.rows=0
         if self.mode == 'append' and Path(self.uri).exists():
             previous = lance.dataset(self.uri)
-            if previous.schema != self.schema:
+            if not previous.schema.equals(self.schema, check_metadata=True):
                 raise ValueError('stream append schema differs from saved table')
             if previous.count_rows() > self.max_rows:
                 raise ValueError('stream snapshot exceeds max_rows')
@@ -67,13 +123,25 @@ class StreamLanceWriter:
                     batch_readahead=1, fragment_readahead=1).to_batches():
                 if batch.nbytes > 128*self.max_key_bytes:
                     raise ValueError('saved keys exceed max_key_bytes')
+                digests = []
                 for row in batch.to_pylist():
                     digest = self.key_digest(tuple(row[k] for k in fields))
-                    if digest in self.seen:
+                    if self._contains(digest) or digest in digests:
                         raise ValueError('saved stream snapshot keys are not unique')
-                    self.seen.add(digest)
+                    digests.append(digest)
                     self.rows += 1
+                self._remember(digests)
             self.version = previous.version
+            return
+        if self.checkpoint is not None and self.checkpoint.declared_outputs is not None:
+            with self.checkpoint.lock:
+                operation = self.checkpoint.begin_initialize(self.stage)
+                receipt = write_lance(LanceWriteSpec(uri=self.uri, mode='create', schema=self.schema),
+                                      [pa.Table.from_pylist([], schema=self.schema)], operation_id=operation)
+                if receipt.status != 'committed':
+                    raise RuntimeError('snapshot initialization is indeterminate')
+                self.version = receipt.committed_version
+                self.checkpoint.committed(self.stage, self.reference())
             return
         receipt = write_lance(LanceWriteSpec(uri=self.uri, mode='overwrite', schema=self.schema),
                               [pa.Table.from_pylist([], schema=self.schema)])
@@ -81,21 +149,33 @@ class StreamLanceWriter:
         self.version = lance.dataset(self.uri).version
 
     def _write(self, rows):
-        if self.checkpoint is not None:
-            with self.checkpoint.lock:
-                try:
+        try:
+            if self.checkpoint is not None:
+                with self.checkpoint.lock:
                     if self.checkpoint.failed:
                         raise ValueError('Checkpoint writer failed; recovery is required')
                     return self._write_locked(rows)
-                except BaseException:
-                    self.checkpoint.failed = True
-                    raise
-        return self._write_locked(rows)
+            return self._write_locked(rows)
+        except BaseException:
+            self._index_failed = True
+            if self.checkpoint is not None:
+                self.checkpoint.failed = True
+            raise
 
     def _write_locked(self, rows):
         if self.output_ref is not None and any(self.output_ref in row for row in rows):
             raise ValueError('output_ref would overwrite an input field')
-        selected = [r for r in rows if self.when is None or self.when(r)]
+        def selected_row(row):
+            if self.when is None:
+                return True
+            validation = self._call_validations.get('when')
+            if validation is not None:
+                validation.inputs((row,), {})
+            result = self.when(row)
+            if validation is not None:
+                validation.output(result)
+            return result
+        selected = [r for r in rows if selected_row(r)]
         if not selected:
             return rows
         from .stream_grouping import row_size
@@ -105,10 +185,11 @@ class StreamLanceWriter:
         fields = self.key if isinstance(self.key, tuple) else (self.key,)
         keys = [tuple(r[k] for k in fields) for r in projected]
         digests = [self.key_digest(k) for k in keys]
-        if len(set(digests)) != len(digests) or self.mode == 'overwrite' and self.seen.intersection(digests):
+        known = [self._contains(digest) for digest in digests]
+        if len(set(digests)) != len(digests) or self.mode == 'overwrite' and any(known):
             raise ValueError('stream snapshot keys must be nonempty and unique')
         if self.mode == 'append':
-            old = [(key, row) for key, d, row in zip(keys, digests, projected) if d in self.seen]
+            old = [(key, row) for key, seen, row in zip(keys, known, projected) if seen]
             if old:
                 table = lance.dataset(self.uri, version=self.version)
                 for key, row in old:
@@ -122,7 +203,7 @@ class StreamLanceWriter:
                     expected = pa.Table.from_pylist([row], schema=self.schema).to_pylist()
                     if _canonical(found) != _canonical(expected):
                         raise ValueError('stream append key has conflicting saved content')
-            fresh = [(k, d, r) for k, d, r in zip(keys, digests, projected) if d not in self.seen]
+            fresh = [(k, d, r) for k, d, r, seen in zip(keys, digests, projected, known) if not seen]
             keys = [k for k, d, r in fresh]
             digests = [d for k, d, r in fresh]
             projected = [r for k, d, r in fresh]
@@ -130,6 +211,9 @@ class StreamLanceWriter:
             raise ValueError('stream snapshot exceeds max_rows')
         if not projected:
             return self.forward(rows, selected)
+        # Reserve index capacity before the external commit. Any subsequent
+        # failure invalidates this derived index; committed rows remain in Lance.
+        self._remember(digests)
         table = pa.Table.from_pylist(projected, schema=self.schema)
         base = self.version
         if self.checkpoint is not None:
@@ -143,16 +227,26 @@ class StreamLanceWriter:
             # partial/different batch remains a hard failure, never blind append.
             current = lance.dataset(self.uri)
             if current.version != base+1: raise
-            predicate = ' OR '.join('(' + ' AND '.join(scalar_equal(name, value)
-                for name, value in zip(fields, key)) + ')' for key in keys)
-            actual = current.to_table(filter=predicate)
             expected = {tuple(r[k] for k in fields):_canonical(r) for r in table.to_pylist()}
-            found = {tuple(r[k] for k in fields):_canonical(r) for r in actual.to_pylist()}
-            if len(actual) != len(table) or found != expected: raise
+            found = {}
+            for key in keys:
+                predicate = ' AND '.join(scalar_equal(name, value) for name, value in zip(fields, key))
+                count = 0
+                for batch in current.scanner(filter=predicate, limit=2, batch_size=1,
+                        batch_readahead=1, fragment_readahead=1).to_batches():
+                    if batch.nbytes > self.max_row_bytes:
+                        raise ValueError('Reconciled stream row exceeds max_row_bytes')
+                    for row in batch.to_pylist():
+                        count += 1
+                        found[tuple(row[k] for k in fields)] = _canonical(row)
+                if count != 1:
+                    raise ValueError('Stream commit reconciliation requires one row per key')
+            if found != expected:
+                raise ValueError('Stream commit reconciliation content differs')
         self.version = base+1
         if self.checkpoint is not None:
             self.checkpoint.committed(self.stage, self.reference())
-        self.seen.update(digests); self.rows += len(projected)
+        self.rows += len(projected)
         return self.forward(rows, selected)
 
     def forward(self, rows, selected):
@@ -173,6 +267,9 @@ class StreamLanceWriter:
 
     def reference(self):
         return {'uri':self.uri,'version':self.version}
+
+    async def aclose(self):
+        self._close_index()
 
 
 class StreamLanceSink(StreamLanceWriter):
@@ -206,6 +303,7 @@ class StreamLanceSink(StreamLanceWriter):
             raise
 
     async def aclose(self):
+        await super().aclose()
         if self._lock is not None:
             self._lock.__exit__(None, None, None)
             self._lock = None

@@ -11,7 +11,7 @@ import re
 
 PROMPT_MODEL_TRANSPORTS = frozenset({"azure_openai", "openai_compatible", "systemone"})
 PROMPT_MODEL_FIELDS = frozenset({
-    "name", "transport", "base_url", "base_url_env", "api_key_env", "api_version",
+    "name", "transport", "base_url", "base_url_env", "api_key_env", "api_version", "deployment",
 })
 PROMPT_ENV_NAME_PATTERN = r"[A-Z_][A-Z0-9_]*"
 _PROMPT_ENV_NAME = re.compile(PROMPT_ENV_NAME_PATTERN)
@@ -47,12 +47,27 @@ def inspect_prompt_model(value: Any, *, label: str, prompt: str = "", media=Fals
     extra = sorted(set(value) - PROMPT_MODEL_FIELDS)
     for name in extra:
         issue("prompt_model_field_unsupported", f"{label} contains unsupported field: {name}", f"model.{name}")
-    normalized = {name: str(value.get(name) or "").strip() for name in PROMPT_MODEL_FIELDS}
+    normalized = {name: str(value.get(name) or "").strip() for name in PROMPT_MODEL_FIELDS if name != 'deployment'}
+    deployment = None
+    if 'deployment' in value:
+        from demiflow.services.deployment import deployment_config, logical_base, PROFILES
+        try:
+            deployment = deployment_config(value['deployment'])
+        except (TypeError, ValueError) as exc:
+            issue('prompt_model_deployment_invalid', str(exc), 'model.deployment')
+        else:
+            expected = PROFILES[deployment['profile']]
+            if normalized['transport'] and normalized['transport'] != expected:
+                issue('prompt_model_deployment_invalid', 'Deployment profile and transport differ', 'model.transport')
+            if normalized['base_url'] or normalized['base_url_env']:
+                issue('prompt_model_deployment_invalid', 'Deployment owns its endpoint; omit base_url/base_url_env', 'model')
+            normalized['transport'] = expected
+            normalized['base_url'] = logical_base(normalized['name'], deployment)
     for name in ("name", "transport"):
         if not normalized[name]:
             issue("prompt_model_field_required", f"{label} requires non-empty {name}", f"model.{name}")
     transport = normalized["transport"]
-    if transport != "systemone" and not normalized["api_key_env"]:
+    if transport != "systemone" and deployment is None and not normalized["api_key_env"]:
         issue("prompt_model_field_required", f"{label} requires non-empty api_key_env", "model.api_key_env")
     if transport and transport not in PROMPT_MODEL_TRANSPORTS:
         issue("prompt_model_transport_invalid", f"{label} has unsupported transport: {transport}", "model.transport")
@@ -70,7 +85,8 @@ def inspect_prompt_model(value: Any, *, label: str, prompt: str = "", media=Fals
         issue("prompt_model_api_version_forbidden", f"{label} openai_compatible does not accept api_version", "model.api_version")
     if issues:
         return None, tuple(issues)
-    return PromptModel(normalized["name"], transport, base_url_env, normalized["api_key_env"], base_url, api_version), ()
+    return PromptModel(normalized["name"], transport, base_url_env, normalized["api_key_env"], base_url, api_version,
+                       deployment=deployment), ()
 
 class PromptPackVersion(str, Enum):
     V2 = "demiflow_prompt_pack_v2"
@@ -110,6 +126,15 @@ class PromptModel:
     base_url: str = ""
     api_version: str = ""
     provider: Mapping[str, Any] = field(default_factory=dict, hash=False)
+    deployment: Mapping[str, Any] | None = field(default=None, hash=False)
+
+    def __post_init__(self):
+        if self.deployment is not None:
+            def freeze(value):
+                if isinstance(value,Mapping): return MappingProxyType({key:freeze(item) for key,item in value.items()})
+                if isinstance(value,(list,tuple)): return tuple(freeze(item) for item in value)
+                return value
+            object.__setattr__(self,'deployment',freeze(self.deployment))
 
 
 @dataclass(frozen=True)
@@ -124,6 +149,15 @@ class PromptDefinition:
     input_mode: str = "template"
     message_limits: Mapping[str, int] = field(default_factory=dict)
     systemone: Mapping[str, Any] = field(default_factory=dict, hash=False)
+
+    @property
+    def arguments(self) -> Mapping[str, PlaceholderKind]:
+        if self.input_mode == 'messages':
+            return {'messages': PlaceholderKind.JSON}
+        arguments = dict(self.template.arguments)
+        if 'for_each' in self.systemone:
+            arguments[self.systemone['for_each']['input']] = PlaceholderKind.JSON
+        return arguments
 
     @property
     def response_keys(self) -> tuple[str, ...]:

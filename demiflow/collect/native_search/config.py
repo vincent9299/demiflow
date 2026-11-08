@@ -16,40 +16,8 @@ VENDOR = Path(__file__).resolve().parents[2] / '_vendor' / 'searxng'
 RUNTIME_VERSION = 'native-search-1'
 
 
-@dataclass(frozen=True)
-class Secret:
-    """Resolve an environment variable at execution, never in a config snapshot."""
-    env: str
-
-    def __post_init__(self):
-        if not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*', self.env):
-            raise ValueError('Invalid secret environment variable name')
-
-    def resolve(self):
-        value = os.environ.get(self.env)
-        if not value:
-            raise ValueError('Missing search secret: ' + self.env)
-        return value
-
-
-def public(value):
-    if isinstance(value, Secret):
-        return {'secret_env': value.env}
-    if isinstance(value, dict):
-        return {k: public(v) for k, v in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [public(v) for v in value]
-    return value
-
-
-def resolve(value):
-    if isinstance(value, Secret):
-        return value.resolve()
-    if isinstance(value, dict):
-        return {k: resolve(v) for k, v in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [resolve(v) for v in value]
-    return value
+# One shared declaration; preserve this historical import location.
+from ...secrets import Secret, public, resolve
 
 
 def validate_language(language):

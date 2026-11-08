@@ -1,0 +1,562 @@
+{
+  "list": {
+    "arguments": [
+      "list",
+      "--module",
+      "demiflow.data",
+      "--name",
+      "map",
+      "--limit",
+      "10"
+    ],
+    "exit_code": 0,
+    "result": {
+      "status": "discovered",
+      "inspection_complete": true,
+      "modules": [
+        "demiflow.data"
+      ],
+      "discovered_total": 273,
+      "page": {
+        "total": 20,
+        "offset": 0,
+        "limit": 10,
+        "has_more": true
+      },
+      "objects": [
+        {
+          "id": "demiflow.data:Dataset.agentmap_async",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.batch_map",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.flat_map",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.map",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.map_async",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.map_batches",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.map_cached",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.map_embeddings",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.map_prompt",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        },
+        {
+          "id": "demiflow.data:Dataset.map_prompt_async",
+          "kind": "method",
+          "origin": {
+            "kind": "platform",
+            "module": "demiflow.data.dataset",
+            "path": "data/dataset.py"
+          },
+          "diagnostics": []
+        }
+      ],
+      "diagnostics": []
+    }
+  },
+  "show": {
+    "arguments": [
+      "show",
+      "demiflow.data:Dataset.map_prompt_async"
+    ],
+    "exit_code": 0,
+    "result": {
+      "status": "discovered",
+      "inspection_complete": true,
+      "object": {
+        "defined_name": "Dataset.map_prompt_async",
+        "diagnostics": [],
+        "documentation": {
+          "status": "available",
+          "text": "Native streaming prompt actor, sharing map_prompt's prompt-pack contract.\n\nSame template, model, inputs/output(s), JSON schema and schema_retries.\nA prompt-pack definition with response_format='image' uses the native\nimage backend and returns an ObjectRef instead of text/JSON. It requires\noutput (or outputs={'image': ...}), call_output, error_output and finite\nmax_requests. options declares sqlite_journal.path, object_store and\noptional image_encoding/limits. Image concurrency is 1..8 (Diffusers 1),\nqueue_depth defaults to 1 and is at most 8. Transport, ordered image\ninputs, exact request identity and service lifecycle are preserved.\nImage output does not support routes, request gates, token budgets,\noffline/Codex options or schema retries. See docs/image_generation.md.\nAdds map_async worker/queue/error policies. Execute with run_stream()\nor checkpoint(); checkpoint before later joins or lazy transforms.\nConfiguration and limits belong to this node. Non-local executors\ncurrently reject this async interface explicitly. HTTP is truly asynchronous; transport\nerrors are not silently retried. Repeated actions can repeat calls.\noptions={'offline_dir': ...} materializes the same model context\nfor external authors and validates submitted responses through this\nactor. Missing responses produce PromptResponsePending; no HTTP call\nor provider-budget reservation occurs in offline mode.\n\n``options={'sqlite_journal': {'path': 'calls.sqlite', 'timeout_s': 30}}``\ndurably reuses exact HTTP requests without logging image base64. Call\nmetadata includes request_id/journal_path; lookup and commits stay off\nthe event loop. Unanswered reservations are not silently retried.\n\n``options={'stream': True}`` receives SSE internally and publishes one\ncomplete, schema-validated response per row. Default False retains the\nordinary JSON request. One HTTP client/pool is shared by this node;\ndefault max_connections equals concurrency. connect_timeout_s,\nread_timeout_s (idle gap), write_timeout_s and pool_timeout_s are distinct\nfrom timeout_s (total HTTP exchange). Truncated streams are journaled\nas uncertain failures without retries. ``gateway='litellm'`` explicitly\nsends zero-retry/no-fallback controls. Generic endpoints receive none.\nSee docs/prompt_http.md for bounds, logs and recovery semantics.\n\n``request_gate`` shares admission/circuit state across nodes for new calls.\n``request_policy`` declares an operator-owned adaptive gate; supply one\nof these two interfaces. Its maximum cannot exceed node concurrency.\n``token_budget`` validates exact rendered messages, including schema, before\njournal lookup/reservation. Neither policy changes the request cache key.\n\n``service=VLLMService(...)`` or ``ManagedHTTPService(...)`` declares a node-owned local server. None\nkeeps the external endpoint behavior. The actor starts it only before\nan uncached request and closes it when this stream action exits, including\nfailure/cancellation. Service failures abort the node, even with\nerror_output. Service placement is not part of request/cache identity.\nManaged services require local async execution and cannot be combined\nwith offline or alternate transports. Two nodes in the same stream can\noverlap; materialize between models that must reuse the same GPUs.\n\n``routes={key: {config, options, concurrency, max_requests, ...}}``\nand ``route='column'`` dispatch assigned rows inside one worker pool.\nTotal concurrency and each route's concurrency are both bounded. The\ncaller assigns rows upstream; the platform does not choose a model or\nretry a failed row on another model. Child actors retain native journal,\nlifecycle and metrics. ``isolate_route_failures=True`` records provider\nstop/service failures in error_output; user stop and storage failures\nstill stop the action. Upstream assignment must bound route backlog to\navoid filling all workers with one route's waiting rows."
+        },
+        "id": "demiflow.data:Dataset.map_prompt_async",
+        "kind": "method",
+        "member_owner": "demiflow.data.dataset.Dataset",
+        "native_semantics": {
+          "status": "unknown"
+        },
+        "origin": {
+          "kind": "platform",
+          "module": "demiflow.data.dataset",
+          "path": "data/dataset.py"
+        },
+        "signature": {
+          "parameters": [
+            {
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self",
+              "required": true
+            },
+            {
+              "annotation": "'str'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "prompt",
+              "required": true
+            },
+            {
+              "annotation": "'str | Path | PromptPack'",
+              "kind": "KEYWORD_ONLY",
+              "name": "config",
+              "required": true
+            },
+            {
+              "annotation": "'Mapping[str, str] | Sequence[str]'",
+              "kind": "KEYWORD_ONLY",
+              "name": "inputs",
+              "required": true
+            },
+            {
+              "annotation": "'Optional[str]'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "output",
+              "required": false
+            },
+            {
+              "annotation": "'Optional[Mapping[str, str]]'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "outputs",
+              "required": false
+            },
+            {
+              "annotation": "'int'",
+              "default": "1",
+              "kind": "KEYWORD_ONLY",
+              "name": "concurrency",
+              "required": false
+            },
+            {
+              "annotation": "'Optional[int]'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "queue_depth",
+              "required": false
+            },
+            {
+              "annotation": "'tuple'",
+              "default": "()",
+              "kind": "KEYWORD_ONLY",
+              "name": "catch",
+              "required": false
+            },
+            {
+              "annotation": "'Optional[str]'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "label",
+              "required": false
+            },
+            {
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "when",
+              "required": false
+            },
+            {
+              "annotation": "'Optional[str]'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "call_output",
+              "required": false
+            },
+            {
+              "annotation": "'Optional[str]'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "error_output",
+              "required": false
+            },
+            {
+              "annotation": "'Mapping[str, Any] | None'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "options",
+              "required": false
+            },
+            {
+              "annotation": "'int | None'",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "max_requests",
+              "required": false
+            },
+            {
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "service",
+              "required": false
+            },
+            {
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "request_gate",
+              "required": false
+            },
+            {
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "request_policy",
+              "required": false
+            },
+            {
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "token_budget",
+              "required": false
+            },
+            {
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "routes",
+              "required": false
+            },
+            {
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "route",
+              "required": false
+            },
+            {
+              "default": "False",
+              "kind": "KEYWORD_ONLY",
+              "name": "isolate_route_failures",
+              "required": false
+            }
+          ],
+          "status": "available",
+          "text": "(self, prompt: 'str', *, config: 'str | Path | PromptPack', inputs: 'Mapping[str, str] | Sequence[str]', output: 'Optional[str]' = None, outputs: 'Optional[Mapping[str, str]]' = None, concurrency: 'int' = 1, queue_depth: 'Optional[int]' = None, catch: 'tuple' = (), label: 'Optional[str]' = None, when = None, call_output: 'Optional[str]' = None, error_output: 'Optional[str]' = None, options: 'Mapping[str, Any] | None' = None, max_requests: 'int | None' = None, service = None, request_gate = None, request_policy = None, token_budget = None, routes = None, route = None, isolate_route_failures = False) -> \"'Dataset'\""
+        }
+      },
+      "diagnostics": []
+    }
+  },
+  "snapshot": {
+    "arguments": [
+      "snapshot",
+      "--out",
+      "/tmp/forge-stage1-acceptance-m3cs3p6r/evidence-accepted-58jfyor2/installed.snapshot.json"
+    ],
+    "exit_code": 0,
+    "result": {
+      "status": "created",
+      "path": "/tmp/forge-stage1-acceptance-m3cs3p6r/evidence-accepted-58jfyor2/installed.snapshot.json",
+      "scope": {
+        "discovery_version": 1,
+        "modules": [
+          "demiflow",
+          "demiflow.agent",
+          "demiflow.data",
+          "demiflow.inference",
+          "demiflow.operator_llm",
+          "demiflow.services"
+        ],
+        "extras": []
+      },
+      "digests": {
+        "standard": "8a43275bc1136540e3cb4596b572fcbd4334fbeefac50a8df4da6e32681f557d",
+        "catalog": "fa1347f580601dcefb6a4f80a0bdfb0c0cbce16f73c2e46daebf6d859f7d3b9a",
+        "platform": "5cad91dc406a5ba27c850da8023eb6f858de86d32c32847108673a6b28ad91cc",
+        "environment": "2da10ef470f57032006ddce78b82cb9701d6344a9c3854b1c555d32912455177",
+        "snapshot": "6b167ddbc83755ed2d6fa3f552c4306a374b0f38af85cd74676e3e86eabf6d9c"
+      },
+      "objects": 851,
+      "files": 917,
+      "dependency_assurance": "metadata_only"
+    }
+  },
+  "current": {
+    "arguments": [
+      "check",
+      "/tmp/forge-stage1-acceptance-m3cs3p6r/evidence-accepted-58jfyor2/installed.snapshot.json"
+    ],
+    "exit_code": 0,
+    "result": {
+      "status": "current",
+      "previous_digest": "6b167ddbc83755ed2d6fa3f552c4306a374b0f38af85cd74676e3e86eabf6d9c",
+      "current_digest": "6b167ddbc83755ed2d6fa3f552c4306a374b0f38af85cd74676e3e86eabf6d9c",
+      "scope": {
+        "discovery_version": 1,
+        "extras": [],
+        "modules": [
+          "demiflow",
+          "demiflow.agent",
+          "demiflow.data",
+          "demiflow.inference",
+          "demiflow.operator_llm",
+          "demiflow.services"
+        ]
+      },
+      "dependency_assurance": "metadata_only",
+      "changes": [],
+      "diagnostics": [],
+      "previous_diagnostics": [],
+      "change_counts": {},
+      "page": {
+        "total": 0,
+        "offset": 0,
+        "limit": 50,
+        "has_more": false
+      }
+    }
+  },
+  "private_drift": {
+    "arguments": [
+      "check",
+      "/tmp/forge-stage1-acceptance-m3cs3p6r/evidence-accepted-58jfyor2/installed.snapshot.json"
+    ],
+    "exit_code": 1,
+    "result": {
+      "status": "stale",
+      "previous_digest": "6b167ddbc83755ed2d6fa3f552c4306a374b0f38af85cd74676e3e86eabf6d9c",
+      "current_digest": "62c5e977274d96585da780ae32b85f2e7e809cafdd736b37551ef5a119b79921",
+      "scope": {
+        "discovery_version": 1,
+        "extras": [],
+        "modules": [
+          "demiflow",
+          "demiflow.agent",
+          "demiflow.data",
+          "demiflow.inference",
+          "demiflow.operator_llm",
+          "demiflow.services"
+        ]
+      },
+      "dependency_assurance": "metadata_only",
+      "changes": [
+        {
+          "kind": "platform_file_changed",
+          "path": "execution/stream_admission.py"
+        }
+      ],
+      "diagnostics": [],
+      "previous_diagnostics": [],
+      "change_counts": {
+        "platform_file_changed": 1
+      },
+      "page": {
+        "total": 1,
+        "offset": 0,
+        "limit": 50,
+        "has_more": false
+      }
+    }
+  },
+  "dynamic_method": {
+    "arguments": [
+      "show",
+      "demiflow.data:Dataset.acceptance_probe"
+    ],
+    "exit_code": 0,
+    "result": {
+      "status": "discovered",
+      "inspection_complete": true,
+      "object": {
+        "defined_name": "_forge_acceptance_probe",
+        "diagnostics": [],
+        "documentation": {
+          "status": "available",
+          "text": "Temporary installed-copy acceptance method."
+        },
+        "id": "demiflow.data:Dataset.acceptance_probe",
+        "kind": "method",
+        "member_owner": "demiflow.data.dataset.Dataset",
+        "native_semantics": {
+          "status": "unknown"
+        },
+        "origin": {
+          "kind": "platform",
+          "module": "demiflow.data.dataset",
+          "path": "data/dataset.py"
+        },
+        "signature": {
+          "parameters": [
+            {
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self",
+              "required": true
+            },
+            {
+              "default": "1",
+              "kind": "KEYWORD_ONLY",
+              "name": "limit",
+              "required": false
+            }
+          ],
+          "status": "available",
+          "text": "(self, *, limit = 1)"
+        }
+      },
+      "diagnostics": []
+    }
+  },
+  "interface_drift": {
+    "arguments": [
+      "check",
+      "/tmp/forge-stage1-acceptance-m3cs3p6r/evidence-accepted-58jfyor2/installed.snapshot.json"
+    ],
+    "exit_code": 1,
+    "result": {
+      "status": "stale",
+      "previous_digest": "6b167ddbc83755ed2d6fa3f552c4306a374b0f38af85cd74676e3e86eabf6d9c",
+      "current_digest": "ca56bfb4cdab24cb8344c434e5c165ba5939fa9af5fc4a5415777bc16cfe82a1",
+      "scope": {
+        "discovery_version": 1,
+        "extras": [],
+        "modules": [
+          "demiflow",
+          "demiflow.agent",
+          "demiflow.data",
+          "demiflow.inference",
+          "demiflow.operator_llm",
+          "demiflow.services"
+        ]
+      },
+      "dependency_assurance": "metadata_only",
+      "changes": [
+        {
+          "kind": "interface_added",
+          "id": "demiflow.data:Dataset.acceptance_probe"
+        },
+        {
+          "kind": "interface_added",
+          "id": "demiflow.data:MaterializedDataset.acceptance_probe"
+        },
+        {
+          "kind": "interface_added",
+          "id": "demiflow:Dataset.acceptance_probe"
+        },
+        {
+          "kind": "interface_added",
+          "id": "demiflow:MaterializedDataset.acceptance_probe"
+        },
+        {
+          "kind": "platform_file_changed",
+          "path": "data/dataset.py"
+        }
+      ],
+      "diagnostics": [],
+      "previous_diagnostics": [],
+      "change_counts": {
+        "interface_added": 4,
+        "platform_file_changed": 1
+      },
+      "page": {
+        "total": 5,
+        "offset": 0,
+        "limit": 50,
+        "has_more": false
+      }
+    }
+  },
+  "restored": {
+    "arguments": [
+      "check",
+      "/tmp/forge-stage1-acceptance-m3cs3p6r/evidence-accepted-58jfyor2/installed.snapshot.json"
+    ],
+    "exit_code": 0,
+    "result": {
+      "status": "current",
+      "previous_digest": "6b167ddbc83755ed2d6fa3f552c4306a374b0f38af85cd74676e3e86eabf6d9c",
+      "current_digest": "6b167ddbc83755ed2d6fa3f552c4306a374b0f38af85cd74676e3e86eabf6d9c",
+      "scope": {
+        "discovery_version": 1,
+        "extras": [],
+        "modules": [
+          "demiflow",
+          "demiflow.agent",
+          "demiflow.data",
+          "demiflow.inference",
+          "demiflow.operator_llm",
+          "demiflow.services"
+        ]
+      },
+      "dependency_assurance": "metadata_only",
+      "changes": [],
+      "diagnostics": [],
+      "previous_diagnostics": [],
+      "change_counts": {},
+      "page": {
+        "total": 0,
+        "offset": 0,
+        "limit": 50,
+        "has_more": false
+      }
+    }
+  }
+}

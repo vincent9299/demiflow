@@ -1,0 +1,56 @@
+"""Owned scratch cleanup may race quota observation; durable receipts stay strict."""
+from pathlib import Path
+import os
+
+import pytest
+from demiflow.execution.block_sink import storage_usage
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.recovery_contract import RecoveryContractError
+
+
+def test_completed_decoder_file_disappears_before_storage_stat(tmp_path,monkeypatch):
+    with RunContext.start(tmp_path/'run') as run:
+        folder=run.directory/'scratch';folder.mkdir()
+        transient=folder/'decoder-result.json';transient.write_bytes(b'finished')
+        original=Path.lstat;removed=[]
+        def stat_after_cleanup(path,*a,**kw):
+            if path==transient and not removed:
+                transient.unlink();removed.append(True)
+            return original(path,*a,**kw)
+        monkeypatch.setattr(Path,'lstat',stat_after_cleanup)
+        assert storage_usage(run)==0
+        assert removed==[True]
+
+
+def test_completed_decoder_directory_disappears_before_enumeration(tmp_path,monkeypatch):
+    with RunContext.start(tmp_path/'run') as run:
+        folder=run.directory/'scratch';folder.mkdir()
+        transient=folder/'decoder-directory';transient.mkdir()
+        original=Path.iterdir;removed=[]
+        def enumerate_after_cleanup(path):
+            if path==transient and not removed:
+                transient.rmdir();removed.append(True)
+            return original(path)
+        monkeypatch.setattr(Path,'iterdir',enumerate_after_cleanup)
+        assert storage_usage(run)==0
+        assert removed==[True]
+
+
+@pytest.mark.parametrize('kind',['symlink','fifo','permission'])
+def test_storage_scan_keeps_nonmissing_type_and_permission_failures(tmp_path,monkeypatch,kind):
+    with RunContext.start(tmp_path/'run') as run:
+        folder=run.directory/'scratch';folder.mkdir()
+        path=folder/'entry'
+        foreign=tmp_path/'foreign.bin';foreign.write_bytes(b'unchanged')
+        if kind=='symlink':path.symlink_to(foreign)
+        elif kind=='fifo':os.mkfifo(path)
+        else:
+            path.write_bytes(b'x')
+            original=Path.lstat
+            def reject(value,*a,**kw):
+                if value==path:raise PermissionError('controlled read failure')
+                return original(value,*a,**kw)
+            monkeypatch.setattr(Path,'lstat',reject)
+        with pytest.raises(PermissionError if kind=='permission' else RecoveryContractError):
+            storage_usage(run)
+        assert foreign.read_bytes()==b'unchanged'

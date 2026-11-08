@@ -12,6 +12,16 @@ import sys
 import time
 
 
+def _write_error(path, error, managed):
+    import cloudpickle
+    if not managed:
+        path.write_bytes(cloudpickle.dumps(error))
+        return
+    from .native_diagnostics import LimitedWriter
+    with path.open('wb') as stream:
+        cloudpickle.dump(error, LimitedWriter(stream, 256*1024))
+
+
 def main():
     import cloudpickle
     request = cloudpickle.loads(Path(sys.argv[1]).read_bytes())
@@ -30,6 +40,9 @@ def main():
     # transforms. Keep fatal-error diagnostics; the parent enforces deadlines
     # and reports progress/RSS without asynchronously walking Python frames.
     from .datafusion import _save
+    managed = request.get('managed_diagnostics', False)
+    if managed:
+        from .native_diagnostics import mandatory_json as _save
     directory = Path(request['directory'])
     diagnostic = Path(request['diagnostic'])
     started = time.monotonic()
@@ -44,7 +57,7 @@ def main():
             try:
                 prepared = _prepare_index(request['lance_index'])
             except Exception as error:
-                (diagnostic / 'index_error.pickle').write_bytes(cloudpickle.dumps(error))
+                _write_error(diagnostic / 'index_error.pickle', error, managed)
                 result['error_origin'] = 'lance_index'
                 raise
             (directory / 'prepared_index.pickle').write_bytes(cloudpickle.dumps(prepared))
@@ -67,7 +80,7 @@ def main():
                 prepared = _prepare_merge(spec, iter_lance_batches(query, batch_size=options['batch_rows']),
                                           _source_row_count=source_rows)
             except Exception as error:
-                (diagnostic / 'merge_error.pickle').write_bytes(cloudpickle.dumps(error))
+                _write_error(diagnostic / 'merge_error.pickle', error, managed)
                 result['error_origin'] = 'lance_merge'
                 raise
             (directory / 'prepared_merge.pickle').write_bytes(cloudpickle.dumps(prepared))
@@ -79,6 +92,7 @@ def main():
         from ..lance.arrow_batches import bounded_record_batches, fixed_row_tables, LANCE_FILE_ROWS, LANCE_BATCH_ROWS, ARROW_BATCH_BYTES
         # Requests from already running parents may predate this option.
         max_row_bytes = options.get('max_row_bytes', ARROW_BATCH_BYTES)
+        writer_batch_bytes = min(ARROW_BATCH_BYTES, max_row_bytes)
         from datafusion import RuntimeEnvBuilder, SessionConfig, SessionContext
         from datafusion.context import SQLOptions
         if datafusion.__version__ != '54.0.0' or getattr(lance, '__build_version__', None) != '12.0.0+demiflow.arrowfix1':
@@ -117,7 +131,8 @@ def main():
         for name, sql in request['views'].items():
             context.register_view(name, context.sql(sql, options=sql_options))
         frame = context.sql(request['sql'], options=sql_options)
-        (diagnostic / 'plan.txt').write_text(str(frame.execution_plan()))
+        if not managed:
+            (diagnostic / 'plan.txt').write_text(str(frame.execution_plan()))
         from .opaque_payloads import payload_schema, hydrate_payloads
         hydrated_schema, opaque_payloads = payload_schema(frame.schema(), opaque_payloads)
         schema = request['schema'] if request['schema'] is not None else hydrated_schema
@@ -158,7 +173,7 @@ def main():
                                 values['batches'] += 1
                                 values['max_lookup_bytes'] = max(values['max_lookup_bytes'], table.nbytes)
                                 for part in bounded_record_batches(table.to_batches(), payload_snapshot.schema,
-                                        batch_rows=payload_read['batch_rows'], max_row_bytes=max_row_bytes):
+                                        batch_rows=payload_read['batch_rows'], batch_bytes=writer_batch_bytes, max_row_bytes=max_row_bytes):
                                     values['max_batch_bytes'] = max(values['max_batch_bytes'], part.nbytes)
                                     yield part
                     native_batches = hydrate(native_batches)
@@ -172,7 +187,7 @@ def main():
                             batch = transform(batch)
                         except Exception as error:
                             if request.get('dataset_spec'):
-                                (diagnostic / 'callback_error.pickle').write_bytes(cloudpickle.dumps(error))
+                                _write_error(diagnostic / 'callback_error.pickle', error, managed)
                                 result['error_origin'] = 'python_callback'
                             raise
                     if not isinstance(batch, pa.RecordBatch):
@@ -187,7 +202,7 @@ def main():
         # Batch sizes no longer need to divide the file row count.
         writer_batch_rows = min(LANCE_BATCH_ROWS, options['batch_rows'])
         note(phase='private_write', query_seconds=time.monotonic()-started,
-             writer_batch_rows=writer_batch_rows, writer_batch_bytes=ARROW_BATCH_BYTES,
+             writer_batch_rows=writer_batch_rows, writer_batch_bytes=writer_batch_bytes,
              writer_max_row_bytes=max_row_bytes)
         for ref in request['sources'].values():
             if ref.get('format') == 'csv':
@@ -203,7 +218,7 @@ def main():
             batches = (reader.get_batch(i) for i in range(reader.num_record_batches))
             output = lance.write_dataset(pa.RecordBatchReader.from_batches(
                 schema, bounded_record_batches(batches, schema, batch_rows=writer_batch_rows,
-                                                max_row_bytes=max_row_bytes)),
+                                                batch_bytes=writer_batch_bytes, max_row_bytes=max_row_bytes)),
                 str(directory / 'output.lance'), mode='create', schema=schema,
                 max_rows_per_file=LANCE_FILE_ROWS)
         if output.count_rows() != result['rows']:
@@ -212,7 +227,7 @@ def main():
         note(complete=True, success=True, phase='finished', version=output.version)
         return 0
     except Exception as exc:
-        note(complete=True, success=False, error_type=type(exc).__name__, message=str(exc))
+        note(complete=True, success=False, error_type=type(exc).__name__, message=str(exc)[:4096] if managed else str(exc))
         raise
 
 

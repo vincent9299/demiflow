@@ -1,0 +1,333 @@
+diff --git a/demiflow/forge/web/app.js b/demiflow/forge/web/app.js
+--- a/demiflow/forge/web/app.js
++++ b/demiflow/forge/web/app.js
+@@ -35,8 +35,15 @@
+     const wasOpen=document.querySelector('.shell')?.classList.contains('nav-open');
+     document.querySelector('.shell')?.classList.remove('nav-open');
+     const toggle=document.getElementById('navigation-toggle');
+-    toggle?.setAttribute('aria-expanded','false');
++    updateNavigation();
+     if(wasOpen&&toggle?.getClientRects().length)toggle.focus();
++  }
++  function updateNavigation() {
++    const shell=document.querySelector('.shell');if(!shell)return;
++    const narrow=matchMedia('(max-width:760px)').matches,expanded=narrow?shell.classList.contains('nav-open'):!shell.classList.contains('sidebar-collapsed');
++    document.getElementById('navigation-toggle')?.setAttribute('aria-expanded',String(expanded));
++    const control=document.getElementById('sidebar-toggle');
++    if(control){const label=narrow?'收起项目导航':expanded?'收起侧栏':'展开侧栏';control.setAttribute('aria-label',label);control.title=label;control.setAttribute('aria-expanded',String(expanded));}
+   }
+   function revealTab() {
+     const current=nav?.querySelector('[aria-current=page]');if(!current)return;
+@@ -112,12 +119,15 @@
+ 
+   function error(parent, err) { if (err?.name !== 'AbortError' && parent?.isConnected) { const box=$('div', err.message || String(err), 'error-box'); parent.append(box); return box; } }
+   function button(label, action, parent, disabled = false) { const b = $('button', label); let failure; b.disabled = disabled; b.onclick = async () => { failure?.remove(); failure=null; b.disabled = true; try { await action(); } catch (err) { failure=error(parent || main, err); } finally { b.disabled = disabled; } }; if (parent) parent.append(b); return b; }
+-  function iconButton(label, action, parent, paths) {
+-    const b=button(label,action),ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
+-    b.className='icon-button';b.setAttribute('aria-label',label);b.title=label;
++  function icon(paths) {
++    const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
+     for(const [key,value] of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.5','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))svg.setAttribute(key,value);
+     for(const d of paths){const path=document.createElementNS(ns,'path');path.setAttribute('d',d);svg.append(path);}
+-    b.replaceChildren(svg);parent?.append(b);return b;
++    return svg;
++  }
++  function iconButton(label, action, parent, paths) {
++    const b=button(label,action);b.className='icon-button';b.setAttribute('aria-label',label);b.title=label;
++    b.replaceChildren(icon(paths));parent?.append(b);return b;
+   }
+   function panel(title, parent = main) { const p = $('section', undefined, 'panel'); if (title) p.append($('h2', title)); parent.append(p); return p; }
+   function badge(status) { const label = {checked:'静态检查通过', invalid:'不符合契约', incomplete:'检查不完整', stale:'依据已变化', not_rechecked:'尚未复核', not_live:'离线快照',prepared:'已准备 · 尚未执行',starting:'正在启动',running:'运行中',stopping:'正在停止',succeeded:'运行成功',failed:'运行失败',cancelled:'已取消',interrupted:'运行中断'}[status] || status; return $('span', label, 'badge' + (['invalid','failed','interrupted'].includes(status) ? ' error' : ['checked','succeeded'].includes(status) ? '' : ' warn')); }
+@@ -430,7 +440,7 @@
+     const state=!hasContent&&!readable?'registered':incomplete?'incomplete':context.report_total||readable?'existing':'registered';
+     const next=panel(null);next.classList.add('next-step');next.dataset.onboarding=state;
+     next.append($('span','从原项目开始','eyebrow'),$('h2',state==='incomplete'?'项目已登记，部分内容尚未识别':state==='registered'?'项目已登记，从已有内容开始':'在这里阅读、核对，再继续下一步'));
+-    next.append($('p',!hasContent&&!readable?'在原项目目录保存 README、代码或数据，再刷新查看；新建空目录尚无业务内容。':'Forge 按当前权限读取已有内容。已登记不代表已检查，识别结果也不授予运行权限。'));
++    next.append($('p',!hasContent&&!readable?'在原项目目录保存 README、代码或数据，再刷新查看；新建空目录尚无业务内容。':'DemiFlow 按当前权限读取已有内容。已登记不代表已检查，识别结果也不授予运行权限。'));
+     const bar=$('div',undefined,'toolbar');next.append(bar);
+     const primary=readable?button('查看数据与 Case',()=>navigate('tables'),bar):context.readme?button('阅读项目说明',()=>{document.getElementById('project-readme')?.scrollIntoView({behavior:'smooth'});document.getElementById('project-readme')?.focus({preventScroll:true});},bar):button('查看入口与配置',()=>navigate('flows'),bar);
+     primary.className='primary';
+@@ -441,7 +451,7 @@
+     const layout=$('div',undefined,'overview-layout');main.append(layout);
+     const intro=panel('项目说明',layout);intro.id='project-readme';intro.tabIndex=-1;
+     intro.append($('p','README.md · 当前项目目录','muted small'));
+-    if(!context.readme)intro.append($('p','尚无 README.md。可在原项目目录补充说明后刷新；Forge 不自动生成业务说明。','notice'));
++    if(!context.readme)intro.append($('p','尚无 README.md。可在原项目目录补充说明后刷新；DemiFlow 不自动生成业务说明。','notice'));
+     else if(context.readme.startsWith('项目说明无法读取：'))intro.append($('p',context.readme,'error-box'));
+     else mountText(intro,context.readme,{resolveLink:resolveProjectLink});
+     const side=panel('项目内容',layout);side.classList.add('overview-facts');
+@@ -965,9 +975,9 @@
+     continueInput='';preferredCompare='';deferredForm=false;auditState=null;pendingOriginalPath=null;
+     for(const b of nav.querySelectorAll('[data-page]')){b.disabled=true;b.classList.remove('active');b.removeAttribute('aria-current');}
+     markProject();projectHeading();renderAudit();main.replaceChildren();main.classList.remove('bound-case-active','original-case-active');
+-    heading('开始使用 Forge',message);
++    heading('开始使用 DemiFlow',message);
+     const welcome=panel(null);welcome.classList.add('next-step');welcome.dataset.onboarding='empty';
+-    welcome.append($('h2','让原项目更容易阅读与核对'),$('p','Forge 将说明、数据、流程与检查结果放在一起。先选择一个项目目录，再从已有内容开始。'));
++    welcome.append($('h2','让原项目更容易阅读与核对'),$('p','DemiFlow 将说明、数据、流程与检查结果放在一起。先选择一个项目目录，再从已有内容开始。'));
+     if(projectManageEnabled){const actions=$('div',undefined,'toolbar');welcome.append(actions);button('注册已有项目',()=>projectDialog(false),actions).className='primary';button('新建项目',()=>projectDialog(true),actions);
+       welcome.append($('p','选择服务器绝对目录 → 阅读项目内容 → 核对规范检查。新建只接受空目录或不存在的目录；注册仅补必要管理信息。','muted small'));}
+     else welcome.append($('p','此服务未授予项目管理权限。请从已授权的单项目服务进入，或由服务管理员登记项目。','notice'));
+@@ -984,10 +994,14 @@
+         if(!item){
+           item=button('',()=>p.workspace_id===workspaceId?closeNavigation():switchProject(p.workspace_id));
+           item.className='project-item';item.dataset.workspace=p.workspace_id;
+-          item.append($('span',undefined,'project-name'),$('span','暂不可用','project-unavailable'));
++          const mark=icon(['M3 7V5h6l2 2h10v13H3z']);mark.classList.add('project-mark');
++          const avatar=$('span',undefined,'project-avatar');avatar.setAttribute('aria-hidden','true');
++          item.append(mark,avatar,$('span',undefined,'project-name'),$('span','暂不可用','project-unavailable'));
+         }
++        item.querySelector('.project-avatar').textContent=Array.from(p.name.split('/').filter(Boolean).at(-1)||p.name).slice(0,2).join('').toUpperCase();
+         item.querySelector('.project-name').textContent=p.name;
+         item.querySelector('.project-unavailable').hidden=p.status==='available';
++        item.dataset.unavailable=String(p.status!=='available');item.setAttribute('aria-label',p.name+(p.status==='available'?'':' · 暂不可用'));
+         item.title=p.name+'\n'+p.root;
+         if(projectNav.children[index]!==item)projectNav.insertBefore(item,projectNav.children[index]||null);
+         existing.delete(p.workspace_id);
+@@ -999,7 +1013,7 @@
+     const manage=document.getElementById('project-actions');if(manage)manage.hidden=!rows.length;
+     for(const key of projectDrafts.keys())if(!rows.some(p=>key.startsWith(p.workspace_id+':')))projectDrafts.delete(key);
+     for(const id of projectTabs.keys())if(!rows.some(p=>p.workspace_id===id))projectTabs.delete(id);
+-    if(workspaceId&&!rows.some(p=>p.workspace_id===workspaceId))clearProject('项目已移出 Forge 登记清单，项目文件和历史数据均已保留。可以重新注册，或选择其他项目。');
++    if(workspaceId&&!rows.some(p=>p.workspace_id===workspaceId))clearProject('项目已移出 DemiFlow 登记清单，项目文件和历史数据均已保留。可以重新注册，或选择其他项目。');
+   }
+   async function switchProject(id, requested=null, historyMode='push') {
+     if(activeWrites)throw new Error('正在提交操作，完成后再切换项目。');
+@@ -1035,24 +1049,26 @@
+   }
+   async function start() {
+     const app=document.getElementById('app'),shell=$('div',undefined,'shell'),sidebar=$('aside',undefined,'sidebar');
+-    const brand=$('div',undefined,'brand');brand.append($('strong','Forge'),$('span','数据工作台'));sidebar.append(brand);
++    const sidebarHeader=$('div',undefined,'sidebar-header'),brand=$('div',undefined,'brand');brand.append($('strong','DemiFlow'),$('span','数据工作台'));sidebarHeader.append(brand);sidebar.append(sidebarHeader);
+     const content=$('div',undefined,'workspace-content'),top=$('div',undefined,'workspace-top'),header=$('header',undefined,'workspace-header');
+     main=$('main');main.id='workspace-content';
+     const title=$('div',undefined,'workspace-title'),workspaceName=$('strong');workspaceName.id='workspace-name';
+     title.append(workspaceName);header.append(title);
+     top.append(header);content.append(top,main);shell.append(sidebar,content);app.append(shell);
+     if(offline){workspaceName.textContent='固定快照';sidebar.append($('div','固定快照 · 只读','nav-note'));heading('接线检查报告','此页面可独立查看。当前源码、表数据和运行结果未复核。');renderReport(offline,main,'not_live');return;}
+-    const toggle=iconButton('展开项目导航',()=>{const open=shell.classList.toggle('nav-open');toggle.setAttribute('aria-expanded',String(open));},null,['M4 6h16M4 12h16M4 18h16']);title.prepend(toggle);
++    try{shell.classList.toggle('sidebar-collapsed',sessionStorage.getItem('demiflow-sidebar-collapsed')==='1');}catch{ /* Keep navigation usable without preference storage. */ }
++    const toggle=iconButton('展开项目导航',()=>{shell.classList.toggle('nav-open');updateNavigation();},null,['M4 6h16M4 12h16M4 18h16']);title.prepend(toggle);
+     toggle.id='navigation-toggle';toggle.setAttribute('aria-controls','project-sidebar');toggle.setAttribute('aria-expanded','false');sidebar.id='project-sidebar';
+-    button('收起项目导航',()=>{closeNavigation();toggle.focus();},sidebar).className='navigation-close quiet';
+-    const label=$('h2','项目','sidebar-heading');label.id='projects-heading';sidebar.append(label);
++    const fold=$('button',undefined,'icon-button sidebar-toggle');fold.id='sidebar-toggle';fold.setAttribute('aria-controls','project-sidebar');fold.append(icon(['M4 4h16v16H4zM9 4v16']));const railBrand=$('span','DF','rail-brand');railBrand.setAttribute('aria-hidden','true');fold.append(railBrand);sidebarHeader.append(fold);
++    fold.onclick=()=>{if(matchMedia('(max-width:760px)').matches)closeNavigation();else{const collapsed=shell.classList.toggle('sidebar-collapsed');try{sessionStorage.setItem('demiflow-sidebar-collapsed',String(Number(collapsed)));}catch{ /* Preference storage is optional. */ }updateNavigation();revealTab();}};
++    const projectHeader=$('div',undefined,'project-header'),label=$('h2','项目','sidebar-heading');label.id='projects-heading';projectHeader.append(label);sidebar.append(projectHeader);
+     projectNav=$('nav',undefined,'project-list');projectNav.id='project-list';projectNav.setAttribute('aria-labelledby',label.id);sidebar.append(projectNav);
+     nav=$('nav',undefined,'function-nav');nav.setAttribute('aria-label','项目功能');nav.hidden=true;
+     for(const [page,label]of [['overview','项目总览'],['tables','数据与 Case'],['flows','流程与配置'],['checks','规范检查'],['runs','运行记录']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
+     const actions=$('div',undefined,'header-actions');
+     const settings=iconButton('项目设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
+     iconButton('刷新当前视图',refreshView,actions,['M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 11-2l3 3M4 16l3 3a7 7 0 0 0 11-2']);
+-    iconButton('帮助',()=>documentDialog('使用 Forge','Forge 从原项目出发：阅读 README，查看固定版本数据与 Case，核对入口、配置和规范检查，再按权限准备运行。\n\n刷新和自动同步只读取当前状态；检查会保存报告。未识别不表示没有内容，静态检查通过不表示行为验证或语义审查已完成。'),actions,['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0','M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01']);header.append(actions);
++    iconButton('帮助',()=>documentDialog('使用 DemiFlow','DemiFlow 从原项目出发：阅读 README，查看固定版本数据与 Case，核对入口、配置和规范检查，再按权限准备运行。\n\n刷新和自动同步只读取当前状态；检查会保存报告。未识别不表示没有内容，静态检查通过不表示行为验证或语义审查已完成。'),actions,['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0','M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4M12 17h.01']);header.append(actions);
+     const crumb=$('span','项目总览','sr-only');crumb.id='workspace-path';title.append(crumb);
+     const status=$('details',undefined,'workspace-status'),statusSummary=$('summary'),statusPanel=$('div',undefined,'workspace-status-panel');status.id='workspace-status';status.hidden=true;
+     statusSummary.setAttribute('aria-label','工作区状态');
+@@ -1062,7 +1078,9 @@
+     statusPanel.append($('h2','工作区状态'),mode,syncDetail);status.append(statusSummary,statusPanel);title.append(status);
+     auditPanel=$('details',undefined,'audit-panel');auditPanel.id='audit-panel';auditPanel.hidden=true;statusPanel.append(auditPanel);
+     top.append(nav);
+-    window.addEventListener('resize',revealTab);
++    updateNavigation();
++    window.addEventListener('resize',()=>{updateNavigation();revealTab();});
++    matchMedia('(max-width:760px)').addEventListener('change',()=>{closeNavigation();revealTab();});
+     document.addEventListener('click',event=>{if(!status.contains(event.target))status.open=false;});
+     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]')){if(shell.classList.contains('nav-open')){closeNavigation();toggle.focus();}else if(status.open){status.open=false;statusSummary.focus();}}});
+     window.addEventListener('pagehide',()=>{disposeReaders();revokeImages();readController.abort();clearTimeout(syncTimer);});
+@@ -1074,7 +1092,7 @@
+       auditEnabled=capability.audit_contract==='demiflow_forge_audit_status_v1';
+       projectManageEnabled=!!capability.permissions.project_manage;
+       projectRemovalEnabled=!!capability.permissions.project_manage&&capability.operations.POST.includes('project-remove');
+-      if(projectManageEnabled){const manage=$('div',undefined,'project-actions');manage.id='project-actions';manage.hidden=true;sidebar.append(manage);button('新建项目',()=>projectDialog(true),manage);button('注册已有项目',()=>projectDialog(false),manage);}
++      if(projectManageEnabled){const manage=$('div',undefined,'project-actions');manage.id='project-actions';manage.hidden=true;projectHeader.append(manage);iconButton('新建项目',()=>projectDialog(true),manage,['M12 5v14M5 12h14']);iconButton('注册已有项目',()=>projectDialog(false),manage,['M3 7V5h6l2 2h10v13H3z','M12 10v7m-3-3 3 3 3-3']);}
+       await refreshProjects();
+       if(initialError)throw initialError;
+       if(!projectList.length)clearProject();
+diff --git a/demiflow/forge/web/style.css b/demiflow/forge/web/style.css
+--- a/demiflow/forge/web/style.css
++++ b/demiflow/forge/web/style.css
+@@ -1,16 +1,18 @@
+ :root{font:15px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;color:#26313f;background:#fff;--accent:#3b63cf;--brand:#225e61;--line:#e4e7ed;--muted:#697386;--danger:#a33b36;scroll-padding-top:96px}
+ *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0}button,input,select,textarea{font:inherit;max-width:100%}button{cursor:pointer;background:#fff;border:1px solid #dce1e9;border-radius:8px;padding:7px 12px;color:#33435b}button:hover{background:#f3f5fa;border-color:#aebbd4}button.active{background:#edf1fc;color:#294faa;border-color:#b5c5ed}button:disabled{opacity:.5;cursor:default}button.primary{background:var(--accent);border-color:var(--accent);color:white}button.primary:hover{background:#3055b8}button.quiet{background:transparent;border-color:transparent;color:var(--muted);font-size:12px}input,select,textarea{border:1px solid #dce1e9;border-radius:7px;background:#fff;padding:7px 9px;min-width:0}input.wide{width:360px}:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+-.shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+-.sidebar{position:sticky;top:0;height:100dvh;min-width:0;overflow:hidden;display:flex;flex-direction:column;padding:28px 16px 20px;background:#f8f9fb;border-right:1px solid var(--line)}
+-.brand{display:flex;align-items:baseline;gap:10px;padding:0 8px 32px}.brand strong{font-size:27px;letter-spacing:-1px;color:var(--brand)}.brand span{font-size:11px;color:var(--muted)}
+-.sidebar-heading{font-size:12px;font-weight:500;color:var(--muted);margin:0 12px 10px}
+-.project-list{display:flex;flex-direction:column;gap:4px;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:4px;margin:0 -4px 16px}
+-.project-list .project-item{display:flex;align-items:center;gap:8px;flex-shrink:0;min-width:0;width:100%;padding:10px 12px;text-align:left;font-size:13px;border-color:transparent;background:transparent;color:#586579}
+-.project-list .project-item:hover{background:#eef0f5}.project-list .project-item.active{background:#e9eefb;color:#3154ae;font-weight:600}
+-.project-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-unavailable{flex-shrink:0;font-size:10px;font-weight:400;color:var(--muted)}.project-empty{font-size:12px;color:var(--muted);margin:0 12px}
+-.project-actions{display:flex;flex-direction:column;gap:8px;margin-top:auto}.project-actions button{font-size:12px}
+-/* Compact header/tab rules adapted from DeepSeek Harness 0.2.1-rc.2,
+- * @deepseek-ai/dsh-client-ui-conversation, skeleton/ConversationRoot.module.css.
++.shell{display:grid;grid-template-columns:264px minmax(0,1fr);min-height:100vh}
++.sidebar{position:sticky;top:0;height:100dvh;min-width:0;overflow:hidden;display:flex;flex-direction:column;padding:6px 12px;background:#f8f9fb;border-right:.5px solid var(--line);color:#15171b;font-size:14px}
++.sidebar-header{box-sizing:border-box;display:flex;align-items:center;gap:8px;flex:none;height:60px;margin-bottom:4px;padding:8px 0 8px 4px;overflow:hidden}
++.brand{display:flex;align-items:baseline;gap:8px;flex:1;min-width:0;white-space:nowrap}.brand strong{font-size:18px;line-height:24px;font-weight:600;letter-spacing:0;color:#15171b}.brand span{font-size:10px;color:var(--muted)}.rail-brand{display:none}
++.project-header{display:flex;align-items:center;gap:4px;flex:none;height:36px;margin:2px 0 4px;padding-left:4px}.sidebar-heading{flex:1;min-width:0;font-size:13px;line-height:20px;font-weight:400;color:#858990;margin:0}.project-actions{display:flex;align-items:center;gap:4px;margin-left:auto}
++.project-list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:2px 0 16px;margin:0 -4px}
++.project-list .project-item{display:flex;position:relative;align-items:center;gap:8px;flex-shrink:0;min-width:0;width:100%;height:34px;padding:0 8px;text-align:left;font-size:14px;font-weight:400;line-height:20px;border:0;border-radius:8px;background:transparent;color:#15171b}
++.project-list .project-item:hover,.project-list .project-item.active{background:#e9eaed}.project-list .project-item.active{font-weight:500}
++.project-mark{width:18px;height:18px;flex:none;color:#477cff}.project-avatar{display:none}.project-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.project-unavailable{flex-shrink:0;font-size:10px;font-weight:400;color:var(--muted)}.project-empty{font-size:12px;color:var(--muted);margin:0 12px}
++@media(min-width:761px){.shell.sidebar-collapsed{grid-template-columns:56px minmax(0,1fr)}.sidebar-collapsed .sidebar{padding:18px 10px 6px}.sidebar-collapsed .sidebar-header{height:36px;margin-bottom:12px;padding:0}.sidebar-collapsed .brand,.sidebar-collapsed .sidebar-heading,.sidebar-collapsed .project-empty{display:none}.sidebar-collapsed .sidebar-toggle{width:36px;height:36px;border-radius:8px}.sidebar-collapsed .sidebar-toggle svg{display:none}.sidebar-collapsed .rail-brand{display:block;font-size:12px;font-weight:600;color:#15171b}.sidebar-collapsed .sidebar-toggle:is(:hover,:focus-visible) svg{display:block}.sidebar-collapsed .sidebar-toggle:is(:hover,:focus-visible) .rail-brand{display:none}.sidebar-collapsed .project-header{height:auto;flex-direction:column;margin:0 0 8px;padding:0}.sidebar-collapsed .project-actions{flex-direction:column;gap:8px;margin:0}.sidebar-collapsed .project-actions .icon-button{width:36px;height:36px}.sidebar-collapsed .project-list{margin:0;padding:4px 0 16px;gap:4px}.sidebar-collapsed .project-item{justify-content:center;width:36px;height:36px;padding:0}.sidebar-collapsed .project-mark,.sidebar-collapsed .project-name,.sidebar-collapsed .project-unavailable{display:none}.sidebar-collapsed .project-avatar{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;font-size:11px;line-height:16px}.sidebar-collapsed .project-item[data-unavailable=true]:after{content:'';position:absolute;top:4px;right:3px;width:4px;height:4px;border-radius:50%;background:#ba872e}}
++/* Header, sidebar and project-row styles adapted from DeepSeek Harness 0.2.1-rc.2.
++ * ui-conversation: skeleton/ConversationRoot.module.css; ui-sidebar: SidebarRoot.module.css;
++ * ui-workspace: rows/WorkspaceBrowser.module.css and rows/Rows.module.css.
+  * https://github.com/deepseek-ai/deepseek-harness
+  *
+  * MIT License
+@@ -43,7 +45,7 @@
+ .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+ .nav-note{font-size:11px;color:var(--muted)}.workspace-status{flex:none;margin:0}.workspace-status>summary{display:flex;align-items:center;justify-content:center;gap:6px;min-width:28px;min-height:28px;padding:3px 6px;border-radius:6px;list-style:none}.workspace-status>summary::-webkit-details-marker{display:none}.workspace-status>summary:after{content:'';width:4px;height:4px;border-right:1px solid currentColor;border-bottom:1px solid currentColor;transform:rotate(45deg);margin-top:-3px}.workspace-status[open]>summary:after{transform:rotate(225deg);margin-top:2px}.workspace-status>summary:hover{background:#f1f2f5}
+ #sync-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:20px;white-space:nowrap}#sync-status:before{content:'';width:6px;height:6px;border-radius:50%;background:#8a919d;flex:none}.workspace-status[data-state=ready] #sync-status:before{background:#4b8876}.workspace-status[data-state=attention] #sync-status{color:#9a6a22}.workspace-status[data-state=attention] #sync-status:before{background:#ba872e}.workspace-status[data-state=error] #sync-status{color:var(--danger)}.workspace-status[data-state=error] #sync-status:before{background:var(--danger)}
+-.workspace-status-panel{position:absolute;top:46px;right:28px;z-index:7;width:400px;max-width:calc(100% - 56px);max-height:min(70dvh,480px);overflow:auto;padding:16px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 8px 30px #202c4320;overflow-wrap:anywhere}.workspace-status-panel>h2{font-size:14px;margin:0 0 8px}.workspace-status-panel .audit-panel{margin:12px 0 0;padding:10px;border-radius:6px;max-height:none}.sync-error{color:var(--danger)}#navigation-toggle,.navigation-close{display:none}
++.workspace-status-panel{position:absolute;top:46px;right:28px;z-index:7;width:400px;max-width:calc(100% - 56px);max-height:min(70dvh,480px);overflow:auto;padding:16px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 8px 30px #202c4320;overflow-wrap:anywhere}.workspace-status-panel>h2{font-size:14px;margin:0 0 8px}.workspace-status-panel .audit-panel{margin:12px 0 0;padding:10px;border-radius:6px;max-height:none}.sync-error{color:var(--danger)}#navigation-toggle{display:none}
+ .function-nav{z-index:1;display:flex;gap:36px;margin-top:10px;overflow-x:auto;scrollbar-width:thin;padding:0 28px;position:relative}
+ .function-nav button{flex-shrink:0;position:relative;padding:0 0 9px;border:0;border-radius:0;background:transparent;color:#7d838e;font-size:13px;font-weight:500;line-height:16px;white-space:nowrap}
+ .function-nav button:after{content:'';background:transparent;border-radius:2px;height:2px;position:absolute;bottom:0;left:0;right:0}.function-nav button:hover{color:var(--accent);background:transparent}.function-nav button.active{background:transparent;color:var(--accent)}.function-nav button.active:after{background:var(--accent)}.function-nav button:focus-visible{outline-offset:-2px}
+@@ -51,7 +53,7 @@
+ main{padding:24px 32px;min-width:0;max-width:1164px;width:100%;margin:0 auto;overflow-wrap:anywhere}main>h1{font-size:28px;line-height:1.4;margin:0 0 6px}h2{font-size:18px;line-height:1.5;margin:0 0 16px}h3{font-size:15px;line-height:1.5;margin:0 0 12px}p{margin:10px 0}.muted{color:var(--muted)}.small{font-size:12px}.panel{background:white;border:1px solid var(--line);border-radius:10px;padding:24px;margin:20px 0;min-width:0}.next-step{background:#fafbfe;border-color:#e5eaf6}.next-step h2{font-size:22px;margin:6px 0 12px}.next-step p{max-width:76ch}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}.end{justify-content:space-between}.overview-layout{display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:24px;align-items:start}.overview-facts{font-size:13px}.overview-facts ul{padding:0;list-style:none;margin:0 0 20px}.overview-facts li{padding:9px 0;border-bottom:1px solid var(--line)}.overview-facts button{font-size:12px}#project-readme{min-width:0}#project-readme>.forge-reader{font-size:14px}.badge{display:inline-block;border-radius:5px;background:#eef4f1;color:#34624f;padding:3px 8px;font-size:12px}.badge.warn{background:#fff8e9;color:#886522}.badge.error{background:#fcf0ee;color:#9a433c}.error-box{white-space:pre-wrap;overflow-wrap:anywhere;background:#fff5f3;border:1px solid #eed1cc;border-radius:8px;padding:14px;margin:15px 0}.notice{background:#f8fafc;border-left:3px solid #aab9d5;padding:10px 14px;margin:15px 0;font-size:13px}.table-wrap{overflow:auto;max-width:100%}table{border-collapse:collapse;width:100%;font-size:13px;text-align:left}td,th{border-bottom:1px solid var(--line);padding:10px;vertical-align:top;max-width:350px;overflow-wrap:anywhere}th{color:var(--muted);font-weight:500;background:#f8f9fb}tbody tr.clickable{cursor:pointer}tbody tr.clickable:hover,tbody tr.selected{background:#f0f3fc}pre{font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;background:#f7f8fa;border-radius:6px;padding:14px;max-height:480px;overflow:auto;max-width:100%}.code,.scalar-value{white-space:pre;tab-size:4}.details{display:grid;grid-template-columns:minmax(90px,140px) minmax(0,1fr);gap:8px;font-size:12px}.details dt{color:var(--muted)}.details dd{margin:0;overflow-wrap:anywhere}.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:16px}.case-field{padding:16px 0;min-width:0}.case-image{display:block;max-width:100%;max-height:350px;margin-top:12px;border-radius:6px}.case-identity{border-bottom:1px solid var(--line);padding-bottom:16px}.case-identity dd{font-weight:500}.field-tabs{display:flex;gap:6px;max-width:100%;overflow-x:auto;padding:4px 3px 10px;border-bottom:1px solid var(--line)}.field-tabs button{flex-shrink:0;font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.field-tabs button[aria-selected=true]{background:#edf1fc;color:var(--accent);border-color:#adc0ee;font-weight:600}.case-detail{min-width:0}.case-reading .reader{max-width:76ch}.context-actions{border-bottom:1px solid var(--line);padding-bottom:10px}.context-actions>button{font-size:11px}.context-actions details{font-size:11px;max-width:100%;min-width:0}.context-actions details[open]{flex-basis:100%}.case-comparison>summary{font-weight:600}.case-record-selector{display:none}.bound-case-active .case-record-selector{display:flex;gap:8px;overflow-x:auto;padding:4px 3px 10px;max-width:100%}.case-record-selector button{flex-shrink:0;max-width:210px;text-align:left;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bound-case-active>.table-catalog{display:none}.bound-case-active .bound-table .table-wrap,.bound-case-active .bound-table>.toolbar{display:none}.bound-case-active .bound-table{padding:14px 20px}.bound-case-active .bound-table>h2{font-size:14px;margin-bottom:3px}.original-case-active>:not(.original-data):not(h1){display:none}.original-case-active .original-data>.original-listing,.original-case-active .original-viewer>.toolbar{display:none}.original-case-active .original-data{border:0;padding:0}.original-case-active .original-data>h2{font-size:14px}
+ .graph{overflow:auto;background:#fbfcfd;border:1px solid var(--line);border-radius:8px;margin:12px 0}.graph svg{min-width:100%;display:block}.graph .node{cursor:pointer}.graph .node rect{fill:#fff;stroke:#aabbd6;stroke-width:1.5}.graph .node:hover rect,.graph .node.selected rect{stroke:var(--accent);stroke-width:2.5;fill:#f4f6fe}.graph text{font:12px system-ui;fill:#34445d}.graph .node-title{font-size:14px;font-weight:600}.graph .edge{stroke:#93a8aa;stroke-width:1.5;fill:none}.graph .edge-value{stroke:#326bba;stroke-dasharray:7 4}.graph .edge-action{stroke:#8d8d8d;stroke-dasharray:2 5}.busy{color:var(--brand);padding:15px}.report-row{padding:12px 0;border-bottom:1px solid var(--line)}a{color:var(--accent)}details{margin:12px 0;min-width:0}summary{cursor:pointer;color:#50647f}footer{font-size:11px;color:var(--muted);padding-top:15px}.output-row{border-top:1px solid var(--line);padding:16px 0}.output-row button,.output-row input{margin:5px 8px 5px 0}textarea{width:100%;max-width:720px;font:13px ui-monospace,monospace}label{display:inline-block;margin:8px 16px 8px 0}label select,label input{margin-left:8px}.audit-panel{margin:0 32px 12px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;max-height:320px;overflow:auto;font-size:12px}.audit-panel.audit-attention{border-color:#e0c396;background:#fffaf3}.audit-panel summary{font-weight:600}.audit-row{padding:12px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.audit-row strong,.audit-row span{display:block}.audit-row ul{padding-left:20px}.audit-row button{margin-top:8px}dialog{max-width:560px;width:calc(100% - 32px);max-height:calc(100dvh - 32px);overflow:auto;border:1px solid var(--line);border-radius:12px;padding:24px}dialog::backdrop{background:rgba(24,35,53,.25)}dialog form{display:grid;gap:14px}dialog input{width:100%}dialog.document-dialog{max-width:900px}.document-dialog h2{overflow-wrap:anywhere}
+ @media(max-width:1100px){.overview-layout{grid-template-columns:minmax(0,1fr)}.overview-facts{margin-top:0}.overview-facts ul{display:flex;flex-wrap:wrap;gap:12px}.overview-facts li{border:0;padding:0}.split{grid-template-columns:1fr}}
+-@media(max-width:760px){.function-nav{gap:24px;margin-top:8px;padding:0 16px}.shell{display:block}.sidebar{display:none;position:fixed;top:0;left:0;bottom:0;z-index:10;width:min(288px,calc(100% - 32px));height:100dvh;border-right:1px solid var(--line);box-shadow:6px 0 24px #283c5620}.shell.nav-open .sidebar{display:flex}.navigation-close{display:block;align-self:flex-end;margin-bottom:8px}.workspace-header{min-height:38px;padding:8px 12px 0;gap:8px}.workspace-title{gap:6px}#workspace-name{flex:1;max-width:none}#navigation-toggle{display:inline-flex}.workspace-status .sync-caption{display:none}.workspace-status-panel{top:42px;right:16px;max-width:calc(100% - 32px)}main{padding:24px 16px}main>h1{font-size:24px}main>p{font-size:13px}.panel{padding:18px;margin:16px 0}.next-step h2{font-size:20px}.toolbar{gap:8px}.toolbar button{font-size:12px}.details{grid-template-columns:minmax(60px,100px) minmax(0,1fr)}.case-reading .context-actions{margin-top:16px}.bound-case-active .bound-table{padding:12px}.case-identity{font-size:11px}#project-readme>.forge-reader{font-size:14px}.overview-layout{gap:0}}
++@media(max-width:760px){.function-nav{gap:24px;margin-top:8px;padding:0 16px}.shell{display:block}.sidebar{display:none;position:fixed;top:0;left:0;bottom:0;z-index:10;width:min(288px,calc(100% - 32px));height:100dvh;border-right:1px solid var(--line);box-shadow:6px 0 24px #283c5620}.shell.nav-open .sidebar{display:flex}.workspace-header{min-height:38px;padding:8px 12px 0;gap:8px}.workspace-title{gap:6px}#workspace-name{flex:1;max-width:none}#navigation-toggle{display:inline-flex}.workspace-status .sync-caption{display:none}.workspace-status-panel{top:42px;right:16px;max-width:calc(100% - 32px)}main{padding:24px 16px}main>h1{font-size:24px}main>p{font-size:13px}.panel{padding:18px;margin:16px 0}.next-step h2{font-size:20px}.toolbar{gap:8px}.toolbar button{font-size:12px}.details{grid-template-columns:minmax(60px,100px) minmax(0,1fr)}.case-reading .context-actions{margin-top:16px}.bound-case-active .bound-table{padding:12px}.case-identity{font-size:11px}#project-readme>.forge-reader{font-size:14px}.overview-layout{gap:0}}
+ 
+ /* Keep the selected Case, its source and return path ahead of catalogue metadata. */
+ .original-case-active>h1,.bound-case-active>h1,.bound-case-active>h1+p{display:none}
+diff --git a/demiflow/forge/web/index.html b/demiflow/forge/web/index.html
+--- a/demiflow/forge/web/index.html
++++ b/demiflow/forge/web/index.html
+@@ -1,3 +1,3 @@
+ <!doctype html>
+-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Forge · 项目工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/reading.css"></head>
++<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DemiFlow · 项目工作台</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/reading.css"></head>
+ <body><div id="app"></div><script src="/markdown-it.min.js" defer></script><script src="/view.js" defer></script><script src="/reading.js" defer></script><script src="/app.js" defer></script></body></html>
+diff --git a/tests/test_forge_web_redesign.py b/tests/test_forge_web_redesign.py
+--- a/tests/test_forge_web_redesign.py
++++ b/tests/test_forge_web_redesign.py
+@@ -30,7 +30,7 @@
+     page.on('request',lambda r:requests.append((r.method,r.url)))
+     page.on('console',lambda m:csp.append(m.text) if 'Content Security Policy' in m.text else None)
+     page.goto(app.origin+'/#token='+app.token)
+-    page.locator('#sync-status').filter(has_text='最近同步').or_(page.get_by_role('heading',name='开始使用 Forge')).first.wait_for()
++    page.locator('#sync-status').filter(has_text='最近同步').or_(page.get_by_role('heading',name='开始使用 DemiFlow')).first.wait_for()
+     try:
+         yield page,requests
+         assert not errors,errors
+@@ -254,6 +254,8 @@
+     page.on('request',lambda r:network.append(r.url) if r.url.startswith(('http:','https:')) else None)
+     page.on('pageerror',lambda e:errors.append(str(e)))
+     page.goto(output.as_uri());page.get_by_role('heading',name='接线检查报告',exact=True).wait_for()
++    assert page.title()=='DemiFlow · 项目工作台'
++    assert page.locator('.brand strong').inner_text()=='DemiFlow'
+     assert page.locator('.graph .node').count()==7
+     page.get_by_text('第三方许可证与通知',exact=True).click()
+     assert page.locator('.export-notices pre').text_content()==(ASSETS/'markdown-it.LICENSE.txt').read_text()+'\n\n'+(ASSETS/'markdown-it.NOTICES.txt').read_text()
+@@ -355,7 +357,7 @@
+         # Outside actions close the disclosure and keep the original operation.
+         summary.click()
+         page.get_by_role('button',name='帮助',exact=True).click()
+-        page.get_by_role('dialog').get_by_role('heading',name='使用 Forge',exact=True).wait_for()
++        page.get_by_role('dialog').get_by_role('heading',name='使用 DemiFlow',exact=True).wait_for()
+         assert status.get_attribute('open') is None
+         page.get_by_role('dialog').get_by_role('button',name='关闭',exact=True).click()
+         page.get_by_role('button',name='项目设置',exact=True).click()
+@@ -375,6 +377,63 @@
+         page.get_by_role('button',name='刷新当前视图',exact=True).click()
+         expect(page.get_by_role('button',name='刷新当前视图',exact=True)).to_be_enabled(timeout=30000)
+         expect(status).to_have_attribute('data-state','ready')
++        assert not any(method=='POST' for method,_ in requests)
++
++
++def test_unified_demiflow_sidebar_collapses_without_losing_project_tabs(isolated,original,tmp_path,browser):
++    expect=pytest.importorskip('playwright.sync_api').expect
++    registry=tmp_path/'registry.json'
++    bound_id=console.add(registry,isolated)['workspace_id']
++    original_id=console.add(registry,original)['workspace_id']
++    with service(None,registry=registry) as app,opened(browser,app) as (page,requests):
++        assert page.title()=='DemiFlow · 项目工作台'
++        assert page.locator('.brand strong').inner_text()=='DemiFlow'
++        projects=page.get_by_role('navigation',name='项目',exact=True)
++        row=lambda identity:projects.locator(f'[data-workspace="{identity}"]')
++        row(bound_id).click()
++        page.get_by_role('heading',name='question-experiments',exact=True).wait_for()
++        controls=page.locator('.project-header')
++        assert controls.get_by_role('button',name='新建项目',exact=True).is_visible()
++        assert controls.get_by_role('button',name='注册已有项目',exact=True).is_visible()
++        navigate(page,'流程与配置')
++        page.get_by_role('heading',name='流程与配置',exact=True).wait_for()
++        fold=page.get_by_role('button',name='收起侧栏',exact=True)
++        fold.press('Enter')
++        assert page.locator('#project-sidebar').bounding_box()['width']==56
++        assert not row(bound_id).locator('.project-name').is_visible()
++        assert row(bound_id).locator('.project-avatar').is_visible()
++        assert row(bound_id).get_attribute('aria-label')=='question-experiments'
++        assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
++        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
++        artifact(page,'demiflow-sidebar-collapsed-1440')
++        row(original_id).click()
++        page.get_by_role('heading',name='shipping',exact=True).wait_for()
++        row(bound_id).click()
++        page.get_by_role('heading',name='流程与配置',exact=True).wait_for()
++        page.wait_for_function("identity => {const value=ForgeView.decodeView(location.hash);return value?.kind==='flows'&&value.workspace===identity;}",arg=bound_id)
++        page.reload()
++        page.get_by_role('heading',name='流程与配置',exact=True).wait_for()
++        assert page.locator('#project-sidebar').bounding_box()['width']==56
++        # The desktop preference does not collapse the mobile project drawer.
++        page.set_viewport_size({'width':390,'height':844})
++        toggle=page.get_by_role('button',name='展开项目导航',exact=True)
++        assert not page.locator('#project-sidebar').is_visible()
++        toggle.click()
++        assert row(bound_id).locator('.project-name').is_visible()
++        assert page.locator('.brand strong').is_visible()
++        artifact(page,'demiflow-sidebar-390')
++        page.get_by_role('button',name='收起项目导航',exact=True).click()
++        assert not page.locator('#project-sidebar').is_visible()
++        expect(toggle).to_be_focused()
++        page.set_viewport_size({'width':1440,'height':1000})
++        page.get_by_role('button',name='展开侧栏',exact=True).press('Enter')
++        assert row(bound_id).locator('.project-name').is_visible()
++        assert page.locator('#project-sidebar').bounding_box()['width']==264
++        assert page.evaluate('ForgeView.decodeView(location.hash).kind')=='flows'
++        artifact(page,'demiflow-sidebar-expanded-1440')
++        for label in ['新建项目','注册已有项目']:
++            controls.get_by_role('button',name=label,exact=True).click()
++            page.get_by_role('dialog').get_by_role('button',name='取消',exact=True).click()
+         assert not any(method=='POST' for method,_ in requests)
+ 
+ 
+diff --git a/tests/test_forge_project_browser.py b/tests/test_forge_project_browser.py
+--- a/tests/test_forge_project_browser.py
++++ b/tests/test_forge_project_browser.py
+@@ -32,7 +32,7 @@
+         page=browser.new_page(viewport={'width':1440,'height':1000});page.set_default_timeout(60000)
+         errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+         page.goto(app.origin+'/#token='+app.token)
+-        page.get_by_role('heading',name='开始使用 Forge').wait_for()
++        page.get_by_role('heading',name='开始使用 DemiFlow').wait_for()
+         page.get_by_role('button',name='新建项目',exact=True).click()
+         dialog=page.get_by_role('dialog')
+         dialog.get_by_label('项目目录').fill(str(tmp_path/'new-project'))
+@@ -105,7 +105,7 @@
+         browser=runtime.chromium.launch(executable_path=str(executable),headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+         page=browser.new_page();page.set_default_timeout(30000)
+         page.goto(app.origin+'/#token='+app.token)
+-        page.get_by_role('heading',name='开始使用 Forge').wait_for()
++        page.get_by_role('heading',name='开始使用 DemiFlow').wait_for()
+         result=CliRunner().invoke(main,['forge','console','--registry',str(registry),'add',str(existing)])
+         assert result.exit_code==0,result.output
+         # No reload or browser-side registration: the same console observes it.
+diff --git a/tests/test_forge_project_removal.py b/tests/test_forge_project_removal.py
+--- a/tests/test_forge_project_removal.py
++++ b/tests/test_forge_project_removal.py
+@@ -143,7 +143,7 @@
+         cli=CliRunner().invoke(main,['forge','console','--registry',str(registry),'remove',beta_id,'--expected',expected])
+         assert cli.exit_code==0,cli.output
+         for page in pages:
+-            page.get_by_role('heading',name='开始使用 Forge').wait_for()
++            page.get_by_role('heading',name='开始使用 DemiFlow').wait_for()
+             assert page.locator('#project-list button').count()==0
+             assert page.locator('#project-list .project-empty').inner_text()=='尚未登记项目'
+             assert '#view=' not in page.url

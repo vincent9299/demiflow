@@ -10,68 +10,14 @@ from demiflow.collect.reading import select_blocks
 from demiflow.collect.documents import canonical, parse_document
 
 
-class FakeWeb:
-    def __init__(self, reverse=False): self.calls=[]; self.closed=0; self.reverse=reverse
-    async def search(self, query):
-        self.calls.append(query)
-        return {'status':'ok','reason':'','candidates':[{'url':'https://example.org/a','title':'A','snippet':''}],'attempts':[]}
-    async def fetch(self, url):
-        self.calls.append(url)
-        await asyncio.sleep(.005 if url.endswith('/a') != self.reverse else 0)
-        return {'url':url,'status':'ok','reason':'','document_ref':{'uri':'file:///'+url[-1], 'sha256':url[-1]*64},'attempts':[]}
-    async def aclose(self): self.closed+=1
-    def snapshot_metrics(self): return {'calls':len(self.calls)}
 
 
-def collect(stream):
-    rows=[]
-    stats=stream.map(lambda row: rows.append(row) or row).run_stream()
-    return rows,stats
 
 
-def test_native_plan_is_lazy_and_resources_are_owned(tmp_path):
-    from demiflow.data.plan import SearchWebOp, FetchDocumentsOp, SaveLanceOp
-    web=FakeWeb(); uri=tmp_path/'output.lance'
-    stream=(data.from_items([{'id':'a','requests':[{'request_id':'r','query':'seed','bindings':['x']}]}])
-        .search_web(requests='requests',output='searched',session=web)
-        .map(lambda row:{**row,'urls':[{'request_id':'r','bindings':['x'],'urls':['https://example.org/a']}]})
-        .fetch_documents(requests='urls',output='fetched',session=web)
-        .save_lance(uri,schema=pa.schema([('id',pa.string())]),key='id',stage='out',flush_interval=.01))
-    assert not uri.exists() and not web.calls
-    assert any(isinstance(op,SearchWebOp) for op in stream._plan.operations)
-    assert any(isinstance(op,FetchDocumentsOp) for op in stream._plan.operations)
-    assert isinstance(stream._plan.operations[-1],SaveLanceOp)
-    rows,stats=collect(stream)
-    assert len(rows)==1 and web.closed==1
-    assert stats.outputs['out']['version']>=1
-    assert stats.metrics['resources']['FakeWeb:0']['calls']==2
 
 
-def test_fetch_caps_and_existing_document_binding_merge():
-    web=FakeWeb()
-    requests=[{'request_id':str(i),'bindings':['b'+str(i)],'urls':[f'https://example.org/{i}/{j}' for j in range(5)]} for i in range(2)]
-    out,_=collect(data.from_items([{'requests':requests}]).fetch_documents(
-        requests='requests',output='out',session=web,per_request=None,max_attempts=5,max_new_documents=2))
-    assert len(web.calls)==2 and len(out[0]['out']['documents'])==2
-    known={'url':'https://example.org/a','status':'ok','reason':'','document_ref':{'uri':'file:///a','sha256':'a'*64},
-           'request_ids':['old'],'bindings':['b1']}
-    web=FakeWeb()
-    out,_=collect(data.from_items([{'known':[known],'requests':[{'request_id':'new','bindings':['b2'],'urls':[known['url']]}]}])
-        .fetch_documents(requests='requests',output='out',known='known',session=web,max_attempts=0,max_new_documents=0))
-    document=out[0]['out']['documents'][0]
-    assert document['request_ids']==['old','new'] and document['bindings']==['b1','b2']
-    assert not web.calls and out[0]['out']['touched_urls']==[known['url']]
 
 
-def test_fetch_order_is_independent_of_completion():
-    requests=[{'request_id':'q1','bindings':['c1'],'urls':['https://example.org/a','https://example.org/b']},
-              {'request_id':'q2','bindings':['c2'],'urls':['https://example.org/b','https://example.org/a']}]
-    outputs=[]
-    for reverse in (False,True):
-        rows,_=collect(data.from_items([{'requests':requests}]).fetch_documents(requests='requests',output='out',session=FakeWeb(reverse)))
-        outputs.append(rows[0]['out']['documents'])
-    assert outputs[0]==outputs[1]
-    assert all(d['bindings']==['c1','c2'] and d['request_ids']==['q1','q2'] for d in outputs[0])
 
 
 class Counter:
@@ -102,13 +48,6 @@ def test_empty_snapshot_and_failure_cleanup(tmp_path):
     schema=pa.schema([('id',pa.string())]); uri=tmp_path/'empty.lance'
     stats=data.from_items([]).save_lance(uri,schema=schema,key='id',stage='empty').run_stream()
     assert stats.outputs['empty']['version']>=1
-    web=FakeWeb(); seen=[]
-    def fail(row): raise ValueError('failure after committed stage')
-    stream=(data.from_items([{'id':'a','requests':[]}]).search_web(requests='requests',output='out',session=web)
-        .save_lance(uri,schema=schema,key='id',stage='saved',flush_interval=.01).map(fail))
-    with pytest.raises(ValueError,match='failure after'):
-        stream.run_stream(on_drain=lambda stats:seen.append(stats.outputs))
-    assert web.closed==1 and seen[0]['saved']['version']>0
     data.from_items([]).save_lance(uri,schema=schema,key='id',stage='retry').run_stream()
 
 
@@ -147,21 +86,17 @@ def test_profile_change_separates_search_cache(tmp_path):
     assert calls[0]['engines']=='wikipedia' and 'categories' not in calls[0]
 
 
-def test_parser_upgrade_reuses_raw_download(tmp_path,monkeypatch):
-    import demiflow.collect.web as module
-    calls=[]
-    async def run():
-        web=module.WebClient(cache_path=tmp_path/'cache.sqlite',object_directory=tmp_path/'objects',search_url='https://s.example')
-        async def get(url,**kwargs):
-            calls.append(url)
-            return {'status':'ok','body':b'<main><p>Public text</p></main>','final_url':url,
-                    'headers':{'content-type':'text/html'},'attempts':[]}
-        web._get=get
-        try: return await web.fetch('https://example.org')
-        finally: await web.aclose()
-    monkeypatch.setattr(module,'run_isolated',lambda function,*args,timeout_s=None,**kwargs:function(*args,**kwargs))
-    first=asyncio.run(run());monkeypatch.setattr(module,'PARSER_VERSION','test-next-parser');second=asyncio.run(run())
-    assert len(calls)==1 and first['raw_ref']==second['raw_ref'] and second['status']=='ok'
+def test_reparse_retained_raw_snapshot(tmp_path,monkeypatch):
+    from demiflow.collect.acquisition import ParseDocument
+    from demiflow.objects import LocalObjectStore
+    from demiflow.collect.documents import read_document
+    raw=LocalObjectStore(tmp_path/'raw').put(b'<main><p>Public text</p></main>')
+    request=dict(raw_ref=raw.to_dict(),url='https://example.org/',final_url='https://example.org/',
+                 content_type='text/html',retrieved_at='fixed')
+    parser=ParseDocument(store=LocalObjectStore(tmp_path/'parsed'))
+    first=asyncio.run(parser(request));second=asyncio.run(parser(request))
+    assert first==second and first['raw_ref']==raw.to_dict() and first['status']=='ok'
+    assert read_document(first['document_ref'])['blocks'][0]['text']=='Public text'
 
 
 def test_public_main_survives_sidebar_login_and_table_rows():

@@ -7,16 +7,26 @@ name = "demiflow"
 version = "0.3.0"
 description = "Declarative dataset pipelines: lazy local execution, async streaming stage, Lance I/O, LLM operators"
 requires-python = ">=3.10"
-dependencies = ["pyarrow==25.0.1", "PyYAML>=6", "click>=8", "packaging>=23", "datafusion==54.0.0", "pylance==12.0.0+demiflow.arrowfix1", "cloudpickle>=2.2", "psutil>=5.9"]
+dependencies = ["pyarrow==25.0.1", "PyYAML>=6", "click>=8", "packaging>=23", "datafusion==54.0.0", "pylance==12.0.0+demiflow.arrowfix1", "cloudpickle>=2.2", "psutil>=5.9", "tomli>=2; python_version < '3.11'"]
+
+[project.scripts]
+demiflow = "demiflow.cli:main"
+
+[project.entry-points."jupyter_client.kernel_provisioners"]
+demiflow-sandbox = "demiflow.workbench.analysis.provisioner:SandboxProvisioner"
 
 [project.optional-dependencies]
 local = ["cloudpickle>=2.2"]
+fetch = ["httpx>=0.27,<0.29"]
+queue-postgresql = ["psycopg[binary]>=3.3,<4"]
 lance = ["pylance>=0.9"]
 ray = ["ray[data]>=2.9"]
 llm = ["requests>=2.31", "httpx>=0.27"]      # operator_llm 客户端惰性 import requests（真实依赖）
+tokens = ["tiktoken>=0.9"]
 crawl = ["crawl4ai>=0.9"]
 images = ["pillow>=10"]
 embeddings = ["httpx>=0.27", "pillow>=10"]
+services = ["httpx>=0.27", "uv>=0.8,<1"]
 wikitext = ["mwparserfromhell==0.7.2"]
 pdf = ["pypdf==6.19.0"]
 # 聚合 extras：一键装齐采集栈（net/fetch 零三方依赖，crawl 与 images 惰性）
@@ -32,6 +42,8 @@ search-postgresql = ["psycopg2-binary>=2.9"]
 search-mongodb = ["pymongo>=4"]
 search-browser = ["playwright==1.63.0"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+analysis = ["jupyter_client==8.10.0", "ipykernel==7.3.0", "nbformat==5.11.1",
+            "pandas==2.3.3", "matplotlib==3.11.1", "pillow==12.3.0"]
 
 [tool.setuptools.packages.find]
 include = ["demiflow*"]
@@ -39,6 +51,10 @@ exclude = ["demiflow._vendor.searxng*"]
 
 [tool.setuptools.package-data]
 "demiflow.collect.native_search" = ["inventory.json"]
+"demiflow.forge" = ["contracts/*.json", "standards/*.json"]
+"demiflow.workbench" = ["analysis/*.json", "web/*.html", "web/*.js", "web/*.css", "web/*.txt", "web/*.json"]
+"demiflow.forge.development" = ["standards/*.md", "skill/SKILL.md", "skill/scripts/*.py"]
+"demiflow.workbench.conversations" = ["*.cjs"]
 "demiflow._vendor" = ["searxng/**/*", "searxng/*"]
 
 [tool.pytest.ini_options]

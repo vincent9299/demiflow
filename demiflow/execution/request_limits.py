@@ -151,12 +151,38 @@ class LatencySummary:
 
 
 class ObservedQueue(asyncio.Queue):
-    def __init__(self,depth):
+    def __init__(self, depth, *, max_item_bytes=None, max_bytes=None):
+        if max_item_bytes is not None and (type(max_item_bytes) is not int or max_item_bytes < 1):
+            raise ValueError('Queue item byte budget must be positive')
+        if max_bytes is not None and (max_item_bytes is None or max_bytes < max_item_bytes):
+            raise ValueError('Queue byte capacity must cover one maximum item')
         super().__init__(depth);self.peak=0;self.wait=LatencySummary()
+        self.max_item_bytes, self.max_bytes = max_item_bytes, max_bytes
+        self.bytes = self.peak_bytes = 0
+
+    def full(self):
+        # Reserve a complete item before admission. Workers own dequeued rows;
+        # their independent in-flight allowance is admitted with the plan.
+        return super().full() or self.max_bytes is not None and self.bytes + self.max_item_bytes > self.max_bytes
+
     def put_nowait(self,item):
-        super().put_nowait((time.monotonic(),item));self.peak=max(self.peak,self.qsize())
+        from demiflow.execution.stream import SENTINEL, _BatchBoundary
+        size = 0
+        if self.max_item_bytes is not None and item is not SENTINEL and type(item) is not _BatchBoundary:
+            from ..data.runtime_contract import check_size
+            from .row_scope import ScopedRow
+            size = check_size(item.row if type(item) is ScopedRow else item, self.max_item_bytes)
+            if type(item) is ScopedRow:
+                size += 256
+                if size > self.max_item_bytes:
+                    raise ValueError("Native sidecar exceeds queue item budget")
+        super().put_nowait((time.monotonic(),item,size))
+        self.bytes += size
+        self.peak_bytes = max(self.peak_bytes, self.bytes)
+        self.peak=max(self.peak,self.qsize())
     def get_nowait(self):
-        queued,item=super().get_nowait()
-        from demiflow.execution.stream import SENTINEL
-        if item is not SENTINEL:self.wait.observe(time.monotonic()-queued)
+        queued,item,size=super().get_nowait()
+        self.bytes -= size
+        from demiflow.execution.stream import SENTINEL, _BatchBoundary
+        if item is not SENTINEL and type(item) is not _BatchBoundary:self.wait.observe(time.monotonic()-queued)
         return item

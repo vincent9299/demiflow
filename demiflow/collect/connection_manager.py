@@ -76,7 +76,7 @@ class ConnectionManager:
             self.loop = loop
             self.maintenance = loop.create_task(self._maintain(), name='demiflow-connection-maintenance')
 
-    def client(self, key, *, proxy, capacity, keepalive, timeout, headers):
+    def client(self, key, *, proxy, capacity, keepalive, timeout, headers, verify=True):
         self.start()
         if key in self.clients:
             return self.clients[key]['client']
@@ -89,7 +89,7 @@ class ConnectionManager:
         if self.reserved + capacity > self.policy.max_total_connections:
             raise ConnectionCapacityError('connection_total_capacity')
         from .http_transport import RetrievalTransport
-        transport = RetrievalTransport(proxy=proxy, limits=httpx.Limits(
+        transport = RetrievalTransport(proxy=proxy, verify=verify, limits=httpx.Limits(
             max_connections=capacity, max_keepalive_connections=keepalive,
             keepalive_expiry=self.policy.keepalive_expiry_s))
         client = httpx.AsyncClient(transport=transport, timeout=timeout,

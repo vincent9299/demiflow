@@ -316,12 +316,15 @@ def test_concurrent_first_requests_verify_model_once(server, monkeypatch):
     import httpx
     from demiflow.data.api import DataAPI
     checks = []
-    async def models(self, url, **kwargs):
-        checks.append(url)
+    original_send=httpx.AsyncClient.send
+    async def send(self, request, **kwargs):
+        if request.method!='GET' or request.url.path!='/v1/models':
+            return await original_send(self,request,**kwargs)
+        checks.append(str(request.url))
         await asyncio.sleep(.04)
         return httpx.Response(200, json={'data': [{'id': 'mock-model'}]},
-                              request=httpx.Request('GET', url))
-    monkeypatch.setattr(httpx.AsyncClient, 'get', models)
+                              request=request)
+    monkeypatch.setattr(httpx.AsyncClient, 'send', send)
     prompt(DataAPI().from_items([{'item': i} for i in range(8)]),
            options={'verify_model': True}, concurrency=8).materialize()
     assert len(checks) == 1 and len(server['requests']) == 8

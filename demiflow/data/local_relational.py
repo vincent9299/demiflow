@@ -348,7 +348,7 @@ def join(left, right, on, right_on=None, how='inner', suffix='_right', chunk_byt
     return DataAPI(left._executor).from_iter(generate)
 
 
-def reduce_by_key(dataset, on, reducer, initial=None, chunk_bytes=32*1024*1024):
+def reduce_by_key(dataset, on, reducer, initial=None, chunk_bytes=32*1024*1024, *, fn_kwargs=None):
     """按键稳定执行 Python reducer；复用直接上游 join 已建立的同键顺序。"""
     if getattr(dataset._executor, 'NAME', None) != 'local':
         raise NotImplementedError('reduce_by_key supports local only')
@@ -367,7 +367,7 @@ def reduce_by_key(dataset, on, reducer, initial=None, chunk_bytes=32*1024*1024):
             for _, items in itertools.groupby(rows, key=lambda item: item[0]):
                 state = copy.deepcopy(initial)
                 for _, row in items:
-                    state = reducer(state, row)
+                    state = reducer(state, row, **(fn_kwargs or {}))
                 if state is not None:
                     yield state
     # reducer 可以返回任意字段，不能擅自给结果加上有序性保证。
@@ -408,6 +408,9 @@ def group_batches(dataset, on, max_rows=32, output='items', chunk_bytes=32*1024*
 
 
 def checkpoint(dataset,path,version):
+    """Retired entry; existing sidecars must not bypass unified recovery."""
+    from ..execution.capabilities import require_action
+    require_action('checkpoint')
     from .api import DataAPI
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     metadata=path.with_suffix(path.suffix+'.meta.json')

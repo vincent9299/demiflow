@@ -18,10 +18,12 @@ from typing import Any
 
 
 class OperatorCheckpoint:
-    """SQLite-backed task ledger shared by operator workers and restarts."""
+    """Retired facade; construction cannot create or recover an operator ledger."""
 
     def __init__(self, path: str | Path, *, operator: str, lease_s: float = 300.0,
                  payload_policy: str = 'immutable'):
+        from .capabilities import require_action
+        require_action('operator_checkpoint')
         if not operator or not isinstance(operator, str):
             raise ValueError("operator must be a non-empty string")
         if lease_s <= 0:

@@ -1,0 +1,315 @@
+"""Persistent local task lifecycle and snapshot-bound acceptance records."""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import fcntl
+import json
+import os
+from pathlib import Path
+import uuid
+
+from .io import atomic_write_json, atomic_write_text
+from .launcher import SCRIPT
+from .checks import structural
+from .project import (ForgeError, PAGE_SIZE, REVIEW_RULES, SKIP, VERSION, PROJECT_LOCAL_STANDARDS, Project,
+                      changes, digest, no_symlinks, read_json, relative, safe_id, within)
+from .runner import run
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def init(root, config_path):
+    root = Path(root).absolute()
+    if not root.is_dir():
+        raise ForgeError("Project directory must already exist")
+    no_symlinks(root)
+    control = no_symlinks(root / ".demiforge")
+    candidate = Project.__new__(Project)
+    candidate.root, candidate.control = root, control
+    candidate.config = read_json(Path(config_path).absolute())
+    candidate.validate()
+    control.mkdir(exist_ok=True)
+    with no_symlinks(control / ".init.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        targets = [control / name for name in ("project.json", "forge", ".gitignore")]
+        if any(p.exists() or p.is_symlink() for p in targets):
+            raise ForgeError("Already initialized or partial bootstrap exists; refusing overwrite")
+        atomic_write_json(targets[0], candidate.config)
+        atomic_write_text(targets[1], SCRIPT)
+        os.chmod(targets[1], 0o755)
+        atomic_write_text(targets[2], "tasks/\n.init.lock\n")
+    return {"project": str(root), "standard": candidate.config["standard"], "status": "initialized"}
+
+
+@contextmanager
+def locked(project, task_id, *, create=False):
+    safe_id(task_id)
+    directory = no_symlinks(project.control / "tasks" / task_id)
+    if create:
+        directory.mkdir(parents=True, exist_ok=False)
+    elif not directory.is_dir():
+        raise ForgeError(f"Unknown task: {task_id}")
+    lockpath = no_symlinks(directory / ".lock")
+    with lockpath.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ForgeError(f"Task is busy: {task_id}") from error
+        path = no_symlinks(directory / "task.json")
+        state = {} if create else read_json(path)
+        yield directory, state
+        atomic_write_json(path, state)
+
+
+def start(project, task_id, pipeline, goal, writes, non_goals):
+    project.pipeline(pipeline)
+    if not goal.strip() or not writes or not non_goals:
+        raise ForgeError("Task requires a goal, explicit writable paths and non-goals")
+    for name in writes:
+        relative(name, modern=project.standard(pipeline) in PROJECT_LOCAL_STANDARDS)
+        no_symlinks(project.root / name)
+        if not any(within(name, w) for w in project.config["watch"]):
+            raise ForgeError(f"Writable path is not in watched roots: {name}")
+        for readonly in project.config["readonly"]:
+            target = (project.root / name).resolve()
+            protected = (project.root / readonly).resolve()
+            if target.is_relative_to(protected) or protected.is_relative_to(target):
+                raise ForgeError(f"Writable scope intersects readonly: {name}")
+    binding = project.binding()
+    observation = project.observe(pipeline)
+    if observation.coverage is not None:
+        if observation.facts.unwatched:
+            raise ForgeError('Necessary local source is not watched; cannot capture its original baseline')
+        unknown = [p for scope in ('tree', 'readonly')
+                   for p in observation.coverage[scope]['unverified_ranges']]
+        for name in writes:
+            if any(within(name, p) or within(p, name) for p in unknown):
+                raise ForgeError(f'Writable scope intersects unverified source coverage: {name}')
+    if project.binding() != binding:
+        raise ForgeError('Tool/config changed during start observation')
+    initial = {"schema": "demiforge-task-v1", "id": task_id, "pipeline": pipeline,
+               "goal": goal, "writes": sorted(set(writes)), "non_goals": non_goals,
+               "created": now(), "binding": binding, "baseline": observation.tree,
+               "readonly_baseline": observation.readonly, "sources": observation.sources,
+               "reads": {}, "notes": [], "check": None, "verification": None, "review": None}
+    if observation.coverage is not None:
+        initial['baseline_coverage'] = observation.coverage
+    with locked(project, task_id, create=True) as (_, state):
+        state.update(initial)
+    return {"task": task_id, "status": "started", "writes": initial["writes"],
+            "next": f"context --id {task_id}", "note": "Baseline includes existing dirty/untracked files"}
+
+
+def current(project, state, *, with_observation=False):
+    binding = project.binding()
+    if binding != state["binding"]:
+        raise ForgeError("Tool, standard or project configuration changed; use read-only history. "
+                         "Continuation requires a separately reviewed plan preserving the original baseline; "
+                         "do not restart this task from the current tree")
+    observation = project.observe(state['pipeline'])
+    tree, readonly, sources = observation.tree, observation.readonly, observation.sources
+    if project.binding() != binding:
+        raise ForgeError('Tool/config changed during current observation')
+    basis = {"tree": tree, "readonly": readonly, "sources": sources,
+                          "binding": state["binding"],
+                          "task": {k: state[k] for k in ("id", "goal", "pipeline", "writes", "non_goals")},
+                          "decisions": [n for n in state["notes"] if n["kind"] == "decision" or
+                                        (n["kind"] == "question" and n.get("resolved"))]}
+    if observation.coverage is not None:
+        basis['coverage'] = observation.coverage
+    fingerprint = digest(basis)
+    values = (tree, readonly, sources, fingerprint)
+    return (*values, observation) if with_observation else values
+
+
+def context(project, state, source_id=None, page=1):
+    _, _, sources, fingerprint, observation = current(project, state, with_observation=True)
+    if source_id is None:
+        return {"id": state["id"], "goal": state["goal"], "non_goals": state["non_goals"],
+                "writes": state["writes"], "watch": project.config["watch"],
+                "readonly": project.config["readonly"],
+                "excluded_directories": sorted(SKIP - {'runs', 'datasets'} if observation.coverage is not None else SKIP),
+                **({'source_coverage': observation.coverage} if observation.coverage is not None else {}),
+                "sources": sources, "read_pages": state["reads"], "notes": state["notes"],
+                "fingerprint": fingerprint,
+                "evidence": {k: evidence_status(state[k], fingerprint) for k in ("check", "verification", "review")},
+                "next": "Read each required source page with context --read ID --page N; excerpts are explicit"}
+    if sources != state["sources"]:
+        raise ForgeError("Context sources changed; refresh --reason before recording new reads")
+    if source_id not in sources:
+        raise ForgeError(f"Unknown source: {source_id}")
+    info = sources[source_id]
+    if not 1 <= page <= info["pages"]:
+        raise ForgeError(f"Page must be 1..{info['pages']}")
+    text = project.source(info["definition"], identities=observation.identities,
+                          deadline=observation.facts.deadline if observation.facts else None)
+    observation.stable()
+    if digest(text) != info["sha256"]:
+        raise ForgeError("Source changed during context read; retry")
+    state["reads"][source_id] = sorted(set(state["reads"].get(source_id, []) + [page]))
+    return f"# {source_id} | page {page}/{info['pages']} | sha256 {info['sha256']}\n" + text[(page-1)*PAGE_SIZE:page*PAGE_SIZE]
+
+
+def refresh(project, state, reason):
+    _, _, sources, _ = current(project, state)
+    if not reason.strip():
+        raise ForgeError("Context refresh requires a reason")
+    changed = [key for key in sources if sources[key] != state["sources"].get(key)]
+    state["reads"] = {k: v for k, v in state["reads"].items() if k not in changed}
+    state["sources"] = sources
+    for key in ("check", "verification", "review"):
+        state[key] = None
+    state["notes"].append({"kind": "context-refresh", "text": reason, "changed": changed, "time": now()})
+    return {"refreshed": changed, "baseline_preserved": True}
+
+
+def check(project, state):
+    tree, readonly, sources, fingerprint, observation = current(project, state, with_observation=True)
+    changed = changes(state["baseline"], tree)
+    violations = [f"DF-01 out-of-scope change: {name}" for name in changed
+                  if not any(within(name.rstrip("/"), w) for w in state["writes"])]
+    violations += [f"DF-01 readonly changed: {name}" for name in changes(state["readonly_baseline"], readonly)]
+    if observation.coverage is not None and 'baseline_coverage' in state:
+        for scope in ('tree', 'readonly'):
+            before_unknown = set(state['baseline_coverage'][scope]['unverified_ranges'])
+            after_unknown = set(observation.coverage[scope]['unverified_ranges'])
+            for path in sorted(before_unknown ^ after_unknown):
+                if scope == 'readonly' or not any(within(path, w) for w in state['writes']):
+                    violations.append(f'DF-01 {scope} coverage boundary changed outside original scope: {path}')
+    if sources != state["sources"]:
+        violations.append("DF-01 context changed: refresh and read changed sources")
+    for key, info in sources.items():
+        if state["reads"].get(key) != list(range(1, info["pages"] + 1)):
+            violations.append(f"DF-01 required context pages unread: {key}")
+    violations += structural(project, state["pipeline"], observation=observation)
+    state["check"] = {"fingerprint": fingerprint, "time": now(), "passed": not violations,
+                      "changed": changed, "violations": violations,
+                      "semantic_review_required": list(REVIEW_RULES)}
+    if observation.coverage is not None:
+        state['check']['source_coverage'] = observation.coverage
+    return state["check"]
+
+
+def verify(project, state, directory, allow_tests):
+    if not allow_tests:
+        raise ForgeError("Verification runs trusted project code; explicit --allow-tests required")
+    result = check(project, state)
+    if not result["passed"]:
+        raise ForgeError("Mechanical check failed; run check for details")
+    fingerprint = result["fingerprint"]
+    invocation = uuid.uuid4().hex
+    evidence = no_symlinks(directory / "verification" / invocation)
+    evidence.mkdir(parents=True)
+    state["verification"] = {"fingerprint": fingerprint, "time": now(), "passed": False,
+                             "status": "running", "invocation": invocation, "commands": []}
+    atomic_write_json(directory / "task.json", state)
+    commands = state["verification"]["commands"]
+    for command in project.pipeline(state["pipeline"])["verify"]:
+        try:
+            outcome = run(command, project, evidence / (command["id"] + "-scratch"))
+        except OSError as error:
+            outcome = {"id": command["id"], "passed": False, "failure": str(error), "output": ""}
+        output = outcome.pop("output")
+        logfile = evidence / (command["id"] + ".log")
+        atomic_write_text(logfile, output)
+        outcome["log"] = str(logfile.relative_to(project.root))
+        outcome["log_sha256"] = digest(output)
+        commands.append(outcome)
+        if not outcome["passed"]:
+            break
+    _, _, _, after = current(project, state)
+    result = state["verification"]
+    result["source_changed_during_tests"] = after != fingerprint
+    result["passed"] = after == fingerprint and all(c["passed"] for c in commands) and len(commands) == len(project.pipeline(state["pipeline"])["verify"])
+    result["status"] = "passed" if result["passed"] else "failed"
+    result["sandbox"] = False
+    return result
+
+
+def review(project, state, review_path, reviewer):
+    tree, readonly, _, fingerprint = current(project, state)
+    if not reviewer.strip():
+        raise ForgeError("Identify the reviewer; self-review is not independent review")
+    claims = read_json(Path(review_path).absolute())
+    if not isinstance(claims, dict) or set(claims) != set(REVIEW_RULES):
+        raise ForgeError(f"Review must cover exactly {', '.join(REVIEW_RULES)}")
+    known = {str((project.root / p).resolve()) for p, h in {**tree, **readonly}.items() if h not in (None, "directory")}
+    for rule, claim in claims.items():
+        if not isinstance(claim, dict) or set(claim) != {"status", "reason", "evidence"}:
+            raise ForgeError(f"{rule}: requires status, reason, evidence")
+        if claim["status"] not in {"pass", "not_applicable"} or not isinstance(claim["reason"], str) or not claim["reason"].strip():
+            raise ForgeError(f"{rule}: unjustified/failed review cannot be accepted")
+        if rule != "DF-05" and claim["status"] == "not_applicable":
+            raise ForgeError(f"{rule} is mandatory; only prompt review permits justified N/A")
+        if not isinstance(claim["evidence"], list) or not claim["evidence"]:
+            raise ForgeError(f"{rule}: evidence paths required")
+        for path in claim["evidence"]:
+            if not isinstance(path, str) or str((project.root / path).resolve()) not in known:
+                raise ForgeError(f"{rule}: evidence is not a snapshotted source: {path}")
+    state["review"] = {"fingerprint": fingerprint, "time": now(), "passed": True,
+                       "reviewer": reviewer, "type": "reviewer-attestation", "claims": claims}
+    return state["review"]
+
+
+def evidence_status(record, fingerprint):
+    if record is None:
+        return "missing"
+    if record["fingerprint"] != fingerprint:
+        return "stale"
+    return "passed" if record["passed"] else "failed"
+
+
+def handoff(project, state, directory, accept):
+    result = check(project, state)
+    fingerprint = result["fingerprint"]
+    gates = {k: evidence_status(state[k], fingerprint) for k in ("check", "verification", "review")}
+    log_problems = []
+    if state["verification"]:
+        for command in state["verification"]["commands"]:
+            path = no_symlinks(project.root / command["log"])
+            if not path.is_file() or digest(path.read_text(encoding="utf-8")) != command["log_sha256"]:
+                log_problems.append(f"Missing/changed verification log: {path}")
+    if log_problems:
+        gates["verification"] = "corrupt"
+    unresolved = [n["text"] for n in state["notes"] if n["kind"] == "question" and not n.get("resolved")]
+    ready = all(v == "passed" for v in gates.values()) and not unresolved
+    report = {"task": state["id"], "time": now(), "goal": state["goal"],
+              "pipeline": state["pipeline"], "writes": state["writes"], "changed": result["changed"],
+              "non_goals": state["non_goals"], "fingerprint": fingerprint,
+              "status": "accepted-local" if accept and ready else "incomplete",
+              "gates": gates, "violations": result["violations"] + log_problems,
+              "notes": state["notes"], "unresolved_questions": unresolved,
+              "next_steps": [] if ready else ["Resolve violations/questions and obtain current passing evidence"],
+              "watch": project.config["watch"], "readonly": project.config["readonly"],
+              "excluded_directories": sorted(SKIP - {'runs', 'datasets'} if 'source_coverage' in result else SKIP),
+              **({'source_coverage': result['source_coverage']} if 'source_coverage' in result else {}),
+              "verification": state["verification"],
+              "review": state["review"], "sources": state["sources"],
+              "limits": ["Local development-task acceptance only; not whole-pipeline certification",
+                         "Reviewer attestation, not automatic or independent semantic proof",
+                         "Declared source roots only; concurrent changes are not attributed to an author",
+                         "No OS sandbox, production run or business-quality certification"]}
+    atomic_write_json(directory / "handoff.json", report)
+    lines = [f"# DemiForge Handoff: {state['id']}", "", f"Status: {report['status']}",
+             f"Goal: {state['goal']}", f"Fingerprint: `{fingerprint}`", "", "## Gates"]
+    lines += [f"- {k}: {v}" for k, v in gates.items()]
+    for heading, entries in (("Changed", result["changed"]), ("Non-goals", state["non_goals"]),
+                             ("Violations", report["violations"]), ("Next Steps", report["next_steps"]),
+                             ("Limits", report["limits"])):
+        lines += ["", f"## {heading}", *[f"- {entry}" for entry in entries]]
+    if 'source_coverage' in report:
+        coverage = report['source_coverage']
+        lines += ['', '## Source coverage', f"Policy: {coverage['policy']}",
+                  f"Complete: {coverage['complete']}",
+                  'Default pruning candidates: ' + ', '.join(coverage['default_pruning_candidates']),
+                  f"Exact sources: {len(coverage['exact_sources'])}; author subtrees: {len(coverage['author_subtrees'])}",
+                  f"Unverified tree ranges: {len(coverage['tree']['unverified_ranges'])}; readonly ranges: {len(coverage['readonly']['unverified_ranges'])}",
+                  'Full source, exception, external-import and unverified-range lists are in handoff.json.']
+    lines += ["", "## Notes", *[f"- {n['kind']}: {n['text']}" for n in state["notes"]]]
+    atomic_write_text(directory / "handoff.md", "\n".join(lines) + "\n")
+    return {"status": report["status"], "gates": gates, "ready": ready,
+            "handoff": str(directory / "handoff.md"), "violations": report["violations"],
+            "unresolved_questions": unresolved}

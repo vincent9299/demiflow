@@ -212,5 +212,18 @@ def _error(exc):
     )
 
 
+from .forge.cli import register as _register_forge
+
+_register_forge(main)
+
+from .workbench.cli import register as _register_workbench
+
+_register_workbench(main)
+
+from .services.cli import register as _register_services
+
+_register_services(main)
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

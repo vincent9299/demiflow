@@ -1,0 +1,227 @@
+{
+  "scope": "isolated static design prototype; no Forge API or service used",
+  "browser": "existing Chromium 1243",
+  "viewports": [
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "empty",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "onboarded",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "incomplete",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "overview",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "case",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "table",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "flows",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "checks",
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "height": 1080,
+      "scene": "runs",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "empty",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "onboarded",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "incomplete",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "overview",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "case",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "table",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "flows",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "checks",
+      "overflow": false
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "scene": "runs",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "empty",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "onboarded",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "incomplete",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "overview",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "case",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "table",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "flows",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "checks",
+      "overflow": false
+    },
+    {
+      "width": 320,
+      "height": 740,
+      "scene": "runs",
+      "overflow": false
+    }
+  ],
+  "errors": [],
+  "network_attempts": [],
+  "checks": {
+    "readme_preview_source_and_semantics": "passed",
+    "case_fields_raw_keyboard_selection_duplicate_comparison": "passed",
+    "navigation_history": "passed (sample-only route; not ForgeView protocol)",
+    "incomplete_next_steps_keep_limits": "passed; no native binding, fabricated data or pass introduced by navigation",
+    "registration_preview": "passed; no filesystem registration or API request",
+    "new_project_blank_content": "passed",
+    "untyped_original_case": "passed at 1440px/390px; long text defaults to Markdown with exact source, literal field names, no invented case-link or comparison capability",
+    "narrow_navigation_keyboard": "passed",
+    "markdown_security": {
+      "ok": true,
+      "pwned": false,
+      "active_tags": 0,
+      "links": [
+        {
+          "url": "https://example.com/guide",
+          "rel": "noopener noreferrer",
+          "target": "_blank",
+          "policy": "no-referrer"
+        }
+      ],
+      "placeholders": 1,
+      "original_html_visible": true
+    },
+    "markdown_budgets": {
+      "bytes": {
+        "ok": false,
+        "error": "内容超过预览预算；请使用原文视图。"
+      },
+      "tokens": {
+        "ok": false,
+        "error": "Markdown 结构超过预览预算；请使用原文视图。"
+      },
+      "nodes": {
+        "ok": false,
+        "error": "预览节点超过预算；请使用原文视图。"
+      },
+      "valid": {
+        "ok": true,
+        "nodes": 400
+      }
+    },
+    "generic_reading_modes": {
+      "short": "compact",
+      "path": "compact",
+      "long": "preview",
+      "multiline": "preview",
+      "explicit": "preview",
+      "image": "resource",
+      "evidence": "resource",
+      "structured": "structured",
+      "literal_config": "raw",
+      "number": "compact"
+    },
+    "stale_status_visible": "passed; illustrative status, no actual checker"
+  },
+  "checked_at_utc": "2026-11-04T08:44:07Z"
+}

@@ -23,8 +23,9 @@ def request_record(request):
              "response_schema": dict(request.response_schema),
              "response_format": request.response_format, "schema_attempt": request.schema_attempt}
     if request.systemone:
-        from .systemone import request_payload
+        from .systemone import request_payload, identity_fields
         value['payload'] = request_payload(request)
+        value.update(identity_fields(request))
     else:
         value['messages'] = request_messages(request)
     return {**value, "request_sha256": hashlib.sha256(canonical(value).encode()).hexdigest()}

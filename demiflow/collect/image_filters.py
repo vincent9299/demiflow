@@ -2,6 +2,13 @@
 from dataclasses import dataclass, fields
 
 
+class BodyRejected(Exception):
+    """A content selection result; independent of any transport or retry state."""
+    def __init__(self,reason,metadata):
+        super().__init__(reason)
+        self.metadata=metadata
+
+
 @dataclass(frozen=True)
 class ImageFilters:
     """Inclusive pixel minima, combined with AND; None disables a condition."""
@@ -130,5 +137,4 @@ class ImageHeaderProbe:
         if dims:
             reason = self.filters.rejection(*dims)
             if reason:
-                from .web import BodyRejected
                 raise BodyRejected(reason, {'width': dims[0], 'height': dims[1], 'filter_stage': 'header'})

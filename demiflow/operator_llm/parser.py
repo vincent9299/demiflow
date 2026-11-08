@@ -174,12 +174,12 @@ def _inspect_prompt(name: str, raw: Any, *, model=None) -> tuple[PromptDefinitio
             f"$.prompts.{name}.schema_retries", name,
         ))
     if model is not None and model.transport == 'systemone':
-        if not isinstance(systemone, Mapping) or set(systemone) != {'type', 'instructions'}:
+        from .systemone import validate_definition
+        try:
+            validate_definition(systemone)
+        except (TypeError, ValueError) as exc:
             issues.append(PromptContractDiagnostic(
-                'prompt_systemone_invalid', 'SystemOne requires only type and instructions', 'systemone', name))
-        elif systemone.get('type') != 'noul' or not isinstance(systemone.get('instructions'), str) or not systemone['instructions'].strip():
-            issues.append(PromptContractDiagnostic(
-                'prompt_systemone_invalid', 'SystemOne supports noul with nonempty instructions', 'systemone', name))
+                'prompt_systemone_invalid', str(exc), 'systemone', name))
         if response_format != 'json' or retries != 0 or mode != 'template':
             issues.append(PromptContractDiagnostic(
                 'prompt_systemone_invalid', 'SystemOne noul requires template mode, JSON output and zero schema retries', 'systemone', name))

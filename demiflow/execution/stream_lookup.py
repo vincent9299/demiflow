@@ -1,9 +1,10 @@
 """Fixed-version keyed row lookup for a stream, with bounded matches/cache."""
 import asyncio
 from collections import OrderedDict
-import lance
-from .stream_grouping import row_size
-from .lance_predicate import scalar_equal
+from contextlib import closing
+
+
+from ..lance.flow_contract import normalize_lookup
 
 
 class LanceLookup:
@@ -13,22 +14,70 @@ class LanceLookup:
     catch = ()
 
     def __init__(self, source, on, columns, output, max_matches, max_bytes):
-        if not isinstance(source, dict) or set(source) != {'uri', 'version'} or type(source['version']) is not int or source['version'] < 1:
-            raise ValueError('Lookup requires a fixed uri/version')
-        if not isinstance(on, str) or not on or not isinstance(output, str) or not output or on == output:
-            raise ValueError('Lookup requires distinct key and output fields')
-        if type(max_matches) is not int or not 1 <= max_matches <= 64 or type(max_bytes) is not int or not 1 <= max_bytes <= 16*1024**2:
-            raise ValueError('Invalid lookup bounds')
+        normalize_lookup(dict(source=source, on=on, columns=columns, output=output, max_matches=max_matches, max_bytes=max_bytes))
         self.source, self.on, self.columns, self.output = source, on, columns, output
         self.max_matches, self.max_bytes, self.table = max_matches, max_bytes, None
         self.cache, self.cache_bytes = OrderedDict(), 0
+        self._key_scan = False
+
+    def snapshot_state(self):
+        # source uri/version and lookup policy are bound by lookup_facts.
+        # The read-only table handle/index plan and LRU are reconstructible
+        # resources, not progress: astart reopens the same pinned version.
+        return {}
+
+    def restore_state(self, state):
+        if type(state) is not dict or state:
+            raise ValueError('Fixed Lance lookup has no mutable semantic state')
+        self.cache.clear()
+        self.cache_bytes = 0
 
     async def astart(self):
-        self.table = await asyncio.to_thread(lance.dataset, **self.source)
-        if self.on not in self.table.schema.names:
+        self.table, self._key_scan = await asyncio.to_thread(self._open)
+
+    def _open(self):
+        import lance
+        table = lance.dataset(**self.source)
+        names = table.schema.names
+        if self.on not in names:
             raise ValueError('Lookup key absent from source')
+        # An indexed lookup already fetches only matching rows. Keep its native
+        # plan, and leave multi-match or unusual projections to that scanner:
+        # many separate payload takes are slower than one native multi-row read.
+        columns = self.columns
+        direct_projection = columns is None or (
+            isinstance(columns, (list, tuple)) and bool(columns)
+            and all(isinstance(c, str) and c in names for c in columns)
+            and len(set(columns)) == len(columns))
+        key_scan = False
+        if self.max_matches == 1 and direct_projection:
+            key_scan = not any(self.on in index.field_names for index in table.describe_indices())
+        return table, key_scan
+
+    def _unindexed_batches(self, key):
+        from .lance_predicate import scalar_equal
+        predicate = scalar_equal(self.on, key)
+        # batch_size=1 also splits an unindexed filter's *input* into individual
+        # rows. Scan only keys/row IDs in finite native batches instead. The
+        # result holds at most two uint64 IDs; no payload or full key index stays
+        # resident. Row IDs belong to this same pinned dataset, not row offsets.
+        batches = self.table.scanner(columns=[], filter=predicate, with_row_id=True,
+            limit=self.max_matches+1, batch_size=8192, batch_size_bytes=64*1024,
+            io_buffer_size=1024**2, batch_readahead=1, fragment_readahead=1).to_batches()
+        with closing(batches):
+            for batch in batches:
+                for row_id in batch.column('_rowid').to_pylist():
+                    # Keep the original one-row Arrow/Python payload checks.
+                    # Taking all matches together could allocate max_matches
+                    # oversized payloads before any size check can reject them.
+                    payload = self.table._take_rows([row_id], columns=self.columns)
+                    if payload.num_rows != 1:
+                        raise RuntimeError('Pinned Lance lookup did not return its matching row')
+                    yield payload
 
     def lookup(self, row):
+        from .stream_grouping import row_size
+        from .lance_predicate import scalar_equal
         if self.output in row:
             raise ValueError('Lookup output would overwrite an input field')
         key = row[self.on]
@@ -40,15 +89,19 @@ class LanceLookup:
             self.cache.move_to_end(ident)
         else:
             matches, size = [], 0
-            for batch in self.table.scanner(columns=self.columns, filter=scalar_equal(self.on, key),
-                    limit=self.max_matches+1, batch_size=1, batch_readahead=1, fragment_readahead=1).to_batches():
-                if batch.nbytes > self.max_bytes:
-                    raise ValueError('Lookup Arrow payload exceeds max_bytes')
-                for value in batch.to_pylist():
-                    size += row_size(value, self.max_bytes)
-                    if size > self.max_bytes or len(matches) >= self.max_matches:
-                        raise ValueError('Lookup result exceeds match/byte bound')
-                    matches.append(value)
+            batches = (self._unindexed_batches(key) if self._key_scan else
+                self.table.scanner(columns=self.columns, filter=scalar_equal(self.on, key),
+                    limit=self.max_matches+1, batch_size=1, batch_readahead=1,
+                    fragment_readahead=1).to_batches())
+            with closing(batches):
+                for batch in batches:
+                    if batch.nbytes > self.max_bytes:
+                        raise ValueError('Lookup Arrow payload exceeds max_bytes')
+                    for value in batch.to_pylist():
+                        size += row_size(value, self.max_bytes)
+                        if size > self.max_bytes or len(matches) >= self.max_matches:
+                            raise ValueError('Lookup result exceeds match/byte bound')
+                        matches.append(value)
             # Cache only small entries; total cache is at most 8MiB / 128 keys.
             cache_size = size + row_size(key, self.max_bytes)
             if cache_size <= 1024**2:
@@ -69,3 +122,4 @@ class LanceLookup:
 
     async def aclose(self):
         self.table = None; self.cache.clear(); self.cache_bytes = 0
+        self._key_scan = False

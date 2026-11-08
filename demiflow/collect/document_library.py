@@ -1,6 +1,6 @@
 """Configurable successful-document index, separate from execution journals.
 
-Dataset.fetch_documents and Dataset.register_documents own the public entry
+Dataset.fetch 后的独立文档处理 and Dataset.register_documents own the public entry
 points. This resource contains no source credibility or consumer field policy.
 """
 from __future__ import annotations

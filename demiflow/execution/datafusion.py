@@ -5,7 +5,7 @@ work through Dataset; only the ordinary writer publishes business destinations.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext, ExitStack
 from dataclasses import asdict, dataclass, replace
 import json
 import math
@@ -100,8 +100,6 @@ class DataFusionOptions:
                 raise ValueError(f'{key} must be a finite positive number')
         if self.memory_bytes >= self.max_rss_bytes:
             raise ValueError('max_rss_bytes must leave room beyond the DataFusion pool')
-        if self.max_row_bytes < 8 * 1024**2:
-            raise ValueError('max_row_bytes must be at least the 8 MiB batch budget')
 
 
 class DataFusionQueryError(RuntimeError):
@@ -192,7 +190,7 @@ class DataFusionSession:
     not kernel RSS limits. No query or Python batch transform is retried.
     """
     def __init__(self, *, resource_directory, options=None, max_concurrent=1,
-                 temp_directory=None, diagnostics_directory=None, slot_capacity=None):
+                 temp_directory=None, diagnostics_directory=None, slot_capacity=None, managed_diagnostics=False):
         if not sys.platform.startswith('linux'):
             raise ValueError('Managed DataFusion currently requires Linux process/lock support')
         self.options = options or DataFusionOptions()
@@ -211,6 +209,7 @@ class DataFusionSession:
         self._slot_capacity = dict(capacity)
         self.resources = Path(resource_directory).resolve()
         self.diagnostics = Path(diagnostics_directory).resolve() if diagnostics_directory else self.resources / 'queries'
+        self.managed_diagnostics = bool(managed_diagnostics)
         self.temp_directory = temp_directory
         self._condition = threading.Condition()
         self._active = 0
@@ -228,7 +227,8 @@ class DataFusionSession:
         if memory and capacity['max_rss_bytes_per_slot'] * self.max_concurrent + self.options.cgroup_headroom_bytes >= memory[1]:
             raise ValueError('DataFusion slot reservations exceed the container memory allowance')
         self.resources.mkdir(parents=True, exist_ok=True)
-        self.diagnostics.mkdir(parents=True, exist_ok=True)
+        if not self.managed_diagnostics:
+            self.diagnostics.mkdir(parents=True, exist_ok=True)
         with (self.resources / 'capacity.lock').open('a+b') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             path = self.resources / 'capacity.json'
@@ -420,17 +420,45 @@ class DataFusionSession:
                 self._condition.notify_all()
 
     def _run(self, sql, bindings, schema, views, transform, label, slot, lock, dataset_spec=None, lance_merge=None, lance_index=None):
+        from .native_diagnostics import slot as diagnostic_slot
+        query_id = label + '-' + uuid.uuid4().hex
+        with ExitStack() as stack:
+            diagnostic=None
+            if self.managed_diagnostics:
+                try:
+                    diagnostic=stack.enter_context(diagnostic_slot(self.diagnostics,query_id))
+                except (OSError,RuntimeError):
+                    # Unavailable optional retention must not invalidate a
+                    # native result. A bounded temporary sink is scratch-owned.
+                    diagnostic=Path(stack.enter_context(tempfile.TemporaryDirectory(
+                        prefix='diagnostics-',dir=self._temporary.name)))
+            return self._run_query(sql, bindings, schema, views, transform, label, slot, lock,
+                dataset_spec, lance_merge, lance_index, query_id=query_id, managed_directory=diagnostic)
+
+    def _run_query(self, sql, bindings, schema, views, transform, label, slot, lock,
+                   dataset_spec, lance_merge, lance_index, *, query_id, managed_directory):
         import cloudpickle
         import psutil
-        query_id = label + '-' + uuid.uuid4().hex
         directory = Path(self._temporary.name) / query_id
         directory.mkdir()
-        diagnostic = self.diagnostics / query_id
-        diagnostic.mkdir()
+        diagnostic = managed_directory or self.diagnostics / query_id
+        diagnostic.mkdir(exist_ok=True)
+        ipc_directory = directory / 'control' if self.managed_diagnostics else diagnostic
+        ipc_directory.mkdir(exist_ok=True)
+        from .native_diagnostics import write_document, PipeLog
+        def save_diagnostic(path,value):
+            if self.managed_diagnostics:
+                try:
+                    write_document(path,value)
+                except (OSError,ValueError):
+                    pass
+            else:
+                _save(path,value)
         options = replace(self.options, max_rss_bytes=self.options.max_rss_bytes * len(lock))
         request = {'sql': sql, 'sources': bindings, 'schema': schema, 'views': views,
                    'batch_transform': transform, 'options': asdict(options),
-                   'directory': str(directory), 'diagnostic': str(diagnostic),
+                   'directory': str(directory), 'diagnostic': str(ipc_directory),
+                   'managed_diagnostics': self.managed_diagnostics,
                    'parent_pid': os.getpid(), 'slot': slot, 'dataset_spec': dataset_spec,
                    'lance_merge': lance_merge, 'lance_index': lance_index}
         payload = directory / 'request.pickle'
@@ -441,9 +469,12 @@ class DataFusionSession:
             description['lance_merge'] = {'target_uri': spec.uri, 'expected_version': spec.expected_version,
                 'source_uri': query.uri, 'source_version': query.version, 'source_rows': source_rows,
                 'on': spec.on, 'update_columns': spec.update_columns}
-        _save(diagnostic / 'request.json', description)
+        save_diagnostic(diagnostic / 'request.json', description)
         if sql is not None:
-            (diagnostic / 'query.sql').write_text(sql)
+            if self.managed_diagnostics:
+                save_diagnostic(diagnostic / 'query.json', {'sql': sql})
+            else:
+                (diagnostic / 'query.sql').write_text(sql)
         env = os.environ.copy()
         env['PYTHONPATH'] = os.pathsep.join(str(p or Path.cwd()) for p in sys.path)
         for name in ('TOKIO_WORKER_THREADS', 'RAYON_NUM_THREADS', 'OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS'):
@@ -471,20 +502,27 @@ class DataFusionSession:
                   'peak_rss_bytes': 0, 'peak_scratch_bytes': 0, 'guard': None, 'sample_interval_s': 0.1,
                   'cgroup_memory_policy': 'current-minus-clean-inactive-file-v1',
                   'options': asdict(options), 'slot': slot, 'reserved_slots': len(lock), 'started_at': time.time()}
+        from .process_observation import inherited_unit
+        unit_fds = inherited_unit()
         process = None
+        pipe_log = None
         started = time.monotonic()
         try:
-            with (diagnostic / 'worker.log').open('w') as log:
+            with (nullcontext(subprocess.PIPE) if self.managed_diagnostics else (diagnostic / 'worker.log').open('w')) as log:
                 process = subprocess.Popen([sys.executable, '-m', 'demiflow.execution.datafusion_worker', str(payload)],
                     env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
-                    pass_fds=tuple(item.fileno() for item in lock))
+                    pass_fds=tuple(item.fileno() for item in lock) + unit_fds)
+                if self.managed_diagnostics:
+                    pipe_log = PipeLog(process.stdout, diagnostic)
                 owned = psutil.Process(process.pid)
                 report.update(pid=process.pid, create_time=owned.create_time())
-                _save(diagnostic / 'result.json', report)
+                save_diagnostic(diagnostic / 'result.json', report)
                 last_disk = 0
                 last_note = 0
                 scratch = 0
                 while process.poll() is None:
+                    if pipe_log:
+                        pipe_log.drain()
                     try:
                         rss = owned.memory_info().rss
                     except psutil.NoSuchProcess:
@@ -517,20 +555,25 @@ class DataFusionSession:
                         break
                     if elapsed - last_note >= 5:
                         report['seconds'] = elapsed
-                        _save(diagnostic / 'result.json', report)
+                        save_diagnostic(diagnostic / 'result.json', report)
                         last_note = elapsed
                     time.sleep(0.1)
                 code = process.wait()
+                if pipe_log:
+                    pipe_log.drain()
+                    report.update(log_total_bytes=pipe_log.total, log_retained_bytes=None if pipe_log.disabled else min(pipe_log.total, 4*65536),
+                                  diagnostics_available=not pipe_log.disabled,
+                                  diagnostics_truncated=pipe_log.total > 4*65536)
             report.update(exit_code=code, seconds=time.monotonic()-started)
-            result_path = diagnostic / 'worker_result.json'
+            result_path = ipc_directory / 'worker_result.json'
             result = json.loads(result_path.read_text()) if result_path.exists() else {}
             report['worker'] = result
             if not report['guard'] and lance_index is not None and result.get('error_origin') == 'lance_index':
-                raise cloudpickle.loads((diagnostic / 'index_error.pickle').read_bytes())
+                raise cloudpickle.loads((ipc_directory / 'index_error.pickle').read_bytes())
             if not report['guard'] and lance_merge is not None and result.get('error_origin') == 'lance_merge':
-                raise cloudpickle.loads((diagnostic / 'merge_error.pickle').read_bytes())
+                raise cloudpickle.loads((ipc_directory / 'merge_error.pickle').read_bytes())
             if (not report['guard'] and dataset_spec and result.get('error_origin') == 'python_callback'):
-                callback_error = cloudpickle.loads((diagnostic / 'callback_error.pickle').read_bytes())
+                callback_error = cloudpickle.loads((ipc_directory / 'callback_error.pickle').read_bytes())
                 if isinstance(callback_error, Exception):
                     raise callback_error
             if report['guard'] or code or not result.get('complete') or not result.get('success'):
@@ -561,8 +604,10 @@ class DataFusionSession:
             shutil.rmtree(directory, ignore_errors=True)
             raise
         finally:
+            if pipe_log:
+                pipe_log.close()
             report.update(complete=True, seconds=time.monotonic()-started, finished_at=time.time())
-            _save(diagnostic / 'result.json', report)
+            save_diagnostic(diagnostic / 'result.json', report)
 
     def __exit__(self, *exc):
         with self._condition:

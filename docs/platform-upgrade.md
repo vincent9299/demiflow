@@ -108,57 +108,21 @@ Local 可设 `LocalDatasetExecutor(sort_workers=1)` 或 `DEMIFLOW_LOCAL_SORT_WOR
 
 宽行物化、按字节 spill、宽载荷偏移归并、Lance scanner 预读开关，以及部分列 merge/显式增列、Codex 文件交付保持已有语义。此次回归包含这些功能，但没有把既有实现重复记为新功能；真实 GPU、Codex 图像工具、生产峰值 RSS 仍需对应环境验收。
 
-## 单机队列与多机队列
+## 原生队列与下载迁移
 
-| 场景 | 选择 |
-| --- | --- |
-| 单机、百万以内有限任务、逐任务预算/退避 | `SQLiteQueue` |
-| 多机共享同一任务集，节点动态加入退出 | `COSQueue` + `queue_runner` |
-| 多机但可以按桶/来源硬分区 | 每机各自 `SQLiteQueue` |
-| 千万级或持续无限输入 | COS 分批/分片队列，或专门流式系统；不把无限输入塞进一个本地库 |
+当前获取与队列接口见 [Dataset.fetch 与原生任务队列](dataset-fetch.md)。
+单机使用本地 SQLite v2，多 worker 控制后端使用 PostgreSQL；目标仍为声明的
+POSIX host/shared 对象域，已 prepared 的任务按真实域限制恢复。
+原 SQLiteQueue/SQLiteChannel/COSQueue、queue_runner 和组合获取 API 已移除。
+COSIO 对象存取、解析/读取与历史库能力保留。
 
-**SQLite WAL 队列必须放本地磁盘。** 构造时检查 Linux mountinfo，拒绝 NFS/CIFS/Ceph/Lustre/FUSE 等网络文件系统。容器中还需运维确认挂载底层没有伪装网络存储；mountinfo 无法识别 overlay 背后的任意存储实现。网络盘只存 `queue.backup(snapshot_path)` 生成的一致快照，不能把正在运行的 db/WAL 直接复制过去当共享队列。默认护航每 20 分钟执行 SQLite backup API，完成后原子替换快照。
+旧业务 collect/download 入口及其冻结依赖没有在此次平台任务中自动迁移，不能把
+原文档中的旧命令当作新版本可运行入口。新建 v2 库，从固定清单显式生产并验收；
+旧库仅从已关闭的一致 backup 按 SHA256 只读查询，不原地转换或伪造认证。
+未迁移的在运作业继续固定原 revision，不切换代码、队列或服务。
 
-最小入口：
-
-```python
-from demiflow.collect.sqlite_queue import SQLiteQueue
-from demiflow.collect.embedded_worker import run_worker, NamedPoolSupervisor, PoolPolicy
-queue = SQLiteQueue('/tmp/my-collection/tasks.sqlite')
-queue.add({'task_id': str(i), 'payload': {'i': i}, 'pool': 'source_a'} for i in range(100))
-run_worker(queue, consume, verify_artifact, pool='source_a', batch_size=8, exit_when_idle=True)
-# 持续监督/分池爬山：每个 pool 使用独立的 PoolPolicy 对象。
-watch = NamedPoolSupervisor(queue, consume, verify_artifact,
-    {'source_a': PoolPolicy(maximum=40)}, snapshot_path='/persistent/task-snapshot.sqlite')
-# 定期 watch.tick({'source_a': measured_rate})；退出 watch.close()
-```
-
-`consume(handle)` 返回产物描述，`verify_artifact(result)` 必须核对实际内容后才记 done。`existing(handle)` 可提供内容寻址实存快道；必须同样经过验证。worker 每次事务批量认领，默认 8 个；失败按退避再次 pending，达到 max_attempts 进入 failed 死信。完成状态与 completion 账本同事务写入；不确定提交保留 claim，不能当作未处理任务自动放回。
-
-预算预留和已完成消耗在事务中计算。回退到其他来源类之前调用 `transfer_budget(handle, class, cost)`；超帽不发出请求。`actual_cost` 可按验证后的实际结果结算。成本单位和失败尝试费用由业务定义；下载样板保持成功字节口径，不把它当精确账单计费器。
-
-worker 的 PID、进程启动标识、主机、心跳持久存在注册表；只有**心跳过期且原进程身份已失效**才回收，旧 claim token 无法写入新归属。监督器的消费者是线程，每个消费者必须有有限 I/O 超时；它替换退出线程、隔离命名池、定期快照，不强杀卡住的 Python 线程。线程内的提交不确定会保留 claim，需核查或等待其宿主退出后恢复，不能借线程重启重发副作用。
-
-队列 `reconcile(verify_artifact)` 按任务状态、completion 流水、实际产物三方核对。COS 对应 `batches/claims/done`，只有成功 rc 才允许 done；损坏批次报错，禁止静默跳过坏行。COS 依赖对象存储条件 PUT 的原子性；显式回收旧 claim 属于至少一次处理语义，消费者仍须使用内容寻址/幂等提交。
-
-`NetworkConfig.from_env(path)` 支持 direct/environment/explicit 代理模式和精确 host_map，配置只当数据读取，不执行 shell，也不修改进程全局环境。文件使用原始 `KEY=value`，不使用 shell 引号、变量插值或命令替换。
-
-## 下载业务的新入口
-
-`demiwtg/collect/download/platform_pipeline.py` 仅定义固定版本 Lance 任务源、COS 签名/源回退、SHA256+长度验证、原子产物落盘；队列、命名池、批量认领、心跳、回收、快照归平台。
-
-```bash
-# 在 demiwtg 项目目录，用已安装 demiflow[collect,lance,local] 的 Python。
-python -m collect.download.platform_pipeline build --db /tmp/new-download/tasks.sqlite \
-  --source /absolute/path/images.lance --version 1
-python -m collect.download.platform_pipeline run --db /tmp/new-download/tasks.sqlite --max-workers 8
-python -m collect.download.platform_pipeline status --db /tmp/new-download/tasks.sqlite
-python -m collect.download.platform_pipeline reconcile --db /tmp/new-download/tasks.sqlite
-```
-
-配置可保存到 `.dl_env`：`DL_PLATFORM_QUEUE_DB`、`DL_PLATFORM_SNAPSHOT`、`DL_PLATFORM_BLOBS`、`DL_BUDGET_CN`、`DL_BUDGET_INTL`、`DEMIFLOW_PROXY_MODE`、`DEMIFLOW_PROXY_URL`、`DEMIFLOW_HOST_MAP`。兼容既有 `DL_PROXY_MODE=keep` 和 `DL_ACCELERATE_TAGS`；凭证仍从原 COS 凭证机制获取。
-
-本次没有热替换正在运行的旧下载线。新 CLI 拒绝使用 `DL_QUEUE_DB` 指向的旧队列文件。已有旧进程、旧队列和脚本保留至本批结束；后续任务使用新入口。正式切换前停止原写入者，固定原任务源版本并核对旧完成账和产物；新队列重新声明任务时，经过 SHA 复验的已存产物走零下载快道。
+`NetworkConfig.from_env` 等独立网络声明保留其原有限读取和无 shell 执行边界，
+不等于新原生队列支持了旧 supervisor 或自动远程启动。
 
 ## 任意 HTTP 模型服务（DF-008）
 

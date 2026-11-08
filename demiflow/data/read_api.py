@@ -8,30 +8,53 @@ No prompt configuration, request budget or business state is registered here.
 from __future__ import annotations
 
 from typing import Any, Callable, Iterator, Mapping, Sequence
+from .flow_contract import flow_api as _flow_api
 from .api import DataAPI, _current_executor
 from .dataset import Dataset, MaterializedDataset
+from ..execution import queue_flow as _queue_flow
 
 
-def read_queue(config, *, pool='default', stop=None, idle_timeout_s=1800) -> Dataset:
-    """Consume embedded SQLiteQueue tasks; run_stream defaults to one-row delivery.
+@_flow_api('read_queue', execution='stream', effects=('queue',),
+           normalize=_queue_flow.normalize_source, analyze=_queue_flow.analyze_untyped)
+def read_queue(config, *, pool='default', settlement='sink', max_inflight=8,
+               idle_timeout_s=300, lease_s=60, max_tasks=10000, stop=None) -> Dataset:
+    """Claim unfinished tasks through the native queue datasource.
 
-    Producer opens/seals its named channel explicitly. Stored completions replay
-    in _queue_result; fresh payloads carry _queue_delivery until ack_queue.
+    Open-empty is not EOS. Historical completed rows are read explicitly with
+    read_queue_records; workers never scan/replay the pool's completed history.
     """
-    from ..execution.sqlite_channel import QueueReader, channel_config
-    if type(idle_timeout_s) not in (int,float) or not 0<idle_timeout_s<=86400:
-        raise ValueError('Queue idle deadline must be in (0, 86400] seconds')
-    actor=QueueReader(channel_config(**config),pool,stop,idle_timeout_s)
-    ds=DataAPI(_current_executor.get()).from_iter(actor.rows)
-    return Dataset(ds._source,ds._plan,ds._executor,(actor,))
+    from ..execution.queue_source import QueueDatasource
+    source=QueueDatasource(config,pool=pool,settlement=settlement,max_inflight=max_inflight,
+        idle_timeout_s=idle_timeout_s,lease_s=lease_s,max_tasks=max_tasks,stop=stop)
+    return DataAPI(_current_executor.get()).read_datasource(source)
 
 
-def read_queue_records(config, *, pool, through, results=False) -> Dataset:
-    """Scan immutable queue records at an explicit sequence, without claiming."""
-    from ..execution.sqlite_channel import SQLiteChannel, channel_config
-    settings=channel_config(**config)
-    return DataAPI(_current_executor.get()).from_iter(
-        lambda:SQLiteChannel.read_only(**settings).scan(pool,through=through,results=results))
+@_flow_api('read_queue_records', effects=('queue_read', 'objects_read'),
+           normalize=_queue_flow.normalize_history, analyze=_queue_flow.analyze_untyped)
+def read_queue_records(config, *, pool, through, results=False, verify='artifacts', limits=None, after=None) -> Dataset:
+    """Read a fixed publication prefix without leases, repair, GET or callbacks.
+
+    Default inspection hashes referenced artifacts. Explicit metadata inspection
+    adds verification.status=not_checked. Finite limits raise HistoryReadLimit
+    carrying the first undelivered cursor bound to this exact QueueSnapshot.
+    """
+    from ..execution.queue_history import QueueHistoryDatasource
+    source=QueueHistoryDatasource(config,pool=pool,through=through,results=results,verify=verify,limits=limits,after=after)
+    return DataAPI(_current_executor.get()).read_datasource(source)
+
+
+
+def read_legacy_queue_records(path, *, sha256, pool, through, results=False, limits=None,
+                              max_journal_bytes=1024**3, after=None) -> Dataset:
+    """Read a closed v1 SQLite backup by exact SHA256, without v2 certification.
+
+    This archive-only adapter has no publication, claim, repair or ACK methods.
+    It preserves the stored v1 values and marks them legacy_not_certified.
+    """
+    from ..execution.legacy_queue import LegacyQueueHistoryDatasource
+    source=LegacyQueueHistoryDatasource(path,sha256=sha256,pool=pool,through=through,results=results,
+        limits=limits,max_journal_bytes=max_journal_bytes,after=after)
+    return DataAPI(_current_executor.get()).read_datasource(source)
 
 
 def read_document_receipts(path: str, *, sha256: str, max_journal_bytes: int = 8*1024**3,
@@ -49,6 +72,7 @@ def read_document_receipts(path: str, *, sha256: str, max_journal_bytes: int = 8
     return DataAPI(_current_executor.get()).from_iter(factory)
 
 
+@_flow_api('from_items', execution='bridge', role='bridge')
 def from_items(items: list[Any]) -> MaterializedDataset:
     """Create a materialized Dataset from a bounded Driver list.
 
@@ -57,7 +81,16 @@ def from_items(items: list[Any]) -> MaterializedDataset:
     such as one aggregate-analysis request. Prefer lazy external sources for
     external data. Do not collect an external Dataset and pass its rows back
     to ``from_items`` solely to write the same detail rows."""
-    return DataAPI(_current_executor.get()).from_items(items)
+    from ..execution.checked import action, current
+    if current() is not None:
+        from .runtime_contract import check_size
+        if type(items) is not list or not 1 <= len(items) <= 128:
+            raise ValueError('Managed from_items requires 1..128 explicit summary rows')
+        check_size(items, 256 * 1024)
+    with action('from_items', None, None, arguments={'items': items}) as checked:
+        result = DataAPI(_current_executor.get()).from_items(items)
+        checked.materialized(result._source.handle)
+        return result
 
 
 def from_iter(factory: Callable[[], Iterator[Any]]) -> Dataset:
@@ -246,6 +279,7 @@ def read_datasource(datasource, *, backend_options=None, **read_args: Any) -> Da
     )
 
 
+@_flow_api("read_table", effects=("read_table",), version=2)
 def read_lance(
     uri: str,
     *,

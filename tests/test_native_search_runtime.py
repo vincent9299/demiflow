@@ -286,7 +286,8 @@ def test_public_dataset_entry_and_schema(server, engines, tmp_path):
     from demiflow.collect.contracts import SEARCH_RESULT
     import pyarrow as pa
     s = WebSession(cache_path=tmp_path/'cache.sqlite', object_directory=tmp_path/'objects',
-                   search=SearchConfig(engines=engines, host_interval_s=0))
+                   search=SearchConfig(engines=engines, host_interval_s=0,
+                       workers=1,max_bytes=65536,max_results=8))
     assert not tmp_path.joinpath('cache.sqlite').exists()
     rows = []
     stats = (data.from_items([{'id': 'row', 'requests': [

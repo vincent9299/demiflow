@@ -65,11 +65,13 @@ class KeyedSource(SourcePlan):
     chunk_bytes: int = 32 * 1024 * 1024
     max_rows: int = 32
     output: str = "items"
+    reducer_contract: dict | None = None
+    reducer_kwargs: dict | None = None
 
 
 def keyed_dataset(left, kind, on, *, right=None, right_on=None, how="inner",
                   suffix="_right", reducer=None, initial=None,
-                  chunk_bytes=32 * 1024 * 1024, max_rows=32, output="items"):
+                  chunk_bytes=32 * 1024 * 1024, max_rows=32, output="items", reducer_kwargs=None):
     from ..data.dataset import Dataset
     from ..data.plan import LogicalPlan, reject_streaming_map_options
     from ..data.local_relational import keys
@@ -95,7 +97,8 @@ def keyed_dataset(left, kind, on, *, right=None, right_on=None, how="inner",
         raise TypeError("reducer must be callable")
     source = KeyedSource(kind, PlanInput(left._source, left._plan, left._executor), fields,
         PlanInput(right._source, right._plan, right._executor) if right is not None else None,
-        rfields, how, suffix, reducer, initial, chunk_bytes, max_rows, output)
+        rfields, how, suffix, reducer, initial, chunk_bytes, max_rows, output,
+        reducer_kwargs=dict(reducer_kwargs or {}))
     return Dataset(source, LogicalPlan(), left._executor)
 
 
@@ -103,6 +106,10 @@ class LocalExecutionSession:
     """Inspection handle; statistics reflect the latest action, not an estimate."""
     def __init__(self, executor):
         self._executor = executor
+
+    @property
+    def run_ref(self):
+        return getattr(self._executor, "_run_ref", None)
 
     @property
     def stats(self):
@@ -135,8 +142,10 @@ def local_execution(*, workers=4, worker_mode="process", partitions=None,
     except ImportError as exc:
         raise ImportError("local_execution requires the demiflow cloudpickle dependency") from exc
     executor = LocalDatasetExecutor(workers=workers, local_kernel=options)
+    from .run_context import execution_scope
     try:
-        with _use_executor(executor):
+        with execution_scope() as run, _use_executor(executor):
+            executor._run_ref = run.ref
             yield LocalExecutionSession(executor)
     finally:
         executor._local_kernel_closed = True

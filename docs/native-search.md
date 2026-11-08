@@ -4,18 +4,17 @@
 
 可续期检索会话在首次 HTTP 前过期时，允许有界重新获取；已发生 HTTP 后过期则保存 `interrupted` 来源回执和原始 HTTP 证据，不自动重发，不作为目标网站故障，也不停止其他查询。重启和切换代理继续保留未知结果及已消耗预算。
 
-下载可用 `WebSession(fetch_attempt_limit=N)` 收紧新请求的尝试次数（首次也计入，包含回退），须满足 `1 <= N <= retries + 1`。该运行上限不改变请求身份；已完成或未知回执保持原结果，修改或移除上限不会重置已消费的请求。来源选择、图片过滤和具体数值由调用方配置。
-
-下载切换到固定代理池时，可在该池的 `reuse_completed` 中显式声明旧代理或 `{"session_pool": ...}`。文档和图片获取只重用其余请求参数一致的旧回执，保留成功、失败和未知状态及原始证据；此声明不启用旧会话池，也不自动重试旧请求。具体迁移范围由调用方配置。
-
-图片下载并发是调度参数，新图片回执不再将 `ImageFetchPolicy.concurrency` 纳入身份。旧回执曾包含这一字段；变更并发时可用 `reuse_completed_concurrency=[旧值]` 显式兼容，最多16个旧值，每个在1..256内；当前并发的旧格式自动兼容。该迁移也覆盖 `reuse_completed` 指定的旧代理，仍保留失败和未知回执，不重置请求额度。
-
 检索从住宅会话池切换到静态路由时，`WebSession.search_reuse_session_pools=[{"identity": "旧池摘要", "search": 原检索声明}]` 显式授权读取同一日志中的旧池回执。声明必须与当前检索语义一致（只允许代理变化），最多16个池、合计10万个历史profile；不创建旧会话、不恢复旧连接、不清空旧池的熔断记录。完整查询复用原成功、无结果和失败选择；未结算的单源请求保留未知状态，不因切换代理重试。原始来源回执和查询选择保持。历史缺失或超限明确失败。
 
 
-下载 HTTP 准入先等待目标主机，再获取共享并发槽位，避免单个繁忙主机的排队占用其他站点的传输容量。每次重定向释放上一跳的主机和共享槽位后再申请下一跳；后续准入等待及传输仍受首次请求的原截止时间约束。每主机、全局连接和上层图片获取的并发上限均保留；不以无界预取绕过下游背压。主机争用、跨主机重定向和超时释放的本地回归见 `tests/test_fetch_admission.py`。
-
 SearXNG 的检索适配器、五类请求处理器、语言/地区数据、结果类型及合并排序代码已随 demiflow 交付。原生路径不启动 SearXNG HTTP 服务，不需要其地址、端口、源码目录或独立 Python 环境。2026-10-01 经用户明确要求，已接入实际 demiflow 工作区与 concepts pipeline；新启动的入口使用原生检索，已运行的进程不会热切换。接入记录见 `native-search-handoff.md`。
+
+
+当前原生 Dataset 身份/资源准入只接精确 WebSession + 有界 SearchConfig HTTP adapter，
+拒绝 browser、managed service、route/session pool、reuse/fallback 的新 Dataset 接线。
+下面这些低层资源与历史配置仍保留，不代表全部已获当前原生 Dataset 或队列生产准入。
+新队列 producer 用同一 SearchWeb 节点固定每个关键词的有限结果后增量发布，见
+[原生任务队列](dataset-fetch.md)。真实供应商可用性仍以各来源自己的证据为准。
 
 ## 安装与最小调用
 
@@ -52,7 +51,7 @@ SearchConfig(
 
 `http` 使用有界 HTTP 获取，`browser` 使用真正执行 JavaScript 的 Chromium。网页来源 `google` 与图片来源 `google images` 均可显式选择这两种后端；省略 `backend` 的来源仍走原适配器，不在运行中热切换。图片来源使用 `udm=2`，解析原图和来源页面的明确绑定，保留 `img_src`、可读标题和可用的 `thumbnail_src`；同一页面的不同原图分别返回。
 
-图片解析器目前识别 `/imgres?imgurl=...&imgrefurl=...` 及成对的原图／页面 DOM 属性。浏览器执行 JS 后读取同一解析契约；不通过抓取页面中任意 URL、把缩略图当原图或把未知布局当空结果来填充候选。源码为平台 `native_search/google_images.py`，没有调用业务 collect 旧代码。图片搜索中图片字节仍被浏览器阻止，下载继续交给 `Dataset.fetch_images`。
+图片解析器目前识别 `/imgres?imgurl=...&imgrefurl=...` 及成对的原图／页面 DOM 属性。浏览器执行 JS 后读取同一解析契约；不通过抓取页面中任意 URL、把缩略图当原图或把未知布局当空结果来填充候选。源码为平台 `native_search/google_images.py`，没有调用业务 collect 旧代码。图片搜索中图片字节仍被浏览器阻止，原始字节下载使用 `Dataset.fetch`，实际图片解码另行执行。
 
 如果需要 HTTP 失败后转 JS，可在 `WebSession.search_fallback` 显式声明同一 `google images` 来源的 `backend='browser'`，两边的回执与最终选择均保留。会话池 `interval_s` 限制**每次 HTTP**，包括 JS 子请求；不能直接照搬单次 HTML 搜索的 60 秒间隔，同时只给浏览器 45 秒期限。浏览器资源域名还需与代理链允许范围一致，例如 Google 页面所用的 gstatic/googleusercontent。具体账号、代理和访问节奏仍由调用方配置。
 
@@ -87,7 +86,7 @@ from demiflow.collect.session import WebSession
 
 web = WebSession(
     cache_path="runs/search/requests.sqlite",
-    object_directory="runs/search/objects",   # 供同一 session 的 fetch_documents 使用
+    object_directory="runs/search/objects",   # 搜索声明兼容参数；搜索不写对象
     search=SearchConfig(
         engines=("google", "wikisearch", "wikipedia", "mwmbl"),
         workers=4,
@@ -245,7 +244,7 @@ SearchConfig(engines=({
 | `search_web(requests=..., output=..., session=...)` | data/dataset.py、collect/operators.py、session.py、native_search/* | 调用 WebSession 的统一语言 HTTP 搜索；外部源码/解释器由托管服务提供。 | 默认无 URL 时走随包原生来源；逐请求参数、完整结果、逐来源回执；保持一行输入对应一行输出和不透明 bindings。 |
 | `search_web` 的查询展开 | collect/session.py::bounded | 为每个查询创建 task，再用 semaphore 控制执行。 | 固定数量消费者，任务数 O(concurrency)，结果仍保持请求次序。 |
 | `search_web` 的旧显式 HTTP 路径 | collect/web.py、services/searxng.py | 现有托管/外部服务。 | 显式 search_url/service 仍可运行，增加逐请求标准参数；不自动启动新旧双路径，不隐式切换现役业务。旧服务类保留用于协调退役。 |
-| `fetch_documents` | session.py、operators.py、web.py | WebSession 共享文档获取、缓存和配额。 | 获取策略与业务配额保持；可与原生检索共享同一个 session，搜索使用独立 SearchConfig，文档 HTTP 继续使用 WebSession 的 fetch 配置；共享 bounded helper 的任务数受限。 |
+| `fetch` | raw_contract.py、raw_transport.py、execution/raw_* | 旧组合获取与解析入口已退役。 | 每行一个 HTTP/COS 原始对象，独立于搜索资源；解析与读取分离，见 [获取契约](dataset-fetch.md)。 |
 | `read_documents` | reading.py、documents.py | 文档校验/选择/配额。 | 无实现改动；回归验证保持。 |
 | `run_stream` / `save_lance` | 现有资源管理、collect/contracts.py | 执行结束关闭 session，保存旧回执结构。 | 继续由执行器管理资源；更新 SEARCH_RESULT 后可保留新回执及 response_json。未修改公共业务表或新增隐藏 pipeline。 |
 
@@ -255,7 +254,7 @@ concepts 入口已完成以下接入；其他仍显式声明旧 HTTP 后端的�
 
 1. 基于实际未提交工作树做三方合并，保留同期公共文档库等改动。原始 BASELINE.json 记录开发起点；接入前快照、逐文件前后摘要另保存在 `_demiflow/native_search_integration_20261001`。
 2. 在应用自身解释器安装 `[search]` 依赖。业务入口使用 `WebSession(search=...)`，移除原 service/search_url/python/runtime_directory/port 参数，声明来源、语言和凭据变量引用。
-3. 用平台 SEARCH_RESULT 保存完整回执；部分来源失败时保留成功材料及失败事实。文档获取继续使用同一个 session 的公共文档库。概念判断仍由业务完成。
+3. 用平台 SEARCH_RESULT 保存完整回执；部分来源失败时保留成功材料及失败事实。公共文档库的独立低层消费者保留；新 raw 获取使用 Dataset.fetch，解析另行执行。概念判断仍由业务完成。
 4. 新运行采用新配置；当前已运行进程自然结束。新旧缓存身份隔离，不把旧 HTTP 回执冒认为原生结果。切换不要求改写 `Dataset.search_web` 的调用。
 5. 旧 SQLite、日志、原始响应和配置历史继续保留。只有确认所有消费者已退出后才退役具体旧服务；此次没有停止或删除服务。
 

@@ -24,6 +24,7 @@ class CallableSpec:
     constructor_kwargs: Mapping[str, Any] = field(default_factory=dict)
     call_args: Tuple[Any, ...] = ()
     call_kwargs: Mapping[str, Any] = field(default_factory=dict)
+    runtime_contract: Mapping[str, Any] | None = None
 
     @classmethod
     def create(
@@ -343,9 +344,6 @@ class LogicalPlan:
         return not self.operations
 
 
-_FORBIDDEN_BOUND_PARAM_NAMES = {"row", "raw", "record", "_row"}
-
-
 def normalize_bound_inputs(inputs: Mapping[str, str] | Sequence[str]) -> Mapping[str, str]:
     if isinstance(inputs, Mapping):
         normalized = {str(k): str(v) for k, v in inputs.items()}
@@ -368,45 +366,12 @@ def normalize_outputs(outputs: Optional[Mapping[str, str]]) -> Optional[Mapping[
 
 
 def validate_bound_signature(spec: CallableSpec, inputs: Mapping[str, str]) -> None:
-    target = spec.target
-    if inspect.isclass(target):
-        target = target.__call__
-        signature = inspect.signature(target)
-        parameters = {k: v for k, v in signature.parameters.items() if k != "self"}
-    else:
-        signature = inspect.signature(target)
-        parameters = dict(signature.parameters)
-    for name, parameter in parameters.items():
-        if name in _FORBIDDEN_BOUND_PARAM_NAMES:
-            raise TypeError(f"{spec.name}: field-bound map fn must not accept {name!r}")
-        if parameter.kind == inspect.Parameter.VAR_POSITIONAL:
-            raise TypeError(f"{spec.name}: field-bound map fn must not accept *args")
-        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
-            raise TypeError(f"{spec.name}: field-bound map fn must not accept **kwargs")
-        if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
-            raise TypeError(f"{spec.name}: field-bound map fn must not use positional-only parameters")
-    bindable = {
-        name for name, parameter in parameters.items()
-        if parameter.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-    }
-    static_kwargs = set(spec.call_kwargs)
-    unknown_kwargs = static_kwargs - bindable
-    if unknown_kwargs:
-        raise TypeError(f"{spec.name}: fn_kwargs bind unknown parameter(s): {sorted(unknown_kwargs)}")
-    overlap = set(inputs) & static_kwargs
-    if overlap:
-        raise TypeError(f"{spec.name}: parameters cannot be bound by both inputs and fn_kwargs: {sorted(overlap)}")
-    unknown = set(inputs) - bindable
-    if unknown:
-        raise TypeError(f"{spec.name}: inputs bind unknown parameter(s): {sorted(unknown)}")
-    required = {
-        name for name, parameter in parameters.items()
-        if parameter.default is inspect.Parameter.empty
-        and parameter.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-    }
-    missing = required - set(inputs) - static_kwargs
-    if missing:
-        raise TypeError(f"{spec.name}: missing input binding(s): {sorted(missing)}")
+    from .callable_contract import signature_parameters, validate_field_binding
+
+    is_class = inspect.isclass(spec.target)
+    target = spec.target.__call__ if is_class else spec.target
+    parameters = signature_parameters(inspect.signature(target), drop_self=is_class)
+    validate_field_binding(parameters, inputs, spec.call_kwargs, label=spec.name)
 
 
 class BoundCallable:
@@ -415,6 +380,8 @@ class BoundCallable:
     def __init__(self, operation: BoundMapOp) -> None:
         self._operation = operation
         self._fn = operation.callable.instantiate()
+        from .runtime_contract import validator
+        self._validation = validator(self._fn, operation.callable.runtime_contract)
 
     def __call__(self, row: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(row, Mapping):
@@ -427,11 +394,15 @@ class BoundCallable:
                     f"for parameter {parameter!r}"
                 )
             kwargs[parameter] = row[field_name]
-        result = self._fn(
-            *self._operation.callable.call_args,
-            **kwargs,
-            **dict(self._operation.callable.call_kwargs),
-        )
+        if set(kwargs).intersection(self._operation.callable.call_kwargs):
+            raise TypeError('Map parameter is bound more than once')
+        kwargs.update(self._operation.callable.call_kwargs)
+        args = self._operation.callable.call_args
+        if self._validation is not None:
+            self._validation.inputs(args, kwargs)
+        result = self._fn(*args, **kwargs)
+        if self._validation is not None:
+            result = self._validation.output(result)
         if self._operation.stream_options is not None and inspect.isawaitable(result):
             if inspect.iscoroutine(result):
                 result.close()
@@ -464,9 +435,22 @@ class StandardCallable:
     def __init__(self, spec: CallableSpec) -> None:
         self._spec = spec
         self._fn = spec.instantiate()
+        from .runtime_contract import validator
+        self._validation = validator(self._fn, spec.runtime_contract)
 
     def __call__(self, row: Any) -> Any:
-        return self._fn(row, *self._spec.call_args, **dict(self._spec.call_kwargs))
+        args, kwargs = (row, *self._spec.call_args), dict(self._spec.call_kwargs)
+        if self._validation is not None:
+            self._validation.inputs(args, kwargs)
+        result = self._fn(*args, **kwargs)
+        if self._validation is not None:
+            if self._spec.runtime_contract.get('awaitable') and inspect.isawaitable(result):
+                async def checked_result():
+                    value = await result
+                    return self._validation.output(value)
+                return checked_result()
+            result = self._validation.output(result)
+        return result
 
 
 def is_stream_operation(operation) -> bool:
@@ -503,18 +487,6 @@ class SearchWebOp(AsyncMapOp):
     checkpoint: str | None = None
     checkpoint_operator: str = 'search_web'
     checkpoint_lease_s: float = 300.0
-
-
-@dataclass(frozen=True)
-class FetchDocumentsOp(AsyncMapOp):
-    requests: str = ''
-    output: str = ''
-
-
-@dataclass(frozen=True)
-class FetchImagesOp(AsyncMapOp):
-    requests: str = ''
-    output: str = ''
 
 
 @dataclass(frozen=True)

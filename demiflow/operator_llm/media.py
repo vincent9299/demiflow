@@ -51,7 +51,8 @@ def validate_provider(configuration):
         raise ValueError('Image provider requires a model name')
     parameters = configuration.get('parameters', {})
     if not isinstance(parameters, Mapping) or set(parameters) & {
-            'prompt', 'image', 'image[]', 'input_references', 'messages', 'generator', 'model', 'n'}:
+            'prompt', 'image', 'image[]', 'input_references', 'messages', 'generator', 'model', 'n',
+            'stream','tools','functions'}:
         raise ValueError('Parameters cannot override rendered model input')
     timeout = configuration.get('timeout_s', 600)
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
@@ -85,25 +86,36 @@ def media_limits(options):
 
 def execution_options(prompt, options, max_requests):
     options = dict(options or {})
-    allowed = {'sqlite_journal', 'object_store', 'image_encoding', 'limits',
+    allowed = {'object_store', 'image_encoding', 'limits',
                'io_workers', 'prepare_workers', 'response_workers', 'collect_journal_totals',
-               'keepalive_expiry_s', 'max_connections', 'max_keepalive_connections'}
+               'keepalive_expiry_s', 'max_connections', 'max_keepalive_connections',
+               'timeout_s', 'max_request_bytes', 'max_response_bytes', 'max_event_bytes', 'trust_env'}
     if set(options) - allowed:
         raise ValueError('Unsupported image prompt options')
     if type(max_requests) is not int or max_requests < 0:
         raise ValueError('Image output requires a finite max_requests')
-    journal = options.get('sqlite_journal')
-    if not isinstance(journal, Mapping) or not journal.get('path') or set(journal) - {'path', 'timeout_s', 'read_only'}:
-        raise ValueError('Image output requires options.sqlite_journal with a path')
     if not options.get('object_store'):
         raise ValueError('Image output requires options.object_store')
+    from urllib.parse import urlsplit
+    if urlsplit(str(options['object_store'])).scheme not in {'','file'}:
+        raise ValueError('Image output requires a local logical object destination')
     if options.get('image_encoding', 'png') not in {'png', 'preserve'}:
         raise ValueError('image_encoding must be png or preserve')
     limits = media_limits(options)
-    return {**options, 'sqlite_journal': {**journal, 'max_requests': max_requests},
-            'timeout_s': prompt.model.provider.get('timeout_s', 600),
-            'max_response_bytes': limits['max_response_bytes'],
-            'max_event_bytes': min(1024 * 1024, limits['max_response_bytes']), 'trust_env': False}
+    derived=dict(timeout_s=prompt.model.provider.get('timeout_s',600),
+        max_request_bytes=limits['max_request_bytes'],max_response_bytes=limits['max_response_bytes'],
+        max_event_bytes=min(1024*1024,limits['max_response_bytes']),trust_env=False)
+    if any(key in options and options[key]!=value for key,value in derived.items()):
+        raise ValueError('Image HTTP options must match the complete prompt/media limits')
+    return {**options,
+            **derived}
+
+
+def reserved_media_bytes(options,concurrency):
+    limits=media_limits(options)
+    # Conservative payload admission, not a process RSS promise.
+    return concurrency*(8*(limits['max_request_bytes']+limits['max_response_bytes'])
+        +12*(limits['max_total_pixels']+limits['max_pixels']))
 
 
 def bounded_values(prompt, values, options):
@@ -162,6 +174,8 @@ def checked_image(raw, limits):
     if len(raw) > limits['max_image_bytes']:
         raise ValueError('Image exceeds max_image_bytes')
     with open_picture(raw) as picture:
+        if getattr(picture,'n_frames',1)!=1:
+            raise ValueError('Image output requires one complete raster frame')
         if picture.width * picture.height > limits['max_pixels']:
             raise ValueError('Image exceeds max_pixels')
         picture.load()
@@ -263,8 +277,25 @@ def request_record(request, model, options):
         'revision': configuration.get('revision'), 'body': body}
     if images and options.get('image_encoding', 'png') != 'png':
         record['image_encoding'] = options['image_encoding']
-    if len(json.dumps(record, ensure_ascii=False).encode()) > media_limits(options)['max_request_bytes']:
-        raise ValueError('Serialized image request exceeds max_request_bytes')
+    maximum=media_limits(options)['max_request_bytes']
+    stack=[iter((record,))];nodes=0
+    while stack:
+        try:value=next(stack[-1])
+        except StopIteration:stack.pop();continue
+        nodes+=1
+        if nodes>65536 or len(stack)>32:raise ValueError('Image request exceeds its structure budget')
+        if isinstance(value,str) and len(value)>maximum:
+            raise ValueError('Serialized image request exceeds max_request_bytes')
+        if isinstance(value,Mapping):
+            if len(value)>16384:raise ValueError('Image request mapping exceeds its structure budget')
+            stack.append(iter(part for pair in value.items() for part in pair))
+        elif isinstance(value,(list,tuple)):
+            if len(value)>16384:raise ValueError('Image request list exceeds its structure budget')
+            stack.append(iter(value))
+    size=0
+    for chunk in json.JSONEncoder(ensure_ascii=False,allow_nan=False).iterencode(record):
+        size+=len(chunk.encode())
+        if size>maximum:raise ValueError('Serialized image request exceeds max_request_bytes')
     return record
 
 
@@ -309,8 +340,36 @@ def response_location(body, configuration, options):
     return url
 
 
-def store_image(raw, options):
+def store_image(raw, options, *, store=None):
     from demiflow.objects import LocalObjectStore
+    if store is not None:
+        import hashlib,os,tempfile
+        from pathlib import Path
+        from ..collect.image_decode import decode_image
+        from ..execution.block_sink import storage_usage
+        from ..execution.recovery_contract import RecoveryContractError
+        limits=media_limits(options)
+        if len(raw)>limits['max_image_bytes']:raise ValueError('Image exceeds max_image_bytes')
+        scratch=store.run.directory/'scratch'
+        scratch.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='image-pixels-',dir=scratch) as directory:
+            path=Path(directory)/'encoded'
+            store.run.allocate_artifact(path)
+            with store.run.journal.execution_guard(store.run.fence):
+                storage_usage(store.run)
+                descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                with os.fdopen(descriptor,'wb') as output:output.write(raw)
+            policy=dict(max_bytes=limits['max_image_bytes'],max_pixels=limits['max_pixels'],max_frames=1,
+                decode_memory_bytes=max(64*1024**2,min(512*1024**2,store.run.limits['max_rss_bytes']//4)),
+                decode_timeout_s=min(10,options['timeout_s']))
+            try:
+                decode_image(path.as_uri(),hashlib.sha256(raw).hexdigest(),policy,
+                    temporary_directory=scratch,allocate=store.run.allocate_artifact)
+            except OSError as exc:
+                raise ValueError('Invalid image pixels: '+str(exc)) from exc
+            except (MemoryError,RuntimeError) as exc:
+                raise RecoveryContractError('Image decoder resource failure: '+str(exc)) from exc
+        return store.stage(raw, admitted=True)
     picture = checked_image(raw, media_limits(options))
     picture.close()
     return LocalObjectStore(options['object_store']).put(raw).to_dict()

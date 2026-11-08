@@ -33,9 +33,11 @@ def resolve_local_uri(value):
         if not manifest.is_file():
             continue
         stat = manifest.stat()
-        mapping = _location_mapping(str(manifest), stat.st_mtime_ns, stat.st_size)
+        mapping = _location_mapping(str(manifest), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
         target = mapping.get(path.relative_to(root).as_posix())
         if target is not None:
+            if not isinstance(target, str):
+                raise ValueError('Invalid relocated table target')
             relative = Path(target)
             if relative.is_absolute() or '..' in relative.parts or relative.suffix != '.lance':
                 raise ValueError('Invalid relocated table path: ' + target)
@@ -46,11 +48,9 @@ def resolve_local_uri(value):
 from functools import lru_cache
 
 @lru_cache(maxsize=16)
-def _location_mapping(filename, modified_ns, size):
-    document = json.loads(Path(filename).read_text())
-    if document.get('version') != 1 or not isinstance(document.get('tables'), dict):
-        raise ValueError('Invalid Lance location manifest: ' + filename)
-    return document['tables']
+def _location_mapping(filename, device, inode, size, modified_ns, changed_ns):
+    from ..execution.location_index import IndexedLocations
+    return IndexedLocations(filename, (device, inode, size, modified_ns, changed_ns), field='tables')
 
 
 def normalize_lance_uri(value: Any) -> str:

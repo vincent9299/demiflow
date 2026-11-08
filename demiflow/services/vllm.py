@@ -7,26 +7,17 @@ request journals, model downloads or stage selection live here.
 """
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
-from contextlib import ExitStack, suppress
-import logging
 import json
 import math
 import os
 from pathlib import Path
-import signal
-import socket
 import subprocess
 import sys
-import time
 from urllib.parse import urlparse
 
-logger = logging.getLogger(__name__)
 
-
-class ModelServiceError(RuntimeError):
-    """Node resource failure; must stop the stream rather than fail every row."""
+from .contracts import ModelServiceError
 
 
 def vllm_config(value):
@@ -173,167 +164,16 @@ class VLLMService:
         endpoint = model.base_url or os.environ.get(model.base_url_env, '')
         resolved = {'name': model.name, 'base_url': endpoint}
         argv, env = _service_command(self._config, resolved, self.root)
-        return _VLLMOwner(self, resolved, argv, env)
-
-
-class _VLLMOwner:
-    """One actor execution's process, readiness task and cooperative locks."""
-
-    def __init__(self, declaration, model, argv, env):
-        self.spec = declaration._config
-        self.root = declaration.root
-        self.model, self.argv, self.env = model, argv, env
-        port = urlparse(model['base_url']).port
-        self.log_path = declaration.log_path or self.root / '_demiflow' / 'services' / f'vllm_{port}.log'
-        self.log = declaration.log or logger.info
-        self._stack = ExitStack()
-        self._process = None
-        self._startup = None
-
-    def _report(self, message):
-        # A failed user logging callback must never skip process cleanup.
-        try:
-            self.log(message)
-        except Exception:
-            logger.warning('Model service progress callback failed', exc_info=True)
-
-    async def ensure_ready(self):
-        # All workers await one startup task. A cancelled row cannot cancel
-        # another worker's startup; actor aclose owns cancellation and cleanup.
-        if self._startup is None:
-            self._startup = asyncio.create_task(self._start())
-        await asyncio.shield(self._startup)
-        if self._process.poll() is not None:
-            raise ModelServiceError(f'Model service exited ({self._process.returncode}); see {self.log_path}')
-
-    async def _acquire_resources(self, control, names, port):
-        """Optional bounded queue; release partial acquisitions before waiting.
-
-        No child starts and no other owner is interrupted while queued. Waiting
-        is cancellable by aclose and separate from model startup's timeout.
-        Locks scale with the configured GPU count, not rows or wait duration.
-        """
-        import fcntl
-
-        started = time.monotonic()
-        last_log = None
-        while True:
-            blocked = None
-            with ExitStack() as attempt:
-                for name in names:
-                    lock = attempt.enter_context((control / f'{name}.lock').open('a'))
-                    try:
-                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except BlockingIOError:
-                        blocked = f'Model resource {name} is occupied under {control}'
-                        break
-                if blocked is None:
-                    with socket.socket() as probe:
-                        if probe.connect_ex(('127.0.0.1', port)) == 0:
-                            blocked = f'Model port {port} is occupied; use its known external service or another port'
-                if blocked is None:
-                    self._stack.enter_context(attempt.pop_all())
-                    return
-            elapsed = time.monotonic() - started
-            remaining = self.spec['resource_wait_timeout_s'] - elapsed
-            if remaining <= 0:
-                raise RuntimeError(blocked + (f'; resource wait timed out after {elapsed:.1f}s'
-                                             if self.spec['resource_wait_timeout_s'] else ''))
-            if last_log is None or elapsed - last_log >= self.spec['startup_log_interval_s']:
-                self._report(f'等待模型资源：{blocked}；已等 {elapsed:.0f}s，剩余 {remaining:.0f}s')
-                last_log = elapsed
-            await asyncio.sleep(min(self.spec['poll_interval_s'], remaining))
-
-    async def _start(self):
-        import httpx
-
-        try:
-            weights = self.root / self.spec['model_path']
-            if not weights.is_dir():
-                raise FileNotFoundError(weights)
-            port = urlparse(self.model['base_url']).port
-            control = self.root / '_demiflow' / 'local_model_gpus'
-            control.mkdir(parents=True, exist_ok=True)
-            # Only coordinate owned launches; never attach to or terminate an
-            # unknown listener. Locks remain held until this process is reaped.
-            names = [f'gpu_{gpu}' for gpu in sorted(self.spec['gpus'])] + [f'port_{port}']
-            await self._acquire_resources(control, names, port)
-            self.log_path.parent.mkdir(parents=True, exist_ok=True)
-            stream = self._stack.enter_context(self.log_path.open('a', encoding='utf-8'))
-            self._report(f'加载模型 {self.model["name"]}：GPU={self.spec["gpus"]}，'
-                         f'DP={self.spec["data_parallel_size"]}，TP={self.spec["tensor_parallel_size"]}；'
-                         f'服务日志={self.log_path}')
-            # Popen returns before any await, so cancellation cannot lose a newly
-            # spawned process between creation and registering its cleanup owner.
-            self._process = subprocess.Popen(
-                self.argv, env=self.env, cwd=self.root, stdin=subprocess.DEVNULL,
-                stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
-            started = last_log = time.monotonic()
-            async with httpx.AsyncClient(trust_env=False, timeout=self.spec['readiness_timeout_s']) as client:
-                while True:
-                    if self._process.poll() is not None:
-                        raise RuntimeError(f'Model service exited ({self._process.returncode}); see {self.log_path}')
-                    remaining = self.spec['startup_timeout_s'] - (time.monotonic() - started)
-                    if remaining <= 0:
-                        raise TimeoutError(f'Model startup timed out; see {self.log_path}')
-                    try:
-                        response = await asyncio.wait_for(
-                            client.get(self.model['base_url'].rstrip('/') + '/models'), remaining)
-                        response.raise_for_status()
-                    except (httpx.HTTPError, asyncio.TimeoutError):
-                        pass
-                    else:
-                        names = [m['id'] for m in response.json()['data']]
-                        if names != [self.model['name']]:
-                            raise RuntimeError(f'Model endpoint differs: {names}; see {self.log_path}')
-                        break
-                    now = time.monotonic()
-                    if now - last_log >= self.spec['startup_log_interval_s']:
-                        self._report(f'模型仍在加载：{self.model["name"]}，已等 {now - started:.0f}s；日志={self.log_path}')
-                        last_log = now
-                    remaining = self.spec['startup_timeout_s'] - (now - started)
-                    await asyncio.sleep(min(self.spec['poll_interval_s'], max(0, remaining)))
-            self._report(f'模型就绪：{self.model["name"]}，PID={self._process.pid}，'
-                         f'加载耗时={time.monotonic() - started:.1f}s')
-        except BaseException as exc:
-            await self._release()
-            if isinstance(exc, asyncio.CancelledError):
-                raise
-            raise ModelServiceError(str(exc)) from exc
-
-    async def aclose(self):
-        if self._startup is not None:
-            if not self._startup.done():
-                self._startup.cancel()
-            with suppress(asyncio.CancelledError, ModelServiceError):
-                await self._startup
-        await self._release()
-
-    async def _release(self):
-        process, self._process = self._process, None
-        try:
-            if process is None:
-                return
-            self._report(f'释放模型：{self.model["name"]}，PID={process.pid}')
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGTERM)
-            deadline = time.monotonic() + self.spec['shutdown_timeout_s']
-            while True:
-                process.poll()  # Reap parent; children may still own the group.
-                try:
-                    os.killpg(process.pid, 0)
-                except ProcessLookupError:
-                    break
-                if time.monotonic() >= deadline:
-                    break
-                await asyncio.sleep(min(self.spec['poll_interval_s'], max(0, deadline - time.monotonic())))
-        finally:
-            try:
-                if process is not None:
-                    # Also catch descendants left behind after the parent exits,
-                    # and force cleanup if cancellation interrupts graceful wait.
-                    with suppress(ProcessLookupError):
-                        os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=self.spec['shutdown_timeout_s'])
-            finally:
-                self._stack.close()
+        from .http import ManagedHTTPService
+        # vLLM owns argument construction; the HTTP owner owns all processes.
+        environment = {key: value for key, value in env.items() if key != 'CUDA_VISIBLE_DEVICES'}
+        cfg = self._config
+        declaration = ManagedHTTPService(
+            argv, base_url=endpoint, root=self.root, gpus=cfg['gpus'], env=environment,
+            ready_path='/v1/models', expected_model=model.name, model_match='exact',
+            required_paths=[cfg['model_path']], log_path=self.log_path, log=self.log,
+            startup_timeout_s=cfg['startup_timeout_s'], shutdown_timeout_s=cfg['shutdown_timeout_s'],
+            readiness_timeout_s=cfg['readiness_timeout_s'], poll_interval_s=cfg['poll_interval_s'],
+            resource_wait_timeout_s=cfg['resource_wait_timeout_s'],
+            startup_log_interval_s=cfg['startup_log_interval_s'])
+        return declaration.bind(model)

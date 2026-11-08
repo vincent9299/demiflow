@@ -5,9 +5,10 @@ owns its process group; the CLI supervisor can instead keep it across runs.
 """
 from __future__ import annotations
 import asyncio
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, suppress, asynccontextmanager
 import fcntl
 import math
+import logging
 import os
 from pathlib import Path
 import signal
@@ -15,7 +16,9 @@ import socket
 import subprocess
 import time
 from urllib.parse import urlsplit
-from .vllm import ModelServiceError
+from .contracts import ModelServiceError, served_model_names, bounded_metadata_get
+
+logger = logging.getLogger(__name__)
 
 
 def _endpoint(value):
@@ -37,7 +40,10 @@ class ManagedHTTPService:
     def __init__(self, command, *, base_url, root=None, gpus=(), env=None,
                  ready_path='/health', expected_model=None, log_path=None,
                  startup_timeout_s=600, shutdown_timeout_s=30,
-                 readiness_timeout_s=2, poll_interval_s=0.5):
+                 readiness_timeout_s=2, poll_interval_s=0.5,
+                 resource_wait_timeout_s=0, startup_log_interval_s=15,
+                 model_match='listed', required_paths=(), log=None,
+                 resource_directory=None, request_concurrency=None, log_max_bytes=8*1024*1024):
         if (not isinstance(command, (list, tuple)) or not command
                 or any(not isinstance(part, str) or not part for part in command)):
             raise ValueError('command must be a nonempty argv sequence')
@@ -56,6 +62,21 @@ class ManagedHTTPService:
         for value in (startup_timeout_s,shutdown_timeout_s,readiness_timeout_s,poll_interval_s):
             if type(value) not in (int,float) or not math.isfinite(value) or value<=0:
                 raise ValueError('service timeouts must be positive and finite')
+        if (type(resource_wait_timeout_s) not in (int, float)
+                or not math.isfinite(resource_wait_timeout_s) or resource_wait_timeout_s < 0):
+            raise ValueError('resource_wait_timeout_s must be finite and nonnegative')
+        if (type(startup_log_interval_s) not in (int, float)
+                or not math.isfinite(startup_log_interval_s) or startup_log_interval_s <= 0):
+            raise ValueError('startup_log_interval_s must be positive and finite')
+        if model_match not in {'listed', 'exact'}:
+            raise ValueError('model_match must be listed or exact')
+        if (not isinstance(required_paths, (list, tuple))
+                or any(not isinstance(p, (str, Path)) or not str(p) for p in required_paths)):
+            raise ValueError('required_paths must contain nonempty local paths')
+        if log is not None and not callable(log):
+            raise TypeError('log must be callable')
+        if request_concurrency is not None and (type(request_concurrency) is not int or not 1<=request_concurrency<=512):
+            raise ValueError('request_concurrency must be 1..512')
         self.command, self.base_url = tuple(command), base_url.rstrip('/')
         self.root = Path(root or Path.cwd()).resolve()
         self.gpus,self.env = tuple(gpus),dict(env or {})
@@ -64,11 +85,21 @@ class ManagedHTTPService:
                          self.root/'_demiflow/services'/f'http_{_endpoint(base_url).port}.log')
         self.startup_timeout_s,self.shutdown_timeout_s = startup_timeout_s,shutdown_timeout_s
         self.readiness_timeout_s,self.poll_interval_s = readiness_timeout_s,poll_interval_s
+        self.resource_wait_timeout_s = resource_wait_timeout_s
+        self.startup_log_interval_s = startup_log_interval_s
+        self.model_match, self.log = model_match, log
+        self.required_paths = tuple(self.root / p for p in required_paths)
+        self.resource_directory = (Path(resource_directory).resolve() if resource_directory else
+                                   self.root/'_demiflow/local_model_gpus')
+        self.request_concurrency = request_concurrency
+        if type(log_max_bytes) is not int or not 1024<=log_max_bytes<=1024**3:
+            raise ValueError('log_max_bytes must be 1 KiB..1 GiB')
+        self.log_max_bytes=log_max_bytes
 
     def bind(self, model=None):
         if model is not None:
-            if model.transport != 'openai_compatible':
-                raise ValueError('ManagedHTTPService prompt binding requires openai_compatible transport')
+            if model.transport not in {'openai_compatible', 'systemone'}:
+                raise ValueError('ManagedHTTPService requires openai_compatible or systemone transport')
             endpoint = model.base_url or os.environ.get(model.base_url_env, '')
             if endpoint.rstrip('/') != self.base_url:
                 raise ValueError('Prompt endpoint differs from managed service declaration')
@@ -82,6 +113,73 @@ class _HTTPOwner:
         self.declaration = declaration
         self._stack,self._process,self._startup = ExitStack(),None,None
         self._closed = False
+        self._log_pump = None
+        self._slots = (asyncio.Semaphore(declaration.request_concurrency)
+                       if declaration.request_concurrency is not None else None)
+
+    @property
+    def base_url(self):
+        return self.declaration.base_url
+
+    def _report(self, message):
+        try:
+            (self.declaration.log or logger.info)(message)
+        except Exception:
+            logger.warning('Service logging callback failed', exc_info=True)
+
+    @asynccontextmanager
+    async def request_slot(self):
+        if self._closed: raise ModelServiceError('Service owner has already closed')
+        if self._slots is None:
+            yield
+        else:
+            async with asyncio.timeout(self.declaration.startup_timeout_s):
+                await self._slots.acquire()
+            try:
+                if self._closed: raise ModelServiceError('Service owner has already closed')
+                yield
+            finally: self._slots.release()
+
+    async def _acquire_resources(self, port):
+        spec = self.declaration
+        control = spec.resource_directory
+        control.mkdir(parents=True, exist_ok=True)
+        # One host/user coordination domain across roots, plus the declared
+        # legacy lock directory for callers already sharing that root.
+        shared = Path(os.environ.get('DEMIFLOW_RESOURCE_HOME',str(Path.home()/'.cache/demiflow/resources')))/socket.gethostname()
+        shared.mkdir(parents=True,exist_ok=True)
+        controls = sorted({control.resolve(),shared.resolve()},key=str)
+        started = time.monotonic()
+        last_log = None
+        resources = [*(f'gpu_{g}' for g in sorted(spec.gpus)), f'port_{port}']
+        while True:
+            blocked = None
+            with ExitStack() as attempt:
+                for directory in controls:
+                    for resource in resources:
+                        stream = attempt.enter_context((directory/(resource+'.lock')).open('a'))
+                        try:
+                            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            blocked = 'Model resource ' + resource + ' is occupied'
+                            break
+                    if blocked: break
+                if blocked is None:
+                    with socket.socket() as probe:
+                        if probe.connect_ex(('127.0.0.1', port)) == 0:
+                            blocked = 'HTTP port is already occupied; refusing to attach or terminate its owner'
+                if blocked is None:
+                    self._stack.enter_context(attempt.pop_all())
+                    return
+            elapsed = time.monotonic() - started
+            remaining = spec.resource_wait_timeout_s - elapsed
+            if remaining <= 0:
+                suffix = '; resource wait timed out' if spec.resource_wait_timeout_s else ''
+                raise ModelServiceError(blocked + suffix)
+            if last_log is None or elapsed-last_log >= spec.startup_log_interval_s:
+                self._report(f'等待模型资源：{blocked}；已等 {elapsed:.1f}s')
+                last_log = elapsed
+            await asyncio.sleep(min(spec.poll_interval_s, remaining))
 
     async def __aenter__(self):
         try:
@@ -101,6 +199,8 @@ class _HTTPOwner:
         if self._startup is None:
             self._startup = asyncio.create_task(self._start())
         await asyncio.shield(self._startup)
+        if self._log_pump is not None and self._log_pump.error is not None:
+            raise ModelServiceError('Service log failed: '+str(self._log_pump.error))
         if self._process.poll() is not None:
             raise ModelServiceError(f'Managed HTTP service exited ({self._process.returncode})')
 
@@ -110,37 +210,39 @@ class _HTTPOwner:
         url = _endpoint(spec.base_url)
         origin = f'{url.scheme}://{url.netloc}'
         try:
-            control = spec.root/'_demiflow/local_model_gpus'
-            control.mkdir(parents=True,exist_ok=True)
-            for resource in [*(f'gpu_{g}' for g in sorted(spec.gpus)), f'port_{url.port}']:
-                stream = self._stack.enter_context((control/(resource+'.lock')).open('a'))
-                try:
-                    fcntl.flock(stream,fcntl.LOCK_EX|fcntl.LOCK_NB)
-                except BlockingIOError as error:
-                    raise ModelServiceError('Model resource is occupied: '+resource) from error
-            with socket.socket() as probe:
-                if probe.connect_ex(('127.0.0.1',url.port))==0:
-                    raise ModelServiceError('HTTP port is already occupied; refusing to attach or terminate its owner')
+            for path in spec.required_paths:
+                if not path.exists():
+                    raise FileNotFoundError(path)
+            await self._acquire_resources(url.port)
             spec.log_path.parent.mkdir(parents=True,exist_ok=True)
-            output = self._stack.enter_context(spec.log_path.open('ab'))
             env = {**os.environ,**spec.env,'CUDA_VISIBLE_DEVICES':','.join(map(str,spec.gpus)), 'PYTHONUNBUFFERED':'1'}
             self._process = subprocess.Popen(spec.command,cwd=spec.root,env=env,stdin=subprocess.DEVNULL,
-                stdout=output,stderr=subprocess.STDOUT,start_new_session=True)
+                stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
+            from .process_log import ProcessLog
+            self._log_pump=ProcessLog(self._process.stdout,spec.log_path,spec.log_max_bytes)
             deadline = time.monotonic()+spec.startup_timeout_s
+            last_log = time.monotonic()
             async with httpx.AsyncClient(trust_env=False,timeout=spec.readiness_timeout_s) as client:
                 while time.monotonic()<deadline:
                     if self._process.poll() is not None:
                         raise ModelServiceError(f'HTTP service exited ({self._process.returncode}); see {spec.log_path}')
                     try:
-                        response = await asyncio.wait_for(client.get(origin+spec.ready_path), max(0.01,deadline-time.monotonic()))
+                        response = await asyncio.wait_for(bounded_metadata_get(client,origin+spec.ready_path), max(0.01,deadline-time.monotonic()))
                         response.raise_for_status()
                         if spec.expected_model is not None:
-                            response = await asyncio.wait_for(client.get(spec.base_url+'/models'),max(0.01,deadline-time.monotonic()))
+                            response = await asyncio.wait_for(bounded_metadata_get(client,spec.base_url+'/models'),max(0.01,deadline-time.monotonic()))
                             response.raise_for_status()
-                            if spec.expected_model not in [row['id'] for row in response.json()['data']]:
+                            names = served_model_names(response.json())
+                            matched = (names == [spec.expected_model] if spec.model_match == 'exact'
+                                       else spec.expected_model in names)
+                            if not matched:
                                 raise ModelServiceError('Managed endpoint does not serve the declared model')
+                        self._report(f'模型就绪：{spec.expected_model or spec.base_url}，PID={self._process.pid}')
                         return
                     except (httpx.HTTPError, asyncio.TimeoutError):
+                        if time.monotonic()-last_log >= spec.startup_log_interval_s:
+                            self._report(f'模型仍在加载：{spec.expected_model or spec.base_url}；日志={spec.log_path}')
+                            last_log = time.monotonic()
                         await asyncio.sleep(min(spec.poll_interval_s,max(0,deadline-time.monotonic())))
             raise ModelServiceError('HTTP service readiness timed out; see '+str(spec.log_path))
         except BaseException as error:
@@ -179,4 +281,7 @@ class _HTTPOwner:
                         os.killpg(process.pid,signal.SIGKILL)
                     process.wait(timeout=self.declaration.shutdown_timeout_s)
             finally:
+                if self._log_pump is not None:
+                    pump,self._log_pump=self._log_pump,None
+                    await asyncio.to_thread(pump.close)
                 self._stack.close()

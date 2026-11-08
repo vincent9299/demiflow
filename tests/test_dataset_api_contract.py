@@ -29,7 +29,7 @@ DATA_EXPORTS = {
     'read_document_receipts', 'vector_search_lance', 'Dataset',
     'MaterializedDataset', 'BlockMetadata', 'Datasource', 'ReadTask', 'Datasink',
     'WriteResult', 'AbsMax', 'AggregateFnV2', 'Count', 'Max', 'Mean', 'Min',
-    'Std', 'Sum',
+    'Std', 'Sum', 'require', 'schema', 'open_checkpoint', 'read_checkpoint',
 }
 PIPELINE_EXPORTS = {
     'PIPELINE_BACKENDS', 'PIPELINE_DEFAULT_DATASET_WORKERS',

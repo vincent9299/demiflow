@@ -40,10 +40,12 @@ class _ProxyPool(httpcore.AsyncHTTPProxy):
 
 class RetrievalTransport(httpx.AsyncHTTPTransport):
     """Keep HTTPX's request/error mapping and explicit finite pool limits."""
-    def __init__(self, *, proxy=None, limits):
+    def __init__(self, *, proxy=None, limits, verify=True):
+        if verify is False:
+            raise ValueError("TLS verification cannot be disabled")
         declaration=httpx.Proxy(proxy) if isinstance(proxy,(str,httpx.URL)) else proxy
         if declaration is None or declaration.url.scheme not in ('http','https'):
-            super().__init__(proxy=proxy,limits=limits,trust_env=False)
+            super().__init__(proxy=proxy,limits=limits,trust_env=False,verify=verify)
             return
         self._pool=_ProxyPool(
             proxy_url=httpcore.URL(scheme=declaration.url.raw_scheme,
@@ -51,7 +53,7 @@ class RetrievalTransport(httpx.AsyncHTTPTransport):
                 target=declaration.url.raw_path),
             proxy_auth=declaration.raw_auth,proxy_headers=declaration.headers.raw,
             proxy_ssl_context=declaration.ssl_context,
-            ssl_context=httpx.create_ssl_context(verify=True,trust_env=False),
+            ssl_context=httpx.create_ssl_context(verify=verify,trust_env=False),
             max_connections=limits.max_connections,
             max_keepalive_connections=limits.max_keepalive_connections,
             keepalive_expiry=limits.keepalive_expiry,

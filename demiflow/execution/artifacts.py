@@ -12,6 +12,8 @@ from pathlib import Path
 import uuid
 from functools import lru_cache
 
+_LOCATION_INDEX_THRESHOLD = 8*1024**2
+
 
 def resolve_local_artifact(value):
     """Resolve an explicitly moved file/directory without changing saved identity.
@@ -26,7 +28,8 @@ def resolve_local_artifact(value):
             info = manifest.stat()
             if not stat_mode.S_ISREG(info.st_mode):
                 continue
-            mapping = _artifact_locations(str(manifest), info.st_mtime_ns, info.st_size)
+            mapping = _artifact_locations(str(manifest), info.st_mtime_ns, info.st_size,
+                                          info.st_dev, info.st_ino, info.st_ctime_ns)
         except FileNotFoundError:
             # An optional location manifest may disappear between stat and
             # open during maintenance. Treat this like an absent manifest;
@@ -45,7 +48,10 @@ def resolve_local_artifact(value):
 
 
 @lru_cache(maxsize=16)
-def _artifact_locations(filename, modified_ns, size):
+def _artifact_locations(filename, modified_ns, size, device=0, inode=0, changed_ns=0):
+    if size>_LOCATION_INDEX_THRESHOLD:
+        from .location_index import IndexedLocations
+        return IndexedLocations(filename,(device,inode,size,modified_ns,changed_ns))
     document = json.loads(Path(filename).read_text())
     if document.get('version') != 1 or not isinstance(document.get('files'), dict):
         raise ValueError('Invalid artifact location manifest: ' + filename)

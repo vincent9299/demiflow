@@ -53,6 +53,7 @@ class ScanBlock:
 class TaskOutput:
     value: object
     rows_input: int
+    observations: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -109,10 +110,29 @@ def _write_block(path, records):
     return Block(str(path), count, Path(path).stat().st_size)
 
 
-def _apply(rows, operations):
+def _count_rows(rows, counts, name):
+    for row in rows:
+        counts[name] += 1
+        if name == 'rows_input' and 'calls' in counts:
+            counts['calls'] += 1
+        yield row
+
+
+def _task_counters(operations, identities):
+    if identities and len(identities) != len(operations):
+        raise ValueError('Native observation sidecar differs from operation count')
+    return [dict(rows_input=0, rows_output=0,
+                 **({'calls': 0} if isinstance(op, (ops.MapOp, ops.BoundMapOp, ops.FilterOp, ops.FlatMapOp)) else {}))
+            if key is not None else None for op, key in zip(operations, identities)]
+
+
+def _apply(rows, operations, observations=None):
     """Instantiate callback state per task; fuse narrow operators in one loop."""
     from .executors.local import LocalDatasetExecutor
-    for op in operations:
+    for index, op in enumerate(operations):
+        counts = observations[index] if observations is not None else None
+        if counts is not None:
+            rows = _count_rows(rows, counts, 'rows_input')
         if isinstance(op, ops.MapOp):
             rows = map(ops.StandardCallable(op.callable), rows)
         elif isinstance(op, ops.BoundMapOp):
@@ -125,10 +145,16 @@ def _apply(rows, operations):
                     result = fn(row)
                     if isinstance(result, Mapping):
                         raise TypeError("flat_map callable must return an iterable of rows")
-                    for value in result:
-                        if not isinstance(value, Mapping):
-                            raise TypeError("flat_map output rows must be mappings")
-                        yield dict(value)
+                    iterator = iter(result)
+                    try:
+                        for value in iterator:
+                            if not isinstance(value, Mapping):
+                                raise TypeError("flat_map output rows must be mappings")
+                            yield dict(value)
+                    finally:
+                        close = getattr(iterator, 'close', None)
+                        if close is not None:
+                            close()
             rows = flat()
         elif isinstance(op, ops.SelectColumnsOp):
             rows = _select(rows, op.columns)
@@ -159,6 +185,8 @@ def _apply(rows, operations):
             rows = serial._map_batches_stage(rows, op, 1)
         else:
             raise NotImplementedError(f"partition kernel cannot execute {type(op).__name__}")
+        if counts is not None:
+            rows = _count_rows(rows, counts, 'rows_output')
     yield from rows
 
 
@@ -167,7 +195,7 @@ def _select(rows, columns):
         yield {k: row[k] for k in columns}
 
 
-def _map_task(block, encoded, path):
+def _map_task(block, encoded, path, identities=()):
     import cloudpickle
     operations = cloudpickle.loads(encoded)
     count = 0
@@ -176,8 +204,9 @@ def _map_task(block, encoded, path):
         for batch in _input_batches(block):
             count += _row_count(batch)
             yield from _rows(batch)
-    result = _write_block(path, (("", row) for row in _apply(rows(), operations)))
-    return TaskOutput(result, count)
+    counters = _task_counters(operations, identities)
+    result = _write_block(path, (("", row) for row in _apply(rows(), operations, counters or None)))
+    return TaskOutput(result, count, tuple((key, counters[i]) for i, key in enumerate(identities) if key is not None))
 
 
 def _hash_key(key):
@@ -193,7 +222,7 @@ def _may_match(value, bitmap):
     return all(bitmap[bit >> 3] & (1 << (bit & 7)) for bit in _bloom_bits(value, len(bitmap)))
 
 
-def _shuffle_task(block, fields, partitions, directory, buffer_bytes, encoded_operations, filter_path):
+def _shuffle_task(block, fields, partitions, directory, buffer_bytes, encoded_operations, filter_path, identities=()):
     """One input block → bounded buffers of stable hash partitions."""
     buffers = [[] for _ in range(partitions)]
     sizes = [0] * partitions
@@ -245,7 +274,8 @@ def _shuffle_task(block, fields, partitions, directory, buffer_bytes, encoded_op
                                 for values in zip(*columns)]
                         batch = batch.filter(pa.array(mask, type=pa.bool_()))
                 yield from _rows(batch)
-        for row in _apply(rows(), operations):
+        counters = _task_counters(operations, identities)
+        for row in _apply(rows(), operations, counters or None):
             key = key_of(row, fields)
             hashed = _hash_key(key)
             if bitmap is not None and not _may_match(hashed, bitmap):
@@ -259,13 +289,17 @@ def _shuffle_task(block, fields, partitions, directory, buffer_bytes, encoded_op
                 flush(part)
         for part in range(partitions):
             flush(part)
-    return TaskOutput({part: Block(path, counts[part], Path(path).stat().st_size) for part, path in paths.items()}, input_rows)
+    return TaskOutput({part: Block(path, counts[part], Path(path).stat().st_size) for part, path in paths.items()}, input_rows,
+                      tuple((key, counters[i]) for i, key in enumerate(identities) if key is not None))
 
 
-def _fold(records, fields, reducer, initial, *, group_rows=None, output="items", encoded_keys=False):
+def _fold(records, fields, reducer, initial, *, group_rows=None, output="items", encoded_keys=False, reducer_contract=None, reducer_kwargs=None):
     # Native ordering already emits canonical keys; reuse them across the Python
     # callback boundary instead of serializing every row key a second time.
     key_fn = (lambda r: r[0]) if encoded_keys else (lambda r: key_of(r, fields))
+    from ..data.runtime_contract import validator
+    validation = validator(reducer, reducer_contract) if reducer_contract is not None else None
+    kwargs = reducer_kwargs or {}
     for key, group in itertools.groupby(records, key=key_fn):
         if encoded_keys:
             group = (row for _, row in group)
@@ -282,7 +316,11 @@ def _fold(records, fields, reducer, initial, *, group_rows=None, output="items",
         else:
             state = copy.deepcopy(initial)
             for row in group:
-                state = reducer(state, row)
+                if validation is not None:
+                    validation.inputs((state, row), kwargs)
+                state = reducer(state, row, **kwargs)
+                if validation is not None:
+                    state = validation.output(state)
             if state is not None:
                 yield key, state
 
@@ -352,7 +390,8 @@ def _key_task(left, right, encoded, path, directory, chunk_bytes):
         with closing(records):
             if spec.get("fold"):
                 out = _fold(records, fields, spec["reducer"], spec["initial"],
-                            group_rows=spec.get("group_rows"), output=spec.get("output", "items"))
+                            group_rows=spec.get("group_rows"), output=spec.get("output", "items"),
+                            reducer_contract=spec.get('reducer_contract'), reducer_kwargs=spec.get('reducer_kwargs'))
             else:
                 out = ((key_of(row, fields), row) for row in records)
             return TaskOutput(_write_block(path, out), sum(b.rows for b in (*left, *right)))
@@ -364,7 +403,8 @@ def _worker_call(function, args):
     result = completed.value
     output_rows = result.rows if isinstance(result, Block) else sum(b.rows for b in result.values())
     return result, {"pid": os.getpid(), "thread": threading.get_ident(), "seconds": time.monotonic() - started,
-                    "rows_input": completed.rows_input, "rows_output": output_rows}
+                    "rows_input": completed.rows_input, "rows_output": output_rows,
+                    "observations": completed.observations}
 
 
 def _process_init(barrier, preload_lance):
@@ -401,6 +441,8 @@ class TaskScheduler:
         return self
 
     def run(self, function, arguments, stage):
+        from .checked import current
+        checked = current()
         iterator = iter(arguments)
         pending = deque()
         width = self.options.workers * 2
@@ -440,6 +482,11 @@ class TaskScheduler:
                 stage["worker_seconds"] += metrics["seconds"]
                 stage["rows_input"] += metrics["rows_input"]
                 stage["rows_output"] += metrics["rows_output"]
+                if checked is not None:
+                    for key, counts in metrics['observations']:
+                        checked.progress(key, **counts)
+                    checked.group_duration([key for key, _ in metrics['observations']], metrics['seconds'])
+                    checked.flush_observations()
                 worker = (metrics["pid"], metrics["thread"])
                 if worker not in self.stats["workers_used"]:
                     self.stats["workers_used"].append(worker)
@@ -507,6 +554,19 @@ class LocalTaskEngine:
                 yield values
 
     def source_blocks(self, source, *, bounded=False):
+        from .checked import current
+        checked = current()
+        key = checked.source_bindings.get(id(source)) if checked is not None else None
+        if key is not None:
+            checked.progress(key, rows_output=0)
+        for block in self._source_blocks(source, bounded=bounded):
+            # Managed scans use bounded batches; ScanBlock remains available
+            # to ordinary native execution without a claimed row observation.
+            if key is not None and not isinstance(block, ScanBlock):
+                checked.progress(key, rows_output=_row_count(block))
+            yield block
+
+    def _source_blocks(self, source, *, bounded=False):
         if isinstance(source, UnionSource):
             for item in source.inputs:
                 runs = self.evaluate(item.source, item.plan)
@@ -550,15 +610,20 @@ class LocalTaskEngine:
 
     def maps(self, blocks, operations):
         import cloudpickle
+        from .checked import current
+        checked = current()
+        identities = tuple(checked.operation_bindings.get(id(op)) for op in operations) if checked is not None else ()
         encoded = cloudpickle.dumps(tuple(operations))
         def mapped():
             stage = self.stage("map", operators=[type(op).__name__ for op in operations])
-            arguments = ((block, encoded, self.path()) for block in blocks)
+            arguments = ((block, encoded, self.path(), identities) for block in blocks)
             yield from self.scheduler.run(_map_task, arguments, stage)
         return Runs(mapped(), map_input=blocks, map_operations=tuple(operations))
 
     def shuffle(self, runs, fields, filter_path=None):
         import cloudpickle
+        from .checked import current
+        checked = current()
         parts = [[] for _ in range(self.options.partitions)]
         fused = runs.map_input is not None
         stage = self.stage("map+shuffle" if fused else "shuffle", keys=list(fields), partitions=len(parts),
@@ -566,9 +631,10 @@ class LocalTaskEngine:
                            key_filter='bloom' if filter_path else None)
         blocks = runs.map_input if fused else (self.batches(self.render(runs), self.options.batch_rows) if runs.keyed else runs.blocks)
         encoded = cloudpickle.dumps(runs.map_operations if fused else ())
+        identities = tuple(checked.operation_bindings.get(id(op)) for op in runs.map_operations) if fused and checked is not None else ()
         # The bound applies across all partition buffers in each worker.
         buffer_bytes = max(1, self.options.memory_bytes // self.options.workers // len(parts))
-        args = ((b, fields, len(parts), str(self.directory), buffer_bytes, encoded, filter_path) for b in blocks)
+        args = ((b, fields, len(parts), str(self.directory), buffer_bytes, encoded, filter_path, identities) for b in blocks)
         for result in self.scheduler.run(_shuffle_task, args, stage):
             for part, block in result.items():
                 parts[part].append(block)
@@ -658,6 +724,8 @@ class LocalTaskEngine:
         spec = {"kind": source.kind, "on": source.on, "right_on": source.right_on,
                 "how": source.how, "suffix": source.suffix, "fold": group is not None,
                 "reducer": group.reducer if group else None, "initial": group.initial if group else None,
+                "reducer_contract": group.reducer_contract if group else None,
+                "reducer_kwargs": group.reducer_kwargs if group else None,
                 "group_rows": group.max_rows if group and group.kind == "groups" else None,
                 "output": group.output if group else "items"}
         encoded = cloudpickle.dumps(spec)
@@ -669,8 +737,10 @@ class LocalTaskEngine:
         return Runs(list(self.scheduler.run(_key_task, args, stage)), keyed=True)
 
     def evaluate(self, source, plan):
+        from .checked import current
+        checked = current()
         operations = list(plan.operations)
-        bounded = any(isinstance(op, ops.LimitOp) for op in operations)
+        bounded = checked is not None or any(isinstance(op, ops.LimitOp) for op in operations)
         if isinstance(source, KeyedSource):
             runs = self.keyed(source)
         else:
@@ -688,9 +758,13 @@ class LocalTaskEngine:
             op = operations.pop(0)
             if isinstance(op, ops.LimitOp):
                 rows = self.render(runs)
-                def limited(rows=rows, maximum=op.limit):
+                key = checked.operation_bindings.get(id(op)) if checked is not None else None
+                if key is not None:
+                    rows = checked.rows(rows, key, 'rows_input')
+                def limited(rows=rows, maximum=op.limit, key=key):
                     with closing(rows):
-                        yield from itertools.islice(rows, maximum)
+                        values = itertools.islice(rows, maximum)
+                        yield from checked.rows(values, key, 'rows_output') if key is not None else values
                 # No task at the limit boundary: only rechunk the demanded rows.
                 runs = Runs(self.batches(limited(), self.options.batch_rows))
             elif isinstance(op, ops.MapBatchesOp):

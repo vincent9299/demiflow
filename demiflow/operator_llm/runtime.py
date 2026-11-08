@@ -45,17 +45,45 @@ class InProcessOperatorLLMCoordinator:
         self._lock = threading.Lock()
         self._usage = OperatorLLMUsage()
         self._reservations: set[str] = set()
+        self._execution_binding = None
+
+    def bind_execution(self, context, node_id):
+        from demiflow.execution.recovery_contract import identity
+        binding = (context, 'requests-' + identity(node_id))
+        if self._execution_binding is not None and self._execution_binding != binding:
+            raise RuntimeError('A request coordinator cannot be shared across execution nodes')
+        self._execution_binding = binding
 
     def attempted(self) -> None:
         with self._lock:
             self._usage = replace(self._usage, calls_attempted=self._usage.calls_attempted + 1)
         self._publish()
 
+    def release_execution(self):
+        with self._lock:
+            if self._reservations:
+                raise RuntimeError('Cannot release an execution with in-flight model work')
+            self._execution_binding=None
+            self._artifact_request_budget=None
+
     def reserve(self) -> str:
         with self._lock:
             if self._max_requests is not None and self._usage.requests_reserved >= self._max_requests:
                 raise PromptBudgetExceededError("Operator LLM request budget exhausted")
             value = "operator-llm-" + uuid.uuid4().hex
+            if self._execution_binding is not None:
+                context, name = self._execution_binding
+                artifact_budget=getattr(self,'_artifact_request_budget',None)
+                if artifact_budget is None:
+                    context.reserve('requests', reservation_id=value)
+                    context.reserve(name, reservation_id=value,
+                        ceiling=self._max_requests or context.limits['max_requests'])
+                else:
+                    context.check_stop()
+                    context.journal.reserve_budgets(context.fence,value,{
+                        'requests':(1,context.limits['max_requests']),
+                        name:(1,self._max_requests or context.limits['max_requests']),
+                        artifact_budget:(1,context.limits['max_requests'])})
             self._reservations.add(value)
             self._usage = replace(self._usage, requests_reserved=self._usage.requests_reserved + 1)
         self._publish()
@@ -114,6 +142,8 @@ class OperatorLLMRuntime:
     def call(self, prompt_name: str, values: Mapping[str, Any]) -> dict[str, Any]:
         if resolve_prompt(self.config, prompt_name).response_format == 'image':
             raise ValueError('Image output requires Dataset.map_prompt_async')
+        if resolve_prompt(self.config, prompt_name).model.deployment is not None:
+            raise ValueError('Managed model deployment requires map_prompt_async or the async agent runtime')
         if self.options is not None:
             # The synchronous worker uses the same option-aware transport,
             # including offline responses and journals, and closes it per call.
@@ -136,7 +166,9 @@ class OperatorLLMRuntime:
         if client is None:
             client = create_operator_llm_client(prompt.model)
             clients[prompt.model] = client
-        exchange = self._exchange(prompt, parts, messages=messages)
+        from .systemone import render_questions
+        exchange = self._exchange(prompt, parts, messages=messages,
+                                  systemone=render_questions(prompt.systemone, values))
         request = next(exchange)
         while True:
             try:
@@ -149,7 +181,7 @@ class OperatorLLMRuntime:
             except StopIteration as done:
                 return done.value
 
-    def _exchange(self, prompt, parts, client=None, traces=None, response_parser=None, messages=None):
+    def _exchange(self, prompt, parts, client=None, traces=None, response_parser=None, messages=None, systemone=None):
         """Shared schema retries and accounting for both transport forms."""
         contract_errors: list[Exception] = []
         validation_feedback = ""
@@ -165,7 +197,7 @@ class OperatorLLMRuntime:
                 validation_feedback=validation_feedback,
                 messages=messages,
                 template=prompt.template.source,
-                systemone=prompt.systemone,
+                systemone=prompt.systemone if systemone is None else systemone,
             )
             self.coordinator.attempted()
             cached = None
@@ -247,7 +279,7 @@ class OperatorLLMRuntime:
 
 def validate_prompt_binding(operation, config):
     prompt = resolve_prompt(config, operation.prompt_name)
-    required_inputs = {'messages'} if prompt.input_mode == 'messages' else {p.name for p in prompt.template.placeholders}
+    required_inputs = set(prompt.arguments)
     if prompt.input_mode == 'messages' and any(k in (operation.options or {}) for k in ('codex_exec', 'codex_agent')):
         raise PromptResponseContractError('messages mode requires HTTP or offline transport; Codex does not preserve chat roles')
     if set(operation.inputs) != required_inputs:
@@ -293,22 +325,32 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
         self.options=options
         self._service = service
         self._service_owner = None
+        self._service_owners = {}
         self.request_gate = None
         self.token_budget = None
         self.concurrency = 1
+        self.artifact_store=None
 
     @asynccontextmanager
     async def transport_context(self, model):
-        if self._service is not None:
-            if self._service_owner is None:
-                self._service_owner = self._service.bind(model)
-            await self._service_owner.ensure_ready()
-        slot = getattr(self._service_owner, 'request_slot', None)
-        if slot is None:
-            yield
-        else:
-            async with slot():
-                yield
+        service = self._service
+        if model.deployment is not None and service is not None:
+            raise ValueError('model.deployment cannot be combined with service=')
+        owner = self._service_owners.get(model)
+        if owner is None:
+            if model.deployment is not None:
+                from demiflow.services.deployment import DeploymentService
+                service = DeploymentService(model.name, model.deployment)
+            if service is not None:
+                owner = service.bind(model)
+                self._service_owners[model] = owner
+                self._service_owner = owner
+        if owner is not None:
+            await owner.ensure_ready()
+        from demiflow.services.contracts import service_request_slot
+        base_url = getattr(owner, 'base_url', None)
+        async with service_request_slot(owner) as endpoint:
+            yield endpoint or base_url
 
     async def call(self, prompt_name, values):
         result, _ = await self.call_with_trace(prompt_name,values)
@@ -317,7 +359,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
     async def call_with_trace(self, prompt_name, values, *, prompt_override=None, input_budget=None,
                               response_parser=None, client_override=None):
         prompt = prompt_override or resolve_prompt(self.config, prompt_name)
-        from .messages import render_input
+        from .messages import render_input, admit_template
+        if prompt.response_format != 'image':
+            admit_template(prompt, values, self.options or {})
         if prompt.response_format == 'image':
             from .media import bounded_values
             values = bounded_values(prompt, values, self.options)
@@ -328,6 +372,7 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                 client = (create_async_operator_llm_client(prompt.model,self.options)
                           if self.options else create_async_operator_llm_client(prompt.model))
                 configure = getattr(client, 'configure_capacity', None)
+                if self.artifact_store is not None:client.artifact_store=self.artifact_store
                 if configure is not None:
                     configure(self.concurrency)
                 if hasattr(client, 'transport_context'):
@@ -339,7 +384,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                 raise
             self._clients[prompt.model] = client
         traces=[]
-        exchange = self._exchange(prompt, parts, client, traces, response_parser=response_parser, messages=messages)
+        from .systemone import render_questions
+        exchange = self._exchange(prompt, parts, client, traces, response_parser=response_parser, messages=messages,
+                                  systemone=render_questions(prompt.systemone, values))
         try:request = next(exchange)
         except StopIteration as done:return done.value, {**(traces[-1] if traces else {}),"attempts":traces}
         while True:
@@ -419,17 +466,49 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
     async def aclose(self):
         clients, self._clients = self._clients, {}
         owner, self._service_owner = self._service_owner, None
-        try:
-            for client in clients.values():
+        owners, self._service_owners = self._service_owners, {}
+        errors = []
+        for client in clients.values():
+            try:
                 await client.aclose()
-        finally:
-            self._clients.clear()
-            if owner is not None:
-                await owner.aclose()
+            except BaseException as exc:
+                errors.append(exc)
+        # Structural leases need not be hashable.
+        seen=set()
+        for resource in [*owners.values(), *([owner] if owner is not None else [])]:
+            if id(resource) in seen: continue
+            seen.add(id(resource))
+            try: await resource.aclose()
+            except BaseException as exc: errors.append(exc)
+        if errors: raise errors[0]
 
 
 class PromptActor(BoundOperatorLLMMap):
     """Native map_async actor; uses exactly the map_prompt row contract."""
+
+    def bind_execution(self, context, node_id):
+        self._runtime.coordinator.bind_execution(context, node_id)
+        if self._prompt.response_format=='image':
+            from ..execution.run_context import current_action
+            from .media import media_limits
+            action=current_action()
+            stores=getattr(action,'object_sinks',{}) if action is not None else {}
+            store=stores.get(self._runtime.options['object_store'])
+            if store is None:
+                raise ValueError('Image output has no native artifact participant')
+            from ..execution.object_sink import check_image_replay,image_request_budget
+            check_image_replay(action)
+            self._runtime.coordinator._artifact_request_budget=image_request_budget(action)
+            store.reserve_capacity(self._operation.max_requests,
+                media_limits(self._runtime.options)['max_image_bytes'],node_id)
+            self._runtime.artifact_store=store
+
+    def snapshot_state(self):
+        return {}  # clients/leases/metrics are resources, not semantic row state
+
+    def restore_state(self, state):
+        if state != {}:
+            raise ValueError('Prompt actor has no mutable semantic state')
     concurrency = 1
     queue_depth = None
     catch = ()
@@ -437,18 +516,21 @@ class PromptActor(BoundOperatorLLMMap):
     @property
     def cancel_drain_timeout_s(self):
         options = self._runtime.options or {}
-        journal = options.get('sqlite_journal')
-        if not journal:
-            return 0
-        # Request deadline plus bounded journal reserve/commit/decode I/O.
-        return options.get('timeout_s', 120) + 3 * journal.get('timeout_s', 30) + 1
+        return options.get('timeout_s',120)+1
 
     def __init__(self, operation, config, coordinator, options=None, *, service=None):
+        model = validate_prompt_binding(operation, config).model
+        if model.deployment is not None:
+            if service is not None:
+                raise ValueError('model.deployment cannot be combined with service=')
+            if any(key in (options or {}) for key in ('offline_dir','offline_store','codex_exec','codex_agent')):
+                raise ValueError('Managed deployment requires online HTTP prompt execution')
         if service is not None:
             # Validate endpoint/transport when declaring, without starting it.
             service.bind(validate_prompt_binding(operation, config).model)
         super().__init__(operation, AsyncOperatorLLMRuntime(config, coordinator, options, service=service))
         self.when=None;self.call_output=None;self.error_output=None
+        self._call_validations = {}
         self.environment = None
         self.label = operation.prompt_name
         from demiflow.execution.stream_resources import CallMetrics
@@ -456,7 +538,15 @@ class PromptActor(BoundOperatorLLMMap):
 
     async def __call__(self, row):
         try:
-            if self.when is not None and not self.when(row):return row
+            if self.when is not None:
+                validation = self._call_validations.get('when')
+                if validation is not None:
+                    validation.inputs((row,), {})
+                selected = self.when(row)
+                if validation is not None:
+                    validation.output(selected)
+                if not selected:
+                    return row
             if self.environment is None:
                 result, trace = await self._runtime.call_with_trace(self._operation.prompt_name, self.values(row))
             else:
@@ -475,7 +565,8 @@ class PromptActor(BoundOperatorLLMMap):
             from ..services import ModelServiceError
             from demiflow.execution.request_limits import ServiceStopped
             import sqlite3
-            if isinstance(exc, (ModelServiceError, ServiceStopped, OSError, sqlite3.Error)) and not isinstance(exc, TimeoutError):
+            from ..data.runtime_contract import RuntimeContractError
+            if isinstance(exc, RuntimeContractError) or isinstance(exc, (ModelServiceError, ServiceStopped, OSError, sqlite3.Error)) and not isinstance(exc, TimeoutError):
                 raise
             if not self.error_output:raise
             if self._prompt.response_format == 'image':
@@ -500,6 +591,8 @@ class PromptActor(BoundOperatorLLMMap):
 
     async def aclose(self):
         await self._runtime.aclose()
+        self._runtime.coordinator.release_execution()
+        self._runtime.artifact_store=None
 
 
 def _strict_object(value: Any, prompt_name: str) -> dict[str, Any]:

@@ -11,10 +11,10 @@ HTTP_OPTIONS = set(CALL_OPTION_DEFAULTS) | {
     'require_finish_reason_stop', 'trust_env', 'max_keepalive_connections', 'model_revision',
     'stream', 'gateway', 'connect_timeout_s', 'read_timeout_s', 'write_timeout_s',
     'pool_timeout_s', 'max_connections', 'stream_include_usage', 'stream_log_dir',
-    'max_response_bytes', 'max_event_bytes', 'max_stream_events',
+    'max_request_bytes', 'max_response_bytes', 'max_event_bytes', 'max_stream_events',
     'gateway_credentials_env',
     'http_error_retry', 'nonfatal_http_errors',
-    'object_store', 'image_encoding', 'limits',
+    'object_store', 'image_encoding', 'limits', 'systemone_batch', 'input_limits',
 }
 
 
@@ -24,6 +24,12 @@ def validate_http_options(options):
     if unknown:
         raise ValueError(f'Unknown prompt execution options: {sorted(unknown)}')
     options = normalize_call_options(options)
+    if 'input_limits' in options:
+        from .messages import template_input_limits
+        options['input_limits'] = template_input_limits(options['input_limits'])
+    if 'systemone_batch' in options:
+        from .systemone_batch import batch_options
+        options['systemone_batch'] = batch_options(options['systemone_batch'])
     from .http_retry import http_error_retry_policy
     if 'http_error_retry' in options:
         options['http_error_retry'] = http_error_retry_policy(options['http_error_retry'])
@@ -46,7 +52,7 @@ def validate_http_options(options):
         if name in options and (type(options[name]) not in (int, float)
                 or not math.isfinite(options[name]) or options[name] <= 0):
             raise ValueError(f'{name} must be a finite positive number')
-    for name in ('max_connections', 'max_keepalive_connections', 'max_response_bytes', 'max_event_bytes', 'max_stream_events'):
+    for name in ('max_connections', 'max_keepalive_connections', 'max_request_bytes', 'max_response_bytes', 'max_event_bytes', 'max_stream_events'):
         if name in options and (type(options[name]) is not int or options[name] < (0 if name == 'max_keepalive_connections' else 1)):
             raise ValueError(f'{name} has an invalid connection/size limit')
     if ('max_connections' in options and options.get('max_keepalive_connections', 0) > options['max_connections']):

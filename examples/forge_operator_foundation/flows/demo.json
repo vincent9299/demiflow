@@ -1,0 +1,8 @@
+{
+  "format": "demiflow_forge_flow_parameters_v1",
+  "arguments": {
+    "source": {"kind": "table", "alias": "cases"},
+    "target": {"kind": "output", "location_id": "local", "relative_uri": "variants.lance"},
+    "prefix": "demo-"
+  }
+}

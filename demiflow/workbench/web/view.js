@@ -1,0 +1,101 @@
+/* Portable view references. No DOM, network, storage, or host dependency. */
+(() => {
+  'use strict';
+  const text = (maximum, pattern) => ({type: 'string', minLength: 1, maxLength: maximum, ...(pattern ? {pattern} : {})});
+  const fields = {
+    workspace: text(2048, '^/'),
+    alias: text(256, '^(?:[A-Za-z][A-Za-z0-9_-]{0,63}|run:r[0-9a-f]{24}:[A-Za-z][A-Za-z0-9_-]{0,63})$'),
+    binding_digest: text(64, '^[0-9a-f]{64}$'),
+    report_digest: text(64, '^[0-9a-f]{64}$'),
+    run_id: text(25, '^r[0-9a-f]{24}$'),
+    session_id: text(33, '^d[0-9a-f]{32}$'),
+    attempt: {type: 'integer', minimum: 1, maximum: 32},
+    row_id: text(20, '^(?:0|[1-9][0-9]*)$'),
+    node_id: text(64),
+    columns: {type: 'array', minItems: 1, maxItems: 16, uniqueItems: true, items: text(256)},
+    offset: {type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER},
+    entry: text(1024, '^.+\\.py:[^/:\\s]+$'),
+    params: text(1024, '^.+\\.json$'),
+  };
+  fields.left = fields.right = fields.run_id;
+  fields.expected_binding = fields.binding_digest;
+  const kinds = {
+    development: [[], []], development_session: [['session_id'], []],
+    overview: [[], []], tables: [[], []], runs: [[], []], checks: [[], []],
+    flows: [[], ['entry', 'params']],
+    table: [['alias', 'binding_digest'], ['columns', 'offset']],
+    case: [['alias', 'binding_digest', 'row_id'], ['columns']],
+    inspection: [['report_digest'], ['node_id']],
+    run: [['run_id'], ['node_id', 'report_digest', 'attempt']],
+    run_compare: [['left', 'right'], []],
+  };
+  const schemas = Object.fromEntries(Object.entries(kinds).map(([kind, [required, optional]]) => [kind, {
+    type: 'object', additionalProperties: false,
+    properties: {v: {const: 1}, kind: {const: kind}, workspace: fields.workspace,
+      ...Object.fromEntries([...required, ...optional].map(key => [key, fields[key]]))},
+    required: ['v', 'workspace', 'kind', ...required],
+  }]));
+  schemas.run.dependentRequired = {node_id: ['report_digest'], report_digest: ['node_id']};
+  const schemasV2 = Object.fromEntries(Object.entries(schemas).map(([kind, spec]) => [kind, {
+    ...spec, properties: {...spec.properties, v:{const:2}, workspace:text(33, '^[wl][0-9a-f]{32}$')}
+  }]));
+  schemasV2.table_request={
+    type:'object',additionalProperties:false,
+    properties:{v:{const:2},kind:{const:'table_request'},workspace:schemasV2.table.properties.workspace,
+      alias:fields.alias,expected_binding:fields.expected_binding,columns:fields.columns,offset:fields.offset},
+    required:['v','workspace','kind','alias']
+  };
+  // Saved Case configurations stay fixed to one immutable server revision.
+  // This is a locator only: it grants no source or annotation permission.
+  schemasV2.tables.properties.view_id=text(96,'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$');
+  schemasV2.tables.properties.revision={type:'integer',minimum:1,maximum:2147483647};
+  schemasV2.tables.dependentRequired={view_id:['revision'],revision:['view_id']};
+  function object(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+  }
+  function check(value, spec) {
+    if (spec.type === 'string') return typeof value === 'string' && value.length >= spec.minLength &&
+      value.length <= spec.maxLength && !/[\u0000-\u001f]/.test(value) && (!spec.pattern || new RegExp(spec.pattern).test(value));
+    if (spec.type === 'integer') return Number.isSafeInteger(value) && value >= spec.minimum && value <= spec.maximum;
+    if (spec.type === 'array') return Array.isArray(value) && value.length >= spec.minItems && value.length <= spec.maxItems &&
+      new Set(value).size === value.length && value.every(item => check(item, spec.items));
+    return value === spec.const;
+  }
+  function boundedJSON(value, maximum) {
+    const result = JSON.stringify(value);
+    if (new TextEncoder().encode(result).byteLength > maximum) throw new Error('上下文超出字节上限，请缩小字段范围');
+    return result;
+  }
+  function validateView(value) {
+    if (!object(value)) throw new Error('不支持的视图类型');
+    const variants=value.v===2?schemasV2:schemas;
+    if (!Object.hasOwn(variants,value.kind)) throw new Error('不支持的视图类型');
+    const spec = variants[value.kind], keys = Object.keys(value);
+    if (keys.some(key => !Object.hasOwn(spec.properties, key)) || spec.required.some(key => !Object.hasOwn(value, key)) ||
+        keys.some(key => !check(value[key], spec.properties[key]))) throw new Error('视图字段或版本不合法');
+    if (value.v===2&&value.kind==='tables'&&(Object.hasOwn(value,'view_id')!==Object.hasOwn(value,'revision'))) throw new Error('Case 视图链接必须绑定已保存的具体版本');
+    if (value.row_id !== undefined && BigInt(value.row_id) > 18446744073709551615n) throw new Error('行定位值超出 uint64 范围');
+    if (value.kind === 'run' && (Object.hasOwn(value, 'node_id') !== Object.hasOwn(value, 'report_digest'))) throw new Error('运行节点必须绑定报告');
+    if (['entry', 'params'].some(key => value[key] && (value[key].includes('\\') || value[key].split(':')[0].split('/').some(part => ['', '.', '..'].includes(part))))) throw new Error('路径必须位于项目内');
+    return JSON.parse(boundedJSON(value, 4096));
+  }
+  function encodeView(value) {
+    const fragment = new URLSearchParams({view: JSON.stringify(validateView(value))}).toString();
+    if (fragment.length > 16384) throw new Error('视图链接超出长度限制');
+    return '#' + fragment;
+  }
+  function decodeView(hash) {
+    if (typeof hash !== 'string' || hash.length > 16385) throw new Error('视图链接超出长度限制');
+    const params = new URLSearchParams(hash.replace(/^#/, ''));
+    if (params.getAll('view').length > 1 || params.getAll('token').length > 1 || [...params.keys()].some(k => !['view', 'token'].includes(k))) throw new Error('重复或未知链接参数');
+    if (!params.has('view')) return null;
+    const raw = params.get('view');
+    if (new TextEncoder().encode(raw).byteLength > 4096) throw new Error('视图描述超出字节限制');
+    return validateView(JSON.parse(raw));
+  }
+  globalThis.ForgeView = Object.freeze({validateView, encodeView, decodeView, boundedJSON, object,
+    formatReference: value => JSON.stringify(validateView(value), null, 2),
+    viewSchema: {anyOf: [...Object.values(schemas), ...Object.values(schemasV2)]}, caseSchema: schemas.case, columnsSchema: fields.columns,
+    validateColumns: value => {if (!check(value, fields.columns)) throw new Error('请选择 1–16 个明确字段'); return [...value];}});
+})();

@@ -138,6 +138,8 @@ class Worker:
                         # Acquire host first so paced hosts don't consume global capacity.
                         await stack.enter_async_context(host_gate.enter())
                         await stack.enter_async_context(self.owner.http_gate.enter())
+                        if self.owner.execution_admission is not None:
+                            await self.owner.execution_admission()
                         self.owner.metrics['http_requests'] += 1
                         http_started = time.monotonic()
                         observed_http.append({'host': result['host'], 'method': result['method'],
@@ -169,8 +171,9 @@ class Worker:
 
 class NativeSearchSession:
     """Run-owned native backend; normally constructed by WebSession(search=...)."""
-    def __init__(self, *, cache_path, config: SearchConfig):
+    def __init__(self, *, cache_path, config: SearchConfig, execution_admission=None, control_bytes=None, max_hosts=None):
         self.config = copy.deepcopy(config)
+        self.execution_admission,self.control_bytes,self.max_hosts=execution_admission,control_bytes,max_hosts
         self.sources = self.config.source_configs()
         self.path = Path(cache_path)
         self.lock_dir = Path(str(self.path) + '.locks')
@@ -205,6 +208,13 @@ class NativeSearchSession:
         db = sqlite3.connect(self.path, timeout=30)
         try:
             db.execute('PRAGMA synchronous=FULL')
+            if self.control_bytes is not None:
+                page=db.execute('PRAGMA page_size').fetchone()[0]
+                if db.execute('PRAGMA page_count').fetchone()[0]*page>self.control_bytes:
+                    from ...execution.recovery_contract import RecoveryContractError
+                    raise RecoveryContractError('Search cache exceeds its native control byte budget')
+                db.execute('PRAGMA cache_size=-4096')
+                db.execute('PRAGMA max_page_count='+str(self.control_bytes//page))
             with db:
                 yield db
         finally:
@@ -307,6 +317,9 @@ class NativeSearchSession:
 
     def host_gate(self, host):
         if host not in self.hosts:
+            if self.max_hosts is not None and len(self.hosts)>=self.max_hosts:
+                from ...execution.recovery_contract import RecoveryContractError
+                raise RecoveryContractError('Native search host count budget exhausted')
             self.hosts[host] = RequestGate(self.config.host_concurrency, interval_s=self.config.host_interval_s)
         return self.hosts[host]
 

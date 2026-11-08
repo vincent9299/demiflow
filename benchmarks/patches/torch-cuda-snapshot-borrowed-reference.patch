@@ -1,0 +1,26 @@
+--- a/torch/csrc/cuda/Module.cpp
++++ b/torch/csrc/cuda/Module.cpp
+@@ -741,8 +741,8 @@
+ 
+     if (size == 2) {
+       // (int, int) - mempool_id only
+-      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
+-      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
++      auto id1 = THPObjectPtr(Py_NewRef(PyTuple_GetItem(arg, 0)));
++      auto id2 = THPObjectPtr(Py_NewRef(PyTuple_GetItem(arg, 1)));
+       TORCH_CHECK(
+           THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
+           "mempool_id elements must be integers");
+@@ -750,9 +750,9 @@
+           THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
+     } else if (size == 3) {
+       // (int, int, bool) - mempool_id + include_traces
+-      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
+-      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
+-      auto traces = THPObjectPtr(PyTuple_GetItem(arg, 2));
++      auto id1 = THPObjectPtr(Py_NewRef(PyTuple_GetItem(arg, 0)));
++      auto id2 = THPObjectPtr(Py_NewRef(PyTuple_GetItem(arg, 1)));
++      auto traces = THPObjectPtr(Py_NewRef(PyTuple_GetItem(arg, 2)));
+       TORCH_CHECK(
+           THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
+           "mempool_id elements must be integers");

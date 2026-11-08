@@ -45,50 +45,17 @@ def requested_blocks(request, document):
     return list(dict.fromkeys(selected))
 
 
-def select_blocks(spec, documents, counter, *, new_limit=None):
-    # Optional ranking policy changes automatic admission only. Full source
-    # blocks, retained evidence and explicit locators remain byte-for-byte.
-    from .reading_contract import AUTOMATIC_SELECTION
-    from demiflow.schema import validate_instance
-    selection = spec.get('selection', {})
-    validate_instance(selection, AUTOMATIC_SELECTION, label='reading selection')
+def _candidate_order(spec, documents, selection):
+    """Budget-independent ordering, retained only within one selection call.
+
+    Keep compact evidence IDs and bindings, not lexical sets or row payloads.
+    All ranking and tie-breaking rules match the uncached native algorithm.
+    """
     heading_weight = selection.get('heading_weight', 1)
     neighbors = selection.get('include_neighbors', True)
     excluded = set(selection.get('excluded_kinds', []))
     min_matches = selection.get('min_matches', 0)
     fallback = selection.get('fallback_blocks', 0)
-    unit = getattr(counter, 'unit', 'tokens')
-    new_key, total_key = 'new_' + unit, 'total_' + unit
-    if any(type(spec.get(k)) is not int or spec[k]<0 for k in (new_key,total_key)):
-        raise ValueError('Material budgets must be nonnegative integers')
-    available, catalogs, receipts = {}, [], []
-    for record, doc in documents:
-        ref = record['document_ref']
-        for block in doc['blocks']:
-            eid = ref['sha256']+':'+block['block_id']
-            available[eid] = {'evidence_id':eid, 'document_ref':ref, 'url':doc['source']['url'],
-                'title':doc['source']['title'], 'block_id':block['block_id'], 'kind':block['kind'],
-                'headings':block['headings'], 'text':block['text']}
-    selected = [dict(s) for s in spec.get('retained', [])]
-    materials = []
-    for selection in selected:
-        if selection['evidence_id'] not in available:
-            raise ValueError('Previously supplied block is unavailable')
-        materials.append({**available[selection['evidence_id']], 'bindings':selection['bindings']})
-    old_tokens = counter.text(canonical(materials)) if materials else 0
-    new_budget = min(spec[new_key], new_limit) if new_limit is not None else spec[new_key]
-    total_budget = spec[total_key]
-    ordered = []
-    locators = {}
-    for request in spec.get('requests', []):
-        doc = next((d for r, d in documents if r['document_ref'] == request['document_ref']), None)
-        ids = requested_blocks(request, doc) if doc else []
-        known = {b['block_id'] for b in doc['blocks']} if doc else set()
-        valid = set(request['block_ids']) <= known and (not request.get('section_id') or bool(doc and any(
-            b['block_id'] == request['section_id'] and b['kind'] == 'heading' for b in doc['blocks'])))
-        eids = [request['document_ref']['sha256']+':'+bid for bid in ids]
-        locators[request['request_id']] = (eids, valid)
-        ordered.extend((eid, request['bindings']) for eid in eids)
     # Rank within each document, then share reading across documents. Lexical
     # overlap must not give one language every slot and starve other sources.
     per_document, strengths = {}, {}
@@ -122,16 +89,69 @@ def select_blocks(spec, documents, counter, *, new_limit=None):
         per_document[di] = [c[index] for index in range(max((len(c) for c in candidates), default=0))
                             for c in candidates if index < len(c)]
     doc_order = sorted(per_document, key=lambda di: (strengths.get(di, 0), di))
-    explicit = list(ordered)
     automatic = [per_document[di][index]
                  for index in range(max((len(c) for c in per_document.values()), default=0))
                  for di in doc_order if index < len(per_document[di])]
+    per_document = {di: list(dict.fromkeys(eid for eid, _ in items))
+                    for di, items in per_document.items()}
+    return per_document, doc_order, automatic
+
+
+def select_blocks(spec, documents, counter, *, new_limit=None):
+    return _select_blocks(spec, documents, counter, new_limit=new_limit)
+
+
+def _select_blocks(spec, documents, counter, *, new_limit=None, _prepared=None):
+    # Optional ranking policy changes automatic admission only. Full source
+    # blocks, retained evidence and explicit locators remain byte-for-byte.
+    from .reading_contract import AUTOMATIC_SELECTION
+    from demiflow.schema import validate_instance
+    policy = spec.get('selection', {})
+    validate_instance(policy, AUTOMATIC_SELECTION, label='reading selection')
+    unit = getattr(counter, 'unit', 'tokens')
+    new_key, total_key = 'new_' + unit, 'total_' + unit
+    if any(type(spec.get(k)) is not int or spec[k]<0 for k in (new_key,total_key)):
+        raise ValueError('Material budgets must be nonnegative integers')
+    available, catalogs, receipts = {}, [], []
+    for record, doc in documents:
+        ref = record['document_ref']
+        for block in doc['blocks']:
+            eid = ref['sha256']+':'+block['block_id']
+            available[eid] = {'evidence_id':eid, 'document_ref':ref, 'url':doc['source']['url'],
+                'title':doc['source']['title'], 'block_id':block['block_id'], 'kind':block['kind'],
+                'headings':block['headings'], 'text':block['text']}
+    selected = [dict(s) for s in spec.get('retained', [])]
+    materials = []
+    for selection in selected:
+        if selection['evidence_id'] not in available:
+            raise ValueError('Previously supplied block is unavailable')
+        materials.append({**available[selection['evidence_id']], 'bindings':selection['bindings']})
+    old_tokens = counter.text(canonical(materials)) if materials else 0
+    new_budget = min(spec[new_key], new_limit) if new_limit is not None else spec[new_key]
+    total_budget = spec[total_key]
+    ordered = []
+    locators = {}
+    for request in spec.get('requests', []):
+        doc = next((d for r, d in documents if r['document_ref'] == request['document_ref']), None)
+        ids = requested_blocks(request, doc) if doc else []
+        known = {b['block_id'] for b in doc['blocks']} if doc else set()
+        valid = set(request['block_ids']) <= known and (not request.get('section_id') or bool(doc and any(
+            b['block_id'] == request['section_id'] and b['kind'] == 'heading' for b in doc['blocks'])))
+        eids = [request['document_ref']['sha256']+':'+bid for bid in ids]
+        locators[request['request_id']] = (eids, valid)
+        ordered.extend((eid, request['bindings']) for eid in eids)
+    order = _prepared.get('order') if _prepared is not None else None
+    if order is None:
+        order = _candidate_order(spec, documents, policy)
+        if _prepared is not None:
+            _prepared['order'] = order
+    per_document, doc_order, automatic = order
+    explicit = list(ordered)
     # Merge all bindings before admission, including explicit requests. Retained
     # blocks remain byte-for-byte the same, even if new bindings were discovered.
     bindings = {}
     for eid, ids in explicit + automatic:
         bindings[eid] = list(dict.fromkeys(bindings.get(eid, [])+ids))
-    per_document={di:list(dict.fromkeys(eid for eid,_ in items)) for di,items in per_document.items()}
     known = {s['evidence_id'] for s in selected}
     current_tokens = old_tokens
     costs = {}
@@ -184,8 +204,12 @@ def select_context(row, spec, documents, failed, context):
     unit = getattr(context.budget.counter, 'unit', 'tokens')
     metric = 'prompt_' + unit
     original = spec['new_' + unit]
+    # Reuse pure candidate ordering only; each attempt still performs material
+    # admission and complete prompt counting using the original exact counter.
+    prepared = {}
     def attempt(allowance):
-        out = select_blocks(spec, documents, context.budget.counter, new_limit=allowance)
+        out = _select_blocks(spec, documents, context.budget.counter, new_limit=allowance,
+                             _prepared=prepared)
         out['readings'] += failed
         if out['status']!='ok': return out
         if allowance < original:

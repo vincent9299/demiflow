@@ -45,6 +45,17 @@ def iter_lance_batches(
     raise InvalidLanceRequest(f"unsupported Lance query: {type(query).__name__}")
 
 
+def lance_scan_schema(query: LanceScanSpec) -> pa.Schema:
+    """Read the declared scan schema without sampling a row, including empty tables."""
+    dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
+    schema = dataset.schema
+    if not isinstance(schema, pa.Schema):
+        raise LanceExecutionError('Lance returned a non-Arrow schema')
+    _validate_columns(schema, query.columns)
+    return dataset.scanner(columns=dict(query.projection) if query.projection else (list(query.columns) or None),
+                           filter=query.filter, limit=query.limit).projected_schema
+
+
 def plan_lance_scan_partitions(
     query: LanceScanSpec, *, target_partitions: int,
 ) -> tuple[_LanceScanPartition, ...]:
@@ -137,7 +148,7 @@ def fragment_inventory_hash(fragments) -> str:
 
 def _iter_scan(
     query: LanceScanSpec, *, batch_size: int, fragments=None,
-    expected_schema: pa.Schema | None = None,
+    expected_schema: pa.Schema | None = None, offset: int = 0,
 ) -> Iterator[pa.RecordBatch]:
     dataset = open_lance_dataset(query.uri, query.version, query.storage_options)
     schema = dataset.schema
@@ -148,7 +159,8 @@ def _iter_scan(
     _validate_columns(schema, query.columns)
     scanner = dataset.scanner(
         columns=dict(query.projection) if query.projection else (list(query.columns) or None), filter=query.filter,
-        limit=query.limit, batch_size=query.batch_size or batch_size, fragments=fragments,
+        limit=None if query.limit is None else max(0,query.limit-offset), batch_size=query.batch_size or batch_size, fragments=fragments,
+        **({'offset':offset,'scan_in_order':True} if offset else {}),
         **{name: getattr(query, name) for name in ('batch_readahead', 'fragment_readahead')
            if getattr(query, name) is not None},
     )

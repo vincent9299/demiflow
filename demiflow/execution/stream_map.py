@@ -9,11 +9,11 @@ reference semantics and are not recursively cloned per worker.
 import asyncio
 import inspect
 
-from ..data.plan import BoundCallable, BoundMapOp, StandardCallable
+from ..data.plan import AsyncMapOp, BatchMapOp, BoundCallable, BoundMapOp, StandardCallable
 
 
 class _MapWorker:
-    def __init__(self, operation):
+    def __init__(self, operation, recovery_state=None, recovery_key=None):
         self.operation = operation
         self.callable = None
         self.started = False
@@ -21,6 +21,7 @@ class _MapWorker:
         self.start_lock = asyncio.Lock()
         self.stopped = False
         self.closed = False
+        self.recovery_state, self.recovery_key = recovery_state, recovery_key
 
     async def prepare(self):
         # Shared stage instances need exactly one constructor/start, including
@@ -33,7 +34,15 @@ class _MapWorker:
                     self.callable = (BoundCallable(self.operation)
                                      if isinstance(self.operation, BoundMapOp)
                                      else StandardCallable(self.operation.callable))
+                    from .checked import current
+                    checked = current()
+                    if checked is not None:
+                        checked.actor_created(self.callable._fn, checked.operation_bindings.get(id(self.operation)))
+                    if self.recovery_state is not None:
+                        self.recovery_state.validate(self.callable._fn)
                     await self._hook('astart')
+                    if self.recovery_state is not None:
+                        await self.recovery_state.register(self.callable._fn, self.recovery_key)
                     self.started = True
                 except BaseException as exc:
                     self.failure = exc
@@ -43,13 +52,21 @@ class _MapWorker:
         if self.callable is not None:
             hook = getattr(self.callable._fn, name, None)
             if hook is not None:
-                result = hook()
-                if inspect.isawaitable(result):
-                    await result
+                from .checked import current
+                checked = current()
+                completed = False
+                try:
+                    result = hook()
+                    if inspect.isawaitable(result):
+                        await result
+                    completed = True
+                finally:
+                    if checked is not None:
+                        checked.actor_lifecycle(self.callable._fn, {'astart': 'started', 'astop': 'stopped', 'aclose': 'closed'}[name], completed)
 
     def __call__(self, row):
         result = self.callable(row)
-        if inspect.isawaitable(result):
+        if inspect.isawaitable(result) and not isinstance(self.operation, (AsyncMapOp, BatchMapOp)):
             if inspect.iscoroutine(result):
                 result.close()
             raise TypeError('map synchronous callable returned an awaitable; use map_async')
@@ -70,11 +87,16 @@ class StreamMapRuntime:
     def __init__(self, operation):
         self.operation = operation
         self.workers = []
+        options = getattr(operation, 'stream_options', None)
+        self.scope = options.callable_scope if options is not None else 'stage'
+        self.recovery_state = self.recovery_key = None
 
     def new_worker(self):
-        if self.operation.stream_options.callable_scope == 'stage' and self.workers:
+        if self.scope == 'stage' and self.workers:
             return self.workers[0]
-        worker = _MapWorker(self.operation)
+        worker = _MapWorker(self.operation, self.recovery_state,
+                            (self.recovery_key + '-worker-' + str(len(self.workers)))
+                            if self.recovery_key is not None else None)
         self.workers.append(worker)
         return worker
 

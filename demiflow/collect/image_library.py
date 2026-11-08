@@ -2,8 +2,8 @@
 
 Only successfully decoded original bytes enter the URL index. The object store
 is content addressed; a URL is a retrieval alias, never an identity assertion.
-SQLite rows are bounded metadata, not image payloads. ImageClient verifies the
-actual file on reuse; no growing in-memory inventory or whole-library scan is required.
+SQLite rows are bounded metadata, not image payloads. Callers verify the actual
+file with image_decode or ObjectRef before use. This library never downloads.
 """
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
