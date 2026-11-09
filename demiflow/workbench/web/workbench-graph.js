@@ -55,6 +55,48 @@
     }
     return Object.freeze({update,paint,select,fit,zoom:factor=>{viewMode='manual';zoom=Math.max(.25,Math.min(2,zoom*factor));size();},dispose(){resize?.disconnect();if(resizeFrame!==null)cancelAnimationFrame(resizeFrame);resizeFrame=null;}});
   }
+  function mountLogical(host,{onSelect=()=>{}}={}) {
+    const canvas=svg('svg',{'aria-label':'执行逻辑图（E2）',role:'group'});
+    let current=null,selected=null,zoom=1,width=600,height=280,viewMode='readable',resizeFrame=null;
+    const elements=new Map();
+    function size(){canvas.style.width=Math.round(width*zoom)+'px';canvas.style.height=Math.round(height*zoom)+'px';}
+    function fit(){viewMode='fit';zoom=Math.max(.25,Math.min(1,(host.clientWidth-16)/width,(host.clientHeight-16)/height));size();}
+    function readable(){viewMode='readable';zoom=Math.max(host.clientWidth>=640?.5:.85,Math.min(1,(host.clientWidth-16)/width));size();host.style.setProperty('--wb-content-height',Math.round(height*zoom+24)+'px');}
+    const resize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(resizeFrame!==null||viewMode==='manual')return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=null;if(viewMode==='fit')fit();else if(viewMode==='readable')readable();});}):null;resize?.observe(host);
+    function select(id){selected=id;for(const[key,value]of elements){value.group.classList.toggle('selected',key===id);value.group.setAttribute('aria-pressed',String(key===id));}}
+    function update(dag,nodeMap,labels,selectedId) {
+      if(!host.contains(canvas))host.replaceChildren(canvas);
+      current=dag;canvas.replaceChildren();elements.clear();
+      const occurrences=new Map();
+      for(const node of dag.nodes){if(!occurrences.has(node.logical_node_id))occurrences.set(node.logical_node_id,[]);occurrences.get(node.logical_node_id).push(node);}
+      const ids=[...occurrences.keys()],shared=new Set(dag.shared_ancestors.map(s=>s.logical_node_id));
+      const levels=new Map(ids.map(id=>[id,0])),incoming=new Map(ids.map(id=>[id,0])),outgoing=new Map();
+      for(const edge of dag.edges){const a=edge.from.logical_node_id,b=edge.to.logical_node_id;if(!occurrences.has(a)||!occurrences.has(b))continue;incoming.set(b,incoming.get(b)+1);if(!outgoing.has(a))outgoing.set(a,[]);outgoing.get(a).push(b);}
+      const queue=ids.filter(id=>incoming.get(id)===0);let visited=0;
+      while(queue.length){const id=queue.shift();visited++;for(const to of outgoing.get(id)||[]){levels.set(to,Math.max(levels.get(to),levels.get(id)+1));incoming.set(to,incoming.get(to)-1);if(incoming.get(to)===0)queue.push(to);}}
+      if(visited<ids.length)for(const id of ids)if(incoming.get(id)>0)levels.set(id,0);
+      const counts=new Map(),positions=new Map();
+      for(const id of ids){const level=levels.get(id),row=counts.get(level)||0;counts.set(level,row+1);positions.set(id,{x:24+level*224,y:24+row*122});}
+      width=Math.max(440,(Math.max(0,...levels.values())+1)*224+8);height=Math.max(150,Math.max(1,...counts.values())*122+20);
+      canvas.setAttribute('viewBox',`0 0 ${width} ${height}`);
+      const markerId='wb-logical-arrow-'+Math.random().toString(16).slice(2),defs=svg('defs'),marker=svg('marker',{id:markerId,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto'});marker.append(svg('path',{d:'M0 0 L10 5 L0 10z',fill:'#8e9eb8'}));defs.append(marker);canvas.append(defs);
+      for(const edge of dag.edges){const a=positions.get(edge.from.logical_node_id),b=positions.get(edge.to.logical_node_id);if(!a||!b)continue;
+        const path=svg('path',{d:`M${a.x+192} ${a.y+46} C${a.x+212} ${a.y+46},${b.x-20} ${b.y+46},${b.x} ${b.y+46}`,class:'wb-edge wb-edge-data','marker-end':'url(#'+markerId+')'});
+        path.append(svg('title',{},'逻辑数据流 · 端口 '+edge.from.port+' → '+edge.to.port));canvas.append(path);
+        canvas.append(svg('text',{x:(a.x+192+b.x)/2,y:(a.y+b.y)/2+38,class:'wb-edge-port'},edge.from.port+'→'+edge.to.port));}
+      for(const id of ids){const pos=positions.get(id),group=occurrences.get(id),node=group[0];
+        const declared=nodeMap[id],label=(declared&&labels[declared])||node.op_kind;
+        const ports=(node.input_ports.join(',')||'—')+' → '+(node.output_ports.join(',')||'—');
+        const badge=(shared.has(id)?'共享':'')+(group.length>1?(shared.has(id)?' · ':'')+'×'+group.length+' 次出现':'');
+        const element=svg('g',{class:'wb-node'+(shared.has(id)?' wb-node-shared':''),'data-node':id,transform:`translate(${pos.x} ${pos.y})`,tabindex:0,role:'button','aria-label':label+' · '+node.op_kind+' · 端口 '+ports});
+        element.append(svg('rect',{width:192,height:94,rx:9}),svg('text',{x:13,y:22,class:'wb-node-kind'},node.op_kind),svg('text',{x:13,y:47,class:'wb-node-title'},String(label).slice(0,24)),svg('text',{x:13,y:65,class:'wb-node-ports'},ports),svg('text',{x:13,y:82,class:'wb-node-state'},badge||id.slice(0,12)));
+        element.append(svg('title',{},'logical_node_id '+id+'\noccurrence '+group.map(n=>n.occurrence_id).join(', ')));
+        const activate=()=>{select(id);onSelect(id,declared);};element.onclick=activate;element.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}};
+        elements.set(id,{group:element});canvas.append(element);}
+      select(selectedId);readable();
+    }
+    return Object.freeze({update,select,fit,zoom:factor=>{viewMode='manual';zoom=Math.max(.25,Math.min(2,zoom*factor));size();},dispose(){resize?.disconnect();if(resizeFrame!==null)cancelAnimationFrame(resizeFrame);resizeFrame=null;}});
+  }
   function cpuChart(host,points) {
     host.replaceChildren();
     if(!Array.isArray(points)||points.length>600)throw new Error('性能窗口超过预算');
@@ -65,5 +107,5 @@
     const flush=()=>{if(segment.length)canvas.append(svg('polyline',{points:segment.join(' '),fill:'none',stroke:'currentColor','stroke-width':2}));segment=[];};
     for(const point of points){if(!Number.isFinite(point.cpu_cores)){flush();continue;}segment.push((8+584*(point.time-first)/Math.max(1,last-first))+','+(124-112*point.cpu_cores/max));}flush();host.append(canvas);
   }
-  globalThis.ForgeWorkbenchGraph=Object.freeze({mount,status,cpuChart});
+  globalThis.ForgeWorkbenchGraph=Object.freeze({mount,mountLogical,status,cpuChart});
 })();

@@ -247,6 +247,11 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         diagnostics = report.get('diagnostics', [])
         semantic = 'complete' if report['status']=='checked' else 'partial' if nodes else 'unavailable'
         bound_parameters = report.get('binding',{}).get('parameters', {})
+    from demiflow.workbench.graph import logical
+    if basis_kind == 'source':
+        logical_view = logical.unchecked()
+    else:
+        logical_view = logical.project(nodes, report.get('edges', []), report.get('actions', []))
     binding = dict(workspace_id=key, basis_kind=basis_kind, basis_digest=digest, entry=entry,
                    params=params, run_id=run_id, attempt=attempt)
     total_nodes, total_edges = len(nodes), len(edges)
@@ -291,6 +296,7 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
                   nodes=visible,edges=projected_edges,node_index=node_index,diagnostics=public_diagnostics,
                   diagnostics_truncated=len(public_diagnostics)<len(diagnostics),
                   diagnostic_count=len(diagnostics),sources=sources,parameters=parameters,
+                  logical=logical_view,
                   coverage=report.get('coverage',{}) if report else {'wiring':'not_checked'})
     # Account for each record once. Repeatedly serializing the whole graph while
     # dropping one node would turn a display budget into quadratic work.
