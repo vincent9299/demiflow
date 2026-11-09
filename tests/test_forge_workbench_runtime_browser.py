@@ -5,6 +5,7 @@ responses are real API responses; observation reservations below test protocol
 reset behavior and are not reported as measured business execution.
 """
 import json
+import time
 from urllib.parse import parse_qs,urlparse
 
 import pytest
@@ -188,3 +189,41 @@ def test_browser_observation_version_change_resets_pages_without_mixing(isolated
         expect(page.locator('.wb-observation')).to_have_count(32)
         assert reset and not errors,errors
         screenshot(page,'native-observation-cursor-reset')
+
+
+def test_run_seal_summary_and_history_time_match_sealed_facts(isolated,browser):
+    (isolated/'flows/quiet.py').write_text('''from demiflow import data
+def run(*, source, target):
+    return data.read_lance(source['uri'], version=source['version']).write_lance(target['uri'], mode='create', return_receipt=True)
+''')
+    (isolated/'flows/quiet.json').write_text(json.dumps({
+        'format':'demiflow_forge_flow_parameters_v1','arguments':{
+            'source':{'kind':'table','alias':'candidates'},
+            'target':{'kind':'output','location_id':'local','relative_uri':'quiet.lance'}}}))
+    ws.register_flow(isolated,'flows/quiet.py:run',params='flows/quiet.json')
+    with service(isolated,enable_runs=True) as app,page_for(browser,app) as (page,errors):
+        pipeline(page)
+        page.get_by_label('流程',exact=True).select_option('flows/quiet.py:run')
+        expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy','true')
+        page.get_by_role('button',name='检查',exact=True).click()
+        expect(page.locator('.wb-basis')).to_contain_text('检查报告图 · checked')
+        page.get_by_role('button',name='读图与配置',exact=True).click()
+        page.get_by_text('本次运行设置',exact=True).click()
+        page.get_by_label('本次运行秒数上限').fill('77')
+        page.get_by_role('button',name='运行',exact=True).click()
+        run_id=run_finished(page,'成功')
+        expect(page.locator('.wb-run-seal')).to_contain_text('封存输入 candidates v3')
+        expect(page.locator('.wb-run-seal')).to_contain_text('预算 77 秒累计')
+        page.get_by_role('button',name='返回当前配置',exact=True).click()
+        page.get_by_text('本次运行设置',exact=True).click()
+        page.get_by_label('本次运行秒数上限').fill('99')
+        page.get_by_role('button',name='运行记录',exact=True).click()
+        row=page.locator('.wb-run-record[data-run="'+run_id+'"]')
+        created=runs.show(isolated,run_id)['created_at']
+        expect(row).to_contain_text(time.strftime('%Y-%m-%d %H:%M',time.localtime(created)))
+        row.click()
+        expect(page.get_by_role('combobox',name='运行记录',exact=True)).to_have_value(run_id)
+        expect(page.locator('.wb-run-seal')).to_contain_text('预算 77 秒累计')
+        expect(page.locator('.wb-run-seal')).not_to_contain_text('预算 99')
+        assert not errors,errors
+        screenshot(page,'run-seal-summary-history-time')
