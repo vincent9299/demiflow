@@ -41,3 +41,45 @@ def _callable_traits(callable_spec):
     if callable_spec.is_class:
         return OperatorTraits("transform", "reusable", "resident", "reusable_worker")
     return OperatorTraits("transform", "ephemeral", "transient", "ephemeral_worker")
+
+
+def unified_operation_traits(op):
+    """Legacy traits plus protocol-level facts; legacy results stay unchanged.
+
+    Only built-in operators derive facts here; business requirements arrive
+    through the existing runtime_contract/NativeOptions paths, not a new base
+    class. Worker counts, chunk sizes and attempts never enter these facts.
+    """
+    base = operation_traits(op)
+    updates = {}
+    if isinstance(op, (ops.SortOp, ops.RepartitionOp, ops.RandomShuffleOp, ops.RandomizeBlockOrderOp)):
+        updates["input_mode"] = "finite_scope"
+    if isinstance(op, ops.SortOp):
+        updates["ordering"] = "requires_global_order"
+    if isinstance(op, ops.FlatMapOp):
+        updates["cardinality"] = "many"
+    if isinstance(op, ops.FilterOp):
+        updates["cardinality"] = "zero_or_one"
+    if isinstance(op, (ops.OperatorLLMMapOp, ops.EmbeddingMapOp, ops.SearchWebOp)):
+        updates["effect_kind"] = "external_paid"
+    if isinstance(op, ops.SaveLanceOp):
+        updates["effect_kind"] = "external_unknown"
+    if isinstance(op, (ops.BatchMapOp, ops.MapBatchesOp)) or getattr(op, "stream_options", None) is not None:
+        updates["batching"] = "batch"
+    callable_spec = getattr(op, "callable", None)
+    if callable_spec is not None and callable_spec.is_class:
+        target = callable_spec.target
+        if callable(getattr(target, "snapshot_state", None)) and callable(getattr(target, "restore_state", None)):
+            updates["state_ownership"] = "shared_colocated"
+    return replace(base, **updates) if updates else base
+
+
+def unified_source_traits(source):
+    base = source_traits(source)
+    if isinstance(source, sources.MaterializedSource):
+        return replace(base, input_mode="finite_scope")
+    return base
+
+
+def unified_terminal_traits(category="action"):
+    return terminal_traits(category)

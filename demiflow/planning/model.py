@@ -54,6 +54,12 @@ class OperatorTraits:
     lifecycle: str
     policy_class: str
     elastic: bool = True
+    input_mode: str = "incremental"
+    cardinality: str = "one"
+    ordering: str = "unordered"
+    state_ownership: str = "none"
+    effect_kind: str = "pure"
+    batching: str = "record"
 
 @dataclass(frozen=True)
 class PhysicalStage:

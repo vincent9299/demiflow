@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
 if TYPE_CHECKING:
-    from .requirements import ResolvedWheel
+    from ..requirements import ResolvedWheel
 
-from ..pipeline import PIPELINE_PACKAGE_PATH, discover_pipeline_definition
-from .package_loader import RUNTIME_PACKAGE_PATH
+from ...pipeline import PIPELINE_PACKAGE_PATH, discover_pipeline_definition
+from ..package_loader import RUNTIME_PACKAGE_PATH
 
 PIPELINE_RUNTIME_ABI = "demiflow-pipeline-v12"
 
@@ -61,7 +61,7 @@ class PlatformRuntimeIdentity:
             not isinstance(item, str) for item in imports
         ):
             raise ValueError("Platform runtime preflight imports are invalid")
-        from .requirements import ResolvedWheel
+        from ..requirements import ResolvedWheel
         raw_wheels = value["platform_wheels"]
         if not isinstance(raw_wheels, list):
             raise ValueError("Platform runtime wheels are invalid")
@@ -144,7 +144,7 @@ class PipelineExecutionEnvironment:
                 raise ValueError(f"Configured {label} is unavailable")
             if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
                 raise ValueError(f"Configured {label} digest mismatch")
-        from .requirements import platform_wheel_paths
+        from ..requirements import platform_wheel_paths
         platform_wheel_paths(
             self.runtime.platform_wheels, self.platform_wheel_directory,
         )
@@ -211,7 +211,7 @@ class PipelineRunRequest:
     def __post_init__(self) -> None:
         if not self.run_id.strip():
             raise ValueError("Pipeline run_id is required")
-        from .target import PipelineExecutionTarget
+        from ..target import PipelineExecutionTarget
         if not isinstance(self.target, PipelineExecutionTarget):
             raise TypeError("PipelineRunRequest requires PipelineExecutionTarget")
 
