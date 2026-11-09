@@ -7,6 +7,7 @@
   const json=value=>JSON.stringify(value,null,2);
   const safe=value=>value==null?'未测量':String(value);
   const unit=value=>value==null?'未测量':(value/1024**2).toFixed(1)+' MiB';
+  const timeText=value=>{const d=new Date(value*1000),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());};
   const inputText=field=>field.value_type==='str'?String(field.value):json(field.value);
   async function mount(options) {
     const {main,api,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView=()=>{},
@@ -176,7 +177,7 @@
       graphTitle.textContent='数据算子图 · '+value.completeness.total_nodes+' 节点 / '+value.completeness.total_edges+' 条边';
       const basis=value.binding.basis_kind;
       basisLabel.textContent=(basis==='run'?'封存运行图':basis==='report'?'检查报告图 · '+value.status:'源码观察图 · 尚未检查')+(scopeNode?' · 节点邻域':value.completeness.display==='clipped'?' · 显示已裁剪':'');
-      graphView.update(value,snapshot||run,selectedNode);paintSelectors();graphLoading(false);
+      graphView.update(value,snapshot||run,selectedNode);paintSelectors();graphLoading(false);paintRunSeal();
       if(graphKind==='logical')renderLogical(value);
       paintLocator(value);
       if(!value.nodes.length){
@@ -449,6 +450,7 @@
       choice.onchange=()=>openRun(run.run_id,Number(choice.value),data().mode).catch(error=>message(error.message,'error-box'));runBar.append(choice);
       const historical=run.current_attempt!==run.attempt;
       if(historical)runBar.append($('span','历史尝试 · 只读','wb-caption'));
+      runBar.append($('span',undefined,'wb-caption wb-run-seal'));
       const target=Object.freeze({run_id:run.run_id,attempt:run.attempt,digest:run.digest});
       const control=async action=>{const ticket=state.capture();await action(target);if(current(ticket))await observer.refresh();};
       if(!historical&&run.status==='prepared')button('开始这次运行',async()=>{
@@ -465,6 +467,19 @@
       button('刷新状态',()=>observer.refresh(),runBar);button('返回当前配置',()=>useWorking(working?.entry||run.entry,working?.params||run.parameter_path),runBar);
       if(run.state.cancel_requested_at)runBar.append($('span','停止：'+({requested:'等待执行端确认',terminating:'正在请求所属进程退出',killing:'正在终止未退出进程',confirmed:'所属执行已停止',unconfirmed:'尚未确认全部停止'}[run.state.stop_phase]||'等待确认'),'wb-caption'));
       if(run.state.cleanup==='pending')runBar.append($('span','临时资源清理待确认 · 容量保留','wb-caption'));
+      paintRunSeal();
+    }
+    function paintRunSeal(){
+      const node=runBar.querySelector('.wb-run-seal');if(!node||!run)return;
+      const parts=[],graph=data().graph;
+      const bound=graph?.binding?.basis_kind==='run'&&graph.binding.run_id===run.run_id&&graph.binding.attempt===run.attempt;
+      if(bound&&graph.completeness.display==='complete'){
+        const names=graph.nodes.filter(n=>n.kind==='read_table'&&typeof n.parameters?.uri==='string')
+          .map(n=>{const name=n.parameters.uri.split('/').pop().replace(/\.lance$/,'');return typeof n.parameters.version==='number'?name+' v'+n.parameters.version:name;});
+        if(names.length)parts.push('封存输入 '+names.slice(0,4).join(' / ')+(names.length>4?' 等'+names.length+'个':''));
+      }else if(bound)parts.push('图已裁剪，输入摘要从略');
+      if(typeof run.limits?.timeout_s==='number')parts.push('预算 '+run.limits.timeout_s+' 秒累计'+(typeof run.state?.usage?.elapsed_ms==='number'?'，已用 '+Math.round(run.state.usage.elapsed_ms/1000)+' 秒':''));
+      node.textContent=parts.join(' · ');
     }
     function paintRunFacts(freshness=run?.freshness){
       if(!run)return;runFacts.replaceChildren();
@@ -545,7 +560,7 @@
       if(!records.runs.length)historyPanel.append($('p','当前页没有运行记录。运行会在检查和封存后产生独立记录。','wb-caption'));
       const visible=records.runs.filter(item=>!runFilter||item.status===runFilter);
       if(records.runs.length&&!visible.length)historyPanel.append($('p','本页没有符合筛选条件的运行。','wb-caption'));
-      for(const item of visible){const row=button('',()=>openRun(item.run_id),historyPanel,{cls:'wb-run-record'});row.replaceChildren($('strong',item.run_id.slice(-10)),$('span',item.entry),$('span',item.parameter_path||'内联配置'),$('span',labels[item.status]||item.status,'wb-tag'));row.dataset.run=item.run_id;row.setAttribute('aria-label',item.run_id+' · '+item.entry+' · '+(labels[item.status]||item.status));row.classList.toggle('selected',item.run_id===data().run);}
+      for(const item of visible){const row=button('',()=>openRun(item.run_id),historyPanel,{cls:'wb-run-record'});row.replaceChildren($('strong',item.run_id.slice(-10)),$('span',timeText(item.created_at),'wb-caption'),$('span',item.entry),$('span',item.parameter_path||'内联配置'),$('span',labels[item.status]||item.status,'wb-tag'));row.dataset.run=item.run_id;row.setAttribute('aria-label',item.run_id+' · '+item.entry+' · '+(labels[item.status]||item.status));row.classList.toggle('selected',item.run_id===data().run);}
       markHistorySelection();
       const pager=$('div',undefined,'wb-inline-actions');historyPanel.append(pager);
       button('最新记录',async()=>{cursors=[null];page=0;await listRuns();},pager,{disabled:page===0});
