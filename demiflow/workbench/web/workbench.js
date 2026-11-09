@@ -19,6 +19,7 @@
     let logOffset=0,logBody='',eventCursor=null,eventRows=[],lastMetricAt=0,lastEventAt=0;
     let records=null,cursors=[null],page=0,listSequence=0,sourceOpen=true,comparison=null,outputFingerprint=null,runFilter='';
     let observationCursor=null,observationPages=[],graphSequence=0,scopeNode=null,nodeOffset=0,inspectorWhole=false;
+    let graphKind='declared',logicalAction=null,logicalSelected=null;
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     const aliasDrafts=new Map();
     const data=()=>state.current();
@@ -65,12 +66,17 @@
     graphTools.append(graphTitle);const tools=$('div');graphTools.append(tools);
     const wholeButton=button('整图配置',()=>wholeConfiguration(),tools);
     const graphView=ForgeWorkbenchGraph.mount(graphHost,{onSelect:id=>chooseNode(id)});
-    button('−',()=>graphView.zoom(.8),tools).setAttribute('aria-label','缩小算子图');
-    button('+',()=>graphView.zoom(1.25),tools).setAttribute('aria-label','放大算子图');
-    button('适应',()=>graphView.fit(),tools).setAttribute('aria-label','适应算子图');
+    const logicalView=ForgeWorkbenchGraph.mountLogical(graphHost,{onSelect:(id,declared)=>chooseLogicalNode(id,declared)});
+    const logicalToggle=button('执行逻辑图（E2）',()=>toggleGraphKind(),tools);
+    logicalToggle.setAttribute('aria-pressed','false');
+    const activeGraphView=()=>graphKind==='logical'?logicalView:graphView;
+    button('−',()=>activeGraphView().zoom(.8),tools).setAttribute('aria-label','缩小算子图');
+    button('+',()=>activeGraphView().zoom(1.25),tools).setAttribute('aria-label','放大算子图');
+    button('适应',()=>activeGraphView().fit(),tools).setAttribute('aria-label','适应算子图');
     const graphLegend=$('p','实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用','wb-caption');
+    const logicalBar=$('div',undefined,'wb-logical-bar');logicalBar.hidden=true;
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
-    graphSection.prepend(graphTools,graphHost,graphLegend);body.append(graphSection,inspector);root.append(body);
+    graphSection.prepend(graphTools,logicalBar,graphHost,graphLegend);body.append(graphSection,inspector);root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
     const detailButtons=new Map();
     detailHeader.append($('strong','日志与观测'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
@@ -106,7 +112,7 @@
     documents.addEventListener('toggle',()=>{if(documents.open&&!projectInfoRendered)refreshProjectInfo();});
     button('在开发中查看与修正',()=>navigate('development'),documents);
     function graphLoading(loading){graphHost.inert=inspector.inert=checks.inert=loading;if(loading){graphHost.setAttribute('aria-busy','true');basisLabel.textContent='正在读取图…';disposeReaders(sourceBody);sourceBody.replaceChildren($('p','正在读取绑定来源…','wb-caption'));}else graphHost.removeAttribute('aria-busy');updateActions();}
-    function transition(patch){notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
+    function transition(patch){notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;logicalAction=null;logicalSelected=null;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
     function registered(){return !!working&&ctx.flows.some(f=>f.entry===working.entry&&(f.parameters||[]).includes(working.params));}
     function choices(){
       const entries=new Map();
@@ -137,6 +143,7 @@
       runButton.disabled=busy||!!run||!registered()||!can('run_submit')||dirty||!data().graph?.parameters.available||data().graph?.freshness.current===false;
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
       wholeButton.disabled=!data().graph;
+      logicalToggle.disabled=!data().graph||graphHost.hasAttribute('aria-busy');
       accessState.hidden=!!run||registered()&&can('run_submit');
       accessState.textContent=!working?.entry?'尚未发现可用入口。可在开发中编写流程，再通过“接入与权限”登记。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；当前仅观察源码，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       for(const[key,b]of modes){b.classList.toggle('active',data().mode===key);b.setAttribute('aria-pressed',String(data().mode===key));}
@@ -170,6 +177,7 @@
       const basis=value.binding.basis_kind;
       basisLabel.textContent=(basis==='run'?'封存运行图':basis==='report'?'检查报告图 · '+value.status:'源码观察图 · 尚未检查')+(scopeNode?' · 节点邻域':value.completeness.display==='clipped'?' · 显示已裁剪':'');
       graphView.update(value,snapshot||run,selectedNode);paintSelectors();graphLoading(false);
+      if(graphKind==='logical')renderLogical(value);
       paintLocator(value);
       if(!value.nodes.length){
         paintConfiguration(null);
@@ -198,6 +206,82 @@
       button('下一组节点',()=>locateNode(scopeNode,index.next_offset),locatorBody,{disabled:index.next_offset==null});
       button('返回全图范围',()=>locateNode(null,0),locatorBody,{disabled:!scopeNode});
       locatorBody.append($('span','已索引 '+index.total+' 个节点 · 当前显示 '+graph.nodes.length+' 个；局部视图仍绑定同一图依据。','wb-caption'));
+    }
+    function logicalEntry(){
+      const view=data().graph?.logical;
+      if(!view?.available||!view.actions.length)return null;
+      return view.actions.find(a=>a.action_id===logicalAction)||view.actions[0];
+    }
+    function toggleGraphKind(){
+      graphKind=graphKind==='logical'?'declared':'logical';
+      logicalToggle.setAttribute('aria-pressed',String(graphKind==='logical'));
+      logicalToggle.classList.toggle('active',graphKind==='logical');
+      logicalToggle.textContent=graphKind==='logical'?'返回数据算子图':'执行逻辑图（E2）';
+      const g=data().graph;if(!g){updateActions();return;}
+      if(graphKind==='logical')renderLogical(g);
+      else{logicalBar.hidden=true;graphLegend.textContent='实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用';
+        graphTitle.textContent='数据算子图 · '+g.completeness.total_nodes+' 节点 / '+g.completeness.total_edges+' 条边';
+        graphView.update(g,snapshot||run,data().node);}
+      updateActions();
+    }
+    function logicalPanel(title,detail,extra){
+      const box=$('div',undefined,'wb-logical-panel');
+      box.append($('strong',title),$('p',detail));
+      if(extra)box.append(extra);
+      graphHost.replaceChildren(box);
+    }
+    function renderLogical(graph){
+      const view=graph.logical;
+      logicalBar.hidden=true;logicalBar.replaceChildren();
+      graphLegend.textContent='实线：逻辑数据流（标注端口）　虚线框：共享祖先 / 复用　×N：同一逻辑节点多次出现';
+      if(!view){graphTitle.textContent='执行逻辑图（E2）· 无投影';logicalPanel('执行逻辑图不可用','当前图响应没有逻辑投影字段。');return;}
+      if(!view.available){
+        graphTitle.textContent='执行逻辑图（E2）· '+(view.semantic_unchecked?'语义未检查':'不可用');
+        logicalPanel(view.semantic_unchecked?'语义未检查':'执行逻辑图不可用',view.detail||view.reason||'',
+          view.semantic_unchecked?$('p','对当前流程运行“检查”生成报告后，可在此查看按 action 投影的执行逻辑图。','wb-caption'):null);
+        return;
+      }
+      const entry=logicalEntry();
+      if(!entry){graphTitle.textContent='执行逻辑图（E2）· 无 action';logicalPanel('没有可投影的 action','报告声明了 action 列表，但当前没有可展示的条目。');return;}
+      logicalAction=entry.action_id;
+      logicalBar.hidden=false;
+      if(view.actions.length>1||view.truncated){
+        const choice=select('逻辑图 action',view.actions.map(a=>({value:a.action_id,label:(a.action_id||'无效 action').slice(-12)+' · '+(a.status==='projected'?'已投影':'投影失败')})),entry.action_id);
+        choice.onchange=()=>{if(!disposed&&choice.isConnected){logicalAction=choice.value;logicalSelected=null;renderLogical(data().graph);}};
+        field('action',choice,logicalBar);
+      }
+      logicalBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
+      if(entry.status!=='projected'){
+        graphTitle.textContent='执行逻辑图（E2）· 投影失败';
+        const error=entry.error||{};
+        const box=$('div',undefined,'wb-logical-panel');
+        box.append($('strong','此 action 的逻辑投影失败'),$('p','其它 action 的投影不受影响。','wb-caption'),
+          $('p','code：'+(error.code||'unknown')),$('p','reason：'+(error.reason||'未提供')),$('p','retriable：'+(error.retriable?'true':'false')));
+        graphHost.replaceChildren(box);return;
+      }
+      const dag=entry.dag;
+      graphTitle.textContent='执行逻辑图（E2）· '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
+      logicalBar.append($('span','契约校验通过 · '+dag.schema_version,'wb-tag'),$('span','dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
+      const labels={};for(const n of graph.nodes)labels[n.id]=n.operator?.name||n.api.split(/[.:]/).at(-1)||n.kind;
+      logicalView.update(dag,entry.node_map,labels,logicalSelected);
+    }
+    function chooseLogicalNode(id,declared){
+      const entry=logicalEntry();
+      const group=entry?.status==='projected'?entry.dag.nodes.filter(n=>n.logical_node_id===id):[];
+      if(declared&&!data().graph.nodes.some(n=>n.id===declared)){
+        locateNode(declared).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
+        return;
+      }
+      if(declared)chooseNode(declared);
+      logicalSelected=id;logicalView.select(id);
+      if(!group.length)return;
+      const node=group[0],box=details('逻辑节点（E2）· '+id.slice(0,12),inspector);box.open=true;
+      const facts=$('dl',undefined,'details');
+      for(const[label,value]of[['op_kind',node.op_kind],['输入端口',node.input_ports.join(', ')||'无'],['输出端口',node.output_ports.join(', ')||'无'],['出现次数',String(group.length)],['operator_spec_ref',node.operator_spec_ref||'未绑定（只读投影）'],['声明节点',declared||'未映射']])facts.append($('dt',label),$('dd',value));
+      box.append(facts);
+      if(entry.dag.shared_ancestors.some(s=>s.logical_node_id===id))box.append($('p','共享祖先 / 复用：该逻辑节点被多个消费方共享。','wb-caption'));
+      raw('traits',node.traits,box);raw('occurrence_id',group.map(n=>n.occurrence_id),box);
+      inspector.prepend(box);
     }
     async function useWorking(entry,params,report=null,mode='config'){
       if(disposed)throw new DOMException('工作台已关闭','AbortError');
@@ -314,6 +398,7 @@
     function chooseNode(id){
       if(!data().graph?.nodes.some(n=>n.id===id)||disposed)return;
       state.chooseNode(id);graphView.select(id);
+      if(graphKind==='logical'){logicalSelected=null;logicalView.select(null);}
       observationCursor=null;observationPages=[];lastObservationRevision=null;
       const node=data().graph.nodes.find(n=>n.id===id),binding=data().graph.binding;
       sourceTitle.textContent=(binding.basis_kind==='run'?'封存源码 · ':'源码 · ')+(node.operator?.name||node.api.split(/[.:]/).at(-1)||node.kind);
@@ -703,7 +788,7 @@
       },
       dirty:()=>!!working&&Object.keys(getDraft().values).length>0,
       projectCheckSettled:()=>{if(!disposed&&documents.open&&projectInfoDirty)refreshProjectInfo();},
-      dispose:()=>{disposed=true;observer.dispose();graphView.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
+      dispose:()=>{disposed=true;observer.dispose();graphView.dispose();logicalView.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;
