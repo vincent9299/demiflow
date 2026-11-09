@@ -15,7 +15,7 @@ from pathlib import Path
 import selectors
 import time
 
-from demiflow.execution.process_observation import unit_stopped
+from demiflow.resources.process_observation import unit_stopped
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.analysis import contracts as c
 from demiflow.workbench.analysis import execution_facts

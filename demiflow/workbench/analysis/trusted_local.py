@@ -21,10 +21,10 @@ import threading
 import uuid
 
 from demiflow.workbench.process import process_identity
-from demiflow.execution.process_observation import _pidfd
-from demiflow.execution.process_observation import _signal_fd
-from demiflow.execution.process_observation import unit_stopped
-from demiflow.execution.process_observation import require_pidfds
+from demiflow.resources.process_observation import _pidfd
+from demiflow.resources.process_observation import _signal_fd
+from demiflow.resources.process_observation import unit_stopped
+from demiflow.resources.process_observation import require_pidfds
 from demiflow.forge.io import atomic_write_json
 from demiflow.forge.io import atomic_write_text
 from demiflow.forge.io import no_symlinks
@@ -515,7 +515,7 @@ class TrustedLocalBackend:
         if worker==peer.identity and live_wrapper:return True
         if init_only:return False
         if not live_wrapper:return False
-        from demiflow.execution.process_observation import descendants
+        from demiflow.resources.process_observation import descendants
         try:
             item=descendants(wrapper['pid']).get(peer.pid)
             return item is not None and item['start']==peer.identity['start'] and peer.live()

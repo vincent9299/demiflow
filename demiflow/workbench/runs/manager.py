@@ -660,7 +660,7 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
     if existing['status'] != 'prepared':
         return existing
     from demiflow.workbench.runs import domain as run_domain
-    from demiflow.execution.process_observation import require_pidfds
+    from demiflow.resources.process_observation import require_pidfds
     require_pidfds()
     operation_budget.check()
     with run_domain.lock() as (domain, capacity), execution_lock(root) as lease:
@@ -1037,7 +1037,7 @@ def register_results(root, run_id, *, recover=False, attempt=None):
 
 
 def execution_stopped(target, state):
-    from demiflow.execution.process_observation import unit_stopped
+    from demiflow.resources.process_observation import unit_stopped
     if any(process_matches(state.get(name)) for name in ('supervisor', 'worker')):
         return False
     try:

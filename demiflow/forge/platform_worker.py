@@ -48,7 +48,7 @@ def inspection_environment(pass_fds=(), *, allow_preparation=True):
         "MALLOC_ARENA_MAX": "2",
         "DEMIFLOW_INSPECTION_PARENT": str(os.getpid()),
     }
-    from demiflow.execution.process_observation import inherited_unit, UNIT_ENV
+    from demiflow.resources.process_observation import inherited_unit, UNIT_ENV
     if os.environ.get("DEMIFLOW_FORGE_DOMAIN"):
         env["DEMIFLOW_FORGE_DOMAIN"]=os.environ["DEMIFLOW_FORGE_DOMAIN"]
     unit_fds=inherited_unit()
@@ -93,7 +93,7 @@ def capture(argv, request, limits, *, response_formats=None, input_limit=16384, 
                     selector.register(pipe, selectors.EVENT_READ, name)
                 while selector.get_map():
                     if tree_rss_limit is not None:
-                        from demiflow.execution.process_observation import descendants
+                        from demiflow.resources.process_observation import descendants
                         if sum(p['rss_bytes'] for p in descendants(process.pid,include_owner=True).values())>tree_rss_limit:
                             raise ForgeError('Managed inspection tree exceeds RSS reservation',code='resource_limit')
                     expired = time.monotonic() >= deadline

@@ -15,10 +15,10 @@ import time
 if __package__ in {None, ''}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from demiflow.execution.process_observation import descendants
-from demiflow.execution.process_observation import drain_owned
-from demiflow.execution.process_observation import require_pidfds
-from demiflow.execution.process_observation import signal_owned
+from demiflow.resources.process_observation import descendants
+from demiflow.resources.process_observation import drain_owned
+from demiflow.resources.process_observation import require_pidfds
+from demiflow.resources.process_observation import signal_owned
 from demiflow.workbench.conversations.common import digest
 from demiflow.workbench.conversations.common import directory_bytes
 from demiflow.workbench.process import process_identity

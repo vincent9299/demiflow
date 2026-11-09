@@ -9,6 +9,7 @@ import time
 
 from .datafusion import DataFusionOptions, DataFusionSession, _cpu_capacity, _cgroup_memory
 from .payload_limits import native_row_limit
+from ..resources.capacity import inherited_envelope
 
 
 _LIMITS = {'memory_bytes', 'max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes', 'batch_rows',
@@ -37,8 +38,15 @@ def parse_native_resources(value):
 
 
 def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=False):
-    cpus = _cpu_capacity()
-    memory = _cgroup_memory()
+    envelope = inherited_envelope()
+    if envelope is None:
+        cpus = _cpu_capacity()
+        memory = _cgroup_memory()
+    else:
+        # A managed worker queries inside its parent allocation slice; defaults
+        # come from the envelope, not the whole machine (single charge).
+        cpus = max(1, envelope['cpu_millis'] // 1000)
+        memory = (0, envelope['memory_bytes'])
     slots = min(2, max(1, cpus // 4))
     if memory and memory[1] < 52 * 2**30:
         slots = 1
@@ -86,9 +94,14 @@ def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=
                                     max(0.001, run.deadline - time.time())))
     resources = executor.resource_root / '_demiflow' / 'dataset_native'
     managed = getattr(executor, 'diagnostics_root', None)
-    group_id = hashlib.sha256(Path('/proc/self/cgroup').read_bytes()).hexdigest()[:16]
-    shared_pool = Path(tempfile.gettempdir()) / f'demiflow-dataset-{os.getuid()}-{group_id}'
-    return DataFusionSession(options=options, max_concurrent=slots, resource_directory=shared_pool,
+    if envelope is None:
+        group_id = hashlib.sha256(Path('/proc/self/cgroup').read_bytes()).hexdigest()[:16]
+        admission_root = Path(tempfile.gettempdir()) / f'demiflow-dataset-{os.getuid()}-{group_id}'
+    else:
+        # Private admission directory: the parent allocation already paid the
+        # deployment-domain reservation, so queries must not charge it again.
+        admission_root = Path(envelope['resource_directory'])
+    return DataFusionSession(options=options, max_concurrent=slots, resource_directory=admission_root,
                              slot_capacity={'max_rss_bytes_per_slot': rss, 'threads_per_slot': threads},
                              diagnostics_directory=managed or resources / 'queries', temp_directory=str(directory),
                              managed_diagnostics=managed is not None)

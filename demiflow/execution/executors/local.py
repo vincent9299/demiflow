@@ -124,8 +124,10 @@ class LocalDatasetExecutor(DatasetExecutor):
         candidate_execution=None,
         local_kernel=None,
         sort_workers: int | None = None,
+        unified_chain: bool = False,
     ) -> None:
         self._workers = max(1, int(workers))
+        self._unified_chain = bool(unified_chain)
         if sort_workers is None:
             sort_workers = os.environ.get('DEMIFLOW_LOCAL_SORT_WORKERS',
                            os.environ.get('DEMIWFLOW_LOCAL_SORT_WORKERS', self._workers))
@@ -852,6 +854,9 @@ class LocalDatasetExecutor(DatasetExecutor):
         action = current_action()
         if action is None:
             raise RuntimeError("Materialization requires the native action context")
+        if self._unified_chain:
+            from ..chain import run_local_chain
+            return run_local_chain(self, dataset, source=source, plan=plan)
         from ..run_context import admit_stream
         admit_stream(dataset._plan if plan is None else plan)
         selected = freeze_source(action, dataset._source if source is None else source)

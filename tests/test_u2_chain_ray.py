@@ -1,0 +1,290 @@
+"""U2 Ray Core full-chain + SEM two-provider equivalence (S5, D1/D3/D5).
+
+Single-host Ray Core (env-ray, ray 2.60.0 Core only, no ray[data]) is semantic-
+adaptation evidence only (design §8): no multi-host/GPU/performance claim. The
+whole operator chain runs in one named Ray actor hosting the *same* WorkerRuntime
++ WorkerChainExecutor + WorkerStreamProgress as the Local process worker; the
+driver owns the control plane, the fixed source capture and the single commit
+authority. Control is actor methods (driver->worker) plus a bounded outbox pull
+(worker->driver); result blocks hand off as staging descriptors on the shared
+same-host run directory (D3, no new physical data transport).
+
+SEM proves the same plan/source yields an identical output multiset, record
+identity, commit sequence/position progression and K6 manifest shape across Local
+and Ray. The Ray fault matrix covers actor death (new allocation recovers the acked
+prefix exactly once), single-host node-loss simulation (actor unreachable ->
+inspect LOST, confirmed cleanup) and scheduling with no capacity (PENDING, never a
+false RUNNING). ray.kill having been called is not itself cleanup confirmation.
+"""
+import json
+import os
+import signal
+import sys
+import time
+import uuid
+from pathlib import Path
+
+import pytest
+
+ray = pytest.importorskip("ray")
+from ray.exceptions import RayActorError
+
+from demiflow.data.dataset import Dataset
+from demiflow.data.plan import CallableSpec, FilterOp, LogicalPlan, MapOp, MapStreamOptions
+from demiflow.data.sources import ItemsSource
+from demiflow.execution.executors.local import LocalDatasetExecutor
+from demiflow.execution.executors.ray import RayDatasetExecutor
+from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.resource_state import RunResourceState
+from demiflow.execution.run_context import RunContext
+from demiflow.resources.contracts import (
+    RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan, ResourceProfile,
+    ResourceScope, WorkerLaunchSpec, WorkerRequest,
+)
+from demiflow.resources.manager import ResourceManager
+from demiflow.resources.ray import RayResourceProvider
+from demiflow.execution.worker.ray_host import RayControlConnector
+
+pytestmark = [
+    pytest.mark.ray,
+    pytest.mark.skipif(not sys.platform.startswith("linux"),
+                       reason="Local managed units require Linux"),
+]
+
+
+@pytest.fixture(scope="module")
+def ray_cluster():
+    ray.init(num_cpus=2, include_dashboard=False, ignore_reinit_error=True)
+    try:
+        yield
+    finally:
+        ray.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def pidfds_available():
+    from demiflow.resources.process_observation import require_pidfds
+    try:
+        require_pidfds()
+    except (OSError, RuntimeError) as exc:
+        pytest.skip("pidfd exit evidence unavailable: " + str(exc))
+
+
+def _plan(double, items_count=10):
+    # Local closures: cloudpickle serializes them by value so neither the Local
+    # worker process nor the Ray actor need import this test module.
+    def keep_even_doubled(row):
+        return row["x"] % 4 == 0
+
+    items = tuple({"x": i} for i in range(items_count))
+    plan = LogicalPlan((
+        MapOp(CallableSpec.create(double), stream_options=MapStreamOptions(concurrency=1)),
+        FilterOp(CallableSpec.create(keep_even_doubled)),
+    ))
+    expected = [{"x": i * 2} for i in range(items_count) if (i * 2) % 4 == 0]
+    return items, plan, expected
+
+
+def _chain_child_id(run):
+    with run.journal._connection() as db:
+        row = db.execute("SELECT action_id FROM runtime_actions "
+                         "WHERE action_id LIKE '%-chain'").fetchone()
+    assert row is not None, "chain output child action was not bound"
+    return row[0]
+
+
+def _commit_shape(run):
+    facts = run.journal.execution_commits(_chain_child_id(run))
+    return {
+        "sequences": [f["sequence"] for f in facts],
+        "positions": [f["intent"]["position"]["next_ordinal"] for f in facts],
+        "statuses": [f["status"] for f in facts],
+        "commit_ids": [f["commit_id"] for f in facts],
+    }
+
+
+def _k6_shapes(run_dir):
+    """Normalized K6 manifest shape (structure, not run-specific hashes/paths)."""
+    shapes = []
+    for path in sorted((Path(run_dir) / "state").glob("*.json")):
+        value = json.loads(path.read_text())
+        if value.get("schema_version") != "demiflow.checkpoint_manifest.v1":
+            continue
+        shapes.append({
+            "participants": {k: len(v) for k, v in value["participants"].items()},
+            "source_progress_components": len(value["source_progress"]),
+            "channel_cuts": len(value["channel_cuts"]),
+            "operator_states": len(value["operator_states"]),
+            "seal_keys": sorted(value["seal"].keys()),
+            "sealed": value["seal"]["sealed"],
+        })
+    return shapes
+
+
+# ---------------- SEM: same plan/source, two providers, identical semantics ----------------
+
+def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
+    def double(row):
+        return {**row, "x": row["x"] * 2}
+
+    items, plan, expected = _plan(double)
+    limits = {"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}
+
+    local_dir = tmp_path / "local-run"
+    local_executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    local_dataset = Dataset(ItemsSource(items), plan, local_executor)
+    with RunContext.start(local_dir, limits=limits) as local_run:
+        local_rows = local_dataset.materialize().take_all()
+        local_commits = _commit_shape(local_run)
+        with local_run.journal._connection() as db:
+            local_owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
+        assert local_owner == (local_run.attempt, local_run.fence)
+        # K6 manifests are per-cut checkpoint records, GC'd on run exit (durable
+        # recovery uses the journal commit's prepared.state); capture while open.
+        local_k6 = _k6_shapes(local_dir)
+
+    ray_dir = tmp_path / "ray-run"
+    ray_executor = RayDatasetExecutor(unified_chain=True)
+    ray_dataset = Dataset(ItemsSource(items), plan, ray_executor)
+    with RunContext.start(ray_dir, limits=limits) as ray_run:
+        ray_rows = ray_dataset.materialize().take_all()
+        ray_commits = _commit_shape(ray_run)
+        with ray_run.journal._connection() as db:
+            ray_owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
+        assert ray_owner == (ray_run.attempt, ray_run.fence)
+        ray_k6 = _k6_shapes(ray_dir)
+
+    # Output multiset + record identity (x value) identical across providers.
+    assert local_rows == expected
+    assert ray_rows == expected
+    assert sorted(local_rows, key=lambda r: r["x"]) == sorted(ray_rows, key=lambda r: r["x"])
+    # Commit sequence/position progression identical (same checkpoint semantics).
+    assert local_commits["sequences"] == ray_commits["sequences"]
+    assert local_commits["positions"] == ray_commits["positions"]
+    assert local_commits["statuses"] == ray_commits["statuses"] == ["acked"] * len(local_commits["sequences"])
+    assert len(set(local_commits["commit_ids"])) == len(local_commits["commit_ids"])
+    assert len(set(ray_commits["commit_ids"])) == len(ray_commits["commit_ids"])
+    # K6 manifest shape identical (participants/source-progress vector/channel cuts/seal).
+    assert local_k6 == ray_k6
+    assert local_k6, "no K6 checkpoint manifest was produced"
+    # Exactly one manifest is the sealed final cut; hash-named files are not
+    # cut-ordered, so check the sealed invariant rather than the last element.
+    assert sum(1 for shape in local_k6 if shape["sealed"]) == 1
+
+
+# ---------------- Ray fault: actor death, new allocation recovers exactly once ----------------
+
+def test_ray_actor_death_recovers_acked_prefix_exactly_once(tmp_path, ray_cluster):
+    crash_marker = tmp_path / "crashed-once"
+
+    def double(row):
+        # Kill the whole actor process once, after at least one durable acked cut.
+        # On a single host this also simulates node loss: the actor becomes
+        # unreachable and Ray reports RayActorError to the driver (no auto-replay,
+        # max_restarts=0).
+        if row["x"] == 4 and not crash_marker.exists():
+            crash_marker.touch()
+            os.kill(os.getpid(), signal.SIGKILL)
+        return {**row, "x": row["x"] * 2}
+
+    items, plan, expected = _plan(double)
+    executor = RayDatasetExecutor(unified_chain=True)
+    dataset = Dataset(ItemsSource(items), plan, executor)
+    with pytest.raises((RayActorError, RecoveryContractError, OSError)):
+        with RunContext.start(tmp_path / "run",
+                              limits={"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}) as run:
+            reference = run.ref
+            dataset.materialize().take_all()  # actor SIGKILLs mid-chain
+    assert crash_marker.exists()
+    with RunContext.resume(reference) as run2:
+        rows = dataset.materialize().take_all()
+        assert rows == expected
+        facts = run2.journal.execution_commits(_chain_child_id(run2))
+        sequences = [f["sequence"] for f in facts]
+        assert sequences == list(range(1, len(facts) + 1))  # contiguous, no gap/dup
+        assert all(f["status"] == "acked" for f in facts)
+        assert len({f["commit_id"] for f in facts}) == len(facts)
+        with run2.journal._connection() as db:
+            owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
+        assert owner == (run2.attempt, run2.fence)  # actor death never moved ownership
+
+
+# ---------------- Ray fault: single-host node-loss simulation + confirmed cleanup ----------------
+
+def _launch_spec(run, scope_id, allocation_id, boot_id):
+    return {
+        "directory": str(run.directory), "run_id": run.ref.run_id, "scope_id": scope_id,
+        "allocation_id": allocation_id, "boot_id": boot_id, "controller_epoch": run.attempt,
+        "capabilities": ["cpu-map"], "grant": None,
+    }
+
+
+def _immutable_spec(provider, scope_id, allocation_id, cpu_millis=1000):
+    launch = WorkerLaunchSpec(
+        artifact_refs={"plan": {"digest": "0" * 64, "location": "file:///tmp/plan.pkl"}},
+        entrypoint="demiflow-worker-actor", argv=("ray-actor",),
+        bootstrap_ref="bootstrap-ref", access_refs={},
+        runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
+    request = WorkerRequest(
+        "worker-" + allocation_id, allocation_id,
+        ResourceProfile(requests={"cpu_millis": cpu_millis, "memory_bytes": 1024 ** 3}),
+        launch, provision_deadline_ms=60000).to_dict()
+    normalized = provider.describe_and_normalize(None, None, request)
+    return {"scope_id": scope_id, "allocation_id": allocation_id, "request": request,
+            "spec_hash": normalized["spec_hash"], "effective": normalized["effective"],
+            "requirements": None, "binding": {}}
+
+
+def test_ray_node_loss_simulation_inspect_lost_and_confirmed_cleanup(tmp_path, ray_cluster):
+    connector = RayControlConnector()
+    provider = RayResourceProvider(connector, provision_timeout_s=15)
+    scope_id, allocation_id, boot_id = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+    with RunContext.start(tmp_path / "run") as run:
+        connector.stage(allocation_id, _launch_spec(run, scope_id, allocation_id, boot_id))
+        immutable = _immutable_spec(provider, scope_id, allocation_id)
+        observed = provider.ensure_present(allocation_id, immutable)
+        assert observed["phase"] == "RUNNING"
+        assert observed["boot_id"] == boot_id
+        actor = provider._actors[allocation_id][0]
+        # Single-host node-loss simulation: the actor becomes unreachable.
+        ray.kill(actor, no_restart=True)
+        # ray.kill is asynchronous: a task submitted in the kill window can still
+        # succeed, so poll until Ray reports the actor unreachable. This makes the
+        # LOST inventory observation below deterministic.
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                ray.get(actor.identity.remote(), timeout=2)
+            except RayActorError:
+                break
+            if time.monotonic() > deadline:
+                pytest.fail("actor did not become unreachable after ray.kill")
+            time.sleep(0.05)
+        inventory = provider.inspect(scope_id, None)
+        assert inventory["allocations"][0]["phase"] == "LOST"
+        # ray.kill called is not confirmation; ensure_absent observes death evidence.
+        result = provider.ensure_absent(
+            {"scope_id": scope_id, "allocation_id": allocation_id}, 5000)
+        assert result["cleanup"] == "CONFIRMED"
+        assert result["evidence_ref"].startswith("ray-actor-dead:")
+        with pytest.raises(RayActorError):
+            ray.get(actor.identity.remote(), timeout=5)
+
+
+# ---------------- Ray fault: scheduling with no capacity stays PENDING ----------------
+
+def test_ray_scheduling_no_capacity_pending_not_running(tmp_path, ray_cluster):
+    connector = RayControlConnector()
+    provider = RayResourceProvider(connector, provision_timeout_s=3)
+    scope_id, allocation_id, boot_id = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+    # num_cpus = 100 exceeds the 2-CPU single-host cluster: Ray Core cannot place
+    # the actor, so it never initializes and must not be reported RUNNING.
+    connector.stage(allocation_id, {"boot_id": boot_id})
+    immutable = _immutable_spec(provider, scope_id, allocation_id, cpu_millis=100000)
+    observed = provider.ensure_present(allocation_id, immutable)
+    assert observed["phase"] == "PENDING"
+    assert "capacity_pending" in observed["conditions"]
+    # The pending actor was killed by the provider; cleanup is confirmed, no leak.
+    result = provider.ensure_absent(
+        {"scope_id": scope_id, "allocation_id": allocation_id}, 5000)
+    assert result["cleanup"] == "CONFIRMED"

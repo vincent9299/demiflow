@@ -19,7 +19,7 @@ from demiflow.workbench.runs import domain as run_domain
 from demiflow.workbench.runs import requests as run_requests
 from demiflow.workbench.runs import view as run_view
 from demiflow.forge.schema import ForgeError
-from demiflow.execution.process_observation import unit_stopped, require_pidfds
+from demiflow.resources.process_observation import unit_stopped, require_pidfds
 from demiflow.execution.run_telemetry import Telemetry, series, latest
 from demiflow.execution.native_diagnostics import PipeLog, slot
 from demiflow.execution.run_journal import RunJournal
@@ -242,7 +242,7 @@ def test_rm08_cross_session_descendants_and_unrelated_canary(tmp_path):
     )
     code = """import os,sys,subprocess,time,json
 from demiflow.workbench.runs.worker import _adopt_descendants
-from demiflow.execution.process_observation import drain_owned,descendants
+from demiflow.resources.process_observation import drain_owned,descendants
 _adopt_descendants()
 # The leader exits before its separate-session child; subreaper owns the latter.
 child=subprocess.Popen([sys.executable,'-c',"import subprocess,sys;subprocess.Popen([sys.executable,'-c','import time;time.sleep(10)'],start_new_session=True)"],start_new_session=True)
@@ -266,7 +266,7 @@ print(json.dumps({'children':len(descendants(os.getpid())),'drained':drain_owned
 
 
 def test_rm12_sampled_cpu_rss_and_missing_first_rate():
-    from demiflow.execution.process_observation import ProcessSampler
+    from demiflow.resources.process_observation import ProcessSampler
 
     sampler = ProcessSampler()
     first = sampler.sample(os.getpid())

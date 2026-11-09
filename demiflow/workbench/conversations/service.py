@@ -22,7 +22,7 @@ from demiflow.workbench.conversations.policy import proxy_environment
 from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.store import StorageUnavailable
 from demiflow.workbench.conversations.provider import adapter_for
-from demiflow.execution.process_observation import unit_stopped
+from demiflow.resources.process_observation import unit_stopped
 
 
 class Service:

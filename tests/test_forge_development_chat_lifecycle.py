@@ -173,7 +173,7 @@ def test_lost_popen_return_keeps_reservation_across_restart_until_actual_drain(t
         spawned.append(child)
         if running:
             wait_running(service, service.store.submission(sid, 'first')['id'])
-            from demiflow.execution.process_observation import descendants
+            from demiflow.resources.process_observation import descendants
             until = time.monotonic() + 5
             while len(children) < 2 and time.monotonic() < until:
                 children.update(descendants(child.pid)); time.sleep(.02)

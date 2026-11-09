@@ -232,8 +232,10 @@ class RayDatasetExecutor(DatasetExecutor):
     def __init__(
         self, *, aggregate_state_max_bytes: int = 8 * 1024 * 1024,
         resource_root=None, planning_policy=None, candidate_execution=None,
+        unified_chain: bool = False,
     ) -> None:
         self._aggregate_state_max_bytes = max(1, int(aggregate_state_max_bytes))
+        self._unified_chain = bool(unified_chain)
         self._last_native = None
         self.resource_root = Path(resource_root or ".").resolve()
         self._prompt_coordinators = {}
@@ -531,13 +533,34 @@ class RayDatasetExecutor(DatasetExecutor):
         self._last_native = ds
         return ds
 
+    def _chain_readback(self, source: SourcePlan):
+        # Unified-chain results are Local staging-block descriptors on the shared
+        # run directory (D3), not Ray Data datasets. Read them back through the
+        # neutral Local block reader; the default Ray Data path is untouched.
+        if self._unified_chain and isinstance(source, MaterializedSource):
+            from .local import LocalDatasetExecutor, _LocalMaterializedHandle
+            if isinstance(source.handle, _LocalMaterializedHandle):
+                cached = getattr(self, "_chain_local_reader", None)
+                if cached is None:
+                    cached = LocalDatasetExecutor(workers=1)
+                    self._chain_local_reader = cached
+                return cached
+        return None
+
     def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[dict[str, Any]]:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.iter_rows(source, plan)
         return self._compile(source, plan, action_kind="iter_rows").iter_rows()
 
     def iter_batches(
         self, source: SourcePlan, plan: LogicalPlan, *, prefetch_batches: int = 1,
         batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
     ) -> Iterable[Any]:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.iter_batches(source, plan, prefetch_batches=prefetch_batches,
+                batch_size=batch_size, batch_format=batch_format, drop_last=drop_last)
         return self._compile(source, plan, action_kind="iter_batches").iter_batches(
             prefetch_batches=prefetch_batches,
             batch_size=batch_size,
@@ -546,13 +569,28 @@ class RayDatasetExecutor(DatasetExecutor):
         )
 
     def materialize(self, source: SourcePlan, plan: LogicalPlan) -> Any:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.materialize(source, plan)
         native = self._compile(source, plan, action_kind="materialize").materialize()
         self._last_native = native
         return native
 
+    def materialize_stream(self, dataset, *, source=None, plan=None):
+        # Platform-side unified-chain seam (D5): selected explicitly, the whole
+        # operator chain runs in one Ray Core actor host via execution/chain.py,
+        # never through Ray Data. The default Ray Data path is unchanged.
+        if self._unified_chain:
+            from ..chain import run_ray_chain
+            return run_ray_chain(self, dataset, source=source, plan=plan)
+        raise NotImplementedError("async materialize is only supported by the local executor")
+
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,
     ) -> list[dict[str, Any]]:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.take(source, plan, limit)
         # Bounded collection is a native Ray Data action. Keep iterator
         # lifecycle and early-stop cleanup inside the Ray backend.
         return self._compile(source, plan, action_kind="take").take(limit)
@@ -561,17 +599,26 @@ class RayDatasetExecutor(DatasetExecutor):
         self, source: SourcePlan, plan: LogicalPlan, batch_size: int,
         *, batch_format: str,
     ) -> Any:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.take_batch(source, plan, batch_size, batch_format=batch_format)
         return self._compile(source, plan, action_kind="take_batch").take_batch(
             batch_size, batch_format=batch_format,
         )
 
     def count(self, source: SourcePlan, plan: LogicalPlan) -> int:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.count(source, plan)
         return self._compile(source, plan, action_kind="count").count()
 
     def aggregate(
         self, source: SourcePlan, plan: LogicalPlan,
         aggregates: tuple[Any, ...],
     ) -> Any:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.aggregate(source, plan, aggregates)
         native = self._compile(source, plan, action_kind="aggregate")
         for aggregate in aggregates:
             try:
@@ -590,21 +637,33 @@ class RayDatasetExecutor(DatasetExecutor):
         ))
 
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.schema(source, plan, fetch_if_missing=fetch_if_missing)
         return self._compile(source, plan, action_kind="schema").schema(fetch_if_missing=fetch_if_missing)
 
     def columns(
         self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool,
     ) -> list[str] | None:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.columns(source, plan, fetch_if_missing=fetch_if_missing)
         return self._compile(source, plan, action_kind="columns").columns(
             fetch_if_missing=fetch_if_missing,
         )
 
     def size_bytes(self, source: SourcePlan, plan: LogicalPlan) -> int:
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.size_bytes(source, plan)
         return int(self._compile(source, plan, action_kind="size_bytes").size_bytes())
 
     def num_blocks(self, source: SourcePlan, plan: LogicalPlan) -> int:
         if not isinstance(source, MaterializedSource) or not plan.is_empty:
             raise TypeError("num_blocks is only available on MaterializedDataset")
+        local = self._chain_readback(source)
+        if local is not None:
+            return local.num_blocks(source, plan)
         return int(source.handle.num_blocks())
 
     def stats(self, source: SourcePlan, plan: LogicalPlan) -> str:

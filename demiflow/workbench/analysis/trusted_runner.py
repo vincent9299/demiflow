@@ -11,9 +11,9 @@ import subprocess
 import time
 
 from demiflow.workbench.process import process_identity
-from demiflow.execution.process_observation import descendants
-from demiflow.execution.process_observation import signal_owned
-from demiflow.execution.process_observation import drain_owned
+from demiflow.resources.process_observation import descendants
+from demiflow.resources.process_observation import signal_owned
+from demiflow.resources.process_observation import drain_owned
 from demiflow.forge.io import atomic_write_json
 from demiflow.workbench.analysis import contracts as c
 

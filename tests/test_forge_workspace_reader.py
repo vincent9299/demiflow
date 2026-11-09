@@ -16,7 +16,7 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.execution.process_observation import _signal_fd
+from demiflow.resources.process_observation import _signal_fd
 from demiflow.workbench.process import process_identity
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.reader import Reader

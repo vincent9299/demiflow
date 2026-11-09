@@ -13,7 +13,7 @@ from demiflow.workbench.runs import domain as run_domain
 from demiflow.workbench.runs import admission as run_admission
 from demiflow.forge.schema import ForgeError
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.process_observation import signal_owned
+from demiflow.resources.process_observation import signal_owned
 from test_forge_runs import base, root, prepared
 from test_forge_public_api import service, request
 
@@ -76,7 +76,7 @@ def test_rm03_all_seal_directories_are_synced(tmp_path, monkeypatch):
 
 
 def test_rm09_pid_identity_mismatch_cannot_signal(monkeypatch):
-    from demiflow.execution import process_observation as observation
+    from demiflow.resources import process_observation as observation
 
     rows = observation.descendants(os.getpid(), include_owner=True)
     own = rows[os.getpid()]

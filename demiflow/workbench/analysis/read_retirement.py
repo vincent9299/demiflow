@@ -110,7 +110,7 @@ def _absent(runtime,value):
 
 
 def retire(runtime,identifier):
-    from demiflow.execution.process_observation import unit_stopped
+    from demiflow.resources.process_observation import unit_stopped
     job_id(identifier);recover(runtime)
     audit=load(runtime.root);pending=audit['pending']
     if pending is not None and pending['lease']['job_id']!=identifier:

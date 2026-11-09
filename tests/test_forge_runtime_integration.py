@@ -20,7 +20,7 @@ from demiflow.workbench.process import process_identity
 from demiflow.workbench.runs import view as run_view
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.api import WorkspaceServer
-from demiflow.execution.process_observation import _pidfd, _signal_fd, unit_stopped
+from demiflow.resources.process_observation import _pidfd, _signal_fd, unit_stopped
 from test_forge_runs import base, root, prepared, wait, custom
 from test_forge_run_faults import _slow, _first_committed
 
@@ -398,7 +398,7 @@ def test_rm14_optional_sampler_loss_and_corruption_leave_control_intact(root):
             time.sleep(0.1)
             snapshot = run_view.snapshot(root, value["run_id"])
         assert snapshot["telemetry"]["availability"] == "available"
-        from demiflow.execution.process_observation import descendants
+        from demiflow.resources.process_observation import descendants
 
         helpers = []
         for pid in descendants(current["state"]["supervisor"]["pid"]):

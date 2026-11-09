@@ -161,7 +161,7 @@ def _source_imports(source, files):
 
 
 def _tree_rss(pid):
-    from demiflow.execution.process_observation import descendants
+    from demiflow.resources.process_observation import descendants
     return sum(row['rss_bytes'] for row in descendants(pid, include_owner=True).values())
 
 
@@ -181,7 +181,7 @@ def _stop_group(pid, signum):
 
 
 def _drain_descendants(process, *, timeout_s=5):
-    from demiflow.execution.process_observation import drain_owned
+    from demiflow.resources.process_observation import drain_owned
     return drain_owned(process, timeout_s=timeout_s)
 
 
@@ -224,9 +224,9 @@ def supervise(root, run_id, lease, attempt=None):
     import shutil
     from demiflow.workbench.runs import manager as runs
     from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.process_observation import inherited_unit
-    from demiflow.execution.process_observation import signal_owned
-    from demiflow.execution.process_observation import UNIT_ENV
+    from demiflow.resources.process_observation import inherited_unit
+    from demiflow.resources.process_observation import signal_owned
+    from demiflow.resources.process_observation import UNIT_ENV
 
     target, value = runs._load(root, run_id)
     manifest = value['manifest']

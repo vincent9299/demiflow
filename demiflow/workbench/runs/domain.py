@@ -189,7 +189,7 @@ def _overlap(a, b):
 
 def _owner_finished(owner):
     from demiflow.workbench.runs import manager as runs
-    from demiflow.execution.process_observation import unit_stopped
+    from demiflow.resources.process_observation import unit_stopped
 
     try:
         target = runs.directory(owner["root"], owner["run_id"])

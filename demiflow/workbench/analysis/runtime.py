@@ -18,11 +18,11 @@ import threading
 import time
 import uuid
 
-from demiflow.execution.process_observation import _pidfd
-from demiflow.execution.process_observation import _signal_fd
+from demiflow.resources.process_observation import _pidfd
+from demiflow.resources.process_observation import _signal_fd
 from demiflow.workbench.process import process_identity
-from demiflow.execution.process_observation import require_pidfds
-from demiflow.execution.process_observation import unit_stopped
+from demiflow.resources.process_observation import require_pidfds
+from demiflow.resources.process_observation import unit_stopped
 from demiflow.forge.io import atomic_write_json
 from demiflow.forge.io import atomic_write_text
 from demiflow.forge.io import no_symlinks

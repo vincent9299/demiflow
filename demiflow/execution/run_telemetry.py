@@ -366,7 +366,7 @@ def series(target, *, attempt=None, points=600, resolution="raw"):
 def observe(target, attempt, worker_pid, deadline):
     """One optional process, no overlapping probes and no browser dependency."""
     import resource
-    from .process_observation import ProcessSampler
+    from ..resources.process_observation import ProcessSampler
 
     # stdlib only: measured virtual footprint plus explicit allocation headroom.
     baseline = int(Path("/proc/self/statm").read_text().split()[0]) * os.sysconf(

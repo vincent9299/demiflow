@@ -169,64 +169,7 @@ def bounded_stream_batches(executor, rows, *, batch_size=256, batch_format='defa
             if close is not None:close()
 
 
-class StreamMaterialization:
-    def __init__(self, action, rows_factory, *, object_specs=None, staging_only=False):
-        self.action, self.run = action, action.context
-        self.source_sink, self.source = capture_source(action, rows_factory)
-        self.sink = BlockSink(action)
-        self.row_sink=self.sink
-        self.has_objects=bool(object_specs)
-        self.batch_rows=self.run.limits["checkpoint_rows"]
-        if object_specs:
-            from .object_sink import ObjectRowsSink
-            self.sink=ObjectRowsSink(action,object_specs=object_specs)
-            self.row_sink=self.sink.rows
-            action.object_sinks=self.sink.object_sinks
-        self.row_sink.staging_only = staging_only
-        self.on_checkpoint = None
-        self.stop_requested = lambda: False
-        self.coordinator = CommitCoordinator(action)
-        latest = self.run.journal.latest_execution_commit(action.action_id)
-        self.pending_cut = latest['intent']['position']['next_ordinal'] if latest and latest['status'] == 'pending' else None
-        if latest and latest['status'] == 'pending':
-            latest = self.run.journal.latest_execution_commit(action.action_id, confirmed=True)
-        if latest:
-            self.coordinator._finish(latest, {'output': self.sink}, None)
-            latest = self.run.journal.execution_commit(latest['commit_id'])
-        facts = [latest] if latest else []
-        self.inputs = self.rows = self.sequence = 0
-        restored = {}
-        for fact in facts:
-            if fact["status"] == "pending":
-                continue
-            position = fact["intent"]["position"]
-            if position["source_id"] != self.source["source_id"] or position["next_ordinal"] < self.inputs:
-                raise RecoveryContractError("Stream source progress differs")
-            self.inputs = position["next_ordinal"]
-            self.sequence = fact["sequence"]
-            data = fact["receipts"]["output"]["data"]
-            if self.has_objects:data=data['rows']
-            self.rows += data["rows"]
-            restored = {key: StateArtifacts(self.run).read(ref)
-                        for key, ref in fact["prepared"]["state"].items()}
-        if latest:
-            summary = restored.get('stream-progress')
-            if summary is None:
-                raise RecoveryContractError('Stream checkpoint has no protocol progress summary')
-            self.rows = summary['rows']
-        self.state = OperatorStates(self.run, restored)
-        self.ordinal = 0
-        self.complete = action.record["result"] is not None
-        self.append_lock = asyncio.Lock()
-        self.append_slots = asyncio.Semaphore(64)
-        self.pending_appends = {}
-        self.direct_owners = []
-        self.group_ends = []
-        self.buffer_sinks = {}
-        self.admitted_rows = self.rows
-        if self.complete and self.inputs != self.source["data"]["rows"]:
-            raise RecoveryContractError("Completed materialization has an incomplete source")
-
+class StreamStageProgress:
     def source_rows(self):
         return self.source_sink.iter_rows(self.source["data"])
 
@@ -422,6 +365,65 @@ class StreamMaterialization:
             barrier.states.update(await self.state.snapshot(prefixes, budget=barrier))
         if self.has_objects and index == self.object_cut:
             barrier.objects = {root: store.detach() for root, store in self.sink.object_sinks.items()}
+
+
+class StreamMaterialization(StreamStageProgress):
+    def __init__(self, action, rows_factory, *, object_specs=None, staging_only=False):
+        self.action, self.run = action, action.context
+        self.source_sink, self.source = capture_source(action, rows_factory)
+        self.sink = BlockSink(action)
+        self.row_sink=self.sink
+        self.has_objects=bool(object_specs)
+        self.batch_rows=self.run.limits["checkpoint_rows"]
+        if object_specs:
+            from .object_sink import ObjectRowsSink
+            self.sink=ObjectRowsSink(action,object_specs=object_specs)
+            self.row_sink=self.sink.rows
+            action.object_sinks=self.sink.object_sinks
+        self.row_sink.staging_only = staging_only
+        self.on_checkpoint = None
+        self.stop_requested = lambda: False
+        self.coordinator = CommitCoordinator(action)
+        latest = self.run.journal.latest_execution_commit(action.action_id)
+        self.pending_cut = latest['intent']['position']['next_ordinal'] if latest and latest['status'] == 'pending' else None
+        if latest and latest['status'] == 'pending':
+            latest = self.run.journal.latest_execution_commit(action.action_id, confirmed=True)
+        if latest:
+            self.coordinator._finish(latest, {'output': self.sink}, None)
+            latest = self.run.journal.execution_commit(latest['commit_id'])
+        facts = [latest] if latest else []
+        self.inputs = self.rows = self.sequence = 0
+        restored = {}
+        for fact in facts:
+            if fact["status"] == "pending":
+                continue
+            position = fact["intent"]["position"]
+            if position["source_id"] != self.source["source_id"] or position["next_ordinal"] < self.inputs:
+                raise RecoveryContractError("Stream source progress differs")
+            self.inputs = position["next_ordinal"]
+            self.sequence = fact["sequence"]
+            data = fact["receipts"]["output"]["data"]
+            if self.has_objects:data=data['rows']
+            self.rows += data["rows"]
+            restored = {key: StateArtifacts(self.run).read(ref)
+                        for key, ref in fact["prepared"]["state"].items()}
+        if latest:
+            summary = restored.get('stream-progress')
+            if summary is None:
+                raise RecoveryContractError('Stream checkpoint has no protocol progress summary')
+            self.rows = summary['rows']
+        self.state = OperatorStates(self.run, restored)
+        self.ordinal = 0
+        self.complete = action.record["result"] is not None
+        self.append_lock = asyncio.Lock()
+        self.append_slots = asyncio.Semaphore(64)
+        self.pending_appends = {}
+        self.direct_owners = []
+        self.group_ends = []
+        self.buffer_sinks = {}
+        self.admitted_rows = self.rows
+        if self.complete and self.inputs != self.source["data"]["rows"]:
+            raise RecoveryContractError("Completed materialization has an incomplete source")
 
     def seal(self, barrier):
         from copy import copy

@@ -104,7 +104,7 @@ def test_cancel_detached_child_does_not_kill_sentinel(tmp_path):
         while service.store.turn(tid)['state']!='running' and time.monotonic()<until: time.sleep(.05)
         time.sleep(.2)
         process=json.loads(service.store.turn(tid)['process'])['supervisor']['pid']
-        from demiflow.execution.process_observation import descendants
+        from demiflow.resources.process_observation import descendants
         children=set(descendants(process));assert len(children)>=2
         stop=service.cancel('wfixture',root,sid,tid,'stop')
         assert service.cancel('wfixture',root,sid,tid,'stop-again')['stop_at']==stop['stop_at']
@@ -293,7 +293,7 @@ time.sleep(60)
         while not marker.exists() and time.monotonic()<deadline:time.sleep(.05)
         ids=json.loads(marker.read_text());store=Store(tmp_path/'state',Limits())
         identity=json.loads(store.turn(ids['tid'])['process'])['supervisor']
-        from demiflow.execution.process_observation import descendants
+        from demiflow.resources.process_observation import descendants
         children=set(descendants(identity['pid']))
         parent.kill();parent.wait()
         deadline=time.monotonic()+10

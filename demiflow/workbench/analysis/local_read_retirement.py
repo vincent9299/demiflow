@@ -12,7 +12,7 @@ import re
 import stat
 
 from demiflow.workbench.process import process_identity
-from demiflow.execution.process_observation import unit_stopped
+from demiflow.resources.process_observation import unit_stopped
 from demiflow.forge.io import no_symlinks
 from demiflow.workbench.analysis import contracts as c
 from demiflow.workbench.analysis import read_control

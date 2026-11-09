@@ -502,7 +502,7 @@ class DataFusionSession:
                   'peak_rss_bytes': 0, 'peak_scratch_bytes': 0, 'guard': None, 'sample_interval_s': 0.1,
                   'cgroup_memory_policy': 'current-minus-clean-inactive-file-v1',
                   'options': asdict(options), 'slot': slot, 'reserved_slots': len(lock), 'started_at': time.time()}
-        from .process_observation import inherited_unit
+        from ..resources.process_observation import inherited_unit
         unit_fds = inherited_unit()
         process = None
         pipe_log = None

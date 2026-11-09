@@ -57,7 +57,7 @@ class Reader:
     def _spawn(self):
         from demiflow.forge.platform_worker import inspection_environment
         from demiflow.workbench.process import process_identity
-        from demiflow.execution.process_observation import _pidfd
+        from demiflow.resources.process_observation import _pidfd
         env,fds=inspection_environment(allow_preparation=False)
         for name in ('TOKIO_WORKER_THREADS','RAYON_NUM_THREADS','LANCE_CPU_THREADS'):
             env[name]='1'
@@ -132,7 +132,7 @@ class Reader:
         if ticket['error'] is not None:raise ForgeError(ticket['error'][0],code=ticket['error'][1])
 
     def _sample(self):
-        from demiflow.execution.process_observation import descendants
+        from demiflow.resources.process_observation import descendants
         from demiflow.workbench.process import process_identity
         if process_identity(self.process.pid)!=self.identity:
             raise ForgeError('Original native reader exited or changed identity')
@@ -179,9 +179,9 @@ class Reader:
             self.retirement_pending=False
             return
         from demiflow.workbench.process import process_identity
-        from demiflow.execution.process_observation import _signal_fd
-        from demiflow.execution.process_observation import signal_owned
-        from demiflow.execution.process_observation import _pidfd
+        from demiflow.resources.process_observation import _signal_fd
+        from demiflow.resources.process_observation import signal_owned
+        from demiflow.resources.process_observation import _pidfd
         if process.poll() is None:
             if self.identity is None or process_identity(process.pid)!=self.identity:
                 raise ForgeError('Original reader exit is unknown; ownership remains held',code='operation_rejected')
