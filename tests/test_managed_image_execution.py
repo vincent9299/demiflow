@@ -166,12 +166,12 @@ def test_same_graph_generation_read_object_and_vision_scoring(tmp_path,fixture_h
     assert len(fixture_http['requests'])==2
 
 
-def native_dataset(root,server,count=8):
+def native_dataset(root,server,count=8,*,concurrency=1):
     pack=definition(server['base'],template='{{ instruction }}')
     pack['prompts']['generate']['model']['timeout_s']=10
     result=data.from_items([{'id':i,'instruction':'paint '+str(i)} for i in range(count)]).map_prompt_async('generate',
         config=parse_prompt_pack(json.dumps(pack)),inputs={'instruction':'instruction'},
-        output='image',call_output='call',error_output='error',max_requests=count,
+        output='image',call_output='call',error_output='error',max_requests=count,concurrency=concurrency,
         options={'object_store':str(root),'image_encoding':'preserve','io_workers':1,'prepare_workers':1,'response_workers':1,
             'limits':{'max_images':2,'max_image_bytes':4096,'max_text_bytes':1024,'max_pixels':64,
                 'max_total_pixels':128,'max_request_bytes':8192,'max_response_bytes':8192}})
@@ -266,18 +266,28 @@ def test_checked_same_graph_generation_read_and_edit(tmp_path,fixture_http,monke
     assert base64.b64decode(encoded)==fixture_http['raw']
 
 
-def test_failed_downstream_cleans_this_run_and_preserves_previous_images(tmp_path,fixture_http):
+def test_failed_downstream_preserves_known_effect_and_resumes_without_regeneration(tmp_path,fixture_http,monkeypatch):
     root=tmp_path/'assets'
     with RunContext.start(tmp_path/'first',limits=run_limits()):
         old,=native_dataset(root,fixture_http,1).take(1)
-    def fail(row):raise RuntimeError('controlled downstream failure')
+    def fail(row):
+        if os.environ.get('NATIVE_IMAGE_DOWNSTREAM_FAILURE'):
+            raise RuntimeError('controlled downstream failure')
+        return row
+    monkeypatch.setenv('NATIVE_IMAGE_DOWNSTREAM_FAILURE', '1')
     with pytest.raises(RuntimeError,match='controlled downstream'):
         with RunContext.start(tmp_path/'second',limits=run_limits()) as run:
             failed_namespace=root/'.demiflow-objects'/run.ref.run_id
+            reference=run.ref
             native_dataset(root,fixture_http,1).map(fail).write_lance(str(tmp_path/'failed.lance'),mode='create')
     assert ObjectRef(**old['image']).read(max_bytes=4096)==old['pixels']
-    assert not [p for p in failed_namespace.rglob('*') if p.is_file() and len(p.name)==64]
-    assert not (tmp_path/'failed.lance').exists()
+    assert [p for p in failed_namespace.rglob('*') if p.is_file() and len(p.name)==64]
+    count=len(fixture_http['requests'])
+    monkeypatch.delenv('NATIVE_IMAGE_DOWNSTREAM_FAILURE')
+    with RunContext.resume(reference):
+        native_dataset(root,fixture_http,1).map(fail).write_lance(str(tmp_path/'failed.lance'),mode='create')
+    assert len(fixture_http['requests'])==count
+    assert lance.dataset(str(tmp_path/'failed.lance')).count_rows()==1
 
 
 @pytest.mark.parametrize('window,damage',[('after_provider_before_artifact',False),
@@ -298,7 +308,7 @@ def test_http_process_fault_recovery_never_regenerates_prepared_images(tmp_path,
     second=subprocess.run([sys.executable,'-B',str(script),str(tmp_path),'resume'],cwd=tmp_path,env=env,
         capture_output=True,text=True,timeout=40)
     assert len(fixture_http['requests'])==1
-    if window in {'after_provider_before_artifact','after_staging_before_prepared'}:
+    if window == 'after_provider_before_artifact':
         assert second.returncode!=0 and 'automatic regeneration is forbidden' in second.stderr
         assert not (tmp_path/'out.lance').exists()
     elif damage:
@@ -387,3 +397,54 @@ def test_terminal_batch_byte_budget_checked_before_arrow_allocation(tmp_path,mon
         with pytest.raises(RecoveryContractError,match='terminal batch'):
             list(bounded_stream_batches(executor,iter([{'payload':'x'*400}]*2),batch_size=1000000))
     assert calls==[]
+
+
+def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_path, fixture_http, monkeypatch):
+    import asyncio
+    import threading
+    import demiflow.execution.commit as protocol
+    from demiflow.operator_llm.runtime import PromptActor
+    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.state_artifacts import StateArtifacts
+    reached = threading.Event()
+    original = PromptActor.__call__
+    async def delayed(actor, row):
+        result = await original(actor, row)
+        if os.getenv('NATIVE_SLOW_COMPLETION') == '1':
+            if row['id'] == 7:
+                reached.set()
+            if row['id'] == 0:
+                for _ in range(500):
+                    if reached.is_set():
+                        break
+                    await asyncio.sleep(.01)
+                else:
+                    raise RuntimeError('native free slot could not cross barrier')
+        return result
+    monkeypatch.setattr(PromptActor, '__call__', delayed)
+    monkeypatch.setenv('NATIVE_SLOW_COMPLETION', '1')
+    def fail(name, commit_id):
+        fact = RunJournal(tmp_path/'run').execution_commit(commit_id)
+        if name == 'after_acked' and fact['sequence'] == 1 and fact['intent']['sinks'] == ['output']:
+            assert reached.wait(5), 'source stopped at suppressed trigger or slow worker'
+            raise RuntimeError('controlled published checkpoint failure')
+    monkeypatch.setattr(protocol, 'fault_point', fail)
+    limits = {**run_limits(), 'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}
+    with pytest.raises(RuntimeError, match='controlled published checkpoint failure'):
+        with RunContext.start(tmp_path/'run', limits=limits) as run:
+            reference = run.ref
+            native_dataset(tmp_path/'assets', fixture_http, 12, concurrency=2).materialize()
+    first = RunJournal(tmp_path/'run').execution_commits('action-1')[0]
+    pending = json.loads((tmp_path/'run'/first['prepared']['state']['node-0-inflight']['path']).read_text())
+    assert pending['data']['rows'] >= 1
+    monkeypatch.delenv('NATIVE_SLOW_COMPLETION')
+    monkeypatch.setattr(protocol, 'fault_point', lambda *args: None)
+    with RunContext.resume(reference):
+        rows = native_dataset(tmp_path/'assets', fixture_http, 12, concurrency=2).materialize().take_all()
+    assert sorted(row['id'] for row in rows) == list(range(12))
+    assert len(fixture_http['requests']) == 12
+    # Confirmed prefix rows and journal-replayed rows must infer the same
+    # nested image/call schema when a later sink splits them across batches.
+    import pyarrow as pa
+    schemas = [pa.Table.from_pylist([row]).schema for row in rows]
+    assert all(schema == schemas[0] for schema in schemas)

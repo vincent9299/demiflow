@@ -359,7 +359,13 @@ def supervise(root, run_id, lease, attempt=None):
                 if reason and stop_at is None:
                     killed_reason, stop_at = reason, now
                     run.transition(runs.ACTIVE, 'stopping', reason=reason, stop_phase='terminating')
-                    signal_owned(os.getpid(), signal.SIGTERM)
+                    if reason == 'cancelled':
+                        # The worker owns a bounded cooperative drain window.
+                        # Its decoder children may still be making a received
+                        # model response durable. Hard expiry still kills all.
+                        process.send_signal(signal.SIGTERM)
+                    else:
+                        signal_owned(os.getpid(), signal.SIGTERM)
                 if stop_at is not None and now - stop_at >= limits['cancel_grace_s']:
                     signal_owned(os.getpid(), signal.SIGKILL)
                     if state.get('stop_phase') != 'killing':

@@ -1,6 +1,13 @@
 {
   "format": 1,
   "scope": "P0–P2 platform foundation; not the P3–P6 platform-wide cutover",
+  "later_extensions": [
+    {
+      "protocol": "aligned-barrier-v2",
+      "contract": "native-barrier-checkpoints.md",
+      "scope": "Native local stream barriers and existing HTTP effect-journal integration; the historical phase scope and exclusions below remain an account of the original foundation delivery."
+    }
+  ],
   "baseline": "49527158d9c4f37f57f264adc28adbc556cfffba plus preserved workspace snapshot; evidence/baseline.json is authoritative",
   "authority": "existing execution.RunJournal; same native Dataset/executor; no new graph scheduler",
   "state_machine": [

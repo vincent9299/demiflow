@@ -19,6 +19,7 @@ from .run_journal import RunJournal
 
 _CURRENT = ContextVar("demiflow_run_context", default=None)
 _ACTION = ContextVar("demiflow_run_action", default=None)
+_PERSISTING_EFFECT = ContextVar("demiflow_persisting_admitted_effect", default=None)
 
 
 def current_run():
@@ -51,6 +52,8 @@ class RunContext:
         self._journal_connections = ExitStack()
         self._object_resource_lock = threading.RLock()
         self.started = None
+        self._draining = False
+        self._quarantined_workers = []
 
     @property
     def limits(self):
@@ -115,7 +118,7 @@ class RunContext:
                     raise RecoveryContractError('Run limits semantics changed on resume')
                 configuration = old
             else:
-                configuration = dict(format=1, run_id=uuid.uuid4().hex,
+                configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id=uuid.uuid4().hex,
                     entry_identity=self.entry_identity, limits=execution_limits(self.requested_limits),
                     platform_revision=revision, started_at=time.time(),
                     limits_explicit=sorted((self.requested_limits or {}).keys()))
@@ -157,8 +160,43 @@ class RunContext:
 
     def __exit__(self, exc_type, exc, tb):
         failure = exc
+        workers = [worker for worker in self._quarantined_workers if worker.is_alive()]
+        if workers:
+            # A blocked native writer cannot be killed safely. Keep its handles
+            # and exclusive run lease isolated until its producer exits. This
+            # finalizer schedules no graph work and permits no replacement owner.
+            self._draining = True
+            _CURRENT.reset(self._token)
+            def finish_owned_resources():
+                try:
+                    for worker in workers:
+                        worker.join()
+                    native_journal = getattr(self, '_native_prompt_journal', None)
+                    if native_journal is not None:
+                        native_journal.close()
+                    self.journal.clean_orphans(self.fence)
+                    if not self.external_control:
+                        self.journal.finish_execution(self.fence, 'failed')
+                    else:
+                        self.journal.release_execution(self.fence)
+                finally:
+                    self.active = False
+                    try:
+                        self._journal_connections.close()
+                    finally:
+                        os.close(self._lease)
+                        self._lease = None
+            self._drain_finalizer = threading.Thread(target=finish_owned_resources,
+                name='demiflow-owned-writer-drain', daemon=True)
+            self._drain_finalizer.start()
+            if exc is None:
+                raise RecoveryContractError('Native writer is isolated while draining; run lease is retained')
+            return False
         try:
             if self.active:
+                native_journal = getattr(self, '_native_prompt_journal', None)
+                if native_journal is not None:
+                    native_journal.close()
                 self.journal.clean_orphans(self.fence)
                 if failure is None:
                     try:
@@ -184,16 +222,38 @@ class RunContext:
             raise failure
         return False
 
+    def quarantine_worker(self, worker):
+        if worker not in self._quarantined_workers:
+            self._quarantined_workers.append(worker)
+
     def check_stop(self):
         if not self.active:
             raise RecoveryContractError("Execution context is closed")
         if time.time() > self.deadline or time.monotonic() - self.started > self.limits["timeout_s"]:
             raise RecoveryContractError("Execution time budget exhausted")
+        if _PERSISTING_EFFECT.get() is self:
+            return  # Only local durability of an already received native effect.
+        if self._draining:
+            raise RecoveryContractError('Execution is draining an isolated native writer')
         if self.check_stop_callback is not None:
             self.check_stop_callback()
         state = self.journal.execution_status()
         if state["status"] in {"stopping", "cancelled"}:
             raise RecoveryContractError("Execution cancellation requested")
+
+    @contextmanager
+    def persist_admitted_effect(self):
+        """Finish received bytes during cooperative stop, under the same fence.
+
+        The native model adapter alone uses this around local result storage.
+        It cannot dispatch a request or publish a row. Resource/time admission,
+        journal fencing and the enclosing driver's drain deadline still apply.
+        """
+        token = _PERSISTING_EFFECT.set(self)
+        try:
+            yield
+        finally:
+            _PERSISTING_EFFECT.reset(token)
 
     @contextmanager
     def action(self, declaration, *, action_id=None):
@@ -226,9 +286,33 @@ class RunContext:
         finally:
             _ACTION.reset(token)
 
-    def allocate_artifact(self, path, *, commit_id=None):
+    def allocate_artifact(self, path, *, commit_id=None, size=0, atomic=True):
         self.journal.allocate_artifact(self.fence,
-            self.journal.artifact_name(path), commit_id=commit_id)
+            self.journal.artifact_name(path), commit_id=commit_id, size=size, atomic=atomic)
+
+    def reserve_artifact_bytes(self, path, size, *, atomic=False):
+        self.journal.resize_artifact(self.fence, self.journal.artifact_name(path), size, atomic=atomic)
+
+    def release_temporaries(self, paths):
+        names = []
+        for path in paths:
+            name = self.journal.artifact_name(path)
+            names.extend((name, name + '.staging'))
+        self.journal.release_temporaries(self.fence, names)
+
+    @contextmanager
+    def temporary_artifacts(self):
+        """A producer-owned bounded allocation group; remove files before exit."""
+        paths = []
+        def allocate(path):
+            if len(paths) >= 64:
+                raise RecoveryContractError('Temporary producer allocation count exceeds budget')
+            self.allocate_artifact(path, atomic=False)
+            paths.append(path)
+        try:
+            yield allocate
+        finally:
+            self.release_temporaries(paths)
 
     def object_namespace(self, logical_root):
         """Platform-owned physical namespace under a stable logical destination."""

@@ -1451,8 +1451,9 @@ class Dataset:
         inputs, exact request identity and service lifecycle are preserved.
         Image output does not support routes, request gates, token budgets,
         offline/Codex options or schema retries. See docs/image_generation.md.
-        Adds map_async worker/queue/error policies. Execute with run_stream()
-        or checkpoint(); checkpoint before later joins or lazy transforms.
+        Adds map_async worker/queue/error policies. Execute with supported native
+        terminals; materialize before later joins or lazy transforms. Recovery
+        belongs to RunContext rather than explicit checkpoint orchestration.
         Configuration and limits belong to this node. Non-local executors
         currently reject this async interface explicitly. HTTP is truly asynchronous; transport
         errors are not silently retried. Repeated actions can repeat calls.

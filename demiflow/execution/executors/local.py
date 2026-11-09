@@ -46,7 +46,7 @@ from ...planning.traits import terminal_traits
 
 @dataclass
 class _LocalMaterializedHandle:
-    blocks: tuple[Any, ...]
+    blocks: Iterable[Any]
     row_count: int
     released: bool = False
     recovery_reference: Any = None
@@ -54,6 +54,32 @@ class _LocalMaterializedHandle:
     def check_open(self):
         if self.released:
             raise RuntimeError('Materialized Dataset was released')
+
+
+class _CheckpointBlocks:
+    """Repeatable lazy block paths backed by immutable checkpoint pages."""
+    def __init__(self, terminal):
+        self.run, self.action_id = terminal.run, terminal.action.action_id
+        self.sequence, self.reader, self.has_objects = terminal.sequence, terminal.row_sink, terminal.has_objects
+        self.sink, self.coordinator = terminal.sink, terminal.coordinator
+
+    def __iter__(self):
+        for fact in self.run.journal.iter_execution_commits(self.action_id, through_sequence=self.sequence):
+            # Historical rows also own object publications. Verify the complete
+            # native receipt lazily before exposing this generation's blocks.
+            receipt = self.sink.inspect(fact['prepared']['sinks']['output'],
+                                        self.coordinator._context(fact['commit_id']))
+            if receipt != fact['receipts']['output']:
+                from ..recovery_contract import RecoveryContractError
+                raise RecoveryContractError('Completed receipt differs from artifact evidence')
+            value = receipt['data']
+            if self.has_objects:
+                value = value['rows']
+            for block in self.reader.block_entries(value):
+                yield _SpilledBlock(str(self.run.directory / block['path']), durable=True)
+
+    def __len__(self):
+        return sum(1 for _ in self)
 
 
 @dataclass(frozen=True)
@@ -794,14 +820,14 @@ class LocalDatasetExecutor(DatasetExecutor):
             raise RuntimeError("Materialization requires the native action context")
         self._run_ref = action.context.ref
         source = freeze_source(action, source)
-        _, snapshot = capture_source(action, lambda: self.iter_rows(source, LogicalPlan()))
+        source_sink, snapshot = capture_source(action, lambda: self.iter_rows(source, LogicalPlan()))
         sink = BlockSink(action)
         coordinator = CommitCoordinator(action)
         facts = coordinator.recover({"output": sink})
         if not facts or facts[-1]["status"] == "pending":
             data = snapshot["data"]
             handle = _LocalMaterializedHandle(tuple(_SpilledBlock(
-                str(action.context.directory / b["path"]), durable=True) for b in data["blocks"]),
+                str(action.context.directory / b["path"]), durable=True) for b in source_sink.block_entries(data)),
                 data["rows"], recovery_reference={"source_id": snapshot["source_id"]})
             held = MaterializedSource(handle, data["rows"])
             for row in self._apply_plan(held, plan, action_kind="materialize"):
@@ -814,7 +840,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         action.complete(dict(kind="materialized", rows=data["rows"],
                              inputs=snapshot["data"]["rows"], commits=1))
         return _LocalMaterializedHandle(tuple(_SpilledBlock(
-            str(action.context.directory / b["path"]), durable=True) for b in data["blocks"]),
+            str(action.context.directory / b["path"]), durable=True) for b in sink.block_entries(data)),
             data["rows"], recovery_reference=dict(run_id=action.context.ref.run_id,
                 action_id=action.action_id, semantic_id=action.semantic_id))
 
@@ -838,7 +864,7 @@ class LocalDatasetExecutor(DatasetExecutor):
                                 progress=terminal, source_iter=terminal.source_rows())
             terminal.finish()
         return _LocalMaterializedHandle(
-            tuple(_SpilledBlock(path, durable=True) for path in terminal.blocks), terminal.rows,
+            _CheckpointBlocks(terminal), terminal.rows,
             recovery_reference=dict(run_id=action.context.ref.run_id, action_id=action.action_id,
                                     semantic_id=action.semantic_id))
 

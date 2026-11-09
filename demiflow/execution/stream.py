@@ -43,26 +43,8 @@ from .row_scope import ScopedRow, RowScope, set_row_scope
 SENTINEL = object()
 
 
-class _BatchBoundary:
-    """Internal barrier: all workers finish a batch before its sink confirms it."""
-    def __init__(self, stages, queues, commit):
-        self.stages, self.queues, self.commit = stages, queues, commit
-        self.arrivals = {}
-        self.done = asyncio.Event()
+from .stream_barrier import _CheckpointBarrier, CheckpointControl
 
-    async def arrive(self, stage):
-        index = self.stages.index(stage)
-        self.arrivals[index] = self.arrivals.get(index, 0) + 1
-        if self.arrivals[index] == stage.concurrency:
-            if index + 1 < len(self.stages):
-                for _ in range(self.stages[index + 1].concurrency):
-                    await self.queues[index + 1].put(self)
-            else:
-                result = self.commit()
-                if inspect.isawaitable(result):
-                    await result
-                self.done.set()
-        await self.done.wait()
 _FEED_CHUNK = 256            # 源头同步迭代器的分块拉取粒度（每块一次线程切换）
 _WATCHDOG_INTERVAL = 0.2     # 真异常收敛巡检周期（秒）
 _DRAIN_TIMEOUT = 2.0         # 取消后等待在飞任务平息的上限（秒）
@@ -115,7 +97,7 @@ class StreamStats:
 class _Stage:
     __slots__ = ("name", "fn", "concurrency", "queue_depth", "catch",
                  "pre_filters", "post_filters", "hard_timeout",
-                 "max_batch", "flush_interval", "execution", "executor", "pending", "flat_map", "grouping", "prefix", "validation", "observation")
+                 "max_batch", "flush_interval", "execution", "executor", "pending", "flat_map", "grouping", "prefix", "validation", "observation", "recovery_buffer", "native_recovery", "native_snapshot", "batch_ordinal", "scope_id", "native_pending", "native_restore", "native_input_lock", "native_emit_lock", "native_idle")
 
     def __init__(self, name, fn, concurrency, queue_depth, catch,
                  pre_filters, post_filters, hard_timeout=None,
@@ -138,6 +120,17 @@ class _Stage:
         self.prefix = None
         self.validation = None
         self.observation = None
+        self.recovery_buffer = None
+        self.native_recovery = None
+        self.native_snapshot = False
+        self.native_pending = {}
+        self.native_restore = []
+        self.native_input_lock = asyncio.Lock()
+        self.native_emit_lock = asyncio.Lock()
+        self.native_idle = asyncio.Event()
+        self.native_idle.set()
+        self.batch_ordinal = 0
+        self.scope_id = None
 
 
 def _materialize(plan: LogicalPlan) -> list[_Stage]:
@@ -327,6 +320,9 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
     from .run_context import current_run
     run = current_run()
     batch_limits = checked.limits if checked is not None else run.limits if run is not None else None
+    # Opaque stages already align every worker before forwarding a barrier.
+    # Only native in-flight snapshots need an additional emission gate.
+    emission_gate = stage.native_emit_lock if stage.native_snapshot else contextlib.nullcontext()
 
     def progress(**counts):
         if checked is not None:
@@ -409,10 +405,38 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
         if stage.max_batch is not None:
             return await batch_worker(st)   # 攒批级：走批循环
         while True:
-            row = await q_in.get()
+            native_key = None
+            if stage.native_snapshot:
+                async with stage.native_input_lock:
+                    row = await q_in.get()
+                    if isinstance(row, _CheckpointBarrier):
+                        if row.final:
+                            await stage.native_idle.wait()
+                        async with stage.native_emit_lock:
+                            await row.arrive(stage)
+                        continue
+                    if row is not SENTINEL:
+                        native_key = id(asyncio.current_task())
+                        pending_row = row
+                        if stage.pre_filters or getattr(stage.native_recovery, 'copy_inputs', False):
+                            # A Python predicate may mutate its input. Preserve
+                            # its original value so recovery applies it once.
+                            from copy import deepcopy
+                            check_row(row.row)
+                            copying = asyncio.create_task(asyncio.to_thread(deepcopy, row.row))
+                            try:
+                                original_input = await asyncio.shield(copying)
+                            except asyncio.CancelledError:
+                                await copying
+                                raise
+                            pending_row = ScopedRow(original_input, row.scope)
+                        stage.native_pending[native_key] = pending_row
+                        stage.native_idle.clear()
+            else:
+                row = await q_in.get()
             if row is SENTINEL:
                 return
-            if isinstance(row, _BatchBoundary):
+            if isinstance(row, _CheckpointBarrier):
                 await row.arrive(stage)
                 continue
             scope = row.scope if type(row) is ScopedRow else None
@@ -445,50 +469,63 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                     stats.add_miss(f"{name}:hard_timeout")   # 活性层：必醒
                     progress(errors=1, dropped=1)
                 else:
-                    if scope is not None and scope.delivery is not None and type(out) is not dict:
-                        raise RuntimeContractError('Task callbacks must return exactly one record; drop/expansion cannot settle a task')
-                    if stage.validation is not None:
-                        stage.validation.output(out)
-                    if stage.flat_map:
-                        # Pull one child at a time under downstream backpressure;
-                        # never turn an arbitrary expansion iterator into a list.
-                        children=iter(out)
-                        try:
-                            for index,child in enumerate(children):
-                                check_row(child)
-                                if unit_driver is not None:unit_driver.observe_expansion(name, child)
-                                progress(rows_output=1)
-                                if index and index%256==0:await asyncio.sleep(0)
-                                if not all(_predicate(p, child) for p in stage.post_filters):
-                                    stats.add_miss(f"{name}:filtered")
-                                    continue
-                                if q_out is not None:await q_out.put(ScopedRow(child,scope.child(index)) if scope else child)
-                                elif consume is not None:
-                                    set_row_scope(scope.child(index) if scope else None)
-                                    await _call(consume, child)
-                                    set_row_scope(scope)
-                                st["emitted"]+=1
-                        finally:
-                            close=getattr(children,'close',None)
-                            if close is not None:close()
-                    else:
-                        progress(rows_output=0 if out is None else len(out) if isinstance(out, list) else 1)
-                        out = _post_filter(stage.post_filters, out)
-                        if out is None:
-                            stats.add_miss(f"{name}:drop")
+                    async with emission_gate:
+                        if isinstance(out, list) and batch_limits is not None:
+                            from ..data.runtime_contract import check_size
+                            check_size(out, batch_limits['max_batch_bytes'])
+                        if scope is not None and scope.delivery is not None and type(out) is not dict:
+                            raise RuntimeContractError('Task callbacks must return exactly one record; drop/expansion cannot settle a task')
+                        if stage.validation is not None:
+                            stage.validation.output(out)
+                        if stage.flat_map:
+                            # Pull one child at a time under downstream backpressure;
+                            # never turn an arbitrary expansion iterator into a list.
+                            children=iter(out)
+                            try:
+                                for index,child in enumerate(children):
+                                    check_row(child)
+                                    if unit_driver is not None:unit_driver.observe_expansion(name, child)
+                                    progress(rows_output=1)
+                                    if index and index%256==0:await asyncio.sleep(0)
+                                    if not all(_predicate(p, child) for p in stage.post_filters):
+                                        stats.add_miss(f"{name}:filtered")
+                                        continue
+                                    if q_out is not None:await q_out.put(ScopedRow(child,scope.child(index)) if scope else child)
+                                    elif consume is not None:
+                                        set_row_scope(scope.child(index) if scope else None)
+                                        await _call(consume, child)
+                                        set_row_scope(scope)
+                                    st["emitted"]+=1
+                            finally:
+                                close=getattr(children,'close',None)
+                                if close is not None:close()
                         else:
-                            rows = out if isinstance(out, list) else (out,)
-                            for child_index,r in enumerate(rows):
-                                child_scope = scope.child(child_index) if scope and isinstance(out,list) else scope
-                                check_row(r)
-                                if unit_driver is not None:unit_driver.observe_expansion(name, r)
-                                if q_out is not None:
-                                    await q_out.put(ScopedRow(r,child_scope) if child_scope else r)
-                                elif consume is not None:
-                                    set_row_scope(child_scope)
-                                    await _call(consume, r)
-                                    set_row_scope(scope)
-                                st["emitted"] += 1
+                            progress(rows_output=0 if out is None else len(out) if isinstance(out, list) else 1)
+                            out = _post_filter(stage.post_filters, out)
+                            if out is None:
+                                stats.add_miss(f"{name}:drop")
+                            else:
+                                rows = out if isinstance(out, list) else (out,)
+                                for child_index,r in enumerate(rows):
+                                    child_scope = scope.child(child_index) if scope and isinstance(out,list) else scope
+                                    check_row(r)
+                                    if unit_driver is not None:unit_driver.observe_expansion(name, r)
+                                    if q_out is not None:
+                                        await q_out.put(ScopedRow(r,child_scope) if child_scope else r)
+                                    elif consume is not None:
+                                        set_row_scope(child_scope)
+                                        await _call(consume, r)
+                                        set_row_scope(scope)
+                                    st["emitted"] += 1
+                        if native_key is not None:
+                            stage.native_pending.pop(native_key)
+                            if not stage.native_pending:
+                                stage.native_idle.set()
+            if native_key is not None and native_key in stage.native_pending:
+                async with stage.native_emit_lock:
+                    stage.native_pending.pop(native_key)
+                    if not stage.native_pending:
+                        stage.native_idle.set()
             # 进度钩子挂首级消费口径（chain 的「实例进度」同位）
             if (log_every and stage is FIRST_STAGE_REF.get()
                     and st["in"] % log_every == 0 and on_progress is not None):
@@ -499,13 +536,17 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
         if out is None:
             return
         outs = out if isinstance(out, list) else [out]
-        for r in outs:
+        from .row_scope import current_row_scope
+        scope = current_row_scope() if stage.scope_id is not None else None
+        for index, r in enumerate(outs):
+            child_scope = scope.child(index) if scope is not None else None
             check_row(r)
             if not all(_predicate(p, r) for p in stage.post_filters):
                 continue
             if q_out is not None:
-                await q_out.put(r)
+                await q_out.put(ScopedRow(r, child_scope) if child_scope else r)
             elif consume is not None:
+                set_row_scope(child_scope)
                 await _call(consume, r)
             st["emitted"] += 1
 
@@ -527,8 +568,12 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             await grouped_worker(st)
             return
         loop = asyncio.get_running_loop()
+        restored = stage.recovery_buffer or []
+        stage.recovery_buffer = None
         while True:
-            batch, deadline, batch_bytes = [], None, 64
+            batch, restored, deadline = restored, [], None
+            from ..data.runtime_contract import check_size
+            batch_bytes = 64 + sum(check_size(row, batch_limits['max_row_bytes']) + 16 for row in batch) if batch_limits else 64
             while True:
                 timeout = None
                 if batch and stage.flush_interval is not None:
@@ -544,6 +589,13 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                     if batch:
                         await _flush(batch)
                     return                           # 尾批已刷，退役
+                if isinstance(row, _CheckpointBarrier):
+                    if row.final and batch:
+                        await _flush(batch)
+                        batch, batch_bytes = [], 64
+                    await row.arrive(stage, batch)
+                    continue
+                row = row.row if type(row) is ScopedRow else row
                 check_row(row)
                 if any(not _predicate(p, row) for p in stage.pre_filters):
                     stats.add_miss(f'{name}:filtered')
@@ -609,6 +661,10 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                 await flush(key)
 
     async def _flush(batch):
+        if stage.scope_id is not None:
+            from .recovery_contract import identity
+            set_row_scope(RowScope(identity(['fixed-batch', stage.scope_id, stage.batch_ordinal])))
+            stage.batch_ordinal += 1
         st = stats.stage(name)
         if map_worker is not None:
             await map_worker.prepare()
@@ -665,15 +721,17 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         raise ServiceStopped('operator_stop_file')
     make_queue = queue_factory or _local_queue
     queues = [make_queue(s.queue_depth) for s in stages]
-    whole_source = progress is not None and progress.whole_source
     from .raw_fetch import RawFetch
     from ..collect.operators import SearchWeb
-    track_occurrences = any(type(getattr(s.fn, '__self__', s.fn)) in {RawFetch,SearchWeb} for s in stages)
-    if track_occurrences and any(s.max_batch is not None or s.grouping is not None or s.prefix is not None for s in stages):
+    raw_occurrences = any(type(getattr(s.fn, '__self__', s.fn)) in {RawFetch,SearchWeb} for s in stages)
+    track_occurrences = raw_occurrences or any(s.native_recovery is not None for s in stages)
+    if raw_occurrences and any(s.max_batch is not None or s.grouping is not None or s.prefix is not None for s in stages):
         raise RuntimeContractError('Raw acquisition requires a row-local stream; materialize buffered transformations first')
+    if progress is not None:
+        progress.stats = stats
     if progress is not None and any(
             s.grouping is not None or s.prefix is not None or
-            s.max_batch is not None and not whole_source for s in stages):
+            s.max_batch is not None and (s.concurrency != 1 or s.flush_interval is not None) for s in stages):
         raise RuntimeContractError('Automatic stream progress requires row-local stages; grouped state needs its own commit contract')
     for stage in stages:
         stats.stage(stage.name)
@@ -712,22 +770,21 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                 if checked is not None:
                     checked.actor_lifecycle(owner, 'stopped', completed)
 
+    control = None
+
     async def feed():
         it = iter(source_iter)
-        # Resume a generator in the same Context across worker threads.
         feed_context = contextvars.copy_context()
-        batch_keys = []
         ordinal = 0
-        async def confirm():
-            from functools import partial
-            boundary = _BatchBoundary(stages, queues, partial(progress.confirm, list(batch_keys)))
-            for _ in range(stages[0].concurrency):
-                await queues[0].put(boundary)
-            await boundary.done.wait()
-            batch_keys.clear()
+        for index, stage in enumerate(stages):
+            for restored in stage.native_restore:
+                await queues[index].put(restored)
+            stage.native_restore = []
         while True:
             if checked is not None:
                 checked.check_stop()
+            if progress is not None and progress.stop_requested():
+                raise RuntimeContractError("Terminal preparation stopped")
             if cancellation is not None and cancellation.requested:
                 if unit_driver is not None:raise ServiceStopped('producer_cancelled_before_eos')
                 break
@@ -739,43 +796,75 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                 if unit_driver is not None:unit_driver.begin_unit()
                 source_ordinal = ordinal
                 ordinal += 1
-                if progress is not None:
-                    key = progress.select(row)
-                    if key is None:
-                        continue
-                    if not whole_source:
-                        batch_keys.append(key)
+                if progress is not None and source_ordinal < progress.inputs:
+                    progress.select(row)
+                    continue
                 if track_occurrences and type(row) is not ScopedRow:
                     from .recovery_contract import identity
                     row = ScopedRow(row, RowScope(identity(['source-occurrence',source_ordinal])))
-                await queues[0].put(row)
+                if control is not None:
+                    from ..data.runtime_contract import check_size
+                    amount = check_size(row.row if type(row) is ScopedRow else row,
+                                        progress.run.limits['max_row_bytes'])
+                    await control.admit(amount)
+                    async with control.gate:
+                        await queues[0].put(row)
+                        progress.select(row)
+                        control.accepted(progress.ordinal, amount)
+                    # Let a due trigger acquire the gate without stopping data
+                    # for the lifetime of the coordinating checkpoint.
+                    if control.changed.is_set():
+                        await asyncio.sleep(0)
+                else:
+                    await queues[0].put(row)
                 if unit_driver is not None:
-                    boundary = _BatchBoundary(stages, queues, unit_driver.end_unit)
-                    for _ in range(stages[0].concurrency):await queues[0].put(boundary)
-                    await boundary.done.wait()
-                if progress is not None and len(batch_keys) >= getattr(progress,'batch_rows',512):
-                    await confirm()
-        if batch_keys:
-            await confirm()
+                    boundary = _CheckpointBarrier(stages, queues, unit_driver.end_unit, track=track_commit)
+                    for _ in range(boundary.tokens(stages[0])):await queues[0].put(boundary)
+                    await boundary.wait()
         if unit_driver is not None:await unit_driver.end_source()
-        # Durable operator work is replayed after the live source is exhausted.
-        # This keeps recovery independent of upstream re-feeding: each stage
-        # may expose opaque recovery_rows(), while the platform remains unaware
-        # of row schemas or business rules.
-        for index, stage in enumerate(stages):
-            owner = getattr(stage.fn, '__self__', stage.fn)
-            recover = getattr(owner, 'recovery_rows', None)
+        # Restore-only emissions precede the final cut. An actor exposing this
+        # hook must see its live inputs drained before it enumerates recovery.
+        recovery = [(index, getattr(owners[id(stage)], 'recovery_rows', None))
+                    for index, stage in enumerate(stages)]
+        if control is not None and any(hook is not None for _, hook in recovery):
+            await control.finish()
+        emitted_recovery = False
+        for index, recover in recovery:
             if recover is None:
                 continue
             rows = recover()
             if inspect.isawaitable(rows):
                 rows = await rows
             for row in rows or ():
-                if stage.max_batch is not None and isinstance(row, list):
+                emitted_recovery = True
+                if stages[index].max_batch is not None and isinstance(row, list):
                     for item in row:
                         await queues[index].put(item)
                 else:
                     await queues[index].put(row)
+        if control is not None:
+            if control.finished.is_set() and emitted_recovery:
+                boundary = _CheckpointBarrier(stages, queues, None, progress=progress,
+                                              final=True, track=track_commit)
+                boundary.next_ordinal = progress.ordinal
+                control.pending = boundary
+                for _ in range(boundary.tokens(stages[0])):
+                    await queues[0].put(boundary)
+                await boundary.wait()
+            else:
+                await control.finish()
+
+    commit_tasks = set()
+    def track_commit(task):
+        commit_tasks.add(task)
+        all_tasks.append(task)
+        def retire(completed):
+            # Failed tasks remain visible to the watchdog until shutdown.
+            if not completed.cancelled() and completed.exception() is None:
+                commit_tasks.discard(completed)
+                all_tasks.remove(completed)
+        task.add_done_callback(observe_completion)
+        task.add_done_callback(retire)
 
     stage_tasks: list[list[asyncio.Task]] = []
     for i, s in enumerate(stages):
@@ -783,14 +872,20 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         stage_tasks.append([asyncio.create_task(
             _make_worker(s, queues[i], q_out, stats, on_progress, log_every, consume, unit_driver)())
             for _ in range(s.concurrency)])
+    if progress is not None:
+        control = CheckpointControl(progress, stages, queues, track_commit)
+    control_tasks = [asyncio.create_task(control.run(), name='demiflow-checkpoint-control')] if control else []
     feed_task = asyncio.create_task(feed())
-    all_tasks = [feed_task, *(t for g in stage_tasks for t in g)]
+    all_tasks = [feed_task, *control_tasks, *(t for g in stage_tasks for t in g)]
     # Watchdog reports the first failure, but several workers may fail together
     # (e.g. a shared budget). Observe every completed task, including late errors
     # after cancellation; retrieving does not suppress propagation below.
     def observe_completion(task):
         if not task.cancelled():
-            task.exception()
+            error = task.exception()
+            if error is not None and not fatal:
+                fatal.append(error)
+                _cancel_all()
     for task in all_tasks:
         task.add_done_callback(observe_completion)
     fatal: list[BaseException] = []
@@ -807,6 +902,8 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         return ServiceStopped('pipeline_failed:' + type(fatal[0]).__name__)
 
     def _cancel_all() -> None:
+        if control is not None:
+            control.fail(fatal[0] if fatal else asyncio.CancelledError('stream stopped'))
         if on_stop is not None:on_stop()
         for t in all_tasks:
             if not t.done() and not t.cancelling():
@@ -833,6 +930,17 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                     fatal.append(exc)
                     _cancel_all()
                     return
+            if progress is not None and progress.stop_requested():
+                fatal.append(ServiceStopped('terminal_preparation_stopped'))
+                _cancel_all()
+                return
+            if control is not None:
+                try:
+                    control.check()
+                except BaseException as exc:
+                    fatal.append(exc)
+                    _cancel_all()
+                    return
             if stop_path is not None and await asyncio.to_thread(stop_path.exists):
                 fatal.append(ServiceStopped('operator_stop_file'))
                 _cancel_all()
@@ -848,11 +956,11 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                     return
             if stall_timeout is None:
                 continue
-            progress = sum(v["in"] + v["emitted"]
+            stage_progress = sum(v["in"] + v["emitted"]
                            for v in stats.stages.values())
             now = time.monotonic()
-            if progress != last_progress:
-                last_progress, last_tick = progress, now
+            if stage_progress != last_progress:
+                last_progress, last_tick = stage_progress, now
                 continue
             if now - last_tick < stall_timeout:
                 continue
@@ -933,15 +1041,7 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                 raise ex
             if any(t.cancelled() for t in group):
                 raise asyncio.CancelledError('stream worker cancelled')
-            if not whole_source:
-                await stop_stage(stages[i])
-        if whole_source:
-            # All batch workers have flushed their ordinary EOF tails and all
-            # downstream work has drained. Commit before lifecycle teardown;
-            # no intermediate barrier flushes or changes logical batch groups.
-            await progress.confirm_source()
-            for stage in stages:
-                await stop_stage(stage)
+            await stop_stage(stages[i])
     except BaseException as exc:
         from .request_limits import ServiceStopped
         if isinstance(exc, Exception) and not fatal:
@@ -957,6 +1057,10 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                             'cancel_drain_timeout_s', 0)
                     for stage in stages
                 ])
+            from .run_context import current_run
+            run = current_run()
+            if run is not None:
+                timeout = min(timeout, run.limits['cancel_grace_s'])
             _, pending = await asyncio.wait(all_tasks, timeout=timeout)
             if pending:
                 for task in pending:

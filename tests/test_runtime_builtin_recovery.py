@@ -93,7 +93,6 @@ def run_collect(root, family, window=None):
 
     # Five rows exercise three real durable boundaries without hundreds of
     # image subprocesses. Same internal batch size in both test processes.
-    materialize.BATCH_ROWS = 2
     root = Path(root)
     directory = root / "run"
     original = protocol.fault_point
@@ -113,6 +112,8 @@ def run_collect(root, family, window=None):
             directory,
             {
                 "memory_bytes": 1024**3,
+                "checkpoint_rows": 2,
+                "checkpoint_interval_ms": 60000,
                 "max_row_bytes": 1024**2,
                 "max_batch_bytes": 2 * 1024**2,
             },
@@ -158,7 +159,6 @@ def test_builtin_partial_receipts_restore_without_serializing_resources(
 ):
     import demiflow.execution.stream_materialize as materialize
 
-    monkeypatch.setattr(materialize, "BATCH_ROWS", 2)
     if family == "lookup":
         lance.write_dataset(
             pa.table({"id": ["a", "b"], "value": ["pinned-a", "pinned-b"]}),
@@ -187,7 +187,9 @@ def test_builtin_partial_receipts_restore_without_serializing_resources(
     assert facts[0]["commit_id"] == before[0]["commit_id"]
     for fact in facts:
         assert fact["prepared"]["state"]
-        for ref in fact["prepared"]["state"].values():
+        for key, ref in fact["prepared"]["state"].items():
+            if key == "stream-progress":
+                continue
             assert (
                 json.loads((Path(reference.directory) / ref["path"]).read_text()) == {}
             )
@@ -315,7 +317,7 @@ def run_batch(root, window=None):
 @pytest.mark.parametrize(
     "window", ["during_batch", "after_prepared", "after_sink_commit_before_receipt"]
 )
-def test_fixed_batches_keep_original_groups_and_one_terminal_commit_on_resume(
+def test_fixed_batches_keep_original_groups_across_native_checkpoints_on_resume(
     tmp_path, window
 ):
     crashed = child(tmp_path, "run_batch", window)
@@ -329,7 +331,7 @@ def test_fixed_batches_keep_original_groups_and_one_terminal_commit_on_resume(
         assert len(before) == 1 and before[0]["status"] == "prepared"
     result, reference = run_batch(tmp_path)
     additional_calls = len((tmp_path / "calls").read_text().splitlines()) - calls
-    assert additional_calls == (154 if window == "during_batch" else 0)
+    assert additional_calls == (154 if window == "during_batch" else 8)
     source = [
         {"id": i, "payload": b"original\x00" if i % 3 else None} for i in range(536)
     ]
@@ -343,8 +345,8 @@ def test_fixed_batches_keep_original_groups_and_one_terminal_commit_on_resume(
     ]
     assert result == expected and len(result) == 1076
     facts = journal.execution_commits("action-1")
-    assert len(facts) == 1 and facts[0]["status"] == "acked"
-    assert facts[0]["intent"]["position"]["next_ordinal"] == 538
+    assert len(facts) == 2 and all(f["status"] == "acked" for f in facts)
+    assert facts[-1]["intent"]["position"]["next_ordinal"] == 538
     assert journal.execution_status()["attempt"] == 2
     assert not list(Path(reference.directory).rglob("checkpoint.json"))
 

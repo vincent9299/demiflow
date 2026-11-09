@@ -10,7 +10,9 @@ DEFAULT_LIMITS.update(max_row_bytes=run_row_limit(DEFAULT_LIMITS),
                       max_batch_bytes=run_row_limit(DEFAULT_LIMITS))
 
 RECOVERY_LIMITS = dict(max_state_bytes=16 * 1024**2, max_control_bytes=64 * 1024**2,
-                       max_commits=16384, max_requests=100000, max_artifacts=65536)
+                       max_commits=16384, max_requests=100000, max_artifacts=65536,
+                       checkpoint_rows=512, checkpoint_interval_ms=1000, checkpoint_timeout_s=60,
+                       checkpoint_unconfirmed_rows=4096, checkpoint_unconfirmed_bytes=64 * 1024**2)
 
 
 def execution_limits(values=None):

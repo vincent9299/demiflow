@@ -195,7 +195,8 @@ def save_facts(root, prepared, result, server, **more):
 
 
 def launch_observed(root, value, window, monkeypatch, *, resume=False):
-    (root/'joint_fault.json').write_text(json.dumps(dict(window=window)))
+    (root/'joint_fault.json').write_text(json.dumps(dict(window=window,
+        image_checkpoint_fixture=(root/'flows/image.py').is_file())))
     driver = str(Path(__file__).with_name('joint_forge_fault_driver.py'))
     original = subprocess.Popen
     target = str(runs.directory(root,value['run_id'])/'runtime/demiflow/workbench/runs/worker.py')
@@ -253,7 +254,7 @@ def test_actual_forge_multibatch_cancel_resume_prefix(image_workspace_base,tmp_p
     value = make_run(root,joint_http,count=130,materialize=True)
     ready = start_fault(root,value,window,monkeypatch)
     assert ready['fact']['status']==('prepared' if window=='after_prepared' else 'acked')
-    assert len(joint_http['requests'])==128
+    assert 128 <= len(joint_http['requests']) <= 130
     assert ready['fact']['intent']['position']['next_ordinal']==128
     runs.cancel(root,value['run_id']);previous = stop(root,value['run_id'])
     assert previous['status']=='cancelled' and previous['state']['usage_complete'] is True
@@ -386,7 +387,10 @@ def test_native_run_request_ceiling_fails_before_second_http_and_cannot_reset(tm
     assert len(joint_http['requests'])==1 and not (tmp_path/'out.lance').exists()
     with sqlite3.connect(tmp_path/'run/run.sqlite') as db:
         assert db.execute("SELECT consumed,ceiling FROM runtime_budgets WHERE name='requests'").fetchone()==(1,1)
-    with pytest.raises(RecoveryContractError,match='automatic regeneration is forbidden'):
+        assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 1
+    # The first response is now durable even before the output cut. Resume may
+    # reuse it, but cannot replenish the exhausted budget for the second row.
+    with pytest.raises(RecoveryContractError,match='budget.*exhausted'):
         with RunContext.resume(reference):dataset().write_lance(str(tmp_path/'out.lance'),mode='create')
     assert len(joint_http['requests'])==1 and not (tmp_path/'out.lance').exists()
 

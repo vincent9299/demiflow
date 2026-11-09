@@ -30,6 +30,7 @@ def atomic_bytes(path, raw):
         temporary.unlink(missing_ok=True)
 
 
+
 class StateArtifacts:
     def __init__(self, context):
         self.context = context
@@ -40,17 +41,16 @@ class StateArtifacts:
         raw = document(value, self.context.limits["max_state_bytes"])
         sha = hashlib.sha256(raw).hexdigest()
         name = sha + ".json"
-        self.context.allocate_artifact(self.root / name)
-        with self.context.journal.execution_guard(self.context.fence):
+        self.context.allocate_artifact(self.root / name, size=len(raw))
+        with self.context.journal.publication_guard(self.context.fence):
             from .block_sink import storage_usage
             total = storage_usage(self.context)
             target = self.root / name
             if not target.exists():
-                if total + len(raw) > self.context.limits["max_scratch_bytes"]:
-                    raise RecoveryContractError("State disk budget exceeded")
                 atomic_bytes(target, raw)
             elif target.read_bytes() != raw:
                 raise RecoveryContractError("Existing state artifact is corrupt")
+        self.context.release_temporaries([target.with_name(target.name + ".staging")])
         return dict(state_id=state_id, path="state/" + name, bytes=len(raw), sha256=sha)
 
     def read(self, reference):

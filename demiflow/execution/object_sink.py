@@ -30,9 +30,11 @@ def image_request_budget(action):
 def check_image_replay(action):
     """One action watermark in the existing prepared artifact descriptor.
 
-    A charged external call without a prepared result is unresolved. No model
-    request/result index or per-request recovery state is introduced.
+    Legacy participants use the action watermark. Native row-local prompt
+    participants reconcile each occurrence through the existing model journal.
     """
+    if getattr(action, "native_image_effects", False):
+        return  # Each occurrence is reconciled from the same native commit journal.
     with action.context._object_resource_lock:
         if not getattr(action,'replaying',False) or getattr(action,'_image_replay_checked',False):return
         confirmed=0
@@ -49,7 +51,8 @@ def check_image_replay(action):
 
 class ObjectSink(Datasink):
     """One action's immutable blobs; bytes and metadata have separate quotas."""
-    def __init__(self, action, *, logical_root=None, sink_id='objects', max_object_bytes=32*1024**2, max_objects=128):
+    def __init__(self, action, *, logical_root=None, sink_id='objects', max_object_bytes=32*1024**2, max_objects=128,
+                 object_action_id=None):
         self.action, self.run = action, action.context
         self.sink_id = identifier(sink_id)
         if type(max_object_bytes) is not int or not 1 <= max_object_bytes <= 64*1024**2:
@@ -59,12 +62,18 @@ class ObjectSink(Datasink):
         self.maximum, self.count = max_object_bytes, max_objects
         from .object_resources import namespace_record
         self.resource=namespace_record(self.run,logical_root or self.run.directory/'objects')
-        self.root=Path(self.resource['physical_root'])/action.action_id/sink_id
+        owner = object_action_id or action.action_id
+        if owner not in {action.action_id, action.action_id + '-stream'}:
+            raise RecoveryContractError('Object owner must be the action or its native stream child')
+        self.root=Path(self.resource['physical_root'])/owner/sink_id
         self.store = LocalObjectStore(self.root)
         if self.store.directory != self.root:
             raise RecoveryContractError('Object write root must not use relocation or symlinks')
         self.objects = {}
+        self.manifest = None
         self._objects_lock=threading.RLock()
+        from collections import OrderedDict
+        self._synced_directories = OrderedDict()
 
     def recovery_identity(self):
         return dict(format=1, logical_root=self.resource['logical_root'], root=self._name(self.root),
@@ -93,9 +102,6 @@ class ObjectSink(Datasink):
         ref = self.store.reference(sha)
         target = self.root / sha[:2] / sha
         fact = dict(path=self._name(target), bytes=len(raw), sha256=sha)
-        with self._objects_lock:
-            if sha not in self.objects and len(self.objects) >= self.count:
-                raise RecoveryContractError('Object manifest count exceeds ceiling')
         # Do not adopt files created by another producer, even if they happen
         # to have the same content name inside this run's directory.
         with self.run.journal.execution_guard(self.run.fence) as db:
@@ -103,24 +109,39 @@ class ObjectSink(Datasink):
             if target.exists() and owned is None:
                 raise RecoveryContractError('Object path is not owned by this run')
         self.run.reserve_output('object_bytes', len(raw), reservation_id='object-' + identity(fact),admitted=admitted)
+        if target.exists():
+            self._verify(fact)
+            self._record_object(sha, fact)
+            return ref.to_dict()
         temporary = target.parent / ('.pending-' + uuid.uuid4().hex)
-        self.run.allocate_artifact(target)
-        self.run.allocate_artifact(temporary)
-        with self.run.journal.execution_guard(self.run.fence):
+        self.run.allocate_artifact(target, size=len(raw), atomic=False)
+        self.run.allocate_artifact(temporary, size=len(raw), atomic=False)
+        with self.run.journal.publication_guard(self.run.fence):
             if any(p.is_symlink() for p in (target, *target.parents)):
                 raise RecoveryContractError('Object path contains a symlink')
-            additional = 0 if target.exists() or admitted else 2*len(raw)
-            if storage_usage(self.run) + additional > self.run.limits['max_scratch_bytes']:
-                raise RecoveryContractError('Object staging exceeds shared scratch budget')
             try:
                 self.store.put(raw, sha256=sha, temporary=temporary, max_bytes=len(raw))
             except ValueError as exc:
                 raise RecoveryContractError('Object publication content differs') from exc
             self._verify(fact)
             from .object_resources import sync_directories
-            sync_directories(self.resource,target.parent)
-        with self._objects_lock:self.objects[sha]=fact
+            sync_directories(self.resource,target.parent, synced=self._synced_directories)
+        self.run.release_temporaries([temporary, target.with_name(target.name + ".staging")])
+        self._record_object(sha, fact)
         return ref.to_dict()
+
+    def _record_object(self, sha, fact):
+        with self._objects_lock:
+            if sha not in self.objects and len(self.objects) >= min(self.count, 256):
+                self._flush_page()
+            self.objects[sha] = fact
+
+    def adopt(self, prepared):
+        """Carry durable child references into the final publication receipt."""
+        self._validate(prepared)
+        from .artifact_manifest import entries
+        for fact in entries(self.run, prepared['objects']):
+            self._record_object(fact['sha256'], fact)
 
     def _verify(self, fact):
         if type(fact) is not dict or set(fact) != {'path', 'bytes', 'sha256'}:
@@ -175,15 +196,36 @@ class ObjectSink(Datasink):
         if type(prepared['image_requests']) is not int or not 0<=prepared['image_requests']<=self.run.limits['max_requests']:
             raise RecoveryContractError('Invalid external request watermark')
         values = prepared['objects']
-        if type(values) is not list or len(values) > self.count:
+        if type(values) is list and len(values) > self.count:
             raise RecoveryContractError('Prepared object count exceeds ceiling')
         document(prepared)
-        hashes = []
-        for fact in values:
-            self._verify(fact)
-            hashes.append(fact['sha256'])
-        if hashes != sorted(set(hashes)):
-            raise RecoveryContractError('Object manifest identity is not canonical')
+        from .artifact_manifest import manifest_pages
+        pages = [(None, values)] if type(values) is list else manifest_pages(self.run.directory, values,
+            maximum=self.run.limits['max_artifacts'])
+        for _, page in pages:
+            if len(page) > self.count:
+                raise RecoveryContractError('Prepared object page exceeds ceiling')
+            hashes = []
+            for fact in page:
+                self._verify(fact)
+                hashes.append(fact['sha256'])
+            if hashes != sorted(set(hashes)):
+                raise RecoveryContractError('Object manifest identity is not canonical')
+
+    def _flush_page(self):
+        from .artifact_manifest import ArtifactManifest
+        if self.manifest is None:
+            self.manifest = ArtifactManifest(self.run,
+                self.run.directory / 'materializations' / self.action.action_id / (self.sink_id + '-index'))
+        if self.objects:
+            self.manifest.append([self.objects[k] for k in sorted(self.objects)])
+            self.objects = {}
+
+    def _descriptor(self):
+        if self.manifest is None:
+            return [self.objects[k] for k in sorted(self.objects)]
+        self._flush_page()
+        return self.manifest.seal()
 
     def _marker(self, context):
         return self.root / '.receipts' / (identifier(context.commit_id) + '.json')
@@ -194,8 +236,13 @@ class ObjectSink(Datasink):
             for raw in blocks:
                 self.stage(raw)
         with self._objects_lock:
-            prepared = {**self.recovery_identity(), 'objects': [self.objects[k] for k in sorted(self.objects)],
-                        'image_requests':self.run.journal.budget_consumed(image_request_budget(self.action))}
+            prepared = {**self.recovery_identity(), 'objects': self._descriptor(),
+                        'image_requests':getattr(self, 'image_requests', None)}
+            if prepared['image_requests'] is None:
+                prepared['image_requests'] = self.run.journal.budget_consumed(image_request_budget(self.action))
+            # Seal transfers this generation. Later producers append to fresh
+            # pages; reset of this receipt cannot erase their equal-hash rows.
+            self.objects, self.manifest = {}, None
         self._validate(prepared)
         self.run.reserve('object_metadata_bytes', len(document(prepared)),
             reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id}),
@@ -232,11 +279,10 @@ class ObjectSink(Datasink):
             return existing
         receipt = dict(commit_id=context.commit_id, sink_id=self.sink_id, status='committed', data=prepared)
         raw = document(receipt)
-        if storage_usage(self.run) + len(raw) > self.run.limits['max_scratch_bytes']:
-            raise RecoveryContractError('Object receipt exceeds shared scratch budget')
+        self.run.allocate_artifact(self._marker(context), commit_id=context.commit_id, size=len(raw))
         atomic_bytes(self._marker(context), raw)
         from .object_resources import sync_directories
-        sync_directories(self.resource,self._marker(context).parent)
+        sync_directories(self.resource,self._marker(context).parent, synced=self._synced_directories)
         return receipt
 
     def abort(self, prepared, context):
@@ -245,12 +291,22 @@ class ObjectSink(Datasink):
         # prepared/committed references protect shared hashes within this run.
         self._validate(prepared)
 
+    def detach(self):
+        from copy import copy
+        with self._objects_lock:
+            sealed = copy(self)
+            sealed._objects_lock = threading.RLock()
+            sealed.image_requests = self.run.journal.budget_consumed(image_request_budget(self.action))
+            self.objects = {}
+            self.manifest = None
+            return sealed
+
     def reset(self,prepared=None):
         with self._objects_lock:
-            if prepared is None:self.objects={}
-            else:
-                for fact in prepared['objects']:
-                    if self.objects.get(fact['sha256'])==fact:self.objects.pop(fact['sha256'],None)
+            if prepared is None:
+                self.objects={}
+                self.manifest=None
+
 
 
 def image_object_specs(plan):
@@ -270,18 +326,20 @@ def image_object_specs(plan):
 
 class ObjectRowsSink(Datasink):
     """A single native participant: objects publish before their row references."""
-    def __init__(self, action, *, object_specs=None, rows_sink=None, input_factory=None, **object_limits):
+    def __init__(self, action, *, object_specs=None, rows_sink=None, input_factory=None,
+                 object_action_id=None, **object_limits):
         self.rows = rows_sink or BlockSink(action,'rows')
         self.sink_id=getattr(rows_sink,'sink_id','output')
         self.input_factory=input_factory
+        object_action_id = object_action_id or (action.action_id + '-stream' if input_factory is not None else None)
         self.object_sinks={}
         if object_specs:
             for index,(root,maximum) in enumerate(sorted(object_specs.items())):
                 self.object_sinks[root]=ObjectSink(action,logical_root=root,max_object_bytes=maximum,
-                    max_objects=1024,sink_id='objects' if index==0 else 'objects-'+str(index))
+                    max_objects=1024,sink_id='objects' if index==0 else 'objects-'+str(index), object_action_id=object_action_id)
             self.objects=next(iter(self.object_sinks.values()))
         else:
-            self.objects=ObjectSink(action,**object_limits)
+            self.objects=ObjectSink(action,object_action_id=object_action_id,**object_limits)
             self.object_sinks[self.objects.resource['logical_root']]=self.objects
 
     @classmethod
@@ -302,6 +360,7 @@ class ObjectRowsSink(Datasink):
         registered={r['logical_root']:r for r in action.context.journal.object_roots()}
         from .object_resources import namespace_record
         names=[]
+        owners=[]
         for index,part in enumerate(parts):
             if type(part) is not dict or type(part.get('logical_root')) is not str:
                 raise RecoveryContractError('Invalid prepared object resource')
@@ -311,14 +370,23 @@ class ObjectRowsSink(Datasink):
             record=namespace_record(action.context,name)
             if name!=record['logical_root'] or registered.get(name)!=record:
                 raise UnresolvedCommit('Object inspection requires its registered run namespace')
+            root_parts = Path(part.get('root', '')).parts
+            if len(root_parts) != 4 or root_parts[2] not in {action.action_id, action.action_id + '-stream'}:
+                raise UnresolvedCommit('Prepared objects have an unrelated action owner')
+            owner = root_parts[2]
+            if owner != action.action_id:
+                child = action.context.journal.execution_action(owner)
+                if child is None or child['declaration'].get('parent') != action.semantic_id:
+                    raise UnresolvedCommit('Prepared objects have no bound native stream child')
+            owners.append(owner)
         if names!=sorted(set(names)):
             raise RecoveryContractError('Object resource order or identity differs')
         def limits(part):
             return dict(logical_root=part['logical_root'],max_object_bytes=part.get('max_object_bytes'),
                         max_objects=part.get('max_objects'))
-        sink=cls(action,rows_sink=rows_sink,**limits(parts[0]))
+        sink=cls(action,rows_sink=rows_sink,object_action_id=owners[0],**limits(parts[0]))
         for index,part in enumerate(parts[1:],1):
-            sink.object_sinks[part['logical_root']]=ObjectSink(action,sink_id='objects-'+str(index),**limits(part))
+            sink.object_sinks[part['logical_root']]=ObjectSink(action,sink_id='objects-'+str(index),object_action_id=owners[index],**limits(part))
         return sink
 
     def append(self,row):

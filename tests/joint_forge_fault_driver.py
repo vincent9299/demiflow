@@ -14,7 +14,9 @@ import tempfile
 import time
 
 runtime_script, mode, root, run_id, *tail = sys.argv[1:]
-runtime = Path(runtime_script).resolve().parents[2]
+# Sealed layout is <target>/runtime/demiflow/<package path>; depth differs
+# between forge/run_worker.py and workbench/runs/worker.py.
+runtime = next(p for p in Path(runtime_script).resolve().parents if p.name == 'runtime')
 sys.path.insert(0, str(runtime))
 from demiflow.workbench.runs import worker as run_worker
 
@@ -60,6 +62,11 @@ if mode == 'supervise':
     finally:
         observe('finish')
 elif mode == 'execute':
+    from demiflow.execution.runtime_limits import RECOVERY_LIMITS
+    if window.get('image_checkpoint_fixture') and 'checkpoint_rows' in RECOVERY_LIMITS:
+        # Bind a deterministic row-trigger workload in each isolated attempt;
+        # these defaults are recorded in the native recovery identity.
+        RECOVERY_LIMITS.update(checkpoint_rows=128, checkpoint_interval_ms=60000)
     from demiflow.execution.run_context import current_run
     import demiflow.execution.commit as protocol
     from demiflow.execution.object_sink import ObjectSink

@@ -55,8 +55,7 @@ class LanceSink(Datasink):
                         raise RecoveryContractError("Lance output exceeds row/byte budget")
                     # IPC framing/alignment plus retained buffers; native allocations
                     # remain covered by the driver isolation, not by this estimate.
-                    if storage_usage(self.run) + 2 * block.get_total_buffer_size() + 65536 > self.run.limits['max_scratch_bytes']:
-                        raise RecoveryContractError('Lance staging exceeds scratch admission budget')
+                    self.run.reserve_artifact_bytes(path, stream.tell() + 2 * block.get_total_buffer_size() + 65536)
                     schema = schema or block.schema
                     block_schema = self.spec.schema or block.schema
                     if block.schema != block_schema:
@@ -68,7 +67,7 @@ class LanceSink(Datasink):
                         writer.write_table(block)
                     writer.close()
                     stream.flush()
-                    storage_usage(self.run)
+                    self.run.reserve_artifact_bytes(path, stream.tell())
                 if writer is None:
                     if schema is None and self.spec.mode == 'merge' and base is not None:
                         schema = current.schema
@@ -79,6 +78,7 @@ class LanceSink(Datasink):
                     writer.close()
                 stream.flush()
                 os.fsync(stream.fileno())
+                self.run.reserve_artifact_bytes(path, stream.tell())
         except BaseException as exc:
             path.unlink(missing_ok=True)
             from ..errors import InvalidLanceRequest
@@ -218,7 +218,9 @@ class LanceSink(Datasink):
         if receipt.status != "committed":
             raise LanceWriteError(receipt)
         result = self._receipt(receipt, context)
-        atomic_bytes(self._marker(context), document(result, 65536))
+        raw = document(result, 65536)
+        self.run.allocate_artifact(self._marker(context), commit_id=context.commit_id, size=len(raw))
+        atomic_bytes(self._marker(context), raw)
         return result
 
     def abort(self, prepared, context):

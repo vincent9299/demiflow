@@ -65,6 +65,7 @@ class InProcessOperatorLLMCoordinator:
                 raise RuntimeError('Cannot release an execution with in-flight model work')
             self._execution_binding=None
             self._artifact_request_budget=None
+            self._native_group_journal=False
 
     def reserve(self) -> str:
         with self._lock:
@@ -74,16 +75,16 @@ class InProcessOperatorLLMCoordinator:
             if self._execution_binding is not None:
                 context, name = self._execution_binding
                 artifact_budget=getattr(self,'_artifact_request_budget',None)
-                if artifact_budget is None:
-                    context.reserve('requests', reservation_id=value)
-                    context.reserve(name, reservation_id=value,
-                        ceiling=self._max_requests or context.limits['max_requests'])
+                charges = {'requests': (1, context.limits['max_requests']),
+                           name: (1, self._max_requests or context.limits['max_requests'])}
+                if artifact_budget is not None:
+                    charges[artifact_budget] = (1, context.limits['max_requests'])
+                context.check_stop()
+                if getattr(self, '_native_group_journal', False):
+                    from .stream_recovery import CALL_RESERVATION
+                    CALL_RESERVATION.set((value, charges))
                 else:
-                    context.check_stop()
-                    context.journal.reserve_budgets(context.fence,value,{
-                        'requests':(1,context.limits['max_requests']),
-                        name:(1,self._max_requests or context.limits['max_requests']),
-                        artifact_budget:(1,context.limits['max_requests'])})
+                    context.journal.reserve_budgets(context.fence, value, charges)
             self._reservations.add(value)
             self._usage = replace(self._usage, requests_reserved=self._usage.requests_reserved + 1)
         self._publish()
@@ -371,6 +372,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
             try:
                 client = (create_async_operator_llm_client(prompt.model,self.options)
                           if self.options else create_async_operator_llm_client(prompt.model))
+                recovery = getattr(self, 'native_recovery', None)
+                if recovery is not None:
+                    recovery.bind_client(client)
                 configure = getattr(client, 'configure_capacity', None)
                 if self.artifact_store is not None:client.artifact_store=self.artifact_store
                 if configure is not None:
@@ -486,6 +490,14 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
 class PromptActor(BoundOperatorLLMMap):
     """Native map_async actor; uses exactly the map_prompt row contract."""
 
+    def native_stream_recovery(self, action, node_id):
+        options = self._runtime.options or {}
+        if self.environment is not None or any(k in options for k in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
+            return None
+        from .stream_recovery import NativePromptRecovery
+        self._runtime.native_recovery = NativePromptRecovery(self, action, node_id)
+        return self._runtime.native_recovery
+
     def bind_execution(self, context, node_id):
         self._runtime.coordinator.bind_execution(context, node_id)
         if self._prompt.response_format=='image':
@@ -567,6 +579,9 @@ class PromptActor(BoundOperatorLLMMap):
             import sqlite3
             from ..data.runtime_contract import RuntimeContractError
             if isinstance(exc, RuntimeContractError) or isinstance(exc, (ModelServiceError, ServiceStopped, OSError, sqlite3.Error)) and not isinstance(exc, TimeoutError):
+                raise
+            from .journal import UncertainPromptCall
+            if isinstance(exc, UncertainPromptCall):
                 raise
             if not self.error_output:raise
             if self._prompt.response_format == 'image':

@@ -31,18 +31,33 @@ def owner_bytes(record):
     return document({'format':1,'root_id':record['root_id'],'run_id':record['run_id']})
 
 
-def sync_directories(record, directory):
+def sync_directories(record, directory, *, synced=None):
     """Persist newly created namespace ancestors as well as the file shard."""
     directory=Path(directory)
     logical=Path(record['logical_root'])
     if not directory.is_relative_to(logical):
         raise RecoveryContractError('Object directory escapes its logical destination')
+    pending = []
     while True:
-        descriptor=os.open(directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-        try:os.fsync(descriptor)
-        finally:os.close(descriptor)
-        if directory==logical.parent:break
-        directory=directory.parent
+        info = directory.stat()
+        key = (str(directory), info.st_dev, info.st_ino)
+        if synced is not None and key in synced and not pending:
+            return  # Its contents were synced by the native object writer.
+        pending.append((directory, key))
+        if directory == logical.parent or synced is not None and key in synced:
+            break
+        directory = directory.parent
+    for directory, _ in pending:
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    if synced is not None:
+        for _, key in pending:
+            synced[key] = True
+        while len(synced) > 512:
+            synced.popitem(last=False)
 
 
 def inspect_namespace(record):
@@ -80,7 +95,7 @@ def bind_namespace(context, logical_root):
         return namespace
     context.reserve('object_namespace_metadata_bytes',len(owner_bytes(record)),
         reservation_id=record['root_id'],ceiling=context.limits['max_control_bytes'])
-    with context.journal.execution_guard(context.fence):
+    with context.journal.publication_guard(context.fence):
         if new:
             try:namespace.mkdir(parents=True,exist_ok=False)
             except FileExistsError as exc:

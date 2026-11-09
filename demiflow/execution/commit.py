@@ -170,7 +170,8 @@ class CommitCoordinator:
                     self.journal.publish_receipt(db,context.commit_id,sink_id,receipt)
                 fault_point('after_sink_receipt',context.commit_id)
             else:
-                with self.journal.execution_guard(self.run.fence) as db:
+                guard = getattr(self.journal, 'publication_guard', self.journal.execution_guard)
+                with guard(self.run.fence) as publication_db:
                     receipt = sink.inspect(prepared["sinks"][sink_id], context)
                     if receipt is None:
                         if sink_id in fact["receipts"]:
@@ -183,8 +184,23 @@ class CommitCoordinator:
                             from .recovery_contract import UnresolvedCommit
                             raise UnresolvedCommit('Sink publication returned without matching inspect evidence')
                     receipt = validate_receipt(receipt, context, sink_id)
-                    self.journal.publish_receipt(db, context.commit_id, sink_id, receipt)
+                    if publication_db is None:
+                        with self.journal.execution_guard(self.run.fence) as db:
+                            self.journal.publish_receipt(db, context.commit_id, sink_id, receipt)
+                    else:
+                        self.journal.publish_receipt(publication_db, context.commit_id, sink_id, receipt)
                 fault_point("after_sink_receipt", context.commit_id)
+        # Every publication call has returned; only its removed private staging
+        # registrations are eligible. Durable receipts and prepared data stay.
+        from .object_sink import ObjectRowsSink
+        for sink in sinks.values():
+            participants = ([sink.rows, *sink.object_sinks.values()]
+                            if type(sink) is ObjectRowsSink else [sink])
+            for participant in participants:
+                marker = getattr(participant, '_marker', None)
+                if marker is not None:
+                    path = marker(context)
+                    self.run.release_temporaries([path.with_name(path.name + '.staging')])
         self.journal.confirm_commit(self.run.fence, context.commit_id,
             expected="prepared", status="data_committed")
         fault_point("after_data_committed", context.commit_id)

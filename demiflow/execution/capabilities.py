@@ -90,7 +90,7 @@ def stream_residency(facts, limits):
     # Materialization cache plus bounded control state, and reader/serialization
     # buffers. Native libraries and candidate temporaries still need the process
     # guard; this reservation describes platform-owned Python payload.
-    fixed = 80 * 1024**2 + 3 * batch_bytes
+    fixed = max(80 * 1024**2, 32 * 1024**2 + 3 * limits.get("max_state_bytes", 16 * 1024**2)) + 3 * batch_bytes
     facts = list(facts)
     if any(f.get("native", {}).get("contract") == "demiflow.prompt.http" for f in facts):
         # Recovery index, output encoding and atomic batch publication buffers.

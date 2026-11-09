@@ -34,6 +34,7 @@ def iter_stream_rows(executor,source,plan,*,limit=None):
         from .run_context import admit_stream
         residency=admit_stream(plan)
         retained_bytes=0
+        delivered_rows=0
         result_budget=run.limits['memory_bytes']-residency['reserved_bytes']-run.limits['max_row_bytes']
         executor._run_ref=run.ref
         declaration=plan_identity('delivery',source,plan,arguments={'limit':limit})
@@ -116,9 +117,12 @@ def iter_stream_rows(executor,source,plan,*,limit=None):
                             if retained_bytes>result_budget:
                                 raise RecoveryContractError('Bounded take result exceeds its driver byte budget')
                         yield row
+                        delivered_rows += 1
+                        if limit is not None and delivered_rows >= limit:
+                            return
             finally:
                 stopped.set()
-                deadlines=[getattr(getattr(op,'callable',None),'target',None) for op in plan.operations]
-                grace=max([10]+[getattr(getattr(a,'__self__',a),'cancel_drain_timeout_s',0) for a in deadlines])
-                worker.join(timeout=grace+2)
-                if worker.is_alive():raise RecoveryContractError('Native delivery work did not drain within its deadline')
+                worker.join(timeout=run.limits['cancel_grace_s']+2)
+                if worker.is_alive():
+                    run.quarantine_worker(worker)
+                    raise RecoveryContractError('Native delivery exceeded cancel/drain budget; owned writer isolated')

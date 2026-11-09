@@ -42,10 +42,10 @@ thread 适用于阻塞 I/O 或释放 GIL 的计算；不保证纯 Python CPU 回
 | --- | --- |
 | Local `run_stream()` | 执行新策略；只有显式流式 map 的计划也可以执行 |
 | Local `materialize()` | 复用同一流式执行器，成功清理资源后交付物化句柄 |
-| `checkpoint()` / `checkpoint_lance()` | 从第一个流式节点连接现有 checkpoint 桥；固定结果可重放 |
-| Local `take/count/iter_rows/write_*` 等普通惰性动作 | 显式报错，不忽略流式参数；先 `materialize()` 再消费 |
+| `checkpoint()` / `checkpoint_lance()` | 显式 checkpoint 编排已退出当前原生能力；使用 RunContext 恢复 |
+| Local 支持的 `take/iter_rows/write_*` terminal | 复用原生流式结果、交付或直接 sink 适配；具体能力由统一入口检查决定 |
 | Ray | 不支持这些流式参数，也不支持 `run_stream()`；在集群及数据源访问前拒绝 |
-| `join/reduce_by_key`、惰性分组与 `union` 消费带新策略的输入 | 先物化或 checkpoint；不能将调度策略隐藏在关系来源中 |
+| `join/reduce_by_key`、惰性分组与 `union` 消费带新策略的输入 | 先物化；不能将调度策略隐藏在关系来源中 |
 | `prepend(other)` 的 other | 必须为有限同步 Dataset；不能含显式流式 map，即使并发为 1 |
 
 `backend_options` 和新策略不能同时指定。关系算子没有因此获得流式执行能力；
@@ -72,6 +72,12 @@ class Normalize:
     def __call__(self, row):
         self.processed += 1
         return {**row, "value": row["value"] + self.offset}
+
+    def snapshot_state(self):
+        return {"processed": self.processed}
+
+    def restore_state(self, value):
+        self.processed = value["processed"]
 
 stats = (
     data.from_items([{"value": i} for i in range(100)])
@@ -144,12 +150,18 @@ concurrency=1 的 inline 同步节点按收到行的顺序调用；上游并发�
 
 action 的持久 checkpoint 与单算子日志不同：
 
-- JSONL/Lance checkpoint 复用调用方显式版本/指纹绑定的完整结果，沿用其原恢复规则。
-- `run_stream(checkpoint=StreamCheckpoint(...))` 可与线程 map 共用；仍由业务声明身份、
-  固定来源、pending 范围及 append sinks。线程 map 不改变 sink 的提交/冲突检查。
+- 原生 `RunContext` 绑定代码、计划、来源和预算，统一保存状态、结果和恢复进度。
+- 显式 JSONL/Lance/operator checkpoint 编排由能力门禁拒绝；历史产物与旧接口定义
+  不代表当前受支持的执行路径。
 - `prepend` 的 pending Dataset 保持同步。需要重新并发处理时，可在注入后的主流
   声明 map 节点；不能把异步 Dataset 直接当作 pending 来源。
 - 普通 map 不提供 exactly-once 副作用保证；未提交行可能在恢复时重新执行。
+
+屏障只在必要的本地安全点对齐。源在显式未确认资源额度内继续投喂，不因下一次
+checkpoint 触发而等待最终 sink。原生 HTTP 模型的有界在途快照、已知响应复用、
+未知请求保护以及所有 terminal 的完成边界见 [原生屏障协议](native-barrier-checkpoints.md)。
+当前直接流式 `count()` 仍受到原有嵌套 action 限制；计数使用 `materialize().count()`。
+屏障扩展不将这个既有失败路径声明为新增支持。
 
 ## 有限资源和观测
 

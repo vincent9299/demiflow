@@ -1,5 +1,6 @@
 """Bounded blocking work owned by a model actor/client, never a global queue."""
 import asyncio
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -25,7 +26,8 @@ class BlockingIOPool:
                 raise RuntimeError('Blocking I/O pool is closed')
             if self._executor is None:
                 self._executor = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix=self.name)
-            future = asyncio.get_running_loop().run_in_executor(self._executor, lambda: fn(*args, **kwargs))
+            context = contextvars.copy_context()
+            future = asyncio.get_running_loop().run_in_executor(self._executor, lambda: context.run(fn, *args, **kwargs))
             self._pending.add(future)
             try:
                 return await asyncio.shield(future)

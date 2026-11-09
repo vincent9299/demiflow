@@ -197,7 +197,7 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), document TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), attempt INTEGER NOT NULL, fence TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_actions (action_id TEXT PRIMARY KEY, declaration TEXT NOT NULL, snapshot TEXT, result TEXT);
-          CREATE TABLE IF NOT EXISTS runtime_artifacts (path TEXT PRIMARY KEY, commit_id TEXT);
+          CREATE TABLE IF NOT EXISTS runtime_artifacts (path TEXT PRIMARY KEY, commit_id TEXT, protected INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0);
           CREATE TABLE IF NOT EXISTS runtime_object_roots (root_id TEXT PRIMARY KEY, logical_root TEXT UNIQUE NOT NULL, physical_root TEXT NOT NULL, run_id TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_sources (action_id TEXT PRIMARY KEY, document TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_commits (commit_id TEXT PRIMARY KEY, action_id TEXT NOT NULL, sequence INTEGER NOT NULL, status TEXT NOT NULL, intent TEXT NOT NULL, prepared TEXT, UNIQUE(action_id,sequence));
@@ -205,6 +205,41 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_budgets (name TEXT PRIMARY KEY, consumed INTEGER NOT NULL, ceiling INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_reservations (name TEXT NOT NULL, reservation_id TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(name,reservation_id));
         ''')
+
+        # Additive ownership metadata; historical execution identity is unchanged.
+        columns = {r[1] for r in db.execute('PRAGMA table_info(runtime_artifacts)')}
+        for name, definition in (('protected', 'INTEGER NOT NULL DEFAULT 0'), ('bytes', 'INTEGER NOT NULL DEFAULT 0'),
+                                 ('reference_commit_id', 'TEXT')):
+            if name not in columns:
+                db.execute('ALTER TABLE runtime_artifacts ADD COLUMN ' + name + ' ' + definition)
+        db.executescript("""
+          CREATE TABLE IF NOT EXISTS runtime_storage (singleton INTEGER PRIMARY KEY CHECK(singleton=1), items INTEGER NOT NULL, bytes INTEGER NOT NULL, object_bytes INTEGER NOT NULL);
+          CREATE TABLE IF NOT EXISTS runtime_reservation_count (singleton INTEGER PRIMARY KEY CHECK(singleton=1), items INTEGER NOT NULL);
+          CREATE TRIGGER IF NOT EXISTS runtime_reservation_added AFTER INSERT ON runtime_reservations BEGIN
+            UPDATE runtime_reservation_count SET items=items+1 WHERE singleton=1;
+          END;
+          CREATE TRIGGER IF NOT EXISTS runtime_reservation_removed AFTER DELETE ON runtime_reservations BEGIN
+            UPDATE runtime_reservation_count SET items=items-1 WHERE singleton=1;
+          END;
+          CREATE INDEX IF NOT EXISTS runtime_artifacts_protected ON runtime_artifacts(protected,path);
+          CREATE INDEX IF NOT EXISTS runtime_artifacts_reference_commit ON runtime_artifacts(reference_commit_id);
+          CREATE TRIGGER IF NOT EXISTS runtime_artifact_added AFTER INSERT ON runtime_artifacts BEGIN
+            UPDATE runtime_storage SET items=items+1,bytes=bytes+NEW.bytes,object_bytes=object_bytes+CASE WHEN NEW.path LIKE 'materializations/@objects-%' THEN NEW.bytes ELSE 0 END WHERE singleton=1;
+          END;
+          CREATE TRIGGER IF NOT EXISTS runtime_artifact_removed AFTER DELETE ON runtime_artifacts BEGIN
+            UPDATE runtime_storage SET items=items-1,bytes=bytes-OLD.bytes,object_bytes=object_bytes-CASE WHEN OLD.path LIKE 'materializations/@objects-%' THEN OLD.bytes ELSE 0 END WHERE singleton=1;
+          END;
+          CREATE TRIGGER IF NOT EXISTS runtime_artifact_resized AFTER UPDATE OF bytes ON runtime_artifacts BEGIN
+            UPDATE runtime_storage SET bytes=bytes+NEW.bytes-OLD.bytes,object_bytes=object_bytes+CASE WHEN NEW.path LIKE 'materializations/@objects-%' THEN NEW.bytes-OLD.bytes ELSE 0 END WHERE singleton=1;
+          END;
+        """)
+
+        if db.execute('SELECT 1 FROM runtime_reservation_count WHERE singleton=1').fetchone() is None:
+            db.execute('INSERT INTO runtime_reservation_count SELECT 1,count(*) FROM runtime_reservations')
+            db.commit()
+        if db.execute('SELECT 1 FROM runtime_storage WHERE singleton=1').fetchone() is None:
+            db.execute("INSERT INTO runtime_storage SELECT 1,count(*),COALESCE(sum(bytes),0),COALESCE(sum(CASE WHEN path LIKE 'materializations/@objects-%' THEN bytes ELSE 0 END),0) FROM runtime_artifacts")
+            db.commit()
 
     @contextmanager
     def _transaction(self):
@@ -600,7 +635,38 @@ class RunJournal:
             return (db.execute('SELECT 1 FROM runtime_actions WHERE result IS NULL LIMIT 1').fetchone() is not None
                     or db.execute("SELECT 1 FROM runtime_commits WHERE status!='acked' LIMIT 1").fetchone() is not None)
 
+    @contextmanager
+    def _publication_lease(self, timeout=30):
+        """Serialize fence replacement with publication, without holding SQLite."""
+        import fcntl
+        path = self.directory / '.publication.lock'
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise ExecutionConflict('Publication ownership wait expired')
+                    time.sleep(.01)
+            yield
+        finally:
+            os.close(descriptor)
+
+    @contextmanager
+    def publication_guard(self, fence):
+        with self._publication_lease():
+            with self.execution_guard(fence):
+                pass
+            yield None
+
     def claim_execution(self, configuration, fence):
+        with self._publication_lease(configuration['limits'].get('admission_timeout_s', 30)):
+            return self._claim_execution(configuration, fence)
+
+    def _claim_execution(self, configuration, fence):
         from .recovery_contract import document, identifier, RecoveryContractError
         raw = document(configuration).decode()
         identifier(fence)
@@ -767,6 +833,26 @@ class RunJournal:
                     intent=json.loads(row[3]), prepared=json.loads(row[4]) if row[4] else None,
                     receipts=receipts)
 
+    def latest_execution_commit(self, action_id, *, confirmed=False):
+        with self._connection() as db:
+            sql = 'SELECT commit_id FROM runtime_commits WHERE action_id=?'
+            if confirmed:
+                sql += " AND status!='pending'"
+            row = db.execute(sql + ' ORDER BY sequence DESC LIMIT 1', (action_id,)).fetchone()
+            return self._execution_commit(db, row[0]) if row else None
+
+    def iter_execution_commits(self, action_id, *, through_sequence=None):
+        """Indexed bounded pages; callers retain at most one decoded commit."""
+        after = 0
+        while True:
+            with self._connection() as db:
+                ids = db.execute('SELECT sequence,commit_id FROM runtime_commits WHERE action_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT 16',
+                    (action_id, after, through_sequence if through_sequence is not None else 16384)).fetchall()
+            if not ids:
+                return
+            for after, commit_id in ids:
+                yield self.execution_commit(commit_id)
+
     def execution_commits(self, action_id):
         with self._connection() as db:
             db.execute('BEGIN')
@@ -776,14 +862,80 @@ class RunJournal:
             return [self._execution_commit(db, row[0]) for row in rows]
 
     def prepare_commit(self, fence, commit_id, prepared):
+        """Validate pages outside write transactions and bind references in batches.
+
+        Provisional reference ownership is separate from allocation ownership:
+        equal content-addressed state can be allocated again by a later cut.
+        Only the final prepared transition protects these references. A failed
+        traversal therefore leaves its unpublished files eligible for cleanup.
+        """
         from .recovery_contract import document, RecoveryContractError
+        from itertools import islice
         raw = document(prepared).decode()
+        limits = self.recovery_identity()['limits']
+        state_limit, remaining = limits['max_state_bytes'], limits['max_artifacts'] * 4
+
+        def references(value, depth=0):
+            nonlocal remaining
+            if depth > 32:
+                raise RecoveryContractError('Prepared reference nesting exceeds budget')
+            if type(value) is dict:
+                path = value.get('path')
+                if type(path) is str:
+                    remaining -= 1
+                    if remaining < 0:
+                        raise RecoveryContractError('Prepared artifact count exceeds budget')
+                    yield path
+                    if value.get('format') == 'paged-artifacts-v1':
+                        from .artifact_manifest import manifest_pages
+                        for page_path, page in manifest_pages(self.directory, value,
+                                maximum=limits['max_artifacts']):
+                            remaining -= 1
+                            if remaining < 0:
+                                raise RecoveryContractError('Prepared artifact count exceeds budget')
+                            yield page_path
+                            yield from references(page, depth + 1)
+                    if 'state_id' in value:
+                        from .artifact_manifest import _read
+                        relative = Path(path)
+                        if (relative.is_absolute() or '..' in relative.parts
+                                or not relative.parts or relative.parts[0] != 'state'):
+                            raise RecoveryContractError('State artifact escapes its owner')
+                        raw_state = _read(self.directory / relative, state_limit,
+                                          size=value['bytes'], digest=value['sha256'])
+                        yield from references(json.loads(raw_state), depth + 1)
+                for child in value.values():
+                    yield from references(child, depth + 1)
+            elif type(value) is list:
+                for child in value:
+                    yield from references(child, depth + 1)
+
+        iterator = references(prepared)
+        while batch := tuple(set(islice(iterator, 64))):
+            # Already durable references need no new write. Decode and hash the
+            # next bounded page before entering either journal transaction.
+            with self._connection() as db:
+                pending = [path for path in batch if db.execute(
+                    'SELECT 1 FROM runtime_artifacts WHERE path=? AND protected=0',
+                    (path,)).fetchone()]
+            if pending:
+                with self.execution_guard(fence) as db:
+                    for path in pending:
+                        row = db.execute('SELECT protected,reference_commit_id FROM runtime_artifacts WHERE path=?',
+                                         (path,)).fetchone()
+                        if row is None or row[0]:
+                            continue
+                        if row[1] not in (None, commit_id):
+                            raise RecoveryContractError('Artifact has another pending reference owner')
+                        db.execute('UPDATE runtime_artifacts SET reference_commit_id=? WHERE path=?',
+                                   (commit_id, path))
         with self.execution_guard(fence) as db:
             row = db.execute('SELECT status,prepared FROM runtime_commits WHERE commit_id=?', (commit_id,)).fetchone()
             if row is None or row[0] != 'pending':
                 if row is not None and row[1] == raw:
                     return
                 raise RecoveryContractError('Commit cannot be prepared in its current state')
+            db.execute('UPDATE runtime_artifacts SET protected=1 WHERE reference_commit_id=?', (commit_id,))
             db.execute("UPDATE runtime_commits SET status='prepared',prepared=? WHERE commit_id=?", (raw, commit_id))
 
     def confirm_commit(self, fence, commit_id, *, expected, status):
@@ -824,6 +976,11 @@ class RunJournal:
         Payload and metadata remain separate counters in this same control DB;
         no component can consume capacity while the aggregate rejects it.
         """
+        with self.execution_guard(fence) as db:
+            return self.reserve_budgets_in_transaction(db, reservation_id, charges)
+
+    @staticmethod
+    def reserve_budgets_in_transaction(db, reservation_id, charges):
         from .recovery_contract import identifier, RecoveryContractError, identity
         identifier(reservation_id)
         if type(charges) is not dict or not 1 <= len(charges) <= 4:
@@ -837,32 +994,31 @@ class RunJournal:
             # A different component set is a different reservation, so adding
             # a component cannot reuse the already charged aggregate entry.
             reservation_id = identity({'reservation': reservation_id, 'components': sorted(charges)})
-        with self.execution_guard(fence) as db:
-            pending, totals = {}, {}
-            for name, (amount, ceiling) in charges.items():
-                old = db.execute('SELECT amount FROM runtime_reservations WHERE name=? AND reservation_id=?', (name, reservation_id)).fetchone()
-                budget = db.execute('SELECT consumed,ceiling FROM runtime_budgets WHERE name=?', (name,)).fetchone()
-                if budget is not None and budget[1] != ceiling:
-                    raise RecoveryContractError('Budget ceiling differs across attempts')
-                if old is not None:
-                    if old[0] != amount or budget is None:
-                        raise RecoveryContractError('Budget reservation changed')
-                    totals[name] = budget[0]
-                    continue
-                consumed = (budget[0] if budget else 0) + amount
-                if consumed > ceiling:
-                    raise RecoveryContractError('Execution budget exhausted: ' + name)
-                pending[name] = (consumed, ceiling, amount)
-                totals[name] = consumed
-            count = db.execute('SELECT count(*) FROM runtime_reservations').fetchone()[0]
-            if count + len(pending) > 100000:
-                raise RecoveryContractError('Reservation count exceeds budget')
-            for name, (consumed, ceiling, amount) in pending.items():
-                db.execute('INSERT OR REPLACE INTO runtime_budgets VALUES (?,?,?)', (name, consumed, ceiling))
-                db.execute('INSERT INTO runtime_reservations VALUES (?,?,?)', (name, reservation_id, amount))
-            return totals
+        pending, totals = {}, {}
+        for name, (amount, ceiling) in charges.items():
+            old = db.execute('SELECT amount FROM runtime_reservations WHERE name=? AND reservation_id=?', (name, reservation_id)).fetchone()
+            budget = db.execute('SELECT consumed,ceiling FROM runtime_budgets WHERE name=?', (name,)).fetchone()
+            if budget is not None and budget[1] != ceiling:
+                raise RecoveryContractError('Budget ceiling differs across attempts')
+            if old is not None:
+                if old[0] != amount or budget is None:
+                    raise RecoveryContractError('Budget reservation changed')
+                totals[name] = budget[0]
+                continue
+            consumed = (budget[0] if budget else 0) + amount
+            if consumed > ceiling:
+                raise RecoveryContractError('Execution budget exhausted: ' + name)
+            pending[name] = (consumed, ceiling, amount)
+            totals[name] = consumed
+        count = db.execute('SELECT items FROM runtime_reservation_count WHERE singleton=1').fetchone()[0]
+        if count + len(pending) > 100000:
+            raise RecoveryContractError('Reservation count exceeds budget')
+        for name, (consumed, ceiling, amount) in pending.items():
+            db.execute('INSERT OR REPLACE INTO runtime_budgets VALUES (?,?,?)', (name, consumed, ceiling))
+            db.execute('INSERT INTO runtime_reservations VALUES (?,?,?)', (name, reservation_id, amount))
+        return totals
 
-    def allocate_artifact(self, fence, path, *, commit_id=None):
+    def allocate_artifact(self, fence, path, *, commit_id=None, size=0, atomic=True):
         """Record ownership before allocation, including the atomic staging file."""
         from .recovery_contract import RecoveryContractError
         relative = Path(path)
@@ -872,15 +1028,80 @@ class RunJournal:
         with self.execution_guard(fence) as db:
             self._artifact_path(db, str(relative))
             limit = json.loads(db.execute('SELECT document FROM runtime_identity').fetchone()[0])['limits']['max_artifacts']
-            for name, owner in ((str(relative), commit_id), (str(relative) + '.staging', None)):
+            allocations = [(str(relative), commit_id)]
+            if atomic:
+                allocations.append((str(relative) + '.staging', None))
+            for name, owner in allocations:
                 previous = db.execute('SELECT commit_id FROM runtime_artifacts WHERE path=?', (name,)).fetchone()
                 if previous is not None:
                     if previous[0] != owner:
                         raise RecoveryContractError('Artifact owner differs')
                     continue
-                if db.execute('SELECT count(*) FROM runtime_artifacts').fetchone()[0] >= limit:
+                if db.execute('SELECT items FROM runtime_storage WHERE singleton=1').fetchone()[0] >= limit:
                     raise RecoveryContractError('Artifact allocation count exceeds budget')
-                db.execute('INSERT INTO runtime_artifacts VALUES (?,?)', (name, owner))
+                db.execute('INSERT INTO runtime_artifacts(path,commit_id) VALUES (?,?)', (name, owner))
+            if size:
+                if type(size) is not int or size < 0:
+                    raise RecoveryContractError('Invalid artifact byte reservation')
+                db.executemany('UPDATE runtime_artifacts SET bytes=? WHERE path=?', [(size, name) for name, _ in allocations])
+                self._storage_usage(db)
+
+    def resize_artifact(self, fence, path, size, *, atomic=False):
+        """Reserve a known file's next size before writing, then settle actual bytes."""
+        from .recovery_contract import RecoveryContractError
+        if type(size) is not int or size < 0:
+            raise RecoveryContractError('Invalid artifact byte reservation')
+        with self.execution_guard(fence) as db:
+            for name in (path, path + '.staging') if atomic else (path,):
+                if db.execute('SELECT path FROM runtime_artifacts WHERE path=?', (name,)).fetchone() is None:
+                    raise RecoveryContractError('Artifact byte reservation has no registered owner')
+                db.execute('UPDATE runtime_artifacts SET bytes=? WHERE path=?', (size, name))
+            self._storage_usage(db)
+
+    @staticmethod
+    def _storage_usage(db):
+        from .recovery_contract import RecoveryContractError
+        total, objects = db.execute('SELECT bytes,object_bytes FROM runtime_storage WHERE singleton=1').fetchone()
+        admission = db.execute("SELECT consumed FROM runtime_budgets WHERE name='image_scratch_admission_bytes'").fetchone()
+        total = max(total, total - objects + (admission[0] if admission else 0))
+        metadata = db.execute("SELECT consumed FROM runtime_budgets WHERE name='object_namespace_metadata_bytes'").fetchone()
+        total += metadata[0] if metadata else 0
+        limit = json.loads(db.execute('SELECT document FROM runtime_identity').fetchone()[0])['limits']['max_scratch_bytes']
+        if total > limit:
+            raise RecoveryContractError('Runtime storage exceeds scratch admission budget')
+        return total
+
+    def storage_usage(self):
+        with self._connection() as db:
+            return self._storage_usage(db)
+
+    def release_temporaries(self, fence, names):
+        """Forget only absent private files after their producer has joined.
+
+        This never deletes files or scans unrelated storage. Durable artifact
+        registrations and any prepared reference remain owned by the journal.
+        """
+        from .recovery_contract import RecoveryContractError
+        if type(names) not in (list, tuple) or len(names) > 128:
+            raise RecoveryContractError('Temporary release batch exceeds budget')
+        with self.execution_guard(fence) as db:
+            selected = set(names)
+            for name in selected:
+                relative = Path(name)
+                if not (relative.parts[0] == 'scratch' or name.endswith('.staging')
+                        or relative.name.startswith('.pending-')):
+                    raise RecoveryContractError('Release requires a private temporary artifact')
+                path = self._artifact_path(db, name)
+                if any(p.is_symlink() for p in (path, *path.parents)) or path.exists():
+                    raise RecoveryContractError('Temporary producer has not removed its file')
+                owner = db.execute('SELECT commit_id FROM runtime_artifacts WHERE path=?', (name,)).fetchone()
+                if owner is not None and owner[0] is not None:
+                    raise RecoveryContractError('Cannot release a commit-owned artifact')
+            for name in selected:
+                protected = db.execute('SELECT protected FROM runtime_artifacts WHERE path=?', (name,)).fetchone()
+                if protected is not None and protected[0]:
+                    raise RecoveryContractError('Prepared commit still references temporary artifact')
+            db.executemany('DELETE FROM runtime_artifacts WHERE path=?', [(n,) for n in selected])
 
     def object_roots(self):
         """Only this run's registered namespaces; never scan the logical store."""
@@ -957,34 +1178,30 @@ class RunJournal:
         return self.directory/relative
 
     def clean_orphans(self, fence):
-        """Reclaim only registered unpublished files while holding the owner fence."""
+        """Bounded ownership-index audit; file I/O never holds the control lock.
+
+        prepare_commit and native result persistence atomically protect their
+        references. Cleanup consults those indexed facts, never every old state
+        document. The publication lease prevents an owner switch during unlink.
+        """
         from .recovery_contract import RecoveryContractError
-        with self.execution_guard(fence) as db:
-            keep, commits = set(), set()
-            def references(value):
-                if isinstance(value, dict):
-                    if type(value.get('path')) is str:
-                        keep.add(value['path'])
-                    for child in value.values():
-                        references(child)
-                elif isinstance(value, list):
-                    for child in value:
-                        references(child)
-            for commit_id, prepared in db.execute('SELECT commit_id,prepared FROM runtime_commits WHERE prepared IS NOT NULL'):
-                commits.add(commit_id)
-                references(json.loads(prepared))
-            removed = 0
-            for name, commit_id in db.execute('SELECT path,commit_id FROM runtime_artifacts').fetchall():
-                if name in keep or commit_id in commits:
-                    continue
-                path = self._artifact_path(db, name)
-                if any(p.is_symlink() for p in (path, *path.parents)):
-                    raise RecoveryContractError('Orphan path contains a symlink')
-                if path.exists():
-                    path.unlink()
-                    removed += 1
-                db.execute('DELETE FROM runtime_artifacts WHERE path=?', (name,))
-            return removed
+        after, removed = '', 0
+        while True:
+            with self._connection() as db:
+                rows = db.execute("SELECT path FROM runtime_artifacts AS a WHERE protected=0 AND path>? AND NOT EXISTS (SELECT 1 FROM runtime_commits AS c WHERE c.commit_id=a.commit_id AND c.prepared IS NOT NULL) ORDER BY path LIMIT 64", (after,)).fetchall()
+                paths = [(name, self._artifact_path(db, name)) for (name,) in rows]
+            if not paths:
+                return removed
+            with self.publication_guard(fence):
+                for name, path in paths:
+                    if any(p.is_symlink() for p in (path, *path.parents)):
+                        raise RecoveryContractError('Orphan path contains a symlink')
+                    if path.exists():
+                        path.unlink()
+                        removed += 1
+                with self.execution_guard(fence) as db:
+                    db.executemany('DELETE FROM runtime_artifacts WHERE path=? AND protected=0', rows)
+            after = rows[-1][0]
 
     def finish_execution(self, fence, status):
         if status not in {'succeeded', 'failed', 'cancelled'}:

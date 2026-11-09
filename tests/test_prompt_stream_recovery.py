@@ -1,4 +1,4 @@
-"""Real process loss through the checked stream: no request store or model cache."""
+"""Real process loss through the checked stream and its native effect journal."""
 import importlib.util
 import json
 import os
@@ -85,9 +85,8 @@ def run(*, source, target):
     (root/'report.json').write_text(json.dumps(report))
 
 
-@pytest.mark.parametrize('window,remaining', [
-    ('during_batch', 588), ('after_prepared', 76), ('after_checkpoint_committed', 76)])
-def test_process_loss_recomputes_only_unconfirmed_batch(server, tmp_path, window, remaining):
+@pytest.mark.parametrize('window', ['during_batch', 'after_prepared', 'after_checkpoint_committed'])
+def test_process_loss_reuses_known_responses_and_refuses_unknown_calls(server, tmp_path, window):
     rows = [{'id':i, 'item':str(i)} for i in range(1093)] + [{'id':0,'item':'0'} for _ in range(7)]
     setup(tmp_path, rows)
     script = r'''import os,sys
@@ -120,11 +119,22 @@ execute(sys.argv[1])
     assert child.returncode==37, child.stdout+child.stderr
     assert not (tmp_path/'out.lance').exists()
     old_calls=len(server['requests'])
+    import sqlite3
+    with sqlite3.connect(tmp_path/'runtime/run.sqlite') as db:
+        uncertain = db.execute('SELECT count(*) FROM calls WHERE response_json IS NULL').fetchone()[0]
+    if uncertain:
+        from demiflow.operator_llm.journal import UncertainPromptCall
+        with pytest.raises(UncertainPromptCall, match='automatic regeneration is forbidden'):
+            execute(tmp_path)
+        assert len(server['requests']) == old_calls
+        assert not (tmp_path/'out.lance').exists()
+        assert RunJournal(tmp_path/'runtime').execution_status()['status'] == 'failed'
+        return
     execute(tmp_path)
     result=lance.dataset(str(tmp_path/'out.lance')).to_table().to_pylist()
     assert sorted(r['id'] for r in result)==sorted(r['id'] for r in rows)
     assert all(r['value']=='ok transformed' for r in result)
-    assert len(server['requests'])-old_calls==remaining
+    assert len(server['requests']) == len(rows)
     assert RunJournal(tmp_path/'runtime').execution_status()['status']=='succeeded'
     assert not list(tmp_path.rglob('checkpoint.json'))
     # Exactly one execution control database, no private request/result journal.
@@ -157,7 +167,7 @@ def test_downstream_block_corruption_is_not_silently_skipped(tmp_path):
 
 def test_output_capacity_fails_before_progress(tmp_path):
     from test_execution_recovery_stream import Counter
-    with pytest.raises(RuntimeContractError, match='scratch budget'):
+    with pytest.raises(RuntimeContractError, match='scratch.*budget'):
         with RunContext.start(tmp_path/'run', limits={'max_scratch_bytes':32}):
             data.from_items([{'id':1}]).map_async(Counter()).materialize()
     journal=RunJournal(tmp_path/'run')
