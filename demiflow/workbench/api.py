@@ -66,6 +66,7 @@ GET_FIELDS = {
     'run-evidence': ({'run_id', 'reference'}, set()),
     'parameters': ({'path'}, set()), 'source': ({'path'}, {'expected_sha256'}),
     'table': ({'alias'}, {'expected_binding'}),
+    'table-versions': ({'alias'}, {'expected_binding', 'version'}),
     'table-profile': ({'alias','expected_binding','columns'},set()),
     'sample': ({'alias'}, {'columns', 'offset', 'limit', 'row_id', 'match', 'expected_binding'}),
     'media': ({'alias', 'row_id'}, {'field', 'field_path', 'expected_binding'}),
@@ -700,6 +701,9 @@ class Handler(BaseHTTPRequestHandler):
                     value = api.source_text(root, query["path"], expected_sha256=query.get("expected_sha256"))
                 elif url.path == "/api/table":
                     value = api.describe_table(root, query["alias"], expected_binding=query.get("expected_binding"))
+                elif url.path == "/api/table-versions":
+                    value = api.table_versions(root, query["alias"], expected_binding=query.get("expected_binding"),
+                                               version=int(query["version"]) if "version" in query else None)
                 elif url.path=="/api/table-profile":
                     value=api.profile_table(root,query["alias"],expected_binding=query["expected_binding"],columns=query["columns"])
                 elif url.path=="/api/project-table-profile":

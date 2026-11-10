@@ -183,7 +183,7 @@ def dispatch(request):
         elif op == 'audit_hint':
             from demiflow.workbench.projects.workspace import _audit_hint
             value = _audit_hint(root, **args)
-        elif op in {"table", "sample", "media", 'table_evidence'}:
+        elif op in {"table", "sample", "media", 'table_evidence', "table_versions"}:
             import re
             from demiflow.workbench.projects.workspace import load_workspace
             from demiflow.workbench.projects.workspace import table_binding
@@ -196,11 +196,36 @@ def dispatch(request):
             if expected is not None and (type(expected) is not str or not re.fullmatch(r"[0-9a-f]{64}", expected)):
                 raise ForgeError("Invalid preview binding digest", code='invalid_request')
             root, workspace, _ = load_workspace(root)
-            control, ref, uri = table_binding(root, workspace, args.pop("alias"))
+            alias = args.pop("alias")
+            control, ref, uri = table_binding(root, workspace, alias)
             binding = preview_binding(root, control, uri)
             if expected is not None and expected != binding["digest"]:
                 raise ForgeError("Preview binding changed; reopen the table explicitly", code='conflict')
-            if op == "table":
+            if op == "table_versions":
+                version = args.pop("version", None)
+                if args:
+                    raise ValueError("Unknown table version arguments")
+                if version is not None and (type(version) is not int or version < 1):
+                    raise ForgeError("Version must be a fixed positive integer", code='invalid_request')
+                if isinstance(alias, str) and alias.startswith("run:"):
+                    # A run product is pinned to one sealed output version.
+                    value = {"status": "versions", "versions": [], "truncated": False,
+                             "total_registered": 0, "reason": "run_output_sealed_version"}
+                else:
+                    from demiflow.lance.registry import Catalog
+                    base = location_root(root, workspace["locations"][control["location_id"]])
+                    registered = [item for item in Catalog(base).versions(ref.dataset_id)
+                                  if item.store_id == ref.store_id and item.relative_uri == ref.relative_uri]
+                    total = len(registered)
+                    value = {"status": "versions", "versions": [item.to_dict() for item in registered[:128]],
+                             "truncated": total > 128, "total_registered": total}
+                    if not total:
+                        value["reason"] = "no_registered_versions"
+                    if version is not None:
+                        if not any(item.lance_version == version for item in registered):
+                            raise ForgeError("Version is not a registered version of this table", code='invalid_request')
+                        value["selected"] = {"version": version, "metadata": preview.describe_table(uri, version)}
+            elif op == "table":
                 if args:
                     raise ValueError("Unknown table description arguments")
                 metadata = preview.describe_table(uri, ref.lance_version)

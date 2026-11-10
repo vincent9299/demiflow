@@ -118,3 +118,59 @@ def test_nested_projection_and_matching_are_literal_schema_paths(isolated):
     with pytest.raises(ValueError, match='schema'):
         ws.set_table_view(isolated, 'nested_projection', expected=before['digest'],
             display={'fields': [{'path': ['absent'], 'kind': 'text'}]}, provenance={})
+
+
+def test_table_versions_list_registered_facts_and_preview_without_moving_binding(isolated):
+    import lance
+    from demiflow.lance.refs import DatasetRef
+    from demiflow.lance.registry import Catalog
+    root = isolated
+    schema = pa.schema([('question', pa.string())])
+    uri = str(root / 'data' / 'vt.lance')
+    lance.write_dataset(pa.Table.from_pylist([{'question': 'a'}], schema=schema), uri)
+    lance.write_dataset(pa.Table.from_pylist([{'question': 'a'}, {'question': 'b'}], schema=schema), uri, mode='overwrite')
+    catalog = Catalog(root / 'data')
+    for version in (1, 2):
+        meta = operation('describe', uri, version=version)
+        catalog.register(DatasetRef('vt', 'vt.lance', version, 'vt', '1', meta['schema_hash'], meta['row_count'], store_id='local'))
+    ws.attach_table(root, 'vt', relative_uri='vt.lance', version=2, dataset_id='vt', schema_name='vt', schema_version='1')
+    binding = ws.describe_table(root, 'vt')['binding']['digest']
+    listed = ws.table_versions(root, 'vt', expected_binding=binding)
+    assert listed['status'] == 'versions' and listed['truncated'] is False and listed['total_registered'] == 2
+    assert [item['lance_version'] for item in listed['versions']] == [1, 2]
+    assert listed['versions'][0]['row_count'] == 1 and listed['versions'][1]['row_count'] == 2
+    assert listed['binding']['digest'] == binding
+    selected = ws.table_versions(root, 'vt', expected_binding=binding, version=1)
+    assert selected['selected']['version'] == 1 and selected['selected']['metadata']['row_count'] == 1
+    assert 'question' in selected['selected']['metadata']['fields']
+    # Previewing another version never moves the fixed binding or the bound sample.
+    assert ws.describe_table(root, 'vt', expected_binding=binding)['binding']['digest'] == binding
+    assert ws.describe_table(root, 'vt')['metadata']['version'] == 2
+    with pytest.raises(ValueError, match='not a registered version'):
+        ws.table_versions(root, 'vt', version=3)
+    with pytest.raises(ValueError, match='binding changed'):
+        ws.table_versions(root, 'vt', expected_binding='0' * 64)
+    # An attached-but-unregistered table is honestly empty, never a guessed history.
+    unregistered = ws.table_versions(root, 'candidates')
+    assert unregistered['versions'] == [] and unregistered['total_registered'] == 0
+    assert unregistered['reason'] == 'no_registered_versions'
+
+
+def test_table_versions_run_product_is_a_sealed_single_version(isolated, tmp_path, monkeypatch):
+    import time
+    from demiflow.workbench.runs import manager as runs
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'g1-runtime-domain'))
+    root = isolated
+    prepared = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')
+    runs.start(root, prepared['run_id'], expected=prepared['digest'])
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        run = runs.show(root, prepared['run_id'])
+        if run['status'] in runs.TERMINAL:
+            break
+        time.sleep(0.1)
+    assert run['status'] == 'succeeded', run
+    listed = ws.table_versions(root, 'run:' + run['run_id'] + ':target')
+    assert listed['versions'] == [] and listed['total_registered'] == 0 and listed['truncated'] is False
+    assert listed['reason'] == 'run_output_sealed_version'
+    assert listed['binding']['reference']['ref']['lance_version'] >= 1

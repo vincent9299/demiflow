@@ -783,6 +783,12 @@ def describe_table(root, alias, *, expected_binding=None):
     return operation("table", root, alias=alias, expected_binding=expected_binding)
 
 
+def table_versions(root, alias, *, expected_binding=None, version=None):
+    from demiflow.workbench.worker import operation
+
+    return operation("table_versions", root, alias=alias, expected_binding=expected_binding, version=version)
+
+
 def attach_table(
     root,
     alias,

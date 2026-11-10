@@ -263,6 +263,7 @@
       for(const [index,value] of draft.cells.entries()){
         const section=$('article',undefined,'analysis-cell'),tools=$('div',undefined,'analysis-cell-tools'),language=$('select');language.setAttribute('aria-label','单元语言');
         for(const [key,label]of [['python','Python'],['sql','SQL'],['markdown','Markdown']]){const option=$('option',label);option.value=key;language.append(option);}language.value=value.language;tools.append(language,$('code','单元 '+(index+1),'muted small'));section.append(tools);
+        const recent=executions.filter(item=>item.cell_id===value.id).at(-1);
         language.onchange=()=>{value.language=language.value;if(value.language!=='sql')delete value.result_name;changed();paintCells();};
         if(value.language==='sql'){
           const name=input('结果变量名',value.result_name||'',tools,80);name.placeholder='可留空';name.oninput=()=>{if(name.value)value.result_name=name.value;else delete value.result_name;changed();};
@@ -278,12 +279,21 @@
           const submitted=await mutate('cell-submit',{session_id:original.id,expected_generation:original.generation,revision:submittedRevision,cell_id:value.id,source_sha256:hash},{notebook:identifier,cell_id:value.id});
           if(live(ticket)){if(typeof submitted.value?.id==='string'){if(explicitExecutions.size>=64)explicitExecutions.delete(explicitExecutions.values().next().value);explicitExecutions.add(submitted.value.id);}info('单元已受理。');await poll();}
         },tools,!connected||!permissions.analysis_execute||value.language==='markdown'||!session||session.state==='stopped');
+        const cancel=action('取消单元',async()=>{
+          const recent=executions.filter(item=>item.cell_id===value.id).at(-1);
+          if(!recent||!session)return;
+          const original={id:session.id,generation:session.generation},ticket=epoch;
+          const reply=await api('analysis-cell-cancel',{}, {request_id:uid('u'),execution_id:recent.id,expected_generation:original.generation},project);
+          if(live(ticket)&&session?.id===original.id&&session?.generation===original.generation){info(reply.accepted?(reply.generation_will_stop?'取消已受理；本代内核将停止，清理完成后可重新启动。':'排队单元已取消。'):'取消尚未确认。');await poll();}
+        },tools,true);
+        cancel.classList.add('analysis-cell-cancel');
+        refreshCellCancel(section,value.id);
         action('删除单元',()=>{draft.cells=draft.cells.filter(item=>item.id!==value.id);changed();paintCells();},tools);
         section.dataset.analysisCell=value.id;
         const source=$('textarea');source.value=value.source;source.maxLength=16384;source.spellcheck=false;source.setAttribute('aria-label',value.language+' 单元代码');source.rows=Math.min(18,Math.max(4,value.source.split('\n').length+1));section.append(source);
         source.oninput=()=>{value.source=source.value;changed();};
         if(value.language==='markdown'){const preview=$('details');preview.append($('summary','预览 Markdown'));section.append(preview);preview.ontoggle=()=>{if(preview.open&&preview.children.length===1)mountText(preview,value.source);};}
-        const recent=executions.filter(item=>item.cell_id===value.id).at(-1);paintExecutionStatus(section,recent);
+        paintExecutionStatus(section,recent);
         body.append(section);paintOutput(section,recent);
       }
       const add=$('div',undefined,'analysis-cell-tools');body.append(add);
@@ -341,6 +351,14 @@
       historyAfter=after;historyItems=page.items;historyNext=page.next_cursor;paintHistory();
     }
     function paint(){saveNotebookButton.disabled=!canWrite();title.value=draft.title;status.textContent=dirty()?'有未保存修改':'已保存 · v'+revision;persistence.textContent=store.hasVolatileSources()?'本窗口暂存 · 重开前请导出':'';paintPending();paintSources();paintKernel();paintCells();paintHistory();}
+    function refreshCellCancel(node,cellId){
+      const button=node.querySelector('.analysis-cell-cancel');if(!button)return;
+      const recent=executions.filter(item=>item.cell_id===cellId).at(-1);
+      const cancellable=!!recent&&!!session&&recent.generation===session.generation&&['queued','dispatched','running'].includes(recent.state);
+      button.disabled=!connected||!permissions.analysis_execute||!cancellable;
+      button.textContent=recent?.state==='queued'?'取消排队':'取消单元';
+      button.title=recent?.state==='queued'?'取消尚未派发的排队单元。':'中断本单元；受信模式下将停止本代内核并清理，之后可重新启动。';
+    }
     async function poll(){
       if(polling||!connected||!session||disposed||session.state==='stopped')return;polling=true;
       const ticket=epoch,original={id:session.id,generation:session.generation};
@@ -358,6 +376,7 @@
           const recent=executions.filter(item=>item.cell_id===draft.cells[index]?.id).at(-1);
           paintExecutionStatus(node,recent);
           paintOutput(node,recent);
+          refreshCellCancel(node,draft.cells[index]?.id);
         }
       }finally{polling=false;}
     }
