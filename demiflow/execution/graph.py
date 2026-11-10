@@ -1,0 +1,953 @@
+"""Static multi-worker graph orchestration (U3/S3-S4, Local; exit gates 1-3).
+
+The driver compiles a fixed stage->partition->worker placement, provisions one
+managed Local worker per node partition through the real ResourceManager, wires
+1:1 physical data channels between them (socketpair fds inherited via the existing
+process-unit hook), runs the frozen K3 lifecycle per worker, then schedules global
+cuts: each worker contributes its K6 fragment, the driver commits the whole group
+once through GraphCommitTerminal (full-coverage CheckpointManifest) and acks with a
+receipt that releases the workers. Business payloads flow worker->worker over the
+data sockets and never transit the driver; the shared ancestor computes each record
+once and replicates at egress (broadcast/fan_out).
+
+S3 proves the multi-worker data plane + lifecycle (exit gate 1); S4 adds the single
+CommitCoordinator commit, full K6 assembly, whole-graph restore and segment GC
+(exit gates 2/3). chain.py (U2) and the dataset API stay untouched; this is selected
+only by the opt-in ``unified_graph`` executor seam (D6).
+"""
+import select
+import socket
+import time
+import uuid
+
+from .block_sink import BlockSink
+from .chain import ChainResultSink, stage_plan_artifact
+from .commit import CommitCoordinator
+from .contracts.checkpoint import validate_checkpoint_manifest
+from .contracts.envelope import WORKER_PROTOCOL_VERSION
+from .contracts.errors import ProtocolError
+from .contracts.worker import WorkerProtocolModel
+from .graph_wire import (
+    CUT_CONTRIBUTION_SCHEMA, build_graph_checkpoint, validate_cut_contribution,
+)
+from .recovery_contract import RecoveryContractError, SourcePosition, identity
+from .run_context import RunAction, current_action
+from .source_snapshot import capture_source, freeze_source
+from .state_artifacts import StateArtifacts
+from .worker.bootstrap import recv_message, send_message
+from ..planning.dag import build_channel_plan
+from ..planning.graph_channels import RouteTable
+
+
+class GraphLocalConnector:
+    """Local control connector that also inherits data-channel socket fds.
+
+    Wraps the U2 LocalControlConnector control socketpair and adds the child-end
+    data descriptors the orchestrator pre-wired per allocation, so the managed
+    process unit passes them through its existing extra_pass_fds hook.
+    """
+
+    def __init__(self):
+        from .worker.bootstrap import LocalControlConnector
+        self._control = LocalControlConnector()
+        self._data_fds = {}
+        self.driver_socks = self._control.driver_socks
+
+    def stage(self, allocation_id, launch_spec, data_fds):
+        self._control.stage(allocation_id, launch_spec)
+        self._data_fds[allocation_id] = tuple(data_fds)
+
+    def spawn_payload(self, allocation_id):
+        payload = self._control.spawn_payload(allocation_id)
+        data_fds = self._data_fds.get(allocation_id, ())
+        payload["extra_pass_fds"] = (*payload["extra_pass_fds"], *data_fds)
+        return payload
+
+    def spawned(self, allocation_id):
+        return self._control.spawned(allocation_id)
+
+    def abort(self, allocation_id):
+        self._data_fds.pop(allocation_id, None)
+        self._control.abort(allocation_id)
+
+    def close(self, allocation_id):
+        self._data_fds.pop(allocation_id, None)
+        self._control.close(allocation_id)
+
+
+def _build_manifest(run, plan_refs):
+    from .contracts.artifact import build_manifest, save_manifest, seal_manifest
+    config = run.journal.recovery_identity()
+    bundle = identity([ref["sha256"] for ref in plan_refs])
+    manifest = build_manifest(
+        run_id=run.ref.run_id,
+        platform={"source_digest": config["platform_revision"], "distribution": "demiflow",
+                  "version": "u3-graph", "runtime_identity_ref": identity([run.ref.run_id, "runtime"])},
+        business={"bundle_digest": "sha256:" + bundle,
+                  "entrypoints": [{"name": "graph", "module_key": "p_" + bundle[:24],
+                                   "definition_ref": {"sha256": bundle}}]},
+        config={"resolved_config_digest": identity([run.ref.run_id, "config"]), "model_config_refs": []},
+        environment={"requirements_sha256": identity(["requirements"]), "lock_digest": identity(["lock"]),
+                     "resolution_digest": identity(["resolution"])},
+        protocol_versions={"worker": {"major": 1, "minor": 0}, "exchange": {"major": 1, "minor": 0},
+                           "checkpoint_schema": 1, "state_schema": 1, "resource_protocol": "1.0"},
+        secret_refs=[])
+    manifest = seal_manifest(manifest, int(config["started_at"] * 1000))
+    ref = save_manifest(run.directory, manifest)
+    return {"manifest_id": ref["manifest_id"], "sha256": ref["sha256"]}
+
+
+class _WorkerLink:
+    """Driver side of one worker control socket: lifecycle + contribution intake."""
+
+    def __init__(self, sock, model, allocation_id, now_ms):
+        self.sock = sock
+        self.model = model
+        self.allocation_id = allocation_id
+        self._now_ms = now_ms
+        self.contributions = {}
+        self.pending_ops = {}
+        self.final_seen = False
+        self.final_at = None
+        self.command_ops = {}
+
+    def command(self, kind, payload):
+        op = uuid.uuid4().hex
+        send_message(self.sock, {
+            "protocol_version": WORKER_PROTOCOL_VERSION, "kind": kind,
+            "scope_id": self.model.scope_id, "run_id": self.model.run_id, "operation_id": op,
+            "controller_epoch": self.model.controller_epoch, "authority_ref": self.model.grant["grant_id"],
+            "allocation_id": self.allocation_id, "boot_id": self.model.boot_id, "payload": payload})
+        return op
+
+    def _handle_event(self, message):
+        if message.get("schema_version") == CUT_CONTRIBUTION_SCHEMA or message.get("kind") == "CutContribution":
+            contribution = validate_cut_contribution(message["contribution"])
+            checkpoint_id = contribution["checkpoint_id"]
+            # Hold the contribution until the driver's single durable commit for the
+            # whole cut group; the receipt (send_receipt) is the ack that releases the
+            # worker. Acking here would publish before the group commit (S4).
+            self.contributions[checkpoint_id] = contribution
+            self.pending_ops[checkpoint_id] = message["operation_id"]
+            if contribution["final"] and not self.final_seen:
+                self.final_seen = True
+                self.final_at = time.monotonic()
+            return True
+        if message.get("kind") in ("Register", "Ready", "Heartbeat"):
+            self.model.handle(message, now_ms=self._now_ms())
+            return True
+        return False
+
+    def send_graph_checkpoint(self, command):
+        send_message(self.sock, command)
+
+    def send_receipt(self, checkpoint_id, receipt):
+        operation_id = self.pending_ops.pop(checkpoint_id)
+        send_message(self.sock, {"response_to": operation_id, "receipt": receipt})
+
+    def read_response(self, op):
+        while True:
+            message = recv_message(self.sock)
+            if message is None:
+                raise RecoveryContractError("Worker closed before responding")
+            if message.get("response_to") == op:
+                if "error" in message:
+                    raise RecoveryContractError("Worker command failed: " + str(message["error"]))
+                return message["receipt"]
+            self._handle_event(message)
+
+    def pump(self):
+        message = recv_message(self.sock)
+        if message is None:
+            return False
+        if not self._handle_event(message):
+            response_to = message.get("response_to")
+            if response_to is not None:
+                self.command_ops[response_to] = message
+        return True
+
+
+class GraphCommitTerminal:
+    """The driver's single result-commit authority for the whole graph (S4).
+
+    One ``CommitCoordinator.commit`` per cut group publishes every target's staging
+    descriptor verbatim (``ChainResultSink`` per target child root, no re-encode),
+    then records a full-coverage K6 CheckpointManifest: the ancestor's confirmed
+    source ordinal, every physical channel cut (consumer offsets are authoritative
+    for 1:1 channels), all operator participants and every target sink receipt. The
+    workers never own commit authority; the receipt is their ack.
+    """
+
+    def __init__(self, action, *, source_id, ancestor, targets, target_children,
+                 physical, manifest_ref, result_child_id, target_allocs, ancestor_alloc):
+        self.run = action.context
+        self.source_id = source_id
+        self.reader_ids = [target["reader_id"] for target in targets]
+        self.target_allocs = dict(target_allocs)
+        self.ancestor_alloc = ancestor_alloc
+        self.channel_by_reader = {rid: physical[rid]["channel_id"] for rid in self.reader_ids}
+        self.channel_ids = [self.channel_by_reader[rid] for rid in self.reader_ids]
+        self.manifest_ref = manifest_ref
+        self.operators = [dict(logical_node_id=ancestor["logical_node_id"],
+                               occurrence_id=ancestor["occurrence_id"])]
+        self.operators += [dict(logical_node_id=target["logical_node_id"],
+                                occurrence_id=target["occurrence_id"]) for target in targets]
+        declaration = dict(kind="graph-result", source=action.declaration["source"],
+                           parent=action.semantic_id, protocol="graph-cut-v1")
+        self.run.journal.bind_execution_action(self.run.fence, result_child_id, declaration)
+        self.child = RunAction(self.run, result_child_id, declaration)
+        self.coordinator = CommitCoordinator(self.child)
+        self.sinks = {}
+        for target in targets:
+            rid = target["reader_id"]
+            child_decl = dict(kind="graph-node", source=action.declaration["source"],
+                              parent=action.semantic_id, protocol="graph-cut-v1")
+            child_action = RunAction(self.run, target_children[rid], child_decl)
+            self.sinks[rid] = ChainResultSink(child_action, rid)
+        self.sequence = self.inputs = 0
+        self.rows = {rid: 0 for rid in self.reader_ids}
+        self.checkpoints = {}
+        facts = self.coordinator.recover(self.sinks)
+        latest = facts[-1] if facts else None
+        if latest is not None and latest["status"] != "pending":
+            position = latest["intent"]["position"]
+            if position["source_id"] != self.source_id:
+                raise RecoveryContractError("Graph source progress differs")
+            self.inputs = position["next_ordinal"]
+            self.sequence = latest["sequence"]
+            summary = StateArtifacts(self.run).read(latest["prepared"]["state"]["graph-progress"])
+            self.rows = dict(summary["target_rows"])
+        self.complete = self.child.record["result"] is not None
+
+    def restore_point(self):
+        latest = self.run.journal.latest_execution_commit(self.child.action_id, confirmed=True)
+        if latest is None or latest["status"] == "pending":
+            return None
+        summary = StateArtifacts(self.run).read(latest["prepared"]["state"]["graph-progress"])
+        return {"position": latest["intent"]["position"], "sequence": latest["sequence"],
+                "checkpoint_id": latest["commit_id"], "summary": summary,
+                "state": latest["prepared"]["state"]}
+
+    def commit_group(self, checkpoint_id, group, *, ordinal, final, epoch):
+        outputs = {}
+        channel_cuts = []
+        for rid in self.reader_ids:
+            contribution = group[self.target_allocs[rid]]
+            descriptor = contribution["output_descriptor"]
+            if descriptor is None:
+                raise RecoveryContractError("Graph target cut lacks a staging descriptor")
+            outputs[rid] = (self.sinks[rid], descriptor)
+            channel_id = self.channel_by_reader[rid]
+            cut = next((c for c in contribution["channel_cuts"] if c["channel_id"] == channel_id), None)
+            if cut is None:
+                raise RecoveryContractError("Graph target cut lacks its channel cut")
+            channel_cuts.append(cut)
+        summary = {"source_ordinal": ordinal, "sequence": self.sequence + 1,
+                   "target_rows": {rid: self.rows[rid] + outputs[rid][1]["rows"] for rid in self.reader_ids},
+                   "final": bool(final)}
+        fact = self.coordinator.commit(self.sequence + 1, outputs=outputs,
+            position=SourcePosition(self.source_id, ordinal), states={"graph-progress": summary})
+        sink_receipts = [{"sink_id": rid, "commit_id": fact["commit_id"], "receipt_ref": fact["commit_id"]}
+                         for rid in self.reader_ids]
+        manifest = {
+            "schema_version": "demiflow.checkpoint_manifest.v1",
+            "checkpoint_id": checkpoint_id, "run_id": self.run.ref.run_id,
+            "action_id": self.child.action_id, "epoch": epoch,
+            "topology_revision": 0, "route_epoch": 0, "plan_revision": 0,
+            "artifact_manifest_ref": self.manifest_ref,
+            "participants": {"sources": [{"source_id": self.source_id, "partition_id": "p0"}],
+                             "channels": self.channel_ids, "operators": self.operators,
+                             "sinks": self.reader_ids},
+            "source_progress": [{"source_id": self.source_id, "partition_id": "p0",
+                                 "position": {"next_ordinal": ordinal}}],
+            "channel_cuts": channel_cuts, "operator_states": [], "inflight": [],
+            "sink_receipts": sink_receipts, "seal": {"sealed": bool(final)},
+        }
+        if final:
+            manifest["seal"]["digest"] = identity({k: v for k, v in manifest.items() if k != "seal"})
+        manifest = validate_checkpoint_manifest(manifest)
+        ref = StateArtifacts(self.run).put(checkpoint_id, manifest)
+        self.checkpoints[checkpoint_id] = {"manifest": manifest, "ref": ref}
+        self.sequence = fact["sequence"]
+        self.inputs = ordinal
+        self.rows = dict(summary["target_rows"])
+        return fact, manifest
+
+    def finish(self, source_rows):
+        if self.inputs != source_rows:
+            raise RecoveryContractError("Unconfirmed source at graph completion")
+        self.child.complete(dict(kind="graph-materialized", inputs=self.inputs,
+                                 target_rows=self.rows, commits=self.sequence))
+        self.complete = True
+
+
+def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_timeout_s=120):
+    """Run a static ancestor->targets graph in independent Local worker hosts.
+
+    graph_spec: {source, source_id, ancestor{plan,logical_node_id,occurrence_id},
+    targets[{plan,logical_node_id,occurrence_id,reader_id}], routing, exchange_mode,
+    credit_budget, cut_rows}. Returns {target_rows, contributions, egress_rows,
+    workers}. The driver schedules global cuts, collects every worker's K6 fragment,
+    commits the group once through GraphCommitTerminal and acks with a receipt.
+    """
+    from ..data.plan import LogicalPlan
+    from ..resources.capacity import LocalCapacityPool
+    from ..resources.contracts import (
+        RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan, ResourceProfile,
+        ResourceScope, WorkerLaunchSpec, WorkerRequest,
+    )
+    from ..resources.local import LocalResourceProvider
+    from ..resources.manager import ManagerBounds, ResourceManager
+    from ..resources.process_unit import ManagedProcessUnit
+    from .resource_state import RunResourceState
+    from .exchange import read_domain
+    from pathlib import Path
+
+    action = current_action()
+    if action is None:
+        raise RuntimeError("Graph materialization requires the native action context")
+    run = action.context
+    source = graph_spec["source"]
+    source_id = graph_spec["source_id"]
+    ancestor = graph_spec["ancestor"]
+    targets = graph_spec["targets"]
+    routing = graph_spec.get("routing", "broadcast")
+    exchange_mode = graph_spec.get("exchange_mode", "memory_incremental")
+    budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
+
+    from .executors.local import LocalDatasetExecutor
+    capture_executor = LocalDatasetExecutor(workers=1)
+    selected = freeze_source(action, source)
+    source_sink, source_reference = capture_source(
+        action, lambda: capture_executor.iter_rows(selected, LogicalPlan()))
+    ancestor_plan_ref = stage_plan_artifact(action, ancestor["plan"])
+    target_plan_refs = [stage_plan_artifact(action, target["plan"]) for target in targets]
+    manifest_ref = _build_manifest(run, [ancestor_plan_ref, *target_plan_refs])
+    domain = read_domain(run.directory, host_id)
+
+    reader_ids = [target["reader_id"] for target in targets]
+    channel_plan = build_channel_plan(
+        edge_id=identity([action.action_id, "graph-egress"]), scheme_version=1,
+        producer_partitions=["p0"], consumer_partitions=reader_ids,
+        exchange_mode=exchange_mode, routing=routing, read_domain=domain,
+        credit_budget=budget,
+        durability_declared="durable" if exchange_mode == "durable_incremental" else "ephemeral",
+        seal_scope=({"scope_id": identity([action.action_id, "seal"]), "membership": ["p0"], "generation": 1}
+                    if exchange_mode == "finite_sealed" else None))
+    table = RouteTable(channel_plan)
+    physical = {item["consumer_partition"]: item for item in table.physical_channels}
+
+    # Pre-wire one socketpair per physical channel; ancestor owns the producer end,
+    # each target owns its consumer end. The driver keeps neither data end.
+    data_pairs = {}
+    for reader_id in reader_ids:
+        producer_sock, consumer_sock = socket.socketpair()
+        data_pairs[reader_id] = (producer_sock, consumer_sock, physical[reader_id]["channel_id"])
+
+    ids = {k: uuid.uuid4().hex for k in ("scope_id", "boot_id", "grant_id")}
+    scope_id = ids["scope_id"]
+    ancestor_alloc = uuid.uuid4().hex
+    target_allocs = {target["reader_id"]: uuid.uuid4().hex for target in targets}
+    all_allocs = [ancestor_alloc, *target_allocs.values()]
+
+    def grant_for(allocation_id, boot_id):
+        return {"grant_id": ids["grant_id"], "run_id": run.ref.run_id, "attempt": run.attempt,
+                "fence": run.fence, "scope_id": scope_id, "allocation_id": allocation_id,
+                "boot_id": boot_id, "controller_epoch": run.attempt,
+                "expires_at_ms": int(time.time() * 1000) + max(120000, int(run.limits["timeout_s"] * 1000))}
+
+    boot_ids = {alloc: uuid.uuid4().hex for alloc in all_allocs}
+    capabilities = ["cpu-map", "stream", "graph"]
+
+    def base_spec(allocation_id, output_child_id):
+        return {"directory": str(run.directory), "run_id": run.ref.run_id, "scope_id": scope_id,
+                "allocation_id": allocation_id, "boot_id": boot_ids[allocation_id],
+                "controller_epoch": run.attempt, "capabilities": capabilities,
+                "grant": grant_for(allocation_id, boot_ids[allocation_id]),
+                "artifact_digest_observed": run.journal.recovery_identity()["platform_revision"]}
+
+    # Bind every worker child action read-only before spawn (WorkerAuthority requires it).
+    ancestor_output_child = action.action_id + "-graph-ancestor"
+    # capture_source already bound and completed the fixed-source child; the
+    # ancestor reads it read-only, so it reuses that exact id rather than re-binding.
+    ancestor_source_child = action.action_id + "-source"
+    decl = dict(kind="graph-node", source=action.declaration["source"], parent=action.semantic_id,
+                protocol="graph-cut-v1")
+    run.journal.bind_execution_action(run.fence, ancestor_output_child, decl)
+    target_children = {}
+    for target in targets:
+        child_id = action.action_id + "-graph-" + target["reader_id"]
+        decl = dict(kind="graph-node", source=action.declaration["source"], parent=action.semantic_id,
+                    protocol="graph-cut-v1")
+        run.journal.bind_execution_action(run.fence, child_id, decl)
+        target_children[target["reader_id"]] = child_id
+
+    # The driver commit authority reconciles any prepared cut before re-provisioning
+    # (D5 whole-graph restore). A completed graph short-circuits re-entry; otherwise
+    # every worker resumes from the latest acked cut (ancestor skips the acked source
+    # prefix and re-sends post-cut data; targets stage only post-cut output).
+    result_child_id = action.action_id + "-graph-result"
+    terminal = GraphCommitTerminal(
+        action, source_id=source_id, ancestor=ancestor, targets=targets,
+        target_children=target_children, physical=physical, manifest_ref=manifest_ref,
+        result_child_id=result_child_id, target_allocs=target_allocs,
+        ancestor_alloc=ancestor_alloc)
+    source_rows = source_reference["data"]["rows"]
+    if terminal.complete:
+        for pair in data_pairs.values():
+            pair[0].close()
+            pair[1].close()
+        return {"target_rows": dict(terminal.rows), "contributions": {rid: [] for rid in reader_ids},
+                "egress_rows": terminal.inputs, "workers": 0, "ancestor_contributions": [],
+                "final_arrival": {}, "checkpoints": dict(terminal.checkpoints)}
+    restore = terminal.restore_point()
+    restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
+    ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0, "state": {}}
+                        if restore else None)
+    target_restore = ({"inputs": 0, "sequence": terminal.sequence, "rows": 0, "state": {}}
+                      if restore else None)
+
+    ancestor_spec = base_spec(ancestor_alloc, ancestor_output_child)
+    ancestor_spec["graph"] = {
+        "allocation_id": ancestor_alloc, "output_child_id": ancestor_output_child,
+        "cut_namespace": action.action_id,
+        "source_child_id": ancestor_source_child, "plan_ref": ancestor_plan_ref,
+        "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
+        "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
+        "route_plan": channel_plan, "queue_depth": graph_spec.get("queue_depth", 4096),
+        "restore": ancestor_restore,
+        "output_channels": [{"channel_id": data_pairs[rid][2], "fd": data_pairs[rid][0].fileno(),
+                             "reader_id": rid, "exchange_mode": exchange_mode, "credit_budget": budget,
+                             "storage_bytes": graph_spec.get("storage_bytes", budget["bytes"]),
+                             "route_epoch": 0} for rid in reader_ids]}
+    ancestor_data_fds = [data_pairs[rid][0].fileno() for rid in reader_ids]
+
+    target_specs = {}
+    target_data_fds = {}
+    for target in targets:
+        rid = target["reader_id"]
+        alloc = target_allocs[rid]
+        spec = base_spec(alloc, target_children[rid])
+        spec["graph"] = {
+            "allocation_id": alloc, "output_child_id": target_children[rid],
+            "plan_ref": target_plan_refs[targets.index(target)], "source_id": source_id,
+            "host_id": host_id, "logical_node_id": target["logical_node_id"],
+            "occurrence_id": target["occurrence_id"], "sink_id": rid, "restore": target_restore,
+            "input_channels": [{"channel_id": data_pairs[rid][2], "fd": data_pairs[rid][1].fileno(),
+                                "reader_id": rid, "exchange_mode": exchange_mode, "credit_budget": budget,
+                                "route_epoch": 0}]}
+        target_specs[rid] = spec
+        target_data_fds[rid] = [data_pairs[rid][1].fileno()]
+
+    root = run.directory.with_name(run.directory.name + "-resources") if resource_root is None \
+        else Path(resource_root)
+    pool = LocalCapacityPool(root / "capacity", capacity={"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3})
+    unit = ManagedProcessUnit(root / "units")
+    connector = GraphLocalConnector()
+    provider = LocalResourceProvider(pool, unit, control=connector)
+    state = RunResourceState(run.journal)
+    manager = ResourceManager(provider, state, bounds=ManagerBounds())
+    connector.stage(ancestor_alloc, ancestor_spec, ancestor_data_fds)
+    for rid in reader_ids:
+        connector.stage(target_allocs[rid], target_specs[rid], target_data_fds[rid])
+    state.open_scope(run.fence, ResourceScope(
+        scope_id, run.ref.run_id, {"provider": "local"}, run.fence,
+        {"cpu_millis": 32000, "memory_bytes": 32 * 1024 ** 3, "max_workers": 16}))
+
+    def request_for(allocation_id):
+        launch = WorkerLaunchSpec(
+            artifact_refs={"graph": {"digest": manifest_ref["sha256"], "location": "file://" + str(run.directory)}},
+            entrypoint="demiflow-graph-worker",
+            argv=(__import__("sys").executable, "-B", "-m", "demiflow.execution.worker.graph_host"),
+            bootstrap_ref="bootstrap-ref", access_refs={}, runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
+        return WorkerRequest(allocation_id, allocation_id,
+                             ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3}),
+                             launch, provision_deadline_ms=60000)
+
+    requests = tuple(request_for(alloc) for alloc in all_allocs)
+    accepted = manager.apply(
+        MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence, uuid.uuid4().hex, 0),
+        ResourcePlan(scope_id, requests, ()))
+
+    links = {}
+    socks = []
+    try:
+        manager.reconcile_once(run.fence, time.monotonic() + 60, 32)
+        snapshot = manager.get(scope_id)
+        phases = {a["allocation_id"]: a["phase"] for a in snapshot["allocations"]}
+        for alloc in all_allocs:
+            if phases.get(alloc) != "RUNNING":
+                raise RecoveryContractError("Graph worker did not reach RUNNING: " + str(phases.get(alloc)))
+        # Workers inherited the data fds; the driver releases its copies now.
+        for rid in reader_ids:
+            data_pairs[rid][0].close()
+            data_pairs[rid][1].close()
+
+        def now_ms():
+            return int(time.time() * 1000)
+
+        for alloc in all_allocs:
+            sock = connector.driver_socks[alloc]
+            sock.settimeout(control_timeout_s)
+            socks.append(sock)
+            model = WorkerProtocolModel(
+                scope_id=scope_id, run_id=run.ref.run_id, allocation_id=alloc,
+                boot_id=boot_ids[alloc], controller_epoch=run.attempt,
+                grant=grant_for(alloc, boot_ids[alloc]), plan_revision=0, capabilities=capabilities)
+            links[alloc] = _WorkerLink(sock, model, alloc, now_ms)
+
+        # Lifecycle per worker: Register -> Verify -> Restore -> Activate -> Assign.
+        for alloc in all_allocs:
+            link = links[alloc]
+            register = recv_message(link.sock)
+            if register is None or register.get("kind") != "Register":
+                raise RecoveryContractError("Graph worker did not register")
+            link.model.handle(register, now_ms=now_ms())
+            link.read_response(link.command("VerifyArtifactAndCapabilities",
+                                            {"artifact_manifest_ref": manifest_ref,
+                                             "required_capabilities": capabilities}))
+            assignment_id = uuid.uuid4().hex
+            link.read_response(link.command("Restore", {"assignment_ref": assignment_id,
+                                                        "restore_point": None, "state_refs": []}))
+            link.read_response(link.command("Activate", {"grant_ref": ids["grant_id"],
+                                                         "controller_epoch": run.attempt,
+                                                         "operation_id": uuid.uuid4().hex}))
+            occurrence = (ancestor["occurrence_id"] if alloc == ancestor_alloc
+                          else next(t["occurrence_id"] for t in targets if target_allocs[t["reader_id"]] == alloc))
+            assignment = {
+                "schema_version": "demiflow.worker_assignment.v1", "assignment_id": assignment_id,
+                "operation_id": uuid.uuid4().hex, "scope_id": scope_id, "allocation_id": alloc,
+                "boot_id": boot_ids[alloc], "worker_id": alloc, "controller_epoch": run.attempt,
+                "grant_ref": ids["grant_id"], "plan_revision": 0, "expected_plan_revision": 0,
+                "artifact_manifest_ref": manifest_ref, "stages": [occurrence], "partitions": ["p0"],
+                "channels": {"inputs": [], "outputs": []}, "restore_point": None,
+                "route_epoch": 0, "topology_revision": 0, "ready_deadline_ms": 60000}
+            link.read_response(link.command("Assign", {"assignment": assignment}))
+
+        # Driver cut schedule: one global cut per interval, the last at source EOF.
+        # Each cut names a checkpoint, every worker contributes its K6 fragment, the
+        # driver commits the whole group once and only then acks (releases the workers).
+        # On restore the schedule continues strictly after the latest acked ordinal.
+        cut_rows = max(1, int(graph_spec.get("cut_rows", source_rows or 1)))
+        bounds = [b for b in range(cut_rows, source_rows, cut_rows) if b > restore_ordinal]
+        # The final cut seals the graph and must run even for an empty source (bound
+        # 0); skip it only when a prior attempt already acked up to source_rows.
+        if restore is None or restore_ordinal < source_rows:
+            bounds.append(source_rows)
+        contributions = {rid: [] for rid in reader_ids}
+        ancestor_contributions = []
+        epoch = run.attempt
+        for bound in bounds:
+            final = bound == source_rows
+            checkpoint_id = identity([action.action_id, "graph-cut", bound])
+            command = build_graph_checkpoint(checkpoint_id, epoch=epoch,
+                                             producer_sequence_bound=bound, final=final)
+            for alloc in all_allocs:
+                links[alloc].send_graph_checkpoint(command)
+            group = {}
+            deadline = time.monotonic() + control_timeout_s
+            while len(group) < len(all_allocs):
+                if time.monotonic() > deadline:
+                    raise RecoveryContractError("Graph cut collection deadline exceeded")
+                readable, _, _ = select.select(socks, [], [], 0.5)
+                for sock in readable:
+                    link = next(l for l in links.values() if l.sock is sock)
+                    if not link.pump():
+                        # A worker host died (producer/consumer fault): fail fast so the
+                        # run exits and whole-graph restore re-enters from the acked cut.
+                        raise RecoveryContractError("Graph worker closed during cut collection")
+                for alloc, link in links.items():
+                    if alloc not in group and checkpoint_id in link.contributions:
+                        group[alloc] = link.contributions[checkpoint_id]
+            # Use the ancestor's actual confirmed ordinal (the chunked feed may
+            # overshoot the requested bound), never the requested bound itself.
+            ancestor_progress = group[ancestor_alloc]["source_progress"]
+            ordinal = ancestor_progress[0]["position"]["next_ordinal"] if ancestor_progress else 0
+            fact, manifest = terminal.commit_group(checkpoint_id, group, ordinal=ordinal,
+                                                   final=final, epoch=epoch)
+            receipt = {"status": "acked", "checkpoint_id": checkpoint_id,
+                       "sequence": fact["sequence"], "commit_id": fact["commit_id"],
+                       "channel_cuts": manifest["channel_cuts"]}
+            for alloc in all_allocs:
+                links[alloc].send_receipt(checkpoint_id, receipt)
+            ancestor_contributions.append(group[ancestor_alloc])
+            for rid in reader_ids:
+                contributions[rid].append(group[target_allocs[rid]])
+
+        target_rows = dict(terminal.rows)
+        egress_rows = terminal.inputs
+        run.journal.complete_execution_action(run.fence, ancestor_output_child,
+            dict(kind="graph-ancestor", egress=egress_rows, cuts=len(ancestor_contributions)))
+        for target in targets:
+            rid = target["reader_id"]
+            run.journal.complete_execution_action(run.fence, target_children[rid],
+                dict(kind="graph-target", rows=target_rows[rid], cuts=len(contributions[rid])))
+        terminal.finish(source_rows)
+
+        for alloc in all_allocs:
+            link = links[alloc]
+            link.read_response(link.command("Drain", {"deadline_ms": int(run.limits["cancel_grace_s"] * 1000) + 10000,
+                                                      "reason": "graph drained"}))
+        manager.close(
+            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
+                            uuid.uuid4().hex, accepted["desired_revision"]),
+            {"mode": "DRAINED", "engine_receipt_ref": scope_id + "-drained",
+             "terminate_deadline_ms": 5000, "reason": "graph drained"})
+        manager.reconcile_once(run.fence, time.monotonic() + 20, 32)
+    finally:
+        for sock in socks:
+            sock.close()
+        for alloc in all_allocs:
+            connector.close(alloc)
+        for rid in reader_ids:
+            for sock in data_pairs[rid][:2]:
+                sock.close()
+        for process in list(provider._spawned.values()):
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+    final_arrival = {"ancestor": links[ancestor_alloc].final_at}
+    for rid, alloc in target_allocs.items():
+        final_arrival[rid] = links[alloc].final_at
+    return {"target_rows": target_rows, "contributions": contributions,
+            "egress_rows": egress_rows, "workers": len(all_allocs),
+            "ancestor_contributions": ancestor_contributions,
+            "final_arrival": final_arrival, "checkpoints": terminal.checkpoints}
+
+
+def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_timeout_s=120):
+    """Run a static ancestor->targets graph in independent Ray Core actor hosts (S5).
+
+    Same driver orchestration as ``run_local_graph`` (fixed source capture, K1
+    manifest, frozen K3 lifecycle, single GraphCommitTerminal commit authority,
+    whole-graph restore, cut schedule). Only the worker host and transports differ:
+    named Ray actors (max_restarts=0) instead of managed processes; actor methods +
+    a bounded outbox pull instead of an inherited control socketpair; the data plane
+    is the Ray carriage (one async channel actor per physical channel, ray_object
+    plasma for large payloads) instead of inherited socket fds. Business rows flow
+    worker->worker and never transit the driver. Single-host Ray is semantic-
+    adaptation evidence only (no multi-host/performance claim); selected by the
+    opt-in ``unified_graph`` executor seam (D6).
+    """
+    import sys
+    import ray
+    from ray.exceptions import RayActorError
+
+    from ..data.plan import LogicalPlan
+    from ..resources.contracts import (
+        RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan, ResourceProfile,
+        ResourceScope, WorkerLaunchSpec, WorkerRequest,
+    )
+    from ..resources.manager import ManagerBounds, ResourceManager
+    from ..resources.ray import RayResourceProvider
+    from .resource_state import RunResourceState
+    from .exchange import read_domain
+    from .exchange.carriage_ray import ray_channel_pair
+    from .worker.graph_ray_host import RayGraphControlConnector
+
+    action = current_action()
+    if action is None:
+        raise RuntimeError("Graph materialization requires the native action context")
+    run = action.context
+    source = graph_spec["source"]
+    source_id = graph_spec["source_id"]
+    ancestor = graph_spec["ancestor"]
+    targets = graph_spec["targets"]
+    routing = graph_spec.get("routing", "broadcast")
+    exchange_mode = graph_spec.get("exchange_mode", "memory_incremental")
+    budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
+
+    from .executors.local import LocalDatasetExecutor
+    capture_executor = LocalDatasetExecutor(workers=1)
+    selected = freeze_source(action, source)
+    source_sink, source_reference = capture_source(
+        action, lambda: capture_executor.iter_rows(selected, LogicalPlan()))
+    ancestor_plan_ref = stage_plan_artifact(action, ancestor["plan"])
+    target_plan_refs = [stage_plan_artifact(action, target["plan"]) for target in targets]
+    manifest_ref = _build_manifest(run, [ancestor_plan_ref, *target_plan_refs])
+    domain = read_domain(run.directory, host_id)
+
+    reader_ids = [target["reader_id"] for target in targets]
+    channel_plan = build_channel_plan(
+        edge_id=identity([action.action_id, "graph-egress"]), scheme_version=1,
+        producer_partitions=["p0"], consumer_partitions=reader_ids,
+        exchange_mode=exchange_mode, routing=routing, read_domain=domain,
+        credit_budget=budget,
+        durability_declared="durable" if exchange_mode == "durable_incremental" else "ephemeral",
+        seal_scope=({"scope_id": identity([action.action_id, "seal"]), "membership": ["p0"], "generation": 1}
+                    if exchange_mode == "finite_sealed" else None))
+    table = RouteTable(channel_plan)
+    physical = {item["consumer_partition"]: item for item in table.physical_channels}
+
+    ids = {k: uuid.uuid4().hex for k in ("scope_id", "boot_id", "grant_id")}
+    scope_id = ids["scope_id"]
+    ancestor_alloc = uuid.uuid4().hex
+    target_allocs = {target["reader_id"]: uuid.uuid4().hex for target in targets}
+    all_allocs = [ancestor_alloc, *target_allocs.values()]
+
+    def grant_for(allocation_id, boot_id):
+        return {"grant_id": ids["grant_id"], "run_id": run.ref.run_id, "attempt": run.attempt,
+                "fence": run.fence, "scope_id": scope_id, "allocation_id": allocation_id,
+                "boot_id": boot_id, "controller_epoch": run.attempt,
+                "expires_at_ms": int(time.time() * 1000) + max(120000, int(run.limits["timeout_s"] * 1000))}
+
+    boot_ids = {alloc: uuid.uuid4().hex for alloc in all_allocs}
+    capabilities = ["cpu-map", "stream", "graph"]
+
+    def base_spec(allocation_id):
+        return {"directory": str(run.directory), "run_id": run.ref.run_id, "scope_id": scope_id,
+                "allocation_id": allocation_id, "boot_id": boot_ids[allocation_id],
+                "controller_epoch": run.attempt, "capabilities": capabilities,
+                "grant": grant_for(allocation_id, boot_ids[allocation_id]),
+                "artifact_digest_observed": run.journal.recovery_identity()["platform_revision"]}
+
+    ancestor_output_child = action.action_id + "-graph-ancestor"
+    ancestor_source_child = action.action_id + "-source"
+    decl = dict(kind="graph-node", source=action.declaration["source"], parent=action.semantic_id,
+                protocol="graph-cut-v1")
+    run.journal.bind_execution_action(run.fence, ancestor_output_child, decl)
+    target_children = {}
+    for target in targets:
+        child_id = action.action_id + "-graph-" + target["reader_id"]
+        run.journal.bind_execution_action(run.fence, child_id, decl)
+        target_children[target["reader_id"]] = child_id
+
+    result_child_id = action.action_id + "-graph-result"
+    terminal = GraphCommitTerminal(
+        action, source_id=source_id, ancestor=ancestor, targets=targets,
+        target_children=target_children, physical=physical, manifest_ref=manifest_ref,
+        result_child_id=result_child_id, target_allocs=target_allocs,
+        ancestor_alloc=ancestor_alloc)
+    source_rows = source_reference["data"]["rows"]
+    if terminal.complete:
+        return {"target_rows": dict(terminal.rows), "contributions": {rid: [] for rid in reader_ids},
+                "egress_rows": terminal.inputs, "workers": 0, "ancestor_contributions": [],
+                "final_arrival": {}, "checkpoints": dict(terminal.checkpoints)}
+    restore = terminal.restore_point()
+    restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
+    ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0, "state": {}}
+                        if restore else None)
+    target_restore = ({"inputs": 0, "sequence": terminal.sequence, "rows": 0, "state": {}}
+                      if restore else None)
+
+    # Ray data plane: one named channel actor per physical channel. The driver keeps
+    # the link handles alive for the whole run so the actors are not GC-killed before
+    # the workers look them up by name; each worker reconstructs its endpoint on Assign.
+    channel_names = {}
+    channel_links = {}
+    for reader_id in reader_ids:
+        cid = physical[reader_id]["channel_id"]
+        producer_link, consumer_link, name = ray_channel_pair(cid)
+        channel_names[reader_id] = name
+        channel_links[reader_id] = (producer_link, consumer_link)
+
+    ancestor_spec = base_spec(ancestor_alloc)
+    ancestor_spec["graph"] = {
+        "allocation_id": ancestor_alloc, "output_child_id": ancestor_output_child,
+        "cut_namespace": action.action_id,
+        "source_child_id": ancestor_source_child, "plan_ref": ancestor_plan_ref,
+        "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
+        "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
+        "route_plan": channel_plan, "queue_depth": graph_spec.get("queue_depth", 4096),
+        "restore": ancestor_restore,
+        "output_channels": [{"channel_id": physical[rid]["channel_id"], "ray_queue": channel_names[rid],
+                             "carriage": "ray", "reader_id": rid, "exchange_mode": exchange_mode,
+                             "credit_budget": budget,
+                             "storage_bytes": graph_spec.get("storage_bytes", budget["bytes"]),
+                             "route_epoch": 0} for rid in reader_ids]}
+
+    target_specs = {}
+    for target in targets:
+        rid = target["reader_id"]
+        alloc = target_allocs[rid]
+        spec = base_spec(alloc)
+        spec["graph"] = {
+            "allocation_id": alloc, "output_child_id": target_children[rid],
+            "plan_ref": target_plan_refs[targets.index(target)], "source_id": source_id,
+            "host_id": host_id, "logical_node_id": target["logical_node_id"],
+            "occurrence_id": target["occurrence_id"], "sink_id": rid, "restore": target_restore,
+            "input_channels": [{"channel_id": physical[rid]["channel_id"], "ray_queue": channel_names[rid],
+                                "carriage": "ray", "reader_id": rid, "exchange_mode": exchange_mode,
+                                "credit_budget": budget, "route_epoch": 0}]}
+        target_specs[rid] = spec
+
+    connector = RayGraphControlConnector(command_timeout_s=control_timeout_s)
+    provider = RayResourceProvider(connector)
+    state = RunResourceState(run.journal)
+    manager = ResourceManager(provider, state, bounds=ManagerBounds())
+    connector.stage(ancestor_alloc, ancestor_spec)
+    for rid in reader_ids:
+        connector.stage(target_allocs[rid], target_specs[rid])
+    state.open_scope(run.fence, ResourceScope(
+        scope_id, run.ref.run_id, {"provider": "ray"}, run.fence,
+        {"cpu_millis": 32000, "memory_bytes": 32 * 1024 ** 3, "max_workers": 16}))
+
+    def request_for(allocation_id):
+        launch = WorkerLaunchSpec(
+            artifact_refs={"graph": {"digest": manifest_ref["sha256"], "location": "file://" + str(run.directory)}},
+            entrypoint="demiflow-graph-worker-actor",
+            argv=(sys.executable, "-B", "-m", "demiflow.execution.worker.graph_ray_host"),
+            bootstrap_ref="bootstrap-ref", access_refs={}, runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
+        return WorkerRequest(allocation_id, allocation_id,
+                             ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3}),
+                             launch, provision_deadline_ms=60000)
+
+    requests = tuple(request_for(alloc) for alloc in all_allocs)
+    accepted = manager.apply(
+        MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence, uuid.uuid4().hex, 0),
+        ResourcePlan(scope_id, requests, ()))
+
+    def now_ms():
+        return int(time.time() * 1000)
+
+    models = {}
+    final_at = {}
+    try:
+        manager.reconcile_once(run.fence, time.monotonic() + 60, 32)
+        snapshot = manager.get(scope_id)
+        phases = {a["allocation_id"]: a["phase"] for a in snapshot["allocations"]}
+        for alloc in all_allocs:
+            if phases.get(alloc) != "RUNNING":
+                raise RecoveryContractError("Ray graph worker did not reach RUNNING: " + str(phases.get(alloc)))
+
+        def command(alloc, kind, payload):
+            op = uuid.uuid4().hex
+            result = connector.handle(alloc, {
+                "protocol_version": WORKER_PROTOCOL_VERSION, "kind": kind,
+                "scope_id": scope_id, "run_id": run.ref.run_id, "operation_id": op,
+                "controller_epoch": run.attempt, "authority_ref": ids["grant_id"],
+                "allocation_id": alloc, "boot_id": boot_ids[alloc], "payload": payload})
+            if "error" in result:
+                raise RecoveryContractError("Worker command failed: " + str(result["error"]))
+            return result["receipt"]
+
+        def await_event(alloc, kind, deadline):
+            while True:
+                events = connector.pull(alloc)
+                for message in events:
+                    if message.get("kind") in ("Register", "Ready", "Heartbeat"):
+                        models[alloc].handle(message, now_ms=now_ms())
+                    if message.get("kind") == kind:
+                        return message
+                if time.monotonic() > deadline:
+                    raise RecoveryContractError("Ray graph worker did not emit " + kind)
+                if not events:
+                    time.sleep(0.01)
+
+        for alloc in all_allocs:
+            models[alloc] = WorkerProtocolModel(
+                scope_id=scope_id, run_id=run.ref.run_id, allocation_id=alloc,
+                boot_id=boot_ids[alloc], controller_epoch=run.attempt,
+                grant=grant_for(alloc, boot_ids[alloc]), plan_revision=0, capabilities=capabilities)
+
+        lifecycle_deadline = time.monotonic() + control_timeout_s
+        for alloc in all_allocs:
+            await_event(alloc, "Register", lifecycle_deadline)
+            command(alloc, "VerifyArtifactAndCapabilities",
+                    {"artifact_manifest_ref": manifest_ref, "required_capabilities": capabilities})
+            assignment_id = uuid.uuid4().hex
+            command(alloc, "Restore", {"assignment_ref": assignment_id,
+                                       "restore_point": None, "state_refs": []})
+            await_event(alloc, "Ready", lifecycle_deadline)
+            command(alloc, "Activate", {"grant_ref": ids["grant_id"],
+                                        "controller_epoch": run.attempt,
+                                        "operation_id": uuid.uuid4().hex})
+            occurrence = (ancestor["occurrence_id"] if alloc == ancestor_alloc
+                          else next(t["occurrence_id"] for t in targets if target_allocs[t["reader_id"]] == alloc))
+            assignment = {
+                "schema_version": "demiflow.worker_assignment.v1", "assignment_id": assignment_id,
+                "operation_id": uuid.uuid4().hex, "scope_id": scope_id, "allocation_id": alloc,
+                "boot_id": boot_ids[alloc], "worker_id": alloc, "controller_epoch": run.attempt,
+                "grant_ref": ids["grant_id"], "plan_revision": 0, "expected_plan_revision": 0,
+                "artifact_manifest_ref": manifest_ref, "stages": [occurrence], "partitions": ["p0"],
+                "channels": {"inputs": [], "outputs": []}, "restore_point": None,
+                "route_epoch": 0, "topology_revision": 0, "ready_deadline_ms": 60000}
+            command(alloc, "Assign", {"assignment": assignment})
+
+        cut_rows = max(1, int(graph_spec.get("cut_rows", source_rows or 1)))
+        bounds = [b for b in range(cut_rows, source_rows, cut_rows) if b > restore_ordinal]
+        if restore is None or restore_ordinal < source_rows:
+            bounds.append(source_rows)
+        contributions = {rid: [] for rid in reader_ids}
+        ancestor_contributions = []
+        epoch = run.attempt
+        for bound in bounds:
+            final = bound == source_rows
+            checkpoint_id = identity([action.action_id, "graph-cut", bound])
+            cut_command = build_graph_checkpoint(checkpoint_id, epoch=epoch,
+                                                 producer_sequence_bound=bound, final=final)
+            for alloc in all_allocs:
+                connector.send_graph_checkpoint(alloc, cut_command)
+            group = {}
+            pending_ops = {}
+            deadline = time.monotonic() + control_timeout_s
+            while len(group) < len(all_allocs):
+                if time.monotonic() > deadline:
+                    raise RecoveryContractError("Graph cut collection deadline exceeded")
+                for alloc in all_allocs:
+                    if alloc in group:
+                        continue
+                    try:
+                        events = connector.pull(alloc)
+                    except RayActorError:
+                        raise RecoveryContractError("Ray graph worker died during cut collection")
+                    for message in events:
+                        if message.get("schema_version") == CUT_CONTRIBUTION_SCHEMA or message.get("kind") == "CutContribution":
+                            contribution = validate_cut_contribution(message["contribution"])
+                            if contribution["checkpoint_id"] == checkpoint_id:
+                                group[alloc] = contribution
+                                pending_ops[alloc] = message["operation_id"]
+                                if contribution["final"] and alloc not in final_at:
+                                    final_at[alloc] = time.monotonic()
+                        elif message.get("kind") in ("Register", "Ready", "Heartbeat"):
+                            models[alloc].handle(message, now_ms=now_ms())
+                if len(group) < len(all_allocs):
+                    time.sleep(0.01)
+            ancestor_progress = group[ancestor_alloc]["source_progress"]
+            ordinal = ancestor_progress[0]["position"]["next_ordinal"] if ancestor_progress else 0
+            fact, manifest = terminal.commit_group(checkpoint_id, group, ordinal=ordinal,
+                                                   final=final, epoch=epoch)
+            receipt = {"status": "acked", "checkpoint_id": checkpoint_id,
+                       "sequence": fact["sequence"], "commit_id": fact["commit_id"],
+                       "channel_cuts": manifest["channel_cuts"]}
+            for alloc in all_allocs:
+                connector.send_receipt(alloc, pending_ops[alloc], receipt)
+            ancestor_contributions.append(group[ancestor_alloc])
+            for rid in reader_ids:
+                contributions[rid].append(group[target_allocs[rid]])
+
+        target_rows = dict(terminal.rows)
+        egress_rows = terminal.inputs
+        run.journal.complete_execution_action(run.fence, ancestor_output_child,
+            dict(kind="graph-ancestor", egress=egress_rows, cuts=len(ancestor_contributions)))
+        for target in targets:
+            rid = target["reader_id"]
+            run.journal.complete_execution_action(run.fence, target_children[rid],
+                dict(kind="graph-target", rows=target_rows[rid], cuts=len(contributions[rid])))
+        terminal.finish(source_rows)
+
+        for alloc in all_allocs:
+            command(alloc, "Drain", {"deadline_ms": int(run.limits["cancel_grace_s"] * 1000) + 10000,
+                                     "reason": "graph drained"})
+        manager.close(
+            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
+                            uuid.uuid4().hex, accepted["desired_revision"]),
+            {"mode": "DRAINED", "engine_receipt_ref": scope_id + "-drained",
+             "terminate_deadline_ms": 5000, "reason": "graph drained"})
+        manager.reconcile_once(run.fence, time.monotonic() + 20, 32)
+    finally:
+        for alloc in all_allocs:
+            connector.terminate(alloc)
+            connector.close(alloc)
+        for name in channel_names.values():
+            try:
+                ray.kill(ray.get_actor(name), no_restart=True)
+            except Exception:
+                pass
+    final_arrival = {"ancestor": final_at.get(ancestor_alloc)}
+    for rid, alloc in target_allocs.items():
+        final_arrival[rid] = final_at.get(alloc)
+    return {"target_rows": target_rows, "contributions": contributions,
+            "egress_rows": egress_rows, "workers": len(all_allocs),
+            "ancestor_contributions": ancestor_contributions,
+            "final_arrival": final_arrival, "checkpoints": terminal.checkpoints}

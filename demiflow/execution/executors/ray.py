@@ -232,10 +232,11 @@ class RayDatasetExecutor(DatasetExecutor):
     def __init__(
         self, *, aggregate_state_max_bytes: int = 8 * 1024 * 1024,
         resource_root=None, planning_policy=None, candidate_execution=None,
-        unified_chain: bool = False,
+        unified_chain: bool = False, unified_graph: bool = False,
     ) -> None:
         self._aggregate_state_max_bytes = max(1, int(aggregate_state_max_bytes))
         self._unified_chain = bool(unified_chain)
+        self._unified_graph = bool(unified_graph)
         self._last_native = None
         self.resource_root = Path(resource_root or ".").resolve()
         self._prompt_coordinators = {}
@@ -584,6 +585,21 @@ class RayDatasetExecutor(DatasetExecutor):
             from ..chain import run_ray_chain
             return run_ray_chain(self, dataset, source=source, plan=plan)
         raise NotImplementedError("async materialize is only supported by the local executor")
+
+    def materialize_graph(self, graph_spec):
+        """Opt-in static multi-worker graph entry on Ray Core (U3/S5, D6).
+
+        Parallel to the Local ``materialize_graph`` seam; the default Ray Data path
+        is untouched. Runs the whole graph in independent Ray actor hosts; business
+        payloads flow worker->worker over Ray channel actors / ray_object plasma and
+        never transit the driver. Requires the native action context.
+        """
+        from ..graph import run_ray_graph
+        from ..run_context import current_action
+        if current_action() is None:
+            raise RuntimeError("Graph materialization requires the native action context")
+        self._ensure_ray()
+        return run_ray_graph(graph_spec)
 
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,

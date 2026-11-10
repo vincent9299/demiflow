@@ -874,6 +874,9 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
             for _ in range(s.concurrency)])
     if progress is not None:
         control = CheckpointControl(progress, stages, queues, track_commit)
+        bind_control = getattr(progress, "_bind_checkpoint_control", None)
+        if bind_control is not None:
+            bind_control(control)
     control_tasks = [asyncio.create_task(control.run(), name='demiflow-checkpoint-control')] if control else []
     feed_task = asyncio.create_task(feed())
     all_tasks = [feed_task, *control_tasks, *(t for g in stage_tasks for t in g)]

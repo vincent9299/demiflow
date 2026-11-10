@@ -1,0 +1,233 @@
+"""Worker-side graph progress (U3/S3).
+
+Reuses the driver's stage binding/alignment/snapshot verbatim via
+StreamStageProgress (U2 WorkerStreamProgress stays untouched). Two roles share one
+class:
+
+* **ancestor** — reads the driver-captured fixed source, runs the shared stages
+  once, and routes each output record to its downstream physical channels through
+  an injected GraphOutputRouter (egress replication, not re-execution).
+* **target** — reads its input physical channels through a GraphInputReader
+  (timely dequeue), runs its stages, and stages terminal output under the granted
+  fence. ``source`` is None so E1 never auto-finals from a fixed row count;
+  finality arrives with input EOI / the driver's final cut.
+
+The commit terminal stays driver-only: seal returns a thunk that delegates to an
+injected ``request_contribution`` callback carrying a K6-shaped cut fragment. The
+worker never constructs a CommitCoordinator or owns result-commit authority.
+"""
+import asyncio
+import threading
+import uuid
+
+from ..block_sink import BlockSink
+from ..exchange.carriage_local import inline_records, ref_records
+from ..operator_state import OperatorStates
+from ..recovery_contract import RecoveryContractError, identity
+from ..state_artifacts import StateArtifacts
+from ..stream_materialize import StreamStageProgress
+
+
+class GraphWorkerProgress(StreamStageProgress):
+    def __init__(self, action, *, allocation_id, occurrence_id, source_id,
+                 source=None, source_sink=None, input_reader=None, output_router=None,
+                 route_value=None, restore=None, request_contribution=None,
+                 stop_requested=None, sink_id="output", exchange_mode="memory_incremental",
+                 segment_store=None, cut_namespace=None):
+        self.action, self.run = action, action.context
+        self.allocation_id = allocation_id
+        self.occurrence_id = occurrence_id
+        self.source_id = source_id
+        self._cut_namespace = cut_namespace
+        self.source = source
+        self.input_reader = input_reader
+        self.output_router = output_router
+        self._exchange_mode = exchange_mode
+        self._segment_store = segment_store
+        self._route_value = route_value or (lambda row: None)
+        self.source_sink = source_sink
+        self.sink = BlockSink(action, sink_id, staging_only=True)
+        self.row_sink = self.sink
+        self.has_objects = False
+        # Graph cuts are driver/alignment-driven, never row-count auto-triggered.
+        self.batch_rows = 2 ** 62
+        self.stop_requested = stop_requested or (lambda: False)
+        self._request_contribution = request_contribution
+        # Restore comes only from driver-provided refs; the driver stays the
+        # commit authority. A graph worker never reads a journal commit itself.
+        self.inputs = self.rows = self.sequence = 0
+        self.pending_cut = None
+        self._cut_checkpoint_id = None
+        self._cut_epoch = 0
+        self._final_cut = False
+        self._final_done = False
+        self._cut_done = None
+        self._control = None
+        self._driver_finals = {}
+        restored = {}
+        if restore is not None:
+            self.inputs = restore.get("inputs", 0)
+            self.sequence = restore.get("sequence", 0)
+            self.rows = restore.get("rows", 0)
+            self.pending_cut = restore.get("pending_cut")
+            restored = {key: StateArtifacts(self.run).read(ref)
+                        for key, ref in restore.get("state", {}).items()}
+        self.state = OperatorStates(self.run, restored)
+        self.ordinal = 0
+        self.complete = False
+        self.append_lock = asyncio.Lock()
+        self.append_slots = asyncio.Semaphore(64)
+        self.pending_appends = {}
+        self.direct_owners = []
+        self.group_ends = []
+        self.buffer_sinks = {}
+        self.admitted_rows = self.rows
+        self._egress_ordinal = 0
+
+    def source_rows(self):
+        if self.input_reader is not None:
+            return self.input_reader.rows()
+        return self.source_sink.iter_rows(self.source["data"])
+
+    def _bind_checkpoint_control(self, control):
+        # Additive run_stream seam: graph cuts wake the E1 control loop precisely at
+        # the pending bound instead of waiting on its interval timer. U2 progress
+        # has no such hook, so its path is unchanged. Capture the loop here (this
+        # runs in the run_stream event-loop thread) so a cut named from a foreign
+        # thread (target reader generator / driver command) wakes it thread-safely.
+        self._control = control
+        self._control_loop = asyncio.get_running_loop()
+
+    def _wake_control(self):
+        if self._control is not None:
+            # align_cut/request_cut run off the event loop (reader to_thread worker,
+            # driver control thread). asyncio.Event.set() from a foreign thread does
+            # not wake the selector, so the cut would stall until the interval timer;
+            # call_soon_threadsafe both wakes the loop and is safe from any thread.
+            self._control_loop.call_soon_threadsafe(self._control.changed.set)
+
+    def select(self, row):
+        key = super().select(row)
+        if self.pending_cut is not None and self.ordinal >= self.pending_cut:
+            self._wake_control()
+        return key
+
+    def request_cut(self, checkpoint_id, producer_sequence_bound, *, epoch=0, final=False):
+        """Driver graph_checkpoint converges the same E1 pending_cut path (D3)."""
+        self._cut_checkpoint_id = checkpoint_id
+        self._cut_epoch = epoch
+        self.pending_cut = producer_sequence_bound
+        self._final_cut = final
+        self._wake_control()
+
+    def note_driver_cut(self, checkpoint_id, *, final=False):
+        """Target: the driver names the cut and its finality; alignment drives the
+        ordinal. Recording finality here avoids racing the ancestor's trailing EOI
+        and avoids waiting on post-cut data (which the ancestor only sends after the
+        commit ack, so waiting would deadlock the cut)."""
+        self._driver_finals[checkpoint_id] = bool(final)
+
+    def align_cut(self, checkpoint_id, consumed_rows, *, final=False):
+        """Target reader: InputGate aligned on a barrier; cut at this input ordinal.
+
+        Returns the event the reader waits on; the commit receipt sets it so the
+        reader releases post-cut data only after the driver's single durable commit.
+        """
+        self._cut_checkpoint_id = checkpoint_id
+        self._final_cut = self._driver_finals.get(checkpoint_id, final)
+        self.pending_cut = consumed_rows
+        self._cut_done = threading.Event()
+        self._wake_control()
+        return self._cut_done
+
+    async def append(self, row):
+        if self.stop_requested():
+            raise RecoveryContractError("Graph worker stopped")
+        if self.output_router is not None:
+            if self._exchange_mode != "memory_incremental" and self._segment_store is not None:
+                # durable/sealed: business rows ride segment files; only a K4
+                # DataRef crosses the socket, so large payloads never transit the
+                # driver (D3). The consumer reads the segment directly (S2).
+                durability = "durable" if self._exchange_mode == "durable_incremental" else "ephemeral"
+                _, refs = self._segment_store.write([row], scope_ref=self.occurrence_id,
+                                                    durability=durability)
+                records = ref_records(refs, occurrence_id=self.occurrence_id)
+            else:
+                records = inline_records([row], source_id=self.source_id,
+                                         occurrence_id=self.occurrence_id,
+                                         start_ordinal=self._egress_ordinal)
+            self._egress_ordinal += 1
+            self.output_router.route(records, route_value=self._route_value(row))
+            self.rows += 1
+            return
+        await super().append(row)
+
+    def _channel_cuts(self):
+        cuts = []
+        if self.input_reader is not None:
+            for channel_id, cursor in self.input_reader.cursors.items():
+                bound = max(cursor + 1, 0)
+                cuts.append({"channel_id": channel_id,
+                             "producer_cut_sequence": bound,
+                             "consumer_offsets": {self.input_reader.reader_id: bound}})
+        if self.output_router is not None:
+            for channel_id, channel in self.output_router.channels.items():
+                cuts.append({"channel_id": channel_id,
+                             "producer_cut_sequence": max(channel.producer.next_sequence - 1, 0),
+                             "consumer_offsets": {}})
+        return cuts
+
+    def seal(self, barrier):
+        if self._final_done:
+            return lambda: None
+        real_cut = (self._cut_checkpoint_id is not None or barrier.final or self._final_cut)
+        if not real_cut:
+            # Timer-driven E1 trigger between driver/alignment cuts: snapshot nothing,
+            # publish nothing, keep staged rows. Only the coordinating cut publishes.
+            return lambda: None
+        barrier.final = bool(barrier.final or self._final_cut)
+        sealed = self.sink.detach()
+        barrier.states["stream-progress"] = dict(rows=self.rows + sealed.rows,
+                                                 final=barrier.final, inputs=barrier.next_ordinal)
+        if self._request_contribution is None:
+            raise RecoveryContractError("Worker contribution channel is not wired")
+        if self._cut_checkpoint_id is not None:
+            checkpoint_id = self._cut_checkpoint_id
+        elif self._cut_namespace is not None:
+            # E1 can auto-final at source EOF (control.finish) before the driver's
+            # final cut command names the checkpoint — a race actor-method latency
+            # exposes on Ray. Derive the SAME id the driver schedules for this bound
+            # (identity([action, "graph-cut", ordinal])) so the contribution still
+            # matches the driver's cut group instead of a random fallback id.
+            checkpoint_id = identity([self._cut_namespace, "graph-cut", barrier.next_ordinal])
+        else:
+            checkpoint_id = identity(
+                [self.allocation_id, "ck", barrier.next_ordinal, uuid.uuid4().hex])
+        if self.output_router is not None:
+            # Inject the K5 barrier after the pre-cut data already routed (E1 seal
+            # runs once every pre-cut row traversed the pipeline). FIFO channel queues
+            # keep the barrier ahead of any post-cut data routed later.
+            self.output_router.barrier(checkpoint_id, epoch=self._cut_epoch, topology_revision=0)
+        descriptor = sealed.descriptor() if self.output_router is None else None
+        # Only the ancestor reads a fixed source; targets consume input channels
+        # (covered by channel_cuts). The confirmed source ordinal rides K6-shaped
+        # source_progress so the driver assembles full coverage and commits once.
+        source_progress = ([{"source_id": self.source_id, "partition_id": "p0",
+                             "position": {"next_ordinal": barrier.next_ordinal}}]
+                           if self.source is not None else [])
+        contribution = {
+            "schema_version": "demiflow.cut_contribution.v1",
+            "checkpoint_id": checkpoint_id, "allocation_id": self.allocation_id,
+            "channel_cuts": self._channel_cuts(), "operator_states": [],
+            "inflight": [], "output_descriptor": descriptor,
+            "source_progress": source_progress, "final": barrier.final}
+        states = dict(barrier.states)
+        self._cut_checkpoint_id = None
+        if barrier.final:
+            self._final_done = True
+        return lambda: self._request_contribution(contribution, sealed, states, barrier.final)
+
+    def note_contribution_acked(self, inputs):
+        self.inputs = inputs
+        if self._cut_done is not None:
+            self._cut_done.set()

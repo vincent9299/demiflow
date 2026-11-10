@@ -125,9 +125,11 @@ class LocalDatasetExecutor(DatasetExecutor):
         local_kernel=None,
         sort_workers: int | None = None,
         unified_chain: bool = False,
+        unified_graph: bool = False,
     ) -> None:
         self._workers = max(1, int(workers))
         self._unified_chain = bool(unified_chain)
+        self._unified_graph = bool(unified_graph)
         if sort_workers is None:
             sort_workers = os.environ.get('DEMIFLOW_LOCAL_SORT_WORKERS',
                            os.environ.get('DEMIWFLOW_LOCAL_SORT_WORKERS', self._workers))
@@ -872,6 +874,21 @@ class LocalDatasetExecutor(DatasetExecutor):
             _CheckpointBlocks(terminal), terminal.rows,
             recovery_reference=dict(run_id=action.context.ref.run_id, action_id=action.action_id,
                                     semantic_id=action.semantic_id))
+
+    def materialize_graph(self, graph_spec):
+        """Opt-in static multi-worker graph entry (U3/D6); default path untouched.
+
+        The linear Dataset API cannot express a fan-out ancestor->targets graph,
+        so this is a separate platform-side entry selected explicitly, parallel to
+        the ``unified_chain`` seam. It requires the native action context and runs
+        the whole graph in independent Local worker hosts; business payloads flow
+        worker->worker over inherited data sockets and never transit the driver.
+        """
+        from ..graph import run_local_graph
+        from ..run_context import current_action
+        if current_action() is None:
+            raise RuntimeError("Graph materialization requires the native action context")
+        return run_local_graph(graph_spec)
 
     def _materialize_blocks(self, source, execute) -> _LocalMaterializedHandle:
         """通用块缓存；失败时清理本次溢写，不返回部分结果或删除其他缓存。"""
