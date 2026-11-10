@@ -713,6 +713,42 @@
     raw(p,'当前表的固定来源',{alias,uri:binding.uri,reference:binding.reference});
     if(description.reference.provenance?.kind==='historical')p.append($('p','历史结果 · '+(description.reference.provenance.note||'只读固定引用；没有补造新 Flow 的执行记录。'),'notice'));
     if(alias.startsWith('run:'))p.append($('p','实际运行结果 · '+alias,'notice'));
+    p.append($('p','样例与分布按绑定版本 v'+binding.reference.ref.lance_version+'；查看其他版本请用既有 attach 显式绑定。','muted small'));
+    const fieldsMeta=description.metadata?.fields||{};
+    const fieldRows=(fields,names)=>(names&&names.length?names:Object.keys(fields)).map(name=>{const type=fields[name]?.type||{};return {value:name,cells:[name,(type.kind||'未知')+(type.physical?' · '+type.physical:''),type.nullable?'是':'否']};});
+    const fieldDetails=$('details',undefined,'bound-fields'),fieldHost=$('div');fieldDetails.append($('summary','字段 · '+Object.keys(fieldsMeta).length),fieldHost);p.append(fieldDetails);
+    fieldDetails.addEventListener('toggle',()=>{if(fieldDetails.open&&!fieldHost.children.length)table(fieldHost,['字段','类型','可空'],fieldRows(fieldsMeta,description.columns));});
+    const versionDetails=$('details',undefined,'bound-versions'),versionHost=$('div');versionDetails.append($('summary','版本'),versionHost);p.append(versionDetails);
+    let versionsLoaded=false;
+    versionDetails.addEventListener('toggle',()=>{if(versionDetails.open&&!versionsLoaded){versionsLoaded=true;loadVersions();}});
+    async function loadVersions(){
+      const epoch=viewEpoch;versionHost.replaceChildren($('p','正在读取登记版本…','busy'));
+      try{
+        const value=await api('table-versions',{alias,expected_binding:binding.digest});
+        if(epoch!==viewEpoch||!versionHost.isConnected)throw staleRequest();
+        if(value.binding?.digest!==binding.digest)throw new Error('版本来源与当前固定绑定不一致');
+        versionHost.replaceChildren();
+        const boundVersion=binding.reference.ref.lance_version,preview=$('div',undefined,'bound-version-preview');let previewRequest=0;
+        async function previewVersion(version){
+          const seq=++previewRequest;preview.replaceChildren($('p','正在读取版本 v'+version+' 的登记事实…','busy'));
+          try{
+            const chosen=await api('table-versions',{alias,expected_binding:binding.digest,version});
+            if(seq!==previewRequest||epoch!==viewEpoch||!preview.isConnected)throw staleRequest();
+            const meta=chosen.selected?.metadata;preview.replaceChildren();
+            if(!meta)throw new Error('该版本没有可预览的登记事实');
+            preview.append($('p','版本 v'+meta.version+' · '+meta.row_count+' 行 · schema '+meta.schema_hash,'notice'));
+            table(preview,['字段','类型','可空'],fieldRows(meta.fields));
+          }catch(err){if(seq===previewRequest&&preview.isConnected){preview.replaceChildren();error(preview,err);}}
+        }
+        if(value.reason==='run_output_sealed_version')versionHost.append($('p','运行产物固定于单一 sealed 版本，没有登记版本历史。','muted small'));
+        else if(!value.versions.length)versionHost.append($('p','此表尚未在数据目录登记版本；仅绑定版本可预览。','muted small'));
+        if(value.versions.length){
+          table(versionHost,['版本','行数','schema','内容摘要'],value.versions.map(item=>({value:item,cells:['v'+item.lance_version+(item.lance_version===boundVersion?' · 当前绑定':''),String(item.row_count),item.schema_name+'@'+item.schema_version,item.content_digest||'未计算']})),item=>previewVersion(item.lance_version));
+          versionHost.append($('p','点击版本查看该版本的登记事实与字段；不会改变当前绑定、样例或分布。'+(value.truncated?'仅显示前 128 个登记版本（共 '+value.total_registered+' 个）。':''),'muted small'));
+        }
+        versionHost.append(preview);
+      }catch(err){if(epoch===viewEpoch&&versionHost.isConnected){versionHost.replaceChildren();error(versionHost,err);}}
+    }
     const tools=$('div',undefined,'toolbar'),projection=$('input');projection.placeholder='字段投影（逗号分隔；默认前 16 列）';projection.className='wide';projection.setAttribute('aria-label','字段投影');projection.maxLength=4096;projection.value=(request.columns||[]).join(',');
     const pageSize=select(['20','5','50','100'],'20');pageSize.setAttribute('aria-label','每页行数');tools.append(projection,pageSize);p.append(tools);
     const caseRail=$('div',undefined,'case-record-selector');p.append(caseRail);

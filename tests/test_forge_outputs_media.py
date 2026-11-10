@@ -253,6 +253,24 @@ def test_json_int64_source_is_exact_instead_of_rounding_through_browser_number()
     assert str(2**63-1) in reps[0]['raw_json'] and reps[0]['format']=='json'
 
 
+def test_message_and_dialogue_mimes_reuse_typed_validation_and_degrade_honestly():
+    message={'role':'user','content':'看这个'}
+    dialogue=[{'role':'user','content':'问'},{'role':'assistant','content':'答'}]
+    reps={rep['mime']:rep for rep in outputs.mime_representations(
+        {outputs.MESSAGE_MIME:message,outputs.DIALOGUE_MIME:dialogue})}
+    assert reps[outputs.MESSAGE_MIME]['format']=='message' and reps[outputs.MESSAGE_MIME]['available']
+    assert reps[outputs.MESSAGE_MIME]['value']==message
+    assert reps[outputs.DIALOGUE_MIME]['format']=='dialogue' and reps[outputs.DIALOGUE_MIME]['available']
+    assert reps[outputs.DIALOGUE_MIME]['value']==dialogue
+    # Type mismatch keeps the original value as JSON, never guesses execution.
+    bad=outputs.mime_representations({outputs.MESSAGE_MIME:'not a message'})[0]
+    assert not bad['available'] and bad['format']=='json'
+    assert bad['reason']=='value_does_not_match_declared_format' and bad['value']=='not a message'
+    # The existing 32-turn budget still binds through the new channel.
+    over=outputs.mime_representations({outputs.DIALOGUE_MIME:[{'role':'user','content':'x'}]*33})[0]
+    assert not over['available']
+
+
 def test_embedded_wav_mime_uses_real_decoder_and_missing_video_probe_is_explicit():
     data=wav_bytes()
     bundle={'audio/wav':base64.b64encode(data).decode(),'video/webm':base64.b64encode(b'not video').decode(),'text/plain':'media'}

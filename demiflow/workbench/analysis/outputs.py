@@ -195,11 +195,14 @@ def field_preview(format_name, value):
 OUTPUT_MIME = "application/vnd.demiflow.output+json"
 CASE_MIME = "application/vnd.demiflow.case-view+json"
 TABLE_MIME = "application/vnd.demiflow.table+json"
+MESSAGE_MIME = "application/vnd.demiflow.message+json"
+DIALOGUE_MIME = "application/vnd.demiflow.dialogue+json"
 MIME_FORMATS = {"text/plain": "text", "text/markdown": "md", "text/html": "html",
                 "application/json": "json", "image/png": "image", "image/jpeg": "image",
                 "image/webp": "image", "image/gif": "image",
                 "audio/wav": "audio", "audio/mpeg": "audio", "audio/ogg": "audio", "audio/webm": "audio",
-                "video/mp4": "video", "video/webm": "video", "video/ogg": "video", CASE_MIME: "case", TABLE_MIME: "table"}
+                "video/mp4": "video", "video/webm": "video", "video/ogg": "video",
+                MESSAGE_MIME: "message", DIALOGUE_MIME: "dialogue", CASE_MIME: "case", TABLE_MIME: "table"}
 DISPLAY_BYTES = 16*1024
 
 
