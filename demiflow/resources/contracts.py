@@ -10,7 +10,7 @@ import math
 import re
 from typing import Protocol
 
-RESOURCE_PROTOCOL_VERSION = {"major": 1, "minor": 0}
+RESOURCE_PROTOCOL_VERSION = {"major": 1, "minor": 1}
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 MAX_DOCUMENT_BYTES = 65536
@@ -35,6 +35,22 @@ RELEASE_MODES = frozenset({"DRAINED", "ABANDON"})
 
 _PROFILE_RESOURCES = frozenset({"cpu_millis", "memory_bytes", "scratch_bytes"})
 _BUDGET_KEYS = frozenset({"cpu_millis", "memory_bytes", "max_workers", "max_creates_per_minute"})
+# minor 1.1 additive family: per-device-type authorization ceilings, e.g.
+# accelerator_gpu. Documents without these keys remain valid minor-1.0 input.
+ACCELERATOR_BUDGET_PREFIX = "accelerator_"
+
+
+def accelerator_budget_key(device_type):
+    return ACCELERATOR_BUDGET_PREFIX + identifier(device_type)
+
+
+def _validate_budget_key(key):
+    if key in _BUDGET_KEYS:
+        return key
+    if key.startswith(ACCELERATOR_BUDGET_PREFIX):
+        identifier(key[len(ACCELERATOR_BUDGET_PREFIX):])
+        return key
+    raise ResourceError("INVALID_SPEC", "budget has unsupported key: " + str(key))
 
 
 class ResourceError(Exception):
@@ -153,9 +169,10 @@ def _validate_requests(requests, name):
 
 
 def validate_budget(budget):
-    if type(budget) is not dict or not {"cpu_millis", "memory_bytes"} <= set(budget) or set(budget) - _BUDGET_KEYS:
+    if type(budget) is not dict or not {"cpu_millis", "memory_bytes"} <= set(budget):
         raise ResourceError("INVALID_SPEC", "budget needs cpu_millis/memory_bytes within a closed key set")
     for key in set(budget):
+        _validate_budget_key(key)
         _positive_int(budget[key], "budget." + key)
     return dict(budget)
 

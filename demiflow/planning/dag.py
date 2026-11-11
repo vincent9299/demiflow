@@ -106,7 +106,7 @@ def compile_logical_dag(*, action_id, source, operations, terminal_kind,
     chain = [source_node_id]
     for index, operation in enumerate(operations):
         semantic, kind = _operation_semantics(operation)
-        node_id = identity(semantic)
+        node_id = identity([semantic, index])
         spec_ref = None
         if operator_spec_refs is not None:
             spec_ref = operator_spec_refs[index]
@@ -229,6 +229,32 @@ def dag_id_for(value):
     return identity({key: item for key, item in value.items() if key != "dag_id"})
 
 
+def _reject_logical_cycle(adjacency):
+    """Iterative three-color DFS over unique logical nodes; a back-edge is a cycle.
+
+    Vertices are unique logical_node_ids, so a shared ancestor's reuse occurrences
+    collapse to one vertex and legitimate fan-out stays acyclic.
+    """
+    color = dict.fromkeys(adjacency, 0)
+    for start in adjacency:
+        if color[start]:
+            continue
+        color[start] = 1
+        stack = [(start, iter(adjacency[start]))]
+        while stack:
+            node, children = stack[-1]
+            for child in children:
+                if color[child] == 1:
+                    raise ValueError("cycle in logical dag")
+                if color[child] == 0:
+                    color[child] = 1
+                    stack.append((child, iter(adjacency[child])))
+                    break
+            else:
+                color[node] = 2
+                stack.pop()
+
+
 def validate_logical_dag(value):
     keys = {"schema_version", "dag_id", "action_id", "nodes", "edges", "sources",
             "terminals", "shared_ancestors"}
@@ -241,6 +267,7 @@ def validate_logical_dag(value):
     if value["dag_id"] != dag_id_for(value):
         raise ValueError("dag_id does not bind the content")
     node_keys = set()
+    node_ids = set()
     for node in value["nodes"]:
         if type(node) is not dict or set(node) != {
                 "logical_node_id", "occurrence_id", "op_kind", "operator_spec_ref",
@@ -251,7 +278,16 @@ def validate_logical_dag(value):
         if node["occurrence_id"] in node_keys:
             raise ValueError("duplicate occurrence in logical dag")
         node_keys.add(node["occurrence_id"])
+        node_ids.add(node["logical_node_id"])
         document(node["traits"])
+    # Declared vertices include sources/terminals: a source behind a reused bridge
+    # has no occurrence entry yet its data edges are legitimate, so referential
+    # integrity spans the whole declared vertex set, not only occurrences.
+    for source in value["sources"]:
+        node_ids.add(source["source_id"])
+    for terminal in value["terminals"]:
+        node_ids.add(terminal["logical_node_id"])
+    adjacency = {node_id: [] for node_id in node_ids}
     for edge in value["edges"]:
         if type(edge) is not dict or set(edge) != {"edge_id", "from", "to"}:
             raise ValueError("logical edge key set is unsupported")
@@ -260,6 +296,14 @@ def validate_logical_dag(value):
             if type(endpoint) is not dict or set(endpoint) != {"logical_node_id", "port"}:
                 raise ValueError("edge endpoint key set is unsupported")
             identifier(endpoint["logical_node_id"])
+        producer = edge["from"]["logical_node_id"]
+        consumer = edge["to"]["logical_node_id"]
+        if producer not in node_ids or consumer not in node_ids:
+            raise ValueError("edge references unknown logical node")
+        if producer == consumer:
+            raise ValueError("self-loop edge in logical dag")
+        adjacency[producer].append(consumer)
+    _reject_logical_cycle(adjacency)
     document(value)
     return value
 

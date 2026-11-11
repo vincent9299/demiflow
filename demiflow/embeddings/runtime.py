@@ -347,3 +347,12 @@ class EmbeddingActor:
         self._started = False
         if errors:
             raise ExceptionGroup('Embedding resource cleanup failed', errors)
+
+    def snapshot_state(self):
+        # Semantic progress lives in the optional journal; pools/client/locks are
+        # resources. Without a journal, cross-restart effects are unprovable (UNKNOWN).
+        return {}
+
+    def restore_state(self, state):
+        if state != {}:
+            raise ValueError('Embedding actor has no mutable semantic state')

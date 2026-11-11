@@ -123,6 +123,8 @@ class ResourceManager:
                 "effective": normalized["effective"],
                 "requirements": worker.profile.requirements,
             }
+            if normalized.get("warnings"):
+                workers[worker.allocation_id]["warnings"] = normalized["warnings"]
         validated = {"plan": parsed.to_dict(), "workers": workers,
                      "payload_hash": spec_hash(parsed.to_dict())}
         return self.state.accept_plan(context, validated)

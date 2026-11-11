@@ -23,20 +23,46 @@ import uuid
 from .block_sink import BlockSink
 from .chain import ChainResultSink, stage_plan_artifact
 from .commit import CommitCoordinator
-from .contracts.checkpoint import validate_checkpoint_manifest
+from .contracts.checkpoint import replayable_effects, validate_checkpoint_manifest
 from .contracts.envelope import WORKER_PROTOCOL_VERSION
 from .contracts.errors import ProtocolError
 from .contracts.worker import WorkerProtocolModel
+from .effect_keys import merge_inflight, replayable_effect_refs
 from .graph_wire import (
     CUT_CONTRIBUTION_SCHEMA, build_graph_checkpoint, validate_cut_contribution,
 )
 from .recovery_contract import RecoveryContractError, SourcePosition, identity
+from .reservation import derive_prefetch
 from .run_context import RunAction, current_action
 from .source_snapshot import capture_source, freeze_source
 from .state_artifacts import StateArtifacts
 from .worker.bootstrap import recv_message, send_message
 from ..planning.dag import build_channel_plan
 from ..planning.graph_channels import RouteTable
+
+_WORKER_CPU_MILLIS = 1000
+_WORKER_MEMORY_BYTES = 1024 ** 3
+
+
+def _activation_order(ancestor_alloc, target_allocs, *, capacity):
+    """Engine-side admission: downstream-first, control progress reserved.
+
+    The static graph's minimum viable role combination is every worker, so a
+    shortfall fails before provisioning instead of spawning a partial graph that
+    can never drain. Parallelism reduction/elasticity is the scaling step's job.
+    """
+    from .admission import RoleDemand, plan_activation
+    demands = [RoleDemand(alloc, "consume", _WORKER_CPU_MILLIS, _WORKER_MEMORY_BYTES,
+                          fairness_key=rid) for rid, alloc in target_allocs.items()]
+    demands.append(RoleDemand(ancestor_alloc, "produce", _WORKER_CPU_MILLIS, _WORKER_MEMORY_BYTES))
+    # Driver commit/lease/cancel progress runs outside the worker pool, so the
+    # control reserve here is zero; the admission module enforces nonzero reserves
+    # for callers whose control role shares the domain.
+    plan = plan_activation(demands, capacity=capacity)
+    if plan["shortfall"]:
+        raise RecoveryContractError(
+            "Graph role minimum exceeds worker capacity; shortfall: " + ",".join(plan["shortfall"]))
+    return plan["admitted"]
 
 
 class GraphLocalConnector:
@@ -226,6 +252,7 @@ class GraphCommitTerminal:
         summary = StateArtifacts(self.run).read(latest["prepared"]["state"]["graph-progress"])
         return {"position": latest["intent"]["position"], "sequence": latest["sequence"],
                 "checkpoint_id": latest["commit_id"], "summary": summary,
+                "replayable_effects": replayable_effect_refs(summary["inflight"]),
                 "state": latest["prepared"]["state"]}
 
     def commit_group(self, checkpoint_id, group, *, ordinal, final, epoch):
@@ -242,11 +269,30 @@ class GraphCommitTerminal:
             if cut is None:
                 raise RecoveryContractError("Graph target cut lacks its channel cut")
             channel_cuts.append(cut)
+        # Full K6 effect coverage: union every participant's in-flight external
+        # effects (the worker journals are the one durable authority). The merged
+        # description rides the recoverable graph-progress summary AND the manifest
+        # so Restore can reuse known_completed refs and fail-close unknown ones.
+        merged_inflight = merge_inflight(group.values())
         summary = {"source_ordinal": ordinal, "sequence": self.sequence + 1,
                    "target_rows": {rid: self.rows[rid] + outputs[rid][1]["rows"] for rid in self.reader_ids},
-                   "final": bool(final)}
+                   "final": bool(final), "inflight": merged_inflight}
+        # Each worker persisted its stage snapshots under its occurrence key and
+        # rode them in the contribution's operator_states (K6 state_ref). Read the
+        # values back and commit them through the one authority so prepared.state
+        # durably holds them for Restore; the manifest refs bind to that commit.
+        operator_states = []
+        actor_states = {}
+        for contribution in group.values():
+            for entry in contribution["operator_states"]:
+                occ = entry["occurrence_id"]
+                actor_states[occ] = StateArtifacts(self.run).read(entry["state_ref"])
+                operator_states.append(entry)
         fact = self.coordinator.commit(self.sequence + 1, outputs=outputs,
-            position=SourcePosition(self.source_id, ordinal), states={"graph-progress": summary})
+            position=SourcePosition(self.source_id, ordinal),
+            states={"graph-progress": summary, **actor_states})
+        manifest_states = [dict(entry, state_ref=fact["prepared"]["state"][entry["occurrence_id"]])
+                           for entry in operator_states]
         sink_receipts = [{"sink_id": rid, "commit_id": fact["commit_id"], "receipt_ref": fact["commit_id"]}
                          for rid in self.reader_ids]
         manifest = {
@@ -260,14 +306,18 @@ class GraphCommitTerminal:
                              "sinks": self.reader_ids},
             "source_progress": [{"source_id": self.source_id, "partition_id": "p0",
                                  "position": {"next_ordinal": ordinal}}],
-            "channel_cuts": channel_cuts, "operator_states": [], "inflight": [],
+            "channel_cuts": channel_cuts, "operator_states": manifest_states, "inflight": merged_inflight,
             "sink_receipts": sink_receipts, "seal": {"sealed": bool(final)},
         }
         if final:
             manifest["seal"]["digest"] = identity({k: v for k, v in manifest.items() if k != "seal"})
         manifest = validate_checkpoint_manifest(manifest)
+        # Production wiring of the frozen description-level rule: only
+        # known_completed effects carry a reusable ref; unknown never auto-replays.
+        replayable = replayable_effects(manifest)
         ref = StateArtifacts(self.run).put(checkpoint_id, manifest)
-        self.checkpoints[checkpoint_id] = {"manifest": manifest, "ref": ref}
+        self.checkpoints[checkpoint_id] = {"manifest": manifest, "ref": ref,
+                                           "replayable_effects": replayable}
         self.sequence = fact["sequence"]
         self.inputs = ordinal
         self.rows = dict(summary["target_rows"])
@@ -311,9 +361,21 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
     source_id = graph_spec["source_id"]
     ancestor = graph_spec["ancestor"]
     targets = graph_spec["targets"]
+    from .operator_precheck import precheck_plan_state
+    precheck_plan_state(ancestor["plan"])
+    for target in targets:
+        precheck_plan_state(target["plan"])
     routing = graph_spec.get("routing", "broadcast")
     exchange_mode = graph_spec.get("exchange_mode", "memory_incremental")
     budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
+    # Prefetch bounds derive from the admitted inflight budget only when one is
+    # configured; the default path injects no key and stays byte-identical (U3).
+    prefetch_slots = graph_spec.get("prefetch_slots")
+    prefetch = (derive_prefetch(prefetch_slots, max_pending_floor=budget["rows"])
+                if prefetch_slots is not None else None)
+    queue_depth = graph_spec.get("queue_depth", 4096)
+    if prefetch is not None:
+        queue_depth = min(queue_depth, prefetch["queue_depth"])
 
     from .executors.local import LocalDatasetExecutor
     capture_executor = LocalDatasetExecutor(workers=1)
@@ -402,10 +464,19 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
                 "final_arrival": {}, "checkpoints": dict(terminal.checkpoints)}
     restore = terminal.restore_point()
     restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
-    ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0, "state": {}}
+
+    def worker_state(occurrence_id):
+        # Each worker's combined stage-state artifact is keyed by its occurrence;
+        # hand back only that ref so the worker restore never sees sibling keys
+        # or the graph-progress summary. Pure-function stages have no artifact.
+        if restore is None:
+            return {}
+        ref = restore["state"].get(occurrence_id)
+        return {occurrence_id: ref} if ref is not None else {}
+
+    ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0,
+                         "state": worker_state(ancestor["occurrence_id"])}
                         if restore else None)
-    target_restore = ({"inputs": 0, "sequence": terminal.sequence, "rows": 0, "state": {}}
-                      if restore else None)
 
     ancestor_spec = base_spec(ancestor_alloc, ancestor_output_child)
     ancestor_spec["graph"] = {
@@ -414,7 +485,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         "source_child_id": ancestor_source_child, "plan_ref": ancestor_plan_ref,
         "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
         "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
-        "route_plan": channel_plan, "queue_depth": graph_spec.get("queue_depth", 4096),
+        "route_plan": channel_plan, "queue_depth": queue_depth,
         "restore": ancestor_restore,
         "output_channels": [{"channel_id": data_pairs[rid][2], "fd": data_pairs[rid][0].fileno(),
                              "reader_id": rid, "exchange_mode": exchange_mode, "credit_budget": budget,
@@ -432,16 +503,24 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
             "allocation_id": alloc, "output_child_id": target_children[rid],
             "plan_ref": target_plan_refs[targets.index(target)], "source_id": source_id,
             "host_id": host_id, "logical_node_id": target["logical_node_id"],
-            "occurrence_id": target["occurrence_id"], "sink_id": rid, "restore": target_restore,
+            "occurrence_id": target["occurrence_id"], "sink_id": rid,
+            "restore": ({"inputs": 0, "sequence": terminal.sequence, "rows": 0,
+                         "state": worker_state(target["occurrence_id"])} if restore else None),
             "input_channels": [{"channel_id": data_pairs[rid][2], "fd": data_pairs[rid][1].fileno(),
                                 "reader_id": rid, "exchange_mode": exchange_mode, "credit_budget": budget,
                                 "route_epoch": 0}]}
         target_specs[rid] = spec
         target_data_fds[rid] = [data_pairs[rid][1].fileno()]
 
+    if prefetch is not None:
+        ancestor_spec["graph"]["prefetch"] = prefetch
+        for spec in target_specs.values():
+            spec["graph"]["prefetch"] = prefetch
+
     root = run.directory.with_name(run.directory.name + "-resources") if resource_root is None \
         else Path(resource_root)
     pool = LocalCapacityPool(root / "capacity", capacity={"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3})
+    all_allocs = _activation_order(ancestor_alloc, target_allocs, capacity=pool.capacity)
     unit = ManagedProcessUnit(root / "units")
     connector = GraphLocalConnector()
     provider = LocalResourceProvider(pool, unit, control=connector)
@@ -461,7 +540,8 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
             argv=(__import__("sys").executable, "-B", "-m", "demiflow.execution.worker.graph_host"),
             bootstrap_ref="bootstrap-ref", access_refs={}, runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
         return WorkerRequest(allocation_id, allocation_id,
-                             ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3}),
+                             ResourceProfile(requests={"cpu_millis": _WORKER_CPU_MILLIS,
+                                                       "memory_bytes": _WORKER_MEMORY_BYTES}),
                              launch, provision_deadline_ms=60000)
 
     requests = tuple(request_for(alloc) for alloc in all_allocs)
@@ -653,9 +733,21 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
     source_id = graph_spec["source_id"]
     ancestor = graph_spec["ancestor"]
     targets = graph_spec["targets"]
+    from .operator_precheck import precheck_plan_state
+    precheck_plan_state(ancestor["plan"])
+    for target in targets:
+        precheck_plan_state(target["plan"])
     routing = graph_spec.get("routing", "broadcast")
     exchange_mode = graph_spec.get("exchange_mode", "memory_incremental")
     budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
+    # Prefetch bounds derive from the admitted inflight budget only when one is
+    # configured; the default path injects no key and stays byte-identical (U3).
+    prefetch_slots = graph_spec.get("prefetch_slots")
+    prefetch = (derive_prefetch(prefetch_slots, max_pending_floor=budget["rows"])
+                if prefetch_slots is not None else None)
+    queue_depth = graph_spec.get("queue_depth", 4096)
+    if prefetch is not None:
+        queue_depth = min(queue_depth, prefetch["queue_depth"])
 
     from .executors.local import LocalDatasetExecutor
     capture_executor = LocalDatasetExecutor(workers=1)
@@ -725,10 +817,19 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
                 "final_arrival": {}, "checkpoints": dict(terminal.checkpoints)}
     restore = terminal.restore_point()
     restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
-    ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0, "state": {}}
+
+    def worker_state(occurrence_id):
+        # Each worker's combined stage-state artifact is keyed by its occurrence;
+        # hand back only that ref so the worker restore never sees sibling keys
+        # or the graph-progress summary. Pure-function stages have no artifact.
+        if restore is None:
+            return {}
+        ref = restore["state"].get(occurrence_id)
+        return {occurrence_id: ref} if ref is not None else {}
+
+    ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0,
+                         "state": worker_state(ancestor["occurrence_id"])}
                         if restore else None)
-    target_restore = ({"inputs": 0, "sequence": terminal.sequence, "rows": 0, "state": {}}
-                      if restore else None)
 
     # Ray data plane: one named channel actor per physical channel. The driver keeps
     # the link handles alive for the whole run so the actors are not GC-killed before
@@ -748,7 +849,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         "source_child_id": ancestor_source_child, "plan_ref": ancestor_plan_ref,
         "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
         "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
-        "route_plan": channel_plan, "queue_depth": graph_spec.get("queue_depth", 4096),
+        "route_plan": channel_plan, "queue_depth": queue_depth,
         "restore": ancestor_restore,
         "output_channels": [{"channel_id": physical[rid]["channel_id"], "ray_queue": channel_names[rid],
                              "carriage": "ray", "reader_id": rid, "exchange_mode": exchange_mode,
@@ -765,12 +866,26 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
             "allocation_id": alloc, "output_child_id": target_children[rid],
             "plan_ref": target_plan_refs[targets.index(target)], "source_id": source_id,
             "host_id": host_id, "logical_node_id": target["logical_node_id"],
-            "occurrence_id": target["occurrence_id"], "sink_id": rid, "restore": target_restore,
+            "occurrence_id": target["occurrence_id"], "sink_id": rid,
+            "restore": ({"inputs": 0, "sequence": terminal.sequence, "rows": 0,
+                         "state": worker_state(target["occurrence_id"])} if restore else None),
             "input_channels": [{"channel_id": physical[rid]["channel_id"], "ray_queue": channel_names[rid],
                                 "carriage": "ray", "reader_id": rid, "exchange_mode": exchange_mode,
                                 "credit_budget": budget, "route_epoch": 0}]}
         target_specs[rid] = spec
 
+    if prefetch is not None:
+        ancestor_spec["graph"]["prefetch"] = prefetch
+        for spec in target_specs.values():
+            spec["graph"]["prefetch"] = prefetch
+
+    # Ray admission checks the authorized scope ceiling; physical placement stays
+    # with Ray Core (a busy cluster reports PENDING, never a fake RUNNING).
+    scope_budget = {"cpu_millis": 32000, "memory_bytes": 32 * 1024 ** 3, "max_workers": 16}
+    # plan_activation plans CPU/memory role minimums only; max_workers is enforced
+    # by the scope ceiling in resource_state, not by the admission planner.
+    all_allocs = _activation_order(ancestor_alloc, target_allocs,
+                                   capacity={k: scope_budget[k] for k in ("cpu_millis", "memory_bytes")})
     connector = RayGraphControlConnector(command_timeout_s=control_timeout_s)
     provider = RayResourceProvider(connector)
     state = RunResourceState(run.journal)
@@ -779,8 +894,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
     for rid in reader_ids:
         connector.stage(target_allocs[rid], target_specs[rid])
     state.open_scope(run.fence, ResourceScope(
-        scope_id, run.ref.run_id, {"provider": "ray"}, run.fence,
-        {"cpu_millis": 32000, "memory_bytes": 32 * 1024 ** 3, "max_workers": 16}))
+        scope_id, run.ref.run_id, {"provider": "ray"}, run.fence, scope_budget))
 
     def request_for(allocation_id):
         launch = WorkerLaunchSpec(
@@ -789,7 +903,8 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
             argv=(sys.executable, "-B", "-m", "demiflow.execution.worker.graph_ray_host"),
             bootstrap_ref="bootstrap-ref", access_refs={}, runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
         return WorkerRequest(allocation_id, allocation_id,
-                             ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3}),
+                             ResourceProfile(requests={"cpu_millis": _WORKER_CPU_MILLIS,
+                                                       "memory_bytes": _WORKER_MEMORY_BYTES}),
                              launch, provision_deadline_ms=60000)
 
     requests = tuple(request_for(alloc) for alloc in all_allocs)

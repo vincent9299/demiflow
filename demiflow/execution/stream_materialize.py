@@ -51,6 +51,8 @@ def prepare_stream_blocks(executor, source, plan, action, context):
     from .source_snapshot import freeze_source
     from .object_sink import image_object_specs
     from ..data.plan import LogicalPlan
+    from .operator_precheck import precheck_plan_state
+    precheck_plan_state(plan)
     run = action.context
     child_id = action.action_id + '-stream'
     declaration = dict(kind='stream-terminal-input', source=action.declaration['source'],
@@ -186,6 +188,11 @@ class StreamStageProgress:
 
         for index, stage in enumerate(stages):
             key = "node-" + str(index)
+            # Only fixed batches (concurrency=1, no flush window) have a proven
+            # platform buffer snapshot. Concurrent/timed/grouped/prepend buffers
+            # hold rows across cuts under window semantics a naive cut snapshot
+            # cannot align (graph cut deadlock / unproven group preservation);
+            # keep the honest rejection rather than fake recovery (S3 boundary).
             if (stage.grouping is not None or stage.prefix is not None or
                     stage.max_batch is not None and
                     (stage.concurrency != 1 or stage.flush_interval is not None)):

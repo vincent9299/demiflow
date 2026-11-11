@@ -13,8 +13,8 @@ import time
 
 from ..errors import ExecutionConflict
 from ..resources.contracts import (
-    ResourceError, ResourceScope, TERMINAL_HOST_PHASES, document, identifier,
-    spec_hash, validate_observation,
+    ACCELERATOR_BUDGET_PREFIX, ResourceError, ResourceScope, TERMINAL_HOST_PHASES,
+    accelerator_budget_key, document, identifier, spec_hash, validate_observation,
 )
 from .recovery_contract import RecoveryContractError
 
@@ -264,6 +264,10 @@ class RunResourceState:
                 for key in ("cpu_millis", "memory_bytes", "max_workers", "max_creates_per_minute"):
                     if key in ceiling and key in budget and ceiling[key] > budget[key]:
                         raise ResourceError("INVALID_SPEC", "plan budget exceeds authorized scope ceiling", scope_id=scope_id)
+                for key in ceiling:
+                    if (key == "scratch_bytes" or key.startswith(ACCELERATOR_BUDGET_PREFIX)) \
+                            and ceiling[key] > budget.get(key, 0):
+                        raise ResourceError("INVALID_SPEC", "plan budget exceeds authorized scope ceiling", scope_id=scope_id)
             new_ids = [a for a in workers if a not in existing]
             if len(existing) + len(new_ids) > self.max_allocations:
                 raise ResourceError("QUOTA_EXCEEDED", "scope allocation history exceeds budget", scope_id=scope_id)
@@ -332,6 +336,13 @@ class RunResourceState:
                 if charged[key] > ceiling.get(key, budget[key]):
                     raise ResourceError("QUOTA_EXCEEDED", "charged resources exceed scope budget: " + key,
                                         scope_id=scope_id, observed_revision=scope["desired_revision"])
+            # Additive dimensions are fail-closed: a scope that never authorized
+            # scratch/devices has a zero ceiling for them.
+            for key in charged:
+                if (key == "scratch_bytes" or key.startswith(ACCELERATOR_BUDGET_PREFIX)) \
+                        and charged[key] > ceiling.get(key, budget.get(key, 0)):
+                    raise ResourceError("QUOTA_EXCEEDED", "charged resources exceed scope budget: " + key,
+                                        scope_id=scope_id, observed_revision=scope["desired_revision"])
             if "max_workers" in ceiling and charged["workers"] > ceiling["max_workers"]:
                 raise ResourceError("QUOTA_EXCEEDED", "charged worker count exceeds scope budget", scope_id=scope_id)
             db.execute("UPDATE resource_scopes SET desired_revision=? WHERE scope_id=?", (revision, scope_id))
@@ -343,6 +354,9 @@ class RunResourceState:
                        "desired_revision": revision, "accepted_spec_hash": payload_hash,
                        "status": "ACCEPTED",
                        "warnings_with_effective_mapping": {a: w["effective"] for a, w in workers.items()}}
+            placement_warnings = {a: w["warnings"] for a, w in workers.items() if w.get("warnings")}
+            if placement_warnings:
+                receipt["placement_warnings"] = placement_warnings
             self._store_receipt(db, context, "apply", payload_hash, receipt, now_ms)
         return receipt
 
@@ -355,10 +369,20 @@ class RunResourceState:
         rows = db.execute("SELECT effective FROM resource_allocations WHERE scope_id=? AND cleanup!='CONFIRMED'",
                           (scope_id,)).fetchall()
         total = {"cpu_millis": 0, "memory_bytes": 0, "workers": len(rows)}
+        scratch = 0
+        has_scratch = False
         for row in rows:
             effective = json.loads(row[0])
             total["cpu_millis"] += effective["cpu_millis"]
             total["memory_bytes"] += effective["memory_bytes"]
+            if "scratch_bytes" in effective:
+                has_scratch = True
+                scratch += effective["scratch_bytes"]
+            for item in effective.get("accelerators", []):
+                key = accelerator_budget_key(item["type"])
+                total[key] = total.get(key, 0) + item["count"]
+        if has_scratch:
+            total["scratch_bytes"] = scratch
         return total
 
     def begin_close(self, context, close_spec):

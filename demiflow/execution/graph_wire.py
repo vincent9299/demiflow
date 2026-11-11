@@ -101,10 +101,19 @@ def _validate_source_progress(entry):
     identifier(entry["source_id"])
     identifier(entry["partition_id"])
     position = entry["position"]
-    if type(position) is not dict or set(position) != {"next_ordinal"}:
-        raise ProtocolError("INVALID_SPEC", "source progress position needs next_ordinal")
-    if type(position["next_ordinal"]) is not int or not 0 <= position["next_ordinal"] < 2**63:
-        raise ProtocolError("INVALID_SPEC", "next_ordinal is invalid")
+    # Align the frozen K6 position rule (contracts/checkpoint.py): exactly one of
+    # next_ordinal (fixed re-readable sources) or cursor_ref (an identifier naming a
+    # cursor artifact for incremental Lance/file/queue progress). Additive in the
+    # execution layer; the contracts family stays byte-frozen (D2).
+    if type(position) is not dict or len(position) != 1:
+        raise ProtocolError("INVALID_SPEC", "position needs exactly next_ordinal or cursor_ref")
+    if "next_ordinal" in position:
+        if type(position["next_ordinal"]) is not int or not 0 <= position["next_ordinal"] < 2**63:
+            raise ProtocolError("INVALID_SPEC", "next_ordinal is invalid")
+    elif "cursor_ref" in position:
+        identifier(position["cursor_ref"])
+    else:
+        raise ProtocolError("INVALID_SPEC", "unknown position kind")
 
 
 def validate_cut_contribution(value):

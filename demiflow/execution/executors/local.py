@@ -857,10 +857,13 @@ class LocalDatasetExecutor(DatasetExecutor):
         if action is None:
             raise RuntimeError("Materialization requires the native action context")
         if self._unified_chain:
-            from ..chain import run_local_chain
-            return run_local_chain(self, dataset, source=source, plan=plan)
+            from ..chain import run_local_chain, unified_chain_eligible
+            if unified_chain_eligible(dataset._plan if plan is None else plan):
+                return run_local_chain(self, dataset, source=source, plan=plan)
         from ..run_context import admit_stream
         admit_stream(dataset._plan if plan is None else plan)
+        from ..operator_precheck import precheck_plan_state
+        precheck_plan_state(dataset._plan if plan is None else plan)
         selected = freeze_source(action, dataset._source if source is None else source)
         from ..object_sink import image_object_specs
         terminal = StreamMaterialization(action, lambda: self.iter_rows(selected, LogicalPlan()),

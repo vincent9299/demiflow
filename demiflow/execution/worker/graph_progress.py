@@ -21,6 +21,7 @@ import threading
 import uuid
 
 from ..block_sink import BlockSink
+from ..effect_keys import collect_inflight
 from ..exchange.carriage_local import inline_records, ref_records
 from ..operator_state import OperatorStates
 from ..recovery_contract import RecoveryContractError, identity
@@ -33,10 +34,12 @@ class GraphWorkerProgress(StreamStageProgress):
                  source=None, source_sink=None, input_reader=None, output_router=None,
                  route_value=None, restore=None, request_contribution=None,
                  stop_requested=None, sink_id="output", exchange_mode="memory_incremental",
-                 segment_store=None, cut_namespace=None):
+                 segment_store=None, cut_namespace=None, append_slots=64,
+                 logical_node_id=None):
         self.action, self.run = action, action.context
         self.allocation_id = allocation_id
         self.occurrence_id = occurrence_id
+        self.logical_node_id = logical_node_id
         self.source_id = source_id
         self._cut_namespace = cut_namespace
         self.source = source
@@ -70,13 +73,17 @@ class GraphWorkerProgress(StreamStageProgress):
             self.sequence = restore.get("sequence", 0)
             self.rows = restore.get("rows", 0)
             self.pending_cut = restore.get("pending_cut")
-            restored = {key: StateArtifacts(self.run).read(ref)
-                        for key, ref in restore.get("state", {}).items()}
+            # The driver hands back one combined per-participant state artifact
+            # (state_schema_version 1); its value is the node-i keyed stage-state
+            # mapping that OperatorStates/bind_stages restore by their local keys.
+            for ref in restore.get("state", {}).values():
+                value = StateArtifacts(self.run).read(ref)
+                restored.update(value)
         self.state = OperatorStates(self.run, restored)
         self.ordinal = 0
         self.complete = False
         self.append_lock = asyncio.Lock()
-        self.append_slots = asyncio.Semaphore(64)
+        self.append_slots = asyncio.Semaphore(append_slots)
         self.pending_appends = {}
         self.direct_owners = []
         self.group_ends = []
@@ -215,17 +222,36 @@ class GraphWorkerProgress(StreamStageProgress):
         source_progress = ([{"source_id": self.source_id, "partition_id": "p0",
                              "position": {"next_ordinal": barrier.next_ordinal}}]
                            if self.source is not None else [])
+        # In-flight external effects ride the existing K6-shaped inflight field:
+        # the worker's native effect journal (LLM/embedding) is the one durable
+        # authority; known_completed reuse via effect_ref, unknown never replay.
+        # Pure-compute workers have no journal and contribute nothing (byte-neutral).
         contribution = {
             "schema_version": "demiflow.cut_contribution.v1",
             "checkpoint_id": checkpoint_id, "allocation_id": self.allocation_id,
             "channel_cuts": self._channel_cuts(), "operator_states": [],
-            "inflight": [], "output_descriptor": descriptor,
+            "inflight": collect_inflight(getattr(self.run, "_native_prompt_journal", None)),
+            "output_descriptor": descriptor,
             "source_progress": source_progress, "final": barrier.final}
         states = dict(barrier.states)
         self._cut_checkpoint_id = None
         if barrier.final:
             self._final_done = True
-        return lambda: self._request_contribution(contribution, sealed, states, barrier.final)
+
+        def publish():
+            # Persist this worker's stage snapshots under its own occurrence key
+            # (namespaced against sibling workers' identical node-i keys) and ride
+            # the existing cut_contribution operator_states field as a K6 state_ref.
+            worker_states = {k: v for k, v in states.items() if k != "stream-progress"}
+            if worker_states and self.logical_node_id is not None:
+                ref = StateArtifacts(self.run).put(self.occurrence_id, worker_states)
+                contribution["operator_states"] = [{
+                    "logical_node_id": self.logical_node_id,
+                    "occurrence_id": self.occurrence_id,
+                    "state_ref": ref, "state_schema_version": 1}]
+            return self._request_contribution(contribution, sealed, states, barrier.final)
+
+        return publish
 
     def note_contribution_acked(self, inputs):
         self.inputs = inputs

@@ -16,6 +16,7 @@ protocol itself is proven by the CHN group; the single-worker real chain commits
 in lock-step, so a barrier can never overtake its pre-cut output descriptor.
 """
 import hashlib
+import logging
 
 from .artifact_manifest import entries
 from .block_sink import BlockSink
@@ -32,6 +33,8 @@ from .state_artifacts import StateArtifacts
 COMMIT_CUT_SCHEMA = "demiflow.commit_cut.v1"
 COMMIT_RECEIPT_SCHEMA = "demiflow.commit_receipt.v1"
 _MAX_CONTROL_BYTES = 1 << 20
+
+logger = logging.getLogger(__name__)
 
 
 def build_commit_cut(operation_id, checkpoint_id, *, source_id, next_ordinal,
@@ -291,6 +294,27 @@ class DriverStreamTerminal:
         self.child.complete(dict(kind="materialized", rows=self.rows,
                                  inputs=self.inputs, commits=self.sequence))
         self.complete = True
+
+
+def unified_chain_eligible(plan):
+    """The in-run pickle delivery (E2) requires a cloudpickle-serializable plan.
+
+    Plans embedding a live process-bound actor runtime (prompt/model actors hold
+    asyncio/HTTP/journal locks) cannot cross to an independent worker host; they
+    stay on the byte-unchanged legacy in-driver path. This is the controlled MVP-1
+    seam boundary: the probe only tests serializability (a pure dumps), so a real
+    error inside a serializable plan still raises along the unified path and is
+    never masked here. Fallback hits are logged at debug for observability.
+    """
+    import cloudpickle
+    import pickle
+    try:
+        cloudpickle.dumps(plan)
+    except (pickle.PicklingError, TypeError, AttributeError) as exc:
+        logger.debug("unified chain ineligible: plan not cloudpickle-serializable "
+                     "(%s: %s); routing to legacy in-driver path", type(exc).__name__, exc)
+        return False
+    return True
 
 
 def stage_plan_artifact(action, plan):

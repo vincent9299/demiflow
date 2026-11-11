@@ -93,6 +93,7 @@ class GraphWorkerExecutor:
         try:
             plan = self._load_plan()
             graph = self._graph
+            prefetch = graph.get("prefetch")
             channel_specs = graph.get("output_channels") or graph.get("input_channels") or []
             store = self._store(channel_specs)
             input_reader = None
@@ -100,7 +101,8 @@ class GraphWorkerExecutor:
                 specs = graph["input_channels"]
                 input_reader = GraphInputReader(
                     specs, self._links(specs, "consumer"), reader_id=specs[0]["reader_id"],
-                    reader_domain=store.domain, store=store)
+                    reader_domain=store.domain, store=store,
+                    max_pending=prefetch["max_pending"] if prefetch else 1024)
                 self.input_reader = input_reader
             output_router = None
             segment_index = None
@@ -129,12 +131,14 @@ class GraphWorkerExecutor:
                 self.progress = GraphWorkerProgress(
                     output_action, allocation_id=self._graph["allocation_id"],
                     occurrence_id=self.occurrence_id, source_id=self.source_id,
+                    logical_node_id=graph.get("logical_node_id"),
                     source=self.source_reference, source_sink=source_sink,
                     input_reader=input_reader, output_router=output_router,
                     restore=self.restore, request_contribution=self._request_contribution,
                     stop_requested=self._stop_requested, sink_id=self._graph.get("sink_id", "output"),
                     exchange_mode=exchange_mode, segment_store=store,
-                    cut_namespace=self._graph.get("cut_namespace"))
+                    cut_namespace=self._graph.get("cut_namespace"),
+                    append_slots=prefetch["append_slots"] if prefetch else 64)
                 if input_reader is not None:
                     input_reader.set_cut_hook(
                         lambda checkpoint, consumed, final: self.progress.align_cut(
@@ -146,7 +150,8 @@ class GraphWorkerExecutor:
                 # before the reader detects barrier alignment (the chunked feed drains
                 # a whole block before feeding any row, which would deadlock a reader
                 # that waits at alignment). The ancestor's fixed source never blocks.
-                feed_batch = 1 if input_reader is not None else 256
+                feed_batch = 1 if input_reader is not None else (
+                    prefetch["source_batch_size"] if prefetch else 256)
                 self.stats = run_stream(self.progress.source_rows(), plan,
                                         consume=self.progress.append, progress=self.progress,
                                         source_batch_size=feed_batch)

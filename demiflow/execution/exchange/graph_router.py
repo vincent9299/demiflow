@@ -17,6 +17,7 @@ import queue
 import threading
 import uuid
 
+from ..admission import FairTurns
 from ..contracts.errors import ProtocolError
 from ..contracts.exchange import DATA_REF_SCHEMA
 from ..recovery_contract import RecoveryContractError, identifier
@@ -320,6 +321,7 @@ class GraphInputReader:
                 spec["channel_id"], links[spec["channel_id"]], self._consumer,
                 budget_rows=budget["rows"], budget_bytes=budget["bytes"])
         self._ids = ids
+        self._turns = FairTurns(ids)
         self._started = False
         self.consumed_rows = 0
         self._cut_hook = None
@@ -372,7 +374,7 @@ class GraphInputReader:
 
         while True:
             progressed = False
-            for channel_id in self._ids:
+            for channel_id in self._turns.pass_order():
                 event = self._consumer.consume(channel_id)
                 if event is None:
                     continue
@@ -399,7 +401,7 @@ class GraphInputReader:
                 # consume pass and this check; yield that tail rather than discard
                 # it, and only finish when a full pass finds nothing left.
                 tail = False
-                for channel_id in self._ids:
+                for channel_id in self._turns.pass_order():
                     event = self._consumer.consume(channel_id)
                     if event is None:
                         continue

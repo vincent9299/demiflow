@@ -27,12 +27,15 @@ def _provider_uid(identity):
 
 
 class LocalResourceProvider:
-    def __init__(self, pool, unit, *, control=None):
+    def __init__(self, pool, unit, *, control=None, device_pool=None):
         self.pool = pool
         self.unit = unit
         # Optional provider-specific control connector (Local socketpair in S4,
         # Ray actor methods in S5). Duck-typed so resources/ stays neutral.
         self._control = control
+        # Without a device ledger the provider keeps the exact CPU/memory-only
+        # rejection defaults; a configured ledger additively admits accelerators.
+        self._device_pool = device_pool
         # The spawning controller is the parent and must reap its own children;
         # a zombie with a matching birth identity is not a live host.
         self._spawned = {}
@@ -46,32 +49,79 @@ class LocalResourceProvider:
             raise ResourceError("UNSUPPORTED_CAPABILITY", "pidfd exit evidence unavailable: " + str(exc)) from exc
         profile = spec["profile"]
         requests = profile["requests"]
-        if requests.get("accelerators") or requests.get("custom"):
-            raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider admits CPU/memory only")
-        if profile.get("limits"):
-            raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider cannot enforce hard physical limits")
-        if profile.get("requirements") or (requirements or {}):
-            raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider cannot verify hardware requirements")
         placement = spec.get("placement") or {}
-        if placement.get("required"):
-            raise ResourceError("UNSATISFIABLE_CONSTRAINT", "Local provider has no placement constraints")
+        device_plan = {"warnings": [], "device_ids": None, "pin_required": False}
+        device_memory_bytes = None
+        if self._device_pool is None:
+            if requests.get("accelerators") or requests.get("custom"):
+                raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider admits CPU/memory only")
+            if profile.get("limits"):
+                raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider cannot enforce hard physical limits")
+            if profile.get("requirements") or (requirements or {}):
+                raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider cannot verify hardware requirements")
+            if placement.get("required"):
+                raise ResourceError("UNSATISFIABLE_CONSTRAINT", "Local provider has no placement constraints")
+        else:
+            if requests.get("custom"):
+                raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider cannot verify custom resources")
+            if profile.get("limits"):
+                raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider cannot enforce hard physical limits")
+            declared = dict(profile.get("requirements") or {})
+            for key, value in (requirements or {}).items():
+                if key in declared and declared[key] != value:
+                    raise ResourceError("INVALID_SPEC", "conflicting hardware requirements: " + key)
+                declared[key] = value
+            if set(declared) - {"accelerator_memory_bytes"}:
+                raise ResourceError("UNSUPPORTED_CAPABILITY", "Local provider cannot verify hardware requirements")
+            if "accelerator_memory_bytes" in declared:
+                device_memory_bytes = declared["accelerator_memory_bytes"]
+                if type(device_memory_bytes) is not int or device_memory_bytes <= 0:
+                    raise ResourceError("INVALID_SPEC", "accelerator_memory_bytes must be a positive int")
+                if not requests.get("accelerators"):
+                    raise ResourceError("INVALID_SPEC", "accelerator_memory_bytes needs accelerator demand")
+            if requests.get("accelerators") or placement:
+                device_plan = self._device_pool.evaluate(
+                    requests.get("accelerators", []), device_memory_bytes=device_memory_bytes,
+                    placement=placement)
         effective = {"cpu_millis": requests["cpu_millis"], "memory_bytes": requests["memory_bytes"]}
         if "scratch_bytes" in requests:
             effective["scratch_bytes"] = requests["scratch_bytes"]
-        return {"effective": effective, "spec": spec, "spec_hash": spec_hash(spec)}
+        if self._device_pool is not None and requests.get("accelerators"):
+            effective["accelerators"] = [dict(item) for item in requests["accelerators"]]
+        normalized = {"effective": effective, "spec": spec, "spec_hash": spec_hash(spec)}
+        if self._device_pool is not None:
+            normalized["warnings"] = device_plan["warnings"]
+            normalized["device_plan"] = device_plan
+            normalized["device_memory_bytes"] = device_memory_bytes
+        return normalized
 
     def _observation(self, scope_id, allocation_id, phase, freshness, identity=None,
-                     cleanup="NONE", effective=None, conditions=None, evidence_ref=None):
+                     cleanup="NONE", effective=None, conditions=None, evidence_ref=None,
+                     placement=None):
         value = {
             "allocation_id": allocation_id, "provider_uid": _provider_uid(identity),
             "boot_id": None, "phase": phase, "observation": freshness,
             "observed_at_ms": _now_ms(), "observation_revision": _now_ms(),
             "cleanup": cleanup, "effective_resources": effective,
             "conditions": conditions or [], "evidence_ref": evidence_ref,
-            "placement": None,
+            "placement": placement,
             "ownership": {"scope_owned": [allocation_id], "shared": []},
         }
         return validate_observation(value)
+
+    def _release_devices(self, allocation_id, evidence_ref):
+        if self._device_pool is not None and self._device_pool.reservation_view(allocation_id) is not None:
+            self._device_pool.release(allocation_id, {
+                "confirmed": True, "identity": None, "evidence_ref": evidence_ref,
+            })
+
+    def _device_placement(self, allocation_id):
+        if self._device_pool is None:
+            return None
+        view = self._device_pool.reservation_view(allocation_id)
+        if view is None:
+            return None
+        return {"device_ids": [d["device_id"] for d in view["devices"]]}
 
     def ensure_present(self, allocation_id, immutable_spec):
         identifier(allocation_id)
@@ -87,15 +137,18 @@ class LocalResourceProvider:
         if found["phase"] == "RUNNING" and found["observation"] == "FRESH":
             return self._observation(scope_id, allocation_id, "RUNNING", "FRESH",
                                      identity=found["identity"], effective=effective,
-                                     evidence_ref=found["evidence_ref"])
+                                     evidence_ref=found["evidence_ref"],
+                                     placement=self._device_placement(allocation_id))
         if found["phase"] == "TERMINATED":
             return self._observation(scope_id, allocation_id, "TERMINATED", "FRESH",
                                      identity=found["identity"], effective=effective,
-                                     conditions=["exited_before_present"], evidence_ref=found["evidence_ref"])
+                                     conditions=["exited_before_present"], evidence_ref=found["evidence_ref"],
+                                     placement=self._device_placement(allocation_id))
         if found["observation"] == "STALE_UNKNOWN":
             return self._observation(scope_id, allocation_id, found["phase"], "STALE_UNKNOWN",
                                      identity=found["identity"], effective=effective,
-                                     conditions=["identity_or_lock_unverified"], evidence_ref=found["evidence_ref"])
+                                     conditions=["identity_or_lock_unverified"], evidence_ref=found["evidence_ref"],
+                                     placement=self._device_placement(allocation_id))
         try:
             self.pool.reserve(allocation_id, immutable_spec["spec_hash"], effective,
                               immutable_spec["request"]["provision_deadline_ms"])
@@ -104,6 +157,24 @@ class LocalResourceProvider:
                 return self._observation(scope_id, allocation_id, "PENDING", "FRESH",
                                          effective=effective, conditions=["capacity_pending"])
             raise
+        if self._device_pool is not None and effective.get("accelerators"):
+            # Independent device pool: all-or-nothing per allocation. A device
+            # shortfall withdraws the never-spawned CPU reservation rather than
+            # holding it (hold-and-wait across pools is the deadlock the engine
+            # forbids); withdrawal keeps the allocation id retryable.
+            try:
+                self._device_pool.reserve(
+                    allocation_id, immutable_spec["spec_hash"], effective["accelerators"],
+                    deadline_ms=immutable_spec["request"]["provision_deadline_ms"],
+                    device_memory_bytes=normalized.get("device_memory_bytes"),
+                    device_ids=normalized["device_plan"]["device_ids"],
+                    pin_required=normalized["device_plan"]["pin_required"])
+            except ResourceError as exc:
+                self.pool.cancel_reservation(allocation_id)
+                if exc.code == "CAPACITY_PENDING":
+                    return self._observation(scope_id, allocation_id, "PENDING", "FRESH",
+                                             effective=effective, conditions=["capacity_pending"])
+                raise
         request = immutable_spec["request"]
         envelope = {
             "allocation_id": allocation_id, "spec_hash": immutable_spec["spec_hash"],
@@ -120,6 +191,7 @@ class LocalResourceProvider:
                     "confirmed": True, "identity": None,
                     "evidence_ref": "control-failed:" + allocation_id,
                 })
+                self._release_devices(allocation_id, "control-failed:" + allocation_id)
                 return self._observation(scope_id, allocation_id, "FAILED", "FRESH",
                                          effective=effective, conditions=["LAUNCH_FAILED", str(exc)[:256]])
         try:
@@ -133,12 +205,15 @@ class LocalResourceProvider:
             if self._control is not None:
                 self._control.abort(allocation_id)
             if exc.code == "OUTCOME_UNKNOWN":
+                # Unknown spawn outcome keeps both pools charged until confirmed.
                 return self._observation(scope_id, allocation_id, "STARTING", "STALE_UNKNOWN",
-                                         effective=effective, conditions=["spawn_outcome_unknown"])
+                                         effective=effective, conditions=["spawn_outcome_unknown"],
+                                         placement=self._device_placement(allocation_id))
             self.pool.release(allocation_id, {
                 "confirmed": True, "identity": None,
                 "evidence_ref": "launch-failed:" + allocation_id + ":" + exc.code,
             })
+            self._release_devices(allocation_id, "launch-failed:" + allocation_id + ":" + exc.code)
             return self._observation(scope_id, allocation_id, "FAILED", "FRESH",
                                      effective=effective, conditions=[exc.code, exc.reason])
         except OSError as exc:
@@ -148,6 +223,7 @@ class LocalResourceProvider:
                 "confirmed": True, "identity": None,
                 "evidence_ref": "launch-failed:" + allocation_id + ":OSError",
             })
+            self._release_devices(allocation_id, "launch-failed:" + allocation_id + ":OSError")
             return self._observation(scope_id, allocation_id, "FAILED", "FRESH",
                                      effective=effective, conditions=["LAUNCH_FAILED", str(exc)[:256]])
         if self._control is not None:
@@ -157,7 +233,8 @@ class LocalResourceProvider:
         self.pool.bind_identity(allocation_id, identity)
         return self._observation(scope_id, allocation_id, "RUNNING", "FRESH",
                                  identity=identity, effective=effective,
-                                 evidence_ref=spawned["directory"] + "/process.json")
+                                 evidence_ref=spawned["directory"] + "/process.json",
+                                 placement=self._device_placement(allocation_id))
 
     def inspect(self, scope_id, page_token):
         identifier(scope_id)
@@ -199,12 +276,14 @@ class LocalResourceProvider:
                 "confirmed": True, "identity": None,
                 "evidence_ref": "never-spawned:" + allocation_id,
             })
+            self._release_devices(allocation_id, "never-spawned:" + allocation_id)
             return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
                     "evidence_ref": "never-spawned:" + allocation_id, "observed_at_ms": _now_ms()}
         evidence = self.unit.stop(scope_id, allocation_id, terminate_deadline_ms=terminate_deadline_ms,
                                   process=process)
         if evidence["confirmed"]:
             self.pool.release(allocation_id, evidence)
+            self._release_devices(allocation_id, evidence["evidence_ref"])
             self._spawned.pop(allocation_id, None)
             return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
                     "evidence_ref": evidence["evidence_ref"], "observed_at_ms": _now_ms()}

@@ -126,10 +126,15 @@ class LocalCapacityPool:
         return records
 
     def _charged(self, records):
-        return {
+        charged = {
             "cpu_millis": sum(r["effective"]["cpu_millis"] for r in records),
             "memory_bytes": sum(r["effective"]["memory_bytes"] for r in records),
         }
+        # Scratch joins the charge only when the domain declares it or a record
+        # carries it; scratch-free domains keep the exact legacy shape.
+        if "scratch_bytes" in self.capacity or any("scratch_bytes" in r["effective"] for r in records):
+            charged["scratch_bytes"] = sum(r["effective"].get("scratch_bytes", 0) for r in records)
+        return charged
 
     def _view(self, record):
         return {
@@ -165,14 +170,47 @@ class LocalCapacityPool:
                         "CAPACITY_PENDING", "deployment domain has no free " + name,
                         allocation_id=allocation_id, retriable=True, retry_after_ms=1000,
                     )
+            if "scratch_bytes" in effective_profile:
+                if "scratch_bytes" not in self.capacity:
+                    raise ResourceError(
+                        "UNSATISFIABLE_CONSTRAINT", "deployment domain declares no scratch capacity",
+                        allocation_id=allocation_id)
+                if charged.get("scratch_bytes", 0) + effective_profile["scratch_bytes"] > self.capacity["scratch_bytes"]:
+                    raise ResourceError(
+                        "CAPACITY_PENDING", "deployment domain has no free scratch_bytes",
+                        allocation_id=allocation_id, retriable=True, retry_after_ms=1000,
+                    )
             record = {
                 "allocation_id": allocation_id, "spec_hash": spec_hash_value,
                 "effective": {k: effective_profile[k] for k in ("cpu_millis", "memory_bytes")},
                 "state": "RESERVED", "identity": None,
                 "created_ms": int(time.time() * 1000), "deadline_ms": deadline_ms,
             }
+            if "scratch_bytes" in effective_profile:
+                record["effective"]["scratch_bytes"] = effective_profile["scratch_bytes"]
             _save_atomic(self._records / (allocation_id + ".json"), record)
             return self._view(record)
+        finally:
+            os.close(fd)
+
+    def cancel_reservation(self, allocation_id):
+        """Withdraw a never-bound reservation (no host ever existed).
+
+        This is not an exit release: the record must be RESERVED with no physical
+        identity, so no process can still be running. Deleting it keeps the
+        allocation id reusable, which a release tombstone would forbid.
+        """
+        identifier(allocation_id)
+        fd = self._lock()
+        try:
+            record = self._read(allocation_id)
+            if record is None:
+                raise ResourceError("INVALID_SPEC", "cancel needs a known reservation", allocation_id=allocation_id)
+            if record["state"] != "RESERVED" or record["identity"] is not None:
+                raise ResourceError("INVALID_SPEC", "only an unbound reservation can be cancelled",
+                                    allocation_id=allocation_id)
+            os.remove(self._records / (allocation_id + ".json"))
+            return {"allocation_id": allocation_id, "state": "CANCELLED"}
         finally:
             os.close(fd)
 
