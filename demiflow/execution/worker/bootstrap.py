@@ -72,6 +72,7 @@ def run_worker(launch_spec, sock):
 
     from ..chain import COMMIT_RECEIPT_SCHEMA
     from .execution import WorkerChainExecutor
+    from .queue_transform import QueueTransformExecutor, TRANSFORM_REQUEST_SCHEMA
     from .runtime import WorkerRuntime
     send_lock = threading.Lock()
 
@@ -79,8 +80,12 @@ def run_worker(launch_spec, sock):
         with send_lock:
             send_message(sock, frame)
 
-    executor = (WorkerChainExecutor(launch_spec, send=send)
-                if "execution" in launch_spec else None)
+    if "execution" in launch_spec:
+        executor = WorkerChainExecutor(launch_spec, send=send)
+    elif "queue_transform" in launch_spec:
+        executor = QueueTransformExecutor(launch_spec, send=send)
+    else:
+        executor = None
     runtime = WorkerRuntime(
         launch_spec, control=send,
         manifest_loader=_manifest_loader(launch_spec["directory"]),
@@ -94,6 +99,10 @@ def run_worker(launch_spec, sock):
             if message.get("schema_version") == COMMIT_RECEIPT_SCHEMA:
                 if executor is not None:
                     executor.deliver_receipt(message)
+                continue
+            if message.get("schema_version") == TRANSFORM_REQUEST_SCHEMA:
+                if executor is not None:
+                    executor.feed(message["request_id"], message["row"])
                 continue
             if "kind" not in message:
                 continue

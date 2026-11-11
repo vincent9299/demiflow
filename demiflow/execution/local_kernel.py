@@ -120,7 +120,8 @@ class LocalExecutionSession:
 @contextmanager
 def local_execution(*, workers=4, worker_mode="process", partitions=None,
                     batch_rows=8192, memory_bytes=256 * 1024 * 1024,
-                    temp_directory=None, native_resources=None, unified_chain=True):
+                    temp_directory=None, native_resources=None, unified_chain=True,
+                    unified_queue_chain=True):
     """Bind existing Dataset readers to a single-machine partition executor.
 
     Callbacks must be partition-local: no driver side effects or dependence on
@@ -136,6 +137,13 @@ def local_execution(*, workers=4, worker_mode="process", partitions=None,
     slice; pass unified_chain=False for the byte-unchanged legacy in-driver
     fallback. Queue/incremental flows use run_stream (untouched by this seam) and
     open queues fail closed before any capture.
+    unified_queue_chain selects the unified queue settlement carrier (MVP-2 A1):
+    the driver keeps the queue lifecycle, RawFetch acquisition and finalize_task
+    byte-unchanged, and only the by-value pure-maps suffix runs in a managed
+    worker. It defaults to True for the workbench Local queue settlement slice;
+    the S8.5 narrow gate routes a by-reference, fetch-only or non-serializable
+    suffix to the byte-unchanged legacy in-driver write_queue_datasink fallback.
+    Pass unified_queue_chain=False for the explicit legacy in-driver path.
     """
     from ..data.api import _current_executor, _use_executor
     from .executors.local import LocalDatasetExecutor
@@ -148,7 +156,8 @@ def local_execution(*, workers=4, worker_mode="process", partitions=None,
     except ImportError as exc:
         raise ImportError("local_execution requires the demiflow cloudpickle dependency") from exc
     executor = LocalDatasetExecutor(workers=workers, local_kernel=options,
-                                    unified_chain=unified_chain)
+                                    unified_chain=unified_chain,
+                                    unified_queue_chain=unified_queue_chain)
     from .run_context import execution_scope
     try:
         with execution_scope() as run, _use_executor(executor):

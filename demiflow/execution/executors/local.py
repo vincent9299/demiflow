@@ -126,10 +126,12 @@ class LocalDatasetExecutor(DatasetExecutor):
         sort_workers: int | None = None,
         unified_chain: bool = False,
         unified_graph: bool = False,
+        unified_queue_chain: bool = False,
     ) -> None:
         self._workers = max(1, int(workers))
         self._unified_chain = bool(unified_chain)
         self._unified_graph = bool(unified_graph)
+        self._unified_queue_chain = bool(unified_queue_chain)
         if sort_workers is None:
             sort_workers = os.environ.get('DEMIFLOW_LOCAL_SORT_WORKERS',
                            os.environ.get('DEMIWFLOW_LOCAL_SORT_WORKERS', self._workers))
@@ -1132,6 +1134,10 @@ class LocalDatasetExecutor(DatasetExecutor):
             raise RuntimeError('A durable Datasink requires the execution action context')
         from ..queue_execution import queue_source, write_queue_datasink
         if queue_source(source) is not None:
+            if getattr(self, '_unified_queue_chain', False):
+                from ..queue_chain import run_local_queue_chain, unified_queue_chain_eligible
+                if unified_queue_chain_eligible(plan):
+                    return run_local_queue_chain(self, source, plan, datasink, action)
             return write_queue_datasink(self,source,plan,datasink,action)
         coordinator = CommitCoordinator(action)
         sink_id = getattr(datasink, 'sink_id', 'output')
