@@ -36,6 +36,8 @@ WORKER_FAILURE_SCHEMA = "demiflow.worker_failure.v1"
 _MAX_CONTROL_BYTES = 1 << 20
 _DEP_MAX_MODULES = 64
 _DEP_MAX_BYTES = 8 * 1024 ** 2
+SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
+MAX_SEALED_PLAN_BYTES = 4 * 1024 ** 2
 
 logger = logging.getLogger(__name__)
 
@@ -631,6 +633,45 @@ def _worker_failure(message):
                                  % (error.get("type"), error.get("message")))
 
 
+def seal_plan_facts(run, action, logical_dag, physical, manifest_ref, sealed_at):
+    """Persist the executed sealed plan as durable content-addressed facts (D1a).
+
+    gap⑤: the compiled logical_dag/physical were returned but never persisted, so
+    the workbench display graph had no authoritative execution plan to read. Both
+    documents are sealed under ``scratch/chain-sealed-plans/<sha256>.json`` (atomic,
+    bounded, idempotent) and an attempt-independent F1 reference is bound through the
+    existing ``runtime_sources`` slot (zero journal schema change). The single compile
+    seam covers the local/ray/queue callers; the return signature is unchanged.
+
+    F1 omits ``attempt`` (bind_source is immutable; an attempt field would make resume
+    re-compilation differ and falsely refuse recovery) and omits ``identity_bridge_ref``
+    (the D1b bridge is a separate side-car binding key, so it never mutates this F1).
+    """
+    from .state_artifacts import atomic_bytes
+
+    def archive(value):
+        raw = document(value, MAX_SEALED_PLAN_BYTES)
+        digest = hashlib.sha256(raw).hexdigest()
+        path = run.directory / "scratch" / "chain-sealed-plans" / (digest + ".json")
+        # Unregistered, mirroring the K1 manifest: clean_orphans deletes registered
+        # protected=0 artifacts at run exit, but the workbench audits these post-run.
+        with run.journal.publication_guard(run.fence):
+            if not path.exists():
+                atomic_bytes(path, raw)
+            elif path.read_bytes() != raw:
+                raise RecoveryContractError("Existing sealed-plan artifact is corrupt")
+        return {"sha256": digest, "path": str(path.relative_to(run.directory)),
+                "bytes": len(raw)}
+
+    facts = {"schema": SEALED_PLAN_FACTS_SCHEMA, "run_id": run.ref.run_id,
+             "action_id": action.action_id, "dag_id": logical_dag["dag_id"],
+             "plan_id": physical["plan_id"], "artifact_manifest_ref": manifest_ref,
+             "logical_dag_ref": archive(logical_dag),
+             "physical_plan_ref": archive(physical), "sealed_at": sealed_at}
+    run.journal.bind_source(run.fence, action.action_id + "-sealed-plan", facts)
+    return facts
+
+
 def compile_chain_topology(action, source, plan, source_reference, *,
                            output_child_id, host_id, plan_ref):
     """Compile the E2 linear DAG/physical plan and seal the K1 manifest (D3).
@@ -699,6 +740,7 @@ def compile_chain_topology(action, source, plan, source_reference, *,
                 "source_id": source_reference["source_id"],
                 "channel_id": physical["channels"][-1]["channel_id"],
                 "operators": operators, "sink_id": "output"}
+    seal_plan_facts(run, action, logical_dag, physical, mref, manifest["sealed_at"])
     return topology, logical_dag, physical
 
 
