@@ -148,11 +148,15 @@ class ChainResultSink(BlockSink):
             raise RecoveryContractError("Chain result preparation needs a descriptor")
         self._validate(descriptor)
         if not self.input_capture and not self.staging_only:
-            for block in self.block_entries(descriptor):
-                reservation = 'rows-' + hashlib.sha256(block['path'].encode()).hexdigest()
-                self.run.reserve_output('row_bytes', block['bytes'], reservation_id=reservation)
+            # Commit-keyed + ordinal survives a window-3 re-prepare via the journal's idempotent charge.
+            for ordinal, block in enumerate(self.block_entries(descriptor)):
+                self.run.reserve_output('row_bytes', block['bytes'],
+                    reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                             'component': 'row_bytes', 'block': ordinal}))
             self.run.reserve('output_rows', descriptor['rows'],
-                             ceiling=self.run.limits['max_output_rows'])
+                             ceiling=self.run.limits['max_output_rows'],
+                             reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                                      'component': 'output_rows'}))
         self.run.allocate_artifact(self._marker(context), commit_id=context.commit_id)
         return descriptor
 

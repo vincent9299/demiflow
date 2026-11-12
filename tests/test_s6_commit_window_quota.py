@@ -1,0 +1,539 @@
+"""§6 commit-crash-window quota fix: stable commit-keyed output attribution.
+
+A commit that crashes in the "after prepare / before prepared record" window
+(commit.py:71, window-3) leaves a *pending* fact. On resume the driver re-runs
+``sink.prepare`` (commit.py:62), which re-reserves the output staging quota. The
+three output sinks (ChainResultSink / LanceSink / BlockSink) keyed those
+reservations by unstable ids -- a random per-generation staging path for
+``row_bytes`` and ``reservation_id=None`` (-> fresh uuid) for ``output_rows`` --
+so every recovery charged the SAME logical output again. ``clean_orphans``
+unlinks the orphan staging files but never releases ``runtime_reservations`` /
+``runtime_budgets``, so repeated crashes accumulate quota until a legitimate
+output is permanently uncommittable (real-person priority #3「崩溃恢复不能改变
+计算语义或留下无法继续的资源状态」, original intent D-B).
+
+The fix (candidate A, coordinator-approved) keys every output reservation by the
+stable ``commit_id`` (begin_commit derives it from run/action/sequence) plus sink
+and component, reusing the journal's EXISTING idempotent branch
+(run_journal.py:1003-1007): same (name, id) + same amount -> reuse, no re-charge;
+a differing amount -> ``Budget reservation changed`` (fail-closed). Zero
+journal/commit/schema change. ``row_bytes`` is keyed per block *ordinal* (not
+content sha) so two identical blocks in one commit still each count once, while
+the commit component keeps cross-commit accumulation intact.
+
+Gates pinned here (coordinator adjudication §3):
+  1  window-3 crash -> recovery: identical budgets + acked + identical bytes
+     (DriverStreamTerminal/ChainResultSink, and BlockSink/LanceSink direct)
+  2  same logical cut crashed >=24 rounds: quota constant, never exhausted
+  3  window-5 (after_prepared) recovery: prepare skipped, no re-charge (regression)
+  4  model-request reservation + unknown paid effect preserved (not refunded/replayed)
+  5  orphan staging blocks still recycled by clean_orphans; committed blocks survive
+  7  BlockSink row_bytes deferral: streaming per-row/output_rows/scratch limits still
+     reject; aggregate output_BYTES rejects at prepare, pre-publish (fail-closed)
+  8  ordinal: identical blocks in one commit charged twice; cross-commit same bytes
+     accumulate; non-deterministic re-prepare fail-closed (Budget reservation changed)
+  9  real managed-worker SIGKILL -> resume: same quota + acked + per-record equality
+
+Gates 6 (full regression / exact files / main / load-bearing bytes) is a delivery
+activity. In-process tests inject the real commit.py fault seam and re-stage with a
+fresh sink generation to simulate worker re-production; only the captured logical
+output is repeated. No paid model, no network. Tests write only under pytest tmp_path.
+"""
+from contextlib import contextmanager
+from types import SimpleNamespace
+import sys
+import uuid
+
+import pytest
+
+import demiflow.data as data
+from demiflow.data.runtime_contract import RuntimeContractError
+from demiflow.execution import commit as commit_module
+from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.chain import DriverStreamTerminal, build_commit_cut
+from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.contracts.checkpoint import replayable_effects
+from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, identity
+from demiflow.execution.run_context import RunContext, RunAction
+from demiflow.execution.run_journal import RunJournal
+from demiflow.lance.model import LanceWriteSpec
+
+from test_stage2_unified_plan import LIMITS, _crash_hook
+
+pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
+                                reason="Local managed units require Linux")
+
+
+@pytest.fixture(autouse=True)
+def pidfds_available():
+    from demiflow.resources.process_observation import require_pidfds
+    try:
+        require_pidfds()
+    except (OSError, RuntimeError) as exc:
+        pytest.skip("pidfd exit evidence unavailable: " + str(exc))
+
+
+def _budgets(run):
+    with run.journal._connection() as db:
+        return {name: (consumed, ceiling) for name, consumed, ceiling in
+                db.execute("SELECT name, consumed, ceiling FROM runtime_budgets")}
+
+
+def _reservations(run, name):
+    with run.journal._connection() as db:
+        return db.execute("SELECT reservation_id, amount FROM runtime_reservations "
+                          "WHERE name=? ORDER BY reservation_id", (name,)).fetchall()
+
+
+@contextmanager
+def _driver(tmp_path, limits=None):
+    """A real DriverStreamTerminal (ChainResultSink) over a sealed chain action."""
+    with RunContext.start(tmp_path / "run", limits=limits) as run:
+        declaration = {"kind": "chain-materialize", "source": {"source_id": "fixed"}}
+        run.journal.bind_execution_action(run.fence, "main-action", declaration)
+        action = RunAction(run, "main-action", declaration)
+        source_id = identity(["test-source"])
+        channel_id = identity(["result-out-channel"])
+        output_child = "main-action-chain"
+        topology = {
+            "run_id": run.ref.run_id, "action_id": output_child, "epoch": run.attempt,
+            "topology_revision": 0, "route_epoch": 0, "plan_revision": 0,
+            "artifact_manifest_ref": {"manifest_id": "a" * 64, "sha256": "b" * 64},
+            "source_id": source_id, "channel_id": channel_id,
+            "operators": [{"logical_node_id": identity(["node-0"]),
+                           "occurrence_id": identity(["occ-0"])}],
+            "sink_id": "output",
+        }
+        terminal = DriverStreamTerminal(action, {"source_id": source_id, "data": {}},
+                                        output_child_id=output_child, topology=topology)
+        try:
+            yield SimpleNamespace(run=run, action=action, terminal=terminal,
+                                  source_id=source_id, channel_id=channel_id,
+                                  topology=topology, output_child=output_child)
+        finally:
+            for action_id in ("main-action", output_child):
+                record = run.journal.execution_action(action_id)
+                if record is not None and record["result"] is None:
+                    run.journal.complete_execution_action(
+                        run.fence, action_id, {"kind": "test-complete"})
+
+
+@contextmanager
+def _coord_env(tmp_path, limits=None):
+    """A bare action + CommitCoordinator for direct BlockSink/LanceSink commits."""
+    with RunContext.start(tmp_path / "run", limits=limits) as run:
+        declaration = {"kind": "s6-commit", "source": {"source_id": "fixed"}}
+        run.journal.bind_execution_action(run.fence, "main-action", declaration)
+        action = RunAction(run, "main-action", declaration)
+        try:
+            yield run, action
+        finally:
+            record = run.journal.execution_action("main-action")
+            if record is not None and record["result"] is None:
+                run.journal.complete_execution_action(
+                    run.fence, "main-action", {"kind": "test-complete"})
+
+
+def _stage(child, rows):
+    """Simulate the worker writing one epoch of staging blocks (granted fence)."""
+    sink = BlockSink(child, "output", staging_only=True)
+    for row in rows:
+        sink.append(row)
+    return sink.descriptor()
+
+
+def _cut(env, descriptor, *, sequence, next_ordinal, final=False, inflight=()):
+    return build_commit_cut(
+        uuid.uuid4().hex, identity(["ck", sequence]),
+        source_id=env.source_id, next_ordinal=next_ordinal, sequence=sequence,
+        channel_id=env.channel_id, channel_cut_sequence=sequence - 1,
+        output_descriptor=descriptor,
+        states={"stream-progress": {"rows": next_ordinal, "final": final,
+                                    "inputs": next_ordinal}},
+        inflight=inflight, final=final)
+
+
+def _revive(env):
+    return DriverStreamTerminal(env.action, {"source_id": env.source_id, "data": {}},
+                                output_child_id=env.output_child, topology=env.topology)
+
+
+def _make_sink(kind, action, tmp_path, rows):
+    if kind == "block":
+        return BlockSink(action, "output"), rows
+    if kind == "lance":
+        import pyarrow as pa
+        table = pa.table({"x": pa.array([r["x"] for r in rows], type=pa.int64())})
+        spec = LanceWriteSpec(uri=str(tmp_path / "t.lance"), mode="create", schema=table.schema)
+        return LanceSink(action, spec), [table]
+    raise ValueError(kind)
+
+
+def _window3(name, commit_id):
+    if name == "after_prepare_before_record":
+        raise RuntimeError("window-3 crash before prepared record")
+
+
+# --- Gate 1: window-3 crash -> recovery identical quota + acked + bytes (chain) ---
+
+def test_s6_gate1_window3_chain_recovery_same_quota(tmp_path, monkeypatch):
+    rows = [{"x": i} for i in range(4)]
+    with _driver(tmp_path) as env:
+        descriptor = _stage(env.terminal.child, rows)
+        cut = _cut(env, descriptor, sequence=1, next_ordinal=4, final=True)
+        monkeypatch.setattr(commit_module, "fault_point", _window3)
+        with pytest.raises(RuntimeError, match="window-3"):
+            env.terminal.commit_cut(cut)
+        before = _budgets(env.run)
+        assert env.run.journal.execution_commits(env.output_child)[0]["status"] == "pending"
+        monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
+        revived = _revive(env)
+        # The worker re-produces the SAME logical output: a fresh staging generation
+        # writes new physical paths, so an unstable path/uuid key would re-charge.
+        restaged = _stage(revived.child, rows)
+        receipt = revived.commit_cut(dict(cut, output_descriptor=restaged))
+        assert _budgets(env.run) == before, "window-3 recovery doubled the output quota"
+        assert receipt["status"] == "acked"
+        assert receipt["receipt_descriptor"] == restaged
+        assert list(revived.sink.iter_rows(restaged)) == rows
+        revived.finish(4)
+        assert revived.complete
+
+
+# --- Gate 1: window-3 recovery identical quota (BlockSink / LanceSink direct) ---
+
+@pytest.mark.parametrize("kind", ["block", "lance"])
+def test_s6_gate1_window3_sink_recovery_same_quota(tmp_path, monkeypatch, kind):
+    rows = [{"x": i} for i in range(4)]
+    with _coord_env(tmp_path) as (run, action):
+        coord = CommitCoordinator(action)
+        position = SourcePosition(identity(["src"]), 4)
+        sink, blocks = _make_sink(kind, action, tmp_path, rows)
+        monkeypatch.setattr(commit_module, "fault_point", _window3)
+        with pytest.raises(RuntimeError, match="window-3"):
+            coord.commit(1, outputs={sink.sink_id: (sink, blocks)}, position=position)
+        before = _budgets(run)
+        assert run.journal.execution_commits(action.action_id)[0]["status"] == "pending"
+        monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
+        sink2, blocks2 = _make_sink(kind, action, tmp_path, rows)
+        fact = coord.commit(1, outputs={sink2.sink_id: (sink2, blocks2)}, position=position)
+        assert _budgets(run) == before, "window-3 recovery doubled the output quota"
+        assert fact["status"] == "acked"
+
+
+# --- Gate 2: same logical cut crashed >=24 rounds -> quota constant, never exhausted ---
+
+def test_s6_gate2_repeat_crash_quota_constant(tmp_path, monkeypatch):
+    rows = [{"x": i} for i in range(4)]
+    limits = {"max_output_rows": 64, "max_output_bytes": 4096,
+              "max_row_bytes": 512, "max_batch_bytes": 1024}
+    with _driver(tmp_path, limits) as env:
+        monkeypatch.setattr(commit_module, "fault_point", _window3)
+        terminal = env.terminal
+        baseline = None
+        for round_index in range(24):
+            descriptor = _stage(terminal.child, rows)
+            cut = _cut(env, descriptor, sequence=1, next_ordinal=4, final=True)
+            with pytest.raises(RuntimeError, match="window-3"):
+                terminal.commit_cut(cut)
+            current = _budgets(env.run)
+            if baseline is None:
+                baseline = current
+            else:
+                assert current == baseline, f"round {round_index}: output quota accumulated"
+            terminal = _revive(env)
+        monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
+        descriptor = _stage(terminal.child, rows)
+        receipt = terminal.commit_cut(_cut(env, descriptor, sequence=1, next_ordinal=4, final=True))
+        assert receipt["status"] == "acked"
+        assert _budgets(env.run) == baseline
+        assert list(terminal.sink.iter_rows(descriptor)) == rows
+        terminal.finish(4)
+
+
+# --- Gate 3: window-5 (after_prepared) recovery skips prepare -> no re-charge ---
+
+def test_s6_gate3_window5_recovery_no_recharge(tmp_path, monkeypatch):
+    rows = [{"x": i} for i in range(4)]
+    with _driver(tmp_path) as env:
+        descriptor = _stage(env.terminal.child, rows)
+        cut = _cut(env, descriptor, sequence=1, next_ordinal=4, final=True)
+
+        def crash(name, commit_id):
+            if name == "after_prepared":
+                raise RuntimeError("window-5 crash after prepared")
+        monkeypatch.setattr(commit_module, "fault_point", crash)
+        with pytest.raises(RuntimeError, match="window-5"):
+            env.terminal.commit_cut(cut)
+        before = _budgets(env.run)
+        assert env.run.journal.execution_commits(env.output_child)[0]["status"] == "prepared"
+        monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
+        revived = _revive(env)  # recover() reconciles prepared -> acked, never re-prepares
+        assert _budgets(env.run) == before
+        assert revived.sequence == 1 and revived.rows == 4
+        assert env.run.journal.execution_commits(env.output_child)[0]["status"] == "acked"
+        assert list(revived.sink.iter_rows(descriptor)) == rows
+
+
+# --- Gate 4: model-request reservation + unknown paid effect preserved ---
+
+def test_s6_gate4_model_request_and_unknown_effect_preserved(tmp_path, monkeypatch):
+    rows = [{"x": i} for i in range(3)]
+    with _driver(tmp_path) as env:
+        model_id = identity(["model-request", "paid-1"])
+        env.run.reserve("model_requests", 1, reservation_id=model_id, ceiling=100)
+        inflight = [{"request_key": identity(["paid-unknown"]), "status": "unknown"},
+                    {"request_key": identity(["paid-done"]), "status": "known_completed",
+                     "effect_ref": identity(["effect-1"])}]
+        descriptor = _stage(env.terminal.child, rows)
+        cut = _cut(env, descriptor, sequence=1, next_ordinal=3, final=True, inflight=inflight)
+        monkeypatch.setattr(commit_module, "fault_point", _window3)
+        with pytest.raises(RuntimeError, match="window-3"):
+            env.terminal.commit_cut(cut)
+        model_before = _budgets(env.run)["model_requests"]
+        monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
+        revived = _revive(env)
+        restaged = _stage(revived.child, rows)
+        receipt = revived.commit_cut(dict(cut, output_descriptor=restaged))
+        assert receipt["status"] == "acked"
+        # The fix only stabilizes staging attribution; a model-request reservation is
+        # neither refunded nor doubled by recovery.
+        assert _budgets(env.run)["model_requests"] == model_before == (1, 100)
+        manifest = revived.checkpoints[cut["checkpoint_id"]]["manifest"]
+        assert replayable_effects(manifest) == [identity(["effect-1"])]  # unknown excluded
+
+
+# --- Gate 5: orphan staging blocks still recycled; committed blocks survive ---
+
+def test_s6_gate5_orphan_blocks_recycled(tmp_path, monkeypatch):
+    rows = [{"x": i} for i in range(4)]
+    with _driver(tmp_path) as env:
+        descriptor = _stage(env.terminal.child, rows)
+        old_paths = [env.run.directory / b["path"]
+                     for b in env.terminal.sink.block_entries(descriptor)]
+        cut = _cut(env, descriptor, sequence=1, next_ordinal=4, final=True)
+        monkeypatch.setattr(commit_module, "fault_point", _window3)
+        with pytest.raises(RuntimeError, match="window-3"):
+            env.terminal.commit_cut(cut)
+        monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
+        revived = _revive(env)
+        restaged = _stage(revived.child, rows)
+        revived.commit_cut(dict(cut, output_descriptor=restaged))
+        assert all(p.is_file() for p in old_paths)
+        removed = env.run.journal.clean_orphans(env.run.fence)
+        assert removed >= len(old_paths)
+        assert not any(p.exists() for p in old_paths), "orphan staging must be recycled"
+        new_paths = [env.run.directory / b["path"]
+                     for b in revived.sink.block_entries(restaged)]
+        assert all(p.is_file() for p in new_paths), "committed blocks must survive cleanup"
+
+
+# --- Gate 7: BlockSink streaming limits still reject after row_bytes deferral ---
+
+@pytest.mark.parametrize("limit", ["max_row_bytes", "max_output_rows", "max_scratch_bytes"])
+def test_s6_gate7_streaming_limits_still_reject(tmp_path, limit):
+    limits = {"max_row_bytes": 512, "max_batch_bytes": 1024, "max_output_rows": 8,
+              "max_output_bytes": 1 << 30, "max_scratch_bytes": 1 << 30}
+    if limit == "max_row_bytes":
+        limits.update(max_row_bytes=64, max_batch_bytes=128)
+    elif limit == "max_scratch_bytes":
+        limits.update(max_scratch_bytes=256)
+    with _coord_env(tmp_path, limits) as (run, action):
+        sink = BlockSink(action, "output")
+        with pytest.raises((RecoveryContractError, RuntimeContractError)):
+            if limit == "max_row_bytes":
+                sink.append({"x": "y" * 4096})
+            elif limit == "max_output_rows":
+                for i in range(100):
+                    sink.append({"x": i})
+            else:
+                for i in range(100):
+                    sink.append({"x": "z" * 200})
+
+
+def test_s6_gate7_output_bytes_deferred_to_prepare(tmp_path):
+    # Aggregate output_BYTES admission moves from streaming _flush to prepare, but
+    # stays fail-closed and pre-publish. Streaming append/flush must SUCCEED here
+    # (total bytes > max_output_bytes, each row < max_row_bytes, scratch large).
+    limits = {"max_row_bytes": 512, "max_batch_bytes": 1024, "max_output_rows": 1000,
+              "max_output_bytes": 256, "max_scratch_bytes": 1 << 30}
+    with _coord_env(tmp_path, limits) as (run, action):
+        sink = BlockSink(action, "output")
+        for i in range(20):
+            sink.append({"x": "z" * 100})
+        sink._flush()
+        context = CommitCoordinator(action)._context(identity(["s6-defer"]))
+        with pytest.raises(RecoveryContractError, match="exhausted"):
+            sink.prepare(None, context)
+        assert not sink._marker(context).exists(), "over-budget output must not publish"
+
+
+# --- Gate 8: ordinal semantics + cross-commit accumulation + fail-closed ---
+
+def test_s6_gate8_ordinal_identical_blocks_charged_twice(tmp_path):
+    with _coord_env(tmp_path) as (run, action):
+        commit_id = identity(["s6-ordinal"])
+        context = CommitCoordinator(action)._context(commit_id)
+        sink = BlockSink(action, "output")
+        # Two identical-content blocks (explicit flush each), distinguished only by
+        # ordinal -- a content-sha key would collapse them and under-count.
+        sink.append({"x": "a" * 40})
+        sink._flush()
+        sink.append({"x": "a" * 40})
+        sink._flush()
+        sink.prepare(None, context)
+        rows_res = _reservations(run, "row_bytes")
+        assert len(rows_res) == 2, "identical blocks in one commit must each count once"
+        assert len({rid for rid, _ in rows_res}) == 2, "ordinal must distinguish identical blocks"
+        assert sum(amount for _, amount in rows_res) == _budgets(run)["row_bytes"][0]
+        # A fresh sink re-preparing the SAME commit reuses the same ordinal keys
+        # (commit-keyed, not path-keyed): no new reservation and no re-charge.
+        before = _budgets(run)
+        sink2 = BlockSink(action, "output")
+        sink2.append({"x": "a" * 40})
+        sink2._flush()
+        sink2.append({"x": "a" * 40})
+        sink2._flush()
+        sink2.prepare(None, context)
+        assert _reservations(run, "row_bytes") == rows_res
+        assert _budgets(run) == before
+
+
+def test_s6_gate8_cross_commit_same_bytes_accumulate(tmp_path):
+    rows = [{"x": 1}, {"x": 2}]
+    with _coord_env(tmp_path) as (run, action):
+        coord = CommitCoordinator(action)
+        src = identity(["src"])
+        sink = BlockSink(action, "output")
+        coord.commit(1, outputs={"output": (sink, rows)}, position=SourcePosition(src, 2))
+        single = _budgets(run)["row_bytes"][0]
+        sink2 = BlockSink(action, "output")
+        coord.commit(2, outputs={"output": (sink2, rows)}, position=SourcePosition(src, 4))
+        # The commit component keeps distinct commits accumulating (no cross-commit collision).
+        assert _budgets(run)["row_bytes"][0] == 2 * single
+        assert _budgets(run)["output_rows"][0] == 4
+
+
+def test_s6_gate8_nondeterministic_reprepare_fail_closed(tmp_path):
+    with _coord_env(tmp_path) as (run, action):
+        context = CommitCoordinator(action)._context(identity(["s6-nondet"]))
+        sink = BlockSink(action, "output")
+        sink.prepare([{"x": 1}, {"x": 2}], context)
+        # Same commit, a DIFFERENT amount (non-deterministic re-production) must
+        # fail-closed against the stable key, never silently double-charge.
+        sink2 = BlockSink(action, "output")
+        with pytest.raises(RecoveryContractError, match="Budget reservation changed"):
+            sink2.prepare([{"x": 1}, {"x": 2}, {"x": 3}], context)
+
+
+# --- Gate 9: real managed-worker recovery preserves output quota + bytes ---
+
+def _output_budgets(directory):
+    journal = RunJournal(directory)
+    with journal._connection() as db:
+        return {name: consumed for name, consumed in db.execute(
+            "SELECT name, consumed FROM runtime_budgets WHERE name IN "
+            "('output_rows','row_bytes','output_bytes','output_admission_bytes')")}
+
+
+def _clean_baseline(tmp_path, rows_in, transform):
+    clean_root = tmp_path / "clean"
+    with RunContext.start(clean_root, limits=LIMITS):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+                                  unified_chain=True):
+            rows = (data.from_items(rows_in).map_async(transform, concurrency=1)
+                    .materialize().take_all())
+    return clean_root, {r["input"]: r["value"] for r in rows}
+
+
+def test_s6_gate9_real_worker_sigkill_recovery_same_quota(tmp_path, monkeypatch):
+    from test_u2_chain_faults import _release_crash_orphans
+    from demiflow.execution import chain
+    rows_in = [{"x": i} for i in range(8)]
+
+    def transform(row):
+        return {"input": row["x"], "value": row["x"] + 1}
+
+    clean_root, clean_values = _clean_baseline(tmp_path, rows_in, transform)
+    clean_budget = _output_budgets(clean_root)
+    hook, marker = _crash_hook(tmp_path)
+
+    def pipeline():
+        return (data.from_items(rows_in).map_async(transform, concurrency=1)
+                .map_async(hook, concurrency=1))
+
+    original_run = chain.run_local_chain
+    monkeypatch.setattr(chain, "run_local_chain",
+                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
+    root = tmp_path / "run"
+    with pytest.raises((RecoveryContractError, OSError)):
+        with RunContext.start(root, limits=LIMITS) as run:
+            reference = run.ref
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+                                      unified_chain=True):
+                pipeline().materialize().take_all()
+    assert marker.exists(), "first run must SIGKILL the worker after acked cuts"
+    with RunContext.resume(reference):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+                                  unified_chain=True):
+            resumed = pipeline().materialize().take_all()
+    _release_crash_orphans(tmp_path / "run-resources")
+    assert {r["input"]: r["value"] for r in resumed} == clean_values
+    assert _output_budgets(root) == clean_budget, "real-worker SIGKILL recovery doubled output quota"
+    assert RunJournal(root).execution_status()["status"] == "succeeded"
+
+
+def test_s6_gate9_real_worker_window3_recovery_same_quota(tmp_path, monkeypatch):
+    # A real managed worker stages and sends the first cut; the DRIVER crashes in
+    # window-3 (after prepare, before the prepared record), leaving a pending commit.
+    # Resume re-produces the same logical cut and re-prepares the pending commit:
+    # commit-keyed attribution must reuse the charge, not double it.
+    from test_u2_chain_faults import _release_crash_orphans
+    from demiflow.execution import chain
+    rows_in = [{"x": i} for i in range(8)]
+
+    def transform(row):
+        return {"input": row["x"], "value": row["x"] + 1}
+
+    clean_root, clean_values = _clean_baseline(tmp_path, rows_in, transform)
+    clean_budget = _output_budgets(clean_root)
+    crashed = [False]
+    prepare_calls = [0]
+
+    def fault(name, commit_id):
+        if name == "after_prepare_before_record":
+            prepare_calls[0] += 1
+            # The first window-3 is the fixed-source capture (input_capture, no
+            # output quota); the second is the first real chain output cut, which
+            # is the commit whose staging quota §6 must keep idempotent.
+            if prepare_calls[0] == 2 and not crashed[0]:
+                crashed[0] = True
+                raise OSError("driver window-3 crash before prepared record")
+
+    monkeypatch.setattr(commit_module, "fault_point", fault)
+    original_run = chain.run_local_chain
+    monkeypatch.setattr(chain, "run_local_chain",
+                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
+    root = tmp_path / "run"
+    with pytest.raises((RecoveryContractError, OSError)):
+        with RunContext.start(root, limits=LIMITS) as run:
+            reference = run.ref
+            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+                                      unified_chain=True):
+                (data.from_items(rows_in).map_async(transform, concurrency=1)
+                 .materialize().take_all())
+    assert crashed[0], "driver must crash in window-3 with a real worker running"
+    assert any(c["status"] == "pending"
+               for c in RunJournal(root).execution_commits("action-1-chain")), \
+        "window-3 must leave a pending commit to re-prepare on resume"
+    monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
+    with RunContext.resume(reference):
+        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+                                  unified_chain=True):
+            resumed = (data.from_items(rows_in).map_async(transform, concurrency=1)
+                       .materialize().take_all())
+    _release_crash_orphans(tmp_path / "run-resources")
+    assert {r["input"]: r["value"] for r in resumed} == clean_values
+    assert _output_budgets(root) == clean_budget, "window-3 re-prepare doubled output quota"
+    assert RunJournal(root).execution_status()["status"] == "succeeded"

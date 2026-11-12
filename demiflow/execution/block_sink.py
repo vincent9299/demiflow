@@ -8,7 +8,7 @@ import uuid
 
 from ..data.datasink import Datasink
 from ..data.runtime_contract import check_size
-from .recovery_contract import document, RecoveryContractError, identifier
+from .recovery_contract import document, RecoveryContractError, identifier, identity
 from .state_artifacts import atomic_bytes
 
 BLOCK_BYTES = 4 * 1024**2
@@ -68,9 +68,6 @@ class BlockSink(Datasink):
             return
         payload = b"".join(self.buffer)
         path = self.root / self.generation / (str(self.block_count) + ".pkl")
-        if not self.input_capture and not self.staging_only:
-            self.run.reserve_output('row_bytes', len(payload),
-                reservation_id='rows-' + hashlib.sha256(str(path.relative_to(self.run.directory)).encode()).hexdigest())
         self.run.allocate_artifact(path, size=len(payload))
         with self.run.journal.publication_guard(self.run.fence):
             # Object staging and row staging use this same fence/transaction.
@@ -93,10 +90,18 @@ class BlockSink(Datasink):
             for row in blocks:
                 self.append(row)
         self._flush()
+        descriptor = self.descriptor()
         if not self.input_capture and not self.staging_only:
-            self.run.reserve('output_rows', self.rows, ceiling=self.run.limits['max_output_rows'])
+            # Commit-keyed + ordinal: a window-3 re-prepare reuses the journal's idempotent charge.
+            for ordinal, block in enumerate(self.block_entries(descriptor)):
+                self.run.reserve_output('row_bytes', block['bytes'],
+                    reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                             'component': 'row_bytes', 'block': ordinal}))
+            self.run.reserve('output_rows', self.rows, ceiling=self.run.limits['max_output_rows'],
+                reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                         'component': 'output_rows'}))
         self.run.allocate_artifact(self._marker(context), commit_id=context.commit_id)
-        return self.descriptor()
+        return descriptor
 
     def descriptor(self):
         self._flush()

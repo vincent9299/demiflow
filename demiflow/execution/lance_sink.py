@@ -10,7 +10,7 @@ from ..errors import LanceResourceNotFound, LanceWriteConflict, LanceWriteError
 from ..lance.model import LanceWriteReceipt
 from ..lance.storage import inspect_lance, open_lance_dataset, schema_hash
 from .block_sink import storage_usage
-from .recovery_contract import RecoveryContractError, UnresolvedCommit, document
+from .recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 from .state_artifacts import atomic_bytes
 
 
@@ -91,8 +91,12 @@ class LanceSink(Datasink):
                     written_rows=None, schema_hash=schema_hash(schema) if schema is not None else None,
                     status='indeterminate', error=error_from_exception(exc))) from exc
             raise
-        self.run.reserve('output_rows', rows, ceiling=self.run.limits['max_output_rows'])
-        self.run.reserve_output('row_bytes', logical_bytes)
+        self.run.reserve('output_rows', rows, ceiling=self.run.limits['max_output_rows'],
+            reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                     'component': 'output_rows'}))
+        self.run.reserve_output('row_bytes', logical_bytes,
+            reservation_id=identity({'commit': context.commit_id, 'sink': self.sink_id,
+                                     'component': 'row_bytes'}))
         descriptor = os.open(path.parent, os.O_DIRECTORY)
         try:
             os.fsync(descriptor)
