@@ -29,19 +29,25 @@ def _confirmed_unsent(error):
 
 
 def collect_inflight(journal):
-    """Describe a native effect journal's calls as K6 inflight entries.
+    """Describe a native effect journal's in-flight calls as K6 inflight entries.
 
-    known_completed: a durable response exists -> reusable via effect_ref (the
-    journal request_key identifies the response fact). unknown: a request was
-    reserved without a complete response -> never auto-replayed; the journal's
-    own check_recovery fail-closes it before any new dispatch. A confirmed-unsent
-    dispatch wrote no effect and is omitted (pure compute may recompute), matching
-    the journal's unresolved-call rule.
+    Bounded to the current unresolved calls (pending_only): inflight carries the
+    in-flight unknown effects, not the whole completed history, so a long run's
+    cut metadata stays within the document byte budget instead of growing with
+    every completed call. Completed effects are durable journal facts reused by
+    the journal's own check_recovery (the one effect authority), so they need not
+    be re-listed each cut; the frozen replayable_effects rule still holds (a
+    manifest with no in-flight completed entry yields [], which is contract-valid).
+
+    unknown: a request was reserved without a complete response -> never
+    auto-replayed; the journal's own check_recovery fail-closes it before any new
+    dispatch. A confirmed-unsent dispatch wrote no effect and is omitted (pure
+    compute may recompute), matching the journal's unresolved-call rule.
     """
     if journal is None:
         return []
     entries = []
-    for call in journal.calls():
+    for call in journal.calls(pending_only=True):
         key = call["request_id"]
         if call["response"] is not None:
             entries.append({"request_key": key, "status": "known_completed", "effect_ref": key})

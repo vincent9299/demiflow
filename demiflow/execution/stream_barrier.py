@@ -198,7 +198,7 @@ class CheckpointControl:
                 limits = self.progress.run.limits
                 full = (len(self.unconfirmed) >= limits['checkpoint_unconfirmed_rows'] or
                         self.capacity_requested)
-                trigger = (self.progress.ordinal >= replay_cut if replay_cut is not None
+                trigger = ((self.progress.ordinal >= replay_cut or full) if replay_cut is not None
                            else count and (count >= self.progress.batch_rows or due or full))
                 if self.final_requested or trigger:
                     # Start the deadline before waiting for a blocked source put.

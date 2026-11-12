@@ -89,12 +89,26 @@ class GraphWorkerProgress(StreamStageProgress):
         self.group_ends = []
         self.buffer_sinks = {}
         self.admitted_rows = self.rows
-        self._egress_ordinal = 0
+        # The egress routing ordinal resumes at the acked cut (driver hands it back
+        # in the runtime restore dict, separate from stage-state) so rebalance
+        # partition assignment continues instead of resetting to 0 on restore.
+        self._egress_ordinal = restore.get("egress_ordinal", 0) if restore else 0
+        # Target permanent seal is gated by actual input EOF (all channels drained to
+        # EOI), never by the driver's provisional final hint: the ancestor sends EOI
+        # only after the final cut is acked, so the hint may name a final-bound cut
+        # that the budget forced early (ordinal < source_rows).
+        self._input_exhausted = False
 
     def source_rows(self):
         if self.input_reader is not None:
-            return self.input_reader.rows()
+            return self._target_rows()
         return self.source_sink.iter_rows(self.source["data"])
+
+    def _target_rows(self):
+        yield from self.input_reader.rows()
+        # The reader returns only after every input channel reached EOI and drained
+        # its tail; this is the target's true EOF, the sole authority for sealing it.
+        self._input_exhausted = True
 
     def _bind_checkpoint_control(self, control):
         # Additive run_stream seam: graph cuts wake the E1 control loop precisely at
@@ -151,10 +165,12 @@ class GraphWorkerProgress(StreamStageProgress):
         if self.stop_requested():
             raise RecoveryContractError("Graph worker stopped")
         if self.output_router is not None:
-            if self._exchange_mode != "memory_incremental" and self._segment_store is not None:
-                # durable/sealed: business rows ride segment files; only a K4
-                # DataRef crosses the socket, so large payloads never transit the
-                # driver (D3). The consumer reads the segment directly (S2).
+            if self._segment_store is not None:
+                # Every mode rides pickle-4 segment files (only a K4 DataRef crosses
+                # the socket, D3): this preserves business-row types (tuple/bytes) that
+                # the strict-JSON inline path would silently coerce or reject.
+                # memory_incremental uses ephemeral blocks per its declared policy;
+                # durable_incremental durable ones. The consumer reads the segment (S2).
                 durability = "durable" if self._exchange_mode == "durable_incremental" else "ephemeral"
                 _, refs = self._segment_store.write([row], scope_ref=self.occurrence_id,
                                                     durability=durability)
@@ -185,14 +201,31 @@ class GraphWorkerProgress(StreamStageProgress):
         return cuts
 
     def seal(self, barrier):
-        if self._final_done:
+        if self._final_done or self._input_exhausted:
             return lambda: None
-        real_cut = (self._cut_checkpoint_id is not None or barrier.final or self._final_cut)
+        real_cut = (self._cut_checkpoint_id is not None or barrier.final)
         if not real_cut:
-            # Timer-driven E1 trigger between driver/alignment cuts: snapshot nothing,
-            # publish nothing, keep staged rows. Only the coordinating cut publishes.
+            # Timer/budget-driven E1 trigger with no driver cut named: snapshot nothing,
+            # publish nothing, keep staged rows. Only a driver-named cut (or true EOF,
+            # barrier.final) publishes. The sticky final hint must NOT force a publish
+            # here: a budget cut racing ahead of the driver's retry command would ride
+            # the ordinal-derived fallback id and mismatch the bound-named cut group.
             return lambda: None
-        barrier.final = bool(barrier.final or self._final_cut)
+        if self.source is not None:
+            # Ancestor reads the fixed source: actual EOF is the sole finality authority
+            # (mirrors the chain U2 hard gate final <=> next_ordinal == source rows). The
+            # driver's final hint never seals a budget-forced early cut prematurely.
+            barrier.final = barrier.next_ordinal == self.source["data"]["rows"]
+            contribution_final = barrier.final
+        else:
+            # Target: barrier.final drives the control-loop finish (stream_barrier) and
+            # the permanent seal, so it must reflect TRUE input EOF (_input_exhausted:
+            # every channel drained to EOI), never the driver's provisional hint. A
+            # budget-forced early cut at a final-named bound still has rows to consume and
+            # must not stop the target. The hint drives only the contribution's
+            # descriptive final field (final_arrival), provisional per HC1.
+            contribution_final = bool(barrier.final or self._final_cut)
+            barrier.final = self._input_exhausted
         sealed = self.sink.detach()
         barrier.states["stream-progress"] = dict(rows=self.rows + sealed.rows,
                                                  final=barrier.final, inputs=barrier.next_ordinal)
@@ -232,10 +265,12 @@ class GraphWorkerProgress(StreamStageProgress):
             "channel_cuts": self._channel_cuts(), "operator_states": [],
             "inflight": collect_inflight(getattr(self.run, "_native_prompt_journal", None)),
             "output_descriptor": descriptor,
-            "source_progress": source_progress, "final": barrier.final}
+            "source_progress": source_progress, "final": contribution_final}
         states = dict(barrier.states)
         self._cut_checkpoint_id = None
-        if barrier.final:
+        if barrier.final and self.source is not None:
+            # Ancestor seals permanently at actual EOF; the target's permanent seal is
+            # deferred to _input_exhausted (input EOI), never the provisional hint.
             self._final_done = True
 
         def publish():
@@ -243,8 +278,16 @@ class GraphWorkerProgress(StreamStageProgress):
             # (namespaced against sibling workers' identical node-i keys) and ride
             # the existing cut_contribution operator_states field as a K6 state_ref.
             worker_states = {k: v for k, v in states.items() if k != "stream-progress"}
-            if worker_states and self.logical_node_id is not None:
-                ref = StateArtifacts(self.run).put(self.occurrence_id, worker_states)
+            payload = dict(worker_states)
+            if self.output_router is not None:
+                # The ancestor's egress ordinal persists even when stage state is empty
+                # (pure-compute), so rebalance routing resumes at the acked ordinal. The
+                # reserved key rides the artifact VALUE; the driver extracts it into the
+                # graph-progress summary and strips it from the committed stage-state so
+                # OperatorStates/bind_stages local-key restore stays unpolluted.
+                payload["__egress_ordinal__"] = self._egress_ordinal
+            if payload and self.logical_node_id is not None:
+                ref = StateArtifacts(self.run).put(self.occurrence_id, payload)
                 contribution["operator_states"] = [{
                     "logical_node_id": self.logical_node_id,
                     "occurrence_id": self.occurrence_id,

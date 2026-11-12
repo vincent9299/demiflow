@@ -2,14 +2,18 @@
 
 Proves the S4 effect mainline rather than re-proving frozen units: a worker's
 native effect journal is the one durable authority; ``collect_inflight`` maps its
-calls onto the frozen K6 inflight description (known_completed carries effect_ref,
-unknown never does, confirmed-unsent is omitted); the driver unions every
-participant's fragment into the CheckpointManifest inflight AND the recoverable
-graph-progress summary; ``replayable_effects`` (frozen) fires on every committed
-manifest and returns only known_completed refs. An uncertain request fail-closes
-the journal's own recovery check before any new dispatch (no blind retry). The
-end-to-end graph tests use a dynamic effect actor that writes the worker journal
-through the same SQLite mechanism an LLM actor uses — no network, no paid model.
+UNRESOLVED calls (pending_only) onto the frozen K6 inflight description — a BOUNDED
+description carrying the in-flight unknown effects (unknown never carries
+effect_ref), omitting completed effects (durable journal facts reused by the
+journal's own check_recovery, not re-listed each cut) and confirmed-unsent
+dispatches; the driver unions every participant's fragment into the
+CheckpointManifest inflight AND the recoverable graph-progress summary;
+``replayable_effects`` (frozen) fires on every committed manifest and returns only
+known_completed refs (an all-completed run yields [], which is contract-valid). An
+uncertain request fail-closes the journal's own recovery check before any new
+dispatch (no blind retry). The end-to-end graph tests use a dynamic effect actor
+that writes the worker journal through the same SQLite mechanism an LLM actor uses
+— no network, no paid model.
 """
 import sys
 
@@ -72,10 +76,13 @@ def test_collect_inflight_known_unknown_and_confirmed_unsent(tmp_path):
     assert journal.reserve(unsent) is True
     journal.failed(unsent, _UnsentError("cancelled before dispatch"), 0.0)
     entries = {e["request_key"]: e for e in collect_inflight(journal)}
-    assert len(entries) == 2                              # confirmed-unsent omitted
-    known = entries[request_key(done)]
-    assert known["status"] == "known_completed"
-    assert known["effect_ref"] == request_key(done)       # ref points at the one fact
+    # Bounded inflight (pending_only): only the unresolved UNKNOWN call is described.
+    # The completed effect is a durable journal fact reused by the journal's own
+    # check_recovery (the one authority), not re-listed each cut; a confirmed-unsent
+    # dispatch wrote no effect and is omitted (pure compute may recompute).
+    assert len(entries) == 1
+    assert request_key(done) not in entries               # completed omitted (bounded)
+    assert request_key(unsent) not in entries             # confirmed-unsent omitted
     unknown = entries[request_key(uncertain)]
     assert unknown["status"] == "unknown"
     assert "effect_ref" not in unknown                    # unknown never carries a ref
@@ -142,8 +149,12 @@ def test_journal_completed_response_reuses_without_new_reservation(tmp_path):
     request = {"kind": "effect", "id": "done"}
     assert journal.reserve(request) is True
     journal.response(request, {"ok": True})
+    # The operative reuse authority is the journal itself: a completed request is
+    # never re-reserved (reserve -> False), independent of the manifest description.
     assert journal.reserve(request) is False              # known_completed reuse
-    assert collect_inflight(journal)[0]["status"] == "known_completed"
+    # Bounded inflight: a completed-only journal yields an empty description
+    # (contract-valid) — completed effects are durable journal facts, not re-listed.
+    assert collect_inflight(journal) == []
     journal.close()
     recovery = _recovery_check(tmp_path / "effects.sqlite")
     recovery.check_recovery()                             # complete response is provable
@@ -224,7 +235,7 @@ def _run_graph(tmp_path, spec):
     return result
 
 
-def test_graph_manifest_covers_worker_effects_and_replayable_fires(tmp_path):
+def test_graph_manifest_bounded_inflight_completed_journal_reused(tmp_path):
     from demiflow.execution.state_artifacts import StateArtifacts
     spec, readers, n = _graph_spec(_make_effect_actor("completed"), n=24, cut_rows=8)
     executor = LocalDatasetExecutor(workers=1, unified_graph=True)
@@ -244,21 +255,39 @@ def test_graph_manifest_covers_worker_effects_and_replayable_fires(tmp_path):
     assert result["egress_rows"] == n
     manifests = [cp["manifest"] for cp in result["checkpoints"].values()]
     final = next(m for m in manifests if m["seal"]["sealed"])
-    # Full coverage: every ancestor effect is described as known_completed with a
-    # ref equal to the journal request_key (the one durable effect fact).
-    inflight = final["inflight"]
-    assert len(inflight) == n
-    assert all(e["status"] == "known_completed" for e in inflight)
-    assert all(e["effect_ref"] == e["request_key"] for e in inflight)
-    expected_keys = {request_key({"kind": "conformance-effect", "x": i}) for i in range(n)}
-    assert {e["request_key"] for e in inflight} == expected_keys
-    # The frozen production rule fired on the committed manifest: only known refs.
-    assert replayable_effects(final) == sorted(expected_keys)
+    # BOUNDED coverage: every ancestor effect completed in the worker journal, so the
+    # cut description omits them (pending_only) — an all-completed run carries an empty
+    # inflight, which is contract-valid. Completed effects stay durable journal facts.
+    assert final["inflight"] == []
+    # The frozen production rule still fires on the committed manifest: no in-flight
+    # completed entry -> no replayable ref ([]), never a blind replay of paid effects.
+    assert replayable_effects(final) == []
     final_summary = next(s for s in summaries if s["final"])
     assert final_summary["inflight"] == final["inflight"]
-    assert replayable_effect_refs(final_summary["inflight"]) == sorted(expected_keys)
+    assert replayable_effect_refs(final_summary["inflight"]) == []
     for cp in result["checkpoints"].values():
+        assert cp["manifest"]["inflight"] == []
         assert cp["replayable_effects"] == replayable_effects(cp["manifest"])
+    # The reuse authority is the journal, NOT the manifest: a completed request is
+    # never re-reserved (reserve -> False) even though it is omitted from inflight.
+    # Same SQLite mechanism the effect actor writes through the worker journal.
+    reuse = _SQLiteJournalShard(tmp_path / "reuse.sqlite", max_requests=1024)
+    request = {"kind": "conformance-effect", "x": 0}
+    assert reuse.reserve(request) is True
+    reuse.response(request, {"ok": True, "x": 0})
+    assert reuse.reserve(request) is False                # completed reuse, journal-authoritative
+    assert collect_inflight(reuse) == []                  # bounded: omitted from the description
+    reuse.close()
+    # SAFETY companion: an unknown (reserved, no response) effect IS retained in inflight
+    # and is never replayable — bounded-inflight does not weaken the no-blind-retry rule.
+    uspec, _, un = _graph_spec(_make_effect_actor("unknown"), n=12, cut_rows=6)
+    uresult = _run_graph(tmp_path / "unknown", uspec)
+    ufinal = next(cp["manifest"] for cp in uresult["checkpoints"].values()
+                  if cp["manifest"]["seal"]["sealed"])
+    assert len(ufinal["inflight"]) == un
+    assert all(e["status"] == "unknown" for e in ufinal["inflight"])
+    assert all("effect_ref" not in e for e in ufinal["inflight"])
+    assert replayable_effects(ufinal) == []               # unknown never auto-replayed
 
 
 def test_graph_unknown_effects_are_never_replayable(tmp_path):
