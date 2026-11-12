@@ -36,6 +36,8 @@ WORKER_FAILURE_SCHEMA = "demiflow.worker_failure.v1"
 _MAX_CONTROL_BYTES = 1 << 20
 _DEP_MAX_MODULES = 64
 _DEP_MAX_BYTES = 8 * 1024 ** 2
+_DEP_MAX_FUNCTIONS = 256
+_DEP_MAX_NODES = 4096
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
 MAX_SEALED_PLAN_BYTES = 4 * 1024 ** 2
 
@@ -412,20 +414,207 @@ def _is_by_reference_udf(function):
     return obj is function
 
 
+def _is_by_reference_class(cls):
+    """True if cloudpickle carries this class by reference (importable module +
+    qualname), so the worker re-imports it; its defining module is then pinnable.
+    A by-value class (``<locals>``/``__main__``) is reconstructed on the worker, so
+    its defining module is never pinned (R4) — only its captured state is walked.
+    """
+    import sys
+    module_name = getattr(cls, "__module__", None)
+    if not module_name or module_name == "__main__":
+        return False
+    module = sys.modules.get(module_name)
+    if module is None:
+        return False
+    obj = module
+    for part in getattr(cls, "__qualname__", "").split("."):
+        if part == "<locals>":
+            return False
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return False
+    return obj is cls
+
+
+def _code_global_names(code):
+    """Global names a code object (and its nested code constants) references.
+
+    ``co_names`` excludes freevars (closure cells), so captured modules/nested
+    functions are reached separately through ``__closure__``; this is the
+    referenced-globals subset cloudpickle carries by value (driver == worker).
+    """
+    import types
+    names = set(code.co_names)
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= _code_global_names(const)
+    return names
+
+
+def _by_value_reachable(function):
+    """Values a by-value function carries: referenced globals subset + closure cells.
+
+    Passive — reads ``__globals__``/``__closure__`` only, never executes code. An
+    empty cell (ValueError) is skipped, mirroring ``describe``.
+    """
+    namespace = function.__globals__
+    values = [namespace[name] for name in _code_global_names(function.__code__)
+              if name in namespace]
+    for cell in function.__closure__ or ():
+        try:
+            values.append(cell.cell_contents)
+        except ValueError:
+            pass
+    return values
+
+
+def _declared_slots(cls):
+    """Slot names declared across a class MRO (passive), excluding dict/weakref."""
+    slots = []
+    for base in getattr(cls, "__mro__", ()):
+        declared = getattr(base, "__slots__", ())
+        if isinstance(declared, str):
+            declared = (declared,)
+        for slot in declared:
+            if slot not in ("__dict__", "__weakref__"):
+                slots.append(slot)
+    return slots
+
+
+def _is_walkable_value(value):
+    """True if a value is a composite the dependency walk recurses (not a leaf).
+
+    Filtering leaves before enqueue keeps the value budget meaningful: primitives,
+    bytes and opaque C objects without introspectable state carry no by-name
+    business module and are skipped passively.
+    """
+    import functools
+    import inspect
+    import types
+    if value is None or isinstance(value, (str, int, float, bool, bytes, bytearray)):
+        return False
+    if isinstance(value, (types.ModuleType, functools.partial,
+                          list, tuple, set, frozenset, dict)):
+        return True
+    if inspect.isfunction(value) or inspect.isclass(value) or inspect.ismethod(value):
+        return True
+    if getattr(value, "__dict__", None) is not None:
+        return True
+    return bool(_declared_slots(type(value)))
+
+
+def _by_value_business_modules(function):
+    """Business modules reachable from a by-value UDF's captured state (gap④ R2).
+
+    cloudpickle carries a by-value closure's captured modules BY NAME (the worker
+    re-imports them), but ``describe`` records them name-only and the by-reference
+    walk excludes by-value UDFs entirely. This walks the closure's referenced
+    globals + cells and recurses composite capture forms — nested by-value
+    functions/classes, bound methods, ``functools.partial`` (func/args/keywords),
+    containers (list/tuple/dict/set/frozenset) and instances (type module if
+    by-reference + ``__dict__`` + declared slots) — to reach every captured business
+    module. The returned modules seed the SAME module BFS, which pins their source
+    and recurses their full namespace (consistent worker-side once re-imported by
+    name). Bounded (function/value budgets), cycle-safe (visited ids), passive (no
+    code execution) and fail-closed (over-budget refuses). ``__main__`` and by-value
+    defining modules are never pinned (R4); their own code is bound by ``describe``.
+    """
+    import functools
+    import inspect
+    import sys
+    import types
+    from collections import deque
+
+    modules, pending, visited = [], deque([function]), set()
+    functions = nodes = 0
+
+    def enqueue(values):
+        pending.extend(v for v in values if _is_walkable_value(v))
+
+    while pending:
+        value = pending.popleft()
+        marker = id(value)
+        if marker in visited:
+            continue
+        visited.add(marker)
+        nodes += 1
+        if nodes > _DEP_MAX_NODES:
+            raise RecoveryContractError(
+                "Business dependency walk exceeds value budget; code-pin refuses (fail-closed)")
+        if isinstance(value, types.ModuleType):
+            name = getattr(value, "__name__", "")
+            if name and name != "__main__":
+                modules.append(value)
+            continue
+        if inspect.ismethod(value):
+            enqueue((value.__self__, value.__func__))
+            continue
+        if inspect.isfunction(value):
+            functions += 1
+            if functions > _DEP_MAX_FUNCTIONS:
+                raise RecoveryContractError(
+                    "Business dependency walk exceeds function budget; code-pin refuses (fail-closed)")
+            if _is_by_reference_udf(value):
+                module = sys.modules.get(value.__module__)
+                if module is not None:
+                    pending.append(module)
+            else:
+                enqueue(_by_value_reachable(value))
+            continue
+        if inspect.isclass(value):
+            if _is_by_reference_class(value):
+                module = sys.modules.get(value.__module__)
+                if module is not None:
+                    pending.append(module)
+            else:
+                enqueue(vars(value).values())
+            continue
+        if isinstance(value, functools.partial):
+            enqueue((value.func,))
+            enqueue(value.args)
+            enqueue(value.keywords.values())
+            continue
+        if isinstance(value, dict):
+            enqueue(value.values())
+            continue
+        if isinstance(value, (list, tuple, set, frozenset)):
+            enqueue(value)
+            continue
+        cls = type(value)
+        if _is_by_reference_class(cls):
+            module = sys.modules.get(cls.__module__)
+            if module is not None:
+                pending.append(module)
+        state = getattr(value, "__dict__", None)
+        if isinstance(state, dict):
+            enqueue(state.values())
+        for slot in _declared_slots(cls):
+            try:
+                slot_value = getattr(value, slot)
+            except AttributeError:
+                continue
+            enqueue((slot_value,))
+    return modules
+
+
 def _business_dependency_modules(plan):
     """Transitive closure of business modules a plan's pure UDF maps import.
 
     ``describe`` binds a UDF's own source/bytecode/closure but never ``__globals__``,
     so an imported business helper escapes the code-pin (gap④). This walks each
-    pure-UDF ``__globals__`` for business modules and recurses through their own
-    namespaces, pinning every business module's source. Platform (``demiflow.*``),
-    stdlib and site-packages third-party modules are skipped — platform code is
-    pinned by ``platform_revision``; third-party env resolution is deferred (D5).
-    Bounded (≤64 modules, ≤8 MiB total source), deterministic (sorted by name),
-    cycle-safe (visited set) and passive (no code execution). Over-budget or an
-    unresolvable business source fail-closes at seal. The worker recomputes this
-    from its own actual imports, so an edited helper changes the manifest and the
-    load gate refuses. Returns ``{name: (Path, raw_bytes)}`` sorted by name.
+    by-reference pure-UDF ``__globals__`` for business modules and recurses through
+    their own namespaces, pinning every business module's source. A by-value front-end
+    additionally reaches the business modules a closure/lambda/``__main__`` UDF
+    CAPTURES (cells + instance/partial/container state, R2), seeding the same BFS.
+    Platform (``demiflow.*``), stdlib and site-packages third-party modules are
+    skipped — platform code is pinned by ``platform_revision``; third-party env
+    resolution is deferred (D5). Bounded (≤64 modules, ≤8 MiB total source, plus
+    function/value walk budgets), deterministic (sorted by name), cycle-safe (visited
+    set) and passive (no code execution). Over-budget or an unresolvable business
+    source fail-closes at seal. The worker recomputes this from its own actual imports,
+    so an edited helper changes the manifest and the load gate refuses. Returns
+    ``{name: (Path, raw_bytes)}`` sorted by name.
     """
     import inspect
     import sys
@@ -454,9 +643,26 @@ def _business_dependency_modules(plan):
                 if module is not None:
                     yield module
 
+    def by_value_udfs():
+        for operation in plan.operations:
+            try:
+                if operation_facts(operation).get("native") is not None:
+                    continue
+            except (RuntimeError, ValueError, TypeError):
+                pass
+            target = getattr(getattr(operation, "callable", None), "target", None)
+            function = getattr(target, "__self__", target)
+            if inspect.isfunction(function) and not _is_by_reference_udf(function):
+                yield function
+
     pending = deque()
     for function in udfs():
         pending.extend(candidates(function.__globals__))
+    # By-value front-end (gap④ R2): a closure/lambda/__main__ UDF is excluded above,
+    # yet cloudpickle carries its captured business modules by name. Reach them
+    # through cells + composite state and seed the SAME module BFS (unchanged).
+    for function in by_value_udfs():
+        pending.extend(_by_value_business_modules(function))
     visited, found, total = set(), {}, 0
     while pending:
         module = pending.popleft()
