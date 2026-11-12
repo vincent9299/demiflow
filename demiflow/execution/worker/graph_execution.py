@@ -20,7 +20,7 @@ from ..exchange.carriage_local import LocalChannelLink, LocalSegmentStore
 from ..exchange.graph_router import GraphInputReader, GraphOutputRouter
 from ..exchange.segment_gc import SegmentIndex
 from ..graph_wire import validate_cut_contribution
-from ..recovery_contract import RecoveryContractError
+from ..recovery_contract import RecoveryContractError, document
 from ..stream import run_stream
 from .graph_progress import GraphWorkerProgress
 
@@ -105,6 +105,7 @@ class GraphWorkerExecutor:
                     max_pending=prefetch["max_pending"] if prefetch else 1024)
                 self.input_reader = input_reader
             output_router = None
+            route_value = None
             segment_index = None
             exchange_mode = channel_specs[0].get("exchange_mode", "memory_incremental") if channel_specs else "memory_incremental"
             if graph.get("output_channels"):
@@ -121,8 +122,22 @@ class GraphWorkerExecutor:
                     producer={"logical_node_id": graph["logical_node_id"],
                               "occurrence_id": self.occurrence_id},
                     route_table=table, depth=graph.get("queue_depth", 256),
-                    segment_index=segment_index)
+                    segment_index=segment_index,
+                    initial_ordinal=(self.restore or {}).get("egress_ordinal", 0))
                 self.output_router = output_router
+                # The egress route_value extractor reads the declared routing keys
+                # (RouteTable stores them as read-only instance attributes): hash
+                # extracts the key tuple, target extracts the declared business-class
+                # column. broadcast/rebalance/forward select by ordinal alone.
+                route_table = output_router._route_table
+                if route_table._key_fields is not None:
+                    key_fields = route_table._key_fields
+                    route_value = lambda row: tuple(row[k] for k in key_fields)
+                elif route_table._target_classes is not None:
+                    target_field = graph.get("target_field")
+                    if target_field is None:
+                        raise RecoveryContractError("target routing requires a declared target_field")
+                    route_value = lambda row: row[target_field]
             source_sink = None
             if self.source_child_id is not None:
                 with self.authority.action_scope(self.source_child_id) as source_action:
@@ -134,6 +149,7 @@ class GraphWorkerExecutor:
                     logical_node_id=graph.get("logical_node_id"),
                     source=self.source_reference, source_sink=source_sink,
                     input_reader=input_reader, output_router=output_router,
+                    route_value=route_value,
                     restore=self.restore, request_contribution=self._request_contribution,
                     stop_requested=self._stop_requested, sink_id=self._graph.get("sink_id", "output"),
                     exchange_mode=exchange_mode, segment_store=store,
@@ -157,6 +173,20 @@ class GraphWorkerExecutor:
                                         source_batch_size=feed_batch)
             if output_router is not None:
                 output_router.end_of_input()
+                if exchange_mode == "finite_sealed":
+                    # finite_sealed seals the scope after EOI: the consumer releases
+                    # reads only once this completion declaration (membership) arrives.
+                    # The manifest commits to the sealed egress summary; the frozen
+                    # validate_seal/seal_allowed run read-only inside ChannelProducer.
+                    seal_scope = graph["route_plan"]["seal_scope"]
+                    manifest = {"scope_id": seal_scope["scope_id"],
+                                "generation": seal_scope["generation"],
+                                "logical_node_id": graph["logical_node_id"],
+                                "occurrence_id": self.occurrence_id,
+                                "sent_records": output_router.sent_records()}
+                    manifest_ref = {"sha256": hashlib.sha256(document(manifest)).hexdigest()}
+                    output_router.seal(seal_scope=seal_scope, manifest_ref=manifest_ref,
+                                       producer_statuses=["success"])
         except BaseException as exc:
             self._error = exc
             with self._lock:

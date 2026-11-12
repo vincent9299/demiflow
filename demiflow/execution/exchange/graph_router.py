@@ -158,7 +158,7 @@ class GraphOutputRouter:
     """
 
     def __init__(self, channel_specs, links, *, producer, route_table,
-                 producer_partition="p0", depth=64, segment_index=None):
+                 producer_partition="p0", depth=64, segment_index=None, initial_ordinal=0):
         self._route_table = route_table
         self._producer_partition = producer_partition
         self._segment_index = segment_index
@@ -169,7 +169,9 @@ class GraphOutputRouter:
                 spec, link, producer=producer, depth=depth, segment_index=segment_index)
         if set(self._channels) != set(route_table.channel_ids):
             raise RecoveryContractError("Router links do not cover the route table channels")
-        self._ordinal = 0
+        # Restore resumes the egress ordinal at the acked cut so rebalance/fan_out
+        # partition assignment (ordinal % N) continues instead of resetting to 0.
+        self._ordinal = initial_ordinal
         self._closed = False
 
     @property
@@ -311,9 +313,12 @@ class GraphInputReader:
         self._store = store
         self._reader_id = identifier(reader_id)
         ids = [spec["channel_id"] for spec in channel_specs]
+        self._exchange_mode = (channel_specs[0].get("exchange_mode", "memory_incremental")
+                               if channel_specs else "memory_incremental")
         self._consumer = GraphChannelConsumer(
             ids, reader_id=reader_id, reader_domain=reader_domain,
-            route_epoch=route_epoch, max_pending=max_pending)
+            route_epoch=route_epoch, max_pending=max_pending,
+            exchange_mode=self._exchange_mode)
         self._channels = {}
         for spec in channel_specs:
             budget = spec["credit_budget"]
@@ -361,6 +366,11 @@ class GraphInputReader:
     def _all_eoi(self):
         return all(channel.eoi or channel._closed.is_set() for channel in self._channels.values())
 
+    def _sealed_or_incremental(self):
+        # finite_sealed finishes only after the scope seal (membership complete);
+        # incremental modes finish on EOI alone.
+        return self._exchange_mode != "finite_sealed" or self._consumer.sealed
+
     def rows(self):
         self.start()
         import time
@@ -375,6 +385,8 @@ class GraphInputReader:
         while True:
             progressed = False
             for channel_id in self._turns.pass_order():
+                if not self._consumer.may_read(channel_id):
+                    continue
                 event = self._consumer.consume(channel_id)
                 if event is None:
                     continue
@@ -393,10 +405,10 @@ class GraphInputReader:
                     done = self._cut_hook(checkpoint, self.consumed_rows, final)
                     done.wait()
                     self._consumer.release(checkpoint)
-                    if final:
+                    if final and self._sealed_or_incremental():
                         return
                     continue
-            if self._all_eoi():
+            if self._all_eoi() and self._sealed_or_incremental():
                 # EOI is the last frame, but data may have been pushed between the
                 # consume pass and this check; yield that tail rather than discard
                 # it, and only finish when a full pass finds nothing left.

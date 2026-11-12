@@ -15,6 +15,7 @@ CommitCoordinator commit, full K6 assembly, whole-graph restore and segment GC
 (exit gates 2/3). chain.py (U2) and the dataset API stay untouched; this is selected
 only by the opt-in ``unified_graph`` executor seam (D6).
 """
+import logging
 import select
 import socket
 import time
@@ -39,6 +40,8 @@ from .state_artifacts import StateArtifacts
 from .worker.bootstrap import recv_message, send_message
 from ..planning.dag import build_channel_plan
 from ..planning.graph_channels import RouteTable
+
+logger = logging.getLogger(__name__)
 
 _WORKER_CPU_MILLIS = 1000
 _WORKER_MEMORY_BYTES = 1024 ** 3
@@ -274,20 +277,29 @@ class GraphCommitTerminal:
         # description rides the recoverable graph-progress summary AND the manifest
         # so Restore can reuse known_completed refs and fail-close unknown ones.
         merged_inflight = merge_inflight(group.values())
-        summary = {"source_ordinal": ordinal, "sequence": self.sequence + 1,
-                   "target_rows": {rid: self.rows[rid] + outputs[rid][1]["rows"] for rid in self.reader_ids},
-                   "final": bool(final), "inflight": merged_inflight}
         # Each worker persisted its stage snapshots under its occurrence key and
         # rode them in the contribution's operator_states (K6 state_ref). Read the
         # values back and commit them through the one authority so prepared.state
         # durably holds them for Restore; the manifest refs bind to that commit.
+        # The ancestor's egress ordinal rides the artifact VALUE under a reserved
+        # key: extract it into the driver-side summary (not the K6 contribution) and
+        # strip it from the committed stage-state so OperatorStates local-key restore
+        # never sees it (separation hard condition).
         operator_states = []
         actor_states = {}
+        egress_ordinal = 0
         for contribution in group.values():
             for entry in contribution["operator_states"]:
                 occ = entry["occurrence_id"]
-                actor_states[occ] = StateArtifacts(self.run).read(entry["state_ref"])
+                value = StateArtifacts(self.run).read(entry["state_ref"])
+                if "__egress_ordinal__" in value:
+                    egress_ordinal = value.pop("__egress_ordinal__")
+                actor_states[occ] = value
                 operator_states.append(entry)
+        summary = {"source_ordinal": ordinal, "sequence": self.sequence + 1,
+                   "target_rows": {rid: self.rows[rid] + outputs[rid][1]["rows"] for rid in self.reader_ids},
+                   "final": bool(final), "inflight": merged_inflight,
+                   "egress_ordinal": egress_ordinal}
         fact = self.coordinator.commit(self.sequence + 1, outputs=outputs,
             position=SourcePosition(self.source_id, ordinal),
             states={"graph-progress": summary, **actor_states})
@@ -366,6 +378,9 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
     for target in targets:
         precheck_plan_state(target["plan"])
     routing = graph_spec.get("routing", "broadcast")
+    key_fields = graph_spec.get("key_fields")
+    target_classes = graph_spec.get("target_classes")
+    target_field = graph_spec.get("target_field")
     exchange_mode = graph_spec.get("exchange_mode", "memory_incremental")
     budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
     # Prefetch bounds derive from the admitted inflight budget only when one is
@@ -396,7 +411,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         durability_declared="durable" if exchange_mode == "durable_incremental" else "ephemeral",
         seal_scope=({"scope_id": identity([action.action_id, "seal"]), "membership": ["p0"], "generation": 1}
                     if exchange_mode == "finite_sealed" else None))
-    table = RouteTable(channel_plan)
+    table = RouteTable(channel_plan, key_fields=key_fields, target_classes=target_classes)
     physical = {item["consumer_partition"]: item for item in table.physical_channels}
 
     # Pre-wire one socketpair per physical channel; ancestor owns the producer end,
@@ -475,7 +490,8 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         return {occurrence_id: ref} if ref is not None else {}
 
     ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0,
-                         "state": worker_state(ancestor["occurrence_id"])}
+                         "state": worker_state(ancestor["occurrence_id"]),
+                         "egress_ordinal": restore["summary"].get("egress_ordinal", 0)}
                         if restore else None)
 
     ancestor_spec = base_spec(ancestor_alloc, ancestor_output_child)
@@ -486,6 +502,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
         "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
         "route_plan": channel_plan, "queue_depth": queue_depth,
+        "key_fields": key_fields, "target_classes": target_classes, "target_field": target_field,
         "restore": ancestor_restore,
         "output_channels": [{"channel_id": data_pairs[rid][2], "fd": data_pairs[rid][0].fileno(),
                              "reader_id": rid, "exchange_mode": exchange_mode, "credit_budget": budget,
@@ -551,6 +568,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
 
     links = {}
     socks = []
+    drained = False
     try:
         manager.reconcile_once(run.fence, time.monotonic() + 60, 32)
         snapshot = manager.get(scope_id)
@@ -617,42 +635,61 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         contributions = {rid: [] for rid in reader_ids}
         ancestor_contributions = []
         epoch = run.attempt
+        # EOF-driven finality: the driver commits final only when the ancestor's actual
+        # confirmed ordinal reaches source_rows. A budget-forced early cut (or full)
+        # undershoots the requested bound, so the driver retries that bound until the
+        # ancestor reaches EOF; every committed cut advances the ordinal (no zero-progress
+        # loop). command["final"] is only a provisional hint, never the seal authority.
+        done = False
         for bound in bounds:
-            final = bound == source_rows
-            checkpoint_id = identity([action.action_id, "graph-cut", bound])
-            command = build_graph_checkpoint(checkpoint_id, epoch=epoch,
-                                             producer_sequence_bound=bound, final=final)
-            for alloc in all_allocs:
-                links[alloc].send_graph_checkpoint(command)
-            group = {}
-            deadline = time.monotonic() + control_timeout_s
-            while len(group) < len(all_allocs):
-                if time.monotonic() > deadline:
-                    raise RecoveryContractError("Graph cut collection deadline exceeded")
-                readable, _, _ = select.select(socks, [], [], 0.5)
-                for sock in readable:
-                    link = next(l for l in links.values() if l.sock is sock)
-                    if not link.pump():
-                        # A worker host died (producer/consumer fault): fail fast so the
-                        # run exits and whole-graph restore re-enters from the acked cut.
-                        raise RecoveryContractError("Graph worker closed during cut collection")
-                for alloc, link in links.items():
-                    if alloc not in group and checkpoint_id in link.contributions:
-                        group[alloc] = link.contributions[checkpoint_id]
-            # Use the ancestor's actual confirmed ordinal (the chunked feed may
-            # overshoot the requested bound), never the requested bound itself.
-            ancestor_progress = group[ancestor_alloc]["source_progress"]
-            ordinal = ancestor_progress[0]["position"]["next_ordinal"] if ancestor_progress else 0
-            fact, manifest = terminal.commit_group(checkpoint_id, group, ordinal=ordinal,
-                                                   final=final, epoch=epoch)
-            receipt = {"status": "acked", "checkpoint_id": checkpoint_id,
-                       "sequence": fact["sequence"], "commit_id": fact["commit_id"],
-                       "channel_cuts": manifest["channel_cuts"]}
-            for alloc in all_allocs:
-                links[alloc].send_receipt(checkpoint_id, receipt)
-            ancestor_contributions.append(group[ancestor_alloc])
-            for rid in reader_ids:
-                contributions[rid].append(group[target_allocs[rid]])
+            if done:
+                break
+            while True:
+                hint_final = bound == source_rows
+                checkpoint_id = identity([action.action_id, "graph-cut", bound])
+                command = build_graph_checkpoint(checkpoint_id, epoch=epoch,
+                                                 producer_sequence_bound=bound, final=hint_final)
+                for alloc in all_allocs:
+                    links[alloc].send_graph_checkpoint(command)
+                group = {}
+                deadline = time.monotonic() + control_timeout_s
+                while len(group) < len(all_allocs):
+                    if time.monotonic() > deadline:
+                        raise RecoveryContractError("Graph cut collection deadline exceeded")
+                    readable, _, _ = select.select(socks, [], [], 0.5)
+                    for sock in readable:
+                        link = next(l for l in links.values() if l.sock is sock)
+                        if not link.pump():
+                            # A worker host died (producer/consumer fault): fail fast so the
+                            # run exits and whole-graph restore re-enters from the acked cut.
+                            raise RecoveryContractError("Graph worker closed during cut collection")
+                    for alloc, link in links.items():
+                        if alloc not in group and checkpoint_id in link.contributions:
+                            group[alloc] = link.contributions[checkpoint_id]
+                # Use the ancestor's actual confirmed ordinal (the chunked feed may
+                # overshoot the requested bound), never the requested bound itself.
+                ancestor_progress = group[ancestor_alloc]["source_progress"]
+                ordinal = ancestor_progress[0]["position"]["next_ordinal"] if ancestor_progress else 0
+                final = ordinal == source_rows
+                fact, manifest = terminal.commit_group(checkpoint_id, group, ordinal=ordinal,
+                                                       final=final, epoch=epoch)
+                receipt = {"status": "acked", "checkpoint_id": checkpoint_id,
+                           "sequence": fact["sequence"], "commit_id": fact["commit_id"],
+                           "channel_cuts": manifest["channel_cuts"]}
+                for alloc in all_allocs:
+                    links[alloc].send_receipt(checkpoint_id, receipt)
+                    # Drop the just-committed fragment so a retry at this bound collects the
+                    # next cut's contribution, never the stale one (same checkpoint_id).
+                    links[alloc].contributions.pop(checkpoint_id, None)
+                ancestor_contributions.append(group[ancestor_alloc])
+                for rid in reader_ids:
+                    contributions[rid].append(group[target_allocs[rid]])
+                if final:
+                    done = True
+                    break
+                if ordinal >= bound:
+                    break
+                # ordinal < bound: the budget forced an early cut; retry to reach EOF.
 
         target_rows = dict(terminal.rows)
         egress_rows = terminal.inputs
@@ -668,13 +705,23 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
             link = links[alloc]
             link.read_response(link.command("Drain", {"deadline_ms": int(run.limits["cancel_grace_s"] * 1000) + 10000,
                                                       "reason": "graph drained"}))
-        manager.close(
-            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
-                            uuid.uuid4().hex, accepted["desired_revision"]),
-            {"mode": "DRAINED", "engine_receipt_ref": scope_id + "-drained",
-             "terminate_deadline_ms": 5000, "reason": "graph drained"})
-        manager.reconcile_once(run.fence, time.monotonic() + 20, 32)
+        drained = True
     finally:
+        # Unified resource terminal (carrier N3): success/failure/cancel all convert
+        # confirmed exit to capacity release through the same ResourceManager
+        # close+reconcile. Only an unconfirmed exit keeps its charge; the kill below
+        # is a backstop for survivors the protocol could not confirm.
+        try:
+            manager.close(
+                MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
+                                uuid.uuid4().hex, accepted["desired_revision"]),
+                {"mode": "DRAINED" if drained else "ABANDON",
+                 "engine_receipt_ref": scope_id + ("-drained" if drained else "-abandoned"),
+                 "terminate_deadline_ms": 5000,
+                 "reason": "graph drained" if drained else "graph terminal cleanup"})
+            manager.reconcile_once(run.fence, time.monotonic() + 20, 32)
+        except Exception:
+            logger.exception("Graph resource terminal failed; falling back to process kill")
         for sock in socks:
             sock.close()
         for alloc in all_allocs:
@@ -738,6 +785,9 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
     for target in targets:
         precheck_plan_state(target["plan"])
     routing = graph_spec.get("routing", "broadcast")
+    key_fields = graph_spec.get("key_fields")
+    target_classes = graph_spec.get("target_classes")
+    target_field = graph_spec.get("target_field")
     exchange_mode = graph_spec.get("exchange_mode", "memory_incremental")
     budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
     # Prefetch bounds derive from the admitted inflight budget only when one is
@@ -768,7 +818,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         durability_declared="durable" if exchange_mode == "durable_incremental" else "ephemeral",
         seal_scope=({"scope_id": identity([action.action_id, "seal"]), "membership": ["p0"], "generation": 1}
                     if exchange_mode == "finite_sealed" else None))
-    table = RouteTable(channel_plan)
+    table = RouteTable(channel_plan, key_fields=key_fields, target_classes=target_classes)
     physical = {item["consumer_partition"]: item for item in table.physical_channels}
 
     ids = {k: uuid.uuid4().hex for k in ("scope_id", "boot_id", "grant_id")}
@@ -828,7 +878,8 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         return {occurrence_id: ref} if ref is not None else {}
 
     ancestor_restore = ({"inputs": restore_ordinal, "sequence": terminal.sequence, "rows": 0,
-                         "state": worker_state(ancestor["occurrence_id"])}
+                         "state": worker_state(ancestor["occurrence_id"]),
+                         "egress_ordinal": restore["summary"].get("egress_ordinal", 0)}
                         if restore else None)
 
     # Ray data plane: one named channel actor per physical channel. The driver keeps
@@ -850,6 +901,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
         "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
         "route_plan": channel_plan, "queue_depth": queue_depth,
+        "key_fields": key_fields, "target_classes": target_classes, "target_field": target_field,
         "restore": ancestor_restore,
         "output_channels": [{"channel_id": physical[rid]["channel_id"], "ray_queue": channel_names[rid],
                              "carriage": "ray", "reader_id": rid, "exchange_mode": exchange_mode,
@@ -917,6 +969,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
 
     models = {}
     final_at = {}
+    drained = False
     try:
         manager.reconcile_once(run.fence, time.monotonic() + 60, 32)
         snapshot = manager.get(scope_id)
@@ -986,50 +1039,65 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         contributions = {rid: [] for rid in reader_ids}
         ancestor_contributions = []
         epoch = run.attempt
+        # EOF-driven finality mirrors the Local driver: commit final only at the ancestor's
+        # actual source_rows, retrying a bound the budget forced early until EOF. Ray pull
+        # drains each cut's contributions, so a retry at the same checkpoint_id naturally
+        # collects fresh fragments (no stale carry-over). Ray runtime verification deferred.
+        done = False
         for bound in bounds:
-            final = bound == source_rows
-            checkpoint_id = identity([action.action_id, "graph-cut", bound])
-            cut_command = build_graph_checkpoint(checkpoint_id, epoch=epoch,
-                                                 producer_sequence_bound=bound, final=final)
-            for alloc in all_allocs:
-                connector.send_graph_checkpoint(alloc, cut_command)
-            group = {}
-            pending_ops = {}
-            deadline = time.monotonic() + control_timeout_s
-            while len(group) < len(all_allocs):
-                if time.monotonic() > deadline:
-                    raise RecoveryContractError("Graph cut collection deadline exceeded")
+            if done:
+                break
+            while True:
+                hint_final = bound == source_rows
+                checkpoint_id = identity([action.action_id, "graph-cut", bound])
+                cut_command = build_graph_checkpoint(checkpoint_id, epoch=epoch,
+                                                     producer_sequence_bound=bound, final=hint_final)
                 for alloc in all_allocs:
-                    if alloc in group:
-                        continue
-                    try:
-                        events = connector.pull(alloc)
-                    except RayActorError:
-                        raise RecoveryContractError("Ray graph worker died during cut collection")
-                    for message in events:
-                        if message.get("schema_version") == CUT_CONTRIBUTION_SCHEMA or message.get("kind") == "CutContribution":
-                            contribution = validate_cut_contribution(message["contribution"])
-                            if contribution["checkpoint_id"] == checkpoint_id:
-                                group[alloc] = contribution
-                                pending_ops[alloc] = message["operation_id"]
-                                if contribution["final"] and alloc not in final_at:
-                                    final_at[alloc] = time.monotonic()
-                        elif message.get("kind") in ("Register", "Ready", "Heartbeat"):
-                            models[alloc].handle(message, now_ms=now_ms())
-                if len(group) < len(all_allocs):
-                    time.sleep(0.01)
-            ancestor_progress = group[ancestor_alloc]["source_progress"]
-            ordinal = ancestor_progress[0]["position"]["next_ordinal"] if ancestor_progress else 0
-            fact, manifest = terminal.commit_group(checkpoint_id, group, ordinal=ordinal,
-                                                   final=final, epoch=epoch)
-            receipt = {"status": "acked", "checkpoint_id": checkpoint_id,
-                       "sequence": fact["sequence"], "commit_id": fact["commit_id"],
-                       "channel_cuts": manifest["channel_cuts"]}
-            for alloc in all_allocs:
-                connector.send_receipt(alloc, pending_ops[alloc], receipt)
-            ancestor_contributions.append(group[ancestor_alloc])
-            for rid in reader_ids:
-                contributions[rid].append(group[target_allocs[rid]])
+                    connector.send_graph_checkpoint(alloc, cut_command)
+                group = {}
+                pending_ops = {}
+                deadline = time.monotonic() + control_timeout_s
+                while len(group) < len(all_allocs):
+                    if time.monotonic() > deadline:
+                        raise RecoveryContractError("Graph cut collection deadline exceeded")
+                    for alloc in all_allocs:
+                        if alloc in group:
+                            continue
+                        try:
+                            events = connector.pull(alloc)
+                        except RayActorError:
+                            raise RecoveryContractError("Ray graph worker died during cut collection")
+                        for message in events:
+                            if message.get("schema_version") == CUT_CONTRIBUTION_SCHEMA or message.get("kind") == "CutContribution":
+                                contribution = validate_cut_contribution(message["contribution"])
+                                if contribution["checkpoint_id"] == checkpoint_id:
+                                    group[alloc] = contribution
+                                    pending_ops[alloc] = message["operation_id"]
+                                    if contribution["final"] and alloc not in final_at:
+                                        final_at[alloc] = time.monotonic()
+                            elif message.get("kind") in ("Register", "Ready", "Heartbeat"):
+                                models[alloc].handle(message, now_ms=now_ms())
+                    if len(group) < len(all_allocs):
+                        time.sleep(0.01)
+                ancestor_progress = group[ancestor_alloc]["source_progress"]
+                ordinal = ancestor_progress[0]["position"]["next_ordinal"] if ancestor_progress else 0
+                final = ordinal == source_rows
+                fact, manifest = terminal.commit_group(checkpoint_id, group, ordinal=ordinal,
+                                                       final=final, epoch=epoch)
+                receipt = {"status": "acked", "checkpoint_id": checkpoint_id,
+                           "sequence": fact["sequence"], "commit_id": fact["commit_id"],
+                           "channel_cuts": manifest["channel_cuts"]}
+                for alloc in all_allocs:
+                    connector.send_receipt(alloc, pending_ops[alloc], receipt)
+                ancestor_contributions.append(group[ancestor_alloc])
+                for rid in reader_ids:
+                    contributions[rid].append(group[target_allocs[rid]])
+                if final:
+                    done = True
+                    break
+                if ordinal >= bound:
+                    break
+                # ordinal < bound: the budget forced an early cut; retry to reach EOF.
 
         target_rows = dict(terminal.rows)
         egress_rows = terminal.inputs
@@ -1044,13 +1112,22 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         for alloc in all_allocs:
             command(alloc, "Drain", {"deadline_ms": int(run.limits["cancel_grace_s"] * 1000) + 10000,
                                      "reason": "graph drained"})
-        manager.close(
-            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
-                            uuid.uuid4().hex, accepted["desired_revision"]),
-            {"mode": "DRAINED", "engine_receipt_ref": scope_id + "-drained",
-             "terminate_deadline_ms": 5000, "reason": "graph drained"})
-        manager.reconcile_once(run.fence, time.monotonic() + 20, 32)
+        drained = True
     finally:
+        # Unified resource terminal (carrier N3), mirrors Local: success/failure/cancel
+        # all release capacity through the same ResourceManager close+reconcile; the
+        # actor kill below is a backstop for survivors the protocol could not confirm.
+        try:
+            manager.close(
+                MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
+                                uuid.uuid4().hex, accepted["desired_revision"]),
+                {"mode": "DRAINED" if drained else "ABANDON",
+                 "engine_receipt_ref": scope_id + ("-drained" if drained else "-abandoned"),
+                 "terminate_deadline_ms": 5000,
+                 "reason": "graph drained" if drained else "graph terminal cleanup"})
+            manager.reconcile_once(run.fence, time.monotonic() + 20, 32)
+        except Exception:
+            logger.exception("Ray graph resource terminal failed; falling back to actor kill")
         for alloc in all_allocs:
             connector.terminate(alloc)
             connector.close(alloc)
