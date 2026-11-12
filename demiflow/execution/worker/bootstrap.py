@@ -102,7 +102,7 @@ def run_worker(launch_spec, sock):
                 continue
             if message.get("schema_version") == TRANSFORM_REQUEST_SCHEMA:
                 if executor is not None:
-                    executor.feed(message["request_id"], message["row"])
+                    executor.feed(message["request_id"], message["row_ref"])
                 continue
             if "kind" not in message:
                 continue

@@ -4,14 +4,20 @@ The driver owns the queue lifecycle, the single RawFetch acquisition and
 finalize_task; this executor only applies the validated pure stateless maps
 suffix that follows RawFetch. It never constructs a CommitCoordinator or owns
 any commit/recovery authority (guardrail 2, absolute). Acquired rows arrive
-incrementally over the control channel; each transformed row keeps its native
-``_queue_delivery`` display so the driver can correlate it back to the
-source-owned delivery and settle the task under its own journal.
+incrementally as K4 DataRefs over the control channel and are read from the
+shared pickle-4 segment data plane (type-preserving, bounded, one row in
+flight); each transformed row keeps its native ``_queue_delivery`` display so
+the driver can correlate it back to the source-owned delivery and settle the
+task under its own journal. A business failure is returned as an explicit
+request_id-correlated response carrying the original exception, never left to
+surface as a driver control timeout.
 """
 import hashlib
 import queue
 import threading
+import traceback
 
+from ..exchange.carriage_local import LocalSegmentStore
 from ..recovery_contract import RecoveryContractError
 from ..stream import run_stream
 
@@ -35,9 +41,11 @@ class QueueTransformExecutor:
         self._send = send
         self.plan_ref = execution["plan_ref"]
         self.authority = None
+        self._store = None
         self._thread = None
         self._inbox = queue.Queue()
         self._error = None
+        self._current_request_id = None
         self._done = threading.Event()
         self.rows = 0
 
@@ -53,6 +61,7 @@ class QueueTransformExecutor:
         if self._thread is not None:
             return
         self.authority = authority
+        self._store = LocalSegmentStore(authority.directory / "queue-transform-segments", host_id="local")
         self._thread = threading.Thread(target=self._run, name="demiflow-queue-transform", daemon=True)
         self._thread.start()
 
@@ -65,9 +74,28 @@ class QueueTransformExecutor:
                        source_batch_size=1)
         except BaseException as exc:
             self._error = exc
+            self._send_failure(exc)
         finally:
             _CURRENT.reset(token)
             self._done.set()
+
+    def _send_failure(self, exc):
+        # One row is in flight (driver concurrency=1), so the current request_id
+        # unambiguously correlates the failure. The original exception rides the
+        # pickle data plane to preserve its type/args; a bounded traceback string
+        # rides the control frame for diagnostics.
+        request_id = self._current_request_id
+        if request_id is None:
+            return
+        frame = {"schema_version": TRANSFORM_RESPONSE_SCHEMA, "request_id": request_id,
+                 "traceback": traceback.format_exc()[-8192:]}
+        try:
+            _, refs = self._store.write([exc], scope_ref=self.authority.allocation_id,
+                                        durability="ephemeral")
+            frame["error_ref"] = refs[0]
+        except Exception:
+            frame["error"] = {"type": type(exc).__name__, "message": str(exc)}
+        self._send(frame)
 
     @staticmethod
     def _stream_plan(suffix):
@@ -81,20 +109,25 @@ class QueueTransformExecutor:
 
     def _source_rows(self):
         while True:
-            item = self._inbox.get()
-            if item is _EOS:
+            ref = self._inbox.get()
+            if ref is _EOS:
                 return
-            yield item
+            row = self._store.read([ref])[0]
+            self._store.discard([ref])
+            yield row
 
     def _emit(self, row):
         if type(row) is not dict or "_queue_delivery" not in row:
             raise RecoveryContractError("Queue transform lost its native delivery display")
         self.rows += 1
+        _, refs = self._store.write([row], scope_ref=self.authority.allocation_id,
+                                    durability="ephemeral")
         self._send({"schema_version": TRANSFORM_RESPONSE_SCHEMA,
-                    "request_id": row["_queue_delivery"]["task_id"], "row": row})
+                    "request_id": row["_queue_delivery"]["task_id"], "row_ref": refs[0]})
 
-    def feed(self, request_id, row):
-        self._inbox.put(row)
+    def feed(self, request_id, row_ref):
+        self._current_request_id = request_id
+        self._inbox.put(row_ref)
 
     def checkpoint(self, cut):
         # Pure maps hold no durable state; the driver's per-task finalize_task is

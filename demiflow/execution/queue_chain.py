@@ -1,20 +1,26 @@
-"""Driver-side unified queue settlement carrier (MVP-2 A1, segment 1).
+"""Driver-side unified queue settlement carrier (MVP-2 A1).
 
 The legacy queue lifecycle stays byte-unchanged on the driver: QueueDatasource
 claim/lease/heartbeat, the single RawFetch acquisition and finalize_task all run
 in the driver journal exactly as ``write_queue_datasink`` does. Only the pure
 stateless maps suffix that follows RawFetch is carried by an independent managed
 worker. The driver runs the RawFetch prefix plus a per-task transform carrier
-stage; the carrier ships each acquired row to the worker over the control
-channel, the worker applies the pure maps (no progress, no commit) and returns
-the transformed row, and the driver's unchanged ``consume`` settles the task
-through finalize_task. Both commit scopes (acquisition + result) remain on the
-driver's single journal; the worker constructs zero CommitCoordinator.
+stage; the carrier ships each acquired row to the worker as a K4 DataRef over the
+shared pickle-4 segment data plane (the control frame carries only identity,
+status and reference, so intermediate tuple/bytes values keep their type), the
+worker applies the pure maps (no progress, no commit) and returns the transformed
+row the same way, and the driver's unchanged ``consume`` settles the task through
+finalize_task. A business failure returns as an explicit request_id-correlated
+response carrying the original exception, which the driver raises immediately
+rather than waiting out a control timeout. Both commit scopes (acquisition +
+result) remain on the driver's single journal; the worker constructs zero
+CommitCoordinator. Success, failure and cancel all release this-task capacity
+through one ResourceManager close+reconcile terminal.
 
 This reuses the frozen K3 lifecycle, ResourceManager launch and K1 manifest
-compiler unchanged. It is selected only by the platform-side write_datasink
-queue seam (default OFF); the legacy in-driver path is the byte-unchanged
-fallback.
+compiler unchanged. It is selected by the platform-side write_datasink queue
+seam (controlled default ON); the legacy in-driver path is the byte-unchanged
+fallback for ineligible suffixes.
 """
 import logging
 import threading
@@ -87,13 +93,17 @@ class _TransformClient:
     Called from the carrier stage's thread-pool worker (concurrency=1), so one
     request is in flight at a time. Each acquired row is correlated by its
     preserved native delivery task_id; the worker's pure maps cannot change it
-    (validate_topology guarantees delivery preservation).
+    (validate_topology guarantees delivery preservation). The business row rides
+    the shared pickle-4 segment data plane as a K4 DataRef (type-preserving,
+    bounded); the control frame carries only identity/status/reference.
     """
 
-    def __init__(self, sock, model, *, now_ms):
+    def __init__(self, sock, model, *, now_ms, store, scope_ref):
         self._sock = sock
         self._model = model
         self._now_ms = now_ms
+        self._store = store
+        self._scope_ref = scope_ref
         self._lock = threading.Lock()
 
     def transform(self, row):
@@ -103,9 +113,10 @@ class _TransformClient:
         if type(delivery) is not dict or 'task_id' not in delivery:
             raise RecoveryContractError('Queue carrier row lost its native delivery display')
         request_id = delivery['task_id']
+        _, refs = self._store.write([row], scope_ref=self._scope_ref, durability="ephemeral")
         with self._lock:
             send_message(self._sock, {"schema_version": TRANSFORM_REQUEST_SCHEMA,
-                                      "request_id": request_id, "row": row})
+                                      "request_id": request_id, "row_ref": refs[0]})
             while True:
                 message = recv_message(self._sock)
                 if message is None:
@@ -113,12 +124,32 @@ class _TransformClient:
                 if message.get("schema_version") == TRANSFORM_RESPONSE_SCHEMA:
                     if message.get("request_id") != request_id:
                         raise RecoveryContractError("Transform response does not match the outstanding task")
-                    return message["row"]
+                    if "error_ref" in message or "error" in message:
+                        raise self._read_error(message)
+                    ref = message["row_ref"]
+                    result = self._store.read([ref])[0]
+                    self._store.discard([ref])
+                    return result
                 if message.get("kind") in ("Register", "Ready", "Heartbeat"):
                     self._model.handle(message, now_ms=self._now_ms())
                     continue
                 raise RecoveryContractError("Unexpected worker frame during queue transform: "
                                             + str(message.get("kind") or message.get("schema_version")))
+
+    def _read_error(self, message):
+        detail = message.get("traceback")
+        if detail:
+            logger.error("Worker queue transform failed:\n%s", detail)
+        if "error_ref" in message:
+            ref = message["error_ref"]
+            exc = self._store.read([ref])[0]
+            self._store.discard([ref])
+            if isinstance(exc, BaseException):
+                return exc
+            return RecoveryContractError("Worker queue transform failed: " + str(exc))
+        error = message.get("error") or {}
+        return RecoveryContractError("Worker queue transform failed: %s: %s"
+                                     % (error.get("type"), error.get("message")))
 
 
 def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
@@ -130,6 +161,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
     prefix + transform carrier instead of the full plan). The worker receives the
     maps suffix as a sha256-bound K1 plan artifact and never commits.
     """
+    import shutil
     import sys
     import time
     import uuid
@@ -148,6 +180,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
     from .chain import compile_chain_topology, stage_plan_artifact
     from .contracts.envelope import WORKER_PROTOCOL_VERSION
     from .contracts.worker import WorkerProtocolModel
+    from .exchange.carriage_local import LocalSegmentStore
     from .queue_execution import finalize_task, queue_source, validate_topology, write_queue_datasink
     from .recovery_identity import source_identity
     from .resource_state import RunResourceState
@@ -200,6 +233,8 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
 
     root = run.directory.with_name(run.directory.name + "-resources") if resource_root is None \
         else __import__("pathlib").Path(resource_root)
+    segment_dir = run.directory / "queue-transform-segments"
+    store = LocalSegmentStore(segment_dir, host_id="local")
     pool = LocalCapacityPool(root / "capacity",
                              capacity={"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3})
     unit = ManagedProcessUnit(root / "units")
@@ -226,6 +261,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
                         uuid.uuid4().hex, 0),
         ResourcePlan(scope_id, (request,), ()))
     sock = None
+    drained = False
     try:
         manager.reconcile_once(run.fence, time.monotonic() + 30, 16)
         snapshot = manager.get(scope_id)
@@ -287,7 +323,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
             "restore_point": None, "route_epoch": 0, "topology_revision": 0, "ready_deadline_ms": 60000}
         read_response(command("Assign", {"assignment": assignment}))
 
-        client = _TransformClient(sock, model, now_ms=now_ms)
+        client = _TransformClient(sock, model, now_ms=now_ms, store=store, scope_ref=allocation_id)
         carrier_op = AsyncMapOp(CallableSpec.create(client.transform), 1, 1, (),
                                 'queue_transform', None, 'thread')
         carrier_plan = LogicalPlan(prefix + (carrier_op,))
@@ -296,13 +332,23 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
 
         read_response(command("Drain", {"deadline_ms": int(run.limits["cancel_grace_s"] * 1000) + 5000,
                                         "reason": "queue transform drained"}))
-        manager.close(
-            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
-                            uuid.uuid4().hex, accepted["desired_revision"]),
-            {"mode": "DRAINED", "engine_receipt_ref": allocation_id + "-drained",
-             "terminate_deadline_ms": 5000, "reason": "queue transform drained"})
-        manager.reconcile_once(run.fence, time.monotonic() + 15, 16)
+        drained = True
     finally:
+        # Unified resource terminal: success/failure/cancel all convert confirmed
+        # exit to capacity release through the same ResourceManager close+reconcile
+        # protocol. Only an unconfirmed exit keeps its charge; the kill below is a
+        # backstop for survivors the protocol could not confirm.
+        try:
+            manager.close(
+                MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
+                                uuid.uuid4().hex, accepted["desired_revision"]),
+                {"mode": "DRAINED" if drained else "ABANDON",
+                 "engine_receipt_ref": allocation_id + ("-drained" if drained else "-abandoned"),
+                 "terminate_deadline_ms": 5000,
+                 "reason": "queue transform drained" if drained else "queue transform terminal cleanup"})
+            manager.reconcile_once(run.fence, time.monotonic() + 15, 16)
+        except Exception:
+            logger.exception("Queue carrier resource terminal failed; falling back to process kill")
         if sock is not None:
             sock.close()
         connector.close(allocation_id)
@@ -310,6 +356,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=5)
+        shutil.rmtree(segment_dir, ignore_errors=True)
 
     source.assert_settled()
     metadata = source.snapshot_metrics()

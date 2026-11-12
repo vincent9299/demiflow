@@ -180,6 +180,21 @@ class LocalSegmentStore:
         return rows
 
 
+    def discard(self, refs):
+        """Reclaim consumed ephemeral blocks so per-row carriage stays bounded.
+
+        Resolves each ref with the same path-escape/symlink/size checks as read,
+        then removes the block file and its now-empty generation directory.
+        """
+        for ref in refs:
+            path = self._resolve(ref)
+            path.unlink(missing_ok=True)
+            try:
+                path.parent.rmdir()
+            except OSError:
+                pass
+
+
 def inline_records(rows, *, source_id, occurrence_id, start_ordinal=0):
     """memory_incremental: business rows inline, one protocol record per row."""
     identifier(occurrence_id)
