@@ -252,6 +252,9 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         logical_view = logical.unchecked()
     else:
         logical_view = logical.project(nodes, report.get('edges', []), report.get('actions', []))
+        if basis_kind == 'run':
+            from demiflow.workbench.runs import facts
+            logical_view = facts.overlay_sealed(root, run_id, logical_view)
     binding = dict(workspace_id=key, basis_kind=basis_kind, basis_digest=digest, entry=entry,
                    params=params, run_id=run_id, attempt=attempt)
     total_nodes, total_edges = len(nodes), len(edges)

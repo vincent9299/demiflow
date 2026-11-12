@@ -145,6 +145,7 @@
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
       wholeButton.disabled=!data().graph;
       logicalToggle.disabled=!data().graph||graphHost.hasAttribute('aria-busy');
+      if(graphKind!=='logical')logicalToggle.textContent=logicalName();
       accessState.hidden=!!run||registered()&&can('run_submit');
       accessState.textContent=!working?.entry?'尚未发现可用入口。可在开发中编写流程，再通过“接入与权限”登记。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；当前仅观察源码，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       for(const[key,b]of modes){b.classList.toggle('active',data().mode===key);b.setAttribute('aria-pressed',String(data().mode===key));}
@@ -208,6 +209,8 @@
       button('返回全图范围',()=>locateNode(null,0),locatorBody,{disabled:!scopeNode});
       locatorBody.append($('span','已索引 '+index.total+' 个节点 · 当前显示 '+graph.nodes.length+' 个；局部视图仍绑定同一图依据。','wb-caption'));
     }
+    function logicalName(){return data().graph?.logical?.basis==='executed'?'执行封存计划（E2）':'声明图投影（E2）';}
+    function actionStatusLabel(a){return a.status==='sealed'?'已封存':a.status==='projected'?'已投影':a.status==='unavailable'?'不可用':'投影失败';}
     function logicalEntry(){
       const view=data().graph?.logical;
       if(!view?.available||!view.actions.length)return null;
@@ -217,7 +220,7 @@
       graphKind=graphKind==='logical'?'declared':'logical';
       logicalToggle.setAttribute('aria-pressed',String(graphKind==='logical'));
       logicalToggle.classList.toggle('active',graphKind==='logical');
-      logicalToggle.textContent=graphKind==='logical'?'返回数据算子图':'声明图投影（E2）';
+      logicalToggle.textContent=graphKind==='logical'?'返回数据算子图':logicalName();
       const g=data().graph;if(!g){updateActions();return;}
       if(graphKind==='logical')renderLogical(g);
       else{logicalBar.hidden=true;graphLegend.textContent='实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用';
@@ -235,24 +238,35 @@
       const view=graph.logical;
       logicalBar.hidden=true;logicalBar.replaceChildren();
       graphLegend.textContent='实线：逻辑数据流（标注端口）　虚线框：共享祖先 / 复用　×N：同一逻辑节点多次出现';
-      if(!view){graphTitle.textContent='声明图投影（E2）· 无投影';logicalPanel('声明图投影不可用','当前图响应没有逻辑投影字段。');return;}
+      const name=logicalName();
+      if(!view){graphTitle.textContent=name+' · 无投影';logicalPanel(name+'不可用','当前图响应没有逻辑投影字段。');return;}
       if(!view.available){
-        graphTitle.textContent='声明图投影（E2）· '+(view.semantic_unchecked?'语义未检查':'不可用');
-        logicalPanel(view.semantic_unchecked?'语义未检查':'声明图投影不可用',view.detail||view.reason||'',
+        graphTitle.textContent=name+' · '+(view.semantic_unchecked?'语义未检查':'不可用');
+        logicalPanel(view.semantic_unchecked?'语义未检查':name+'不可用',view.detail||view.reason||'',
           view.semantic_unchecked?$('p','对当前流程运行“检查”生成报告后，可在此查看按 action 投影的声明图。','wb-caption'):null);
         return;
       }
       const entry=logicalEntry();
-      if(!entry){graphTitle.textContent='声明图投影（E2）· 无 action';logicalPanel('没有可投影的 action','报告声明了 action 列表，但当前没有可展示的条目。');return;}
+      if(!entry){graphTitle.textContent=name+' · 无 action';logicalPanel('没有可投影的 action','报告声明了 action 列表，但当前没有可展示的条目。');return;}
       logicalAction=entry.action_id;
       logicalBar.hidden=false;
       if(view.actions.length>1||view.truncated){
-        const choice=select('逻辑图 action',view.actions.map(a=>({value:a.action_id,label:(a.action_id||'无效 action').slice(-12)+' · '+(a.status==='projected'?'已投影':'投影失败')})),entry.action_id);
+        const choice=select('逻辑图 action',view.actions.map(a=>({value:a.action_id,label:(a.action_id||'无效 action').slice(-12)+' · '+actionStatusLabel(a)})),entry.action_id);
         choice.onchange=()=>{if(!disposed&&choice.isConnected){logicalAction=choice.value;logicalSelected=null;renderLogical(data().graph);}};
         field('action',choice,logicalBar);
       }
       logicalBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
-      if(entry.status!=='projected'){
+      if(view.run_sealed&&!view.run_sealed.available){
+        logicalBar.append($('span','声明投影（非执行封存计划）','wb-tag'),$('p',view.run_sealed.detail||'','wb-caption'));
+      }
+      if(entry.status==='unavailable'){
+        graphTitle.textContent='执行封存计划（E2）· 不可用';
+        const box=$('div',undefined,'wb-logical-panel');
+        box.append($('strong','此 action 的执行封存计划不可用'),$('p','其它 action 不受影响。','wb-caption'),
+          $('p','reason：'+(entry.reason||'unknown')),$('p','detail：'+(entry.detail||'未提供')));
+        graphHost.replaceChildren(box);return;
+      }
+      if(entry.status!=='projected'&&entry.status!=='sealed'){
         graphTitle.textContent='声明图投影（E2）· 投影失败';
         const error=entry.error||{};
         const box=$('div',undefined,'wb-logical-panel');
@@ -260,15 +274,26 @@
           $('p','code：'+(error.code||'unknown')),$('p','reason：'+(error.reason||'未提供')),$('p','retriable：'+(error.retriable?'true':'false')));
         graphHost.replaceChildren(box);return;
       }
-      const dag=entry.dag;
-      graphTitle.textContent='声明图投影（E2）· '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
-      logicalBar.append($('span','结构校验通过 · '+dag.schema_version,'wb-tag'),$('span','未绑定本次执行计划','wb-tag'),$('span','声明图 dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
+      const dag=entry.dag,sealed=entry.status==='sealed';
+      graphTitle.textContent=(sealed?'执行封存计划（E2）':'声明图投影（E2）')+' · '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
+      logicalBar.append($('span','结构校验通过 · '+dag.schema_version,'wb-tag'));
+      if(sealed){
+        logicalBar.append($('span','已绑定本次执行计划','wb-tag'),
+          $('span','dag_id '+dag.dag_id.slice(0,16),'wb-caption'),
+          $('span','plan_id '+(entry.plan_id||'').slice(0,16),'wb-caption'),
+          $('span','action '+String(entry.action_id).slice(-12),'wb-caption'),
+          $('span','sealed_at '+(entry.sealed_at!=null?new Date(entry.sealed_at*1000).toISOString():'未提供'),'wb-caption'));
+      }else{
+        logicalBar.append($('span','未绑定本次执行计划','wb-tag'),$('span','声明图 dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
+        if(entry.fallback)logicalBar.append($('span','声明投影（非执行封存计划）','wb-tag'));
+      }
       const labels={};for(const n of graph.nodes)labels[n.id]=n.operator?.name||n.api.split(/[.:]/).at(-1)||n.kind;
-      logicalView.update(dag,entry.node_map,labels,logicalSelected);
+      logicalView.update(dag,entry.node_map,labels,logicalSelected,sealed?'executed':'declared');
     }
     function chooseLogicalNode(id,declared){
       const entry=logicalEntry();
-      const group=entry?.status==='projected'?entry.dag.nodes.filter(n=>n.logical_node_id===id):[];
+      const projected=entry&&(entry.status==='projected'||entry.status==='sealed');
+      const group=projected?entry.dag.nodes.filter(n=>n.logical_node_id===id):[];
       if(declared&&!data().graph.nodes.some(n=>n.id===declared)){
         locateNode(declared).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
         return;
@@ -276,10 +301,22 @@
       if(declared)chooseNode(declared);
       logicalSelected=id;logicalView.select(id);
       if(!group.length)return;
-      const node=group[0],box=details('声明逻辑节点（E2）· '+id.slice(0,12),inspector);box.open=true;
+      const node=group[0],sealed=entry.status==='sealed';
+      const box=details((sealed?'执行逻辑节点（E2）· ':'声明逻辑节点（E2）· ')+id.slice(0,12),inspector);box.open=true;
       const facts=$('dl',undefined,'details');
-      for(const[label,value]of[['op_kind',node.op_kind],['输入端口',node.input_ports.join(', ')||'无'],['输出端口',node.output_ports.join(', ')||'无'],['出现次数',String(group.length)],['operator_spec_ref',node.operator_spec_ref||'未绑定（只读投影）'],['声明节点',declared||'未映射']])facts.append($('dt',label),$('dd',value));
+      const rows=[['op_kind',node.op_kind],['输入端口',node.input_ports.join(', ')||'无'],['输出端口',node.output_ports.join(', ')||'无'],['出现次数',String(group.length)],['operator_spec_ref',node.operator_spec_ref||'未绑定（只读投影）']];
+      const stage=sealed&&entry.physical&&entry.physical.stages?entry.physical.stages[id]:null;
+      if(sealed){
+        rows.push(['声明节点','未桥接（D1b）'],['节点观测','未桥接（D1b）']);
+        if(stage)rows.push(['分区数',String(stage.partition_count)],['worker 角色',stage.role||'未分配'],['stage_id',String(stage.stage_id).slice(0,16)]);
+      }else rows.push(['声明节点',declared||'未映射']);
+      for(const[label,value]of rows)facts.append($('dt',label),$('dd',value));
       box.append(facts);
+      if(sealed){
+        box.append($('p','C 空间执行事实直连封存计划；A 空间节点观测待 D1b 身份桥，未桥接不猜测。','wb-caption'));
+        if(stage)raw('stage.budgets',stage.budgets,box);
+        if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
+      }
       if(entry.dag.shared_ancestors.some(s=>s.logical_node_id===id))box.append($('p','共享祖先 / 复用：该逻辑节点被多个消费方共享。','wb-caption'));
       raw('traits',node.traits,box);raw('occurrence_id',group.map(n=>n.occurrence_id),box);
       inspector.prepend(box);

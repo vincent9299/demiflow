@@ -16,7 +16,7 @@ TOTAL_BYTES = 192 * 1024
 
 
 def _base(*, available, reason, detail, semantic_unchecked=False, actions=(), action_count=0, truncated=False):
-    return dict(format=FORMAT, available=available, reason=reason, detail=detail,
+    return dict(format=FORMAT, basis='declared', available=available, reason=reason, detail=detail,
                 semantic_unchecked=semantic_unchecked, actions=list(actions),
                 action_count=action_count, truncated=truncated)
 

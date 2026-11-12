@@ -64,8 +64,9 @@
     function readable(){viewMode='readable';zoom=Math.max(host.clientWidth>=640?.5:.85,Math.min(1,(host.clientWidth-16)/width));size();host.style.setProperty('--wb-content-height',Math.round(height*zoom+24)+'px');}
     const resize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(resizeFrame!==null||viewMode==='manual')return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=null;if(viewMode==='fit')fit();else if(viewMode==='readable')readable();});}):null;resize?.observe(host);
     function select(id){selected=id;for(const[key,value]of elements){value.group.classList.toggle('selected',key===id);value.group.setAttribute('aria-pressed',String(key===id));}}
-    function update(dag,nodeMap,labels,selectedId) {
+    function update(dag,nodeMap,labels,selectedId,basis) {
       if(!host.contains(canvas))host.replaceChildren(canvas);
+      canvas.setAttribute('aria-label',basis==='executed'?'执行封存计划（E2）':'声明图投影（E2）');
       current=dag;canvas.replaceChildren();elements.clear();
       const occurrences=new Map();
       for(const node of dag.nodes){if(!occurrences.has(node.logical_node_id))occurrences.set(node.logical_node_id,[]);occurrences.get(node.logical_node_id).push(node);}
