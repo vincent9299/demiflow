@@ -17,6 +17,7 @@ import queue
 import threading
 import traceback
 
+from ..chain import WORKER_FAILURE_SCHEMA
 from ..exchange.carriage_local import LocalSegmentStore
 from ..recovery_contract import RecoveryContractError
 from ..stream import run_stream
@@ -40,6 +41,7 @@ class QueueTransformExecutor:
         execution = launch_spec["queue_transform"]
         self._send = send
         self.plan_ref = execution["plan_ref"]
+        self.sealed_operators = execution.get("sealed_operators")
         self.authority = None
         self._store = None
         self._thread = None
@@ -51,11 +53,14 @@ class QueueTransformExecutor:
 
     def _load_plan(self):
         import cloudpickle
+        from ..chain import verify_loaded_plan
         path = self.authority.directory / self.plan_ref["path"]
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest() != self.plan_ref["sha256"]:
             raise RecoveryContractError("Worker transform plan artifact digest differs")
-        return cloudpickle.loads(raw)
+        plan = cloudpickle.loads(raw)
+        verify_loaded_plan(plan, self.plan_ref, self.sealed_operators)
+        return plan
 
     def start(self, authority, assignment):
         if self._thread is not None:
@@ -85,10 +90,17 @@ class QueueTransformExecutor:
         # pickle data plane to preserve its type/args; a bounded traceback string
         # rides the control frame for diagnostics.
         request_id = self._current_request_id
+        detail = traceback.format_exc()[-8192:]
         if request_id is None:
+            # Load/init failure before the first feed: no request_id to correlate,
+            # so send a worker-level failure frame the driver raises immediately
+            # (F8) instead of leaving it to block on the transform response.
+            self._send({"schema_version": WORKER_FAILURE_SCHEMA,
+                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                        "traceback": detail})
             return
         frame = {"schema_version": TRANSFORM_RESPONSE_SCHEMA, "request_id": request_id,
-                 "traceback": traceback.format_exc()[-8192:]}
+                 "traceback": detail}
         try:
             _, refs = self._store.write([exc], scope_ref=self.authority.allocation_id,
                                         durability="ephemeral")

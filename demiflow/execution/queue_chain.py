@@ -107,6 +107,7 @@ class _TransformClient:
         self._lock = threading.Lock()
 
     def transform(self, row):
+        from .chain import WORKER_FAILURE_SCHEMA, _worker_failure
         from .worker.bootstrap import recv_message, send_message
         from .worker.queue_transform import TRANSFORM_REQUEST_SCHEMA, TRANSFORM_RESPONSE_SCHEMA
         delivery = row.get('_queue_delivery')
@@ -121,6 +122,8 @@ class _TransformClient:
                 message = recv_message(self._sock)
                 if message is None:
                     raise RecoveryContractError("Worker closed before the transform response")
+                if message.get("schema_version") == WORKER_FAILURE_SCHEMA:
+                    raise _worker_failure(message)
                 if message.get("schema_version") == TRANSFORM_RESPONSE_SCHEMA:
                     if message.get("request_id") != request_id:
                         raise RecoveryContractError("Transform response does not match the outstanding task")
@@ -177,7 +180,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
     from ..resources.local import LocalResourceProvider
     from ..resources.manager import ManagerBounds, ResourceManager
     from ..resources.process_unit import ManagedProcessUnit
-    from .chain import compile_chain_topology, stage_plan_artifact
+    from .chain import WORKER_FAILURE_SCHEMA, _worker_failure, compile_chain_topology, stage_plan_artifact
     from .contracts.envelope import WORKER_PROTOCOL_VERSION
     from .contracts.worker import WorkerProtocolModel
     from .exchange.carriage_local import LocalSegmentStore
@@ -228,7 +231,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
         "allocation_id": allocation_id, "boot_id": boot_id, "controller_epoch": run.attempt,
         "capabilities": capabilities, "grant": grant,
         "artifact_digest_observed": run.journal.recovery_identity()["platform_revision"],
-        "queue_transform": {"plan_ref": plan_ref},
+        "queue_transform": {"plan_ref": plan_ref, "sealed_operators": topology["operators"]},
     }
 
     root = run.directory.with_name(run.directory.name + "-resources") if resource_root is None \
@@ -292,6 +295,8 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
                 message = recv_message(sock)
                 if message is None:
                     raise RecoveryContractError("Worker closed before responding")
+                if message.get("schema_version") == WORKER_FAILURE_SCHEMA:
+                    raise _worker_failure(message)
                 if message.get("response_to") == op:
                     if "error" in message:
                         raise RecoveryContractError("Worker command failed: " + str(message["error"]))

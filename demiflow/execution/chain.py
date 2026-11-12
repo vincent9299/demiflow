@@ -32,7 +32,10 @@ from .state_artifacts import StateArtifacts
 
 COMMIT_CUT_SCHEMA = "demiflow.commit_cut.v1"
 COMMIT_RECEIPT_SCHEMA = "demiflow.commit_receipt.v1"
+WORKER_FAILURE_SCHEMA = "demiflow.worker_failure.v1"
 _MAX_CONTROL_BYTES = 1 << 20
+_DEP_MAX_MODULES = 64
+_DEP_MAX_BYTES = 8 * 1024 ** 2
 
 logger = logging.getLogger(__name__)
 
@@ -317,11 +320,257 @@ def unified_chain_eligible(plan):
     return True
 
 
+def _stable_code_identity(value):
+    """Normalize ``describe`` output for cross-process cloudpickle stability.
+
+    cloudpickle reconstructs a function-local class with a stripped ``__qualname__``
+    (the enclosing ``<locals>`` scope does not exist in the worker), so describe's
+    qualified-name label is not round-trip stable. The code-pin binds the actually
+    executed code (``source_hash`` + ``code_record`` + closure), not that label, so
+    reduce each function/class ``name`` to its final component. Structural plan
+    identity is bound separately by the sealed logical_dag operator recheck.
+    """
+    if isinstance(value, dict):
+        return {k: (v.rsplit(".", 1)[-1]
+                    if k == "name" and isinstance(v, str) and "module" in value
+                    else _stable_code_identity(v))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_stable_code_identity(v) for v in value]
+    return value
+
+
+def _classify_dependency_module(module):
+    """Classify a ``__globals__`` module: return a business source Path to pin, or
+    None to skip (platform / stdlib / site-packages third-party / compiled ext).
+
+    Passive — reads only module metadata and the source path, never executes code.
+    A module that is neither stdlib nor platform nor third-party and has no
+    resolvable Python source (dynamic, no ``__file__``) fail-closes: the code-pin
+    refuses rather than silently leaving an unpinned business dependency.
+    """
+    import inspect
+    import sys
+    import sysconfig
+    from pathlib import Path
+    name = getattr(module, "__name__", "") or ""
+    if name.split(".", 1)[0] in sys.stdlib_module_names:
+        return None
+    if name == "demiflow" or name.startswith("demiflow."):
+        return None
+    try:
+        filename = inspect.getsourcefile(module)
+    except (TypeError, OSError):
+        filename = None
+    filename = filename or getattr(module, "__file__", None)
+    if filename:
+        path = Path(filename)
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved.is_relative_to(Path(__file__).resolve().parents[1]):
+            return None
+        for key in ("purelib", "platlib"):
+            base = sysconfig.get_path(key)
+            if base and resolved.is_relative_to(Path(base).resolve()):
+                return None
+        if resolved.suffix == ".py" and resolved.is_file():
+            return resolved
+        return None
+    if getattr(module, "__path__", None) is not None:
+        return None
+    raise RecoveryContractError(
+        "Business dependency module has no resolvable source; code-pin refuses (fail-closed): " + name)
+
+
+def _is_by_reference_udf(function):
+    """True if cloudpickle carries this UDF by reference (importable module +
+    qualname), so the worker re-imports the identical module namespace.
+
+    By-value UDFs (lambdas, ``<locals>`` closures, ``__main__`` scripts) reconstruct
+    a minimal ``__globals__`` on the worker that differs from the driver's full
+    module namespace, so traversing them would diverge the manifest; their code is
+    pinned by ``describe`` (source/bytecode/closure) and the cloudpickle payload.
+    """
+    import sys
+    module_name = getattr(function, "__module__", None)
+    if not module_name or module_name == "__main__":
+        return False
+    module = sys.modules.get(module_name)
+    if module is None:
+        return False
+    obj = module
+    for part in getattr(function, "__qualname__", "").split("."):
+        if part == "<locals>":
+            return False
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return False
+    return obj is function
+
+
+def _business_dependency_modules(plan):
+    """Transitive closure of business modules a plan's pure UDF maps import.
+
+    ``describe`` binds a UDF's own source/bytecode/closure but never ``__globals__``,
+    so an imported business helper escapes the code-pin (gap④). This walks each
+    pure-UDF ``__globals__`` for business modules and recurses through their own
+    namespaces, pinning every business module's source. Platform (``demiflow.*``),
+    stdlib and site-packages third-party modules are skipped — platform code is
+    pinned by ``platform_revision``; third-party env resolution is deferred (D5).
+    Bounded (≤64 modules, ≤8 MiB total source), deterministic (sorted by name),
+    cycle-safe (visited set) and passive (no code execution). Over-budget or an
+    unresolvable business source fail-closes at seal. The worker recomputes this
+    from its own actual imports, so an edited helper changes the manifest and the
+    load gate refuses. Returns ``{name: (Path, raw_bytes)}`` sorted by name.
+    """
+    import inspect
+    import sys
+    import types
+    from collections import deque
+    from .plan_facts import operation_facts
+
+    def udfs():
+        for operation in plan.operations:
+            try:
+                if operation_facts(operation).get("native") is not None:
+                    continue
+            except (RuntimeError, ValueError, TypeError):
+                pass
+            target = getattr(getattr(operation, "callable", None), "target", None)
+            function = getattr(target, "__self__", target)
+            if inspect.isfunction(function) and _is_by_reference_udf(function):
+                yield function
+
+    def candidates(namespace):
+        for value in list(namespace.values()):
+            if isinstance(value, types.ModuleType):
+                yield value
+            elif inspect.isfunction(value) or inspect.isclass(value):
+                module = sys.modules.get(getattr(value, "__module__", None))
+                if module is not None:
+                    yield module
+
+    pending = deque()
+    for function in udfs():
+        pending.extend(candidates(function.__globals__))
+    visited, found, total = set(), {}, 0
+    while pending:
+        module = pending.popleft()
+        name = getattr(module, "__name__", "")
+        if not name or name in visited:
+            continue
+        visited.add(name)
+        path = _classify_dependency_module(module)
+        if path is None:
+            continue
+        raw = path.read_bytes()
+        total += len(raw)
+        if len(found) >= _DEP_MAX_MODULES or total > _DEP_MAX_BYTES:
+            raise RecoveryContractError(
+                "Business dependency manifest exceeds budget; code-pin refuses (fail-closed)")
+        found[name] = (path, raw)
+        pending.extend(candidates(vars(module)))
+    return {name: found[name] for name in sorted(found)}
+
+
+def _business_dependency_manifest(plan):
+    """Code-pin dependency digest: business module source identities, no paths.
+
+    Paths are excluded so the driver-sealed and worker-recomputed manifests are
+    identical for unedited code regardless of how each side resolved the module.
+    """
+    return {name: {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+            for name, (path, raw) in _business_dependency_modules(plan).items()}
+
+
+def plan_code_pin(plan):
+    """Code-sensitive identity of the plan's actually-executed operations.
+
+    Mirrors ``plan_identity``'s operation identity: native domain facts for native
+    actors (engine code, separately pinned by ``platform_revision``), ``describe``
+    for pure UDF maps so each business function's ``source_hash`` + ``code_record``
+    is bound. Editing business code changes this pin even when cloudpickle carries
+    an importable UDF by reference (pickle bytes unchanged). The ``dependencies``
+    key pins the transitive business modules each UDF imports (``describe`` never
+    walks ``__globals__``), so editing an imported helper also changes the pin.
+    The worker recomputes it from the loaded plan alone, so it is the load-time
+    code-pin authority.
+    """
+    from .plan_facts import operation_facts
+    from .recovery_identity import describe
+    operations = []
+    for operation in plan.operations:
+        native = None
+        try:
+            native = operation_facts(operation).get("native")
+        except (RuntimeError, ValueError, TypeError):
+            pass
+        if native is not None:
+            operations.append({"native": native,
+                "policy": {name: describe(getattr(operation, name)) for name in
+                    ("concurrency", "queue_depth", "catch", "hard_timeout", "execution")
+                    if hasattr(operation, name)}})
+        else:
+            operations.append(describe(operation))
+    return {"operations": _stable_code_identity(operations),
+            "dependencies": _business_dependency_manifest(plan)}
+
+
+def snapshot_code_sources(action, plan):
+    """Seal the business UDF source files as immutable run artifacts for audit.
+
+    The code-pin digest already binds each UDF's source bytes (``describe`` carries
+    ``source_hash``) and its transitive business dependencies; this preserves the
+    actual sealed source so a refused resume can be audited against the code that
+    was pinned. Best-effort for plain module functions; native actors are engine
+    code pinned by ``platform_revision``. Dependency modules archive through the
+    same content-addressed path — no second artifact authority.
+    """
+    import inspect
+    from pathlib import Path
+    from .state_artifacts import atomic_bytes
+    run = action.context
+    seen, refs = set(), []
+
+    def archive(source):
+        source = Path(source)
+        if not source.is_file() or source in seen:
+            return
+        seen.add(source)
+        raw = source.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        path = run.directory / "scratch" / "chain-code-pin" / (digest + ".py")
+        run.allocate_artifact(path, size=len(raw))
+        with run.journal.publication_guard(run.fence):
+            atomic_bytes(path, raw)
+        run.release_temporaries([path.with_name(path.name + ".staging")])
+        refs.append({"path": str(path.relative_to(run.directory)), "sha256": digest,
+                     "bytes": len(raw), "source": str(source)})
+
+    for operation in plan.operations:
+        target = getattr(getattr(operation, "callable", None), "target", None)
+        function = getattr(target, "__self__", target)
+        if not inspect.isfunction(function):
+            continue
+        filename = inspect.getsourcefile(function)
+        if filename:
+            archive(filename)
+    for name, (path, raw) in _business_dependency_modules(plan).items():
+        archive(path)
+    return refs
+
+
 def stage_plan_artifact(action, plan):
     """Content-address the in-run pickled plan; the worker verifies before load.
 
     Persistent protocol never carries an arbitrary cloudpickle document (E2):
     this is the in-run pickle delivery path, sha256-bound into the K1 manifest.
+    The pickle alone does not pin importable business UDFs (carried by reference),
+    so a code-sensitive code-pin is sealed alongside it: the per-plan key keeps
+    graph's multiple plans per action distinct, and a resume whose current business
+    code differs from the sealed pin fail-closes (history immutable, D4).
     """
     import cloudpickle
     from .state_artifacts import atomic_bytes
@@ -333,7 +582,53 @@ def stage_plan_artifact(action, plan):
     with run.journal.publication_guard(run.fence):
         atomic_bytes(path, raw)
     run.release_temporaries([path.with_name(path.name + ".staging")])
-    return {"path": str(path.relative_to(run.directory)), "sha256": digest, "bytes": len(raw)}
+    code_pin = plan_code_pin(plan)
+    pin_key = action.action_id + "-code-pin-" + digest
+    sealed = run.journal.source_binding(pin_key)
+    if sealed is not None and sealed != code_pin:
+        raise RecoveryContractError(
+            "Business code changed since the plan was sealed; resume refused (fail-closed)")
+    run.journal.bind_source(run.fence, pin_key, code_pin)
+    sources = snapshot_code_sources(action, plan)
+    return {"path": str(path.relative_to(run.directory)), "sha256": digest, "bytes": len(raw),
+            "code_pin_digest": identity(code_pin), "code_sources": sources}
+
+
+def verify_loaded_plan(plan, plan_ref, sealed_operators):
+    """Worker load-time gate: the loaded plan must equal the sealed plan contract.
+
+    Two complementary bindings, both recomputed from the loaded plan alone: the
+    code-pin (``describe`` identities, code-sensitive) fail-closes if business code
+    changed since seal; the operator ``logical_node_id``s (frozen ``dag.py``
+    semantics) bind the loaded plan structure to the sealed logical_dag. The worker
+    holds no commit authority — this is a pure load check, not a second authority.
+    """
+    from ..planning.dag import _operation_semantics
+    if identity(plan_code_pin(plan)) != plan_ref["code_pin_digest"]:
+        raise RecoveryContractError(
+            "Worker plan code-pin differs; business code edited since seal (fail-closed)")
+    if sealed_operators is not None:
+        recomputed = [identity([_operation_semantics(op)[0], index])
+                      for index, op in enumerate(plan.operations)]
+        sealed = [node["logical_node_id"] for node in sealed_operators]
+        if recomputed != sealed:
+            raise RecoveryContractError(
+                "Loaded plan operator identity differs from the sealed logical_dag")
+
+
+def _worker_failure(message):
+    """Turn a worker-level failure frame into an identifiable driver error (F8).
+
+    A load/init failure (or a row error outside an outstanding cut) happens before
+    any CommitCut, so it cannot ride a cut response; the worker sends this frame
+    instead and the driver ends immediately rather than blocking to control timeout.
+    """
+    detail = message.get("traceback")
+    if detail:
+        logger.error("Worker failed:\n%s", detail)
+    error = message.get("error") or {}
+    return RecoveryContractError("Worker failed: %s: %s"
+                                 % (error.get("type"), error.get("message")))
 
 
 def compile_chain_topology(action, source, plan, source_reference, *,
@@ -353,13 +648,20 @@ def compile_chain_topology(action, source, plan, source_reference, *,
     logical_dag = compile_logical_dag(action_id=action.action_id, source=source,
                                       operations=plan.operations,
                                       terminal_kind="materialize", sink_ids=("output",))
+    # The entrypoint definition_ref binds the code-pin (the actually-executed
+    # business code), not the mutable pickle reference; location points at the
+    # sealed source artifact. bundle_digest stays the plan-bundle pickle digest.
+    code_pin_digest = plan_ref["code_pin_digest"]
+    code_location = (plan_ref["code_sources"][0]["path"] if plan_ref["code_sources"]
+                     else plan_ref["path"])
     manifest = build_manifest(
         run_id=run.ref.run_id,
         platform={"source_digest": config["platform_revision"], "distribution": "demiflow",
                   "version": "u2", "runtime_identity_ref": identity([run.ref.run_id, "runtime"])},
         business={"bundle_digest": "sha256:" + plan_ref["sha256"],
                   "entrypoints": [{"name": "chain", "module_key": "p_" + plan_ref["sha256"][:24],
-                                   "definition_ref": {"sha256": plan_ref["sha256"]}}]},
+                                   "definition_ref": {"sha256": code_pin_digest,
+                                                      "location": code_location}}]},
         config={"resolved_config_digest": identity([run.ref.run_id, "config"]),
                 "model_config_refs": []},
         environment={"requirements_sha256": identity(["requirements"]),
@@ -496,7 +798,8 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
         "artifact_digest_observed": run.journal.recovery_identity()["platform_revision"],
         "execution": {"source_child_id": source_child_id, "output_child_id": output_child_id,
                       "plan_ref": plan_ref, "source_reference": source_reference,
-                      "channel_id": topology["channel_id"], "restore": restore},
+                      "channel_id": topology["channel_id"], "restore": restore,
+                      "sealed_operators": topology["operators"]},
     }
 
     root = run.directory.with_name(run.directory.name + "-resources") if resource_root is None \
@@ -527,6 +830,7 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
                         uuid.uuid4().hex, 0),
         ResourcePlan(scope_id, (request,), ()))
     sock = None
+    drained = False
     try:
         manager.reconcile_once(run.fence, time.monotonic() + 30, 16)
         snapshot = manager.get(scope_id)
@@ -557,6 +861,8 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
                 message = recv_message(sock)
                 if message is None:
                     raise RecoveryContractError("Worker closed before responding")
+                if message.get("schema_version") == WORKER_FAILURE_SCHEMA:
+                    raise _worker_failure(message)
                 if message.get("response_to") == op:
                     if "error" in message:
                         raise RecoveryContractError("Worker command failed: " + str(message["error"]))
@@ -594,6 +900,8 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
             message = recv_message(sock)
             if message is None:
                 raise RecoveryContractError("Worker closed before the final commit cut")
+            if message.get("schema_version") == WORKER_FAILURE_SCHEMA:
+                raise _worker_failure(message)
             if message.get("response_to") == assign_op:
                 if "error" in message:
                     raise RecoveryContractError("Worker assign failed: " + str(message["error"]))
@@ -608,13 +916,24 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
         read_response(command("Drain", {"deadline_ms": int(run.limits["cancel_grace_s"] * 1000) + 5000,
                                         "reason": "chain drained"}))
         terminal.finish(source_rows)
-        manager.close(
-            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
-                            uuid.uuid4().hex, accepted["desired_revision"]),
-            {"mode": "DRAINED", "engine_receipt_ref": allocation_id + "-drained",
-             "terminate_deadline_ms": 5000, "reason": "chain drained"})
-        manager.reconcile_once(run.fence, time.monotonic() + 15, 16)
+        drained = True
     finally:
+        # Unified resource terminal (F6, mirrors the carrier N3 pattern): success,
+        # failure and cancel all convert confirmed exit to capacity release through
+        # the same ResourceManager close+reconcile protocol. Only an unconfirmed exit
+        # keeps its charge; the kill below is a backstop for survivors the protocol
+        # could not confirm.
+        try:
+            manager.close(
+                MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
+                                uuid.uuid4().hex, accepted["desired_revision"]),
+                {"mode": "DRAINED" if drained else "ABANDON",
+                 "engine_receipt_ref": allocation_id + ("-drained" if drained else "-abandoned"),
+                 "terminate_deadline_ms": 5000,
+                 "reason": "chain drained" if drained else "chain terminal cleanup"})
+            manager.reconcile_once(run.fence, time.monotonic() + 15, 16)
+        except Exception:
+            logger.exception("Chain resource terminal failed; falling back to process kill")
         if sock is not None:
             sock.close()
         connector.close(allocation_id)
@@ -708,7 +1027,8 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
         "artifact_digest_observed": run.journal.recovery_identity()["platform_revision"],
         "execution": {"source_child_id": source_child_id, "output_child_id": output_child_id,
                       "plan_ref": plan_ref, "source_reference": source_reference,
-                      "channel_id": topology["channel_id"], "restore": restore},
+                      "channel_id": topology["channel_id"], "restore": restore,
+                      "sealed_operators": topology["operators"]},
     }
 
     connector = RayControlConnector(command_timeout_s=control_timeout_s)
@@ -762,6 +1082,8 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
             while True:
                 events = connector.pull(allocation_id)
                 for message in events:
+                    if message.get("schema_version") == WORKER_FAILURE_SCHEMA:
+                        raise _worker_failure(message)
                     if message.get("kind") in ("Register", "Ready", "Heartbeat"):
                         model.handle(message, now_ms=now_ms())
                     if message.get("kind") == kind:
@@ -800,6 +1122,8 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
         while not final_done:
             events = connector.pull(allocation_id)
             for message in events:
+                if message.get("schema_version") == WORKER_FAILURE_SCHEMA:
+                    raise _worker_failure(message)
                 if message.get("schema_version") == COMMIT_CUT_SCHEMA:
                     receipt = terminal.commit_cut(message)
                     connector.deliver_receipt(allocation_id, receipt)

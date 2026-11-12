@@ -12,12 +12,13 @@ its pre-cut output descriptor.
 """
 import hashlib
 import threading
+import traceback
 import uuid
 from concurrent.futures import Future
 from pathlib import Path
 
 from ..block_sink import BlockSink
-from ..chain import build_commit_cut, validate_commit_receipt
+from ..chain import WORKER_FAILURE_SCHEMA, build_commit_cut, validate_commit_receipt
 from ..recovery_contract import RecoveryContractError, identity
 from ..stream import run_stream
 from .progress import WorkerStreamProgress
@@ -34,6 +35,7 @@ class WorkerChainExecutor:
         self.channel_id = execution["channel_id"]
         self.object_specs = execution.get("object_specs")
         self.restore = execution.get("restore")
+        self.sealed_operators = execution.get("sealed_operators")
         self.authority = None
         self.progress = None
         self.stats = None
@@ -45,11 +47,14 @@ class WorkerChainExecutor:
 
     def _load_plan(self):
         import cloudpickle
+        from ..chain import verify_loaded_plan
         path = self.authority.directory / self.plan_ref["path"]
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest() != self.plan_ref["sha256"]:
             raise RecoveryContractError("Worker plan artifact digest differs")
-        return cloudpickle.loads(raw)
+        plan = cloudpickle.loads(raw)
+        verify_loaded_plan(plan, self.plan_ref, self.sealed_operators)
+        return plan
 
     def start(self, authority, assignment):
         if self._thread is not None:
@@ -78,6 +83,16 @@ class WorkerChainExecutor:
             with self._lock:
                 if self._pending is not None and not self._pending.done():
                     self._pending.set_exception(exc)
+                    carried = True
+                else:
+                    carried = False
+            if not carried:
+                # Load/init failure or a row error outside an outstanding cut: no
+                # CommitCut response can carry it, so send a worker-level failure
+                # frame the driver raises immediately (F8) instead of timing out.
+                self._send({"schema_version": WORKER_FAILURE_SCHEMA,
+                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                            "traceback": traceback.format_exc()[-8192:]})
         finally:
             _CURRENT.reset(token)
             self._done.set()
