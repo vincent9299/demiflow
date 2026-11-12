@@ -165,10 +165,12 @@ class GraphWorkerProgress(StreamStageProgress):
         if self.stop_requested():
             raise RecoveryContractError("Graph worker stopped")
         if self.output_router is not None:
-            if self._exchange_mode != "memory_incremental" and self._segment_store is not None:
-                # durable/sealed: business rows ride segment files; only a K4
-                # DataRef crosses the socket, so large payloads never transit the
-                # driver (D3). The consumer reads the segment directly (S2).
+            if self._segment_store is not None:
+                # Every mode rides pickle-4 segment files (only a K4 DataRef crosses
+                # the socket, D3): this preserves business-row types (tuple/bytes) that
+                # the strict-JSON inline path would silently coerce or reject.
+                # memory_incremental uses ephemeral blocks per its declared policy;
+                # durable_incremental durable ones. The consumer reads the segment (S2).
                 durability = "durable" if self._exchange_mode == "durable_incremental" else "ephemeral"
                 _, refs = self._segment_store.write([row], scope_ref=self.occurrence_id,
                                                     durability=durability)
