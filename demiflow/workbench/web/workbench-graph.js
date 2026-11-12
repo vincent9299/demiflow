@@ -56,7 +56,7 @@
     return Object.freeze({update,paint,select,fit,zoom:factor=>{viewMode='manual';zoom=Math.max(.25,Math.min(2,zoom*factor));size();},dispose(){resize?.disconnect();if(resizeFrame!==null)cancelAnimationFrame(resizeFrame);resizeFrame=null;}});
   }
   function mountLogical(host,{onSelect=()=>{}}={}) {
-    const canvas=svg('svg',{'aria-label':'执行逻辑图（E2）',role:'group'});
+    const canvas=svg('svg',{'aria-label':'声明图投影（E2）',role:'group'});
     let current=null,selected=null,zoom=1,width=600,height=280,viewMode='readable',resizeFrame=null;
     const elements=new Map();
     function size(){canvas.style.width=Math.round(width*zoom)+'px';canvas.style.height=Math.round(height*zoom)+'px';}

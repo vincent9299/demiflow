@@ -24,7 +24,7 @@ def _base(*, available, reason, detail, semantic_unchecked=False, actions=(), ac
 def unchecked():
     """Source observation has no checked semantics: explicit absence, never a guess."""
     return _base(available=False, reason='source_semantics_unchecked', semantic_unchecked=True,
-                 detail='语义未检查：source 依据仅观察入口调用语法，未建立算子端口与执行关系，不投影执行逻辑图。')
+                 detail='语义未检查：source 依据仅观察入口调用语法，未建立算子端口与执行关系，不投影声明图。')
 
 
 def _descriptor(node):
@@ -58,10 +58,10 @@ def _project_action(action_id, nodes, edges):
 
 def _project(nodes, edges, actions):
     if not nodes:
-        return _base(available=False, reason='empty_graph', detail='报告没有声明节点，无法投影执行逻辑图。')
+        return _base(available=False, reason='empty_graph', detail='报告没有声明节点，无法投影声明图。')
     if not actions:
         return _base(available=False, reason='no_declared_actions',
-                     detail='报告未声明 action（终止操作），没有可投影的执行逻辑图。')
+                     detail='报告未声明 action（终止操作），没有可投影的声明图。')
     known = {n['id'] for n in nodes}
     data_edges = [e for e in edges if e.get('from') in known and e.get('to') in known and 'port' in e]
     entries, used, truncated = [], 0, len(actions) > MAX_ACTIONS

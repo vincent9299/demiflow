@@ -68,7 +68,7 @@
     const wholeButton=button('整图配置',()=>wholeConfiguration(),tools);
     const graphView=ForgeWorkbenchGraph.mount(graphHost,{onSelect:id=>chooseNode(id)});
     const logicalView=ForgeWorkbenchGraph.mountLogical(graphHost,{onSelect:(id,declared)=>chooseLogicalNode(id,declared)});
-    const logicalToggle=button('执行逻辑图（E2）',()=>toggleGraphKind(),tools);
+    const logicalToggle=button('声明图投影（E2）',()=>toggleGraphKind(),tools);
     logicalToggle.setAttribute('aria-pressed','false');
     const activeGraphView=()=>graphKind==='logical'?logicalView:graphView;
     button('−',()=>activeGraphView().zoom(.8),tools).setAttribute('aria-label','缩小算子图');
@@ -217,7 +217,7 @@
       graphKind=graphKind==='logical'?'declared':'logical';
       logicalToggle.setAttribute('aria-pressed',String(graphKind==='logical'));
       logicalToggle.classList.toggle('active',graphKind==='logical');
-      logicalToggle.textContent=graphKind==='logical'?'返回数据算子图':'执行逻辑图（E2）';
+      logicalToggle.textContent=graphKind==='logical'?'返回数据算子图':'声明图投影（E2）';
       const g=data().graph;if(!g){updateActions();return;}
       if(graphKind==='logical')renderLogical(g);
       else{logicalBar.hidden=true;graphLegend.textContent='实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用';
@@ -235,15 +235,15 @@
       const view=graph.logical;
       logicalBar.hidden=true;logicalBar.replaceChildren();
       graphLegend.textContent='实线：逻辑数据流（标注端口）　虚线框：共享祖先 / 复用　×N：同一逻辑节点多次出现';
-      if(!view){graphTitle.textContent='执行逻辑图（E2）· 无投影';logicalPanel('执行逻辑图不可用','当前图响应没有逻辑投影字段。');return;}
+      if(!view){graphTitle.textContent='声明图投影（E2）· 无投影';logicalPanel('声明图投影不可用','当前图响应没有逻辑投影字段。');return;}
       if(!view.available){
-        graphTitle.textContent='执行逻辑图（E2）· '+(view.semantic_unchecked?'语义未检查':'不可用');
-        logicalPanel(view.semantic_unchecked?'语义未检查':'执行逻辑图不可用',view.detail||view.reason||'',
-          view.semantic_unchecked?$('p','对当前流程运行“检查”生成报告后，可在此查看按 action 投影的执行逻辑图。','wb-caption'):null);
+        graphTitle.textContent='声明图投影（E2）· '+(view.semantic_unchecked?'语义未检查':'不可用');
+        logicalPanel(view.semantic_unchecked?'语义未检查':'声明图投影不可用',view.detail||view.reason||'',
+          view.semantic_unchecked?$('p','对当前流程运行“检查”生成报告后，可在此查看按 action 投影的声明图。','wb-caption'):null);
         return;
       }
       const entry=logicalEntry();
-      if(!entry){graphTitle.textContent='执行逻辑图（E2）· 无 action';logicalPanel('没有可投影的 action','报告声明了 action 列表，但当前没有可展示的条目。');return;}
+      if(!entry){graphTitle.textContent='声明图投影（E2）· 无 action';logicalPanel('没有可投影的 action','报告声明了 action 列表，但当前没有可展示的条目。');return;}
       logicalAction=entry.action_id;
       logicalBar.hidden=false;
       if(view.actions.length>1||view.truncated){
@@ -253,7 +253,7 @@
       }
       logicalBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
       if(entry.status!=='projected'){
-        graphTitle.textContent='执行逻辑图（E2）· 投影失败';
+        graphTitle.textContent='声明图投影（E2）· 投影失败';
         const error=entry.error||{};
         const box=$('div',undefined,'wb-logical-panel');
         box.append($('strong','此 action 的逻辑投影失败'),$('p','其它 action 的投影不受影响。','wb-caption'),
@@ -261,8 +261,8 @@
         graphHost.replaceChildren(box);return;
       }
       const dag=entry.dag;
-      graphTitle.textContent='执行逻辑图（E2）· '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
-      logicalBar.append($('span','契约校验通过 · '+dag.schema_version,'wb-tag'),$('span','dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
+      graphTitle.textContent='声明图投影（E2）· '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
+      logicalBar.append($('span','结构校验通过 · '+dag.schema_version,'wb-tag'),$('span','未绑定本次执行计划','wb-tag'),$('span','声明图 dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
       const labels={};for(const n of graph.nodes)labels[n.id]=n.operator?.name||n.api.split(/[.:]/).at(-1)||n.kind;
       logicalView.update(dag,entry.node_map,labels,logicalSelected);
     }
@@ -276,7 +276,7 @@
       if(declared)chooseNode(declared);
       logicalSelected=id;logicalView.select(id);
       if(!group.length)return;
-      const node=group[0],box=details('逻辑节点（E2）· '+id.slice(0,12),inspector);box.open=true;
+      const node=group[0],box=details('声明逻辑节点（E2）· '+id.slice(0,12),inspector);box.open=true;
       const facts=$('dl',undefined,'details');
       for(const[label,value]of[['op_kind',node.op_kind],['输入端口',node.input_ports.join(', ')||'无'],['输出端口',node.output_ports.join(', ')||'无'],['出现次数',String(group.length)],['operator_spec_ref',node.operator_spec_ref||'未绑定（只读投影）'],['声明节点',declared||'未映射']])facts.append($('dt',label),$('dd',value));
       box.append(facts);
