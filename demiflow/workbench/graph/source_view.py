@@ -104,13 +104,15 @@ def _public_prompt(raw, *, prompt=None):
     return result
 
 
-def get(root,*,graph_binding,node_id,kind,resource=None):
+def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occurrence_id=None):
     if kind not in {'implementation','callsite','configuration','prompt'}:
         raise ForgeError('Unknown source projection',code='invalid_request')
-    graph=bound_source(root,graph_binding,node_id,include_parameters=kind=='configuration')
-    node=next((n for n in graph['nodes'] if n['id']==node_id),None)
+    graph=bound_source(root,graph_binding,node_id,include_parameters=kind=='configuration',
+                       logical_node_id=logical_node_id,occurrence_id=occurrence_id)
+    node=graph['nodes'][0] if graph['nodes'] else None
     if node is None:
         raise ForgeError('Select a visible node in this graph scope',code='not_found')
+    node_id=node['id']
     historical=graph_binding['basis_kind']=='run'
     result=dict(graph_binding=graph_binding,node_id=node_id,requested_kind=kind,
                 historical=historical,read_only=True,availability='available',

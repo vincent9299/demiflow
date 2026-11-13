@@ -28,6 +28,26 @@ NO_FACTS = 'no_sealed_plan_facts'
 NO_FACTS_DETAIL = ('该 action 无封存计划（pre-D1a 运行或非 chain 终止 action）；'
                    '以下为依据封存报告投影的声明图，非本次执行封存计划。')
 
+BRIDGE_SCHEMA = 'demiflow.identity_bridge.v1'
+MAX_IDENTITY_BRIDGE_BYTES = 64 * 1024
+NO_BRIDGE = 'identity_bridge_missing'
+NO_BRIDGE_DETAIL = ('该 action 尚无节点身份桥（旧运行或本次未生成桥）；'
+                    '封存计划仍可查看，执行节点与报告观测的对应不猜测。')
+
+# PlanContractError.reason (parallel-contracts-v1 §2.3) -> workbench unavailable reason.
+_BRIDGE_REASON = {
+    'missing_plan': NO_BRIDGE,
+    'missing_bindings': NO_BRIDGE,
+    'unsafe_artifact': 'identity_bridge_unsafe',
+    'artifact_too_large': 'identity_bridge_oversize',
+    'corrupt_artifact': 'identity_bridge_corrupt',
+    'identity_mismatch': 'identity_bridge_mismatch',
+    'invalid_contract': 'identity_bridge_invalid',
+    'unsupported_layout': 'identity_bridge_invalid',
+    'invalid_assignment': 'identity_bridge_invalid',
+}
+_BRIDGE_ENTRY_KEYS = {'report_node_id', 'report_occurrence', 'logical_node_id', 'occurrence_id', 'mode'}
+
 
 class _CarrierError(Exception):
     """Internal carrier failure carrying a precise public reason code."""
@@ -122,6 +142,108 @@ def read_sealed_plan(target, action_id):
         return _unavailable(action_id, 'sealed_plan_read_failed', str(exc)[:512])
 
 
+def _bridge_unavailable(reason, detail):
+    return dict(available=False, reason=reason, detail=detail)
+
+
+def _bounded_str(value, maximum=128):
+    return type(value) is str and 1 <= len(value) <= maximum
+
+
+def read_identity_bridge(target, action_id, *, dag_id, report_digest):
+    """Read one action's sealed identity bridge (C-produced) without generating it.
+
+    Returns ``{available: True, ref, bridge}`` on success, or
+    ``{available: False, reason, detail}`` when the bridge is absent/invalid. The
+    carrier is read through B's neutral bounded reader (``read_plan_artifact``);
+    the action/dag/report triple identity is re-checked here. A missing bridge is
+    an honest degradation, never a guessed correspondence. Unexpected program
+    errors (e.g. the reader module being absent while a ref exists) propagate.
+    """
+    if not _bounded_str(action_id):
+        return _bridge_unavailable('identity_bridge_invalid', 'action id is not a bounded string')
+    if not _bounded_str(dag_id) or not _bounded_str(report_digest, 64):
+        return _bridge_unavailable('identity_bridge_invalid', 'dag_id/report_digest identity is not bounded')
+    from demiflow.execution.run_journal import RunJournal
+    try:
+        ref = RunJournal(target).source_binding(action_id + '-identity-bridge')
+    except (OSError, ValueError, ForgeError) as exc:
+        return _bridge_unavailable('identity_bridge_read_failed', str(exc)[:512])
+    if ref is None:
+        return _bridge_unavailable(NO_BRIDGE, NO_BRIDGE_DETAIL)
+    # B's reader/exception are imported lazily: historical runs carry no bridge
+    # ref, so this dependency is only touched when a real bridge exists.
+    from demiflow.execution.sealed_plans import read_plan_artifact
+    from demiflow.execution.plan_interpreter import PlanContractError
+    try:
+        bridge = read_plan_artifact(target, ref, max_bytes=MAX_IDENTITY_BRIDGE_BYTES)
+    except PlanContractError as exc:
+        reason = _BRIDGE_REASON.get(exc.reason, 'identity_bridge_invalid')
+        return _bridge_unavailable(reason, str(exc.detail)[:512])
+    if type(bridge) is not dict or bridge.get('schema') != BRIDGE_SCHEMA:
+        return _bridge_unavailable('identity_bridge_invalid', 'identity bridge schema is unsupported')
+    if (bridge.get('action_id') != action_id or bridge.get('dag_id') != dag_id
+            or bridge.get('report_digest') != report_digest):
+        return _bridge_unavailable('identity_bridge_mismatch', 'bridge action/dag/report identity differs')
+    entries = bridge.get('entries')
+    if type(entries) is not list or len(entries) > 1024:
+        return _bridge_unavailable('identity_bridge_invalid', 'bridge entries are not a bounded list')
+    report_keys, logical_keys = set(), set()
+    for entry in entries:
+        if type(entry) is not dict or not _BRIDGE_ENTRY_KEYS <= set(entry):
+            return _bridge_unavailable('identity_bridge_invalid', 'bridge entry key set is unsupported')
+        if (not _bounded_str(entry['report_node_id'], 64) or not _bounded_str(entry['logical_node_id'])
+                or not _bounded_str(entry['occurrence_id'])
+                or type(entry['report_occurrence']) is not int or not 0 <= entry['report_occurrence'] < 2**31
+                or entry['mode'] not in ('execute', 'reuse')):
+            return _bridge_unavailable('identity_bridge_invalid', 'bridge entry field is invalid')
+        report_key = (entry['report_node_id'], entry['report_occurrence'])
+        logical_key = (entry['logical_node_id'], entry['occurrence_id'])
+        if report_key in report_keys or logical_key in logical_keys:
+            return _bridge_unavailable('identity_bridge_invalid', 'bridge observation key is ambiguous')
+        report_keys.add(report_key)
+        logical_keys.add(logical_key)
+    return dict(available=True, ref=ref, bridge=bridge)
+
+
+def join_node_observations(bridge, observations, *, action_id, attempt):
+    """Join one observation page onto a bridge by exact report observation key.
+
+    ``observations`` is a complete ``view.observations`` page document. The page's
+    attempt/action selection scope is checked first; rows then match by
+    ``(action_id, report_node_id, report_occurrence)``. Each output item keeps the
+    bridge entry and adds ``observation`` (the original row or None) and
+    ``availability`` (``observed``/``not_in_page``). A page absence is NOT evidence
+    that the run never observed the node; cursor/revision stay with the existing
+    query. Scope mismatches raise rather than guess.
+    """
+    if type(bridge) is not dict or bridge.get('action_id') != action_id or type(bridge.get('entries')) is not list:
+        raise ForgeError('Identity bridge does not belong to this action', code='invalid_request')
+    if type(observations) is not dict or observations.get('format') != 'demiflow_forge_node_observation_page_v1':
+        raise ForgeError('Observation page format is unsupported', code='invalid_request')
+    if observations.get('attempt') != attempt:
+        raise ForgeError('Observation page attempt differs from the selected attempt', code='conflict')
+    page_action = observations.get('action_id')
+    if page_action is not None and page_action != action_id:
+        raise ForgeError('Observation page is scoped to a different action', code='conflict')
+    rows = observations.get('observations')
+    if type(rows) is not list:
+        raise ForgeError('Observation page rows are invalid', code='invalid_request')
+    index = {}
+    for row in rows:
+        if type(row) is not dict or row.get('action_id') != action_id:
+            continue
+        key = (row.get('node_id'), row.get('occurrence'))
+        if key not in index:
+            index[key] = row
+    joined = []
+    for entry in bridge['entries']:
+        key = (entry.get('report_node_id'), entry.get('report_occurrence'))
+        row = index.get(key)
+        joined.append(dict(entry, observation=row, availability='observed' if row is not None else 'not_in_page'))
+    return tuple(joined)
+
+
 def _physical_summary(physical):
     """Compact C-space execution facts that join executed logical nodes directly."""
     role_by_stage = {}
@@ -146,21 +268,41 @@ def _physical_summary(physical):
                                for g in physical['worker_groups']])
 
 
-def _sealed_entry(result):
+def _bridge_node_map(entries):
+    """Unambiguous logical_node_id -> report_node_id; multi-instance ids stay out.
+
+    A logical node reused at several call sites maps to several report nodes; a
+    single map cannot represent that without guessing, so those ids are omitted
+    and the frontend resolves them per occurrence from the full bridge entries.
+    """
+    targets = {}
+    for entry in entries:
+        targets.setdefault(entry['logical_node_id'], set()).add(entry['report_node_id'])
+    return {logical: next(iter(report)) for logical, report in targets.items() if len(report) == 1}
+
+
+def _sealed_entry(result, *, bridge=None):
     entry = dict(action_id=result['action_id'], status='sealed', dag=result['logical_dag'],
                  node_map={}, plan_id=result['plan_id'], sealed_at=result['sealed_at'],
                  artifact_manifest_ref=result['artifact_manifest_ref'],
                  physical=_physical_summary(result['physical_plan']))
+    if bridge is not None and bridge.get('available'):
+        entry['node_map'] = _bridge_node_map(bridge['bridge']['entries'])
+        entry['identity_bridge'] = bridge
+    else:
+        entry['identity_bridge'] = bridge if bridge is not None else _bridge_unavailable(NO_BRIDGE, NO_BRIDGE_DETAIL)
     bounded_json(entry, ACTION_BYTES)
     return entry
 
 
-def overlay_sealed(root, run_id, declared_view):
+def overlay_sealed(root, run_id, declared_view, *, report_digest=None):
     """Overlay executed sealed plans onto the declared projection for a run graph.
 
     Per action: F1 present -> executed C-space entry; F1 absent -> keep the declared
     projection with an explicit fallback marker (never impersonate); F1 corrupt ->
-    structured unavailable. One action's failure never fails the whole graph.
+    structured unavailable. One action's failure never fails the whole graph. When
+    ``report_digest`` is given, each sealed action also reads its identity bridge
+    (attempt-independent); observation joining stays attempt-scoped in the caller.
     """
     from demiflow.workbench.runs import manager
     target = manager.directory(root, run_id)
@@ -171,7 +313,10 @@ def overlay_sealed(root, run_id, declared_view):
         result = read_sealed_plan(target, action_id) if type(action_id) is str else None
         if result is not None and result.get('available'):
             try:
-                new = _sealed_entry(result)
+                bridge = (read_identity_bridge(target, action_id, dag_id=result['dag_id'],
+                                               report_digest=report_digest)
+                          if report_digest is not None else None)
+                new = _sealed_entry(result, bridge=bridge)
                 sealed_any = True
             except ForgeError:
                 new = _unavailable(action_id, 'sealed_plan_budget', '执行封存计划超出展示预算')
