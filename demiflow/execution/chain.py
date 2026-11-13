@@ -823,15 +823,37 @@ def snapshot_code_sources(action, plan):
     return refs
 
 
+def _seal_plan_code(action, plan, pin_key):
+    """Seal the code-pin binding + source archive shared by every plan-seal path.
+
+    One implementation for the chain/graph pickle delivery and the in-process write
+    seam. ``pin_key`` must be stable across attempts so a resume whose current
+    business code differs from the sealed pin fail-closes (history immutable, D4):
+    delivery keys it on the pickle digest (stable for UDFs carried by reference, and
+    distinct per plan for graph's multiple plans per action); the write seam keys it
+    on a fixed per-action key (one write plan per action), never on the code-pin
+    identity itself, which would change with the code and defeat the resume refusal.
+    The source archive is the manifest definition_ref.location.
+    """
+    run = action.context
+    code_pin = plan_code_pin(plan)
+    sealed = run.journal.source_binding(pin_key)
+    if sealed is not None and sealed != code_pin:
+        raise RecoveryContractError(
+            "Business code changed since the plan was sealed; resume refused (fail-closed)")
+    run.journal.bind_source(run.fence, pin_key, code_pin)
+    sources = snapshot_code_sources(action, plan)
+    return {"code_pin_digest": identity(code_pin), "code_sources": sources}
+
+
 def stage_plan_artifact(action, plan):
     """Content-address the in-run pickled plan; the worker verifies before load.
 
     Persistent protocol never carries an arbitrary cloudpickle document (E2):
     this is the in-run pickle delivery path, sha256-bound into the K1 manifest.
     The pickle alone does not pin importable business UDFs (carried by reference),
-    so a code-sensitive code-pin is sealed alongside it: the per-plan key keeps
-    graph's multiple plans per action distinct, and a resume whose current business
-    code differs from the sealed pin fail-closes (history immutable, D4).
+    so a code-sensitive code-pin is sealed alongside it through the shared
+    ``_seal_plan_code`` helper (also used by the in-process write seam).
     """
     import cloudpickle
     from .state_artifacts import atomic_bytes
@@ -843,16 +865,42 @@ def stage_plan_artifact(action, plan):
     with run.journal.publication_guard(run.fence):
         atomic_bytes(path, raw)
     run.release_temporaries([path.with_name(path.name + ".staging")])
-    code_pin = plan_code_pin(plan)
-    pin_key = action.action_id + "-code-pin-" + digest
-    sealed = run.journal.source_binding(pin_key)
-    if sealed is not None and sealed != code_pin:
-        raise RecoveryContractError(
-            "Business code changed since the plan was sealed; resume refused (fail-closed)")
-    run.journal.bind_source(run.fence, pin_key, code_pin)
-    sources = snapshot_code_sources(action, plan)
+    code_facts = _seal_plan_code(action, plan, action.action_id + "-code-pin-" + digest)
     return {"path": str(path.relative_to(run.directory)), "sha256": digest, "bytes": len(raw),
-            "code_pin_digest": identity(code_pin), "code_sources": sources}
+            **code_facts}
+
+
+def seal_write_plan_ref(action, plan):
+    """Bundle identity for the in-process write seam: the code-pin, not a pickle.
+
+    The streamed/relational write_lance path runs the live plan via
+    prepare_stream_blocks and never loads a pickled payload, so its bundle identity
+    must not be the digest of a live-actor pickle: materialized PromptActor instances
+    carry runtime locks (unpicklable) and those bytes drift across attempts, weakening
+    gap④. Reuse the sole code-pin authority — identity(plan_code_pin) is the bundle
+    digest, sealed as a real unregistered JSON carrier that survives run exit (bindings
+    carry plan_ref; the workbench audits it). The code-pin binding and source archive
+    come from the same ``_seal_plan_code`` helper the delivery path uses: one sealing
+    implementation, no second serialization authority.
+    """
+    from .state_artifacts import atomic_bytes
+    run = action.context
+    code_pin = plan_code_pin(plan)
+    digest = identity(code_pin)
+    raw = document(code_pin, MAX_SEALED_PLAN_BYTES)
+    path = run.directory / "scratch" / "chain-write-pin" / (digest + ".json")
+    # Unregistered, mirroring seal_plan_facts: clean_orphans prunes registered
+    # protected=0 artifacts at run exit, but this post-run audited side-car must survive.
+    with run.journal.publication_guard(run.fence):
+        if not path.exists():
+            atomic_bytes(path, raw)
+    run.release_temporaries([path.with_name(path.name + ".staging")])
+    # Stable per-action pin key (one write plan per action): a resume with drifted
+    # business code finds the sealed pin and fail-closes. Keying on identity(code_pin)
+    # would change with the code and silently re-bind, defeating gap④.
+    code_facts = _seal_plan_code(action, plan, action.action_id + "-code-pin-write")
+    return {"path": str(path.relative_to(run.directory)), "sha256": digest, "bytes": len(raw),
+            **code_facts}
 
 
 def verify_loaded_plan(plan, plan_ref, sealed_operators):
@@ -1015,7 +1063,8 @@ def _build_sealed_manifest(run, plan_ref, *, entrypoint="chain"):
 
     The entrypoint definition_ref binds the code-pin (the actually-executed
     business code), not the mutable pickle reference; location points at the
-    sealed source artifact. bundle_digest stays the plan-bundle pickle digest.
+    sealed source artifact. bundle_digest is plan_ref's sha256: the pickle digest
+    for chain/graph delivery, the code-pin identity for the in-process write seam.
     Sealed with the run's persisted birth epoch so the ref is stable across
     driver restarts (manifest_id excludes sealed_at; the storage digest binds it).
     """
@@ -1145,7 +1194,7 @@ def seal_write_topology(action, source, plan, *, host_id="local"):
     relational branch. Deferred branches (pure Lance copy, arrow_batch_sink) never
     call this, so the D reader honestly reports no sealed plan for them.
     """
-    plan_ref = stage_plan_artifact(action, plan)
+    plan_ref = seal_write_plan_ref(action, plan)
     # The write bindings are a linear chain (single group, fixed source, single
     # partition, forward channels), so they reuse B's chain_v1 slice unchanged;
     # the write_lance terminal kind is carried by the logical_dag, not the slice.

@@ -348,6 +348,78 @@ def test_code_pin_source_archive_survives_run_exit(tmp_path, monkeypatch):
         assert hashlib.sha256(carrier.read_bytes()).hexdigest() == ref["sha256"]
 
 
+def test_write_seam_bundle_identity_is_code_pin_carrier_survives(tmp_path, monkeypatch):
+    """The in-process write seam seals its bundle identity as the code-pin, not a
+    live-actor pickle (Family 2). plan_ref.sha256 == identity(plan_code_pin(plan)),
+    the carrier is a real unregistered JSON file holding that code-pin document, it
+    survives run-exit orphan cleanup with matching sha256/bytes, and the K1 manifest
+    business.bundle_digest/module_key bind the same code-pin identity.
+    """
+    import demiflow.execution.chain as chain_mod
+    from demiflow.execution.recovery_contract import document, identity
+
+    captured = {}
+    real_seal = chain_mod.seal_write_topology
+    real_manifest = chain_mod._build_sealed_manifest
+
+    def capture_seal(action, source, plan, *, host_id="local"):
+        handle = real_seal(action, source, plan, host_id=host_id)
+        captured["plan_ref"] = handle._plan_ref
+        captured["code_pin"] = chain_mod.plan_code_pin(plan)
+        return handle
+
+    def capture_manifest(run, plan_ref, *, entrypoint="chain"):
+        manifest, mref = real_manifest(run, plan_ref, entrypoint=entrypoint)
+        captured["manifest"] = manifest
+        return manifest, mref
+
+    monkeypatch.setattr(chain_mod, "seal_write_topology", capture_seal)
+    monkeypatch.setattr(chain_mod, "_build_sealed_manifest", capture_manifest)
+    ds = relational_dataset()
+    target = tmp_path / "out.lance"
+    run_dir = tmp_path / "run"
+    with RunContext.start(run_dir):
+        ds.write_lance(str(target), mode="create", return_receipt=True)
+        plan_ref = captured["plan_ref"]
+        code_pin = captured["code_pin"]
+        pin_identity = identity(code_pin)
+        # Bundle identity is the code-pin, not a pickle digest; carrier holds the pin.
+        assert plan_ref["sha256"] == pin_identity
+        assert plan_ref["code_pin_digest"] == pin_identity
+        assert plan_ref["path"].endswith(".json")
+        carrier = run_dir / plan_ref["path"]
+        assert carrier.exists()
+        assert carrier.read_bytes() == document(code_pin, 4 * 1024 ** 2)
+        assert hashlib.sha256(carrier.read_bytes()).hexdigest() == plan_ref["sha256"]
+        assert carrier.stat().st_size == plan_ref["bytes"]
+        # K1 manifest binds the same code-pin identity (shape change, not silent).
+        business = captured["manifest"]["business"]
+        assert business["bundle_digest"] == "sha256:" + pin_identity
+        assert business["entrypoints"][0]["module_key"] == "p_" + pin_identity[:24]
+        assert business["entrypoints"][0]["definition_ref"]["sha256"] == pin_identity
+    # After clean_orphans at exit, the audited code-pin carrier must still survive.
+    assert carrier.exists(), "clean_orphans pruned the write-seam code-pin carrier"
+    assert hashlib.sha256(carrier.read_bytes()).hexdigest() == plan_ref["sha256"]
+    assert carrier.stat().st_size == plan_ref["bytes"]
+
+
+def test_write_seam_code_pin_resume_fail_closed(tmp_path):
+    """gap④: the write-seam code-pin binding key is stable across attempts (one write
+    plan per action), so re-sealing the same action with drifted business code finds
+    the sealed pin and refuses. Keying the pin on identity(code_pin) would change with
+    the code and silently re-bind — this guards against that regression.
+    """
+    import demiflow.execution.chain as chain_mod
+
+    ds = relational_dataset()
+    drifted = drifted_relational_dataset()
+    with RunContext.start(tmp_path / "run") as run:
+        action = RunAction(run, "rel-action", {"kind": "write_table"})
+        chain_mod.seal_write_plan_ref(action, ds._plan)
+        with pytest.raises(RecoveryContractError, match="Business code changed"):
+            chain_mod.seal_write_plan_ref(action, drifted._plan)
+
+
 # --- Streamed layer-3 counterexample: wide row rejected by sealed byte budget --
 
 def test_streamed_wide_row_rejected_by_sealed_byte_budget(tmp_path):
