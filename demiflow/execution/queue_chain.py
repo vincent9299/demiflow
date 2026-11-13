@@ -212,15 +212,18 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
         output_child_id=output_child_id, host_id="local", plan_ref=plan_ref,
         supported_slice="queue_transform_v1")
 
-    import json as _json
-    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
-    bindings_ref = topology["bindings_ref"]
-    bindings_raw = (run.directory / bindings_ref["path"]).read_bytes()
-    if hashlib.sha256(bindings_raw).hexdigest() != bindings_ref["sha256"]:
-        raise RecoveryContractError("Execution bindings artifact digest differs")
-    layout = interpret_physical_plan(logical_dag, physical, _json.loads(bindings_raw))
-    placement = next(p for p in layout.placements if p.group_id == "chain-group")
+    from .plan_interpreter import interpret_physical_plan, to_wire
+    from .sealed_plans import load_execution_bindings, load_sealed_plan
+    sealed_plan = load_sealed_plan(run.directory, action.action_id)
+    bindings = load_execution_bindings(run.directory, action.action_id,
+                                       sealed_plan=sealed_plan)
+    layout = interpret_physical_plan(sealed_plan["logical_dag"],
+                                     sealed_plan["physical_plan"],
+                                     bindings=bindings,
+                                     manifest_ref=sealed_plan["facts"]["artifact_manifest_ref"])
+    placement = next(w for w in layout.workers if w.group_id == "chain-group")
     sealed_profile = ResourceProfile(**to_wire(placement.profile))
+    bindings_ref = bindings["ref"]
 
     source.configure(action, fetch, sink, contract, 'node-' + str(index))
 
@@ -337,8 +340,9 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
             "boot_id": boot_id, "worker_id": ids["worker_id"], "controller_epoch": run.attempt,
             "grant_ref": ids["grant_id"], "plan_revision": 0, "expected_plan_revision": 0,
             "artifact_manifest_ref": topology["artifact_manifest_ref"],
-            "stages": [node["occurrence_id"] for node in logical_dag["nodes"]],
-            "partitions": ["p0"], "channels": {"inputs": [], "outputs": [topology["channel_id"]]},
+            "stages": list(placement.stage_ids),
+            "partitions": list(placement.partition_ids),
+            "channels": {"inputs": [], "outputs": []},
             "restore_point": None, "route_epoch": 0, "topology_revision": 0, "ready_deadline_ms": 60000}
         read_response(command("Assign", {"assignment": assignment}))
 

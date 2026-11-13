@@ -1,85 +1,61 @@
 """Worker-side sealed execution layout loading (C package).
 
-Reads the additive ``execution_plan`` block from launch_spec, loads and verifies
-the execution bindings artifact, resolves the sealed F1 plan facts, interprets
-the physical plan through B's interpreter, and returns the worker's placement
-with checkpoint policy and stage limits.  When no ``execution_plan`` block is
-present the legacy path runs unchanged (returns None).
-
-The worker never constructs a CommitCoordinator or owns commit authority.
+Reads the additive ``execution_plan`` block from launch_spec, loads the sealed
+F1 plan and execution bindings through B's reader, interprets the layout, and
+returns the worker's placement with checkpoint policy and stage limits.  When
+no ``execution_plan`` block is present the legacy path runs unchanged (None).
 """
-import hashlib
-import json
-
-from ..recovery_contract import RecoveryContractError
-
-_MAX_BINDINGS_BYTES = 4 * 1024 * 1024
+from ..plan_interpreter import PlanContractError
 
 
 def load_worker_layout(launch_spec, authority, assignment):
     """Return ``(placement, checkpoint_policy, stage_limits)`` or None.
 
-    ``stage_limits`` is a dict keyed by program operation index with values
-    ``{inflight_rows, inflight_bytes, output_bytes}``; it is passed to
-    ``run_stream`` so the sealed per-operation budgets reach the actual queues.
-    ``checkpoint_policy`` is B's readonly CheckpointPolicy dataclass (or None).
+    ``stage_limits`` is keyed by program operation index with values
+    ``{inflight_rows, inflight_bytes, output_bytes}`` taken from the sealed
+    physical stage budgets via operator_bindings.  ``checkpoint_policy`` is
+    B's readonly CheckpointPolicy at the layout level.
     """
     execution_plan = launch_spec.get("execution_plan")
     if execution_plan is None:
         return None
 
-    from ...planning.plan_interpreter import interpret_physical_plan
+    from ..plan_interpreter import interpret_physical_plan, validate_worker_assignment
+    from ..sealed_plans import load_execution_bindings, load_sealed_plan
 
-    bindings_ref = execution_plan["bindings_ref"]
-    group_id = execution_plan["group_id"]
     action_id = execution_plan["action_id"]
+    group_id = execution_plan["group_id"]
+    bindings_ref = execution_plan["bindings_ref"]
 
-    path = authority.directory / bindings_ref["path"]
-    raw = path.read_bytes()
-    declared_bytes = bindings_ref.get("bytes")
-    if declared_bytes is not None and len(raw) > declared_bytes:
-        raise RecoveryContractError("Execution bindings artifact exceeds declared size")
-    if len(raw) > _MAX_BINDINGS_BYTES:
-        raise RecoveryContractError("Execution bindings artifact exceeds admission budget")
-    if hashlib.sha256(raw).hexdigest() != bindings_ref["sha256"]:
-        raise RecoveryContractError("Execution bindings artifact digest differs")
-    bindings = json.loads(raw)
+    sealed_plan = load_sealed_plan(authority.directory, action_id)
+    bindings = load_execution_bindings(authority.directory, action_id,
+                                       sealed_plan=sealed_plan)
+    if bindings["ref"] != bindings_ref:
+        raise PlanContractError("identity_mismatch",
+                                "launch_spec bindings_ref differs from the sealed journal")
 
-    facts = authority.journal.source_binding(action_id + "-sealed-plan")
-    if facts is None:
-        raise RecoveryContractError("Sealed plan facts are missing for action " + action_id)
-    logical_dag = _load_ref(authority, facts["logical_dag_ref"])
-    physical = _load_ref(authority, facts["physical_plan_ref"])
+    manifest_ref = sealed_plan["facts"]["artifact_manifest_ref"]
+    layout = interpret_physical_plan(sealed_plan["logical_dag"],
+                                     sealed_plan["physical_plan"],
+                                     bindings=bindings, manifest_ref=manifest_ref)
 
-    layout = interpret_physical_plan(logical_dag, physical, bindings)
-
-    placement = None
-    for candidate in layout.placements:
-        if candidate.group_id == group_id:
-            placement = candidate
-            break
+    placement = next((w for w in layout.workers if w.group_id == group_id), None)
     if placement is None:
-        raise RecoveryContractError(
-            "Worker group not found in execution layout: " + str(group_id))
+        raise PlanContractError("invalid_assignment",
+                                "unknown worker group: " + str(group_id))
 
-    assigned = set(assignment.get("stages") or ())
-    program_occurrences = {op.occurrence_id for op in placement.program}
-    if assigned and assigned != program_occurrences:
-        raise RecoveryContractError(
-            "Assignment stages do not match the sealed program occurrences")
+    if assignment and "schema_version" in assignment:
+        validate_worker_assignment(layout, assignment, group_id=group_id)
+    elif assignment:
+        assigned = set(assignment.get("stages") or ())
+        if assigned and assigned != set(placement.stage_ids):
+            raise PlanContractError("invalid_assignment",
+                                    "assignment stages differ from the sealed placement")
 
+    stage_by_id = {s["stage_id"]: s for s in layout.stages}
     stage_limits = {}
-    for op in placement.program:
-        limits = getattr(op, "stage_limits", None)
-        if limits is not None:
-            stage_limits[op.program_index] = dict(limits)
+    for binding in placement.operator_bindings:
+        stage = stage_by_id[binding["stage_id"]]
+        stage_limits[binding["program_index"]] = dict(stage["budgets"])
 
-    return placement, placement.checkpoint_policy, stage_limits
-
-
-def _load_ref(authority, ref):
-    path = authority.directory / ref["path"]
-    raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != ref["sha256"]:
-        raise RecoveryContractError("Sealed plan artifact digest differs: " + ref["path"])
-    return json.loads(raw)
+    return placement, layout.checkpoint, stage_limits

@@ -929,71 +929,46 @@ def seal_plan_facts(run, action, logical_dag, physical, manifest_ref, sealed_at)
     return facts
 
 
-EXECUTION_BINDINGS_SCHEMA = "demiflow.execution_bindings.v1"
-_MAX_BINDINGS_BYTES = 4 * 1024 * 1024
-
-
-def _seal_execution_bindings(run, action, logical_dag, physical, source, plan, mref,
-                             *, supported_slice="chain_v1"):
-    """Build and seal the execution_bindings.v1 document (C assembly).
-
-    The document binds the sealed physical plan to concrete resource profiles,
-    per-operation programs with stage budgets, driver-retained stages and the
-    report observation keys.  Content-addressed under scratch/execution-bindings;
-    the journal slot is attempt-independent and immutable.
-    """
-    from .state_artifacts import atomic_bytes
+def _seal_chain_bindings(run, action, logical_dag, physical, source_reference,
+                         plan, plan_ref, mref, *, supported_slice="chain_v1"):
+    """Assemble §3 inputs and seal through B's single-authority binder."""
+    from .sealed_plans import seal_execution_bindings
     nodes = logical_dag["nodes"]
-    max_row = run.limits["max_row_bytes"]
-    operations = []
-    for i, op in enumerate(plan.operations):
-        node = nodes[i + 1]
-        depth = getattr(op, "queue_depth", None) or getattr(op, "concurrency", 1)
-        operations.append({
-            "program_index": i,
-            "logical_node_id": node["logical_node_id"],
-            "occurrence_id": node["occurrence_id"],
-            "stage_limits": {"inflight_rows": depth,
-                             "inflight_bytes": depth * max_row,
-                             "output_bytes": max_row},
-        })
-    groups = physical.get("worker_groups", [])
-    programs = [{"group_id": g["group_id"], "role": g.get("role", "cpu_prepare"),
-                 "operations": operations} for g in groups]
-    profiles = [{"profile_id": g.get("profile_ref", "profile-local"),
-                 "requests": {"cpu_millis": 1000, "memory_bytes": 1024 ** 3}}
-                for g in groups]
-    driver_stages = [nodes[0]["occurrence_id"], nodes[-1]["occurrence_id"]]
-    channel_options = [{"channel_id": ch["channel_id"],
-                        "exchange_mode": ch.get("exchange_mode", "memory_incremental"),
-                        "durability": ch.get("durability", "durable")}
-                       for ch in physical.get("channels", [])]
-    from .checked import current
-    checked = current()
-    source_bindings = list(checked.execution_bindings(source, plan, action_id=action.action_id)) \
-        if checked is not None else []
-    bindings = {
-        "schema": EXECUTION_BINDINGS_SCHEMA,
-        "run_id": run.ref.run_id, "action_id": action.action_id,
-        "dag_id": logical_dag["dag_id"], "plan_id": physical["plan_id"],
-        "artifact_manifest_ref": mref, "supported_slice": supported_slice,
-        "profiles": profiles, "programs": programs,
-        "driver_stage_ids": driver_stages, "source_bindings": source_bindings,
-        "channel_options": channel_options,
-        "checkpoint_rows": run.limits["checkpoint_rows"],
-    }
-    raw = document(bindings, _MAX_BINDINGS_BYTES)
-    digest = hashlib.sha256(raw).hexdigest()
-    path = run.directory / "scratch" / "execution-bindings" / (digest + ".json")
-    with run.journal.publication_guard(run.fence):
-        if not path.exists():
-            atomic_bytes(path, raw)
-        elif path.read_bytes() != raw:
-            raise RecoveryContractError("Existing execution-bindings artifact is corrupt")
-    ref = {"path": str(path.relative_to(run.directory)),
-           "sha256": digest, "bytes": len(raw)}
-    run.journal.bind_source(run.fence, action.action_id + "-execution-bindings", ref)
-    return ref
+    dag_id = logical_dag["dag_id"]
+    operation_nodes = nodes[1:-1]
+    op_stage_ids = [identity([dag_id, n["occurrence_id"]]) for n in operation_nodes]
+    profile_doc = {"requests": {"cpu_millis": 1000, "memory_bytes": 1024 ** 3}}
+    profile_ref = identity(profile_doc)
+    programs = [{
+        "group_id": "chain-group", "stage_ids": op_stage_ids,
+        "plan_ref": plan_ref,
+        "sealed_operators": [{"logical_node_id": n["logical_node_id"],
+                              "occurrence_id": n["occurrence_id"]} for n in operation_nodes],
+        "operator_bindings": [{"program_index": i, "stage_id": sid}
+                              for i, sid in enumerate(op_stage_ids)],
+    }]
+    driver_stage_ids = [identity([dag_id, nodes[0]["occurrence_id"]]),
+                        identity([dag_id, nodes[-1]["occurrence_id"]])]
+    source_kind = ("queue_declaration" if supported_slice == "queue_transform_v1"
+                   else "fixed_source")
+    if source_kind == "queue_declaration":
+        src_ref = {"source_id": source_reference["source_id"],
+                   "source_identity": source_reference["source_id"]}
+    else:
+        src = logical_dag["sources"][0]
+        src_ref = {"source_id": src["source_id"],
+                   "source_identity_ref": src["source_identity_ref"]}
+    source_bindings = [{"stage_id": driver_stage_ids[0], "kind": source_kind, "ref": src_ref}]
+    scheme_version = logical_dag["sources"][0]["partition_scheme"]["scheme_version"]
+    from ..planning.dag import channel_id_for
+    channel_options = [{"channel_id": channel_id_for(e["edge_id"], scheme_version),
+                        "logical_edge_ids": [e["edge_id"]]} for e in logical_dag["edges"]]
+    return seal_execution_bindings(
+        run, action, logical_dag=logical_dag, physical_plan=physical,
+        profiles={profile_ref: profile_doc}, programs=programs,
+        driver_stage_ids=driver_stage_ids, source_bindings=source_bindings,
+        channel_options=channel_options,
+        checkpoint_rows=run.limits["checkpoint_rows"], supported_slice=supported_slice)
 
 
 def _seal_chain_identity_bridge(run, action, logical_dag, source, plan):
@@ -1026,9 +1001,10 @@ def _seal_chain_identity_bridge(run, action, logical_dag, source, plan):
             "occurrence_id": node["occurrence_id"],
             "mode": item["mode"],
         })
-    report_digest = checked.report_digest or identity([action.action_id, "report"])
+    if not checked.report_digest:
+        return None
     bridge = build_identity_bridge(logical_dag, action_id=action.action_id,
-                                   report_digest=report_digest, bindings=bridge_bindings)
+                                   report_digest=checked.report_digest, bindings=bridge_bindings)
     return seal_identity_bridge(run, action, bridge)
 
 
@@ -1078,12 +1054,17 @@ def compile_chain_topology(action, source, plan, source_reference, *,
     manifest = seal_manifest(manifest, int(config["started_at"] * 1000))
     ref = save_manifest(run.directory, manifest)
     mref = {"manifest_id": ref["manifest_id"], "sha256": ref["sha256"]}
+    op_nodes = logical_dag["nodes"][1:-1]
     stage_refs = [identity([logical_dag["dag_id"], node["occurrence_id"]])
-                  for node in logical_dag["nodes"]]
+                  for node in op_nodes]
+    profile_doc = {"requests": {"cpu_millis": 1000, "memory_bytes": 1024 ** 3}}
+    stage_budgets = {node["occurrence_id"]: {
+        "inflight_rows": 1024, "inflight_bytes": 8 * 1024 ** 2,
+        "output_bytes": 1 * 1024 ** 2} for node in op_nodes}
     physical = compile_physical_execution_plan(
         logical_dag=logical_dag, plan_revision=0, artifact_manifest_ref=mref,
         worker_groups=[{"group_id": "chain-group", "role": "cpu_prepare",
-                        "profile_ref": "profile-local", "stage_refs": stage_refs,
+                        "profile_ref": identity(profile_doc), "stage_refs": stage_refs,
                         "min_workers": 1, "initial_workers": 1, "max_workers": 1}],
         recovery={"checkpoint_interval_ms": run.limits["checkpoint_interval_ms"],
                   "unconfirmed_rows": run.limits["checkpoint_unconfirmed_rows"],
@@ -1091,10 +1072,10 @@ def compile_chain_topology(action, source, plan, source_reference, *,
                   "terminals": []},
         feasibility_snapshot_ref=identity([run.ref.run_id, "feasibility"]),
         read_domain=domain, durability_declared="durable",
-        partition_count=1, scheme_kind="single")
+        partition_count=1, scheme_kind="single", stage_budgets=stage_budgets)
     operators = [{"logical_node_id": node["logical_node_id"],
                   "occurrence_id": node["occurrence_id"]}
-                 for node in logical_dag["nodes"][1:-1]]
+                 for node in op_nodes]
     topology = {"run_id": run.ref.run_id, "action_id": output_child_id,
                 "epoch": run.attempt, "topology_revision": 0, "route_epoch": 0,
                 "plan_revision": 0, "artifact_manifest_ref": mref,
@@ -1102,8 +1083,8 @@ def compile_chain_topology(action, source, plan, source_reference, *,
                 "channel_id": physical["channels"][-1]["channel_id"],
                 "operators": operators, "sink_id": "output"}
     seal_plan_facts(run, action, logical_dag, physical, mref, manifest["sealed_at"])
-    bindings_ref = _seal_execution_bindings(
-        run, action, logical_dag, physical, source, plan, mref,
+    bindings_ref = _seal_chain_bindings(
+        run, action, logical_dag, physical, source_reference, plan, plan_ref, mref,
         supported_slice=supported_slice)
     topology["bindings_ref"] = bindings_ref
     bridge_ref = _seal_chain_identity_bridge(run, action, logical_dag, source, plan)
@@ -1192,15 +1173,18 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
             recovery_reference=dict(run_id=run.ref.run_id, action_id=action.action_id,
                                     semantic_id=action.semantic_id))
 
-    import json as _json
-    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
-    bindings_ref = topology["bindings_ref"]
-    bindings_raw = (run.directory / bindings_ref["path"]).read_bytes()
-    if hashlib.sha256(bindings_raw).hexdigest() != bindings_ref["sha256"]:
-        raise RecoveryContractError("Execution bindings artifact digest differs")
-    layout = interpret_physical_plan(logical_dag, physical, _json.loads(bindings_raw))
-    placement = next(p for p in layout.placements if p.group_id == "chain-group")
+    from .plan_interpreter import interpret_physical_plan, to_wire
+    from .sealed_plans import load_execution_bindings, load_sealed_plan
+    sealed_plan = load_sealed_plan(run.directory, action.action_id)
+    bindings = load_execution_bindings(run.directory, action.action_id,
+                                       sealed_plan=sealed_plan)
+    layout = interpret_physical_plan(sealed_plan["logical_dag"],
+                                     sealed_plan["physical_plan"],
+                                     bindings=bindings,
+                                     manifest_ref=sealed_plan["facts"]["artifact_manifest_ref"])
+    placement = next(w for w in layout.workers if w.group_id == "chain-group")
     sealed_profile = ResourceProfile(**to_wire(placement.profile))
+    bindings_ref = bindings["ref"]
 
     ids = {k: uuid.uuid4().hex for k in
            ("scope_id", "allocation_id", "boot_id", "grant_id", "worker_id")}
@@ -1312,8 +1296,9 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
             "boot_id": boot_id, "worker_id": ids["worker_id"], "controller_epoch": run.attempt,
             "grant_ref": ids["grant_id"], "plan_revision": 0, "expected_plan_revision": 0,
             "artifact_manifest_ref": topology["artifact_manifest_ref"],
-            "stages": [node["occurrence_id"] for node in logical_dag["nodes"]],
-            "partitions": ["p0"], "channels": {"inputs": [], "outputs": [topology["channel_id"]]},
+            "stages": list(placement.stage_ids),
+            "partitions": list(placement.partition_ids),
+            "channels": {"inputs": [], "outputs": []},
             "restore_point": {"checkpoint_id": restore["checkpoint_id"]} if restore else None,
             "route_epoch": 0, "topology_revision": 0, "ready_deadline_ms": 60000}
         assign_op = command("Assign", {"assignment": assignment})
@@ -1433,15 +1418,18 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
             recovery_reference=dict(run_id=run.ref.run_id, action_id=action.action_id,
                                     semantic_id=action.semantic_id))
 
-    import json as _json
-    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
-    bindings_ref = topology["bindings_ref"]
-    bindings_raw = (run.directory / bindings_ref["path"]).read_bytes()
-    if hashlib.sha256(bindings_raw).hexdigest() != bindings_ref["sha256"]:
-        raise RecoveryContractError("Execution bindings artifact digest differs")
-    layout = interpret_physical_plan(logical_dag, physical, _json.loads(bindings_raw))
-    placement = next(p for p in layout.placements if p.group_id == "chain-group")
+    from .plan_interpreter import interpret_physical_plan, to_wire
+    from .sealed_plans import load_execution_bindings, load_sealed_plan
+    sealed_plan = load_sealed_plan(run.directory, action.action_id)
+    bindings = load_execution_bindings(run.directory, action.action_id,
+                                       sealed_plan=sealed_plan)
+    layout = interpret_physical_plan(sealed_plan["logical_dag"],
+                                     sealed_plan["physical_plan"],
+                                     bindings=bindings,
+                                     manifest_ref=sealed_plan["facts"]["artifact_manifest_ref"])
+    placement = next(w for w in layout.workers if w.group_id == "chain-group")
     sealed_profile = ResourceProfile(**to_wire(placement.profile))
+    bindings_ref = bindings["ref"]
 
     ids = {k: uuid.uuid4().hex for k in
            ("scope_id", "allocation_id", "boot_id", "grant_id", "worker_id")}
@@ -1546,8 +1534,9 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
             "boot_id": boot_id, "worker_id": ids["worker_id"], "controller_epoch": run.attempt,
             "grant_ref": ids["grant_id"], "plan_revision": 0, "expected_plan_revision": 0,
             "artifact_manifest_ref": topology["artifact_manifest_ref"],
-            "stages": [node["occurrence_id"] for node in logical_dag["nodes"]],
-            "partitions": ["p0"], "channels": {"inputs": [], "outputs": [topology["channel_id"]]},
+            "stages": list(placement.stage_ids),
+            "partitions": list(placement.partition_ids),
+            "channels": {"inputs": [], "outputs": []},
             "restore_point": {"checkpoint_id": restore["checkpoint_id"]} if restore else None,
             "route_epoch": 0, "topology_revision": 0, "ready_deadline_ms": 60000}
         command("Assign", {"assignment": assignment})
