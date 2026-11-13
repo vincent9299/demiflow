@@ -104,6 +104,9 @@ def operation_capability(operation):
 
 def _catch_facts(catch):
     # Empty/None keep their exact prior JSON form ([] / null) so sealed dag_id never drifts.
+    # Not collision-free: a function-local exception class carries "<locals>" in
+    # __qualname__, so distinct classes from repeated definitions canonicalize alike.
+    # This buys determinism, not a uniqueness guarantee (accepted edge case).
     if catch is None:
         return None
     return sorted(exc.__module__ + "." + exc.__qualname__ for exc in catch)

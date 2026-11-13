@@ -423,9 +423,16 @@ def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch)
     assert bridge["bridge"]["report_digest"] == inspection_digest
     entries = bridge["bridge"]["entries"]
     assert entries, "bridge has no entries"
+    # gap⑤: the page displays exactly the executed plan — every bridged report
+    # node must be present in the workbench display-graph node set, not merely
+    # carry a non-empty id.
+    display_node_ids = {n["id"] for n in observed["graph"]["nodes"]}
     for entry in entries:
         assert entry["logical_node_id"] and entry["occurrence_id"]
         assert entry["report_node_id"] and type(entry["report_occurrence"]) is int
+        assert entry["report_node_id"] in display_node_ids, (
+            "bridged report node missing from workbench display graph",
+            entry["report_node_id"], sorted(display_node_ids))
 
 
 # --- Family 1: catch whitelist must be strict-JSON; empty/None identity frozen ---
