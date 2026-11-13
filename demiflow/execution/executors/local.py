@@ -1172,6 +1172,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         if native_options is not None:
             raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
         from ..stream_materialize import has_stream,prepare_stream_blocks
+        from ..chain import seal_write_topology
         streamed=has_stream(plan)
         physical=None if streamed else self.plan(source,plan,"write_lance",terminal_category="sink",terminal_parallelism_cap=1)
         from ..run_context import current_action
@@ -1185,12 +1186,17 @@ class LocalDatasetExecutor(DatasetExecutor):
         source = freeze_source(action, source)
         self._run_ref = action.context.ref
         native_merge = None
+        write_seal = None
         def write_lance(spec, batches):
+            if write_seal is not None:
+                write_seal.verify(plan)
             sink = LanceSink(action, spec, native_merge=native_merge)
             if streamed:
                 from ..object_sink import image_object_specs,ObjectRowsSink
+                checkpoint_policy, stage_limits = write_seal.layout()
                 sink=ObjectRowsSink(action,object_specs=image_object_specs(plan),rows_sink=sink,
-                    input_factory=lambda context:prepare_stream_blocks(self,source,plan,action,context))
+                    input_factory=lambda context:prepare_stream_blocks(self,source,plan,action,context,
+                        stage_limits=stage_limits, checkpoint_policy=checkpoint_policy))
                 action.object_sinks=sink.object_sinks
             coordinator = CommitCoordinator(action)
             facts = coordinator.recover({"lance": sink})
@@ -1204,7 +1210,9 @@ class LocalDatasetExecutor(DatasetExecutor):
             action.complete(dict(kind="write_lance", receipt=data))
             from ...lance.model import LanceWriteReceipt
             return LanceWriteReceipt.from_dict(data)
-        if streamed:return write_lance(spec,None)
+        if streamed:
+            write_seal = seal_write_topology(action, source, plan)
+            return write_lance(spec,None)
         if isinstance(source, LanceSource) and not plan.operations and source.native_options is None:
             # A pure Lance copy already has typed Arrow batches. Preserve the
             # pinned query and avoid nested rows -> Python -> Arrow round trips.
@@ -1225,6 +1233,7 @@ class LocalDatasetExecutor(DatasetExecutor):
             from contextlib import closing
             with closing(arrow_batch_sink(self, source, plan, spec.schema)) as batches:
                 return write_lance(spec, batches)
+        write_seal = seal_write_topology(action, source, plan)
         from ..dataset_native import has_relational, execute
         if has_relational(source, plan):
             from contextlib import closing

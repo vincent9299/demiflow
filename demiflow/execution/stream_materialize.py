@@ -36,7 +36,8 @@ def stream_view(executor,source,plan):
     return Dataset(source,plan,executor,tuple(actors))
 
 
-def prepare_stream_blocks(executor, source, plan, action, context):
+def prepare_stream_blocks(executor, source, plan, action, context, *,
+                          stage_limits=None, checkpoint_policy=None):
     """Stream durable checkpoint blocks into the original final sink prepare.
 
     The handoff is one bounded epoch descriptor. The final adapter still owns
@@ -81,6 +82,8 @@ def prepare_stream_blocks(executor, source, plan, action, context):
             selected = freeze_source(child, source)
             terminal = StreamMaterialization(child, lambda: executor.iter_rows(selected, LogicalPlan()),
                 object_specs=image_object_specs(plan), staging_only=True)
+            if checkpoint_policy is not None:
+                terminal.checkpoint_policy = checkpoint_policy
             # Previously published checkpoint blocks are forwarded without actor replay.
             for fact in run.journal.iter_execution_commits(child_id, through_sequence=terminal.sequence):
                 if fact['status'] != 'pending':
@@ -90,7 +93,7 @@ def prepare_stream_blocks(executor, source, plan, action, context):
             terminal.stop_requested = stopped.is_set
             if not terminal.complete:
                 stream_view(executor, selected, plan)._run_stream(consume=terminal.append,
-                    progress=terminal, source_iter=terminal.source_rows())
+                    progress=terminal, source_iter=terminal.source_rows(), stage_limits=stage_limits)
                 terminal.finish()
         except BaseException as exc:
             errors.append(exc)

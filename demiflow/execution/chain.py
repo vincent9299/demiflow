@@ -1008,27 +1008,17 @@ def _seal_chain_identity_bridge(run, action, logical_dag, source, plan):
     return seal_identity_bridge(run, action, bridge)
 
 
-def compile_chain_topology(action, source, plan, source_reference, *,
-                           output_child_id, host_id, plan_ref,
-                           supported_slice="chain_v1"):
-    """Compile the E2 linear DAG/physical plan and seal the K1 manifest (D3).
+def _build_sealed_manifest(run, plan_ref, *, entrypoint="chain"):
+    """Build/seal/save the K1 manifest; return (manifest, manifest_ref).
 
-    The whole operator chain runs in one worker host, so the source-progress
-    vector is a single component and the result-out channel is the terminal edge.
-    Worker counts live only in the physical worker group, never in logical ids.
+    The entrypoint definition_ref binds the code-pin (the actually-executed
+    business code), not the mutable pickle reference; location points at the
+    sealed source artifact. bundle_digest stays the plan-bundle pickle digest.
+    Sealed with the run's persisted birth epoch so the ref is stable across
+    driver restarts (manifest_id excludes sealed_at; the storage digest binds it).
     """
-    from ..planning.dag import compile_logical_dag, compile_physical_execution_plan
     from .contracts.artifact import build_manifest, save_manifest, seal_manifest
-    from .exchange import read_domain
-    run = action.context
     config = run.journal.recovery_identity()
-    domain = read_domain(run.directory, host_id)
-    logical_dag = compile_logical_dag(action_id=action.action_id, source=source,
-                                      operations=plan.operations,
-                                      terminal_kind="materialize", sink_ids=("output",))
-    # The entrypoint definition_ref binds the code-pin (the actually-executed
-    # business code), not the mutable pickle reference; location points at the
-    # sealed source artifact. bundle_digest stays the plan-bundle pickle digest.
     code_pin_digest = plan_ref["code_pin_digest"]
     code_location = (plan_ref["code_sources"][0]["path"] if plan_ref["code_sources"]
                      else plan_ref["path"])
@@ -1037,7 +1027,7 @@ def compile_chain_topology(action, source, plan, source_reference, *,
         platform={"source_digest": config["platform_revision"], "distribution": "demiflow",
                   "version": "u2", "runtime_identity_ref": identity([run.ref.run_id, "runtime"])},
         business={"bundle_digest": "sha256:" + plan_ref["sha256"],
-                  "entrypoints": [{"name": "chain", "module_key": "p_" + plan_ref["sha256"][:24],
+                  "entrypoints": [{"name": entrypoint, "module_key": "p_" + plan_ref["sha256"][:24],
                                    "definition_ref": {"sha256": code_pin_digest,
                                                       "location": code_location}}]},
         config={"resolved_config_digest": identity([run.ref.run_id, "config"]),
@@ -1049,11 +1039,30 @@ def compile_chain_topology(action, source, plan, source_reference, *,
                            "checkpoint_schema": 1, "state_schema": 1,
                            "resource_protocol": "1.0"},
         secret_refs=[])
-    # Seal with the run's persisted birth epoch so the ref is stable across
-    # driver restarts (manifest_id excludes sealed_at; the storage digest binds it).
     manifest = seal_manifest(manifest, int(config["started_at"] * 1000))
     ref = save_manifest(run.directory, manifest)
-    mref = {"manifest_id": ref["manifest_id"], "sha256": ref["sha256"]}
+    return manifest, {"manifest_id": ref["manifest_id"], "sha256": ref["sha256"]}
+
+
+def compile_chain_topology(action, source, plan, source_reference, *,
+                           output_child_id, host_id, plan_ref,
+                           supported_slice="chain_v1",
+                           terminal_kind="materialize", sink_ids=("output",),
+                           entrypoint="chain"):
+    """Compile the E2 linear DAG/physical plan and seal the K1 manifest (D3).
+
+    The whole operator chain runs in one worker host, so the source-progress
+    vector is a single component and the result-out channel is the terminal edge.
+    Worker counts live only in the physical worker group, never in logical ids.
+    """
+    from ..planning.dag import compile_logical_dag, compile_physical_execution_plan
+    from .exchange import read_domain
+    run = action.context
+    domain = read_domain(run.directory, host_id)
+    logical_dag = compile_logical_dag(action_id=action.action_id, source=source,
+                                      operations=plan.operations,
+                                      terminal_kind=terminal_kind, sink_ids=sink_ids)
+    manifest, mref = _build_sealed_manifest(run, plan_ref, entrypoint=entrypoint)
     op_nodes = logical_dag["nodes"][1:-1]
     stage_refs = [identity([logical_dag["dag_id"], node["occurrence_id"]])
                   for node in op_nodes]
@@ -1081,9 +1090,10 @@ def compile_chain_topology(action, source, plan, source_reference, *,
     topology = {"run_id": run.ref.run_id, "action_id": output_child_id,
                 "epoch": run.attempt, "topology_revision": 0, "route_epoch": 0,
                 "plan_revision": 0, "artifact_manifest_ref": mref,
-                "source_id": source_reference["source_id"],
+                "source_id": (source_reference["source_id"] if source_reference is not None
+                              else logical_dag["sources"][0]["source_id"]),
                 "channel_id": physical["channels"][-1]["channel_id"],
-                "operators": operators, "sink_id": "output"}
+                "operators": operators, "sink_id": sink_ids[0]}
     seal_plan_facts(run, action, logical_dag, physical, mref, manifest["sealed_at"])
     bindings_ref = _seal_chain_bindings(
         run, action, logical_dag, physical, source_reference, plan, plan_ref, mref,
@@ -1093,6 +1103,55 @@ def compile_chain_topology(action, source, plan, source_reference, *,
     if bridge_ref is not None:
         topology["identity_bridge_ref"] = bridge_ref
     return topology, logical_dag, physical
+
+
+class _WriteSeal:
+    """Pre-publication binding gate for the native write_lance seam (route b).
+
+    Holds the sealed plan contract. ``verify`` re-derives the code-pin and
+    operator identities from the actually-executed plan and fail-closes on any
+    drift before publication; ``layout`` reuses the worker layout reader (import
+    only, no copied extraction) to recover the checkpoint policy and stage limits
+    that the streamed path consumes.
+    """
+
+    def __init__(self, action, plan_ref, topology):
+        self._action = action
+        self._plan_ref = plan_ref
+        self.topology = topology
+        self.bindings_ref = topology["bindings_ref"]
+
+    def verify(self, plan):
+        verify_loaded_plan(plan, self._plan_ref, self.topology["operators"])
+
+    def layout(self):
+        from .worker.layout import load_worker_layout
+        launch_spec = {"execution_plan": {"action_id": self._action.action_id,
+                       "group_id": "chain-group", "bindings_ref": self.bindings_ref}}
+        _, checkpoint_policy, stage_limits = load_worker_layout(
+            launch_spec, self._action.context, None)
+        return checkpoint_policy, stage_limits
+
+
+def seal_write_topology(action, source, plan, *, host_id="local"):
+    """Compile + seal the executed write_lance plan under the parent action (D1a).
+
+    Route (b): native execution and the single LanceSink publication are unchanged;
+    this adds the F1 plan facts, execution bindings and identity bridge above them,
+    plus a pre-publication binding gate. The seal binds the frozen source + the
+    LogicalPlan that actually execute — not the discarded native ``physical`` of the
+    relational branch. Deferred branches (pure Lance copy, arrow_batch_sink) never
+    call this, so the D reader honestly reports no sealed plan for them.
+    """
+    plan_ref = stage_plan_artifact(action, plan)
+    # The write bindings are a linear chain (single group, fixed source, single
+    # partition, forward channels), so they reuse B's chain_v1 slice unchanged;
+    # the write_lance terminal kind is carried by the logical_dag, not the slice.
+    topology, _, _ = compile_chain_topology(
+        action, source, plan, None, output_child_id=action.action_id,
+        host_id=host_id, plan_ref=plan_ref, supported_slice="chain_v1",
+        terminal_kind="write_lance", sink_ids=("lance",), entrypoint="write_lance")
+    return _WriteSeal(action, plan_ref, topology)
 
 
 class _ChainBlocks:

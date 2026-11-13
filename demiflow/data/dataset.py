@@ -1031,7 +1031,7 @@ class Dataset:
     def _run_stream(self, *, source=None, plan=None, consume=None, on_progress=None,
                     on_drain=None, log_every=0, cancellation=None, queue_factory=None,
                     stall_timeout=None, stop_file=None, source_batch_size=None,
-                    checkpoint=None, progress=None, source_iter=None):
+                    checkpoint=None, progress=None, source_iter=None, stage_limits=None):
         """One native driver for public consumption and internal materialization."""
         from ..execution.stream import run_stream as _run_stream
         from ..execution.capabilities import validate_stream_plan
@@ -1123,6 +1123,7 @@ class Dataset:
             on_start=resources.prepare, on_close=resources.close, stall_timeout=stall_timeout,
             stop_file=stop_file, source_batch_size=source_batch_size, progress=progress, unit_driver=unit_driver,
             on_stop=task_source.request_stop if task_source is not None else None,
+            stage_limits=stage_limits,
         )
         if explicit_queue:
             task_source.assert_settled()

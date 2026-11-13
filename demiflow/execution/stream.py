@@ -731,13 +731,17 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
     make_queue = queue_factory or _local_queue
     queues = []
     for s in stages:
-        if s.stage_budget is not None and queue_factory is None:
-            from .request_limits import ObservedQueue
+        if s.stage_budget is not None:
             item_bytes = s.stage_budget.get('output_bytes')
             total_bytes = s.stage_budget.get('inflight_bytes')
-            queues.append(ObservedQueue(
-                s.queue_depth, max_item_bytes=item_bytes,
-                max_bytes=total_bytes if item_bytes is not None else None))
+            max_bytes = total_bytes if item_bytes is not None else None
+            if queue_factory is None:
+                from .request_limits import ObservedQueue
+                queues.append(ObservedQueue(
+                    s.queue_depth, max_item_bytes=item_bytes, max_bytes=max_bytes))
+            else:
+                queues.append(make_queue(
+                    s.queue_depth, max_item_bytes=item_bytes, max_bytes=max_bytes))
         else:
             queues.append(make_queue(s.queue_depth))
     from .raw_fetch import RawFetch
