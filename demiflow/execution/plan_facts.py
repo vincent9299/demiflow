@@ -102,6 +102,13 @@ def operation_capability(operation):
             "bound": type(operation) is ops.BoundMapOp}
 
 
+def _catch_facts(catch):
+    # Empty/None keep their exact prior JSON form ([] / null) so sealed dag_id never drifts.
+    if catch is None:
+        return None
+    return sorted(exc.__module__ + "." + exc.__qualname__ for exc in catch)
+
+
 def operation_facts(operation):
     """Read complete supported operation parameters independently of a report."""
     fact = operation_capability(operation)
@@ -120,10 +127,12 @@ def operation_facts(operation):
                              outputs=dict(operation.outputs) if operation.outputs is not None else None)
         if operation.stream_options is not None:
             arguments.update({f.name: getattr(operation.stream_options, f.name) for f in fields(ops.MapStreamOptions)})
+            arguments["catch"] = _catch_facts(arguments["catch"])
             arguments["queue_depth"] = arguments["queue_depth"] or arguments["concurrency"]
     elif type(operation) in {ops.AsyncMapOp, ops.SearchWebOp, ops.BatchMapOp, ops.SaveLanceOp}:
         names = ("concurrency", "queue_depth", "catch", "label", "hard_timeout")
         arguments.update({name: getattr(operation, name) for name in names})
+        arguments["catch"] = _catch_facts(arguments["catch"])
         arguments["queue_depth"] = arguments["queue_depth"] or arguments["concurrency"]
         if type(operation) in {ops.AsyncMapOp,ops.SearchWebOp}:
             arguments["execution"] = operation.execution

@@ -426,3 +426,67 @@ def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch)
     for entry in entries:
         assert entry["logical_node_id"] and entry["occurrence_id"]
         assert entry["report_node_id"] and type(entry["report_occurrence"]) is int
+
+
+# --- Family 1: catch whitelist must be strict-JSON; empty/None identity frozen ---
+
+def test_catch_nonempty_canonical_strict_json():
+    """A non-empty exception whitelist serializes to sorted qualified names so the
+    sealed plan identity is strict-JSON (the seam compiles every write_lance plan)."""
+    from demiflow.execution.plan_facts import operation_facts
+    from demiflow.execution.recovery_contract import identity
+
+    async def callback(row):
+        return row
+
+    ds = data.from_items([{"id": 1}]).map_async(callback, catch=(TimeoutError,), label="probe")
+    facts = operation_facts(ds._plan.operations[0])
+    assert facts["arguments"]["catch"] == ["builtins.TimeoutError"]
+    identity(facts)  # must not raise "Execution metadata must be strict JSON"
+
+
+def test_catch_canonical_preserves_empty_identity():
+    """The shared canonicalizer keeps the exact prior JSON form for empty/None so
+    neither catch copy site (stream_options fields nor the async/batch/save names
+    loop) can drift a sealed identity."""
+    from demiflow.execution.plan_facts import _catch_facts
+    from demiflow.execution.recovery_contract import identity
+
+    for raw in ((), None, []):
+        assert identity({"catch": _catch_facts(raw)}) == identity({"catch": raw})
+
+
+def test_catch_empty_dag_id_unchanged(monkeypatch):
+    """Hard constraint: canonicalizing catch must not drift the sealed dag_id for an
+    empty whitelist. Compare the real compile_logical_dag dag_id before (the exact
+    pre-fix raw operation.catch copy) and after (canonical) — byte-identical. The
+    None defensive path is covered by test_catch_canonical_preserves_empty_identity
+    (the public map_async API normalizes catch=None to ())."""
+    import demiflow.execution.plan_facts as pf
+    from demiflow.planning.dag import compile_logical_dag
+
+    real_facts = pf.operation_facts
+
+    async def callback(row):
+        return row
+
+    ds = data.from_items([{"id": 1}]).map_async(callback, catch=(), label="probe")
+    source, operations = ds._source, ds._plan.operations
+
+    def dag_id():
+        return compile_logical_dag(action_id="action-1", source=source,
+                                   operations=operations, terminal_kind="write_lance",
+                                   sink_ids=("lance",))["dag_id"]
+
+    after = dag_id()
+
+    def raw_facts(operation, _real=real_facts):
+        fact = _real(operation)
+        if "catch" in fact.get("arguments", {}):
+            fact["arguments"]["catch"] = operation.catch  # exact pre-fix raw copy
+        return fact
+
+    monkeypatch.setattr(pf, "operation_facts", raw_facts)
+    before = dag_id()
+    monkeypatch.setattr(pf, "operation_facts", real_facts)
+    assert after == before, (after, before)
