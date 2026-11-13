@@ -191,10 +191,11 @@ call 唯一值差异 `reused: False→True`（顶层 + attempts[0]），必须�
 
 ### B 的规范化器边届（显式）
 
-- 覆盖类型：`dict/list/tuple/str/bytes` 的有界无环图（默认行与所有 JSON-like 行 + ObjectRef dict）。其它对象原样透传。
+- 覆盖类型：`dict/list/tuple/str/bytes` 的有界无环图（默认行与所有 JSON-like 行 + ObjectRef dict）。**不覆盖类型（显式点名）：`set` / `frozenset`** —— 二者落到不透明透传分支 `('o', id(node))`，原样返回、其元素不被值规范化；其它未列类型同样原样透传。
 - 深度：> `_CANON_MAX_DEPTH` → 回退 raw（零回归，声明）。
 - 环路：检测到 → 回退 raw（pickle 本就支持环；回退保持现状，值规范化保证不覆盖环行，声明）。
-- 不透明对象身份漂移：不在本单范围（默认行不含；未观测）。
+- **set/frozenset 同类漂移残留（显式声明）**：因 set/frozenset 元素不被值规范化，「含 set 且其元素为等值不同身份对象」的行仍存在与 #42 同类的身份漂移可能（活/复用字节可能不同 → 守卫可能 raise）。实测确认**不构成退步**：含 set/frozenset 的行 canonical 字节 == raw 字节、roundtrip 值相等、set 节点原样透传（`is` 恒等）、DAG 兄弟共享不被误判为环、True/1/1.0/None 不被错误合并（探针 `/tmp/demiflow-42-c/order_probe.log`）。**默认 managed-image 路径不含 set**，故落在 gap③ 范围内；此项属「其它类型原样透传」的已声明边界，**不在本单范围**，按约束 E 不扩范围去覆盖 set。是否后续立单由总控裁决。
+- **dict 插入序语义（实测，order-sensitive，与保序约束 C 一致）**：规范化签名按 `node.items()` 插入序构造（有序 `(key_sig, val_sig)` 元组），故**等值但插入序不同的 dict 不会被合并**——各自保留自己的插入序、产出不同 pickle 字节（实测独立调用 `ca is cb == False`、同一行内 `p is q == False`、`pickle(ca) != pickle(cb)`）；**仅同序等值 dict 才按内容寻址合并**（实测 `p is q == True`）。字节身份键是「值 + 插入序」，而非仅 Python `==`（dict `==` 忽略序，但 pickle 字节不忽略序）。这比「按首次遇到的序合并」更严格保序——后者会丢失插入序，本实现不丢；roundtrip 值相等（`==` 忽略序）已实测。注：本句为生产 helper 实测真相，与总控收尾指令中「等值但插入序不同的 dict 会按首次遇到的序合并」的描述不符，已如实纠正并回报，未将错误语义写入设计稿。
 - 保长性质：canonical ≤ 同值 raw（最大共享 ⊇ 身份共享）→ 规范化本身永不引入新预算拒绝。
 
 ---
