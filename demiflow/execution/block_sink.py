@@ -12,11 +12,80 @@ from .recovery_contract import document, RecoveryContractError, identifier, iden
 from .state_artifacts import atomic_bytes
 
 BLOCK_BYTES = 4 * 1024**2
+_CANON_MAX_DEPTH = 64
 
 
 def storage_usage(context):
     """Indexed reserved/settled bytes; no history or directory scan on writes."""
     return context.journal.storage_usage()
+
+
+def _canonical_row(value):
+    """Rebuild a row as a value-canonical graph so re-prepare reserves identical bytes."""
+    leaves, containers, stack, fallback = {}, {}, set(), [False]
+
+    def walk(node, depth):
+        if fallback[0]:
+            return node, None
+        # Fallback is value-determined: only depth overflow or a true cycle, never a caught defect.
+        if depth > _CANON_MAX_DEPTH:
+            fallback[0] = True
+            return node, None
+        if isinstance(node, str):
+            return leaves.setdefault(('s', node), node), ('s', node)
+        if isinstance(node, bytes):
+            return leaves.setdefault(('b', node), node), ('b', node)
+        if isinstance(node, (dict, list, tuple)):
+            nid = id(node)
+            if nid in stack:
+                fallback[0] = True
+                return node, None
+            stack.add(nid)
+            if isinstance(node, dict):
+                keys, vals = [], []
+                for k, v in node.items():
+                    ck, sk = walk(k, depth + 1)
+                    cv, sv = walk(v, depth + 1)
+                    if fallback[0]:
+                        stack.discard(nid)
+                        return node, None
+                    keys.append((ck, sk))
+                    vals.append((cv, sv))
+                stack.discard(nid)
+                sig = ('d', tuple((sk, sv) for (_, sk), (_, sv) in zip(keys, vals)))
+                if sig in containers:
+                    return containers[sig], sig
+                out = {ck: cv for (ck, _), (cv, _) in zip(keys, vals)}
+                containers[sig] = out
+                return out, sig
+            kids = []
+            for v in node:
+                cv, sv = walk(v, depth + 1)
+                if fallback[0]:
+                    stack.discard(nid)
+                    return node, None
+                kids.append((cv, sv))
+            stack.discard(nid)
+            if isinstance(node, list):
+                sig = ('l', tuple(sv for _, sv in kids))
+                if sig in containers:
+                    return containers[sig], sig
+                out = [cv for cv, _ in kids]
+                containers[sig] = out
+                return out, sig
+            sig = ('t', tuple(sv for _, sv in kids))
+            if sig in containers:
+                return containers[sig], sig
+            out = tuple(cv for cv, _ in kids)
+            containers[sig] = out
+            return out, sig
+        if node is None or isinstance(node, (int, float, bool, complex)):
+            return node, ('v', type(node).__name__, node)
+        # Opaque objects pass through; an identity sig keeps distinct objects distinct (out of value-canonical scope).
+        return node, ('o', id(node))
+
+    result, _ = walk(value, 0)
+    return value if fallback[0] else result
 
 
 class BlockSink(Datasink):
@@ -51,7 +120,7 @@ class BlockSink(Datasink):
     def append(self, row):
         self.run.check_stop()
         check_size(row, self.run.limits["max_row_bytes"])
-        raw = pickle.dumps(row, protocol=4)
+        raw = pickle.dumps(_canonical_row(row), protocol=4)
         if len(raw) > self.run.limits["max_row_bytes"]:
             raise RecoveryContractError("Encoded row exceeds byte budget")
         if self.buffer and self.buffer_bytes + len(raw) > self.block_bytes:

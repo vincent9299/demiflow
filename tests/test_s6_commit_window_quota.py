@@ -427,6 +427,135 @@ def test_s6_gate8_nondeterministic_reprepare_fail_closed(tmp_path):
             sink2.prepare([{"x": 1}, {"x": 2}, {"x": 3}], context)
 
 
+# --- Gate 10 (#42): value-canonical row encoding -> re-prepare byte identity ---
+
+def test_s6_gate10_equal_value_diff_identity_same_bytes_sha(tmp_path):
+    import pickle
+    from demiflow.execution.block_sink import _canonical_row
+    rid = (b"r" * 64).decode()
+    live = {"request_id": rid, "ref": {"request_id": rid}}
+    rid_a, rid_b = (b"r" * 64).decode(), (b"r" * 64).decode()
+    reuse = {"request_id": rid_a, "ref": {"request_id": rid_b}}
+    assert live == reuse and rid_a is not rid_b
+    # Live shares one request_id object; reuse has distinct equal objects. Raw
+    # pickle drifts (the #42 bug); value-canonical encoding does not.
+    assert pickle.dumps(live, protocol=4) != pickle.dumps(reuse, protocol=4)
+    assert pickle.dumps(_canonical_row(live), protocol=4) == pickle.dumps(_canonical_row(reuse), protocol=4)
+    with _coord_env(tmp_path) as (run, action):
+        s1, s2 = BlockSink(action, "output"), BlockSink(action, "output")
+        s1.append(live); s1._flush()
+        s2.append(reuse); s2._flush()
+        d1, d2 = s1.descriptor(), s2.descriptor()
+        b1, b2 = list(s1.block_entries(d1))[0], list(s2.block_entries(d2))[0]
+        assert b1["bytes"] == b2["bytes"]
+        assert b1["sha256"] == b2["sha256"]
+        assert list(s1.iter_rows(d1)) == [live]
+        assert list(s2.iter_rows(d2)) == [reuse]
+
+
+def test_s6_gate10_canonical_reprepare_control_no_recharge(tmp_path):
+    # Same commit, equal-value row with an independent request_id object and reused
+    # flipped (mirrors live->reuse): must reuse the reservation, never raise.
+    with _coord_env(tmp_path) as (run, action):
+        context = CommitCoordinator(action)._context(identity(["s6-canon-control"]))
+        rid = (b"r" * 64).decode()
+        live = {"request_id": rid, "ref": {"request_id": rid}, "reused": False}
+        BlockSink(action, "output").prepare([live], context)
+        before = _reservations(run, "row_bytes")
+        rid_a, rid_b = (b"r" * 64).decode(), (b"r" * 64).decode()
+        reuse = {"request_id": rid_a, "ref": {"request_id": rid_b}, "reused": True}
+        BlockSink(action, "output").prepare([reuse], context)
+        assert _reservations(run, "row_bytes") == before
+
+
+def test_s6_gate10_canonical_changed_value_fail_closed(tmp_path):
+    with _coord_env(tmp_path) as (run, action):
+        context = CommitCoordinator(action)._context(identity(["s6-canon-change"]))
+        BlockSink(action, "output").prepare(
+            [{"instruction": "draw a cat", "request_id": "x" * 64}], context)
+        with pytest.raises(RecoveryContractError, match="Budget reservation changed"):
+            BlockSink(action, "output").prepare(
+                [{"instruction": "draw a longer cat description", "request_id": "x" * 64}], context)
+
+
+def test_s6_gate10_max_row_bytes_boundary(tmp_path):
+    import pickle
+    from demiflow.execution.block_sink import _canonical_row
+    from demiflow.data.runtime_contract import check_size
+    fit = {"x": "a" * 40}
+    over = {"x": "a" * 41}
+    # canonical never inflates vs raw for the same value.
+    for row in (fit, over):
+        assert len(pickle.dumps(_canonical_row(row), protocol=4)) <= len(pickle.dumps(row, protocol=4))
+    budget = check_size(fit, 1 << 30)
+    limits = {"max_row_bytes": budget, "max_batch_bytes": 1 << 20, "max_output_rows": 100,
+              "max_output_bytes": 1 << 30, "max_scratch_bytes": 1 << 30}
+    with _coord_env(tmp_path, limits) as (run, action):
+        sink = BlockSink(action, "output")
+        sink.append(fit); sink._flush()
+        assert sink.descriptor()["rows"] == 1
+    # For check_size-valid rows the getsizeof value >= pickle length, so :53 is the
+    # binding budget; a slightly-over row is still refused fail-closed.
+    with _coord_env(tmp_path / "over", limits) as (run, action):
+        with pytest.raises((RecoveryContractError, RuntimeContractError)):
+            BlockSink(action, "output").append(over)
+
+
+def test_s6_gate10_encoded_backstop_rejects(tmp_path, monkeypatch):
+    import pickle
+    import demiflow.execution.block_sink as bs
+    from demiflow.execution.block_sink import _canonical_row
+    # Isolate the :55 encoded-length backstop (check_size :53 normally binds first)
+    # to prove canonical encoding keeps it fail-closed. Production check_size unchanged.
+    monkeypatch.setattr(bs, "check_size", lambda *a, **k: 0)
+    fit, over = {"x": "a" * 10}, {"x": "a" * 4096}
+    budget = len(pickle.dumps(_canonical_row(fit), protocol=4))
+    assert len(pickle.dumps(_canonical_row(over), protocol=4)) > budget
+    limits = {"max_row_bytes": budget, "max_batch_bytes": 1 << 20, "max_output_rows": 100,
+              "max_output_bytes": 1 << 30, "max_scratch_bytes": 1 << 30}
+    with _coord_env(tmp_path, limits) as (run, action):
+        sink = BlockSink(action, "output")
+        sink.append(fit); sink._flush()
+        assert sink.descriptor()["rows"] == 1
+    with _coord_env(tmp_path / "over", limits) as (run, action):
+        with pytest.raises(RecoveryContractError, match="Encoded row exceeds byte budget"):
+            BlockSink(action, "output").append(over)
+
+
+def test_s6_gate10_depth_fallback_raw_writes_reads(tmp_path, monkeypatch):
+    import demiflow.execution.block_sink as bs
+    # check_size caps valid rows at depth 16; lower the canon bound so a valid-depth
+    # row exercises the value-determined depth fallback end-to-end through the sink.
+    monkeypatch.setattr(bs, "_CANON_MAX_DEPTH", 3)
+    row = {"a": {"b": {"c": {"d": {"e": 1}}}}}
+    assert bs._canonical_row(row) is row
+    with _coord_env(tmp_path) as (run, action):
+        sink = BlockSink(action, "output")
+        sink.append(row); sink._flush()
+        assert list(sink.iter_rows(sink.descriptor())) == [row]
+
+
+def test_s6_gate10_deep_fallback_raw_roundtrip():
+    import pickle
+    from demiflow.execution.block_sink import _canonical_row, _CANON_MAX_DEPTH
+    deep = cur = {}
+    for _ in range(_CANON_MAX_DEPTH + 5):
+        cur["n"] = {}
+        cur = cur["n"]
+    assert _canonical_row(deep) is deep
+    assert pickle.loads(pickle.dumps(_canonical_row(deep), protocol=4)) == deep
+
+
+def test_s6_gate10_cycle_fallback_raw_roundtrip():
+    import pickle
+    from demiflow.execution.block_sink import _canonical_row
+    cyc = {}
+    cyc["self"] = cyc
+    assert _canonical_row(cyc) is cyc
+    loaded = pickle.loads(pickle.dumps(_canonical_row(cyc), protocol=4))
+    assert loaded["self"] is loaded
+
+
 # --- Gate 9: real managed-worker recovery preserves output quota + bytes ---
 
 def _output_budgets(directory):
