@@ -38,13 +38,20 @@ from .run_context import RunAction, current_action
 from .source_snapshot import capture_source, freeze_source
 from .state_artifacts import StateArtifacts
 from .worker.bootstrap import recv_message, send_message
-from ..planning.dag import build_channel_plan
+from ..planning.dag import build_channel_plan, _operation_semantics
 from ..planning.graph_channels import RouteTable
 
 logger = logging.getLogger(__name__)
 
 _WORKER_CPU_MILLIS = 1000
 _WORKER_MEMORY_BYTES = 1024 ** 3
+
+
+def _sealed_operators(plan):
+    # Must mirror verify_loaded_plan's recompute exactly (frozen dag semantics); each
+    # graph worker runs a single-node LogicalPlan, so enumerate its operations directly.
+    return [{"logical_node_id": identity([_operation_semantics(op)[0], index])}
+            for index, op in enumerate(plan.operations)]
 
 
 def _activation_order(ancestor_alloc, target_allocs, *, capacity):
@@ -399,6 +406,8 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         action, lambda: capture_executor.iter_rows(selected, LogicalPlan()))
     ancestor_plan_ref = stage_plan_artifact(action, ancestor["plan"])
     target_plan_refs = [stage_plan_artifact(action, target["plan"]) for target in targets]
+    ancestor_sealed = _sealed_operators(ancestor["plan"])
+    target_sealed = [_sealed_operators(target["plan"]) for target in targets]
     manifest_ref = _build_manifest(run, [ancestor_plan_ref, *target_plan_refs])
     domain = read_domain(run.directory, host_id)
 
@@ -499,6 +508,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         "allocation_id": ancestor_alloc, "output_child_id": ancestor_output_child,
         "cut_namespace": action.action_id,
         "source_child_id": ancestor_source_child, "plan_ref": ancestor_plan_ref,
+        "sealed_operators": ancestor_sealed,
         "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
         "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
         "route_plan": channel_plan, "queue_depth": queue_depth,
@@ -519,6 +529,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         spec["graph"] = {
             "allocation_id": alloc, "output_child_id": target_children[rid],
             "plan_ref": target_plan_refs[targets.index(target)], "source_id": source_id,
+            "sealed_operators": target_sealed[targets.index(target)],
             "host_id": host_id, "logical_node_id": target["logical_node_id"],
             "occurrence_id": target["occurrence_id"], "sink_id": rid,
             "restore": ({"inputs": 0, "sequence": terminal.sequence, "rows": 0,
@@ -806,6 +817,8 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         action, lambda: capture_executor.iter_rows(selected, LogicalPlan()))
     ancestor_plan_ref = stage_plan_artifact(action, ancestor["plan"])
     target_plan_refs = [stage_plan_artifact(action, target["plan"]) for target in targets]
+    ancestor_sealed = _sealed_operators(ancestor["plan"])
+    target_sealed = [_sealed_operators(target["plan"]) for target in targets]
     manifest_ref = _build_manifest(run, [ancestor_plan_ref, *target_plan_refs])
     domain = read_domain(run.directory, host_id)
 
@@ -898,6 +911,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         "allocation_id": ancestor_alloc, "output_child_id": ancestor_output_child,
         "cut_namespace": action.action_id,
         "source_child_id": ancestor_source_child, "plan_ref": ancestor_plan_ref,
+        "sealed_operators": ancestor_sealed,
         "source_reference": source_reference, "source_id": source_id, "host_id": host_id,
         "logical_node_id": ancestor["logical_node_id"], "occurrence_id": ancestor["occurrence_id"],
         "route_plan": channel_plan, "queue_depth": queue_depth,
@@ -917,6 +931,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         spec["graph"] = {
             "allocation_id": alloc, "output_child_id": target_children[rid],
             "plan_ref": target_plan_refs[targets.index(target)], "source_id": source_id,
+            "sealed_operators": target_sealed[targets.index(target)],
             "host_id": host_id, "logical_node_id": target["logical_node_id"],
             "occurrence_id": target["occurrence_id"], "sink_id": rid,
             "restore": ({"inputs": 0, "sequence": terminal.sequence, "rows": 0,

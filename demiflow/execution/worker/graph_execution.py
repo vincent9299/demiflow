@@ -33,6 +33,7 @@ class GraphWorkerExecutor:
         self.source_child_id = graph.get("source_child_id")
         self.output_child_id = graph["output_child_id"]
         self.plan_ref = graph["plan_ref"]
+        self.sealed_operators = graph.get("sealed_operators")
         self.source_reference = graph.get("source_reference")
         self.source_id = graph["source_id"]
         self.occurrence_id = graph["occurrence_id"]
@@ -52,11 +53,14 @@ class GraphWorkerExecutor:
 
     def _load_plan(self):
         import cloudpickle
+        from ..chain import verify_loaded_plan
         path = self.authority.directory / self.plan_ref["path"]
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest() != self.plan_ref["sha256"]:
             raise RecoveryContractError("Worker plan artifact digest differs")
-        return cloudpickle.loads(raw)
+        plan = cloudpickle.loads(raw)
+        verify_loaded_plan(plan, self.plan_ref, self.sealed_operators)
+        return plan
 
     def _links(self, specs, role):
         links = {}
