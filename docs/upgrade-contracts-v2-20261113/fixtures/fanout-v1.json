@@ -1,0 +1,691 @@
+{
+  "fixture_kind": "contract_only_dummy_program_refs",
+  "logical_dag": {
+    "schema_version": "demiflow.logical_dag.v1",
+    "action_id": "fanout-action",
+    "nodes": [
+      {
+        "logical_node_id": "3df4d7bbea83fc13356512b4968eacfd1e9fd19f934405d92b2f96af87059836",
+        "occurrence_id": "17a7dcf5103d4c6f59133254e37ad9fa4a89e794b1d93d07356618e018bd1df5",
+        "op_kind": "from_items",
+        "operator_spec_ref": null,
+        "input_ports": [],
+        "output_ports": [
+          "out"
+        ],
+        "traits": {
+          "category": "source",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        }
+      },
+      {
+        "logical_node_id": "7c95e0598ad20c02af721df4a185ab391f7e8c755d26c5903f27586f82d4f01e",
+        "occurrence_id": "043525e69e262888dde0adebca9227b4646b6c1210a9665613a5bcbbe62d050f",
+        "op_kind": "map",
+        "operator_spec_ref": null,
+        "input_ports": [
+          "in"
+        ],
+        "output_ports": [
+          "out"
+        ],
+        "traits": {
+          "category": "transform",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        }
+      },
+      {
+        "logical_node_id": "792057b738c52e4dbb221a2c77859479fbf6d96fc8da608f85fbad3f2b2daf9b",
+        "occurrence_id": "23ea5aa12f627475a2e0bcb80d6fad8af8f31d277f59c339a2bc48de064bdeb5",
+        "op_kind": "map",
+        "operator_spec_ref": null,
+        "input_ports": [
+          "in"
+        ],
+        "output_ports": [
+          "out"
+        ],
+        "traits": {
+          "category": "transform",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        }
+      },
+      {
+        "logical_node_id": "9de2e8c5c2d0c3d857ee72c36ad7975e596a38936bb88dce655ed436b8cfd97e",
+        "occurrence_id": "c6728891742c0b5dc80fa5dfcdcf069bce92ea28d92c86e409237d0ad8f94ea6",
+        "op_kind": "map",
+        "operator_spec_ref": null,
+        "input_ports": [
+          "in"
+        ],
+        "output_ports": [
+          "out"
+        ],
+        "traits": {
+          "category": "transform",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        }
+      },
+      {
+        "logical_node_id": "8b5585e3fe82212ac506b74977f8a2e657642095f52738682f0302ae249aa472",
+        "occurrence_id": "9a3279f5553a01d3448635ff4b28f215ea69760b04ac8c9483e34f9e6b0158f3",
+        "op_kind": "count",
+        "operator_spec_ref": null,
+        "input_ports": [
+          "in"
+        ],
+        "output_ports": [],
+        "traits": {
+          "category": "action",
+          "worker_model": "driver",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "ac715f48a09f992ae45bee0d957c4570a3b90d41109a2c23d2cf8f764f303fb2",
+        "from": {
+          "logical_node_id": "3df4d7bbea83fc13356512b4968eacfd1e9fd19f934405d92b2f96af87059836",
+          "port": "out"
+        },
+        "to": {
+          "logical_node_id": "7c95e0598ad20c02af721df4a185ab391f7e8c755d26c5903f27586f82d4f01e",
+          "port": "in"
+        }
+      },
+      {
+        "edge_id": "bb00da0e10f4b357313057882a03e20340fd16fb1fb4936ae34e190c7cc610db",
+        "from": {
+          "logical_node_id": "7c95e0598ad20c02af721df4a185ab391f7e8c755d26c5903f27586f82d4f01e",
+          "port": "out"
+        },
+        "to": {
+          "logical_node_id": "792057b738c52e4dbb221a2c77859479fbf6d96fc8da608f85fbad3f2b2daf9b",
+          "port": "in"
+        }
+      },
+      {
+        "edge_id": "ded86168a5d17691ae7722443c0134474a0dbf8854cff48527144b6668ec9361",
+        "from": {
+          "logical_node_id": "7c95e0598ad20c02af721df4a185ab391f7e8c755d26c5903f27586f82d4f01e",
+          "port": "out"
+        },
+        "to": {
+          "logical_node_id": "9de2e8c5c2d0c3d857ee72c36ad7975e596a38936bb88dce655ed436b8cfd97e",
+          "port": "in"
+        }
+      },
+      {
+        "edge_id": "35dbd16c1be14252dfb68bb7ba46b6107ab5bbe9322124bc3ea8c995fb87d8d2",
+        "from": {
+          "logical_node_id": "792057b738c52e4dbb221a2c77859479fbf6d96fc8da608f85fbad3f2b2daf9b",
+          "port": "out"
+        },
+        "to": {
+          "logical_node_id": "8b5585e3fe82212ac506b74977f8a2e657642095f52738682f0302ae249aa472",
+          "port": "in"
+        }
+      },
+      {
+        "edge_id": "9789868299c57c26b32094e88e00eed588f14dc0800d82e41665b3cd5d1d115f",
+        "from": {
+          "logical_node_id": "9de2e8c5c2d0c3d857ee72c36ad7975e596a38936bb88dce655ed436b8cfd97e",
+          "port": "out"
+        },
+        "to": {
+          "logical_node_id": "8b5585e3fe82212ac506b74977f8a2e657642095f52738682f0302ae249aa472",
+          "port": "in"
+        }
+      }
+    ],
+    "sources": [
+      {
+        "source_id": "3df4d7bbea83fc13356512b4968eacfd1e9fd19f934405d92b2f96af87059836",
+        "source_identity_ref": {
+          "fanout_source": "src"
+        },
+        "partition_scheme": {
+          "kind": "single",
+          "partition_count": 1,
+          "scheme_version": 1
+        }
+      }
+    ],
+    "terminals": [
+      {
+        "logical_node_id": "8b5585e3fe82212ac506b74977f8a2e657642095f52738682f0302ae249aa472",
+        "kind": "count",
+        "sink_ids": [
+          "output"
+        ]
+      }
+    ],
+    "shared_ancestors": [],
+    "dag_id": "112b7a8a2e937df65fd9305a7ace6dca62b097565602d0caa68b230c57f8628f"
+  },
+  "physical_plan": {
+    "schema_version": "demiflow.physical_execution_plan.v1",
+    "plan_revision": 0,
+    "logical_dag_ref": {
+      "dag_id": "112b7a8a2e937df65fd9305a7ace6dca62b097565602d0caa68b230c57f8628f",
+      "sha256": "cf290be037d85cd2d61e41f65272daf470e2216b4a386d270f1e75eecf909ab9"
+    },
+    "artifact_manifest_ref": {
+      "manifest_id": "test-manifest",
+      "sha256": "abababababababababababababababababababababababababababababababab"
+    },
+    "worker_groups": [
+      {
+        "group_id": "gA",
+        "role": "cpu_prepare",
+        "profile_ref": "1f656662c5f41ebe09a224311f09a762cfcdafb082b6ded1b415463e7d362ef3",
+        "stage_refs": [
+          "8158e9dc7d53d1b9a791cfeba2c2e9a08ea0057fa7d63f16a231adee909cb682"
+        ],
+        "min_workers": 1,
+        "initial_workers": 1,
+        "max_workers": 1
+      },
+      {
+        "group_id": "gB",
+        "role": "cpu_prepare",
+        "profile_ref": "1f656662c5f41ebe09a224311f09a762cfcdafb082b6ded1b415463e7d362ef3",
+        "stage_refs": [
+          "bc5d224cd31a13d4e3f540a2f4b9a04c53cfce8cf4342e1a061475fd3716ac3e"
+        ],
+        "min_workers": 1,
+        "initial_workers": 1,
+        "max_workers": 1
+      },
+      {
+        "group_id": "gC",
+        "role": "cpu_prepare",
+        "profile_ref": "1f656662c5f41ebe09a224311f09a762cfcdafb082b6ded1b415463e7d362ef3",
+        "stage_refs": [
+          "b7b3f2ea9afd31933501496c9a8b7284d70701911b776f6cff81d9a37bf5931e"
+        ],
+        "min_workers": 1,
+        "initial_workers": 1,
+        "max_workers": 1
+      }
+    ],
+    "stages": [
+      {
+        "stage_id": "31f00a7039a6f713509ef383e238cb620d0c33ba3d5407e2ca2ef4f897629e25",
+        "logical_node_id": "3df4d7bbea83fc13356512b4968eacfd1e9fd19f934405d92b2f96af87059836",
+        "occurrence_id": "17a7dcf5103d4c6f59133254e37ad9fa4a89e794b1d93d07356618e018bd1df5",
+        "partitions": [
+          "6c5b4754ef604e57fd761aa900f5faabd7db26c80e5fd770ebf381421686bf13"
+        ],
+        "traits": {
+          "category": "source",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        },
+        "budgets": {
+          "inflight_rows": 1024,
+          "inflight_bytes": 8388608,
+          "output_bytes": 67108864
+        }
+      },
+      {
+        "stage_id": "8158e9dc7d53d1b9a791cfeba2c2e9a08ea0057fa7d63f16a231adee909cb682",
+        "logical_node_id": "7c95e0598ad20c02af721df4a185ab391f7e8c755d26c5903f27586f82d4f01e",
+        "occurrence_id": "043525e69e262888dde0adebca9227b4646b6c1210a9665613a5bcbbe62d050f",
+        "partitions": [
+          "e70ab18ac122b60dfd571b0a14581abd2b06e16a8251b95add2f67f818a6ef52"
+        ],
+        "traits": {
+          "category": "transform",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        },
+        "budgets": {
+          "inflight_rows": 1024,
+          "inflight_bytes": 8388608,
+          "output_bytes": 67108864
+        }
+      },
+      {
+        "stage_id": "bc5d224cd31a13d4e3f540a2f4b9a04c53cfce8cf4342e1a061475fd3716ac3e",
+        "logical_node_id": "792057b738c52e4dbb221a2c77859479fbf6d96fc8da608f85fbad3f2b2daf9b",
+        "occurrence_id": "23ea5aa12f627475a2e0bcb80d6fad8af8f31d277f59c339a2bc48de064bdeb5",
+        "partitions": [
+          "8cbff03f4906f52490e1cea736ab903e4257b5d587ad5ef79302d29b099c2fa7"
+        ],
+        "traits": {
+          "category": "transform",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        },
+        "budgets": {
+          "inflight_rows": 1024,
+          "inflight_bytes": 8388608,
+          "output_bytes": 67108864
+        }
+      },
+      {
+        "stage_id": "b7b3f2ea9afd31933501496c9a8b7284d70701911b776f6cff81d9a37bf5931e",
+        "logical_node_id": "9de2e8c5c2d0c3d857ee72c36ad7975e596a38936bb88dce655ed436b8cfd97e",
+        "occurrence_id": "c6728891742c0b5dc80fa5dfcdcf069bce92ea28d92c86e409237d0ad8f94ea6",
+        "partitions": [
+          "1072e15c059ca8136374e64366f6bd2f9b2715be814dc4a6fd530bf293f531d7"
+        ],
+        "traits": {
+          "category": "transform",
+          "worker_model": "ephemeral",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        },
+        "budgets": {
+          "inflight_rows": 1024,
+          "inflight_bytes": 8388608,
+          "output_bytes": 67108864
+        }
+      },
+      {
+        "stage_id": "0db4348a6942541143b64935841a6b6fadae4dcc8baec5c7409c1310dea0a906",
+        "logical_node_id": "8b5585e3fe82212ac506b74977f8a2e657642095f52738682f0302ae249aa472",
+        "occurrence_id": "9a3279f5553a01d3448635ff4b28f215ea69760b04ac8c9483e34f9e6b0158f3",
+        "partitions": [
+          "f8c326bd52fb84987f4c0d1ee62aa68a0551ee315bf663d255fb07b21a10a4cb"
+        ],
+        "traits": {
+          "category": "action",
+          "worker_model": "driver",
+          "lifecycle": "transient",
+          "policy_class": "ephemeral_worker",
+          "elastic": true,
+          "input_mode": "incremental",
+          "cardinality": "one",
+          "ordering": "unordered",
+          "state_ownership": "none",
+          "effect_kind": "pure",
+          "batching": "record"
+        },
+        "budgets": {
+          "inflight_rows": 1024,
+          "inflight_bytes": 8388608,
+          "output_bytes": 67108864
+        }
+      }
+    ],
+    "channels": [
+      {
+        "channel_id": "bbb801e18cdec9f9ad1223d069e564325d41a6d142bdfff40e192473ed8ae52e",
+        "producer_partitions": [
+          "6c5b4754ef604e57fd761aa900f5faabd7db26c80e5fd770ebf381421686bf13"
+        ],
+        "consumer_partitions": [
+          "e70ab18ac122b60dfd571b0a14581abd2b06e16a8251b95add2f67f818a6ef52"
+        ],
+        "exchange_mode": "durable_incremental",
+        "routing": "forward",
+        "credit_budget": {
+          "rows": 1024,
+          "bytes": 8388608
+        },
+        "durability": {
+          "declared": "durable",
+          "read_domain": "test-domain"
+        }
+      },
+      {
+        "channel_id": "b2bb50e9c803c1adb32fa83183abf3ea87725749c5c9b2818e031f7c8646ff74",
+        "producer_partitions": [
+          "e70ab18ac122b60dfd571b0a14581abd2b06e16a8251b95add2f67f818a6ef52"
+        ],
+        "consumer_partitions": [
+          "8cbff03f4906f52490e1cea736ab903e4257b5d587ad5ef79302d29b099c2fa7"
+        ],
+        "exchange_mode": "durable_incremental",
+        "routing": "forward",
+        "credit_budget": {
+          "rows": 1024,
+          "bytes": 8388608
+        },
+        "durability": {
+          "declared": "durable",
+          "read_domain": "test-domain"
+        }
+      },
+      {
+        "channel_id": "4f74cadcdfff995275e458659404e09174fec9f7525d8a7b220445373e7799c8",
+        "producer_partitions": [
+          "e70ab18ac122b60dfd571b0a14581abd2b06e16a8251b95add2f67f818a6ef52"
+        ],
+        "consumer_partitions": [
+          "1072e15c059ca8136374e64366f6bd2f9b2715be814dc4a6fd530bf293f531d7"
+        ],
+        "exchange_mode": "durable_incremental",
+        "routing": "forward",
+        "credit_budget": {
+          "rows": 1024,
+          "bytes": 8388608
+        },
+        "durability": {
+          "declared": "durable",
+          "read_domain": "test-domain"
+        }
+      },
+      {
+        "channel_id": "cba6482be7d4f7381b5caaeceda73c986154be4a3ace35f3501b782bbd29a485",
+        "producer_partitions": [
+          "8cbff03f4906f52490e1cea736ab903e4257b5d587ad5ef79302d29b099c2fa7"
+        ],
+        "consumer_partitions": [
+          "f8c326bd52fb84987f4c0d1ee62aa68a0551ee315bf663d255fb07b21a10a4cb"
+        ],
+        "exchange_mode": "durable_incremental",
+        "routing": "forward",
+        "credit_budget": {
+          "rows": 1024,
+          "bytes": 8388608
+        },
+        "durability": {
+          "declared": "durable",
+          "read_domain": "test-domain"
+        }
+      },
+      {
+        "channel_id": "5e7d483a07f66f02ef1b04e4266774b983f982218d32b55993493b74f37dc34d",
+        "producer_partitions": [
+          "1072e15c059ca8136374e64366f6bd2f9b2715be814dc4a6fd530bf293f531d7"
+        ],
+        "consumer_partitions": [
+          "f8c326bd52fb84987f4c0d1ee62aa68a0551ee315bf663d255fb07b21a10a4cb"
+        ],
+        "exchange_mode": "durable_incremental",
+        "routing": "forward",
+        "credit_budget": {
+          "rows": 1024,
+          "bytes": 8388608
+        },
+        "durability": {
+          "declared": "durable",
+          "read_domain": "test-domain"
+        }
+      }
+    ],
+    "exchange_selections": [
+      {
+        "channel_id": "bbb801e18cdec9f9ad1223d069e564325d41a6d142bdfff40e192473ed8ae52e",
+        "mode": "durable_incremental",
+        "reason": "policy declares durable incremental exchange"
+      },
+      {
+        "channel_id": "b2bb50e9c803c1adb32fa83183abf3ea87725749c5c9b2818e031f7c8646ff74",
+        "mode": "durable_incremental",
+        "reason": "policy declares durable incremental exchange"
+      },
+      {
+        "channel_id": "4f74cadcdfff995275e458659404e09174fec9f7525d8a7b220445373e7799c8",
+        "mode": "durable_incremental",
+        "reason": "policy declares durable incremental exchange"
+      },
+      {
+        "channel_id": "cba6482be7d4f7381b5caaeceda73c986154be4a3ace35f3501b782bbd29a485",
+        "mode": "durable_incremental",
+        "reason": "policy declares durable incremental exchange"
+      },
+      {
+        "channel_id": "5e7d483a07f66f02ef1b04e4266774b983f982218d32b55993493b74f37dc34d",
+        "mode": "durable_incremental",
+        "reason": "policy declares durable incremental exchange"
+      }
+    ],
+    "recovery": {
+      "checkpoint_interval_ms": 60000,
+      "unconfirmed_rows": 1024,
+      "unconfirmed_bytes": 8388608,
+      "terminals": []
+    },
+    "feasibility_snapshot_ref": "09e53b0196818d93ea6fd9217def3d0d6afb19ea53b06d6bfd3836b1a9c3b079",
+    "plan_id": "c0a1c0fb1f9d631bdb195f14c4db2a2b77ea10dc893c4d45e8df9f7b9fde4be6"
+  },
+  "manifest_ref": {
+    "manifest_id": "test-manifest",
+    "sha256": "abababababababababababababababababababababababababababababababab"
+  },
+  "bindings": {
+    "ref": {
+      "path": "scratch/chain-execution-bindings/2c32cb536f058b6e3b6072c64101336ef649c9d3782399048c57c300ab5cf64f.json",
+      "sha256": "2c32cb536f058b6e3b6072c64101336ef649c9d3782399048c57c300ab5cf64f",
+      "bytes": 4089
+    },
+    "document": {
+      "schema": "demiflow.execution_bindings.v1",
+      "run_id": "run-test",
+      "action_id": "fanout-action",
+      "dag_id": "112b7a8a2e937df65fd9305a7ace6dca62b097565602d0caa68b230c57f8628f",
+      "plan_id": "c0a1c0fb1f9d631bdb195f14c4db2a2b77ea10dc893c4d45e8df9f7b9fde4be6",
+      "artifact_manifest_ref": {
+        "manifest_id": "test-manifest",
+        "sha256": "abababababababababababababababababababababababababababababababab"
+      },
+      "supported_slice": "static_fanout_v1",
+      "profiles": {
+        "1f656662c5f41ebe09a224311f09a762cfcdafb082b6ded1b415463e7d362ef3": {
+          "requests": {
+            "cpu_millis": 1000,
+            "memory_bytes": 1073741824,
+            "accelerators": [
+              {
+                "type": "gpu",
+                "count": 1
+              }
+            ],
+            "custom": {
+              "slots": {
+                "amount": 2,
+                "unit": "core"
+              }
+            }
+          }
+        }
+      },
+      "programs": [
+        {
+          "group_id": "gA",
+          "stage_ids": [
+            "8158e9dc7d53d1b9a791cfeba2c2e9a08ea0057fa7d63f16a231adee909cb682"
+          ],
+          "plan_ref": {
+            "path": "scratch/chain-plans/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd.pkl",
+            "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            "bytes": 128,
+            "code_pin_digest": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+            "code_sources": []
+          },
+          "sealed_operators": [
+            {
+              "logical_node_id": "7c95e0598ad20c02af721df4a185ab391f7e8c755d26c5903f27586f82d4f01e",
+              "occurrence_id": "043525e69e262888dde0adebca9227b4646b6c1210a9665613a5bcbbe62d050f"
+            }
+          ],
+          "operator_bindings": [
+            {
+              "program_index": 0,
+              "stage_id": "8158e9dc7d53d1b9a791cfeba2c2e9a08ea0057fa7d63f16a231adee909cb682"
+            }
+          ]
+        },
+        {
+          "group_id": "gB",
+          "stage_ids": [
+            "bc5d224cd31a13d4e3f540a2f4b9a04c53cfce8cf4342e1a061475fd3716ac3e"
+          ],
+          "plan_ref": {
+            "path": "scratch/chain-plans/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd.pkl",
+            "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            "bytes": 128,
+            "code_pin_digest": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+            "code_sources": []
+          },
+          "sealed_operators": [
+            {
+              "logical_node_id": "792057b738c52e4dbb221a2c77859479fbf6d96fc8da608f85fbad3f2b2daf9b",
+              "occurrence_id": "23ea5aa12f627475a2e0bcb80d6fad8af8f31d277f59c339a2bc48de064bdeb5"
+            }
+          ],
+          "operator_bindings": [
+            {
+              "program_index": 0,
+              "stage_id": "bc5d224cd31a13d4e3f540a2f4b9a04c53cfce8cf4342e1a061475fd3716ac3e"
+            }
+          ]
+        },
+        {
+          "group_id": "gC",
+          "stage_ids": [
+            "b7b3f2ea9afd31933501496c9a8b7284d70701911b776f6cff81d9a37bf5931e"
+          ],
+          "plan_ref": {
+            "path": "scratch/chain-plans/cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd.pkl",
+            "sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            "bytes": 128,
+            "code_pin_digest": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+            "code_sources": []
+          },
+          "sealed_operators": [
+            {
+              "logical_node_id": "9de2e8c5c2d0c3d857ee72c36ad7975e596a38936bb88dce655ed436b8cfd97e",
+              "occurrence_id": "c6728891742c0b5dc80fa5dfcdcf069bce92ea28d92c86e409237d0ad8f94ea6"
+            }
+          ],
+          "operator_bindings": [
+            {
+              "program_index": 0,
+              "stage_id": "b7b3f2ea9afd31933501496c9a8b7284d70701911b776f6cff81d9a37bf5931e"
+            }
+          ]
+        }
+      ],
+      "driver_stage_ids": [
+        "31f00a7039a6f713509ef383e238cb620d0c33ba3d5407e2ca2ef4f897629e25",
+        "0db4348a6942541143b64935841a6b6fadae4dcc8baec5c7409c1310dea0a906"
+      ],
+      "source_bindings": [
+        {
+          "stage_id": "31f00a7039a6f713509ef383e238cb620d0c33ba3d5407e2ca2ef4f897629e25",
+          "kind": "fixed_source",
+          "ref": {
+            "source_id": "3df4d7bbea83fc13356512b4968eacfd1e9fd19f934405d92b2f96af87059836",
+            "source_identity_ref": {
+              "fanout_source": "src"
+            }
+          }
+        }
+      ],
+      "channel_options": [
+        {
+          "channel_id": "bbb801e18cdec9f9ad1223d069e564325d41a6d142bdfff40e192473ed8ae52e",
+          "logical_edge_ids": [
+            "ac715f48a09f992ae45bee0d957c4570a3b90d41109a2c23d2cf8f764f303fb2"
+          ]
+        },
+        {
+          "channel_id": "b2bb50e9c803c1adb32fa83183abf3ea87725749c5c9b2818e031f7c8646ff74",
+          "logical_edge_ids": [
+            "bb00da0e10f4b357313057882a03e20340fd16fb1fb4936ae34e190c7cc610db"
+          ]
+        },
+        {
+          "channel_id": "4f74cadcdfff995275e458659404e09174fec9f7525d8a7b220445373e7799c8",
+          "logical_edge_ids": [
+            "ded86168a5d17691ae7722443c0134474a0dbf8854cff48527144b6668ec9361"
+          ]
+        },
+        {
+          "channel_id": "cba6482be7d4f7381b5caaeceda73c986154be4a3ace35f3501b782bbd29a485",
+          "logical_edge_ids": [
+            "35dbd16c1be14252dfb68bb7ba46b6107ab5bbe9322124bc3ea8c995fb87d8d2"
+          ]
+        },
+        {
+          "channel_id": "5e7d483a07f66f02ef1b04e4266774b983f982218d32b55993493b74f37dc34d",
+          "logical_edge_ids": [
+            "9789868299c57c26b32094e88e00eed588f14dc0800d82e41665b3cd5d1d115f"
+          ]
+        }
+      ],
+      "checkpoint_rows": 2
+    }
+  }
+}

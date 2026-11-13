@@ -1,0 +1,70 @@
+{
+  "kind": "design_validation_not_runtime_acceptance",
+  "base_commit": "bbd93ffcc136c361093c5a4b6d79d0352c4c2557",
+  "checks": [
+    {
+      "check": "source_baseline",
+      "status": "passed",
+      "detail": {
+        "unchanged_baseline_source_files": 39
+      }
+    },
+    {
+      "check": "unique_function_and_file_owner",
+      "status": "passed",
+      "detail": {
+        "tasks": 144,
+        "files": 45
+      }
+    },
+    {
+      "check": "signatures_inputs_and_type_declarations",
+      "status": "passed",
+      "detail": "All Python final signatures parse; baseline functions/hashes and argument descriptions match."
+    },
+    {
+      "check": "producer_consumer_graph",
+      "status": "passed",
+      "detail": "All new implementation functions have task consumers; engine task graph has no workbench dependency."
+    },
+    {
+      "check": "root_coverage_and_test_targets",
+      "status": "passed",
+      "detail": {
+        "acceptance_gates": 27,
+        "intent_leaves": 20,
+        "runtime_acceptance": "not_run"
+      }
+    },
+    {
+      "check": "wire_samples_and_v1_compatibility",
+      "status": "passed",
+      "detail": "Three v1 samples accepted by actual interpreter. v2 DAG/physical valid; v2 runtime explicitly unverified."
+    },
+    {
+      "check": "documents_and_dispatch_links",
+      "status": "passed",
+      "detail": "All local Markdown links resolve."
+    },
+    {
+      "check": "product_and_public_api_examples",
+      "status": "passed",
+      "detail": "User examples parse and public methods/keywords exist; no future behavior claimed as executed."
+    },
+    {
+      "check": "workspace_and_protected_files",
+      "status": "passed",
+      "detail": "Only this design directory differs. All production, memory and global architecture files untouched."
+    },
+    {
+      "check": "final_consistency",
+      "status": "passed",
+      "detail": "Ten review records present; runtime acceptance remains separate; corrected interfaces retained."
+    }
+  ],
+  "runtime_accepted": false,
+  "limitations": [
+    "v2 bindings interpreter and implementation remain to be written",
+    "browser/Ray/performance/business acceptance not executed by this design task"
+  ]
+}

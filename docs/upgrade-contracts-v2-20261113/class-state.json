@@ -1,0 +1,348 @@
+{
+  "demiflow/data/dataset.py:Dataset": {
+    "fields": {
+      "_source": "source",
+      "_plan": "plan",
+      "_executor": "executor",
+      "_stages": "tuple(stages)",
+      "normalized": "tuple[str, ...] | Mapping[str, str]",
+      "normalized_descending": "bool | tuple[bool, ...]"
+    },
+    "init_source": "def __init__(\n        self, source: SourcePlan, plan: LogicalPlan, executor: Any,\n        stages: tuple = (),\n    ) -> None:\n        self._source = source\n        self._plan = plan\n        self._executor = executor\n        # map_stage 挂载的规范算子实例（run_stream 退出期收尾 aclose 用；\n        # 惰性路径不带 stages，终结动作收尾为空操作）\n        self._stages = tuple(stages)"
+  },
+  "demiflow/embeddings/runtime.py:EmbeddingActor": {
+    "fields": {
+      "model": "replace(model)",
+      "service": "service",
+      "request_gate": "request_gate if request_gate is not None else RequestGate(concurrency)",
+      "call_metrics": "EmbeddingMetrics()",
+      "_runtime": "self",
+      "_started": "False",
+      "_pool": "None",
+      "_prepare_pool": "None",
+      "_client": "None",
+      "_owner": "None",
+      "_journal": "None",
+      "_response_pool": "None",
+      "_document_reader": "None",
+      "_started_at": "time.perf_counter()",
+      "_request_slots": "asyncio.Semaphore(self.concurrency)",
+      "_api_key": "os.environ.get(self.model.api_key_env) if self.model.api_key_env else None"
+    },
+    "init_source": "def __init__(self, *, model, inputs, output, call_output, error_output,\n                 concurrency, label, options, max_requests, service, request_gate):\n        if not isinstance(model, EmbeddingModel):\n            raise TypeError('model must be EmbeddingModel')\n        if (not isinstance(inputs, dict) or len(inputs) != 1 or\n                next(iter(inputs)) not in {'image', 'text', 'document'} or\n                any(not isinstance(v, str) or not v for v in inputs.values())):\n            raise ValueError('inputs must map exactly one of image/text/document to a row column')\n        if 'image' in inputs and model.input_format != 'chat':\n            raise ValueError('Image embeddings require input_format=chat')\n        destinations = [v for v in (output, call_output, error_output) if v is not None]\n        if (not output or any(not isinstance(v, str) or not v for v in destinations)\n                or len(set(destinations)) != len(destinations)):\n            raise ValueError('Embedding output columns must be nonempty and distinct')\n        if max_requests is not None and (type(max_requests) is not int or max_requests < 1):\n            raise ValueError('max_requests must be a positive integer or None')\n        validate_service(service)\n        if request_gate is not None and not isinstance(request_gate, RequestGate):\n            raise TypeError('request_gate must be RequestGate or AdaptiveRequestGate')\n        self.model = replace(model)  # Copy nested declaration mappings at plan time.\n        self.inputs, self.output = dict(inputs), output\n        self.call_output, self.error_output = call_output, error_output\n        self.concurrency, self.label = concurrency, label or 'map_embeddings'\n        self.options, self.max_requests = runtime_options(options), max_requests\n        self.service = service\n        if service is not None:\n            service.bind(self.model)  # Validate endpoint binding without acquiring resources.\n        self.request_gate = request_gate if request_gate is not None else RequestGate(concurrency)\n        self.call_metrics = EmbeddingMetrics()\n        self._runtime = self  # StreamResources' shared native-model observation protocol.\n        self._started = False\n        self._pool = self._prepare_pool = self._client = self._owner = self._journal = None\n        self._response_pool = None\n        self._document_reader = None"
+  },
+  "demiflow/execution/block_sink.py:BlockSink": {
+    "fields": {
+      "root": "self.run.directory / 'materializations' / action.action_id / sink_id",
+      "input_capture": "input_capture",
+      "block_bytes": "min(BLOCK_BYTES, self.run.limits['max_batch_bytes'])",
+      "staging_only": "staging_only",
+      "generation": "uuid.uuid4().hex",
+      "buffer_bytes": "0",
+      "rows": "0",
+      "manifest": "None",
+      "block_count": "0",
+      "blocks": "[]"
+    },
+    "init_source": "def __init__(self, action, sink_id=\"output\", *, input_capture=False, staging_only=False, output_buffer_bytes=None):\n        self.action, self.run, self.sink_id = action, action.context, identifier(sink_id)\n        self.root = self.run.directory / \"materializations\" / action.action_id / sink_id\n        self.input_capture = input_capture\n        self.block_bytes = min(BLOCK_BYTES, self.run.limits[\"max_batch_bytes\"])\n        if output_buffer_bytes is not None:\n            self.block_bytes = min(self.block_bytes, output_buffer_bytes)\n        self.staging_only=staging_only\n        self.reset()"
+  },
+  "demiflow/execution/chain.py:_WriteSeal": {
+    "fields": {
+      "_action": "action",
+      "_plan_ref": "plan_ref",
+      "topology": "topology",
+      "bindings_ref": "topology['bindings_ref']"
+    },
+    "init_source": "def __init__(self, action, plan_ref, topology):\n        self._action = action\n        self._plan_ref = plan_ref\n        self.topology = topology\n        self.bindings_ref = topology[\"bindings_ref\"]"
+  },
+  "demiflow/execution/dataset_native.py:Engine": {
+    "fields": {
+      "counter": "itertools.count()",
+      "_session": "None",
+      "payload_sources": "{}",
+      "typed_cache": "{}",
+      "large": "False"
+    },
+    "init_source": "def __init__(self, executor, stack, directory, stats):\n        self.executor, self.stack = executor, stack\n        self.directory, self.stats = Path(directory), stats\n        self.views, self.sources, self.key_functions = {}, {}, []\n        self.counter = itertools.count()\n        self._session = None\n        self.payload_sources = {}\n        self.typed_cache = {}\n        self.large = False"
+  },
+  "demiflow/execution/executors/local.py:LocalDatasetExecutor": {
+    "fields": {
+      "_workers": "max(1, int(workers))",
+      "_unified_chain": "bool(unified_chain)",
+      "_unified_graph": "bool(unified_graph)",
+      "_unified_queue_chain": "bool(unified_queue_chain)",
+      "_sort_workers": "int(sort_workers)",
+      "_planning_policy": "planning_policy or parse_platform_planning_policy(None)",
+      "_candidate_execution": "candidate_execution",
+      "_local_kernel": "local_kernel",
+      "_local_kernel_closed": "False",
+      "_local_kernel_stats": "{}",
+      "_active_physical_plan": "None",
+      "_block_size": "max(1, int(block_size))",
+      "_materialize_memory_limit": "max(1, int(materialize_memory_limit))",
+      "_aggregate_state_max_bytes": "max(1, int(aggregate_state_max_bytes))",
+      "_spill_bytes": "0",
+      "resource_root": "Path(resource_root or '.').resolve()",
+      "_prompt_coordinators": "{}",
+      "_usage_callback": "usage_callback",
+      "pending": "dict[int, Any]",
+      "rows": "Iterable[Any]",
+      "_last_metadata": "ExecutionMetadata(source_name=type(source).__name__, stages=tuple(stage_stats))",
+      "_run_ref": "action.context.ref",
+      "_pool": "ThreadPoolExecutor(max_workers=self._workers)"
+    },
+    "init_source": "def __init__(\n        self,\n        workers: int = 4,\n        *,\n        block_size: int = 256,\n        materialize_memory_limit: int = 64 * 1024 * 1024,\n        aggregate_state_max_bytes: int = 8 * 1024 * 1024,\n        resource_root=None,\n        usage_callback=None,\n        planning_policy=None,\n        candidate_execution=None,\n        local_kernel=None,\n        sort_workers: int | None = None,\n        unified_chain: bool = False,\n        unified_graph: bool = False,\n        unified_queue_chain: bool = False,\n    ) -> None:\n        self._workers = max(1, int(workers))\n        self._unified_chain = bool(unified_chain)\n        self._unified_graph = bool(unified_graph)\n        self._unified_queue_chain = bool(unified_queue_chain)\n        if sort_workers is None:\n            sort_workers = os.environ.get('DEMIFLOW_LOCAL_SORT_WORKERS',\n                           os.environ.get('DEMIWFLOW_LOCAL_SORT_WORKERS', self._workers))\n        if (isinstance(sort_workers, bool) or not isinstance(sort_workers, (int, str))\n                or not str(sort_workers).isdigit() or int(sort_workers) < 1):\n            raise ValueError('sort_workers must be a positive integer')\n        self._sort_workers = int(sort_workers)\n        from ...planning.policy import parse_platform_planning_policy\n        self._planning_policy = planning_policy or parse_platform_planning_policy(None)\n        self._candidate_execution = candidate_execution\n        self._local_kernel = local_kernel\n        self._local_kernel_closed = False\n        self._local_kernel_stats = {}\n        if local_kernel is not None and local_kernel.workers > self._planning_policy.max_parallelism:\n            raise ValueError('local kernel workers exceed the platform max_parallelism')\n        self._active_physical_plan = None\n        self._block_size = max(1, int(block_size))\n        self._materialize_memory_limit = max(1, int(materialize_memory_limit))\n        self._aggregate_state_max_bytes = max(1, int(aggregate_state_max_bytes))\n        self._pool: Optional[ThreadPoolExecutor] = None\n        self._last_metadata: Optional[ExecutionMetadata] = None\n        self._spill_paths: set[str] = set()\n        self._spill_bytes = 0\n        self.resource_root = Path(resource_root or '.').resolve()\n        self._prompt_coordinators = {}\n        self._usage_callback = usage_callback"
+  },
+  "demiflow/execution/operator_state.py:OperatorStates": {
+    "fields": {},
+    "init_source": "def __init__(self, context, restored=None):\n        self.context, self.restored = context, restored or {}\n        self.owners, self.identities, self.aliases = {}, {}, {}"
+  },
+  "demiflow/execution/plan_interpreter.py:CheckpointPolicy": {
+    "fields": {
+      "checkpoint_rows": "int",
+      "interval_ms": "int",
+      "unconfirmed_rows": "int",
+      "unconfirmed_bytes": "int"
+    },
+    "init_source": null
+  },
+  "demiflow/execution/plan_interpreter.py:WorkerPlacement": {
+    "fields": {
+      "group_id": "str",
+      "stage_ids": "tuple[str, ...]",
+      "partition_ids": "tuple[str, ...]",
+      "profile": "ReadonlyDocument",
+      "program_ref": "ReadonlyDocument",
+      "sealed_operators": "tuple[Mapping[str, str], ...]",
+      "operator_bindings": "tuple[ReadonlyDocument, ...]"
+    },
+    "init_source": null
+  },
+  "demiflow/execution/plan_interpreter.py:ChannelBinding": {
+    "fields": {
+      "channel_id": "str",
+      "producer_stage_ids": "tuple[str, ...]",
+      "consumer_stage_ids": "tuple[str, ...]",
+      "channel_plan": "ReadonlyDocument",
+      "options": "ReadonlyDocument",
+      "in_process": "bool"
+    },
+    "init_source": null
+  },
+  "demiflow/execution/plan_interpreter.py:ExecutionLayout": {
+    "fields": {
+      "dag_id": "str",
+      "plan_id": "str",
+      "plan_revision": "int",
+      "artifact_manifest_ref": "ReadonlyDocument",
+      "bindings_ref": "ReadonlyDocument",
+      "supported_slice": "str",
+      "stages": "tuple[ReadonlyDocument, ...]",
+      "stage_owners": "Mapping[str, ReadonlyDocument]",
+      "source_bindings": "tuple[ReadonlyDocument, ...]",
+      "workers": "tuple[WorkerPlacement, ...]",
+      "channels": "tuple[ChannelBinding, ...]",
+      "checkpoint": "CheckpointPolicy"
+    },
+    "init_source": null
+  },
+  "demiflow/execution/run_context.py:RunContext": {
+    "fields": {
+      "directory": "raw",
+      "entry_identity": "entry_identity",
+      "requested_limits": "limits",
+      "resuming": "resume",
+      "external_control": "journal is not None",
+      "journal": "journal or RunJournal(raw)",
+      "check_stop_callback": "check_stop",
+      "fence": "uuid.uuid4().hex",
+      "position": "0",
+      "active": "False",
+      "_lease": "None",
+      "_journal_connections": "ExitStack()",
+      "_object_resource_lock": "threading.RLock()",
+      "started": "None",
+      "_draining": "False",
+      "_quarantined_workers": "[]",
+      "_limits": "value",
+      "ref": "RunRef(str(self.directory), configuration['run_id'])",
+      "limits": "configuration['limits']",
+      "explicit_limits": "frozenset(configuration.get('limits_explicit', ()))",
+      "deadline": "configuration['started_at'] + self.limits['timeout_s']",
+      "attempt": "self.journal.claim_execution(configuration, self.fence)",
+      "_token": "_CURRENT.set(self)",
+      "_drain_finalizer": "threading.Thread(target=finish_owned_resources, name='demiflow-owned-writer-drain', daemon=True)"
+    },
+    "init_source": "def __init__(self, directory, *, entry_identity=None, limits=None, resume=False,\n                 journal=None, check_stop=None):\n        raw = Path(directory).absolute()\n        if any(p.is_symlink() for p in (raw, *raw.parents)):\n            raise RecoveryContractError(\"Run directory contains a symlink\")\n        self.directory = raw\n        self.entry_identity = entry_identity\n        self.requested_limits = limits\n        self.resuming = resume\n        self.external_control = journal is not None\n        self.journal = journal or RunJournal(raw)\n        self.check_stop_callback = check_stop\n        self.fence = uuid.uuid4().hex\n        self.position = 0\n        self.active = False\n        self._lease = None\n        self._journal_connections = ExitStack()\n        self._object_resource_lock = threading.RLock()\n        self.started = None\n        self._draining = False\n        self._quarantined_workers = []"
+  },
+  "demiflow/execution/stream.py:_Stage": {
+    "fields": {
+      "operation_index": "None",
+      "stage_budget": "None",
+      "name": "name",
+      "fn": "fn",
+      "concurrency": "concurrency",
+      "queue_depth": "queue_depth",
+      "catch": "catch",
+      "pre_filters": "pre_filters",
+      "post_filters": "post_filters",
+      "hard_timeout": "hard_timeout",
+      "max_batch": "max_batch",
+      "flush_interval": "flush_interval",
+      "execution": "execution",
+      "executor": "None",
+      "pending": "set()",
+      "flat_map": "flat_map",
+      "grouping": "None",
+      "prefix": "None",
+      "validation": "None",
+      "observation": "None",
+      "recovery_buffer": "None",
+      "native_recovery": "None",
+      "native_snapshot": "False",
+      "native_pending": "{}",
+      "native_restore": "[]",
+      "native_input_lock": "asyncio.Lock()",
+      "native_emit_lock": "asyncio.Lock()",
+      "native_idle": "asyncio.Event()",
+      "batch_ordinal": "0",
+      "scope_id": "None"
+    },
+    "init_source": "def __init__(self, name, fn, concurrency, queue_depth, catch,\n                 pre_filters, post_filters, hard_timeout=None,\n                 max_batch=None, flush_interval=None, execution='inline', flat_map=False):\n        self.operation_index = None\n        self.stage_budget = None\n        self.name = name\n        self.fn = fn\n        self.concurrency = concurrency\n        self.queue_depth = queue_depth\n        self.catch = catch\n        self.pre_filters = pre_filters\n        self.post_filters = post_filters\n        self.hard_timeout = hard_timeout\n        self.max_batch = max_batch          # 非 None 即攒批级（BatchMapOp）\n        self.flush_interval = flush_interval\n        self.execution = execution\n        self.executor = None\n        self.pending = set()\n        self.flat_map=flat_map\n        self.grouping = None\n        self.prefix = None\n        self.validation = None\n        self.observation = None\n        self.recovery_buffer = None\n        self.native_recovery = None\n        self.native_snapshot = False\n        self.native_pending = {}\n        self.native_restore = []\n        self.native_input_lock = asyncio.Lock()\n        self.native_emit_lock = asyncio.Lock()\n        self.native_idle = asyncio.Event()\n        self.native_idle.set()\n        self.batch_ordinal = 0\n        self.scope_id = None"
+  },
+  "demiflow/execution/stream_map.py:_MapWorker": {
+    "fields": {
+      "operation": "operation",
+      "callable": "None",
+      "started": "False",
+      "failure": "None",
+      "start_lock": "asyncio.Lock()",
+      "stopped": "False",
+      "closed": "False"
+    },
+    "init_source": "def __init__(self, operation, recovery_state=None, recovery_key=None):\n        self.operation = operation\n        self.callable = None\n        self.started = False\n        self.failure = None\n        self.start_lock = asyncio.Lock()\n        self.stopped = False\n        self.closed = False\n        self.recovery_state, self.recovery_key = recovery_state, recovery_key"
+  },
+  "demiflow/execution/stream_materialize.py:StreamStageProgress": {
+    "fields": {
+      "stages": "stages",
+      "group_ends": "list(range(len(stages)))",
+      "object_cut": "len(stages) - 1"
+    },
+    "init_source": null
+  },
+  "demiflow/execution/stream_resources.py:StreamResources": {
+    "fields": {
+      "actors": "list(dict(((id(a), a) for a in actors)).values())",
+      "resources": "list(dict(((id(r), r) for r in resources)).values())",
+      "queues": "[]",
+      "queue_factory": "queue_factory",
+      "started": "[]"
+    },
+    "init_source": "def __init__(self, actors, queue_factory=None):\n        self.actors = list(dict((id(a),a) for a in actors).values())\n        resources = [r for a in self.actors for r in getattr(a,'resources',())]\n        self.resources = list(dict((id(r),r) for r in resources).values())\n        self.queues = []; self.queue_factory = queue_factory\n        self.started = []\n        targets = [a.uri for a in self.actors if getattr(a,'is_stream_sink',False)]\n        if len(set(targets)) != len(targets): raise ValueError('Duplicate save_lance target in stream')\n        names = [a.stage for a in self.actors if getattr(a,'is_stream_sink',False)]\n        if len(set(names)) != len(names): raise ValueError('Duplicate save_lance stage name')"
+  },
+  "demiflow/execution/worker/execution.py:WorkerChainExecutor": {
+    "fields": {
+      "_send": "send",
+      "source_child_id": "execution['source_child_id']",
+      "output_child_id": "execution['output_child_id']",
+      "plan_ref": "execution['plan_ref']",
+      "source_reference": "execution['source_reference']",
+      "channel_id": "execution['channel_id']",
+      "object_specs": "execution.get('object_specs')",
+      "restore": "execution.get('restore')",
+      "sealed_operators": "execution.get('sealed_operators')",
+      "_execution_plan": "launch_spec.get('execution_plan')",
+      "authority": "None",
+      "progress": "None",
+      "stats": "None",
+      "_thread": "None",
+      "_pending": "None",
+      "_lock": "threading.Lock()",
+      "_error": "None",
+      "_done": "threading.Event()",
+      "_assignment": "assignment"
+    },
+    "init_source": "def __init__(self, launch_spec, *, send):\n        execution = launch_spec[\"execution\"]\n        self._send = send\n        self.source_child_id = execution[\"source_child_id\"]\n        self.output_child_id = execution[\"output_child_id\"]\n        self.plan_ref = execution[\"plan_ref\"]\n        self.source_reference = execution[\"source_reference\"]\n        self.channel_id = execution[\"channel_id\"]\n        self.object_specs = execution.get(\"object_specs\")\n        self.restore = execution.get(\"restore\")\n        self.sealed_operators = execution.get(\"sealed_operators\")\n        self._execution_plan = launch_spec.get(\"execution_plan\")\n        self.authority = None\n        self.progress = None\n        self.stats = None\n        self._thread = None\n        self._pending = None\n        self._lock = threading.Lock()\n        self._error = None\n        self._done = threading.Event()"
+  },
+  "demiflow/execution/worker/graph_execution.py:GraphWorkerExecutor": {
+    "fields": {
+      "_send": "send",
+      "_graph": "graph",
+      "source_child_id": "graph.get('source_child_id')",
+      "output_child_id": "graph['output_child_id']",
+      "plan_ref": "graph['plan_ref']",
+      "sealed_operators": "graph.get('sealed_operators')",
+      "source_reference": "graph.get('source_reference')",
+      "source_id": "graph['source_id']",
+      "occurrence_id": "graph['occurrence_id']",
+      "host_id": "graph.get('host_id', 'local')",
+      "restore": "graph.get('restore')",
+      "_execution_plan": "launch_spec.get('execution_plan')",
+      "authority": "None",
+      "progress": "None",
+      "stats": "None",
+      "input_reader": "None",
+      "output_router": "None",
+      "_thread": "None",
+      "_lock": "threading.Lock()",
+      "_pending": "{}",
+      "_cut_commands": "[]",
+      "_error": "None",
+      "_done": "threading.Event()",
+      "_assignment": "assignment"
+    },
+    "init_source": "def __init__(self, launch_spec, *, send):\n        graph = launch_spec[\"graph\"]\n        self._send = send\n        self._graph = graph\n        self.source_child_id = graph.get(\"source_child_id\")\n        self.output_child_id = graph[\"output_child_id\"]\n        self.plan_ref = graph[\"plan_ref\"]\n        self.sealed_operators = graph.get(\"sealed_operators\")\n        self.source_reference = graph.get(\"source_reference\")\n        self.source_id = graph[\"source_id\"]\n        self.occurrence_id = graph[\"occurrence_id\"]\n        self.host_id = graph.get(\"host_id\", \"local\")\n        self.restore = graph.get(\"restore\")\n        self._execution_plan = launch_spec.get(\"execution_plan\")\n        self.authority = None\n        self.progress = None\n        self.stats = None\n        self.input_reader = None\n        self.output_router = None\n        self._thread = None\n        self._lock = threading.Lock()\n        self._pending = {}\n        self._cut_commands = []\n        self._error = None\n        self._done = threading.Event()"
+  },
+  "demiflow/execution/worker/queue_transform.py:QueueTransformExecutor": {
+    "fields": {
+      "_send": "send",
+      "plan_ref": "execution['plan_ref']",
+      "sealed_operators": "execution.get('sealed_operators')",
+      "_execution_plan": "launch_spec.get('execution_plan')",
+      "authority": "None",
+      "_store": "None",
+      "_thread": "None",
+      "_inbox": "queue.Queue()",
+      "_error": "None",
+      "_current_request_id": "None",
+      "_done": "threading.Event()",
+      "rows": "0",
+      "_assignment": "assignment"
+    },
+    "init_source": "def __init__(self, launch_spec, *, send):\n        execution = launch_spec[\"queue_transform\"]\n        self._send = send\n        self.plan_ref = execution[\"plan_ref\"]\n        self.sealed_operators = execution.get(\"sealed_operators\")\n        self._execution_plan = launch_spec.get(\"execution_plan\")\n        self.authority = None\n        self._store = None\n        self._thread = None\n        self._inbox = queue.Queue()\n        self._error = None\n        self._current_request_id = None\n        self._done = threading.Event()\n        self.rows = 0"
+  },
+  "demiflow/lance/search.py:VectorSearch": {
+    "fields": {
+      "query": "_name(query, 'query')",
+      "output": "_name(output, 'output')",
+      "label": "_name(label, 'label')",
+      "filter_column": "filter_column",
+      "options": "_options(options)",
+      "spec": "dict(uri=normalize_lance_uri(uri), version=version, vector_column=_name(vector_column, 'vector_column'), columns=list(columns), top_k=top_k, metric=metric, filter=normalize_filter(filter), filter_column=filter_column, storage_options=dict(normalize_storage_options(storage_options)), options=dict(self.options))",
+      "resources": "(self,)",
+      "_lock": "Lock()",
+      "_dataset": "None",
+      "_vector_type": "None",
+      "_version": "None",
+      "_queries": "0",
+      "_hits": "0"
+    },
+    "init_source": "def __init__(self, *, query, output, uri, vector_column, columns, top_k,\n                 version, metric, filter, filter_column, storage_options,\n                 options, label):\n        self.query = _name(query, 'query')\n        self.output = _name(output, 'output')\n        self.label = _name(label, 'label')\n        if query == output or output == filter_column:\n            raise InvalidLanceRequest('output must differ from input query/filter columns')\n        if filter_column is not None:\n            _name(filter_column, 'filter_column')\n        self.filter_column = filter_column\n        positive_int(top_k, 'top_k')\n        if version is not None:\n            positive_int(version, 'version')\n        if metric not in (None, 'l2', 'cosine', 'dot'):\n            raise InvalidLanceRequest('metric must be l2, cosine, dot or None')\n        columns = normalize_columns(columns)\n        if not columns:\n            raise InvalidLanceRequest('search_vectors requires explicit nonempty columns')\n        if '_distance' in columns:\n            raise InvalidLanceRequest('_distance is added automatically; omit it from columns')\n        self.options = _options(options)\n        # HNSW's beam must cover the expanded candidate count, not just the\n        # final output k. Do not silently raise an explicitly chosen ef.\n        candidates = top_k\n        if self.options['use_index']:\n            candidates *= self.options['refine_factor'] or 1\n            ef = self.options['ef']\n            if ef is not None and ef < candidates:\n                raise InvalidLanceRequest(\n                    f'ef must be >= top_k * refine_factor ({candidates}); '\n                    'omit ef to use the Lance default')\n            # Pinned pylance 12 uses k + k//2 when ef is omitted, with k\n            # already expanded for refinement. Conservative for non-HNSW\n            # indices, which do not use this beam. It is a candidate-count\n            # guard, not a bound on all native allocations or visited nodes.\n            beam = candidates + candidates // 2 if ef is None else ef\n            candidates = max(candidates, beam)\n        if candidates > self.options['max_search_candidates']:\n            raise MemoryError('Search candidate count exceeds max_search_candidates; '\n                              'reduce top_k/refine_factor/ef or raise the explicit budget')\n        # Reserve top-k row containers before native search scheduling. Payload\n        # bytes and nested values receive separate admission before to_pylist.\n        if top_k * (128 + 200 * (len(columns) + 1) + 24) > self.options['max_python_result_bytes']:\n            raise MemoryError('top_k row containers exceed max_python_result_bytes')\n        self.spec = dict(uri=normalize_lance_uri(uri), version=version,\n            vector_column=_name(vector_column, 'vector_column'), columns=list(columns),\n            top_k=top_k, metric=metric, filter=normalize_filter(filter),\n            filter_column=filter_column,\n            storage_options=dict(normalize_storage_options(storage_options)),\n            options=dict(self.options))\n        self.resources = (self,)\n        self._lock = Lock()\n        self._dataset = None\n        self._vector_type = None\n        self._version = None\n        self._queries = self._hits = 0"
+  },
+  "demiflow/operator_llm/stream_recovery.py:RunPromptJournal": {
+    "fields": {
+      "run": "run",
+      "stores": "{}"
+    },
+    "init_source": "def __init__(self, run):\n        super().__init__(run.journal.path, max_requests=run.limits['max_requests'],\n            throughput={'batch_size': 64, 'flush_interval_s': .005,\n                        'max_record_bytes': min(16 * 1024**2, run.limits['max_control_bytes']),\n                        'max_queue_bytes': 32 * 1024**2})\n        self.run = run\n        self.stores = {}"
+  },
+  "demiflow/operator_llm/stream_recovery.py:NativePromptRecovery": {
+    "fields": {
+      "journal": "journal",
+      "semantic_owners": "() if predicate is None or inspect.isfunction(predicate) or inspect.isbuiltin(predicate) else (predicate,)",
+      "row_local": "not self.semantic_owners",
+      "copy_inputs": "predicate is not None"
+    },
+    "init_source": "def __init__(self, actor, action, node_id):\n        self.actor, self.action, self.node_id = actor, action, node_id\n        run = action.context\n        journal = getattr(run, '_native_prompt_journal', None)\n        if journal is None:\n            journal = run._native_prompt_journal = RunPromptJournal(run)\n            journal.check_recovery()\n        journal.stores.update(getattr(action, 'object_sinks', {}))\n        self.journal = journal\n        action.native_image_effects = True\n        predicate = getattr(actor, 'when', None)\n        self.semantic_owners = (() if predicate is None or inspect.isfunction(predicate) or inspect.isbuiltin(predicate)\n                                else (predicate,))\n        self.row_local = not self.semantic_owners\n        self.copy_inputs = predicate is not None"
+  }
+}

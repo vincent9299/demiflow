@@ -1,0 +1,673 @@
+{
+  "ADMISSION": {
+    "required_existing_files": [
+      "tests/test_native_delivery_barrier.py",
+      "tests/test_stream_admission.py"
+    ],
+    "leaf_tasks": [
+      "A001",
+      "A002",
+      "A003",
+      "A004",
+      "A005",
+      "A006",
+      "S005",
+      "Q005",
+      "V001"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_supported_stream_terminals"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "BOUNDS": {
+    "required_existing_files": [
+      "tests/test_native_resources.py",
+      "tests/test_u2_resources_local.py",
+      "tests/test_forge_analysis_storage_limits.py"
+    ],
+    "leaf_tasks": [
+      "S002",
+      "S003",
+      "S008",
+      "R004",
+      "R012",
+      "Q001",
+      "Q002",
+      "Q003",
+      "Q004",
+      "Q005",
+      "Q006",
+      "M006",
+      "L010",
+      "L011",
+      "V018",
+      "R016",
+      "M011",
+      "L034",
+      "L035",
+      "L036",
+      "L037",
+      "L038",
+      "L039"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_resource_and_performance_envelope"
+    ],
+    "status": "not_run",
+    "require_real_environment": true
+  },
+  "BUFFER": {
+    "required_existing_files": [
+      "tests/test_stream_grouping_lookup.py",
+      "tests/test_native_barrier.py"
+    ],
+    "leaf_tasks": [
+      "R001",
+      "R002",
+      "R003",
+      "R004",
+      "R005",
+      "R006",
+      "R007",
+      "R008",
+      "R009",
+      "R010",
+      "R011",
+      "R012",
+      "M005",
+      "V008",
+      "R015",
+      "R016"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_grouped_and_prepend_buffers"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "CASE": {
+    "required_existing_files": [
+      "tests/test_forge_analysis_case_browser.py",
+      "tests/test_forge_analysis_case_groups_ui_browser.py",
+      "tests/test_forge_analysis_case_query.py",
+      "tests/test_forge_analysis_case_media_browser.py"
+    ],
+    "leaf_tasks": [
+      "V015"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_case_media_review_roundtrip"
+    ],
+    "status": "not_run",
+    "require_real_environment": true
+  },
+  "CODEC": {
+    "required_existing_files": [
+      "tests/test_u3_graph_type_fidelity.py",
+      "tests/test_execution_recovery_stream.py"
+    ],
+    "leaf_tasks": [
+      "Q001",
+      "Q002",
+      "Q003",
+      "V004",
+      "V005"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_signed_zero_roundtrip",
+      "test_v2_reprepare_budget_same_bytes"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "DELIVERY": {
+    "required_existing_files": [
+      "tests/test_native_delivery_barrier.py"
+    ],
+    "leaf_tasks": [
+      "A001",
+      "A005",
+      "A006",
+      "A007",
+      "S012"
+    ],
+    "new_acceptance_tests": [],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "DEMO": {
+    "required_existing_files": [
+      "tests/test_forge_analysis_case_demo_browser.py",
+      "tests/test_forge_workbench_config_run_browser.py"
+    ],
+    "leaf_tasks": [
+      "V016",
+      "W016",
+      "W017",
+      "W018",
+      "W019",
+      "W020",
+      "W021"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_demo_navigation_and_layout"
+    ],
+    "status": "not_run",
+    "require_real_environment": true
+  },
+  "DEVELOPMENT": {
+    "required_existing_files": [
+      "tests/test_forge_analysis_authority_rpc.py",
+      "tests/test_forge_analysis_frontend_state.py"
+    ],
+    "leaf_tasks": [
+      "V017"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_development_context_isolation"
+    ],
+    "status": "not_run",
+    "require_real_environment": true
+  },
+  "EMBED": {
+    "required_existing_files": [
+      "tests/test_embeddings.py",
+      "tests/test_document_embeddings.py"
+    ],
+    "leaf_tasks": [
+      "F002",
+      "R006",
+      "M003",
+      "M004",
+      "M005",
+      "M006",
+      "M007",
+      "V007",
+      "R015",
+      "M008",
+      "M009",
+      "M010",
+      "M011",
+      "M012"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_embedding_batch_recovery"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "FACTS": {
+    "required_existing_files": [
+      "tests/test_runtime_builtin_recovery.py",
+      "tests/test_c_write_seam.py"
+    ],
+    "leaf_tasks": [
+      "F001",
+      "F002",
+      "F003",
+      "A002"
+    ],
+    "new_acceptance_tests": [],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "GRAPH": {
+    "required_existing_files": [
+      "tests/test_u3_graph_local.py",
+      "tests/test_u3_graph_restore.py",
+      "tests/test_u3_graph_code_pin.py",
+      "tests/test_u3_graph_router.py"
+    ],
+    "leaf_tasks": [
+      "F005",
+      "L003",
+      "L017",
+      "L018",
+      "L020",
+      "L024",
+      "L025",
+      "L026",
+      "V012",
+      "L034",
+      "L035"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_graph_queue_commit_authority"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "HISTORY": {
+    "required_existing_files": [
+      "tests/test_execution_recovery_identity.py",
+      "tests/test_workbench_sealed_facts.py",
+      "tests/test_code_pin_serialization.py"
+    ],
+    "leaf_tasks": [
+      "F001",
+      "F002",
+      "F003",
+      "F004",
+      "F005",
+      "A008",
+      "S010",
+      "S013",
+      "R013",
+      "R014",
+      "L001",
+      "L002",
+      "L004",
+      "L005",
+      "L006",
+      "L008",
+      "L012",
+      "L014",
+      "L021",
+      "L022",
+      "L023",
+      "L024",
+      "L025",
+      "L026",
+      "L027",
+      "L028",
+      "L029",
+      "W001",
+      "W002",
+      "W003",
+      "W004",
+      "W005",
+      "W006",
+      "W007",
+      "W008",
+      "W009",
+      "W010",
+      "W011",
+      "W012",
+      "W013",
+      "V020",
+      "L030",
+      "L031",
+      "L033",
+      "W014",
+      "V021",
+      "W015",
+      "W016",
+      "W017",
+      "W018",
+      "W019",
+      "W020",
+      "W021"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_historical_read_and_code_drift",
+      "test_v2_nested_program_code_pin"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "IDENTITY": {
+    "required_existing_files": [
+      "tests/test_execution_recovery_identity.py",
+      "tests/test_code_pin_serialization.py"
+    ],
+    "leaf_tasks": [
+      "S001",
+      "S013",
+      "V003"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_identity_distinguishes_business_configuration"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "LAYOUT": {
+    "required_existing_files": [
+      "tests/test_execution_layout.py",
+      "tests/test_sealed_execution_bindings.py"
+    ],
+    "leaf_tasks": [
+      "F004",
+      "A008",
+      "S009",
+      "S010",
+      "R011",
+      "L001",
+      "L002",
+      "L003",
+      "L004",
+      "L005",
+      "L006",
+      "L007",
+      "L008",
+      "L009",
+      "L012",
+      "L013",
+      "L014",
+      "L015",
+      "L016",
+      "L020",
+      "L021",
+      "L022",
+      "L023",
+      "V010",
+      "R016",
+      "L030",
+      "L031",
+      "L032",
+      "V021",
+      "L036",
+      "L037",
+      "L039"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_write_routes_consume_layout",
+      "test_v2_nested_program_code_pin"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "NOTEBOOK": {
+    "required_existing_files": [
+      "tests/test_forge_analysis_browser.py",
+      "tests/test_forge_analysis_sessions.py",
+      "tests/test_forge_analysis_kernel_contract.py"
+    ],
+    "leaf_tasks": [
+      "V014"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_notebook_sql_lifecycle"
+    ],
+    "status": "not_run",
+    "require_real_environment": true
+  },
+  "PREPEND": {
+    "required_existing_files": [
+      "tests/test_native_barrier.py",
+      "tests/test_stream_grouping_lookup.py"
+    ],
+    "leaf_tasks": [
+      "F002"
+    ],
+    "new_acceptance_tests": [],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "PROMPT": {
+    "required_existing_files": [
+      "tests/test_prompt_http_stream.py",
+      "tests/test_prompt_stream_recovery.py",
+      "tests/test_inference_execution.py"
+    ],
+    "leaf_tasks": [
+      "M001",
+      "M002",
+      "V009"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_prompt_policy_and_unknown"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "QUEUE": {
+    "required_existing_files": [
+      "tests/test_queue_v2_crash.py",
+      "tests/test_mvp2_queue_unified.py"
+    ],
+    "leaf_tasks": [
+      "A003",
+      "L003",
+      "L019",
+      "L020",
+      "L027",
+      "L028",
+      "L029"
+    ],
+    "new_acceptance_tests": [],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "RAY": {
+    "required_existing_files": [
+      "tests/test_u2_chain_ray.py",
+      "tests/test_u3_graph_ray.py"
+    ],
+    "leaf_tasks": [
+      "L016",
+      "L018",
+      "V019"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_ray_backend_actual"
+    ],
+    "status": "not_run",
+    "require_real_environment": true
+  },
+  "RECOVERY": {
+    "required_existing_files": [
+      "tests/test_u2_chain_faults.py",
+      "tests/test_u3_graph_faults.py",
+      "tests/test_native_barrier.py"
+    ],
+    "leaf_tasks": [
+      "S007",
+      "S008",
+      "S014",
+      "S015",
+      "R002",
+      "R003",
+      "R007",
+      "R008",
+      "R009",
+      "R012",
+      "R013",
+      "Q003",
+      "L015",
+      "L017",
+      "L019",
+      "L021",
+      "L022",
+      "L023",
+      "L024",
+      "L025",
+      "L026",
+      "L027",
+      "L028",
+      "L029",
+      "R015",
+      "L034",
+      "L035",
+      "S016"
+    ],
+    "new_acceptance_tests": [],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "RELATIONAL": {
+    "required_existing_files": [
+      "tests/test_local_join_chain.py",
+      "tests/test_c_write_seam.py"
+    ],
+    "leaf_tasks": [
+      "F004",
+      "A008",
+      "L007",
+      "L009",
+      "L010",
+      "L011",
+      "L030",
+      "L031",
+      "V021",
+      "L036",
+      "L037",
+      "L038",
+      "L039"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_nested_program_code_pin"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "STATE": {
+    "required_existing_files": [
+      "tests/test_u4_state_recovery.py",
+      "tests/test_runtime_builtin_recovery.py"
+    ],
+    "leaf_tasks": [
+      "S001",
+      "S002",
+      "S003",
+      "S004",
+      "S005",
+      "S006",
+      "S007",
+      "S008",
+      "S009",
+      "S010",
+      "S011",
+      "S012",
+      "S013",
+      "S014",
+      "S015",
+      "R008",
+      "V002",
+      "S016"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_actor_counter_crash_resume"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "STREAM": {
+    "required_existing_files": [
+      "tests/test_stream.py",
+      "tests/test_stream_timeout_propagation.py"
+    ],
+    "leaf_tasks": [
+      "A003",
+      "A004",
+      "A007",
+      "Q004",
+      "Q006"
+    ],
+    "new_acceptance_tests": [],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "UNKNOWN": {
+    "required_existing_files": [
+      "tests/test_prompt_stream_recovery.py",
+      "tests/test_managed_image_execution.py"
+    ],
+    "leaf_tasks": [
+      "R002",
+      "R007",
+      "R012",
+      "M001",
+      "M002",
+      "M003",
+      "M004",
+      "M007",
+      "M008",
+      "M010",
+      "M012"
+    ],
+    "new_acceptance_tests": [],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "VECTOR": {
+    "required_existing_files": [
+      "tests/test_vector_search_stream.py",
+      "tests/test_search_recovery.py"
+    ],
+    "leaf_tasks": [
+      "F002",
+      "S004",
+      "S011",
+      "S014",
+      "S015",
+      "R006",
+      "V006"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_vector_search_real_state"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  },
+  "WORKBENCH": {
+    "required_existing_files": [
+      "tests/test_workbench_sealed_facts.py",
+      "tests/test_forge_workbench_config_run_browser.py",
+      "tests/test_forge_workbench_runtime_browser.py"
+    ],
+    "leaf_tasks": [
+      "W001",
+      "W002",
+      "W003",
+      "W004",
+      "W005",
+      "W006",
+      "W007",
+      "W008",
+      "W009",
+      "W010",
+      "W011",
+      "W012",
+      "W013",
+      "V013",
+      "W014",
+      "W015",
+      "W016",
+      "W017",
+      "W018",
+      "W019",
+      "W020",
+      "W021"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_workbench_history_end_to_end"
+    ],
+    "status": "not_run",
+    "require_real_environment": true
+  },
+  "WRITE": {
+    "required_existing_files": [
+      "tests/test_gpt_write_recovery.py",
+      "tests/test_execution_recovery_lance.py",
+      "tests/test_c_write_seam.py"
+    ],
+    "leaf_tasks": [
+      "A008",
+      "R009",
+      "R013",
+      "R014",
+      "L009",
+      "L011",
+      "L012",
+      "L013",
+      "W007",
+      "W008",
+      "W009",
+      "W010",
+      "W011",
+      "W012",
+      "W013",
+      "V011",
+      "L032",
+      "L033"
+    ],
+    "new_acceptance_tests": [
+      "test_v2_write_create_recovery"
+    ],
+    "status": "not_run",
+    "require_real_environment": false
+  }
+}
