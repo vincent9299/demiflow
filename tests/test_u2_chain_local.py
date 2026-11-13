@@ -96,3 +96,45 @@ def test_default_in_driver_path_unchanged(tmp_path):
     assert rows == expected
     # The default seam never provisions a managed worker host.
     assert not (tmp_path / "run-resources").exists()
+
+
+def test_wide_row_admitted_with_raised_limit(tmp_path):
+    """A >1MB row passes the real worker when max_row_bytes is raised."""
+    def widen(row):
+        return {"wide": "x" * (2 * 1024 * 1024), "i": row["i"]}
+
+    def passthrough(row):
+        return row
+
+    items = ({"i": 0}, {"i": 1})
+    plan = LogicalPlan((
+        MapOp(CallableSpec.create(widen), stream_options=MapStreamOptions(concurrency=1)),
+        MapOp(CallableSpec.create(passthrough), stream_options=MapStreamOptions(concurrency=1)),
+    ))
+    executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    dataset = Dataset(ItemsSource(items), plan, executor)
+    with RunContext.start(tmp_path / "run",
+                          limits={"max_row_bytes": 4 * 1024 ** 2,
+                                  "checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
+        rows = dataset.materialize().take_all()
+    assert len(rows) == 2
+    assert all(len(r["wide"]) == 2 * 1024 * 1024 for r in rows)
+
+
+def test_wide_row_exceeding_limit_rejected(tmp_path):
+    """A row exceeding max_row_bytes is honestly rejected, not truncated."""
+    def widen(row):
+        return {"wide": "x" * (2 * 1024 * 1024), "i": row["i"]}
+
+    items = ({"i": 0},)
+    plan = LogicalPlan((
+        MapOp(CallableSpec.create(widen), stream_options=MapStreamOptions(concurrency=1)),
+    ))
+    executor = LocalDatasetExecutor(workers=1, unified_chain=True)
+    dataset = Dataset(ItemsSource(items), plan, executor)
+    with pytest.raises(Exception) as exc_info:
+        with RunContext.start(tmp_path / "run",
+                              limits={"max_row_bytes": 1 * 1024 ** 2,
+                                      "checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
+            dataset.materialize().take_all()
+    assert "byte budget" in str(exc_info.value).lower() or "Worker failed" in str(exc_info.value)

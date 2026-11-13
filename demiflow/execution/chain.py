@@ -1058,9 +1058,11 @@ def compile_chain_topology(action, source, plan, source_reference, *,
     stage_refs = [identity([logical_dag["dag_id"], node["occurrence_id"]])
                   for node in op_nodes]
     profile_doc = {"requests": {"cpu_millis": 1000, "memory_bytes": 1024 ** 3}}
+    row_bytes = run.limits["max_row_bytes"] + 256
+    queue_bytes = max(row_bytes, run.limits["max_batch_bytes"])
     stage_budgets = {node["occurrence_id"]: {
-        "inflight_rows": 1024, "inflight_bytes": 8 * 1024 ** 2,
-        "output_bytes": 1 * 1024 ** 2} for node in op_nodes}
+        "inflight_rows": run.limits["batch_rows"], "inflight_bytes": queue_bytes,
+        "output_bytes": row_bytes} for node in op_nodes}
     physical = compile_physical_execution_plan(
         logical_dag=logical_dag, plan_revision=0, artifact_manifest_ref=mref,
         worker_groups=[{"group_id": "chain-group", "role": "cpu_prepare",

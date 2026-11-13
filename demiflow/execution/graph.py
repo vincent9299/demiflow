@@ -158,6 +158,8 @@ def compile_graph_topology(action, source, ancestor, targets, *,
     dag_id = logical_dag["dag_id"]
     worker_groups = []
     stage_budgets = {}
+    row_bytes = run.limits["max_row_bytes"] + 256
+    queue_bytes = max(row_bytes, run.limits["max_batch_bytes"])
     for prog in programs:
         stage_refs = [identity([dag_id, op["occurrence_id"]])
                       for op in prog["operators"]]
@@ -167,8 +169,8 @@ def compile_graph_topology(action, source, ancestor, targets, *,
             "min_workers": 1, "initial_workers": 1, "max_workers": 1})
         for op in prog["operators"]:
             stage_budgets[op["occurrence_id"]] = {
-                "inflight_rows": 1024, "inflight_bytes": 8 * 1024 ** 2,
-                "output_bytes": 1 * 1024 ** 2}
+                "inflight_rows": run.limits["batch_rows"], "inflight_bytes": queue_bytes,
+                "output_bytes": row_bytes}
     physical = compile_physical_execution_plan(
         logical_dag=logical_dag, plan_revision=0, artifact_manifest_ref=manifest_ref,
         worker_groups=worker_groups,
