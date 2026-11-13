@@ -243,6 +243,55 @@ def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypa
     assert sorted(r["v"] for r in rows) == [0, 2, 4, 6, 8, 10]
 
 
+# --- Bridge carrier durability: survives run-exit orphan cleanup --------------
+
+def test_identity_bridge_carrier_survives_run_exit(tmp_path):
+    """The bridge is a post-run-audited side-car fact, like the sealed plan.
+
+    Registering it as a protected=0 artifact made clean_orphans unlink it at run
+    exit, leaving the journal ref pointing at a missing carrier (workbench reason
+    identity_bridge_corrupt). It must be written unregistered so the workbench
+    reads it back after the run, with every entry four-way identity linked.
+    """
+    from demiflow.execution.identity_bridge import build_identity_bridge, seal_identity_bridge
+    from demiflow.execution.sealed_plans import read_plan_artifact
+    from demiflow.planning.dag import compile_logical_dag
+    from demiflow.workbench.runs import facts
+
+    ds = relational_dataset()
+    report_digest = "a" * 64
+    run_dir = tmp_path / "run"
+    with RunContext.start(run_dir) as run:
+        action = RunAction(run, "bridge-action", {"kind": "write_table"})
+        logical_dag = compile_logical_dag(
+            action_id=action.action_id, source=ds._source,
+            operations=ds._plan.operations, terminal_kind="write_lance",
+            sink_ids=("lance",))
+        nodes = logical_dag["nodes"]
+        bindings = [{"report_node_id": "n%d" % i, "report_occurrence": 0,
+                     "logical_node_id": n["logical_node_id"],
+                     "occurrence_id": n["occurrence_id"], "mode": "execute"}
+                    for i, n in enumerate(nodes)]
+        bridge = build_identity_bridge(logical_dag, action_id=action.action_id,
+                                       report_digest=report_digest, bindings=bindings)
+        ref = seal_identity_bridge(run, action, bridge)
+        carrier = run_dir / ref["path"]
+        assert carrier.exists()
+    # clean_orphans has run at exit; the audited carrier must still be present.
+    assert carrier.exists(), "clean_orphans pruned the post-run-audited bridge carrier"
+    doc = read_plan_artifact(run_dir, ref, max_bytes=facts.MAX_IDENTITY_BRIDGE_BYTES)
+    assert doc["schema"] == "demiflow.identity_bridge.v1"
+    result = facts.read_identity_bridge(run_dir, action.action_id,
+                                        dag_id=logical_dag["dag_id"],
+                                        report_digest=report_digest)
+    assert result["available"] is True, result
+    entries = result["bridge"]["entries"]
+    assert len(entries) == len(nodes)
+    for entry in entries:
+        assert entry["logical_node_id"] and entry["occurrence_id"]
+        assert entry["report_node_id"] and entry["report_occurrence"] == 0
+
+
 # --- Deferred branch: honest absence of a sealed plan -------------------------
 
 def test_deferred_pure_copy_seals_nothing(tmp_path):
