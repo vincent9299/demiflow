@@ -124,19 +124,25 @@ def test_r_e_stale_absence_fact_never_overwrites_foreign_rows(tmp_path, monkeypa
 
 
 def test_resume_reuses_original_program_manifest_and_bindings(tmp_path, monkeypatch):
+    import hashlib
     from demiflow.execution import chain
     paused = _pause_native(tmp_path, monkeypatch)
     journal = RunJournal(tmp_path / 'run')
     aid = paused['action_id']
     before = {suffix: journal.source_binding(aid + suffix)
               for suffix in ('-sealed-plan', '-execution-bindings')}
-    # The first attempt's transient program is intentionally cleaned on exit.
-    assert not (tmp_path / 'run' / paused['plan_ref']['path']).exists()
+    # The write seam seals a code-pin carrier, not a transient pickle: it is
+    # deliberately unregistered so the post-run audit survives orphan cleanup.
+    carrier = tmp_path / 'run' / paused['plan_ref']['path']
+    assert carrier.exists()
+    assert hashlib.sha256(carrier.read_bytes()).hexdigest() == paused['plan_ref']['sha256']
+    assert carrier.stat().st_size == paused['plan_ref']['bytes']
 
     def forbidden_restage(*args, **kwargs):
         pytest.fail('native resume must not pickle/rebind the existing execution plan')
 
     monkeypatch.setattr(chain, 'stage_plan_artifact', forbidden_restage)
+    monkeypatch.setattr(chain, 'seal_write_plan_ref', forbidden_restage)
     with RunContext.resume(paused['ref']) as run:
         _seed_admission(run, paused)
         receipt = _dataset().write_lance(paused['spec'].uri, mode='create', return_receipt=True)
