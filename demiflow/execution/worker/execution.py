@@ -36,6 +36,7 @@ class WorkerChainExecutor:
         self.object_specs = execution.get("object_specs")
         self.restore = execution.get("restore")
         self.sealed_operators = execution.get("sealed_operators")
+        self._execution_plan = launch_spec.get("execution_plan")
         self.authority = None
         self.progress = None
         self.stats = None
@@ -60,6 +61,7 @@ class WorkerChainExecutor:
         if self._thread is not None:
             return
         self.authority = authority
+        self._assignment = assignment
         self._thread = threading.Thread(target=self._run, name="demiflow-worker-chain", daemon=True)
         self._thread.start()
 
@@ -68,6 +70,13 @@ class WorkerChainExecutor:
         token = _CURRENT.set(self.authority)
         try:
             plan = self._load_plan()
+            checkpoint_policy = None
+            stage_limits = None
+            if self._execution_plan is not None:
+                from .layout import load_worker_layout
+                _, checkpoint_policy, stage_limits = load_worker_layout(
+                    {"execution_plan": self._execution_plan},
+                    self.authority, self._assignment)
             with self.authority.action_scope(self.source_child_id) as source_action:
                 source_sink = BlockSink(source_action, "source", input_capture=True)
             with self.authority.action_scope(self.output_child_id) as output_action:
@@ -75,9 +84,11 @@ class WorkerChainExecutor:
                     output_action, self.source_reference, source_sink=source_sink,
                     object_specs=self.object_specs, restore=self.restore,
                     request_commit=self._request_commit,
-                    stop_requested=self._stop_requested)
+                    stop_requested=self._stop_requested,
+                    checkpoint_policy=checkpoint_policy)
                 self.stats = run_stream(self.progress.source_rows(), plan,
-                                        consume=self.progress.append, progress=self.progress)
+                                        consume=self.progress.append, progress=self.progress,
+                                        stage_limits=stage_limits)
         except BaseException as exc:
             self._error = exc
             with self._lock:

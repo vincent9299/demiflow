@@ -21,11 +21,13 @@ def storage_usage(context):
 
 class BlockSink(Datasink):
     """Data receipts live with data; execution progress lives only in RunJournal."""
-    def __init__(self, action, sink_id="output", *, input_capture=False, staging_only=False):
+    def __init__(self, action, sink_id="output", *, input_capture=False, staging_only=False, output_buffer_bytes=None):
         self.action, self.run, self.sink_id = action, action.context, identifier(sink_id)
         self.root = self.run.directory / "materializations" / action.action_id / sink_id
         self.input_capture = input_capture
         self.block_bytes = min(BLOCK_BYTES, self.run.limits["max_batch_bytes"])
+        if output_buffer_bytes is not None:
+            self.block_bytes = min(self.block_bytes, output_buffer_bytes)
         self.staging_only=staging_only
         self.reset()
 

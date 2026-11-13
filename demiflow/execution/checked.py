@@ -35,7 +35,7 @@ def _equal(actual, expected, label):
 
 
 class CheckedExecution:
-    def __init__(self, *, nodes, edges, actions, operators, source_root, limits, record, check_stop, observe=None, resource_root=None, work_root=None):
+    def __init__(self, *, nodes, edges, actions, operators, source_root, limits, record, check_stop, observe=None, resource_root=None, work_root=None, report_digest=None):
         self.nodes = {n['id']: n for n in nodes}
         self.parents = {n['id']: [] for n in nodes}
         for edge in sorted(edges, key=lambda e: e['port']):
@@ -46,6 +46,7 @@ class CheckedExecution:
         self.resource_root = Path(resource_root).resolve() if resource_root is not None else None
         self.work_root = Path(work_root).resolve() if work_root is not None else self.resource_root / 'work' if self.resource_root is not None else None
         self._limits, self.record, self.check_stop = limits, record, check_stop
+        self.report_digest = report_digest
         self.position, self.handles = 0, {}
         self.active = None
         self.operation_id = None
@@ -425,6 +426,40 @@ class CheckedExecution:
             digests[child] = digest.hexdigest()
             pending.extend(self.parents[child])
         return digests
+
+    def execution_bindings(self, source, plan, *, action_id):
+        """Return structural positions matched to report observation keys.
+
+        Each item is ``{role, program_index, report_node_id, report_occurrence,
+        mode}``.  Only real matched items are returned; this reads the existing
+        context bindings, never re-matches or adds occurrences.  ``role`` is
+        source/operation/terminal; ``program_index`` is a non-negative int only
+        for operations, None otherwise; ``mode`` is execute/reuse.
+        """
+        result = []
+        source_key = self.source_bindings.get(id(source))
+        if source_key is not None:
+            obs = self.observations.get(tuple(source_key))
+            mode = "reuse" if obs and obs.get("state") == "reused" else "execute"
+            result.append({"role": "source", "program_index": None,
+                           "report_node_id": source_key[1],
+                           "report_occurrence": source_key[2], "mode": mode})
+        for index, op in enumerate(plan.operations):
+            op_key = self.operation_bindings.get(id(op))
+            if op_key is not None:
+                obs = self.observations.get(tuple(op_key))
+                mode = "reuse" if obs and obs.get("state") == "reused" else "execute"
+                result.append({"role": "operation", "program_index": index,
+                               "report_node_id": op_key[1],
+                               "report_occurrence": op_key[2], "mode": mode})
+        terminal_key = (action_id, action_id, 0)
+        if terminal_key in self.observations:
+            obs = self.observations[terminal_key]
+            mode = "reuse" if obs.get("state") == "reused" else "execute"
+            result.append({"role": "terminal", "program_index": None,
+                           "report_node_id": action_id,
+                           "report_occurrence": 0, "mode": mode})
+        return tuple(result)
 
     @contextmanager
     def action(self, kind, source, plan, spec, arguments=None):

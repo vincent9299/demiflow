@@ -97,11 +97,14 @@ class StreamStats:
 class _Stage:
     __slots__ = ("name", "fn", "concurrency", "queue_depth", "catch",
                  "pre_filters", "post_filters", "hard_timeout",
-                 "max_batch", "flush_interval", "execution", "executor", "pending", "flat_map", "grouping", "prefix", "validation", "observation", "recovery_buffer", "native_recovery", "native_snapshot", "batch_ordinal", "scope_id", "native_pending", "native_restore", "native_input_lock", "native_emit_lock", "native_idle")
+                 "max_batch", "flush_interval", "execution", "executor", "pending", "flat_map", "grouping", "prefix", "validation", "observation", "recovery_buffer", "native_recovery", "native_snapshot", "batch_ordinal", "scope_id", "native_pending", "native_restore", "native_input_lock", "native_emit_lock", "native_idle",
+                 "operation_index", "stage_budget")
 
     def __init__(self, name, fn, concurrency, queue_depth, catch,
                  pre_filters, post_filters, hard_timeout=None,
                  max_batch=None, flush_interval=None, execution='inline', flat_map=False):
+        self.operation_index = None
+        self.stage_budget = None
         self.name = name
         self.fn = fn
         self.concurrency = concurrency
@@ -133,7 +136,7 @@ class _Stage:
         self.scope_id = None
 
 
-def _materialize(plan: LogicalPlan) -> list[_Stage]:
+def _materialize(plan: LogicalPlan, *, stage_limits=None) -> list[_Stage]:
     """Lower async actors and their row-wise synchronous maps to bounded stages."""
     from .capabilities import validate_stream_plan
     validate_stream_plan(plan)
@@ -141,7 +144,7 @@ def _materialize(plan: LogicalPlan) -> list[_Stage]:
     head_filters: list[Callable] = []
     from .checked import current
     checked = current()
-    for op in plan.operations:
+    for op_index, op in enumerate(plan.operations):
         count_before = len(stages)
         if isinstance(op, AsyncMapOp):
             name = op.label or op.callable.name
@@ -215,11 +218,17 @@ def _materialize(plan: LogicalPlan) -> list[_Stage]:
             raise ValueError(
                 f"streaming 路径支持 map_async、batch_map、map、flat_map 与 filter，"
                 f"遇到 {type(op).__name__}（惰性动作走 take/write 系列则不支持本算子组合）")
-        if checked is not None and len(stages) > count_before:
-            stages[-1].observation = checked.operation_bindings.get(id(op))
-            checked.progress(stages[-1].observation, rows_input=0, rows_output=0, calls=0)
+        if len(stages) > count_before:
+            stages[-1].operation_index = op_index
+            if checked is not None:
+                stages[-1].observation = checked.operation_bindings.get(id(op))
+                checked.progress(stages[-1].observation, rows_input=0, rows_output=0, calls=0)
     if not stages:
         raise ValueError("run_stream 需要至少一个 map_async 算子")
+    if stage_limits is not None:
+        for stage in stages:
+            if stage.operation_index is not None and stage.operation_index in stage_limits:
+                stage.stage_budget = stage_limits[stage.operation_index]
     # Repeated functions/prompts are distinct nodes. Collapsing their names
     # merges counts and incorrectly pairs per-node queues with statistics.
     used = set()
@@ -720,7 +729,17 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
     if stop_path is not None and await asyncio.to_thread(stop_path.exists):
         raise ServiceStopped('operator_stop_file')
     make_queue = queue_factory or _local_queue
-    queues = [make_queue(s.queue_depth) for s in stages]
+    queues = []
+    for s in stages:
+        if s.stage_budget is not None and queue_factory is None:
+            from .request_limits import ObservedQueue
+            item_bytes = s.stage_budget.get('output_bytes')
+            total_bytes = s.stage_budget.get('inflight_bytes')
+            queues.append(ObservedQueue(
+                s.queue_depth, max_item_bytes=item_bytes,
+                max_bytes=total_bytes if item_bytes is not None else None))
+        else:
+            queues.append(make_queue(s.queue_depth))
     from .raw_fetch import RawFetch
     from ..collect.operators import SearchWeb
     raw_occurrences = any(type(getattr(s.fn, '__self__', s.fn)) in {RawFetch,SearchWeb} for s in stages)
@@ -1096,7 +1115,8 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
 def run_stream(source_iter, plan: LogicalPlan, *,
                on_progress=None, on_drain=None, log_every: int = 0,
                cancellation=None, queue_factory=None, on_start=None, on_close=None, stall_timeout=None,
-               stop_file=None, source_batch_size=_FEED_CHUNK, consume=None, progress=None, unit_driver=None, on_stop=None) -> StreamStats:
+               stop_file=None, source_batch_size=_FEED_CHUNK, consume=None, progress=None, unit_driver=None, on_stop=None,
+               stage_limits=None) -> StreamStats:
     """同步驱动入口：建事件循环跑至完成（或 Ctrl-C/异常终止），返回 StreamStats。
 
     queue_factory(depth) 是行传输缝（调度层内部，算子/编排零感知）：
@@ -1113,7 +1133,7 @@ def run_stream(source_iter, plan: LogicalPlan, *,
             drained = True
             if on_drain is not None: await _call(on_drain, result)
         try:
-            stages = _materialize(plan)
+            stages = _materialize(plan, stage_limits=stage_limits)
             if progress is not None:
                 progress.bind_stages(stages)
             if on_start is not None:

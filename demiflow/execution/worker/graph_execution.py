@@ -39,6 +39,7 @@ class GraphWorkerExecutor:
         self.occurrence_id = graph["occurrence_id"]
         self.host_id = graph.get("host_id", "local")
         self.restore = graph.get("restore")
+        self._execution_plan = launch_spec.get("execution_plan")
         self.authority = None
         self.progress = None
         self.stats = None
@@ -88,6 +89,7 @@ class GraphWorkerExecutor:
         if self._thread is not None:
             return
         self.authority = authority
+        self._assignment = assignment
         self._thread = threading.Thread(target=self._run, name="demiflow-graph-chain", daemon=True)
         self._thread.start()
 
@@ -96,6 +98,13 @@ class GraphWorkerExecutor:
         token = _CURRENT.set(self.authority)
         try:
             plan = self._load_plan()
+            checkpoint_policy = None
+            stage_limits = None
+            if self._execution_plan is not None:
+                from .layout import load_worker_layout
+                _, checkpoint_policy, stage_limits = load_worker_layout(
+                    {"execution_plan": self._execution_plan},
+                    self.authority, self._assignment)
             graph = self._graph
             prefetch = graph.get("prefetch")
             channel_specs = graph.get("output_channels") or graph.get("input_channels") or []
@@ -158,7 +167,8 @@ class GraphWorkerExecutor:
                     stop_requested=self._stop_requested, sink_id=self._graph.get("sink_id", "output"),
                     exchange_mode=exchange_mode, segment_store=store,
                     cut_namespace=self._graph.get("cut_namespace"),
-                    append_slots=prefetch["append_slots"] if prefetch else 64)
+                    append_slots=prefetch["append_slots"] if prefetch else 64,
+                    checkpoint_policy=checkpoint_policy)
                 if input_reader is not None:
                     input_reader.set_cut_hook(
                         lambda checkpoint, consumed, final: self.progress.align_cut(
@@ -174,7 +184,8 @@ class GraphWorkerExecutor:
                     prefetch["source_batch_size"] if prefetch else 256)
                 self.stats = run_stream(self.progress.source_rows(), plan,
                                         consume=self.progress.append, progress=self.progress,
-                                        source_batch_size=feed_batch)
+                                        source_batch_size=feed_batch,
+                                        stage_limits=stage_limits)
             if output_router is not None:
                 output_router.end_of_input()
                 if exchange_mode == "finite_sealed":

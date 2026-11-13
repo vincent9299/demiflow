@@ -35,7 +35,7 @@ class GraphWorkerProgress(StreamStageProgress):
                  route_value=None, restore=None, request_contribution=None,
                  stop_requested=None, sink_id="output", exchange_mode="memory_incremental",
                  segment_store=None, cut_namespace=None, append_slots=64,
-                 logical_node_id=None):
+                 logical_node_id=None, checkpoint_policy=None):
         self.action, self.run = action, action.context
         self.allocation_id = allocation_id
         self.occurrence_id = occurrence_id
@@ -49,6 +49,7 @@ class GraphWorkerProgress(StreamStageProgress):
         self._segment_store = segment_store
         self._route_value = route_value or (lambda row: None)
         self.source_sink = source_sink
+        self.checkpoint_policy = checkpoint_policy
         self.sink = BlockSink(action, sink_id, staging_only=True)
         self.row_sink = self.sink
         self.has_objects = False

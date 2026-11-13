@@ -131,6 +131,9 @@ class CheckpointControl:
 
     @property
     def interval(self):
+        policy = getattr(self.progress, 'checkpoint_policy', None)
+        if policy is not None:
+            return policy.interval_ms / 1000
         return self.progress.run.limits['checkpoint_interval_ms'] / 1000
 
     def check(self):
@@ -149,11 +152,18 @@ class CheckpointControl:
         self.finished.set()
 
     async def admit(self, size):
-        limits = self.progress.run.limits
-        if size > limits['checkpoint_unconfirmed_bytes']:
+        policy = getattr(self.progress, 'checkpoint_policy', None)
+        if policy is not None:
+            max_bytes = policy.unconfirmed_bytes
+            max_rows = policy.unconfirmed_rows
+        else:
+            limits = self.progress.run.limits
+            max_bytes = limits['checkpoint_unconfirmed_bytes']
+            max_rows = limits['checkpoint_unconfirmed_rows']
+        if size > max_bytes:
             raise ValueError('Source row exceeds unconfirmed byte budget')
-        while (len(self.unconfirmed) >= limits['checkpoint_unconfirmed_rows'] or
-               self.bytes + size > limits['checkpoint_unconfirmed_bytes']):
+        while (len(self.unconfirmed) >= max_rows or
+               self.bytes + size > max_bytes):
             self.check()
             self.capacity.clear()
             self.capacity_requested = True
@@ -195,8 +205,10 @@ class CheckpointControl:
                 replay_cut = getattr(self.progress, 'pending_cut', None)
                 due = time.monotonic() >= self.next_tick
                 # A capacity waiter may need a cut before the row threshold.
-                limits = self.progress.run.limits
-                full = (len(self.unconfirmed) >= limits['checkpoint_unconfirmed_rows'] or
+                policy = getattr(self.progress, 'checkpoint_policy', None)
+                max_rows = (policy.unconfirmed_rows if policy is not None
+                            else self.progress.run.limits['checkpoint_unconfirmed_rows'])
+                full = (len(self.unconfirmed) >= max_rows or
                         self.capacity_requested)
                 trigger = ((self.progress.ordinal >= replay_cut or full) if replay_cut is not None
                            else count and (count >= self.progress.batch_rows or due or full))

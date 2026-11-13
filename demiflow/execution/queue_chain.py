@@ -164,6 +164,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
     prefix + transform carrier instead of the full plan). The worker receives the
     maps suffix as a sha256-bound K1 plan artifact and never commits.
     """
+    import hashlib
     import shutil
     import sys
     import time
@@ -208,7 +209,18 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
     output_child_id = action.action_id + "-queue-transform"
     topology, logical_dag, physical = compile_chain_topology(
         action, source_plan, suffix_plan, source_reference,
-        output_child_id=output_child_id, host_id="local", plan_ref=plan_ref)
+        output_child_id=output_child_id, host_id="local", plan_ref=plan_ref,
+        supported_slice="queue_transform_v1")
+
+    import json as _json
+    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
+    bindings_ref = topology["bindings_ref"]
+    bindings_raw = (run.directory / bindings_ref["path"]).read_bytes()
+    if hashlib.sha256(bindings_raw).hexdigest() != bindings_ref["sha256"]:
+        raise RecoveryContractError("Execution bindings artifact digest differs")
+    layout = interpret_physical_plan(logical_dag, physical, _json.loads(bindings_raw))
+    placement = next(p for p in layout.placements if p.group_id == "chain-group")
+    sealed_profile = ResourceProfile(**to_wire(placement.profile))
 
     source.configure(action, fetch, sink, contract, 'node-' + str(index))
 
@@ -232,6 +244,8 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
         "capabilities": capabilities, "grant": grant,
         "artifact_digest_observed": run.journal.recovery_identity()["platform_revision"],
         "queue_transform": {"plan_ref": plan_ref, "sealed_operators": topology["operators"]},
+        "execution_plan": {"action_id": action.action_id, "group_id": "chain-group",
+                           "bindings_ref": bindings_ref},
     }
 
     root = run.directory.with_name(run.directory.name + "-resources") if resource_root is None \
@@ -257,7 +271,7 @@ def run_local_queue_chain(executor, source_plan, plan, sink, action, *,
         bootstrap_ref="bootstrap-ref", access_refs={},
         runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
     request = WorkerRequest(ids["worker_id"], allocation_id,
-                            ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3}),
+                            sealed_profile,
                             launch, provision_deadline_ms=60000)
     accepted = manager.apply(
         MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,

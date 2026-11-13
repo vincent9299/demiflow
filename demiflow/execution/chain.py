@@ -882,8 +882,112 @@ def seal_plan_facts(run, action, logical_dag, physical, manifest_ref, sealed_at)
     return facts
 
 
+EXECUTION_BINDINGS_SCHEMA = "demiflow.execution_bindings.v1"
+_MAX_BINDINGS_BYTES = 4 * 1024 * 1024
+
+
+def _seal_execution_bindings(run, action, logical_dag, physical, source, plan, mref,
+                             *, supported_slice="chain_v1"):
+    """Build and seal the execution_bindings.v1 document (C assembly).
+
+    The document binds the sealed physical plan to concrete resource profiles,
+    per-operation programs with stage budgets, driver-retained stages and the
+    report observation keys.  Content-addressed under scratch/execution-bindings;
+    the journal slot is attempt-independent and immutable.
+    """
+    from .state_artifacts import atomic_bytes
+    nodes = logical_dag["nodes"]
+    max_row = run.limits["max_row_bytes"]
+    operations = []
+    for i, op in enumerate(plan.operations):
+        node = nodes[i + 1]
+        depth = getattr(op, "queue_depth", None) or getattr(op, "concurrency", 1)
+        operations.append({
+            "program_index": i,
+            "logical_node_id": node["logical_node_id"],
+            "occurrence_id": node["occurrence_id"],
+            "stage_limits": {"inflight_rows": depth,
+                             "inflight_bytes": depth * max_row,
+                             "output_bytes": max_row},
+        })
+    groups = physical.get("worker_groups", [])
+    programs = [{"group_id": g["group_id"], "role": g.get("role", "cpu_prepare"),
+                 "operations": operations} for g in groups]
+    profiles = [{"profile_id": g.get("profile_ref", "profile-local"),
+                 "requests": {"cpu_millis": 1000, "memory_bytes": 1024 ** 3}}
+                for g in groups]
+    driver_stages = [nodes[0]["occurrence_id"], nodes[-1]["occurrence_id"]]
+    channel_options = [{"channel_id": ch["channel_id"],
+                        "exchange_mode": ch.get("exchange_mode", "memory_incremental"),
+                        "durability": ch.get("durability", "durable")}
+                       for ch in physical.get("channels", [])]
+    from .checked import current
+    checked = current()
+    source_bindings = list(checked.execution_bindings(source, plan, action_id=action.action_id)) \
+        if checked is not None else []
+    bindings = {
+        "schema": EXECUTION_BINDINGS_SCHEMA,
+        "run_id": run.ref.run_id, "action_id": action.action_id,
+        "dag_id": logical_dag["dag_id"], "plan_id": physical["plan_id"],
+        "artifact_manifest_ref": mref, "supported_slice": supported_slice,
+        "profiles": profiles, "programs": programs,
+        "driver_stage_ids": driver_stages, "source_bindings": source_bindings,
+        "channel_options": channel_options,
+        "checkpoint_rows": run.limits["checkpoint_rows"],
+    }
+    raw = document(bindings, _MAX_BINDINGS_BYTES)
+    digest = hashlib.sha256(raw).hexdigest()
+    path = run.directory / "scratch" / "execution-bindings" / (digest + ".json")
+    with run.journal.publication_guard(run.fence):
+        if not path.exists():
+            atomic_bytes(path, raw)
+        elif path.read_bytes() != raw:
+            raise RecoveryContractError("Existing execution-bindings artifact is corrupt")
+    ref = {"path": str(path.relative_to(run.directory)),
+           "sha256": digest, "bytes": len(raw)}
+    run.journal.bind_source(run.fence, action.action_id + "-execution-bindings", ref)
+    return ref
+
+
+def _seal_chain_identity_bridge(run, action, logical_dag, source, plan):
+    """Map report observation keys to sealed DAG nodes and seal the bridge (C).
+
+    Returns the bridge ref or None when no checked report context is active.
+    """
+    from .checked import current
+    from .identity_bridge import build_identity_bridge, seal_identity_bridge
+    checked = current()
+    if checked is None:
+        return None
+    resolved = checked.execution_bindings(source, plan, action_id=action.action_id)
+    if not resolved:
+        return None
+    nodes = logical_dag["nodes"]
+    bridge_bindings = []
+    for item in resolved:
+        role = item["role"]
+        if role == "source":
+            node = nodes[0]
+        elif role == "terminal":
+            node = nodes[-1]
+        else:
+            node = nodes[item["program_index"] + 1]
+        bridge_bindings.append({
+            "report_node_id": item["report_node_id"],
+            "report_occurrence": item["report_occurrence"],
+            "logical_node_id": node["logical_node_id"],
+            "occurrence_id": node["occurrence_id"],
+            "mode": item["mode"],
+        })
+    report_digest = checked.report_digest or identity([action.action_id, "report"])
+    bridge = build_identity_bridge(logical_dag, action_id=action.action_id,
+                                   report_digest=report_digest, bindings=bridge_bindings)
+    return seal_identity_bridge(run, action, bridge)
+
+
 def compile_chain_topology(action, source, plan, source_reference, *,
-                           output_child_id, host_id, plan_ref):
+                           output_child_id, host_id, plan_ref,
+                           supported_slice="chain_v1"):
     """Compile the E2 linear DAG/physical plan and seal the K1 manifest (D3).
 
     The whole operator chain runs in one worker host, so the source-progress
@@ -951,6 +1055,13 @@ def compile_chain_topology(action, source, plan, source_reference, *,
                 "channel_id": physical["channels"][-1]["channel_id"],
                 "operators": operators, "sink_id": "output"}
     seal_plan_facts(run, action, logical_dag, physical, mref, manifest["sealed_at"])
+    bindings_ref = _seal_execution_bindings(
+        run, action, logical_dag, physical, source, plan, mref,
+        supported_slice=supported_slice)
+    topology["bindings_ref"] = bindings_ref
+    bridge_ref = _seal_chain_identity_bridge(run, action, logical_dag, source, plan)
+    if bridge_ref is not None:
+        topology["identity_bridge_ref"] = bridge_ref
     return topology, logical_dag, physical
 
 
@@ -1034,6 +1145,16 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
             recovery_reference=dict(run_id=run.ref.run_id, action_id=action.action_id,
                                     semantic_id=action.semantic_id))
 
+    import json as _json
+    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
+    bindings_ref = topology["bindings_ref"]
+    bindings_raw = (run.directory / bindings_ref["path"]).read_bytes()
+    if hashlib.sha256(bindings_raw).hexdigest() != bindings_ref["sha256"]:
+        raise RecoveryContractError("Execution bindings artifact digest differs")
+    layout = interpret_physical_plan(logical_dag, physical, _json.loads(bindings_raw))
+    placement = next(p for p in layout.placements if p.group_id == "chain-group")
+    sealed_profile = ResourceProfile(**to_wire(placement.profile))
+
     ids = {k: uuid.uuid4().hex for k in
            ("scope_id", "allocation_id", "boot_id", "grant_id", "worker_id")}
     scope_id, allocation_id, boot_id = ids["scope_id"], ids["allocation_id"], ids["boot_id"]
@@ -1052,6 +1173,8 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
                       "plan_ref": plan_ref, "source_reference": source_reference,
                       "channel_id": topology["channel_id"], "restore": restore,
                       "sealed_operators": topology["operators"]},
+        "execution_plan": {"action_id": action.action_id, "group_id": "chain-group",
+                           "bindings_ref": bindings_ref},
     }
 
     root = run.directory.with_name(run.directory.name + "-resources") if resource_root is None \
@@ -1075,7 +1198,7 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
         bootstrap_ref="bootstrap-ref", access_refs={},
         runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
     request = WorkerRequest(ids["worker_id"], allocation_id,
-                            ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3}),
+                            sealed_profile,
                             launch, provision_deadline_ms=60000)
     accepted = manager.apply(
         MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
@@ -1263,6 +1386,16 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
             recovery_reference=dict(run_id=run.ref.run_id, action_id=action.action_id,
                                     semantic_id=action.semantic_id))
 
+    import json as _json
+    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
+    bindings_ref = topology["bindings_ref"]
+    bindings_raw = (run.directory / bindings_ref["path"]).read_bytes()
+    if hashlib.sha256(bindings_raw).hexdigest() != bindings_ref["sha256"]:
+        raise RecoveryContractError("Execution bindings artifact digest differs")
+    layout = interpret_physical_plan(logical_dag, physical, _json.loads(bindings_raw))
+    placement = next(p for p in layout.placements if p.group_id == "chain-group")
+    sealed_profile = ResourceProfile(**to_wire(placement.profile))
+
     ids = {k: uuid.uuid4().hex for k in
            ("scope_id", "allocation_id", "boot_id", "grant_id", "worker_id")}
     scope_id, allocation_id, boot_id = ids["scope_id"], ids["allocation_id"], ids["boot_id"]
@@ -1281,6 +1414,8 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
                       "plan_ref": plan_ref, "source_reference": source_reference,
                       "channel_id": topology["channel_id"], "restore": restore,
                       "sealed_operators": topology["operators"]},
+        "execution_plan": {"action_id": action.action_id, "group_id": "chain-group",
+                           "bindings_ref": bindings_ref},
     }
 
     connector = RayControlConnector(command_timeout_s=control_timeout_s)
@@ -1299,7 +1434,7 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
         bootstrap_ref="bootstrap-ref", access_refs={},
         runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
     request = WorkerRequest(ids["worker_id"], allocation_id,
-                            ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3}),
+                            sealed_profile,
                             launch, provision_deadline_ms=60000)
     accepted = manager.apply(
         MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,

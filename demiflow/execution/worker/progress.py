@@ -18,7 +18,7 @@ from ..stream_materialize import StreamStageProgress
 class WorkerStreamProgress(StreamStageProgress):
     def __init__(self, action, source, *, source_sink=None, object_specs=None,
                  restore=None, request_commit=None, on_checkpoint=None,
-                 stop_requested=None):
+                 stop_requested=None, checkpoint_policy=None):
         self.action, self.run = action, action.context
         self.source = source
         self.source_sink = (source_sink if source_sink is not None
@@ -26,7 +26,9 @@ class WorkerStreamProgress(StreamStageProgress):
         self.sink = BlockSink(action, staging_only=True)
         self.row_sink = self.sink
         self.has_objects = bool(object_specs)
-        self.batch_rows = self.run.limits["checkpoint_rows"]
+        self.checkpoint_policy = checkpoint_policy
+        self.batch_rows = (checkpoint_policy.checkpoint_rows if checkpoint_policy is not None
+                           else self.run.limits["checkpoint_rows"])
         if object_specs:
             from ..object_sink import ObjectRowsSink
             self.sink = ObjectRowsSink(action, object_specs=object_specs)

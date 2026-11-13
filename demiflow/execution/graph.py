@@ -133,6 +133,134 @@ def _build_manifest(run, plan_refs):
     return {"manifest_id": ref["manifest_id"], "sha256": ref["sha256"]}
 
 
+def compile_graph_topology(action, source, ancestor, targets, *,
+                           manifest_ref, host_id="local"):
+    """Compile the full-graph DAG/physical plan and seal F1 + bindings (C).
+
+    Uses ``graph_dag.compile_graph_logical_dag`` to compose per-program linear
+    fragments into one DAG, then ``compile_physical_execution_plan`` for the
+    worker-group placement.  Seals F1 facts, execution bindings (one program per
+    worker group) and the identity bridge.  Returns a dict with logical_dag,
+    physical, programs, bindings_ref and optional identity_bridge_ref.
+    """
+    import hashlib
+    import json
+    from ..planning.dag import compile_physical_execution_plan
+    from ..planning.graph_dag import compile_graph_logical_dag
+    from .chain import seal_plan_facts, EXECUTION_BINDINGS_SCHEMA, _MAX_BINDINGS_BYTES
+    from .exchange import read_domain
+    from .state_artifacts import atomic_bytes
+    from .recovery_contract import document
+
+    run = action.context
+    logical_dag, programs = compile_graph_logical_dag(
+        action_id=action.action_id, source=source, ancestor=ancestor, targets=targets)
+    domain = read_domain(run.directory, host_id)
+    worker_groups = []
+    for prog in programs:
+        stage_refs = [identity([logical_dag["dag_id"], op["occurrence_id"]])
+                      for op in prog["operators"]]
+        worker_groups.append({
+            "group_id": prog["group_id"], "role": prog["role"],
+            "profile_ref": "profile-local", "stage_refs": stage_refs,
+            "min_workers": 1, "initial_workers": 1, "max_workers": 1})
+    physical = compile_physical_execution_plan(
+        logical_dag=logical_dag, plan_revision=0, artifact_manifest_ref=manifest_ref,
+        worker_groups=worker_groups,
+        recovery={"checkpoint_interval_ms": run.limits["checkpoint_interval_ms"],
+                  "unconfirmed_rows": run.limits["checkpoint_unconfirmed_rows"],
+                  "unconfirmed_bytes": run.limits["checkpoint_unconfirmed_bytes"],
+                  "terminals": []},
+        feasibility_snapshot_ref=identity([run.ref.run_id, "feasibility"]),
+        read_domain=domain, durability_declared="durable",
+        partition_count=1, scheme_kind="single")
+    seal_plan_facts(run, action, logical_dag, physical, manifest_ref,
+                    int(run.journal.recovery_identity()["started_at"] * 1000))
+
+    max_row = run.limits["max_row_bytes"]
+    plans_by_group = {"ancestor": ancestor["plan"]}
+    for target in targets:
+        plans_by_group["target-" + target["reader_id"]] = target["plan"]
+    binding_programs = []
+    for prog in programs:
+        plan = plans_by_group[prog["group_id"]]
+        operations = []
+        for op_desc in prog["operators"]:
+            i = op_desc["program_index"]
+            op = plan.operations[i]
+            depth = getattr(op, "queue_depth", None) or getattr(op, "concurrency", 1)
+            operations.append({
+                "program_index": i,
+                "logical_node_id": op_desc["logical_node_id"],
+                "occurrence_id": op_desc["occurrence_id"],
+                "stage_limits": {"inflight_rows": depth,
+                                 "inflight_bytes": depth * max_row,
+                                 "output_bytes": max_row}})
+        binding_programs.append({"group_id": prog["group_id"], "role": prog["role"],
+                                 "operations": operations})
+    profiles = [{"profile_id": "profile-local",
+                 "requests": {"cpu_millis": _WORKER_CPU_MILLIS,
+                              "memory_bytes": _WORKER_MEMORY_BYTES}}
+                for _ in programs]
+    driver_stages = ([logical_dag["nodes"][0]["occurrence_id"]] +
+                     [t["logical_node_id"] for t in logical_dag.get("terminals", [])])
+    from .checked import current
+    checked = current()
+    source_bindings = list(checked.execution_bindings(source, ancestor["plan"],
+                                                      action_id=action.action_id)) \
+        if checked is not None else []
+    bindings = {
+        "schema": EXECUTION_BINDINGS_SCHEMA,
+        "run_id": run.ref.run_id, "action_id": action.action_id,
+        "dag_id": logical_dag["dag_id"], "plan_id": physical["plan_id"],
+        "artifact_manifest_ref": manifest_ref, "supported_slice": "static_fanout_v1",
+        "profiles": profiles, "programs": binding_programs,
+        "driver_stage_ids": driver_stages, "source_bindings": source_bindings,
+        "channel_options": [], "checkpoint_rows": run.limits["checkpoint_rows"],
+    }
+    raw = document(bindings, _MAX_BINDINGS_BYTES)
+    digest = hashlib.sha256(raw).hexdigest()
+    path = run.directory / "scratch" / "execution-bindings" / (digest + ".json")
+    with run.journal.publication_guard(run.fence):
+        if not path.exists():
+            atomic_bytes(path, raw)
+        elif path.read_bytes() != raw:
+            raise RecoveryContractError("Existing execution-bindings artifact is corrupt")
+    bindings_ref = {"path": str(path.relative_to(run.directory)),
+                    "sha256": digest, "bytes": len(raw)}
+    run.journal.bind_source(run.fence, action.action_id + "-execution-bindings", bindings_ref)
+
+    bridge_ref = None
+    if checked is not None:
+        from .identity_bridge import build_identity_bridge, seal_identity_bridge
+        resolved = checked.execution_bindings(source, ancestor["plan"],
+                                              action_id=action.action_id)
+        if resolved:
+            nodes = logical_dag["nodes"]
+            bridge_bindings = []
+            for item in resolved:
+                role = item["role"]
+                if role == "source":
+                    node = nodes[0]
+                elif role == "terminal":
+                    node = nodes[-1]
+                else:
+                    node = nodes[item["program_index"] + 1]
+                bridge_bindings.append({
+                    "report_node_id": item["report_node_id"],
+                    "report_occurrence": item["report_occurrence"],
+                    "logical_node_id": node["logical_node_id"],
+                    "occurrence_id": node["occurrence_id"],
+                    "mode": item["mode"]})
+            report_digest = checked.report_digest or identity([action.action_id, "report"])
+            bridge = build_identity_bridge(logical_dag, action_id=action.action_id,
+                                           report_digest=report_digest, bindings=bridge_bindings)
+            bridge_ref = seal_identity_bridge(run, action, bridge)
+
+    return {"logical_dag": logical_dag, "physical": physical, "programs": programs,
+            "bindings_ref": bindings_ref, "identity_bridge_ref": bridge_ref}
+
+
 class _WorkerLink:
     """Driver side of one worker control socket: lifecycle + contribution intake."""
 
@@ -409,6 +537,8 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
     ancestor_sealed = _sealed_operators(ancestor["plan"])
     target_sealed = [_sealed_operators(target["plan"]) for target in targets]
     manifest_ref = _build_manifest(run, [ancestor_plan_ref, *target_plan_refs])
+    graph_topology = compile_graph_topology(
+        action, selected, ancestor, targets, manifest_ref=manifest_ref, host_id=host_id)
     domain = read_domain(run.directory, host_id)
 
     reader_ids = [target["reader_id"] for target in targets]
@@ -486,6 +616,20 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
         return {"target_rows": dict(terminal.rows), "contributions": {rid: [] for rid in reader_ids},
                 "egress_rows": terminal.inputs, "workers": 0, "ancestor_contributions": [],
                 "final_arrival": {}, "checkpoints": dict(terminal.checkpoints)}
+    import hashlib as _hashlib
+    import json as _json
+    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
+    _bindings_ref = graph_topology["bindings_ref"]
+    _bindings_raw = (run.directory / _bindings_ref["path"]).read_bytes()
+    if _hashlib.sha256(_bindings_raw).hexdigest() != _bindings_ref["sha256"]:
+        raise RecoveryContractError("Execution bindings artifact digest differs")
+    _layout = interpret_physical_plan(
+        graph_topology["logical_dag"], graph_topology["physical"], _json.loads(_bindings_raw))
+    _placements = {p.group_id: p for p in _layout.placements}
+    _alloc_group = {ancestor_alloc: "ancestor"}
+    _alloc_group.update({target_allocs[t["reader_id"]]: "target-" + t["reader_id"] for t in targets})
+    _sealed_profiles = {alloc: ResourceProfile(**to_wire(_placements[gid].profile))
+                        for alloc, gid in _alloc_group.items()}
     restore = terminal.restore_point()
     restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
 
@@ -518,6 +662,8 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
                              "reader_id": rid, "exchange_mode": exchange_mode, "credit_budget": budget,
                              "storage_bytes": graph_spec.get("storage_bytes", budget["bytes"]),
                              "route_epoch": 0} for rid in reader_ids]}
+    ancestor_spec["execution_plan"] = {"action_id": action.action_id, "group_id": "ancestor",
+                                       "bindings_ref": _bindings_ref}
     ancestor_data_fds = [data_pairs[rid][0].fileno() for rid in reader_ids]
 
     target_specs = {}
@@ -537,6 +683,8 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
             "input_channels": [{"channel_id": data_pairs[rid][2], "fd": data_pairs[rid][1].fileno(),
                                 "reader_id": rid, "exchange_mode": exchange_mode, "credit_budget": budget,
                                 "route_epoch": 0}]}
+        spec["execution_plan"] = {"action_id": action.action_id, "group_id": "target-" + rid,
+                                  "bindings_ref": _bindings_ref}
         target_specs[rid] = spec
         target_data_fds[rid] = [data_pairs[rid][1].fileno()]
 
@@ -568,8 +716,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
             argv=(__import__("sys").executable, "-B", "-m", "demiflow.execution.worker.graph_host"),
             bootstrap_ref="bootstrap-ref", access_refs={}, runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
         return WorkerRequest(allocation_id, allocation_id,
-                             ResourceProfile(requests={"cpu_millis": _WORKER_CPU_MILLIS,
-                                                       "memory_bytes": _WORKER_MEMORY_BYTES}),
+                             _sealed_profiles[allocation_id],
                              launch, provision_deadline_ms=60000)
 
     requests = tuple(request_for(alloc) for alloc in all_allocs)
@@ -820,6 +967,8 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
     ancestor_sealed = _sealed_operators(ancestor["plan"])
     target_sealed = [_sealed_operators(target["plan"]) for target in targets]
     manifest_ref = _build_manifest(run, [ancestor_plan_ref, *target_plan_refs])
+    graph_topology = compile_graph_topology(
+        action, selected, ancestor, targets, manifest_ref=manifest_ref, host_id=host_id)
     domain = read_domain(run.directory, host_id)
 
     reader_ids = [target["reader_id"] for target in targets]
@@ -878,6 +1027,20 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
         return {"target_rows": dict(terminal.rows), "contributions": {rid: [] for rid in reader_ids},
                 "egress_rows": terminal.inputs, "workers": 0, "ancestor_contributions": [],
                 "final_arrival": {}, "checkpoints": dict(terminal.checkpoints)}
+    import hashlib as _hashlib
+    import json as _json
+    from ..planning.plan_interpreter import interpret_physical_plan, to_wire
+    _bindings_ref = graph_topology["bindings_ref"]
+    _bindings_raw = (run.directory / _bindings_ref["path"]).read_bytes()
+    if _hashlib.sha256(_bindings_raw).hexdigest() != _bindings_ref["sha256"]:
+        raise RecoveryContractError("Execution bindings artifact digest differs")
+    _layout = interpret_physical_plan(
+        graph_topology["logical_dag"], graph_topology["physical"], _json.loads(_bindings_raw))
+    _placements = {p.group_id: p for p in _layout.placements}
+    _alloc_group = {ancestor_alloc: "ancestor"}
+    _alloc_group.update({target_allocs[t["reader_id"]]: "target-" + t["reader_id"] for t in targets})
+    _sealed_profiles = {alloc: ResourceProfile(**to_wire(_placements[gid].profile))
+                        for alloc, gid in _alloc_group.items()}
     restore = terminal.restore_point()
     restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
 
@@ -922,6 +1085,8 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
                              "credit_budget": budget,
                              "storage_bytes": graph_spec.get("storage_bytes", budget["bytes"]),
                              "route_epoch": 0} for rid in reader_ids]}
+    ancestor_spec["execution_plan"] = {"action_id": action.action_id, "group_id": "ancestor",
+                                       "bindings_ref": _bindings_ref}
 
     target_specs = {}
     for target in targets:
@@ -939,6 +1104,8 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
             "input_channels": [{"channel_id": physical[rid]["channel_id"], "ray_queue": channel_names[rid],
                                 "carriage": "ray", "reader_id": rid, "exchange_mode": exchange_mode,
                                 "credit_budget": budget, "route_epoch": 0}]}
+        spec["execution_plan"] = {"action_id": action.action_id, "group_id": "target-" + rid,
+                                  "bindings_ref": _bindings_ref}
         target_specs[rid] = spec
 
     if prefetch is not None:
@@ -970,8 +1137,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
             argv=(sys.executable, "-B", "-m", "demiflow.execution.worker.graph_ray_host"),
             bootstrap_ref="bootstrap-ref", access_refs={}, runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
         return WorkerRequest(allocation_id, allocation_id,
-                             ResourceProfile(requests={"cpu_millis": _WORKER_CPU_MILLIS,
-                                                       "memory_bytes": _WORKER_MEMORY_BYTES}),
+                             _sealed_profiles[allocation_id],
                              launch, provision_deadline_ms=60000)
 
     requests = tuple(request_for(alloc) for alloc in all_allocs)

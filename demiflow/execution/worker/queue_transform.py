@@ -42,6 +42,7 @@ class QueueTransformExecutor:
         self._send = send
         self.plan_ref = execution["plan_ref"]
         self.sealed_operators = execution.get("sealed_operators")
+        self._execution_plan = launch_spec.get("execution_plan")
         self.authority = None
         self._store = None
         self._thread = None
@@ -66,6 +67,7 @@ class QueueTransformExecutor:
         if self._thread is not None:
             return
         self.authority = authority
+        self._assignment = assignment
         self._store = LocalSegmentStore(authority.directory / "queue-transform-segments", host_id="local")
         self._thread = threading.Thread(target=self._run, name="demiflow-queue-transform", daemon=True)
         self._thread.start()
@@ -75,8 +77,14 @@ class QueueTransformExecutor:
         token = _CURRENT.set(self.authority)
         try:
             plan = self._load_plan()
+            stage_limits = None
+            if self._execution_plan is not None:
+                from .layout import load_worker_layout
+                _, _, stage_limits = load_worker_layout(
+                    {"execution_plan": self._execution_plan},
+                    self.authority, self._assignment)
             run_stream(self._source_rows(), self._stream_plan(plan), consume=self._emit,
-                       source_batch_size=1)
+                       source_batch_size=1, stage_limits=stage_limits)
         except BaseException as exc:
             self._error = exc
             self._send_failure(exc)

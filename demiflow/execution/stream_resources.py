@@ -41,7 +41,7 @@ class StreamResources:
         names = [a.stage for a in self.actors if getattr(a,'is_stream_sink',False)]
         if len(set(names)) != len(names): raise ValueError('Duplicate save_lance stage name')
 
-    def make_queue(self, depth):
+    def make_queue(self, depth, *, max_bytes=None, max_item_bytes=None):
         from .run_context import current_run
         from .recovery_contract import RecoveryContractError
         run = current_run()
@@ -51,8 +51,9 @@ class StreamResources:
             raise RecoveryContractError('Execution requires native byte-bounded queues; custom transports need their adapter')
         if type(depth) is not int or not 1 <= depth <= 256:
             raise RecoveryContractError('Stream queue depth exceeds admission budget')
-        maximum = run.limits['max_row_bytes']
-        q = ObservedQueue(depth, max_item_bytes=maximum, max_bytes=depth * maximum)
+        maximum = max_item_bytes if max_item_bytes is not None else run.limits['max_row_bytes']
+        total = max_bytes if max_bytes is not None else depth * maximum
+        q = ObservedQueue(depth, max_item_bytes=maximum, max_bytes=total)
         self.queues.append(q)
         return q
 
