@@ -132,9 +132,10 @@ def test_wide_row_exceeding_limit_rejected(tmp_path):
     ))
     executor = LocalDatasetExecutor(workers=1, unified_chain=True)
     dataset = Dataset(ItemsSource(items), plan, executor)
-    with pytest.raises(Exception) as exc_info:
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    with pytest.raises(RecoveryContractError) as exc_info:
         with RunContext.start(tmp_path / "run",
                               limits={"max_row_bytes": 1 * 1024 ** 2,
                                       "checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
             dataset.materialize().take_all()
-    assert "byte budget" in str(exc_info.value).lower() or "Worker failed" in str(exc_info.value)
+    assert "byte budget" in str(exc_info.value).lower()
