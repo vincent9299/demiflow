@@ -59,7 +59,7 @@
     {
       "check": "final_consistency",
       "status": "passed",
-      "detail": "Ten review records present; runtime acceptance remains separate; corrected interfaces retained."
+      "detail": "Ten dimension-specific review records present; this does not establish ten complete reviews. Runtime acceptance remains separate."
     }
   ],
   "runtime_accepted": false,

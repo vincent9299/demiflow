@@ -114,7 +114,7 @@ def final():
     assert 'not_run' in (OUT/'INTEGRATION-ACCEPTANCE.md').read_text()
     assert not any('NativeEmbeddingRecovery.bind_client' in p.read_text() for p in (OUT/'tasks').glob('*.md'))
     assert 'stage_limits' in (OUT/'interfaces.pyi').read_text()
-    return 'Ten review records present; runtime acceptance remains separate; corrected interfaces retained.'
+    return 'Ten dimension-specific review records present; this does not establish ten complete reviews. Runtime acceptance remains separate.'
 check('final_consistency',final)
 report={'kind':'design_validation_not_runtime_acceptance','base_commit':BASE,'checks':checks,'runtime_accepted':False,'limitations':['v2 bindings interpreter and implementation remain to be written','browser/Ray/performance/business acceptance not executed by this design task']}
 (OUT/'design-validation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
