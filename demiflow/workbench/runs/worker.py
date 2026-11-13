@@ -88,9 +88,13 @@ def execute(root, run_id, attempt=None):
                 if errors:
                     registration_failed[0] = True
                     raise RuntimeError('Committed output registration failed: ' + '; '.join(errors))
+        # Forward C's additive report_digest only once the engine accepts it (shared checkout).
+        checked_extra = {}
+        if 'report_digest' in inspect.signature(CheckedExecution.__init__).parameters:
+            checked_extra['report_digest'] = manifest['report_digest']
         context = CheckedExecution(nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
             operators=report['operators'], source_root=source, resource_root=target, work_root=work, limits=limits,
-            record=record, check_stop=check_stop, observe=run.observe_nodes)
+            record=record, check_stop=check_stop, observe=run.observe_nodes, **checked_extra)
         native = dict(memory_bytes=limits['memory_bytes'], max_rss_bytes=limits['max_rss_bytes'] // 2,
             max_scratch_bytes=limits['max_scratch_bytes'], max_row_bytes=limits['max_row_bytes'],
             batch_rows=limits['batch_rows'], threads=2, partitions=1,

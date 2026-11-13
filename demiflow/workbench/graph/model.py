@@ -200,6 +200,37 @@ def _source_tree(root, *, entry, params, expected_workspace):
                 total_nodes=node_count,total_edges=edge_count,parameter_sha256=parameter_sha)
 
 
+def _join_sealed_observations(root, run_id, attempt, logical_view):
+    """Annotate sealed actions with one bounded observation page (availability only).
+
+    The full per-node records stay with the existing run-observations query loaded
+    on selection; here each bridge entry only gains observed/not_in_page for the
+    selected attempt. A page absence never implies the run never observed a node.
+    Any single action's observation failure degrades honestly, not the whole graph.
+    """
+    from demiflow.workbench.runs import facts
+    from demiflow.workbench.runs import view as run_view
+    for entry in logical_view.get('actions', []):
+        bridge = entry.get('identity_bridge')
+        if entry.get('status') != 'sealed' or not bridge or not bridge.get('available'):
+            continue
+        action_id = entry['action_id']
+        try:
+            page = run_view.observations(root, run_id, attempt=attempt, action_id=action_id, limit=64)
+            if page.get('availability') == 'unsupported':
+                entry['node_observations'] = dict(available=False, reason='historical_observation_contract')
+                continue
+            joined = facts.join_node_observations(bridge['bridge'], page, action_id=action_id, attempt=attempt)
+            entry['node_observations'] = dict(
+                available=True, attempt=attempt, has_more=bool(page.get('has_more')),
+                entries=[dict(logical_node_id=e['logical_node_id'], occurrence_id=e['occurrence_id'],
+                              report_node_id=e['report_node_id'], report_occurrence=e['report_occurrence'],
+                              availability=e['availability']) for e in joined])
+            bounded_json(entry, facts.ACTION_BYTES)
+        except ForgeError as exc:
+            entry['node_observations'] = dict(available=False, reason='observation_page_unavailable', detail=str(exc)[:512])
+
+
 def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         run_id=None, attempt=None, node_id=None, node_offset=0):
     root, control, _ = ws.load_workspace(root)
@@ -254,7 +285,8 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         logical_view = logical.project(nodes, report.get('edges', []), report.get('actions', []))
         if basis_kind == 'run':
             from demiflow.workbench.runs import facts
-            logical_view = facts.overlay_sealed(root, run_id, logical_view)
+            logical_view = facts.overlay_sealed(root, run_id, logical_view, report_digest=report['digest'])
+            _join_sealed_observations(root, run_id, attempt, logical_view)
     binding = dict(workspace_id=key, basis_kind=basis_kind, basis_digest=digest, entry=entry,
                    params=params, run_id=run_id, attempt=attempt)
     total_nodes, total_edges = len(nodes), len(edges)
@@ -346,12 +378,43 @@ def from_binding(root, binding):
     return result
 
 
-def bound_source(root, binding, node_id, *, include_parameters=True):
+def _resolve_bridge_node(target, report, logical_node_id, occurrence_id):
+    """Locate the sealed report node for an execution node via the identity bridge.
+
+    Never guesses: an unbridged node is not_found, and a logical node with several
+    bridged instances requires an explicit occurrence rather than picking the first.
+    """
+    from demiflow.workbench.runs import facts
+    matches = []
+    for action_id in report.get('actions', []):
+        if type(action_id) is not str:
+            continue
+        sealed = facts.read_sealed_plan(target, action_id)
+        if not sealed.get('available'):
+            continue
+        bridge = facts.read_identity_bridge(target, action_id, dag_id=sealed['dag_id'], report_digest=report['digest'])
+        if not bridge.get('available'):
+            continue
+        for entry in bridge['bridge']['entries']:
+            if entry['logical_node_id'] == logical_node_id and (occurrence_id is None or entry['occurrence_id'] == occurrence_id):
+                matches.append(entry['report_node_id'])
+    unique = set(matches)
+    if len(unique) == 1:
+        return next(iter(unique))
+    if len(unique) > 1:
+        raise ForgeError('Logical node has multiple bridged instances; select an occurrence', code='conflict')
+    raise ForgeError('Execution node is not bridged to a sealed report node', code='not_found')
+
+
+def bound_source(root, binding, node_id, *, include_parameters=True, logical_node_id=None, occurrence_id=None):
     """Read one immutable node's provenance without rechecking the project.
 
     A report is evidence of its own revision, not a freshness assertion. Source
     bytes are separately SHA-checked by source_view. Parameter mutations still
-    use from_binding(), which performs the current native verification.
+    use from_binding(), which performs the current native verification. For a run,
+    an execution (logical) node reference is resolved to its sealed report node
+    through the identity bridge before reusing the original sealed-source read;
+    current project files never replace historical code.
     """
     _arguments(binding)
     root, control, _ = ws.load_workspace(root)
@@ -380,6 +443,8 @@ def bound_source(root, binding, node_id, *, include_parameters=True):
             raise ForgeError('Run attempt differs', code='conflict')
         report = runs._report(target, value['manifest'])
         digest = value['manifest']['digest']
+        if logical_node_id is not None:
+            node_id = _resolve_bridge_node(target, report, logical_node_id, occurrence_id)
     evidence = report.get('binding', {})
     observed = dict(workspace_id=key, basis_kind=binding['basis_kind'], basis_digest=digest,
                     entry=report.get('entry', evidence.get('entry')), params=evidence.get('parameter_path'),

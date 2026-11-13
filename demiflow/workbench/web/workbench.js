@@ -278,11 +278,12 @@
       graphTitle.textContent=(sealed?'执行封存计划（E2）':'声明图投影（E2）')+' · '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
       logicalBar.append($('span','结构校验通过 · '+dag.schema_version,'wb-tag'));
       if(sealed){
+        const sealedAt=entry.sealed_at!=null&&Number.isFinite(Number(entry.sealed_at))?new Date(Number(entry.sealed_at)).toISOString():'未提供';
         logicalBar.append($('span','已绑定本次执行计划','wb-tag'),
           $('span','dag_id '+dag.dag_id.slice(0,16),'wb-caption'),
           $('span','plan_id '+(entry.plan_id||'').slice(0,16),'wb-caption'),
           $('span','action '+String(entry.action_id).slice(-12),'wb-caption'),
-          $('span','sealed_at '+(entry.sealed_at!=null?new Date(entry.sealed_at*1000).toISOString():'未提供'),'wb-caption'));
+          $('span','sealed_at '+sealedAt,'wb-caption'));
       }else{
         logicalBar.append($('span','未绑定本次执行计划','wb-tag'),$('span','声明图 dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
         if(entry.fallback)logicalBar.append($('span','声明投影（非执行封存计划）','wb-tag'));
@@ -290,30 +291,75 @@
       const labels={};for(const n of graph.nodes)labels[n.id]=n.operator?.name||n.api.split(/[.:]/).at(-1)||n.kind;
       logicalView.update(dag,entry.node_map,labels,logicalSelected,sealed?'executed':'declared');
     }
+    function bridgeEntryFor(entry,logicalId,occurrenceId){
+      const bridge=entry&&entry.identity_bridge;
+      if(!bridge||!bridge.available||!bridge.bridge||!Array.isArray(bridge.bridge.entries))return null;
+      return bridge.bridge.entries.find(e=>e.logical_node_id===logicalId&&e.occurrence_id===occurrenceId)||null;
+    }
+    function observationLabel(entry,logicalId,occurrenceId){
+      const obs=entry&&entry.node_observations;
+      if(!obs)return '未提供观测信息';
+      if(!obs.available){
+        if(obs.reason==='historical_observation_contract')return '历史运行观测契约不支持，无法对应';
+        return '观测页不可用：'+(obs.detail||obs.reason||'未知');
+      }
+      const row=(obs.entries||[]).find(e=>e.logical_node_id===logicalId&&e.occurrence_id===occurrenceId);
+      return row&&row.availability==='observed'?'已有观测':'本页未见观测（不代表整个运行无观测）';
+    }
     function chooseLogicalNode(id,declared){
       const entry=logicalEntry();
       const projected=entry&&(entry.status==='projected'||entry.status==='sealed');
       const group=projected?entry.dag.nodes.filter(n=>n.logical_node_id===id):[];
-      if(declared&&!data().graph.nodes.some(n=>n.id===declared)){
-        locateNode(declared).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
+      const sealed=projected&&entry.status==='sealed';
+      const bridge=sealed&&entry.identity_bridge&&entry.identity_bridge.available?entry.identity_bridge:null;
+      let reportId=declared||null;
+      if(bridge&&group.length===1){const be=bridgeEntryFor(entry,id,group[0].occurrence_id);if(be)reportId=be.report_node_id;}
+      if(reportId&&!data().graph.nodes.some(n=>n.id===reportId)){
+        locateNode(reportId).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
         return;
       }
-      if(declared)chooseNode(declared);
+      if(reportId)chooseNode(reportId);
       logicalSelected=id;logicalView.select(id);
       if(!group.length)return;
-      const node=group[0],sealed=entry.status==='sealed';
+      const node=group[0];
       const box=details((sealed?'执行逻辑节点（E2）· ':'声明逻辑节点（E2）· ')+id.slice(0,12),inspector);box.open=true;
       const facts=$('dl',undefined,'details');
       const rows=[['op_kind',node.op_kind],['输入端口',node.input_ports.join(', ')||'无'],['输出端口',node.output_ports.join(', ')||'无'],['出现次数',String(group.length)],['operator_spec_ref',node.operator_spec_ref||'未绑定（只读投影）']];
       const stage=sealed&&entry.physical&&entry.physical.stages?entry.physical.stages[id]:null;
       if(sealed){
-        rows.push(['声明节点','未桥接（D1b）'],['节点观测','未桥接（D1b）']);
+        if(bridge){
+          rows.push(['执行节点桥','已绑定报告节点（源码与参数按报告节点对应）']);
+          rows.push(['节点观测',group.length===1?observationLabel(entry,id,group[0].occurrence_id):'按出现分别对应（见下方）']);
+        }else{
+          const ib=entry.identity_bridge||{};
+          rows.push(['执行节点桥','尚无节点身份桥'+(ib.reason?'（'+ib.reason+'）':'')]);
+          rows.push(['节点观测','未桥接，无法对应执行观测']);
+        }
         if(stage)rows.push(['分区数',String(stage.partition_count)],['worker 角色',stage.role||'未分配'],['stage_id',String(stage.stage_id).slice(0,16)]);
       }else rows.push(['声明节点',declared||'未映射']);
       for(const[label,value]of rows)facts.append($('dt',label),$('dd',value));
       box.append(facts);
       if(sealed){
-        box.append($('p','C 空间执行事实直连封存计划；A 空间节点观测待 D1b 身份桥，未桥接不猜测。','wb-caption'));
+        if(bridge){
+          box.append($('p','执行事实直连本次封存计划；源码、参数与已有观测按报告节点对应。未桥接或缺测如实标注，不猜测。','wb-caption'));
+          if(group.length>1){
+            box.append($('p','该逻辑节点有多次出现，选择一次出现查看其封存源码与观测：','wb-caption'));
+            const picker=$('div',undefined,'wb-inline-actions');box.append(picker);
+            for(const occ of group){
+              const be=bridgeEntryFor(entry,id,occ.occurrence_id);
+              const label='出现 '+String(occ.occurrence_id).slice(0,8)+(be?' · '+observationLabel(entry,id,occ.occurrence_id):' · 未桥接');
+              button(label,()=>{
+                if(!be){message('该出现尚无节点身份桥，无法对应执行节点。','error-box');return;}
+                const rid=be.report_node_id;
+                if(!data().graph.nodes.some(n=>n.id===rid)){locateNode(rid).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});return;}
+                chooseNode(rid);logicalSelected=id;logicalView.select(id);
+              },picker,{disabled:!be});
+            }
+          }
+        }else{
+          const ib=entry.identity_bridge||{};
+          box.append($('p',ib.detail||'该 action 尚无节点身份桥；封存计划仍可查看，执行节点与报告观测的对应不猜测。','wb-caption'));
+        }
         if(stage)raw('stage.budgets',stage.budgets,box);
         if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
       }
