@@ -30,6 +30,27 @@ def current_action():
     return _ACTION.get()
 
 
+def create_target_absent_binding(run_id, action_id, declaration, intent):
+    """Derive a create admission identity from native facts, without storage IO."""
+    from ..errors import DemiflowError
+    from .lance_sink import spec_from_identity
+    if (type(declaration) is not dict or declaration.get('kind') != 'write_table'
+            or type(intent) is not dict or intent.get('kind') != 'write_table'):
+        return None
+    try:
+        spec = spec_from_identity(declaration['sink'])
+        if (spec.mode != 'create' or spec.expected_version is not None
+                or intent.get('spec') != spec.to_dict()
+                or intent.get('request_hash') != spec.content_hash
+                or intent.get('operation_id') != identity([run_id, action_id, 1])):
+            return None
+    except (KeyError, TypeError, ValueError, DemiflowError, RecoveryContractError):
+        return None
+    return dict(kind='create-target-absent', action_id=action_id,
+                operation_id=intent['operation_id'], request_hash=spec.content_hash,
+                uri=spec.uri, mode='create')
+
+
 class RunContext:
     """Platform control scope. Pipeline/operator arguments never carry this."""
 
@@ -275,7 +296,8 @@ class RunContext:
             raise RecoveryContractError('Queue task runs cannot also authorize local durable actions; use a separate bounded run')
         if old is not None and (declaration.get('kind') in {'write_file', 'delivery'} or
                 declaration.get('kind')=='run_stream' and not native_stream or
-                declaration.get('kind') == 'write_table' and not self.journal.execution_commits(action_id)):
+                declaration.get('kind') == 'write_table' and not self.journal.execution_commits(action_id)
+                and not self._create_target_was_absent(action_id, declaration)):
             raise RecoveryContractError('This delivery-only entry needs its P3 native sink adapter before replay')
         self.journal.bind_execution_action(self.fence, action_id, declaration)
         action = RunAction(self, action_id, declaration)
@@ -285,6 +307,18 @@ class RunContext:
             yield action
         finally:
             _ACTION.reset(token)
+
+    def _create_target_was_absent(self, action_id, declaration):
+        binding = self.journal.source_binding(action_id + '-create-target-absent')
+        if binding is None:
+            return False
+        view = self.journal.execution_view(detail='summary', action_ids=[action_id])
+        intent = next((event['value'] for event in view['events']
+                       if event['kind'] == 'intent'), None)
+        expected = create_target_absent_binding(self.ref.run_id, action_id, declaration, intent)
+        # This cross-attempt fact grants replay admission, not permission to
+        # overwrite. LanceSink.prepare must recheck absence at the actual write.
+        return expected is not None and binding == expected
 
     def allocate_artifact(self, path, *, commit_id=None, size=0, atomic=True):
         self.journal.allocate_artifact(self.fence,

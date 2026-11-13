@@ -1194,6 +1194,42 @@ def seal_write_topology(action, source, plan, *, host_id="local"):
     relational branch. Deferred branches (pure Lance copy, arrow_batch_sink) never
     call this, so the D reader honestly reports no sealed plan for them.
     """
+    run = action.context
+    if run.journal.source_binding(action.action_id + "-sealed-plan") is not None:
+        from ..planning.dag import compile_logical_dag
+        from .plan_interpreter import interpret_physical_plan, to_wire
+        from .sealed_plans import load_execution_bindings, load_sealed_plan
+        sealed = load_sealed_plan(run.directory, action.action_id)
+        bindings = load_execution_bindings(run.directory, action.action_id, sealed_plan=sealed)
+        logical_dag, physical = sealed["logical_dag"], sealed["physical_plan"]
+        layout = interpret_physical_plan(logical_dag, physical, bindings=bindings,
+                                         manifest_ref=sealed["facts"]["artifact_manifest_ref"])
+        if (layout.supported_slice != "chain_v1" or len(layout.workers) != 1
+                or layout.workers[0].group_id != "chain-group"):
+            raise RecoveryContractError("Sealed native write layout differs")
+        placement = layout.workers[0]
+        plan_ref = to_wire(placement.program_ref)
+        operators = to_wire(placement.sealed_operators)
+        # Native writes execute this in-memory plan, not the transient pickle.
+        # Its bytes may vary across processes despite identical business code.
+        # Verify that code and the full logical identity against the original
+        # seal; never replace its manifest, bindings or program reference.
+        verify_loaded_plan(plan, plan_ref, operators)
+        actual = compile_logical_dag(action_id=action.action_id, source=source,
+            operations=plan.operations, terminal_kind="write_lance", sink_ids=("lance",))
+        if actual != logical_dag:
+            raise RecoveryContractError("Native write logical plan differs from the sealed plan")
+        topology = {"run_id": run.ref.run_id, "action_id": action.action_id,
+                    "epoch": run.attempt, "topology_revision": 0, "route_epoch": 0,
+                    "plan_revision": physical["plan_revision"],
+                    "artifact_manifest_ref": sealed["facts"]["artifact_manifest_ref"],
+                    "source_id": logical_dag["sources"][0]["source_id"],
+                    "channel_id": physical["channels"][-1]["channel_id"],
+                    "operators": operators, "sink_id": "lance", "bindings_ref": bindings["ref"]}
+        bridge_ref = _seal_chain_identity_bridge(run, action, logical_dag, source, plan)
+        if bridge_ref is not None:
+            topology["identity_bridge_ref"] = bridge_ref
+        return _WriteSeal(action, plan_ref, topology)
     plan_ref = seal_write_plan_ref(action, plan)
     # The write bindings are a linear chain (single group, fixed source, single
     # partition, forward channels), so they reuse B's chain_v1 slice unchanged;

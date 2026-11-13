@@ -985,8 +985,6 @@ def register_results(root, run_id, *, recover=False, attempt=None):
     from demiflow.lance.model import LanceWriteReceipt
     from demiflow.workbench.worker import operation
     from demiflow.lance.refs import DatasetRef
-    from demiflow.lance.reconcile import reconcile_lance_create
-    from demiflow.lance.reconcile import reconcile_lance_overwrite
     target, value = _load(root, run_id, attempt=attempt)
     run = RunJournal(target, attempt=value['state'].get('attempt'))
     errors = []  # Recovery belongs to native RunJournal commits, never UI events.
@@ -1019,6 +1017,10 @@ def register_results(root, run_id, *, recover=False, attempt=None):
                 receipt = _native_execution_receipt(run, output['action_id'])
                 if receipt is not None:
                     run.action_event(output['action_id'], 'recovered', receipt)
+                elif _admit_absent_create(run, output,
+                        details['actions'].get(output['action_id'], {}).get('intent')):
+                    # Admission is not a receipt/result: no table exists to read.
+                    continue
             if not receipt or receipt['status'] != 'committed':
                 continue
             receipt = LanceWriteReceipt.from_dict(receipt)
@@ -1034,6 +1036,71 @@ def register_results(root, run_id, *, recover=False, attempt=None):
         except Exception as exc:
             errors.append(output['name'] + ': ' + str(exc)[:512])
     return errors
+
+
+def _admit_absent_create(run, output, intent):
+    """Record only confirmed absence, using the stopped driver's existing fence."""
+    from demiflow.errors import LanceResourceNotFound
+    from demiflow.execution.lance_sink import spec_from_identity
+    from demiflow.execution.run_context import create_target_absent_binding
+    from demiflow.lance.reconcile import reconcile_lance_create
+    from demiflow.lance.storage import inspect_lance
+
+    action_id = output['action_id']
+    configuration = run.recovery_identity()
+    native = run.execution_action(action_id)
+    if configuration is None or native is None or run.execution_commits(action_id):
+        return False
+    binding = create_target_absent_binding(configuration['run_id'], action_id,
+                                          native['declaration'], intent)
+    if (binding is None or output.get('mode') != 'create'
+            or output.get('uri') != binding['uri']):
+        return False
+    spec = spec_from_identity(native['declaration']['sink'])
+    try:
+        try:
+            receipt = reconcile_lance_create(spec.uri, request_hash=binding['request_hash'],
+                                             operation_id=binding['operation_id'])
+        except LanceResourceNotFound:
+            # The native reconciler raises for an absent dataset, rather than
+            # returning None. This supplies no receipt; still require the
+            # separate, current inspect_lance absence proof below.
+            receipt = None
+        if receipt is not None:
+            return False  # Published without a journal commit is outside this slice.
+        try:
+            inspect_lance(spec.uri, None, spec.storage_options)
+        except LanceResourceNotFound:
+            pass
+        else:
+            return False
+    except Exception:
+        return False  # IO, permission and corruption are never absence evidence.
+
+    # Never steal ownership from an active driver. Resume already holds the
+    # workspace execution lock; also take the same runtime lease as RunContext.
+    descriptor = os.open(run.directory / '.runtime.lock',
+                         os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        state = RunJournal(run.directory).execution_status()
+        if (state['status'] not in TERMINAL or state['attempt'] != run.attempt
+                or not execution_stopped(run.directory, state)):
+            return False
+        fence = uuid.uuid4().hex
+        run.claim_execution(configuration, fence)
+        try:
+            # This immutable cross-attempt fact only admits replay. The sink's
+            # create conflict check remains the authority at publication time.
+            run.bind_source(fence, action_id + '-create-target-absent', binding)
+        finally:
+            run.release_execution(fence)
+    finally:
+        os.close(descriptor)
+    return True
 
 
 def execution_stopped(target, state):
