@@ -9,6 +9,9 @@ that the streamed branch really consumes the sealed checkpoint policy and stage
 limits. Deferred branches (pure Lance copy, arrow_batch_sink) honestly seal
 nothing. All scratch output lives under the pytest tmp_path (/tmp/demiflow-*).
 """
+import hashlib
+import sys
+
 import lance
 import pyarrow as pa
 import pytest
@@ -307,3 +310,119 @@ def test_deferred_pure_copy_seals_nothing(tmp_path):
                   if run.journal.source_binding(a + "-sealed-plan") is not None]
         assert sealed == [], "a deferred branch must not seal a plan it does not bind"
     assert lance.dataset(str(target)).count_rows() == 3
+
+
+# --- Code-pin source archive durability: survives run-exit orphan cleanup ------
+
+def test_code_pin_source_archive_survives_run_exit(tmp_path, monkeypatch):
+    """The archived business source (manifest definition_ref.location) must survive.
+
+    snapshot_code_sources registered the archive as protected=0, so clean_orphans
+    unlinked it at run exit and the K1 manifest definition_ref.location dangled
+    (gap④ audit could not read the pinned source). It must be written unregistered.
+    """
+    import demiflow.execution.chain as chain_mod
+
+    captured = {}
+    real_seal = chain_mod.seal_write_topology
+
+    def capture_seal(action, source, plan, *, host_id="local"):
+        handle = real_seal(action, source, plan, host_id=host_id)
+        captured["plan_ref"] = handle._plan_ref
+        return handle
+
+    monkeypatch.setattr(chain_mod, "seal_write_topology", capture_seal)
+    ds = relational_dataset()
+    target = tmp_path / "out.lance"
+    run_dir = tmp_path / "run"
+    with RunContext.start(run_dir):
+        ds.write_lance(str(target), mode="create", return_receipt=True)
+        sources = captured["plan_ref"]["code_sources"]
+        assert sources, "no business source was archived"
+        for ref in sources:
+            assert (run_dir / ref["path"]).exists()
+    # clean_orphans has run at exit; the audited source archive must still be present.
+    for ref in sources:
+        carrier = run_dir / ref["path"]
+        assert carrier.exists(), "clean_orphans pruned the code-pin source archive"
+        assert hashlib.sha256(carrier.read_bytes()).hexdigest() == ref["sha256"]
+
+
+# --- Streamed layer-3 counterexample: wide row rejected by sealed byte budget --
+
+def test_streamed_wide_row_rejected_by_sealed_byte_budget(tmp_path):
+    """A row wider than the sealed output_bytes is honestly rejected, not published.
+
+    The streamed write path consumes the sealed stage budget through ObservedQueue
+    (max_item_bytes = output_bytes = max_row_bytes + 256). A 2MB row under a 1MB
+    max_row_bytes must fail with a byte-budget error before any Lance publication.
+    """
+    async def widen(row):
+        return {"wide": "x" * (2 * 1024 * 1024), "i": row["i"]}
+
+    ds = data.from_items([{"i": 0}]).map_async(widen)
+    target = tmp_path / "wide.lance"
+    limits = {"max_row_bytes": 1 * 1024 ** 2, "max_batch_bytes": 4 * 1024 ** 2,
+              "batch_rows": 16, "checkpoint_rows": 4, "checkpoint_interval_ms": 60000,
+              "checkpoint_unconfirmed_rows": 1024,
+              "checkpoint_unconfirmed_bytes": 8 * 1024 ** 2}
+    with pytest.raises(Exception, match="byte budget") as exc_info:
+        with RunContext.start(tmp_path / "run", limits=limits):
+            ds.write_lance(str(target), mode="create", return_receipt=True)
+    assert "byte budget" in str(exc_info.value).lower()
+    assert not target.exists(), "wide row was published despite the sealed byte budget"
+
+
+# --- Acceptance gate: workbench reads the real bridge after the run exits ------
+
+@pytest.fixture
+def pidfds():
+    from demiflow.resources.process_observation import require_pidfds
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Local managed units require Linux")
+    try:
+        require_pidfds()
+    except (OSError, RuntimeError) as exc:
+        pytest.skip("pidfd exit evidence unavailable: " + str(exc))
+
+
+def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch):
+    """Post-teardown user-visible contract: sealed plan AND bridge both read back.
+
+    Drives the genuine workbench entry (flows/questions.py:select) in a real
+    independent worker. After the run terminates (clean_orphans has run), the
+    workbench reader must return the sealed plan available and the identity bridge
+    available, with the bridge report_digest equal to the inspection digest the
+    workbench binds. An in-run-only assertion cannot catch carrier pruning.
+    """
+    import test_upgrade_business_acceptance as acc
+    from demiflow.workbench.runs import facts, manager as runs
+
+    monkeypatch.setenv("DEMIFLOW_FORGE_DOMAIN", str(tmp_path / "runtime-domain"))
+    fixture = acc.build_owned_fixture(tmp_path, scenario="workbench")
+    observed = acc.run_workbench_scenario(fixture["root"], entry=fixture["entry"],
+                                          params=fixture["params"])
+    assert observed["status"] == "succeeded", observed["status"]
+    target = observed["target"]
+
+    report = runs.show(fixture["root"], observed["run_id"], include_report=True,
+                       attempt=observed["attempt"], compact=True)["report"]
+    inspection_digest = report["digest"]
+
+    sealed_actions = [aid for aid, s in observed["sealed"].items() if s.get("available")]
+    assert sealed_actions, "no sealed plan readable after run exit"
+    action_id = sealed_actions[0]
+
+    sealed = facts.read_sealed_plan(target, action_id)
+    assert sealed["available"] is True, sealed
+    assert sealed["logical_dag"]["nodes"], "sealed logical_dag has no nodes"
+
+    bridge = facts.read_identity_bridge(target, action_id, dag_id=sealed["dag_id"],
+                                        report_digest=inspection_digest)
+    assert bridge["available"] is True, bridge
+    assert bridge["bridge"]["report_digest"] == inspection_digest
+    entries = bridge["bridge"]["entries"]
+    assert entries, "bridge has no entries"
+    for entry in entries:
+        assert entry["logical_node_id"] and entry["occurrence_id"]
+        assert entry["report_node_id"] and type(entry["report_occurrence"]) is int

@@ -93,16 +93,14 @@ def seal_identity_bridge(run, action, bridge):
     raw = document(bridge, _MAX_BRIDGE_BYTES)
     digest = hashlib.sha256(raw).hexdigest()
     path = run.directory / "scratch" / "identity-bridges" / (digest + ".json")
-    # Unregistered, mirroring seal_plan_facts/seal_execution_bindings: clean_orphans
-    # unlinks registered protected=0 artifacts at run exit, but the workbench audits
-    # the bridge post-run, so the carrier must outlive the run.
-    if any(item.is_symlink() for item in (path, *path.parents)):
-        raise RecoveryContractError("Identity bridge path contains a symlink")
+    # Unregistered, mirroring seal_plan_facts: clean_orphans unlinks registered
+    # protected=0 artifacts at run exit, but the workbench audits the bridge post-run.
     with run.journal.publication_guard(run.fence):
         if not path.exists():
             atomic_bytes(path, raw)
         elif path.read_bytes() != raw:
             raise RecoveryContractError("Existing identity bridge artifact is corrupt")
+    run.release_temporaries([path.with_name(path.name + ".staging")])
     ref = {"path": str(path.relative_to(run.directory)),
            "sha256": digest, "bytes": len(raw)}
     key = action.action_id + "-identity-bridge"

@@ -801,7 +801,9 @@ def snapshot_code_sources(action, plan):
         raw = source.read_bytes()
         digest = hashlib.sha256(raw).hexdigest()
         path = run.directory / "scratch" / "chain-code-pin" / (digest + ".py")
-        run.allocate_artifact(path, size=len(raw))
+        # Unregistered, mirroring seal_plan_facts: clean_orphans unlinks registered
+        # protected=0 artifacts at run exit, but this source archive is audited
+        # post-run (the manifest definition_ref points at it), so it must survive.
         with run.journal.publication_guard(run.fence):
             atomic_bytes(path, raw)
         run.release_temporaries([path.with_name(path.name + ".staging")])

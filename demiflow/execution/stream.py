@@ -1123,9 +1123,11 @@ def run_stream(source_iter, plan: LogicalPlan, *,
                stage_limits=None) -> StreamStats:
     """同步驱动入口：建事件循环跑至完成（或 Ctrl-C/异常终止），返回 StreamStats。
 
-    queue_factory(depth) 是行传输缝（调度层内部，算子/编排零感知）：
-    缺省进程内有界队列；分布式实现（如 redis 支撑的跨节点队列）替换
-    此工厂即可，行需可序列化、stage 由各 worker 侧自行构造。
+    queue_factory(depth, *, max_item_bytes=None, max_bytes=None) 是行传输缝
+    （调度层内部，算子/编排零感知）：缺省进程内有界队列；分布式实现（如 redis
+    支撑的跨节点队列）替换此工厂即可，行需可序列化、stage 由各 worker 侧自行构造。
+    有 stage 预算时额外传入 max_item_bytes（单行字节上限）与 max_bytes（在途总字节），
+    适配器须据此约束队列；无 stage 预算时仅传 depth。
     """
     stats = StreamStats()
 
