@@ -392,14 +392,33 @@ def _classify_dependency_module(module):
         "Business dependency module has no resolvable source; code-pin refuses (fail-closed): " + name)
 
 
+def _module_registered_by_value(module_name):
+    """True if cloudpickle carries this module (or a parent package) by value, so
+    its importable functions/classes still travel by value (workbench seal, F9).
+    Mirrors cloudpickle's ``_is_registered_pickle_by_value`` via its public registry.
+    """
+    import cloudpickle
+    registered = cloudpickle.list_registry_pickle_by_value()
+    name = module_name
+    while True:
+        if name in registered:
+            return True
+        parent = name.rsplit(".", 1)[0]
+        if parent == name:
+            return False
+        name = parent
+
+
 def _is_by_reference_udf(function):
     """True if cloudpickle carries this UDF by reference (importable module +
-    qualname), so the worker re-imports the identical module namespace.
+    qualname, not registered by value), so the worker re-imports the identical
+    module namespace. Mirrors cloudpickle's ``_should_pickle_by_reference``.
 
-    By-value UDFs (lambdas, ``<locals>`` closures, ``__main__`` scripts) reconstruct
-    a minimal ``__globals__`` on the worker that differs from the driver's full
-    module namespace, so traversing them would diverge the manifest; their code is
-    pinned by ``describe`` (source/bytecode/closure) and the cloudpickle payload.
+    By-value UDFs (lambdas, ``<locals>`` closures, ``__main__`` scripts, or functions
+    in a ``register_pickle_by_value`` module) reconstruct a minimal ``__globals__`` on
+    the worker that differs from the driver's full module namespace, so traversing
+    them by reference would diverge the manifest; their code is pinned by ``describe``
+    (source/bytecode/closure) and the cloudpickle payload.
     """
     import sys
     module_name = getattr(function, "__module__", None)
@@ -415,14 +434,17 @@ def _is_by_reference_udf(function):
         obj = getattr(obj, part, None)
         if obj is None:
             return False
-    return obj is function
+    if obj is not function:
+        return False
+    return not _module_registered_by_value(module_name)
 
 
 def _is_by_reference_class(cls):
     """True if cloudpickle carries this class by reference (importable module +
-    qualname), so the worker re-imports it; its defining module is then pinnable.
-    A by-value class (``<locals>``/``__main__``) is reconstructed on the worker, so
-    its defining module is never pinned (R4) — only its captured state is walked.
+    qualname, not registered by value), so the worker re-imports it; its defining
+    module is then pinnable. A by-value class (``<locals>``/``__main__``/registered
+    module) is reconstructed on the worker, so its defining module is never pinned
+    (R4) — only its captured state is walked.
     """
     import sys
     module_name = getattr(cls, "__module__", None)
@@ -438,29 +460,47 @@ def _is_by_reference_class(cls):
         obj = getattr(obj, part, None)
         if obj is None:
             return False
-    return obj is cls
+    if obj is not cls:
+        return False
+    return not _module_registered_by_value(module_name)
 
 
 def _code_global_names(code):
     """Global names a code object (and its nested code constants) references.
 
-    ``co_names`` excludes freevars (closure cells), so captured modules/nested
-    functions are reached separately through ``__closure__``; this is the
-    referenced-globals subset cloudpickle carries by value (driver == worker).
+    Mirrors cloudpickle's ``_extract_code_globals``: only global-referencing opcodes
+    (LOAD/STORE/DELETE_GLOBAL), not the broader ``co_names`` (which also lists
+    attribute/import names). This is exactly the globals subset cloudpickle carries
+    by value, so the driver's full namespace and the worker's reconstructed subset
+    reach the same values (F9). Freevars (closure cells) are reached via ``__closure__``.
     """
+    import dis
+    import opcode
     import types
-    names = set(code.co_names)
-    for const in code.co_consts:
-        if isinstance(const, types.CodeType):
-            names |= _code_global_names(const)
+    global_ops = {opcode.opmap[name] for name in
+                  ("LOAD_GLOBAL", "STORE_GLOBAL", "DELETE_GLOBAL")}
+    names = set()
+
+    def walk(co):
+        for instr in dis.get_instructions(co):
+            if instr.opcode in global_ops:
+                names.add(instr.argval)
+        for const in co.co_consts:
+            if isinstance(const, types.CodeType):
+                walk(const)
+
+    walk(code)
     return names
 
 
 def _by_value_reachable(function):
-    """Values a by-value function carries: referenced globals subset + closure cells.
+    """Values a by-value function carries, mirroring cloudpickle ``_function_getstate``:
+    referenced globals subset + closure cells + ``__defaults__`` + ``__kwdefaults__``
+    + ``__dict__`` + ``__annotations__``. A business module in any of these travels by
+    name (the worker re-imports it), so it must be pinned (F7c).
 
-    Passive — reads ``__globals__``/``__closure__`` only, never executes code. An
-    empty cell (ValueError) is skipped, mirroring ``describe``.
+    Passive — reads attributes only, never executes code. An empty cell (ValueError)
+    is skipped, mirroring ``describe``.
     """
     namespace = function.__globals__
     values = [namespace[name] for name in _code_global_names(function.__code__)
@@ -470,6 +510,10 @@ def _by_value_reachable(function):
             values.append(cell.cell_contents)
         except ValueError:
             pass
+    values.extend(function.__defaults__ or ())
+    values.extend((function.__kwdefaults__ or {}).values())
+    values.extend(function.__dict__.values())
+    values.extend((function.__annotations__ or {}).values())
     return values
 
 
@@ -535,6 +579,9 @@ def _by_value_business_modules(function):
 
     def enqueue(values):
         pending.extend(v for v in values if _is_walkable_value(v))
+        if len(pending) > _DEP_MAX_NODES:
+            raise RecoveryContractError(
+                "Business dependency walk exceeds value budget; code-pin refuses (fail-closed)")
 
     while pending:
         value = pending.popleft()
