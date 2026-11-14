@@ -28,7 +28,7 @@ def signatures():
         if t['language']=='python':
             n=ast.parse(t['signature']+'\n    pass').body[0]
             assert n.name==t['symbol'].split('.')[-1],t['id']
-            args=[a.arg for a in [*n.args.posonlyargs,*n.args.args,*n.args.kwonlyargs]]
+            args=[a.arg for a in [*n.args.posonlyargs,*n.args.args,*n.args.kwonlyargs,*([n.args.vararg] if n.args.vararg else []),*([n.args.kwarg] if n.args.kwarg else [])]]
             assert set(args)==set(t['input']),t['id']
             assert all(t['input'].values())
             if t['baseline_line'] is not None:
@@ -37,6 +37,14 @@ def signatures():
                     node=next(x for x in node.body if isinstance(x,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)) and x.name==part)
                 src=ast.get_source_segment((ROOT/t['file']).read_text(),node)
                 assert hashlib.sha256(src.encode()).hexdigest()==t['baseline_function_sha256'],t['id']
+        elif t['language']=='python_declaration':
+            ast.parse(t['signature'])
+            original=(ROOT/t['file']).read_text();node=ast.parse(original)
+            parts=t['symbol'].split('.')
+            for part in parts[:-1]:
+                node=next(n for n in node.body if isinstance(n,ast.ClassDef) and n.name==part)
+            node=next(n for n in node.body if isinstance(n,ast.Assign) and any(isinstance(a,ast.Name) and a.id==parts[-1] for a in n.targets))
+            assert hashlib.sha256(ast.get_source_segment(original,node).encode()).hexdigest()==t['baseline_function_sha256'],t['id']
         assert '沿用基线该参数' not in str(t['input']),t['id']
     ast.parse((OUT/'interfaces.pyi').read_text())
     return 'All Python final signatures parse; baseline functions/hashes and argument descriptions match.'
@@ -80,8 +88,10 @@ check('root_coverage_and_test_targets',gates)
 def frozen_files():
     sys.path.insert(0,str(OUT/'tools'))
     from run_gate import frozen_mismatches
+    from scope_guard import scope_mismatches
     guard=json.loads((OUT/'review-20261114/frozen-files.json').read_text())
     assert not frozen_mismatches(ROOT,guard)
+    assert not scope_mismatches(ROOT,guard)
     return {'explicitly_frozen_files':len(guard['files']),'scope':'preservation only; old design not dispatch-ready'}
 check('explicit_frozen_files',frozen_files)
 def fixtures():

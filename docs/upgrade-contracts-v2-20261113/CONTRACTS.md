@@ -129,7 +129,9 @@ make_stage_buffer_adapter(stage, *, action, stage_key, restored=None)
     -> StageBufferAdapter | None
 ```
 
-snapshot 键集：`schema:'demiflow.stage_buffer.v1', stage_key:str, kind:'fixed_batch'|'concurrent_batch'|'grouped'|'prepend', next_batch_ordinal:int>=0, rows:BlockDescriptor, groups:BlockDescriptor|None, prefix_position:int>=0, next_output_ordinal:int>=0, pending_batches:BlockDescriptor|None, flush_remaining_ms:int>=0|None`。BlockDescriptor 沿用 BlockSink 的 `{blocks:<原有有界列表或manifest>, rows:int}`，不把大行塞进控制文档。groups 的每条载荷固定为 `{key:RuntimeValue,row_ordinals:list[int],flush_ordinal:int,remaining_ms:int|None}`；row_ordinals 引用 rows 的行序号。pending_batches 每条为 `{batch_ordinal:int,input_ordinals:list[int],output_ordinal:int,effect_keys:list[str],status:"buffered"|"response_saved"}`；inflight/unknown 不能伪装这两个状态，必须由原效果协议处置。计时使用暂停后的剩余时长，不保存本机 monotonic 绝对值；恢复先处理到期组，再开新输入。序号非负、唯一、引用范围先验；group/批次与全局行、状态、字节预算共同约束。
+**旧 snapshot 全键集冻结已撤回。** `groups/row_ordinals/pending_batches/next_output_ordinal` 的关系尚未完成 cut/slot/恢复证明，不是可编码的持久协议。`StageBufferSnapshot` 在类型草案仅保留未定义标记；R 的相关任务继续 blocked，不能自行猜 payload。
+
+能力分类 `CheckpointStageKind` 有六种：fixed_batch/concurrent_batch/timed_batch/grouped/prepend/native_row_local。前五种才是本地 buffer 类型；native_row_local 继续原 native_pending 注册表协议，不塞进新 buffer 快照。旧 `{batch_ordinal,data}` 不重命名；新增格式若获准必须显式版本与旧读者迁移，当前不创建虚假的 next_batch_ordinal 兼容。
 
 旧 fixed-batch `{batch_ordinal,data}` 继续可读；不改写原快照。新 schema 仅用于新 native buffer 形态。
 
@@ -159,13 +161,15 @@ Prompt 保留 RunPromptJournal / NativePromptRecovery / request_policy；不恢�
 
 Embedding 使用同一 run-owned effect authority，但其真实 HTTP 请求由 `EmbeddingActor._exchange/_fresh_exchange` 发送，并不存在 PromptClient.record/execute/decode 接口。因此不复制 NativePromptRecovery.bind_client。
 
-新增 `NativeEmbeddingRecovery(actor,action,node_id)`，字段：actor/action/node_id/journal、`semantic_owners:tuple=()`、`row_local:bool=True`、`copy_inputs:bool=False`。journal 借用 run 的 RunPromptJournal；首次取得时执行 check_recovery。`bind_actor()->None` 把 `_BorrowedJournal(journal)` 安装到 actor._journal，关闭借用包装不得关闭 run journal；`scope_request(request)->RequestRecord` 在原请求 JSON 加 native_response_bytes 和 native_occurrence，绑定 action/node/current_row_scope.occurrence，重新使用 RequestRecord 规范 request_key。scope 不存在即拒绝。Actor 现有 snapshot_state/restore_state 空状态钩子保持：连接是资源，效果进度归 journal，输入余量归 C05。不另造无人消费的适配器快照接口。
+新增 `NativeEmbeddingRecovery(actor,action,node_id)`，字段：actor/action/node_id/journal、`semantic_owners:tuple=()`、`row_local:bool=True`、`copy_inputs:bool=False`。inflight:dict[str,Task] 记录真实在途请求；journal 借用 run 的 RunPromptJournal；首次取得时执行 check_recovery。`bind_actor()->None` 把 `_BorrowedJournal(journal)` 安装到 actor._journal，关闭借用包装不得关闭 run journal；`scope_request(request)->RequestRecord` 在原请求 JSON 加 native_response_bytes 和 native_occurrence，绑定 action/node/current_row_scope.occurrence，重新使用 RequestRecord 规范 request_key。scope 不存在即拒绝。Actor 现有 snapshot_state/restore_state 空状态钩子保持：连接是资源，效果进度归 journal，输入余量归 C05。不另造无人消费的适配器快照接口。
 
-`EmbeddingActor.native_stream_recovery(action,node_id)` 缓存该 actor 的适配器；astart 建本 actor 资源后调用 bind_actor；_exchange 在第一次 lookup 前 scope_request；_fresh_exchange 保留 reserve→send→response-before-return；aclose 只关本 actor 资源与借用包装。cancel_drain_timeout_s 在 native journal 存在时也给出有限 drain 时长，不能因 sqlite_journal=None 返回零。此修改由 M 的独立叶任务分别承接，R 只按既有 native capability 属性消费。
+`EmbeddingActor.native_stream_recovery(action,node_id)` 缓存该 actor 的适配器；astart 建本 actor 资源后调用 bind_actor；_exchange 在第一次 lookup 前 scope_request；reserve真实发生在_exchange；该处进入native_request_budget设置CALL_RESERVATION并覆盖reserve到send/持久化结束。_fresh_exchange仅保留send/failed/response-before-return，不承载reserve入口。aclose先await NativeEmbeddingRecovery.drain，再关闭本actor资源及借用包装。BlockingIOPool.run已有copy_context，不另建传播机制。cancel_drain_timeout_s 在 native journal 存在时也给出有限 drain 时长，不能因 sqlite_journal=None 返回零。此修改由 M 的独立叶任务分别承接，R 只按既有 native capability 属性消费。
 
 请求状态至少区别未发送、发送中/unknown、响应已持久化、输出已提交。已持久化响应重用不再占 fresh-call 配额；unknown 默认拒绝自动重发；取消排空已发响应并存证，不能发布不完整成功。请求键绑定固定输入、模型/提示/配置及 occurrence/batch lineage，不能使用 attempt 或本机地址。
 
 PromptActor 与 EmbeddingActor 的资源生命周期仍由各 actor 开关 pools/client；恢复适配器不夺取所有权。native buffer 通过 C05 固定 batch lineage，M 不能在恢复时重新分批生成不同请求键。
+
+预算 helper：`native_request_budget(run,*,node_id,max_requests)->ContextManager[str]`，通过 `@contextlib.contextmanager` 设置/清理既有 CALL_RESERVATION。_enqueue 在调用线程读取并附payload，writer线程仅从payload取值；原RunPromptJournal的预算与intent同savepoint原子性保持。相同charges重复预留已幂等；禁止组件集合不一致的双重预留。native的_calls仅观测、私有SQLite计数不作第二权威；非native路径原行为保持。构造器max_requests=0原本就拒绝，新helper单独验证0上限，不报告为现网漏洞。
 
 ## C08 一份封存布局实际驱动所有已支持路线：L 负责
 
@@ -209,7 +213,7 @@ execute_native_plan(executor, source, plan, *, layout, execution_id,
                     arrow=False, sink_schema=None) -> Iterator
 ```
 
-compile 调用 F 编译器后 stage_native_programs：每个真实子计划分别 stage_plan_artifact(action, slice.plan)，从同一编译结果产生 binding，不二次猜图；seal F1 与 v2 后返回 `(logical_dag,physical_plan,bindings_ref)`。恢复只读取原 ProgramRef，不重新 pickle 覆盖摘要。verify 按 input_path 从实际 source/plan 找回每个程序，重算 source identity，逐个 verify_loaded_plan，再核完整路径集合和 operator→stage 映射；缺子程序/多程序/错映射均拒绝。只给根 plan 做 code-pin 不合格。
+compile 调用 F 编译器后 stage_native_programs：本函数仅服务native_driver_v1，逐slice调用seal_write_plan_ref(action,slice.plan,source=slice.source,program_id=slice.program_id)，保存code-pin-only ProgramRef；独立worker仍由既有stage_plan_artifact发送in-run pickle。封存后从同一编译结果产生binding；恢复读取原引用不重新pickle。verify按封存placement/backend选载体校验方式，native重算包含source callable依赖的plan_code_pin；worker沿原verify_loaded_plan。pin和归档现状已共用_business_dependency_modules，本轮只扩source根；缺段、旧记录未覆盖source代码、错input_path或错stage映射均拒绝，不重写旧档案。
 
 load 返回 `(ExecutionLayout,ExecutionPlacement)`。execute 只能执行 placement.backend/profile/原 program，先 verify_native_programs 后下发；不能再自由 eligible() 重选路线。DataFusion 内部优化由 DataFusion 所有，平台只表达 backend stage 的真实粒度，不伪装逐个底层算子独立调度。`dataset_native.execute(...,execution=None)`、`arrow_batch_sink.execute(...,execution=None)` 为加性参数；绑定调用必须消费 profile 和 stage 预算。
 
@@ -245,14 +249,14 @@ PlanContractError 的 reason 保留现有固定集合；S 使用既有 ProtocolE
 
 新字段：OperatorStates.policies 为按 owner identity 关联的 StatePolicy；保留现有 owners/aliases/identities。_Stage.buffer_adapter 默认 None，与 slots 同步。EmbeddingActor._native_recovery 默认 None。_WriteSeal 增加 native_layout/native_execution_id/source，默认 None；首次编译与恢复加载都先验证再设置。字段声明和构造器是一个文件装配事务。
 
-能力不足（无法证明资源可恢复、外部 source 不可固定、环境没有 Ray）必须明确显示受支持边界，不能算相应验收通过。100% 指本包列明且原意图确认的验收集合全部完成，不指任意输入/任意第三方对象都能自动恢复。
+能力不足（无法证明资源可恢复、外部 source 不可固定、环境没有 Ray）必须明确显示受支持边界，不能算相应验收通过。100% 不能由本包索引计数推出；必须原意图完整集合都有实际证据，不指任意输入/任意第三方对象都能自动恢复。
 
 ## C12 原生预算接入的确切位置
 
-`dataset_native.execute(...,execution=None)` 传给 `Engine(...,execution=None)`；Engine.session 调 `native_resources.dataset_session(...,execution=None)`。同一placement借用到底，不修改共享executor/options。session实际DataFusionOptions的pool/RSS/scratch/threads/rows来自原run/envelope/native配置与封存profile/stage_limits的交集；原allocate/admission仍是同一权威。Engine.batch_rows对真实payload宽度核字节上限，不能在单行超限时靠max(1)继续。Arrow execute在TaskScheduler构造前按同一规则得到局部options，不改executor全局值。
+`dataset_native.execute(...,execution=None)` 传给 `Engine(...,execution=None)`；Engine.session 调 `native_resources.dataset_session(...,execution=None)`。同一placement借用到底，不修改共享executor/options。session的pool/RSS/scratch取原run/envelope/native配置与封存资源上限的有效交集；threads由CPU/native配置推导，rows由阶段/reader预算决定；ResourceProfile没有threads/rows字段；原allocate/admission仍是同一权威。Engine.batch_rows对真实payload宽度核字节上限，不能在单行超限时靠max(1)继续。Arrow execute在TaskScheduler构造前按同一规则得到局部options，不改executor全局值。
 
 stage_limits不是“建议”：inflight_rows限制当前阶段同时在途行数，inflight_bytes限制当前阶段输入/排队字节，output_bytes限制输出暂存。backend合并执行多个平台stage时按同时存活阶段计量，不能每个stage各拿完整run预算。物理I/O可以缩批；明确声明的业务batch_size/max_batch不能为资源测试偷偷改变语义，整批不能准入就明确失败。性能门要求验证真实效果，不接受仅参数透传。
 
-C09 UI映射补充：原node_map的logical键语义兼容保留；sealed entry新增occurrence_node_map。`_bridge_node_map(entries,*,key_kind='logical')` 在occurrence模式返回occurrence→唯一report_node_id；冲突省略。renderLogical向mountLogical.update传occurrence映射；其DOM/select/onSelect键统一occurrence_id；chooseLogicalNode先按occurrence定位，再用该node.logical_node_id读取bridge/观测。声明图无桥时只按无歧义的声明映射展示，不把当前代码猜成历史源码。
+C09 UI映射补充：图顶点、边、DOM/select/onSelect都保持logical_node_id；物理摘要仍按logical ID查询。occurrence只在详情Selection={logical_node_id,occurrence_id}中选择，复用已有identity_bridge/picker与_resolve_bridge_node。_bridge_node_map保留原logical键和多义省略规则，不新增occurrence图映射。state.node仍是报告节点ID，新增state.logical_selection；chooseNode更新二者并递增detail，transition清空；loadSource携带二元键并校验ticket及响应身份。GET_FIELDS['graph-source']仅扩两可选键；source_view.get已支持转发，按verify_preserve核验，不重复新建。
 
 C08 ACK回调固定为async：WorkerChainExecutor._request_commit与GraphWorkerExecutor._request_contribution返回Awaitable[CommitReceipt]。原progress.seal返回publication callable，stream_barrier已支持inspect.isawaitable后await，因此无需再造线程提交器。等待上限取既有 checkpoint_timeout_s 与有效运行/控制 deadline 的最小剩余值（不另造120秒默认），使用asyncio.wrap_future/有限await，取消按原信号传播；超时抛TimeoutError，保留unknown和未确认提交，不自动重发、不提前释放所有权。测试必须同时证明event-loop heartbeat未冻结及迟到ACK不能推动新cut；只测“最终返回”不足。

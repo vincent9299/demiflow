@@ -10,16 +10,23 @@
     "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
     "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
   },
-  "scoped_changes_pending_review": {
+  "symbol_scope_machine_enforced": true,
+  "symbol_scope_semantics": "AST guard: unrelated code, imports and declarations preserved; comments/formatting allowed. Seven frozen files remain byte-exact.",
+  "symbol_scopes": {
     "demiflow/execution/recovery_identity.py": [
-      "describe (S013)"
+      "describe"
     ],
     "demiflow/execution/contracts/operator.py": [
-      "_adapter_present (S009)",
-      "compile_operator_spec (S010)"
+      "_adapter_present",
+      "compile_operator_spec"
     ],
     "demiflow/execution/stream.py": [
-      "only enumerated A/R runtime functions; no replacement execution engine"
+      "_Stage.__slots__",
+      "_Stage.__init__",
+      "_materialize",
+      "_arun",
+      "_make_worker",
+      "run_stream"
     ]
   }
 }

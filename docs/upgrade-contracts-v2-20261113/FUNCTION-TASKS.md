@@ -130,7 +130,7 @@
 | [M008](tasks/M008.md) | M | `demiflow/embeddings/stream_recovery.py` · `NativeEmbeddingRecovery.scope_request` | implement | RequestRecord；绑定native_occurrence和响应上限 | EMBED, UNKNOWN |
 | [M009](tasks/M009.md) | M | `demiflow/embeddings/runtime.py` · `EmbeddingActor.__init__` | implement | EmbeddingActor完整实例；新增_native_recovery=None | EMBED |
 | [M010](tasks/M010.md) | M | `demiflow/embeddings/runtime.py` · `EmbeddingActor.cancel_drain_timeout_s` | implement | float>=0秒；native journal有有限正drain时间 | EMBED, UNKNOWN |
-| [M011](tasks/M011.md) | M | `demiflow/embeddings/runtime.py` · `EmbeddingActor.aclose` | verify_preserve | None（async）；原资源全部收尾 | EMBED, BOUNDS |
+| [M011](tasks/M011.md) | M | `demiflow/embeddings/runtime.py` · `EmbeddingActor.aclose` | implement | None（async）；原资源全部收尾 | EMBED, BOUNDS |
 | [M012](tasks/M012.md) | M | `demiflow/embeddings/runtime.py` · `EmbeddingActor._fresh_exchange` | verify_preserve | (response_record:dict,references:dict|None)（async） | EMBED, UNKNOWN |
 | [L030](tasks/L030.md) | L | `demiflow/execution/native_plan.py` · `stage_native_programs` | implement | tuple[ProgramBinding,...] | LAYOUT, HISTORY, RELATIONAL |
 | [L031](tasks/L031.md) | L | `demiflow/execution/native_plan.py` · `verify_native_programs` | implement | None或RecoveryContractError | LAYOUT, HISTORY, RELATIONAL |
@@ -145,10 +145,54 @@
 | [L037](tasks/L037.md) | L | `demiflow/execution/dataset_native.py` · `Engine.session` | implement | DataFusionSession；property惰性创建一次 | RELATIONAL, LAYOUT, BOUNDS |
 | [L038](tasks/L038.md) | L | `demiflow/execution/dataset_native.py` · `Engine.batch_rows` | implement | int>=1；真实reader/hydration行窗口 | RELATIONAL, BOUNDS |
 | [L039](tasks/L039.md) | L | `demiflow/execution/native_resources.py` · `dataset_session` | implement | DataFusionSession；原contextmanager资源对象 | RELATIONAL, BOUNDS, LAYOUT |
-| [W015](tasks/W015.md) | W | `demiflow/workbench/runs/facts.py` · `_bridge_node_map` | implement | dict[str,str]；选定key_kind到唯一report_node_id | WORKBENCH, HISTORY |
+| [W015](tasks/W015.md) | W | `demiflow/workbench/runs/facts.py` · `_bridge_node_map` | verify_preserve | dict[str,str]；选定key_kind到唯一report_node_id | WORKBENCH, HISTORY |
 | [W016](tasks/W016.md) | W | `demiflow/workbench/web/workbench.js` · `logicalName` | implement | string | WORKBENCH, DEMO, HISTORY |
 | [W017](tasks/W017.md) | W | `demiflow/workbench/web/workbench.js` · `logicalEntry` | implement | LogicalActionEntry|null | WORKBENCH, DEMO, HISTORY |
 | [W018](tasks/W018.md) | W | `demiflow/workbench/web/workbench.js` · `renderLogical` | implement | undefined；更新当前视图DOM/选择状态 | WORKBENCH, DEMO, HISTORY |
 | [W019](tasks/W019.md) | W | `demiflow/workbench/web/workbench.js` · `chooseLogicalNode` | implement | undefined；更新当前视图DOM/选择状态 | WORKBENCH, DEMO, HISTORY |
 | [W020](tasks/W020.md) | W | `demiflow/workbench/web/workbench-graph.js` · `mountLogical.update` | implement | undefined；更新当前视图DOM/选择状态 | WORKBENCH, DEMO, HISTORY |
 | [W021](tasks/W021.md) | W | `demiflow/workbench/web/workbench-graph.js` · `mountLogical.select` | implement | undefined；更新当前视图DOM/选择状态 | WORKBENCH, DEMO, HISTORY |
+| [A009](tasks/A009.md) | A | `demiflow/data/dataset.py` · `Dataset.take` | implement | 原公开返回类型保持 | ADMISSION, DELIVERY, HISTORY |
+| [A010](tasks/A010.md) | A | `demiflow/data/dataset.py` · `Dataset.take_all` | implement | 原公开返回类型保持 | ADMISSION, DELIVERY, HISTORY |
+| [A011](tasks/A011.md) | A | `demiflow/data/dataset.py` · `Dataset.iter_rows` | implement | 原公开返回类型保持 | ADMISSION, DELIVERY, HISTORY |
+| [A012](tasks/A012.md) | A | `demiflow/data/dataset.py` · `Dataset.iter_batches` | implement | 原公开返回类型保持 | ADMISSION, DELIVERY, HISTORY |
+| [A013](tasks/A013.md) | A | `demiflow/data/dataset.py` · `Dataset.schema` | implement | 原公开返回类型保持 | ADMISSION, DELIVERY, HISTORY |
+| [A014](tasks/A014.md) | A | `demiflow/execution/stream_delivery.py` · `iter_stream_rows` | implement | 有界行迭代器；仅owner可complete | ADMISSION, DELIVERY, RECOVERY |
+| [A015](tasks/A015.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor._execution_capabilities` | implement | tuple[str,...]；固定可用backend集合 | ADMISSION, LAYOUT |
+| [A016](tasks/A016.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor._apply_plan` | implement | 原惰性行迭代器 | ADMISSION, LAYOUT, RELATIONAL |
+| [A017](tasks/A017.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.iter_batches` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A018](tasks/A018.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.count` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A019](tasks/A019.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.take_batch` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A020](tasks/A020.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.aggregate` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A021](tasks/A021.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.schema` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A022](tasks/A022.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.size_bytes` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A023](tasks/A023.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.materialize` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A024](tasks/A024.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.write_datasink` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [A025](tasks/A025.md) | A | `demiflow/execution/executors/local.py` · `LocalDatasetExecutor.write_file` | implement | 原公开终端返回值/类型 | ADMISSION, LAYOUT, STREAM |
+| [M013](tasks/M013.md) | M | `demiflow/operator_llm/stream_recovery.py` · `native_request_budget` | implement | ContextManager[str]；yield reservation_id | EMBED, PROMPT, BOUNDS |
+| [M014](tasks/M014.md) | M | `demiflow/embeddings/stream_recovery.py` · `NativeEmbeddingRecovery.drain` | implement | None（async）；超时抛TimeoutError且不关闭仍被用资源 | EMBED, UNKNOWN, BOUNDS |
+| [M015](tasks/M015.md) | M | `demiflow/operator_llm/http_options.py` · `validate_http_options` | implement | 规范化HTTP options或原ValueError | PROMPT, IDENTITY, HISTORY |
+| [R017](tasks/R017.md) | R | `demiflow/execution/stream_barrier.py` · `_CheckpointBarrier.__init__` | implement | 原barrier返回语义；align每stage每cut一次 | BUFFER, RECOVERY, UNKNOWN |
+| [R018](tasks/R018.md) | R | `demiflow/execution/stream_barrier.py` · `_CheckpointBarrier.tokens` | implement | 原barrier返回语义；align每stage每cut一次 | BUFFER, RECOVERY, UNKNOWN |
+| [R019](tasks/R019.md) | R | `demiflow/execution/stream_barrier.py` · `_CheckpointBarrier.arrive` | implement | 原barrier返回语义；align每stage每cut一次 | BUFFER, RECOVERY, UNKNOWN |
+| [R020](tasks/R020.md) | R | `demiflow/execution/stream_barrier.py` · `_CheckpointBarrier.fail` | implement | 原barrier返回语义；align每stage每cut一次 | BUFFER, RECOVERY, UNKNOWN |
+| [R021](tasks/R021.md) | R | `demiflow/execution/stream_barrier.py` · `CheckpointControl.run` | verify_preserve | 原async协调循环 | BUFFER, RECOVERY |
+| [R022](tasks/R022.md) | R | `demiflow/execution/stream.py` · `_Stage.__slots__` | implement | 类/模块声明的窄修改；其余字段逐字保留 | BUFFER |
+| [L040](tasks/L040.md) | L | `demiflow/execution/chain.py` · `source_callable_roots` | implement | tuple[CallableSpec或函数,...]；稳定顺序、有界 | HISTORY, RELATIONAL |
+| [L041](tasks/L041.md) | L | `demiflow/execution/chain.py` · `_business_dependency_modules` | implement | 沿用原返回形状；新增source依赖的有界内容 | HISTORY, IDENTITY, RELATIONAL |
+| [L042](tasks/L042.md) | L | `demiflow/execution/chain.py` · `plan_code_pin` | implement | 沿用原返回形状；新增source依赖的有界内容 | HISTORY, IDENTITY, RELATIONAL |
+| [L043](tasks/L043.md) | L | `demiflow/execution/chain.py` · `snapshot_code_sources` | implement | 沿用原返回形状；新增source依赖的有界内容 | HISTORY, IDENTITY, RELATIONAL |
+| [L044](tasks/L044.md) | L | `demiflow/execution/chain.py` · `seal_write_plan_ref` | implement | ProgramRef五键不变；code-pin-only载体 | HISTORY, WRITE, RELATIONAL |
+| [L045](tasks/L045.md) | L | `demiflow/execution/dataset_native.py` · `Engine.python_rows` | implement | 原Python子阶段行迭代器 | LAYOUT, RELATIONAL, BOUNDS |
+| [Q007](tasks/Q007.md) | Q | `demiflow/execution/reservation.py` · `derive_prefetch` | implement | 原prefetch字典或ReservationError(INVALID_SPEC) | BOUNDS, GRAPH, RECOVERY |
+| [Q008](tasks/Q008.md) | Q | `demiflow/execution/reservation.py` · `resolve_prefetch_credit` | implement | {prefetch:dict,credit_budget:{rows:int,bytes:int}}；全新有界值 | BOUNDS, GRAPH, RECOVERY |
+| [W022](tasks/W022.md) | W | `demiflow/workbench/api.py` · `GET_FIELDS` | implement | 类/模块声明的窄修改；其余字段逐字保留 | WORKBENCH, HISTORY |
+| [W023](tasks/W023.md) | W | `demiflow/workbench/graph/source_view.py` · `get` | verify_preserve | 原source-view响应；仍只读 | WORKBENCH, HISTORY |
+| [W024](tasks/W024.md) | W | `demiflow/workbench/graph/model.py` · `_resolve_bridge_node` | verify_preserve | 原report_node_id或明确错误 | WORKBENCH, HISTORY |
+| [W025](tasks/W025.md) | W | `demiflow/workbench/web/workbench.js` · `chooseNode` | implement | undefined；更新当前视图DOM/选择状态 | WORKBENCH, DEMO, HISTORY |
+| [W026](tasks/W026.md) | W | `demiflow/workbench/web/workbench.js` · `loadSource` | implement | undefined；更新当前视图DOM/选择状态 | WORKBENCH, DEMO, HISTORY |
+| [W027](tasks/W027.md) | W | `demiflow/workbench/web/workbench-state.js` · `create` | implement | undefined；更新当前视图DOM/选择状态 | WORKBENCH, DEMO, HISTORY |
+| [A026](tasks/A026.md) | A | `demiflow/data/dataset.py` · `Dataset.take_batch` | implement | 原公开/内部终端返回值 | ADMISSION, LAYOUT, WRITE |
+| [A027](tasks/A027.md) | A | `demiflow/data/dataset.py` · `Dataset.aggregate` | implement | 原公开/内部终端返回值 | ADMISSION, LAYOUT, WRITE |
+| [A028](tasks/A028.md) | A | `demiflow/data/dataset.py` · `Dataset.size_bytes` | implement | 原公开/内部终端返回值 | ADMISSION, LAYOUT, WRITE |
+| [A029](tasks/A029.md) | A | `demiflow/data/dataset.py` · `Dataset._write_file` | implement | 原公开/内部终端返回值 | ADMISSION, LAYOUT, WRITE |

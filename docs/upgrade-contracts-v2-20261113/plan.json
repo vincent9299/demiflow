@@ -1,7 +1,7 @@
 {
   "schema": "demiflow.implementation_plan.v2",
   "dispatch_ready": false,
-  "review_revision": "20261114-r1",
+  "review_revision": "20261114-r2",
   "base_commit": "bbd93ffcc136c361093c5a4b6d79d0352c4c2557",
   "tasks": [
     {
@@ -54,7 +54,7 @@
         "operation": "data.plan.LogicalOp 的一个原生实例；不接受任意第三方伪装子类"
       },
       "output": "OperationFact：C02 arguments/native/reserved_bytes",
-      "behavior": "按 kind 提取完整参数；13 类逐个验证，5 特化 domain 有界；已有支持输出逐字节不变。",
+      "behavior": "安全的已支持事实保持稳定；model_map只投影非秘密业务语义，凭据和运行环境路径不进入永久事实。此前泄漏形态不能同时承诺逐字节不变：新运行按新平台revision封存，旧载体只读不改写，恢复遵循原版本拒绝。候选按函数吸收且先过合成秘密负例。",
       "contract": "C02",
       "effects": "pure",
       "calls": [
@@ -68,6 +68,7 @@
         "HISTORY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
         "F001"
       ],
@@ -206,7 +207,7 @@
         "available_backends": "tuple[str,...]；executor已拥有后端能力声明，不做运行时探测"
       },
       "output": "ActionDecision(action_kind,backend,route,recovery)",
-      "behavior": "只做静态准入和路线决定，保留合法 map(thread).take/write；不构造 actor、不读源。",
+      "behavior": "只做静态准入和路线决定，保留合法 map(thread).take/write；不构造 actor、不读源。 recovery字段使用RecoveryGuarantee四值描述执行能力，非用户可选策略；不得与queue proof的final_commit字段互相转换。v1缺此字段不补造能力。",
       "contract": "C03",
       "effects": "pure",
       "calls": [],
@@ -221,7 +222,21 @@
         "A004",
         "A006",
         "A007",
-        "A008"
+        "A008",
+        "A009",
+        "A010",
+        "A011",
+        "A012",
+        "A013",
+        "A017",
+        "A018",
+        "A019",
+        "A020",
+        "A021",
+        "A022",
+        "A023",
+        "A024",
+        "A025"
       ],
       "errors": [
         "UnsupportedExecutionOptionError",
@@ -334,19 +349,22 @@
         "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
       },
       "output": "int >= 0",
-      "behavior": "流式 count 通过已拥有 action 的内部驱动计数，不调用第二公开 action；预算与取消有界。",
+      "behavior": "流式 count 通过已拥有 action 的内部驱动计数，不调用第二公开 action；预算与取消有界。 当前源码已建action，保留该边界；修delivery借用，不外包第二个action。",
       "contract": "C03",
       "effects": "runtime_state",
       "calls": [
-        "admit_action_plan"
+        "admit_action_plan",
+        "LocalDatasetExecutor.count"
       ],
       "gates": [
         "ADMISSION",
         "STREAM"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
-        "A001"
+        "A001",
+        "A018"
       ],
       "caller_tasks": [],
       "errors": [
@@ -415,7 +433,8 @@
         "admit_action_plan",
         "iter_stream_rows",
         "compile_native_topology",
-        "execute_native_plan"
+        "execute_native_plan",
+        "LocalDatasetExecutor._execution_capabilities"
       ],
       "gates": [
         "DELIVERY",
@@ -424,10 +443,15 @@
       "status": "planned",
       "callee_tasks": [
         "A001",
+        "A014",
         "L007",
-        "L009"
+        "L009",
+        "A015"
       ],
-      "caller_tasks": [],
+      "caller_tasks": [
+        "A009",
+        "A010"
+      ],
       "errors": [
         "UnsupportedExecutionOptionError",
         "ValueError",
@@ -459,7 +483,8 @@
         "admit_action_plan",
         "iter_stream_rows",
         "compile_native_topology",
-        "execute_native_plan"
+        "execute_native_plan",
+        "LocalDatasetExecutor._execution_capabilities"
       ],
       "gates": [
         "DELIVERY",
@@ -468,10 +493,14 @@
       "status": "planned",
       "callee_tasks": [
         "A001",
+        "A014",
         "L007",
-        "L009"
+        "L009",
+        "A015"
       ],
-      "caller_tasks": [],
+      "caller_tasks": [
+        "A011"
+      ],
       "errors": [
         "UnsupportedExecutionOptionError",
         "ValueError",
@@ -505,7 +534,8 @@
         "admit_action_plan",
         "compile_native_topology",
         "execute_native_plan",
-        "seal_write_topology"
+        "seal_write_topology",
+        "LocalDatasetExecutor._execution_capabilities"
       ],
       "gates": [
         "WRITE",
@@ -518,7 +548,8 @@
         "A001",
         "L007",
         "L009",
-        "L012"
+        "L012",
+        "A015"
       ],
       "caller_tasks": [],
       "errors": [
@@ -860,7 +891,7 @@
         "target": "CallableSpec.target；函数、类工厂或实例；编译阶段不可构造"
       },
       "output": "bool",
-      "behavior": "统一 policy 的 adapter_available；不再只探两个方法而忽略 auto_json；不构造 class。",
+      "behavior": "统一policy：declaration factory的True代表平台deferred适配机制可用，不表示实例已验；instance完整hooks或可安全auto_json才True。不得构造class，不要求class必须自带两个钩子。",
       "contract": "C04",
       "effects": "pure",
       "calls": [
@@ -871,6 +902,7 @@
         "LAYOUT"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
         "S001"
       ],
@@ -1313,7 +1345,7 @@
         "stages": "由真实 plan lowering 得到的 _Stage 有序序列"
       },
       "output": "None；设置 stages/group_ends/buffer adapter/direct_owners",
-      "behavior": "以真实 stage position 接 C04/C05；用 adapter 替换全局 buffered 拒绝，保留未经适配种类拒绝；不改 batch/concurrency 凑绿。",
+      "behavior": "原F3守卫按kind保留；固定batch旧恢复字典{batch_ordinal,data}不改名。恢复batch_ordinal新增type is int且>=0校验（当前无该检查）；恢复rows>=max_batch与字节守卫保留。native全注册表恢复沿原协议；其余kind只有adapter完整+真实故障证据通过才放行。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [
@@ -1327,6 +1359,7 @@
         "VECTOR"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
         "R005",
         "S006",
@@ -1377,7 +1410,8 @@
         "S008"
       ],
       "caller_tasks": [
-        "R009"
+        "R009",
+        "R019"
       ],
       "errors": [
         "RecoveryContractError",
@@ -1400,7 +1434,7 @@
         "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
       },
       "output": "None（async）",
-      "behavior": "恢复实例语义状态，然后 buffer/frontier；不在恢复前重新发模型请求。",
+      "behavior": "恢复实例语义状态，然后 buffer/frontier；不在恢复前重新发模型请求。 restore赋值和运行自增是同一batch序号的两个合法生命周期写点；均经验证，不声称只有一个写点。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [
@@ -1413,6 +1447,7 @@
         "RECOVERY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
         "S007",
         "R003"
@@ -1498,15 +1533,20 @@
         "flat_map": "bool；保持展开与多重性约定"
       },
       "output": "完整 _Stage 实例；新增 buffer_adapter=None，既有 slots 保留",
-      "behavior": "所有其他属性按基线构造；新 adapter 为本 stage 所有，不模块全局缓存。",
+      "behavior": "所有其他属性按基线构造；新 adapter 为本 stage 所有，不模块全局缓存。 必须与_Stage.__slots__同提交装配。",
       "contract": "C05",
       "effects": "runtime_state",
-      "calls": [],
+      "calls": [
+        "_Stage.__slots__"
+      ],
       "gates": [
         "BUFFER"
       ],
       "status": "planned",
-      "callee_tasks": [],
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "R022"
+      ],
       "caller_tasks": [],
       "errors": [
         "RecoveryContractError",
@@ -1582,12 +1622,13 @@
         "on_stop": "已有停止回调或None；按原native语义传播"
       },
       "output": "StreamStats；传入stats实例，rows_in/rows_out/errors/耗时按原结构更新",
-      "behavior": "把 cut 安全点、pending flush 和 adapter align 接入实际循环；效果排空/超时/关闭与现有 native 协议一致。",
+      "behavior": "把 cut 安全点、pending flush 和 adapter align 接入实际循环；效果排空/超时/关闭与现有 native 协议一致。 _arun按实际worker创建循环的稳定索引传worker_slot给_make_worker，不能在arrive临时按到达次序分配slot。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [
         "StageBufferAdapter.align",
-        "StageBufferAdapter.close"
+        "StageBufferAdapter.close",
+        "_make_worker"
       ],
       "gates": [
         "BUFFER",
@@ -1598,7 +1639,8 @@
       "status": "planned",
       "callee_tasks": [
         "R002",
-        "R004"
+        "R004",
+        "R015"
       ],
       "caller_tasks": [
         "R016"
@@ -1984,7 +2026,7 @@
         "node_id": "报告节点或 occurrence 标识，按接口选择；禁止只凭显示名称匹配"
       },
       "output": "适配器 actor/action/node_id；借用同一 run effect authority",
-      "behavior": "不启动 client、不发请求；绑定模型与 batch lineage；不创建私有成功库。",
+      "behavior": "不启动 client、不发请求；绑定模型与 batch lineage；不创建私有成功库。 初始化inflight={}；复用run._native_prompt_journal的RunPromptJournal；不是新SQLitePromptJournal、不新建coordinator。",
       "contract": "C07",
       "effects": "runtime_state",
       "calls": [
@@ -1995,6 +2037,7 @@
         "UNKNOWN"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
         "M002"
       ],
@@ -2022,7 +2065,7 @@
         "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
       },
       "output": "None",
-      "behavior": "把借用包装绑定actor._journal；client为HTTPX对象，不套用PromptClient.record/execute；close不关闭run journal。",
+      "behavior": "绑定借用的run-owned RunPromptJournal到actor；无native路径保留既有独立运行契约。native不得并存private SQLite预算权威；显式不兼容private journal先拒绝，不静默双写。校验响应上限，_calls在native仅作观测，不作第二额度守卫。inflight归adapter，aclose必须先drain。",
       "contract": "C07",
       "effects": "runtime_state",
       "calls": [],
@@ -2031,6 +2074,7 @@
         "UNKNOWN"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [
         "M006"
@@ -2135,10 +2179,11 @@
         "timings": "本次请求阶段计时映射；不是成功/恢复权威"
       },
       "output": "原 embedding call/result 结构（async），结果字段不变",
-      "behavior": "同 request_key 查已知响应；发送前 reserve；响应持久化后返回；fresh/replay 不双计费。",
+      "behavior": "先lookup复用已存响应；在_request_slots/request_gate内、await io(journal.reserve,request)之前进入native_request_budget，并保持到fresh发送/response或failed持久化完成。inflight登记当前真实Task，finally只在实际工作结束后删除。BlockingIOPool.run已copy_context，复用它；_enqueue读ContextVar，writer读payload，不能反过来。非native路径保留原计数策略。取消不重发unknown，不提前释放client。",
       "contract": "C07",
       "effects": "durable_write",
       "calls": [
+        "native_request_budget",
         "NativeEmbeddingRecovery.scope_request",
         "EmbeddingActor._fresh_exchange"
       ],
@@ -2147,7 +2192,9 @@
         "UNKNOWN"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
+        "M013",
         "M008",
         "M012"
       ],
@@ -2176,7 +2223,7 @@
         "manifest_ref": "ManifestRef {manifest_id,sha256}；必须与 F1/bindings 一致"
       },
       "output": "解释上下文字典，仅内部消费",
-      "behavior": "v1 严格原样；新增 v2 executions 精确键集/覆盖/driver-worker 互斥/backend/profile校验；不能改 v1 放宽。",
+      "behavior": "v1 严格原样；新增 v2 executions 精确键集/覆盖/driver-worker 互斥/backend/profile校验；不能改 v1 放宽。 recovery字段使用RecoveryGuarantee四值描述执行能力，非用户可选策略；不得与queue proof的final_commit字段互相转换。v1缺此字段不补造能力。",
       "contract": "C08",
       "effects": "pure",
       "calls": [],
@@ -2214,7 +2261,7 @@
         "manifest_ref": "ManifestRef {manifest_id,sha256}；必须与 F1/bindings 一致"
       },
       "output": "ExecutionLayout，增加末尾 executions 默认 tuple",
-      "behavior": "v1 派生 worker executions；v2 显式 driver/worker；workers 单向派生不二次决定；递归只读。",
+      "behavior": "v1 派生 worker executions；v2 显式 driver/worker；workers 单向派生不二次决定；递归只读。 recovery字段使用RecoveryGuarantee四值描述执行能力，非用户可选策略；不得与queue proof的final_commit字段互相转换。v1缺此字段不补造能力。",
       "contract": "C08",
       "effects": "pure",
       "calls": [
@@ -2306,7 +2353,7 @@
         "executions": "v2 execution 条目列表或 None；键集见 C08"
       },
       "output": "ArtifactRef，journal 中唯一 execution-bindings 记录",
-      "behavior": "加 executions=None keyword；v1 不变，v2用 executions；幂等一致才复用；不创建第二状态库。",
+      "behavior": "加 executions=None keyword；v1 不变，v2用 executions；幂等一致才复用；不创建第二状态库。 recovery字段使用RecoveryGuarantee四值描述执行能力，非用户可选策略；不得与queue proof的final_commit字段互相转换。v1缺此字段不补造能力。",
       "contract": "C08",
       "effects": "durable_write",
       "calls": [
@@ -2419,7 +2466,7 @@
         "decision": "ActionDecision；准入后的route/backend/recovery不可在执行时重选"
       },
       "output": "(logical_dag,physical_plan,bindings_ref)",
-      "behavior": "使用真实 Dataset DAG，driver placement 对应实际 backend，原 compiler 校验；source/terminal 预算同权威。",
+      "behavior": "使用真实 Dataset DAG，driver placement 对应实际 backend，原 compiler 校验；source/terminal 预算同权威。 recovery字段使用RecoveryGuarantee四值描述执行能力，非用户可选策略；不得与queue proof的final_commit字段互相转换。v1缺此字段不补造能力。",
       "contract": "C08",
       "effects": "durable_write",
       "calls": [
@@ -2466,7 +2513,7 @@
         "execution_id": "layout.executions 中唯一标识；不能按函数名模糊匹配"
       },
       "output": "(ExecutionLayout,ExecutionPlacement)",
-      "behavior": "读同一封存输入并精确定位 execution_id；不根据当前 defaults/eligible 重选。",
+      "behavior": "读同一封存输入并精确定位 execution_id；不根据当前 defaults/eligible 重选。 recovery字段使用RecoveryGuarantee四值描述执行能力，非用户可选策略；不得与queue proof的final_commit字段互相转换。v1缺此字段不补造能力。",
       "contract": "C08",
       "effects": "read_only",
       "calls": [
@@ -2537,7 +2584,8 @@
       "caller_tasks": [
         "A006",
         "A007",
-        "A008"
+        "A008",
+        "A016"
       ],
       "errors": [
         "PlanContractError(.reason)",
@@ -2852,19 +2900,22 @@
         "control_timeout_s": "float>0；control deadline，遵循原默认120秒"
       },
       "output": "dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变",
-      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。",
+      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。 初跑在封存之前resolve_prefetch_credit；恢复验证原封存credit与grant，不重新求另一份布局。",
       "contract": "C08",
       "effects": "durable_write",
       "calls": [
-        "interpret_physical_plan"
+        "interpret_physical_plan",
+        "resolve_prefetch_credit"
       ],
       "gates": [
         "GRAPH",
         "RECOVERY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
-        "L002"
+        "L002",
+        "Q008"
       ],
       "caller_tasks": [],
       "errors": [
@@ -2891,19 +2942,22 @@
         "control_timeout_s": "float>0；control deadline，遵循原默认120秒"
       },
       "output": "dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变",
-      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。",
+      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。 初跑在封存之前resolve_prefetch_credit；恢复验证原封存credit与grant，不重新求另一份布局。",
       "contract": "C08",
       "effects": "durable_write",
       "calls": [
-        "interpret_physical_plan"
+        "interpret_physical_plan",
+        "resolve_prefetch_credit"
       ],
       "gates": [
         "RAY",
         "GRAPH"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
-        "L002"
+        "L002",
+        "Q008"
       ],
       "caller_tasks": [],
       "errors": [
@@ -3380,7 +3434,7 @@
         "action_id": "非空稳定 action 标识；不得使用 attempt/PID/时钟生成替代身份"
       },
       "output": "原 available 分支文档",
-      "behavior": "复用中立reader识别v1/v2；缺失、损坏、不支持分别显示",
+      "behavior": "复用中立reader读取F1 sealed_plan_facts.v1；v1/v2区别仅属execution_bindings。历史schema校验不依赖当前业务代码或verify_seal；本轮dag.py冻结，长期历史格式策略仍待单独落实。",
       "contract": "C09",
       "effects": "read_only",
       "calls": [],
@@ -3389,6 +3443,7 @@
         "HISTORY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [
         "W004"
@@ -3596,7 +3651,9 @@
         "W002",
         "W003"
       ],
-      "caller_tasks": [],
+      "caller_tasks": [
+        "W023"
+      ],
       "errors": [
         "原 unavailable/冲突/权限错误"
       ],
@@ -3871,7 +3928,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有验收证据",
-      "behavior": "合法 thread map 的 take/take_all/count/write 各自结果正确；真正无效选项拒绝前events为空；take(0)不读源。",
+      "behavior": "合法 thread map 的 take/take_all/count/write 各自结果正确；真正无效选项拒绝前events为空；take(0)不读源。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -3879,6 +3936,13 @@
         "ADMISSION"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "公开take/take_all/iter/count/write各一次action，内部delivery借用；旧直接内部入口自建兼容不嵌套",
+        "生成器close/早停/取消先drain后退出，不遗留active action",
+        "篡改封存backend/profile/program在业务读取前拒绝；真实consumer记录绑定ID匹配，而非只数unified_chain_eligible",
+        "补验take_batch/aggregate/size_bytes与parquet-json-csv共用_write_file边界；每个实际执行终端只有一次action，纯元数据读取不造计算"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4051,7 +4115,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有验收证据",
-      "behavior": "本地HTTP embedding concurrency=2/max_batch=2，不强制降为1；跨cut恢复已知响应不重发，unknown拒绝。",
+      "behavior": "本地HTTP embedding concurrency=2/max_batch=2，不强制降为1；跨cut恢复已知响应不重发，unknown拒绝。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -4059,6 +4123,14 @@
         "EMBED"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "native两个fresh请求总额度=1只有一个transport；两个node共享run总额度",
+        "新budget helper ceiling=0拒绝；EmbeddingActor原构造器仍拒绝max_requests=0，不误报活缺陷",
+        "reserve事务失败不出现仅扣额度无intent；相同组件重复reserve幂等，组件改变不可双重扣账",
+        "经过真实BlockingIOPool到_enqueue的上下文到达writer payload；writer不直接读ContextVar；异常/取消后token复原",
+        "inflight覆盖reserve/HTTP/持久化；aclose先drain，超时不关闭仍使用资源；未知效果不重发"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4081,7 +4153,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有验收证据",
-      "behavior": "group timeout/pressure/empty-upstream prepend，故障后pending/ordinal/分组边界不丢、不重复；小预算真触发。",
+      "behavior": "group timeout/pressure/empty-upstream prepend，故障后pending/ordinal/分组边界不丢、不重复；小预算真触发。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -4089,6 +4161,13 @@
         "BUFFER"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "普通buffer c=2各有pending，全部进入同cut；重复slot/错cut拒绝，EOF参与者不死等",
+        "native row-local单token保存全注册表，原input/emit锁保护不被改变",
+        "group timeout/压力flush/空源prepend及快照前后崩溃保持多重性和顺序",
+        "restore batch_ordinal拒bool/负数/错类型；旧{batch_ordinal,data}可读，满批及字节守卫不削弱"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4141,7 +4220,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有验收证据",
-      "behavior": "stream/relational/Arrow/pure Lance copy四路真实输出；改变合法封存预算能影响执行，损坏或错assignment在执行前拒绝。",
+      "behavior": "stream/relational/Arrow/pure Lance copy四路真实输出；改变合法封存预算能影响执行，损坏或错assignment在执行前拒绝。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -4149,6 +4228,11 @@
         "LAYOUT"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "native driver真实PromptActor带锁封存不pickle；同action双slice使用不同稳定pin key，恢复无attempt漂移",
+        "覆盖_apply_plan所有10个调用点含Engine.python_rows(_native=False)，绑定execution不得丢失"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4231,7 +4315,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有验收证据",
-      "behavior": "浏览器配置→check→run→节点真实source/参数/观测→结果→cancel/resume；编辑当前代码不改变旧run；无假契约通过标签。",
+      "behavior": "浏览器配置→check→run→节点真实source/参数/观测→结果→cancel/resume；编辑当前代码不改变旧run；无假契约通过标签。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -4239,6 +4323,11 @@
         "WORKBENCH"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "真实HTTP graph-source同时传logical_node_id/occurrence_id不被白名单误拒，错配明确拒绝",
+        "同函数两occurrence仅一logical顶点；各自源码/参数/观测准确；physical摘要仍可读；重绘和迟到响应不串位"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4381,7 +4470,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有验收证据",
-      "behavior": "同预算慢消费者/宽行/倾斜/磁盘不足/取消，峰值与吞吐对比；不扩预算凑通过。",
+      "behavior": "同预算慢消费者/宽行/倾斜/磁盘不足/取消，峰值与吞吐对比；不扩预算凑通过。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -4389,6 +4478,11 @@
         "BOUNDS"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "纯derive_prefetch(1,max_pending_floor=2)拒绝；joint resolver默认credit收紧、显式不兼容credit先拒绝；router/InputGate/封存同值",
+        "Arrow真实TaskScheduler和临时文件必须受同一grant约束；只传execution对象不算通过；该grant装配仍是发布阻塞项"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4441,7 +4535,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有验收证据",
-      "behavior": "历史v1/v2载体只读，业务代码变化拒绝执行；读图不重算，不篡改记录；成功路径dag保持稳定。",
+      "behavior": "历史v1/v2载体只读，业务代码变化拒绝执行；读图不重算，不篡改记录；成功路径dag保持稳定。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -4449,6 +4543,11 @@
         "HISTORY"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "凭据轮换不改变安全模型语义身份；合成API key/Authorization值不得出现在事实/code-pin/历史源码公开投影",
+        "旧载体不改写，当前代码或版本不兼容只拒执行不拒合法历史阅读"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4462,7 +4561,7 @@
       "file": "demiflow/execution/stream.py",
       "symbol": "_make_worker",
       "mode": "implement",
-      "signature": "def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out, stats: StreamStats, on_progress, log_every: int, consume=None, unit_driver=None):",
+      "signature": "def _make_worker(stage, q_in, q_out, stats, on_progress, log_every, consume=None, unit_driver=None, *, worker_slot=None):",
       "baseline_signature": "_make_worker(stage: _Stage, q_in: asyncio.Queue, q_out, stats: StreamStats, on_progress, log_every: int, consume=None, unit_driver=None)",
       "language": "python",
       "baseline_line": 323,
@@ -4475,15 +4574,17 @@
         "on_progress": "Callable[[StreamStats],None|Awaitable] 或 None；原进度回调",
         "log_every": "int>=0；进度采样间隔，不参与计划语义",
         "consume": "Callable[[RuntimeRow],Awaitable|None]或None；下游有背压",
-        "unit_driver": "已有UnitDriver或None；控制权仍属原运行"
+        "unit_driver": "已有UnitDriver或None；控制权仍属原运行",
+        "worker_slot": "_arun创建worker时给定的稳定0..concurrency-1索引；checkpoint路径不得None，native单token分支不以slot数量改变协议"
       },
       "output": "Callable[[],Awaitable[None]]；真实stage worker协程工厂",
-      "behavior": "真正的batch/group/prepend循环在此；把pending/ordinal/计时安全点接buffer_adapter，恢复先消费pending，cut前不越界。",
+      "behavior": "真正的batch/group/prepend循环在此；把pending/ordinal/计时安全点接buffer_adapter，恢复先消费pending，cut前不越界。 本叶唯一持有整_make_worker，含grouped/batch/native嵌套分支；不另派重叠嵌套任务。每个非native参与slot显式arrive，grouped不能把barrier当业务行。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [
         "StageBufferAdapter.align",
-        "StageBufferAdapter.restore"
+        "StageBufferAdapter.restore",
+        "_CheckpointBarrier.arrive"
       ],
       "gates": [
         "BUFFER",
@@ -4491,11 +4592,15 @@
         "RECOVERY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
         "R002",
-        "R003"
+        "R003",
+        "R019"
       ],
-      "caller_tasks": [],
+      "caller_tasks": [
+        "R012"
+      ],
       "errors": [
         "RecoveryContractError",
         "原取消/超时异常；unknown不转换成功"
@@ -4671,7 +4776,7 @@
       "owner": "M",
       "file": "demiflow/embeddings/runtime.py",
       "symbol": "EmbeddingActor.aclose",
-      "mode": "verify_preserve",
+      "mode": "implement",
       "signature": "async def aclose(self):",
       "baseline_signature": "async EmbeddingActor.aclose(self)",
       "language": "python",
@@ -4681,16 +4786,21 @@
         "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
       },
       "output": "None（async）；原资源全部收尾",
-      "behavior": "native借用journal.close不关闭run-owned journal；迟到HTTP先drain，owner/client/pool仍由actor释放。",
+      "behavior": "native路径先await adapter.drain(有效取消deadline)再关闭client/owner与原pool；超时不得宣称已收尾或清空仍运行的inflight。借用journal的close不得关闭run-owned journal。保留非native原关闭语义。",
       "contract": "C07",
       "effects": "runtime_state",
-      "calls": [],
+      "calls": [
+        "NativeEmbeddingRecovery.drain"
+      ],
       "gates": [
         "EMBED",
         "BOUNDS"
       ],
       "status": "planned",
-      "callee_tasks": [],
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "M014"
+      ],
       "caller_tasks": [],
       "errors": [
         "UncertainPromptCall",
@@ -4716,7 +4826,7 @@
         "timings": "本次请求阶段计时映射；不是成功/恢复权威"
       },
       "output": "(response_record:dict,references:dict|None)（async）",
-      "behavior": "原send/failed/response语义兼容RunPromptJournal；response持久化先于向调用者返回，unknown不自动retry。",
+      "behavior": "原send/failed/response语义兼容RunPromptJournal；response持久化先于向调用者返回，unknown不自动retry。 此函数没有reserve；不得在这里才首次设置CALL_RESERVATION。",
       "contract": "C07",
       "effects": "runtime_state",
       "calls": [],
@@ -4725,6 +4835,7 @@
         "UNKNOWN"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [
         "M007"
@@ -4751,11 +4862,11 @@
         "program_slices": "tuple[ProgramSlice,...]；完整真实PlanInput结构遍历输出，路径唯一"
       },
       "output": "tuple[ProgramBinding,...]",
-      "behavior": "每个ProgramSlice独立stage_plan_artifact；局部sealed_operators与全图bindings不混淆；source身份固定；无子计划遗漏。",
+      "behavior": "native_driver_v1每个ProgramSlice调用seal_write_plan_ref(action,slice.plan,source=slice.source,program_id=slice.program_id)，不cloudpickle已物化actor。独立worker路径继续原stage_plan_artifact，不由此函数偷偷改交付方式。ProgramRef五键保持；source和operator映射完整；恢复优先读取原引用。",
       "contract": "C08",
       "effects": "durable_write",
       "calls": [
-        "stage_plan_artifact"
+        "seal_write_plan_ref"
       ],
       "gates": [
         "LAYOUT",
@@ -4763,7 +4874,10 @@
         "RELATIONAL"
       ],
       "status": "planned",
-      "callee_tasks": [],
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "L044"
+      ],
       "caller_tasks": [
         "L007"
       ],
@@ -4791,10 +4905,11 @@
         "action_id": "非空稳定 action 标识；不得使用 attempt/PID/时钟生成替代身份"
       },
       "output": "None或RecoveryContractError",
-      "behavior": "按稳定input_path定位全部真实子程序；核source身份、每段verify_loaded_plan和映射完整性；缺段错段拒绝。",
+      "behavior": "按稳定input_path定位真实子程序，native driver核code-pin-only记录及带source的plan_code_pin，worker仍用verify_loaded_plan。载体种类由封存backend/placement确定，不按同样五键猜测。缺source保护、多slice错键/漏段均拒绝，不用当前代码重写旧档案。",
       "contract": "C08",
       "effects": "read_only",
       "calls": [
+        "plan_code_pin",
         "verify_loaded_plan"
       ],
       "gates": [
@@ -4803,7 +4918,9 @@
         "RELATIONAL"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
+        "L042",
         "L014"
       ],
       "caller_tasks": [
@@ -4946,7 +5063,7 @@
         "tmp_path": "pytest Path；调用必须指定 /tmp/demiflow-* 的basetemp"
       },
       "output": "None；断言通过才有证据",
-      "behavior": "join/union两侧不同UDF；只修改右子plan代码必须拒绝resume；完整图stage映射不碰撞；历史读取仍可。",
+      "behavior": "join/union两侧不同UDF；只修改右子plan代码必须拒绝resume；完整图stage映射不碰撞；历史读取仍可。 必须满足卡内全部验收断言，逐项保留正反例证据。",
       "contract": "C10",
       "effects": "test_only",
       "calls": [],
@@ -4956,6 +5073,10 @@
         "RELATIONAL"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "只改source reducer导入helper后resume拒绝；operations原BFS保护保留；source相同input_path重复定位不混段"
+      ],
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -5233,18 +5354,17 @@
       "owner": "W",
       "file": "demiflow/workbench/runs/facts.py",
       "symbol": "_bridge_node_map",
-      "mode": "implement",
-      "signature": "def _bridge_node_map(entries, *, key_kind='logical'):",
+      "mode": "verify_preserve",
+      "signature": "def _bridge_node_map(entries):",
       "baseline_signature": "_bridge_node_map(entries)",
       "language": "python",
       "baseline_line": 271,
       "baseline_function_sha256": "4d6215ebcb4a3201bedd13d5ff2b719fc3edc4ff038dd12595836afedcd9b50e",
       "input": {
-        "entries": "IdentityBridge.entries；精确action/dag/report已经校验的映射记录",
-        "key_kind": "logical或occurrence；默认logical兼容旧消费者，歧义键省略不猜"
+        "entries": "IdentityBridge.entries；精确action/dag/report已经校验的映射记录"
       },
       "output": "dict[str,str]；选定key_kind到唯一report_node_id",
-      "behavior": "logical默认兼容旧调用；occurrence模式按实际出现位置映射，歧义省略，_sealed_entry同时产两种map供新旧消费者。",
+      "behavior": "保留原logical_node_id到唯一report_node_id映射，多义不猜测；不新增occurrence图键域。",
       "contract": "C09",
       "effects": "pure",
       "calls": [],
@@ -5253,6 +5373,7 @@
         "HISTORY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [
         "W014"
@@ -5382,10 +5503,12 @@
         "declared": "report_node_id字符串或null；历史映射不可猜测"
       },
       "output": "undefined；更新当前视图DOM/选择状态",
-      "behavior": "精确occurrence定位原封存源码/参数和同attempt观测；缺页/缺映射分开提示，不展示另一个节点状态。",
+      "behavior": "复用已有bridgeEntryFor和occurrence picker；一个logical顶点的详情可选择occurrence，传给chooseNode及source请求，物理摘要仍按logical ID。旧桥缺失/多义时显示不可用，不重算DAG。",
       "contract": "C09",
       "effects": "runtime_state",
       "calls": [
+        "chooseNode",
+        "bridgeEntryFor",
         "mountLogical.select"
       ],
       "gates": [
@@ -5394,7 +5517,9 @@
         "HISTORY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [
+        "W025",
         "W021"
       ],
       "caller_tasks": [],
@@ -5416,13 +5541,13 @@
       "baseline_function_sha256": "2265534e39c095f177d47ee84dcc51b36f12f9f562d02e524ceeff827134f2d9",
       "input": {
         "dag": "已封存或明确标声明的LogicalDag文档",
-        "nodeMap": "occurrence_id到已验证report节点的映射；缺项保持不可用",
+        "nodeMap": "logical_node_id到已验证report节点的原映射；多义项不能猜首个",
         "labels": "逻辑节点显示标签映射；文本渲染，不解析成HTML",
-        "selectedId": "occurrence_id或null；与所选action/attempt绑定",
+        "selectedId": "logical_node_id或null；occurrence在详情Selection内",
         "basis": "declared/sealed，消费后端事实；旧basis=executed仅指历史封存来源，不能当成功状态"
       },
       "output": "undefined；更新当前视图DOM/选择状态",
-      "behavior": "按occurrence_id绘制；相同logical id多次出现保留不同节点；选择/来源状态更新一致。",
+      "behavior": "按logical_node_id绘制唯一顶点及原logical边；nodeMap仍按logical ID，不拆occurrence顶点。occurrence列表由详情面板承接；selectedId是logical ID或null。来源sealed不等于运行成功，原physical键域不变。",
       "contract": "C09",
       "effects": "runtime_state",
       "calls": [],
@@ -5432,6 +5557,7 @@
         "HISTORY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [
         "W018"
@@ -5453,10 +5579,10 @@
       "baseline_line": 66,
       "baseline_function_sha256": "99842c402274b0deea360687603c2d757dc4a5da0b726ba04c12b7e365e55871",
       "input": {
-        "id": "occurrence_id显示键；不得以logical_node_id合并多次出现"
+        "id": "logical_node_id或null，不是occurrence_id"
       },
       "output": "undefined；更新当前视图DOM/选择状态",
-      "behavior": "只高亮匹配occurrence，删除/换图清空旧高亮；可访问性aria与真实选择一致。",
+      "behavior": "只高亮logical_node_id顶点；occurrence选择不增加图顶点/边；切action/换图清空无效选择。",
       "contract": "C09",
       "effects": "runtime_state",
       "calls": [],
@@ -5466,12 +5592,1858 @@
         "HISTORY"
       ],
       "status": "planned",
+      "review_revision": "20261114-r2",
       "callee_tasks": [],
       "caller_tasks": [
         "W019"
       ],
       "errors": [
         "原 unavailable/冲突/权限错误"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A009",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.take",
+      "mode": "implement",
+      "signature": "def take(self, limit: int=20):",
+      "baseline_signature": "Dataset.take(self, limit: int=20)",
+      "language": "python",
+      "baseline_line": 1920,
+      "baseline_function_sha256": "ee6e5f99402667c84c64ad64df7b6a55e8fec61118592c8df43ec39968bdfe85",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "limit": "非负行数或 None；0 仍需静态检查但不读源"
+      },
+      "output": "原公开返回类型保持",
+      "behavior": "公开终端只建一次checked.action；与当前count/materialize既有边界一致。惰性迭代器从首次消费到close/耗尽/取消都在scope内；take(0)不读源。schema(fetch_if_missing=False)仅可读已有元数据，缺失不暗跑；True真读取必须进action。内部helper不调用另一个公开终端。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "admit_action_plan",
+        "LocalDatasetExecutor.take"
+      ],
+      "gates": [
+        "ADMISSION",
+        "DELIVERY",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A001",
+        "A006"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A010",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.take_all",
+      "mode": "implement",
+      "signature": "def take_all(self, limit: Optional[int]=None):",
+      "baseline_signature": "Dataset.take_all(self, limit: Optional[int]=None)",
+      "language": "python",
+      "baseline_line": 1935,
+      "baseline_function_sha256": "6c7de798c293a40c6707044f9a146f10b71fb08d2b76b6d0dd742ce8b4228550",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "limit": "非负行数或 None；0 仍需静态检查但不读源"
+      },
+      "output": "原公开返回类型保持",
+      "behavior": "公开终端只建一次checked.action；与当前count/materialize既有边界一致。惰性迭代器从首次消费到close/耗尽/取消都在scope内；take(0)不读源。schema(fetch_if_missing=False)仅可读已有元数据，缺失不暗跑；True真读取必须进action。内部helper不调用另一个公开终端。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "admit_action_plan",
+        "LocalDatasetExecutor.take"
+      ],
+      "gates": [
+        "ADMISSION",
+        "DELIVERY",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A001",
+        "A006"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A011",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.iter_rows",
+      "mode": "implement",
+      "signature": "def iter_rows(self):",
+      "baseline_signature": "Dataset.iter_rows(self)",
+      "language": "python",
+      "baseline_line": 2128,
+      "baseline_function_sha256": "c69b9892944b0954cb1c8c04b83adcafece48f8f2623606c67d9ea997001a5a7",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
+      },
+      "output": "原公开返回类型保持",
+      "behavior": "公开终端只建一次checked.action；与当前count/materialize既有边界一致。惰性迭代器从首次消费到close/耗尽/取消都在scope内；take(0)不读源。schema(fetch_if_missing=False)仅可读已有元数据，缺失不暗跑；True真读取必须进action。内部helper不调用另一个公开终端。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "admit_action_plan",
+        "LocalDatasetExecutor.iter_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "DELIVERY",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A001",
+        "A007"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A012",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.iter_batches",
+      "mode": "implement",
+      "signature": "def iter_batches(self, *, prefetch_batches: int=1, batch_size: Optional[int]=256, batch_format: Optional[str]='default', drop_last: bool=False):",
+      "baseline_signature": "Dataset.iter_batches(self, *, prefetch_batches: int=1, batch_size: Optional[int]=256, batch_format: Optional[str]='default', drop_last: bool=False)",
+      "language": "python",
+      "baseline_line": 2135,
+      "baseline_function_sha256": "bfe7ee1e5e14efdd1560485735135cef414e27133d1861284e69193f13762919",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "prefetch_batches": "int>=1；有界批预读窗口，不是额外内存额度",
+        "batch_size": "int>0 或 None；原批语义，仍受字节上限",
+        "batch_format": "既有批输出格式；不得因路由改变返回类型",
+        "drop_last": "bool；是否保留末尾不足批，保持原语义"
+      },
+      "output": "原公开返回类型保持",
+      "behavior": "公开终端只建一次checked.action；与当前count/materialize既有边界一致。惰性迭代器从首次消费到close/耗尽/取消都在scope内；take(0)不读源。schema(fetch_if_missing=False)仅可读已有元数据，缺失不暗跑；True真读取必须进action。内部helper不调用另一个公开终端。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "admit_action_plan",
+        "LocalDatasetExecutor.iter_batches"
+      ],
+      "gates": [
+        "ADMISSION",
+        "DELIVERY",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A001",
+        "A017"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A013",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.schema",
+      "mode": "implement",
+      "signature": "def schema(self, fetch_if_missing: bool=True):",
+      "baseline_signature": "Dataset.schema(self, fetch_if_missing: bool=True)",
+      "language": "python",
+      "baseline_line": 2159,
+      "baseline_function_sha256": "34581fdaad98b18928b23c59e6bab7416cf753aa2b799fcc0751df6cff363c14",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "fetch_if_missing": "bool；False 不因查询 schema 新读取业务数据；True 的缺失回退属于实际执行"
+      },
+      "output": "原公开返回类型保持",
+      "behavior": "公开终端只建一次checked.action；与当前count/materialize既有边界一致。惰性迭代器从首次消费到close/耗尽/取消都在scope内；take(0)不读源。schema(fetch_if_missing=False)仅可读已有元数据，缺失不暗跑；True真读取必须进action。内部helper不调用另一个公开终端。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "admit_action_plan",
+        "LocalDatasetExecutor.schema"
+      ],
+      "gates": [
+        "ADMISSION",
+        "DELIVERY",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A001",
+        "A021"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A014",
+      "owner": "A",
+      "file": "demiflow/execution/stream_delivery.py",
+      "symbol": "iter_stream_rows",
+      "mode": "implement",
+      "signature": "def iter_stream_rows(executor, source, plan, *, limit=None, action=None):",
+      "baseline_signature": "iter_stream_rows(executor, source, plan, *, limit=None)",
+      "language": "python",
+      "baseline_line": 25,
+      "baseline_function_sha256": "21c37bfb5356a186296e4d2c150b7a36630a096f5b8e93d259b180c40bc41b64",
+      "input": {
+        "executor": "已有 LocalDatasetExecutor 或对应后端实例；资源归原所有者",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "limit": "非负行数或 None；0 仍需静态检查但不读源",
+        "action": "execution.run_context.RunAction；action_id/context/fence 绑定原执行权威"
+      },
+      "output": "有界行迭代器；仅owner可complete",
+      "behavior": "显式action或current_action存在则借用；验证context/source/plan属于当前终端，不再run.action、不调用action.complete。仅无外层scope的原内部兼容入口自建delivery action并负责complete。借用路径的最终complete由外层checked.action执行；提前close先停止并join producer，再退出scope；线程未停保留隔离/失败，不释放资源。保留回执先于yield和unknown语义。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "ADMISSION",
+        "DELIVERY",
+        "RECOVERY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "A006",
+        "A007",
+        "A017",
+        "A018",
+        "A019",
+        "A020",
+        "A021",
+        "A022",
+        "A023",
+        "A024",
+        "A025"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A015",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor._execution_capabilities",
+      "mode": "implement",
+      "signature": "def _execution_capabilities(self, source, plan, *, action_kind, sink_spec=None):",
+      "baseline_signature": null,
+      "language": "python",
+      "baseline_line": null,
+      "baseline_function_sha256": null,
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "action_kind": "str；公开 terminal/action 名，不能由用户任意注入私有kind",
+        "sink_spec": "LanceWriteSpec或None；只有write允许非None，Arrow必须含schema"
+      },
+      "output": "tuple[str,...]；固定可用backend集合",
+      "behavior": "复用现有has_relational、_local_kernel、arrow_batch_sink.eligible和Lance fast-path条件；只检查声明/配置，不读数据、不构造actor。显式缺能力报错，不返回空集合后静默换后端。",
+      "contract": "C03",
+      "effects": "read_only",
+      "calls": [],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "A006",
+        "A007",
+        "A008",
+        "A017",
+        "A018",
+        "A019",
+        "A020",
+        "A021",
+        "A022",
+        "A023",
+        "A024",
+        "A025"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A016",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor._apply_plan",
+      "mode": "implement",
+      "signature": "def _apply_plan(self, source, plan, *, action_kind='iter_rows', terminal_category='action', terminal_native_options=None, physical_plan=None, _native=True, execution=None):",
+      "baseline_signature": "LocalDatasetExecutor._apply_plan(self, source: SourcePlan, plan: LogicalPlan, *, action_kind='iter_rows', terminal_category='action', terminal_native_options=None, physical_plan=None, _native=True)",
+      "language": "python",
+      "baseline_line": 562,
+      "baseline_function_sha256": "2cec10228627541c06b12e31e21276f95bcb7de01222258e36e9c2e56aca8d35",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "action_kind": "str；公开 terminal/action 名，不能由用户任意注入私有kind",
+        "terminal_category": "既有 action/terminal 分类；用于真实计划事实",
+        "terminal_native_options": "原生终端选项或 None；仅当前 action 配置",
+        "physical_plan": "PhysicalExecutionPlan v1 文档；stages/partitions/channels/recovery/worker_groups",
+        "_native": "bool；False 为已绑定的 Python 子阶段，不是再次自动选择后端的授权",
+        "execution": "ExecutionPlacement 或 None；绑定调用不得为 None，预算和 backend 取该值"
+      },
+      "output": "原惰性行迭代器",
+      "behavior": "实际执行型调用必须携带已封存execution；验证backend/profile/program。_native=False只执行该binding指定的Python子阶段，不借此绕过准入或重选backend。纯元数据读取不调用本函数。无外层action的兼容调用按显式非绑定契约处理，不宣称已受统一布局支配。",
+      "contract": "C08",
+      "effects": "runtime_state",
+      "calls": [
+        "execute_native_plan"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "RELATIONAL"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "L009"
+      ],
+      "caller_tasks": [
+        "A017",
+        "A018",
+        "A019",
+        "A020",
+        "A021",
+        "A022",
+        "A023",
+        "A024",
+        "A025",
+        "L045"
+      ],
+      "errors": [
+        "PlanContractError(.reason)",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A017",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.iter_batches",
+      "mode": "implement",
+      "signature": "def iter_batches(self, source: SourcePlan, plan: LogicalPlan, *, prefetch_batches: int=1, batch_size: int | None=256, batch_format: str | None='default', drop_last: bool=False):",
+      "baseline_signature": "LocalDatasetExecutor.iter_batches(self, source: SourcePlan, plan: LogicalPlan, *, prefetch_batches: int=1, batch_size: int | None=256, batch_format: str | None='default', drop_last: bool=False)",
+      "language": "python",
+      "baseline_line": 754,
+      "baseline_function_sha256": "82b6b3363061f8e94d4d3d0a63fd6e2c2d15c8e5950416538aea26f945b32b04",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "prefetch_batches": "int>=1；有界批预读窗口，不是额外内存额度",
+        "batch_size": "int>0 或 None；原批语义，仍受字节上限",
+        "batch_format": "既有批输出格式；不得因路由改变返回类型",
+        "drop_last": "bool；是否保留末尾不足批，保持原语义"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [
+        "A012"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A018",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.count",
+      "mode": "implement",
+      "signature": "def count(self, source: SourcePlan, plan: LogicalPlan):",
+      "baseline_signature": "LocalDatasetExecutor.count(self, source: SourcePlan, plan: LogicalPlan)",
+      "language": "python",
+      "baseline_line": 975,
+      "baseline_function_sha256": "e38f000418de750fa34b3b5be52c1f6f9ea4d98677002fb8ec094b99f677ecea",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [
+        "A004"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A019",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.take_batch",
+      "mode": "implement",
+      "signature": "def take_batch(self, source: SourcePlan, plan: LogicalPlan, batch_size: int, *, batch_format: str):",
+      "baseline_signature": "LocalDatasetExecutor.take_batch(self, source: SourcePlan, plan: LogicalPlan, batch_size: int, *, batch_format: str)",
+      "language": "python",
+      "baseline_line": 995,
+      "baseline_function_sha256": "28c6e321d7932f5a84ed33fe282b7087ed0a7d1c9b63df72ab32207b935e9565",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "batch_size": "int>0 或 None；原批语义，仍受字节上限",
+        "batch_format": "既有批输出格式；不得因路由改变返回类型"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [
+        "A026"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A020",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.aggregate",
+      "mode": "implement",
+      "signature": "def aggregate(self, source: SourcePlan, plan: LogicalPlan, aggregates: tuple[Any, ...]):",
+      "baseline_signature": "LocalDatasetExecutor.aggregate(self, source: SourcePlan, plan: LogicalPlan, aggregates: tuple[Any, ...])",
+      "language": "python",
+      "baseline_line": 1002,
+      "baseline_function_sha256": "bafcbcdd32432bd249c674dce72391a734b5e6414145b974aa111b7ffa23fdd3",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "aggregates": "tuple[既有聚合表达式,...]；保留顺序及空输入语义"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [
+        "A027"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A021",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.schema",
+      "mode": "implement",
+      "signature": "def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool=True):",
+      "baseline_signature": "LocalDatasetExecutor.schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool=True)",
+      "language": "python",
+      "baseline_line": 1057,
+      "baseline_function_sha256": "10bfa45dccc23081461bcc1a4c7422757417b6f03ef54d615c438b0939ad066b",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "fetch_if_missing": "bool；False 不因查询 schema 新读取业务数据；True 的缺失回退属于实际执行"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [
+        "A013"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A022",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.size_bytes",
+      "mode": "implement",
+      "signature": "def size_bytes(self, source: SourcePlan, plan: LogicalPlan):",
+      "baseline_signature": "LocalDatasetExecutor.size_bytes(self, source: SourcePlan, plan: LogicalPlan)",
+      "language": "python",
+      "baseline_line": 1083,
+      "baseline_function_sha256": "373f506058901087f9f87e62d8db877aa3b9efa5da515e480211312d9ed6420f",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [
+        "A028"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A023",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.materialize",
+      "mode": "implement",
+      "signature": "def materialize(self, source: SourcePlan, plan: LogicalPlan):",
+      "baseline_signature": "LocalDatasetExecutor.materialize(self, source: SourcePlan, plan: LogicalPlan)",
+      "language": "python",
+      "baseline_line": 817,
+      "baseline_function_sha256": "520097d1a58ab12e18d347ca898f0fde6fa51d6e6687adb0e4a11315b0bae125",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A024",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.write_datasink",
+      "mode": "implement",
+      "signature": "def write_datasink(self, source: SourcePlan, plan: LogicalPlan, datasink: Datasink, *, native_options=None):",
+      "baseline_signature": "LocalDatasetExecutor.write_datasink(self, source: SourcePlan, plan: LogicalPlan, datasink: Datasink, *, native_options=None)",
+      "language": "python",
+      "baseline_line": 1123,
+      "baseline_function_sha256": "719c400fbaa492ccaa354b500c94f2175592e5efb441e6c682ebc120d701661e",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "datasink": "已有 Datasink；复用其提交/清理契约，不复制提交权威",
+        "native_options": "现有终端原生配置或 None；业务语义和资源边界均保持"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A025",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "symbol": "LocalDatasetExecutor.write_file",
+      "mode": "implement",
+      "signature": "def write_file(self, source: SourcePlan, plan: LogicalPlan, format_name: str, path: str, options: dict[str, Any]):",
+      "baseline_signature": "LocalDatasetExecutor.write_file(self, source: SourcePlan, plan: LogicalPlan, format_name: str, path: str, options: dict[str, Any])",
+      "language": "python",
+      "baseline_line": 1249,
+      "baseline_function_sha256": "32df10bfd5309335ec6f73535d5712affe6c895b7aa2c1e257fd0ab79f5b1416",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "format_name": "现有 file sink 格式名称；仅允许当前实现支持的值",
+        "path": "已检查的输出路径；不追随未经绑定的外部目标",
+        "options": "该函数原生 options；不可跨类型互用；绑定执行只能收紧原选项"
+      },
+      "output": "原公开终端返回值/类型",
+      "behavior": "在唯一action内调用真实能力生产者与准入决策，compile/load原封存execution，再沿本终端原调用链显式传到_apply_plan或native/stream消费者。所有分支保持原输出类型、空输入、取消和sink提交语义；不调用其他公开Dataset action。schema纯元数据分支verify_preserve，fetch回退真读取必须绑定。stream组合不支持时在读源前明确拒绝，不落到全局map选项误拒或legacy偷跑。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._execution_capabilities",
+        "admit_action_plan",
+        "LocalDatasetExecutor._apply_plan",
+        "iter_stream_rows"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "STREAM"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A015",
+        "A001",
+        "A016",
+        "A014"
+      ],
+      "caller_tasks": [
+        "A029"
+      ],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "M013",
+      "owner": "M",
+      "file": "demiflow/operator_llm/stream_recovery.py",
+      "symbol": "native_request_budget",
+      "mode": "implement",
+      "signature": "def native_request_budget(run, *, node_id, max_requests):",
+      "baseline_signature": null,
+      "language": "python",
+      "baseline_line": null,
+      "baseline_function_sha256": null,
+      "input": {
+        "run": "execution.run_context.RunContext；借用；不能另建 journal/allocator 或关闭调用者资源",
+        "node_id": "稳定的原生执行节点预算键；来自本action的node绑定，不是工作台report节点ID",
+        "max_requests": "int>=0 或 None；本新预算 helper 明确 None=采用run额度、0=禁止fresh；Actor原构造器仍要求正数"
+      },
+      "output": "ContextManager[str]；yield reservation_id",
+      "behavior": "仅生成有限charges并设置CALL_RESERVATION，finally reset token；不在事务外扣账。None与0分开，沿既有requests和node额度键。journal._enqueue在调用线程取值，_apply_operation从payload读；沿既有savepoint原子reserve+intent。同集合重复reserve已幂等；禁止用不同组件集合双重预留同一请求。",
+      "contract": "C07",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "EMBED",
+        "PROMPT",
+        "BOUNDS"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "M007"
+      ],
+      "errors": [
+        "UncertainPromptCall",
+        "原transport异常；不隐式重试"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "M014",
+      "owner": "M",
+      "file": "demiflow/embeddings/stream_recovery.py",
+      "symbol": "NativeEmbeddingRecovery.drain",
+      "mode": "implement",
+      "signature": "async def drain(self, *, timeout_s):",
+      "baseline_signature": null,
+      "language": "python",
+      "baseline_line": null,
+      "baseline_function_sha256": null,
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "timeout_s": "有限正超时秒；使用已有运行/取消截止时间的剩余上限"
+      },
+      "output": "None（async）；超时抛TimeoutError且不关闭仍被用资源",
+      "behavior": "inflight为本adapter持有的reservation_id→真实执行Task映射，覆盖reserve到fresh响应/failed持久化完成。等待这些任务有界排空，不将journal unknown当仍在运行的任务；未知效果记录保留。不能等待自己；超时不清空inflight、不提前close client/journal，交原失败/隔离路径。",
+      "contract": "C07",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "EMBED",
+        "UNKNOWN",
+        "BOUNDS"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "M011"
+      ],
+      "errors": [
+        "UncertainPromptCall",
+        "原transport异常；不隐式重试"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "M015",
+      "owner": "M",
+      "file": "demiflow/operator_llm/http_options.py",
+      "symbol": "validate_http_options",
+      "mode": "implement",
+      "signature": "def validate_http_options(options):",
+      "baseline_signature": "validate_http_options(options)",
+      "language": "python",
+      "baseline_line": 21,
+      "baseline_function_sha256": "5491f2b3d1dff065d9bc398191fd2afaa8c50fb9573fc93c4134f54d6575b872",
+      "input": {
+        "options": "该函数原生 options；不可跨类型互用；绑定执行只能收紧原选项"
+      },
+      "output": "规范化HTTP options或原ValueError",
+      "behavior": "拒绝记录型request_options内的api_key/extra_headers，不再以credentials_env是否存在为前提；凭据继续用现有transport-only gateway_credentials。错误不回显值。显式迁移受影响用例，其他合法非秘密语义和既有兼容规则保持。",
+      "contract": "C07",
+      "effects": "pure",
+      "calls": [],
+      "gates": [
+        "PROMPT",
+        "IDENTITY",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "UncertainPromptCall",
+        "原transport异常；不隐式重试"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R017",
+      "owner": "R",
+      "file": "demiflow/execution/stream_barrier.py",
+      "symbol": "_CheckpointBarrier.__init__",
+      "mode": "implement",
+      "signature": "def __init__(self, stages, queues, commit, *, progress=None, final=False, track=None):",
+      "baseline_signature": "_CheckpointBarrier.__init__(self, stages, queues, commit, *, progress=None, final=False, track=None)",
+      "language": "python",
+      "baseline_line": 13,
+      "baseline_function_sha256": "0a0d1c326d7fa6411a1112a2c18a515340eb436e2a6ca6e391c187b4611866f5",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "stages": "由真实 plan lowering 得到的 _Stage 有序序列",
+        "queues": "当前 stage 的有界队列序列；切 cut 控制帧仍由原驱动持有",
+        "commit": "既有提交回调；不创建第二个 CommitCoordinator",
+        "progress": "现有StreamStageProgress/WorkerProgress对象或None；不得新建平行游标",
+        "final": "bool；本 barrier 是否最终 cut，语义沿用原协议",
+        "track": "原后台任务登记回调或 None；取消时不得遗留发布任务"
+      },
+      "output": "原barrier返回语义；align每stage每cut一次",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "contract": "C05",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "UNKNOWN"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RecoveryContractError",
+        "原取消/超时异常；unknown不转换成功"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R018",
+      "owner": "R",
+      "file": "demiflow/execution/stream_barrier.py",
+      "symbol": "_CheckpointBarrier.tokens",
+      "mode": "implement",
+      "signature": "def tokens(stage):",
+      "baseline_signature": "_CheckpointBarrier.tokens(stage)",
+      "language": "python",
+      "baseline_line": 37,
+      "baseline_function_sha256": "5fc3824860f6014b9bd1246416ba733e7ffb72d248811719a589f5bad78a077f",
+      "input": {
+        "stage": "stream._Stage；stage_budget/operation_index/native adapter 与封存位置一致"
+      },
+      "output": "原barrier返回语义；align每stage每cut一次",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "contract": "C05",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "UNKNOWN"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RecoveryContractError",
+        "原取消/超时异常；unknown不转换成功"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R019",
+      "owner": "R",
+      "file": "demiflow/execution/stream_barrier.py",
+      "symbol": "_CheckpointBarrier.arrive",
+      "mode": "implement",
+      "signature": "async def arrive(self, stage, batch=None, *, worker_slot=None, cut_id=None):",
+      "baseline_signature": "async _CheckpointBarrier.arrive(self, stage, batch=None)",
+      "language": "python",
+      "baseline_line": 56,
+      "baseline_function_sha256": "451122abc465ab1a544cbcc19299455c8117a23044cbee0960052922b942aed5",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "stage": "stream._Stage；stage_budget/operation_index/native adapter 与封存位置一致",
+        "batch": "当前 buffer 的有界行序列；不得隐式物化全部流",
+        "worker_slot": "稳定非负 worker slot 或 None；普通 buffered 必须提供，native 阶段单 token 保留 None",
+        "cut_id": "当前 barrier 的稳定 checkpoint 身份；不得用 attempt/时钟；错误 cut 拒绝"
+      },
+      "output": "原barrier返回语义；align每stage每cut一次",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "contract": "C05",
+      "effects": "runtime_state",
+      "calls": [
+        "StreamStageProgress.align"
+      ],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "UNKNOWN"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "R007"
+      ],
+      "caller_tasks": [
+        "R015"
+      ],
+      "errors": [
+        "RecoveryContractError",
+        "原取消/超时异常；unknown不转换成功"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R020",
+      "owner": "R",
+      "file": "demiflow/execution/stream_barrier.py",
+      "symbol": "_CheckpointBarrier.fail",
+      "mode": "implement",
+      "signature": "def fail(self, error):",
+      "baseline_signature": "_CheckpointBarrier.fail(self, error)",
+      "language": "python",
+      "baseline_line": 40,
+      "baseline_function_sha256": "912fa6cc9cf99b72226a1d091c1dd3b6225c0a2d31207bdb79551574f8f107ec",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "error": "原异常对象；取消/超时不变成成功或自动重试"
+      },
+      "output": "原barrier返回语义；align每stage每cut一次",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "contract": "C05",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "UNKNOWN"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RecoveryContractError",
+        "原取消/超时异常；unknown不转换成功"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R021",
+      "owner": "R",
+      "file": "demiflow/execution/stream_barrier.py",
+      "symbol": "CheckpointControl.run",
+      "mode": "verify_preserve",
+      "signature": "async def run(self):",
+      "baseline_signature": "async CheckpointControl.run(self)",
+      "language": "python",
+      "baseline_line": 186,
+      "baseline_function_sha256": "a010fd4f80eaebb3f8fcf5a9d07a6863528ac36c25ef330ec3518b3032ab016c",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
+      },
+      "output": "原async协调循环",
+      "behavior": "保留source ordinal与(ordinal>=replay_cut OR full)，full含容量压力；不能用stage输出或batch ordinal替代源frontier。新增buffer只消费原cut和状态预算。",
+      "contract": "C05",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RecoveryContractError",
+        "原取消/超时异常；unknown不转换成功"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R022",
+      "owner": "R",
+      "file": "demiflow/execution/stream.py",
+      "symbol": "_Stage.__slots__",
+      "mode": "implement",
+      "signature": "__slots__ = (\"name\", \"fn\", \"concurrency\", \"queue_depth\", \"catch\",\n                 \"pre_filters\", \"post_filters\", \"hard_timeout\",\n                 \"max_batch\", \"flush_interval\", \"execution\", \"executor\", \"pending\", \"flat_map\", \"grouping\", \"prefix\", \"validation\", \"observation\", \"recovery_buffer\", \"native_recovery\", \"native_snapshot\", \"batch_ordinal\", \"scope_id\", \"native_pending\", \"native_restore\", \"native_input_lock\", \"native_emit_lock\", \"native_idle\",\n                 \"operation_index\", \"stage_budget\")",
+      "baseline_signature": "__slots__ = (\"name\", \"fn\", \"concurrency\", \"queue_depth\", \"catch\",\n                 \"pre_filters\", \"post_filters\", \"hard_timeout\",\n                 \"max_batch\", \"flush_interval\", \"execution\", \"executor\", \"pending\", \"flat_map\", \"grouping\", \"prefix\", \"validation\", \"observation\", \"recovery_buffer\", \"native_recovery\", \"native_snapshot\", \"batch_ordinal\", \"scope_id\", \"native_pending\", \"native_restore\", \"native_input_lock\", \"native_emit_lock\", \"native_idle\",\n                 \"operation_index\", \"stage_budget\")",
+      "language": "python_declaration",
+      "baseline_line": 98,
+      "baseline_function_sha256": "d6c8c2078a6523b3f327925dc70b69b0303ab2d5f61215425d21ca8a35c21345",
+      "input": {},
+      "output": "类/模块声明的窄修改；其余字段逐字保留",
+      "behavior": "仅添加buffer_adapter，与R010构造器同一装配提交；保留全部原slots及native锁/注册表。",
+      "contract": "C05",
+      "effects": "declaration_only",
+      "calls": [],
+      "gates": [
+        "BUFFER"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "R010"
+      ],
+      "errors": [
+        "RecoveryContractError",
+        "原取消/超时异常；unknown不转换成功"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "L040",
+      "owner": "L",
+      "file": "demiflow/execution/chain.py",
+      "symbol": "source_callable_roots",
+      "mode": "implement",
+      "signature": "def source_callable_roots(source):",
+      "baseline_signature": null,
+      "language": "python",
+      "baseline_line": null,
+      "baseline_function_sha256": null,
+      "input": {
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源"
+      },
+      "output": "tuple[CallableSpec或函数,...]；稳定顺序、有界",
+      "behavior": "按原生SourcePlan/PlanInput明确类型遍历reducer及其参数，保留input_path；不调用用户属性/函数。只提供现有_business_dependency_modules的额外根，复用原BFS上限，不复制依赖遍历权威。",
+      "contract": "C08",
+      "effects": "read_only",
+      "calls": [],
+      "gates": [
+        "HISTORY",
+        "RELATIONAL"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "L041"
+      ],
+      "errors": [
+        "PlanContractError(.reason)",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "L041",
+      "owner": "L",
+      "file": "demiflow/execution/chain.py",
+      "symbol": "_business_dependency_modules",
+      "mode": "implement",
+      "signature": "def _business_dependency_modules(plan, *, source=None):",
+      "baseline_signature": "_business_dependency_modules(plan)",
+      "language": "python",
+      "baseline_line": 652,
+      "baseline_function_sha256": "3df35b6138b599b8f30cb5d79ac9c16459e5c147fa5f31d61137891e6ea766fa",
+      "input": {
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源"
+      },
+      "output": "沿用原返回形状；新增source依赖的有界内容",
+      "behavior": "现状pin与归档已共用_business_dependency_modules，不重写已正确BFS。只扩展source_callable_roots并保证两次收集同集合、封存期漂移拒绝；旧无source调用保持旧字节。新增source保护不能反向声称旧记录已覆盖，缺保护的可恢复source组合明确拒绝。",
+      "contract": "C08",
+      "effects": "read_only",
+      "calls": [
+        "source_callable_roots"
+      ],
+      "gates": [
+        "HISTORY",
+        "IDENTITY",
+        "RELATIONAL"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "L040"
+      ],
+      "caller_tasks": [
+        "L042",
+        "L043"
+      ],
+      "errors": [
+        "PlanContractError(.reason)",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "L042",
+      "owner": "L",
+      "file": "demiflow/execution/chain.py",
+      "symbol": "plan_code_pin",
+      "mode": "implement",
+      "signature": "def plan_code_pin(plan, *, source=None):",
+      "baseline_signature": "plan_code_pin(plan)",
+      "language": "python",
+      "baseline_line": 747,
+      "baseline_function_sha256": "b323e9652c87427f98f9a1d30f10dae9d4967b3a5a2e79b5e1deb9c5f8d5269a",
+      "input": {
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源"
+      },
+      "output": "沿用原返回形状；新增source依赖的有界内容",
+      "behavior": "现状pin与归档已共用_business_dependency_modules，不重写已正确BFS。只扩展source_callable_roots并保证两次收集同集合、封存期漂移拒绝；旧无source调用保持旧字节。新增source保护不能反向声称旧记录已覆盖，缺保护的可恢复source组合明确拒绝。",
+      "contract": "C08",
+      "effects": "read_only",
+      "calls": [
+        "_business_dependency_modules"
+      ],
+      "gates": [
+        "HISTORY",
+        "IDENTITY",
+        "RELATIONAL"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "L041"
+      ],
+      "caller_tasks": [
+        "L031",
+        "L044"
+      ],
+      "errors": [
+        "PlanContractError(.reason)",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "L043",
+      "owner": "L",
+      "file": "demiflow/execution/chain.py",
+      "symbol": "snapshot_code_sources",
+      "mode": "implement",
+      "signature": "def snapshot_code_sources(action, plan, *, source=None):",
+      "baseline_signature": "snapshot_code_sources(action, plan)",
+      "language": "python",
+      "baseline_line": 780,
+      "baseline_function_sha256": "5e15f46786e32494cbd6947d14c36338a8b058d153f410935452c77cb269a907",
+      "input": {
+        "action": "execution.run_context.RunAction；action_id/context/fence 绑定原执行权威",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源"
+      },
+      "output": "沿用原返回形状；新增source依赖的有界内容",
+      "behavior": "现状pin与归档已共用_business_dependency_modules，不重写已正确BFS。只扩展source_callable_roots并保证两次收集同集合、封存期漂移拒绝；旧无source调用保持旧字节。新增source保护不能反向声称旧记录已覆盖，缺保护的可恢复source组合明确拒绝。",
+      "contract": "C08",
+      "effects": "durable_write",
+      "calls": [
+        "_business_dependency_modules"
+      ],
+      "gates": [
+        "HISTORY",
+        "IDENTITY",
+        "RELATIONAL"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "L041"
+      ],
+      "caller_tasks": [
+        "L044"
+      ],
+      "errors": [
+        "PlanContractError(.reason)",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "L044",
+      "owner": "L",
+      "file": "demiflow/execution/chain.py",
+      "symbol": "seal_write_plan_ref",
+      "mode": "implement",
+      "signature": "def seal_write_plan_ref(action, plan, *, source=None, program_id=None):",
+      "baseline_signature": "seal_write_plan_ref(action, plan)",
+      "language": "python",
+      "baseline_line": 873,
+      "baseline_function_sha256": "e10772fa0b1a6cb18cac66a7aa154e5be77f6849d279d0fd82c030518e2402c7",
+      "input": {
+        "action": "execution.run_context.RunAction；action_id/context/fence 绑定原执行权威",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "program_id": "稳定ProgramSlice ID或None；None只用于原单program兼容键"
+      },
+      "output": "ProgramRef五键不变；code-pin-only载体",
+      "behavior": "program_id=None保留原单program兼容键；新多slice必须显式program_id，pin_key=identity([action_id,\"code-pin-write\",program_id])，不能含attempt/pickle字节。source传给pin与归档同一集合。恢复读原记录核对，不重新封存覆盖；同键不同语义仍fail-closed。新旧schema缺少source保证须明确拒绝恢复，而非猜测通过。",
+      "contract": "C08",
+      "effects": "durable_write",
+      "calls": [
+        "plan_code_pin",
+        "snapshot_code_sources"
+      ],
+      "gates": [
+        "HISTORY",
+        "WRITE",
+        "RELATIONAL"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "L042",
+        "L043"
+      ],
+      "caller_tasks": [
+        "L030"
+      ],
+      "errors": [
+        "PlanContractError(.reason)",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "L045",
+      "owner": "L",
+      "file": "demiflow/execution/dataset_native.py",
+      "symbol": "Engine.python_rows",
+      "mode": "implement",
+      "signature": "def python_rows(self, executor, source, plan):",
+      "baseline_signature": "Engine.python_rows(self, executor, source, plan)",
+      "language": "python",
+      "baseline_line": 489,
+      "baseline_function_sha256": "378acdf3688687a67d7ffb0562d902b3f451f7d586262dd484e3a0d19caf9571",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "executor": "已有 LocalDatasetExecutor 或对应后端实例；资源归原所有者",
+        "source": "data.sources.SourcePlan；逻辑源声明，不读取数据；执行入口收到已固定源",
+        "plan": "data.plan.LogicalPlan；operations 为有序不可变算子序列，禁止就地改写"
+      },
+      "output": "原Python子阶段行迭代器",
+      "behavior": "这是_apply_plan第十个真实调用点；按本Engine的execution及对应input_path把子阶段binding传入_native=False调用，不能重新选backend或丢预算。保留原stats合并与finally。",
+      "contract": "C08",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor._apply_plan"
+      ],
+      "gates": [
+        "LAYOUT",
+        "RELATIONAL",
+        "BOUNDS"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A016"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "PlanContractError(.reason)",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "Q007",
+      "owner": "Q",
+      "file": "demiflow/execution/reservation.py",
+      "symbol": "derive_prefetch",
+      "mode": "implement",
+      "signature": "def derive_prefetch(inflight_slots=None, *, max_pending_floor=1):",
+      "baseline_signature": "derive_prefetch(inflight_slots=None, *, max_pending_floor=1)",
+      "language": "python",
+      "baseline_line": 253,
+      "baseline_function_sha256": "853dd07743f8f9aed5080c2c5888cc52b938802cbae79def2081705a39183ef3",
+      "input": {
+        "inflight_slots": "已准入正整数槽额度或原非绑定路径的None，不得由credit floor扩容",
+        "max_pending_floor": "int>=1；原InputGate协议所需pending下限"
+      },
+      "output": "原prefetch字典或ReservationError(INVALID_SPEC)",
+      "behavior": "正数inflight_slots路径验证max_pending_floor<=min(inflight_slots,legacy max_pending)，否则拒绝，不强行max越界。None的旧非绑定路径保留原legacy行为，不借此宣称资源准入已完成。调用者必须先联合求解credit，不能仅删除max后上线。",
+      "contract": "C06",
+      "effects": "pure",
+      "calls": [],
+      "gates": [
+        "BOUNDS",
+        "GRAPH",
+        "RECOVERY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "Q008"
+      ],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "Q008",
+      "owner": "Q",
+      "file": "demiflow/execution/reservation.py",
+      "symbol": "resolve_prefetch_credit",
+      "mode": "implement",
+      "signature": "def resolve_prefetch_credit(inflight_slots, *, inflight_bytes, credit_budget, credit_explicit):",
+      "baseline_signature": null,
+      "language": "python",
+      "baseline_line": null,
+      "baseline_function_sha256": null,
+      "input": {
+        "inflight_slots": "已准入正整数槽额度或原非绑定路径的None，不得由credit floor扩容",
+        "inflight_bytes": "绑定执行的正整数字节额度；不得用槽数替代字节额度",
+        "credit_budget": "{rows:int>=1,bytes:int>=1}；实际通道credit，不是额外grant",
+        "credit_explicit": "bool；用户显式credit不可静默改写；默认credit允许在封存前收紧"
+      },
+      "output": "{prefetch:dict,credit_budget:{rows:int,bytes:int}}；全新有界值",
+      "behavior": "封存/launch前联合检查槽和字节grant与通道credit。显式credit不满足则在读源前拒绝；默认credit可收紧到grant并把同一结果传封存、router和InputGate。恢复仅验证原封存，不动态改credit。调用derive_prefetch，保证floor<=ceiling；不修改输入或申请第二份grant。",
+      "contract": "C06",
+      "effects": "pure",
+      "calls": [
+        "derive_prefetch"
+      ],
+      "gates": [
+        "BOUNDS",
+        "GRAPH",
+        "RECOVERY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "Q007"
+      ],
+      "caller_tasks": [
+        "L017",
+        "L018"
+      ],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "W022",
+      "owner": "W",
+      "file": "demiflow/workbench/api.py",
+      "symbol": "GET_FIELDS",
+      "mode": "implement",
+      "signature": "GET_FIELDS = {\n    'forge-context': (set(), {'task'}),\n    'forge-tools': (set(), set()),\n    'run-context': ({'run_id'}, {'attempt'}),\n    'run-tools': (set(), set()),\n    'graph': ({'basis_kind'}, {'entry','params','report_digest','run_id','attempt','node_id','node_offset'}),\n    'graph-source': ({'graph_binding','node_id','kind'}, {'resource'}),\n    'parameter-state': ({'path'}, set()),\n    'run-observations': ({'run_id','attempt'}, {'node_id','action_id','cursor','limit'}),\n    'project-discovery': (set(), set()),\n    'project-document': ({'path', 'expected'}, set()),\n    'project-table': ({'id', 'expected'}, {'version'}),\n    'project-sample': ({'id', 'expected', 'version', 'binding'}, {'columns', 'offset', 'limit', 'row_id'}),\n    'project-table-profile': ({'id','expected','version','binding','columns'},set()),\n    'project-status': (set(), set()),\n    'audit': (set(), set()),\n    'context': (set(), set()), 'changes': (set(), set()),\n    'reports': (set(), {'offset', 'limit', 'cursor'}),\n    'run-snapshot': ({'run_id'}, {'attempt','revision'}),\n    'run-events': ({'run_id'}, {'attempt','cursor','limit'}),\n    'run-metrics': ({'run_id'}, {'attempt','points','resolution'}),\n    'run-request': ({'request_id'}, set()),\n    'run-compare': ({'left', 'right'}, set()),\n    'run-source': ({'run_id', 'path'}, set()),\n    'run-evidence': ({'run_id', 'reference'}, set()),\n    'parameters': ({'path'}, set()), 'source': ({'path'}, {'expected_sha256'}),\n    'table': ({'alias'}, {'expected_binding'}),\n    'table-versions': ({'alias'}, {'expected_binding', 'version'}),\n    'table-profile': ({'alias','expected_binding','columns'},set()),\n    'sample': ({'alias'}, {'columns', 'offset', 'limit', 'row_id', 'match', 'expected_binding'}),\n    'media': ({'alias', 'row_id'}, {'field', 'field_path', 'expected_binding'}),\n    'table-evidence': ({'alias', 'row_id', 'field_path'}, {'expected_binding'}),\n    'report': ({'digest'}, set()), 'diff': ({'left', 'right'}, set()),\n}",
+      "baseline_signature": "GET_FIELDS = {\n    'forge-context': (set(), {'task'}),\n    'forge-tools': (set(), set()),\n    'run-context': ({'run_id'}, {'attempt'}),\n    'run-tools': (set(), set()),\n    'graph': ({'basis_kind'}, {'entry','params','report_digest','run_id','attempt','node_id','node_offset'}),\n    'graph-source': ({'graph_binding','node_id','kind'}, {'resource'}),\n    'parameter-state': ({'path'}, set()),\n    'run-observations': ({'run_id','attempt'}, {'node_id','action_id','cursor','limit'}),\n    'project-discovery': (set(), set()),\n    'project-document': ({'path', 'expected'}, set()),\n    'project-table': ({'id', 'expected'}, {'version'}),\n    'project-sample': ({'id', 'expected', 'version', 'binding'}, {'columns', 'offset', 'limit', 'row_id'}),\n    'project-table-profile': ({'id','expected','version','binding','columns'},set()),\n    'project-status': (set(), set()),\n    'audit': (set(), set()),\n    'context': (set(), set()), 'changes': (set(), set()),\n    'reports': (set(), {'offset', 'limit', 'cursor'}),\n    'run-snapshot': ({'run_id'}, {'attempt','revision'}),\n    'run-events': ({'run_id'}, {'attempt','cursor','limit'}),\n    'run-metrics': ({'run_id'}, {'attempt','points','resolution'}),\n    'run-request': ({'request_id'}, set()),\n    'run-compare': ({'left', 'right'}, set()),\n    'run-source': ({'run_id', 'path'}, set()),\n    'run-evidence': ({'run_id', 'reference'}, set()),\n    'parameters': ({'path'}, set()), 'source': ({'path'}, {'expected_sha256'}),\n    'table': ({'alias'}, {'expected_binding'}),\n    'table-versions': ({'alias'}, {'expected_binding', 'version'}),\n    'table-profile': ({'alias','expected_binding','columns'},set()),\n    'sample': ({'alias'}, {'columns', 'offset', 'limit', 'row_id', 'match', 'expected_binding'}),\n    'media': ({'alias', 'row_id'}, {'field', 'field_path', 'expected_binding'}),\n    'table-evidence': ({'alias', 'row_id', 'field_path'}, {'expected_binding'}),\n    'report': ({'digest'}, set()), 'diff': ({'left', 'right'}, set()),\n}",
+      "language": "python_declaration",
+      "baseline_line": 42,
+      "baseline_function_sha256": "f3a2c00cfac25a2e81e93bfcdbeba5991acdb184de315963694e1b30db5223a3",
+      "input": {},
+      "output": "类/模块声明的窄修改；其余字段逐字保留",
+      "behavior": "只扩graph-source可选键logical_node_id/occurrence_id；保留graph_binding/node_id/kind必填和其他route精确键集。同步forge-http-api的graph-source字段说明，不改HTTP版本或权限。",
+      "contract": "C09",
+      "effects": "declaration_only",
+      "calls": [],
+      "gates": [
+        "WORKBENCH",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "原 unavailable/冲突/权限错误"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "W023",
+      "owner": "W",
+      "file": "demiflow/workbench/graph/source_view.py",
+      "symbol": "get",
+      "mode": "verify_preserve",
+      "signature": "def get(root, *, graph_binding, node_id, kind, resource=None, logical_node_id=None, occurrence_id=None):",
+      "baseline_signature": "get(root, *, graph_binding, node_id, kind, resource=None, logical_node_id=None, occurrence_id=None)",
+      "language": "python",
+      "baseline_line": 107,
+      "baseline_function_sha256": "d6d5e596f8f3ea97f16bf0478fa0ef7e9ae88f31eebf0389f2c81925b9c99d86",
+      "input": {
+        "root": "业务项目 Path；授权根，不能替换为任意用户路径",
+        "graph_binding": "原图身份文档；workspace/basis/action/attempt/摘要精确校验，不重算历史",
+        "node_id": "原报告节点ID；与图 binding 校验，不能当作 logical ID",
+        "kind": "既有 source projection implementation/callsite/configuration/prompt",
+        "resource": "原可选受限源资源引用；不允许任意路径读取",
+        "logical_node_id": "已封存 logical node ID，非显示名称",
+        "occurrence_id": "同一 DAG 中实际出现位置ID，不能以逻辑节点代替 occurrence"
+      },
+      "output": "原source-view响应；仍只读",
+      "behavior": "既有函数已接受logical_node_id/occurrence_id，主要verify_preserve转发与响应身份。logical/occurrence必须同绑定action/attempt，错配拒绝；无桥或不唯一不猜首个。response携带实际解析身份，旧node_id调用兼容。",
+      "contract": "C09",
+      "effects": "read_only",
+      "calls": [
+        "bound_source"
+      ],
+      "gates": [
+        "WORKBENCH",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "W006"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "原 unavailable/冲突/权限错误"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "W024",
+      "owner": "W",
+      "file": "demiflow/workbench/graph/model.py",
+      "symbol": "_resolve_bridge_node",
+      "mode": "verify_preserve",
+      "signature": "def _resolve_bridge_node(target, report, logical_node_id, occurrence_id):",
+      "baseline_signature": "_resolve_bridge_node(target, report, logical_node_id, occurrence_id)",
+      "language": "python",
+      "baseline_line": 381,
+      "baseline_function_sha256": "5c3f9e36a5d39c9686f5f014c6f4065c9961f7da5d6319b60ea131fa6b8be5d5",
+      "input": {
+        "target": "CallableSpec.target；函数、类工厂或实例；编译阶段不可构造",
+        "report": "已校验摘要的有界Forge报告载体；只读，不执行业务",
+        "logical_node_id": "已封存 logical node ID，非显示名称",
+        "occurrence_id": "同一 DAG 中实际出现位置ID，不能以逻辑节点代替 occurrence"
+      },
+      "output": "原report_node_id或明确错误",
+      "behavior": "既有生产函数，非新建。验证同action/report的二元选择，不唯一或不匹配不得猜首个；保持原只读桥及历史载体验证。",
+      "contract": "C09",
+      "effects": "read_only",
+      "calls": [],
+      "gates": [
+        "WORKBENCH",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "原 unavailable/冲突/权限错误"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "W025",
+      "owner": "W",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "chooseNode",
+      "mode": "implement",
+      "signature": "chooseNode(id, selection=null)",
+      "baseline_signature": "chooseNode(id)",
+      "language": "javascript",
+      "baseline_line": 482,
+      "baseline_function_sha256": "cca7a3d2c64f2f72f988b337a643ce6d7bb68097a1b50404af4f9705ed5f03fb",
+      "input": {
+        "id": "occurrence_id显示键；不得以logical_node_id合并多次出现",
+        "selection": "{logical_node_id:str,occurrence_id:str|null}或null；同action/attempt内的详情选择"
+      },
+      "output": "undefined；更新当前视图DOM/选择状态",
+      "behavior": "扩展现有函数，不新建解析体系。保留report_node_id标量state.node；额外逻辑选择存state.logical_selection，source请求携带logical/occurrence。捕获ticket和选择版本，迟到/跨attempt响应丢弃；历史载体只读，物理摘要用logical ID。",
+      "contract": "C09",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "WORKBENCH",
+        "DEMO",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "W019"
+      ],
+      "errors": [
+        "原 unavailable/冲突/权限错误"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "W026",
+      "owner": "W",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "loadSource",
+      "mode": "implement",
+      "signature": "loadSource()",
+      "baseline_signature": "loadSource()",
+      "language": "javascript",
+      "baseline_line": 496,
+      "baseline_function_sha256": "2fee225e0576b2123794e5ac66939c5d404efe8131bb323f7b5d800e2d1b233a",
+      "input": {},
+      "output": "undefined；更新当前视图DOM/选择状态",
+      "behavior": "扩展现有函数，不新建解析体系。保留report_node_id标量state.node；额外逻辑选择存state.logical_selection，source请求携带logical/occurrence。捕获ticket和选择版本，迟到/跨attempt响应丢弃；历史载体只读，物理摘要用logical ID。",
+      "contract": "C09",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "WORKBENCH",
+        "DEMO",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "原 unavailable/冲突/权限错误"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "W027",
+      "owner": "W",
+      "file": "demiflow/workbench/web/workbench-state.js",
+      "symbol": "create",
+      "mode": "implement",
+      "signature": "create(project)",
+      "baseline_signature": "create(project)",
+      "language": "javascript",
+      "baseline_line": 14,
+      "baseline_function_sha256": "b598410a1d4e30ee998c0380d477d6554aecc2f7a9e1317286f9df1f58f9cfe5",
+      "input": {
+        "project": "原工作区project ID；仍严格校验原正则和项目范围"
+      },
+      "output": "undefined；更新当前视图DOM/选择状态",
+      "behavior": "保留所有既有状态API。value新增logical_selection=null；chooseNode(id,selection=null)校验并同时更新node及logical_selection、递增detail；transition清空二元选择；capture/valid仍拒跨run和旧详情。rememberView回调继续存原report_node_id，重开未恢复二元选择时诚实要求重新选择，不猜位置。",
+      "contract": "C09",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "WORKBENCH",
+        "DEMO",
+        "HISTORY"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "原 unavailable/冲突/权限错误"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A026",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.take_batch",
+      "mode": "implement",
+      "signature": "def take_batch(self, batch_size: int=20, *, batch_format: Optional[str]='default'):",
+      "baseline_signature": "Dataset.take_batch(self, batch_size: int=20, *, batch_format: Optional[str]='default')",
+      "language": "python",
+      "baseline_line": 1967,
+      "baseline_function_sha256": "6fa0175b8fe2d4bbf690160396b0ced62307a1252fddcc264cc84a8b258afdc2",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "batch_size": "int>0 或 None；原批语义，仍受字节上限",
+        "batch_format": "既有批输出格式；不得因路由改变返回类型"
+      },
+      "output": "原公开/内部终端返回值",
+      "behavior": "本轮独立源码追查：当前仅observe_action而无RunAction。补唯一checked.action边界并沿checked后的source/plan调用executor；不绕过前置校验、不调用第二公开终端。_write_file是parquet/json/csv三个薄包装的唯一汇合点；写出后原validate_write_result及observer保留。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor.take_batch"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "WRITE"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A019"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A027",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.aggregate",
+      "mode": "implement",
+      "signature": "def aggregate(self, *aggs: Any):",
+      "baseline_signature": "Dataset.aggregate(self, *aggs: Any)",
+      "language": "python",
+      "baseline_line": 2051,
+      "baseline_function_sha256": "49336976925fed888592d847f2ad0771c186e0c55aa5772c782199197e02ea05",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "aggs": "非空AggregateFnV2位置参数序列；名称唯一，原merge/空输入/返回值语义保持"
+      },
+      "output": "原公开/内部终端返回值",
+      "behavior": "本轮独立源码追查：当前仅observe_action而无RunAction。补唯一checked.action边界并沿checked后的source/plan调用executor；不绕过前置校验、不调用第二公开终端。_write_file是parquet/json/csv三个薄包装的唯一汇合点；写出后原validate_write_result及observer保留。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor.aggregate"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "WRITE"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A020"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A028",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset.size_bytes",
+      "mode": "implement",
+      "signature": "def size_bytes(self):",
+      "baseline_signature": "Dataset.size_bytes(self)",
+      "language": "python",
+      "baseline_line": 2171,
+      "baseline_function_sha256": "740c3f1ec64d65df8b7f9f830aa6b5528a92cd9fc53b52ade5647e185125d2f7",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
+      },
+      "output": "原公开/内部终端返回值",
+      "behavior": "本轮独立源码追查：当前仅observe_action而无RunAction。补唯一checked.action边界并沿checked后的source/plan调用executor；不绕过前置校验、不调用第二公开终端。_write_file是parquet/json/csv三个薄包装的唯一汇合点；写出后原validate_write_result及observer保留。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor.size_bytes"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "WRITE"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A022"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "A029",
+      "owner": "A",
+      "file": "demiflow/data/dataset.py",
+      "symbol": "Dataset._write_file",
+      "mode": "implement",
+      "signature": "def _write_file(self, format_name: str, path: str, options: Mapping[str, Any]):",
+      "baseline_signature": "Dataset._write_file(self, format_name: str, path: str, options: Mapping[str, Any])",
+      "language": "python",
+      "baseline_line": 2269,
+      "baseline_function_sha256": "51190a42b5022ea568c1157c4908fdf825adb15252ca5f4ac4d2d7bead14ee23",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "format_name": "现有 file sink 格式名称；仅允许当前实现支持的值",
+        "path": "已检查的输出路径；不追随未经绑定的外部目标",
+        "options": "该函数原生 options；不可跨类型互用；绑定执行只能收紧原选项"
+      },
+      "output": "原公开/内部终端返回值",
+      "behavior": "本轮独立源码追查：当前仅observe_action而无RunAction。补唯一checked.action边界并沿checked后的source/plan调用executor；不绕过前置校验、不调用第二公开终端。_write_file是parquet/json/csv三个薄包装的唯一汇合点；写出后原validate_write_result及observer保留。",
+      "contract": "C03",
+      "effects": "runtime_state",
+      "calls": [
+        "LocalDatasetExecutor.write_file"
+      ],
+      "gates": [
+        "ADMISSION",
+        "LAYOUT",
+        "WRITE"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r2",
+      "callee_tasks": [
+        "A025"
+      ],
+      "caller_tasks": [],
+      "errors": [
+        "UnsupportedExecutionOptionError",
+        "ValueError",
+        "RecoveryContractError"
       ],
       "dispatch_ready": false
     }

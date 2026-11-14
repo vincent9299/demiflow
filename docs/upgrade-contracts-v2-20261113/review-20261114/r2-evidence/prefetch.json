@@ -1,0 +1,12 @@
+{
+  "probe": "pure existing helper, no graph execution",
+  "inflight_slots": 1,
+  "max_pending_floor": 2,
+  "actual": {
+    "append_slots": 1,
+    "source_batch_size": 1,
+    "queue_depth": 1,
+    "max_pending": 2
+  },
+  "admitted_ceiling_exceeded": true
+}

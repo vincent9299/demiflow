@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from scope_guard import scope_mismatches
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT/'docs/upgrade-contracts-v2-20261113'
@@ -80,18 +81,21 @@ def main():
     if dest.parent != Path('/tmp') or not dest.name.startswith('demiflow-'):
         parser.error('output must be a new /tmp/demiflow-* directory')
     dest.mkdir(exist_ok=False)
-    gates = json.loads((OUT/'gates.json').read_text())
+    gate_bytes = (OUT/'gates.json').read_bytes()
+    gates = json.loads(gate_bytes)
     gate = gates[args.gate]
     guard = json.loads((OUT/'review-20261114/frozen-files.json').read_text())
     evidence = {'gate': args.gate, 'revision': subprocess.check_output(
         ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'git_status': subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True),
         'python': sys.executable, 'depends_on': gate['depends_on'],
+        'gate_config_sha256': hashlib.sha256(gate_bytes).hexdigest(),
         'scope': 'test gate only; dependent gates and product evidence separately required',
-        'frozen_mismatches': frozen_mismatches(ROOT, guard), 'rounds': []}
+        'frozen_mismatches': frozen_mismatches(ROOT, guard),
+        'symbol_scope_mismatches': scope_mismatches(ROOT, guard), 'rounds': []}
     # Dirty or untracked integration inputs invalidate same-revision comparisons.
     dirty = evidence['git_status']
-    if dirty or evidence['frozen_mismatches']:
+    if dirty or evidence['frozen_mismatches'] or evidence['symbol_scope_mismatches']:
         evidence['status'] = 'blocked'
         evidence['reason'] = 'commit integration inputs and preserve frozen source before acceptance'
     else:
@@ -123,7 +127,7 @@ def main():
                               and all(r['status'] == 'passed' for r in evidence['rounds'])
                               else 'not_accepted')
         after = subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True)
-        if after != dirty or frozen_mismatches(ROOT, guard):
+        if after != dirty or frozen_mismatches(ROOT, guard) or scope_mismatches(ROOT,guard):
             evidence.update(status='not_accepted', reason='source changed during test run')
     (dest/'result.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2)+'\n')
     print(json.dumps({'gate': args.gate, 'status': evidence['status'], 'evidence': str(dest)}))

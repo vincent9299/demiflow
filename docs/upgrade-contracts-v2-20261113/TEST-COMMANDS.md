@@ -16,7 +16,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_native_delivery_barrier.py`, `tests/test_stream_admission.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_supported_stream_terminals`。
 
-叶任务：A001, A002, A003, A004, A005, A006, S005, Q005, V001。依赖门：无。
+叶任务：A001, A002, A003, A004, A005, A006, S005, Q005, V001, A009, A010, A011, A012, A013, A014, A015, A016, A017, A018, A019, A020, A021, A022, A023, A024, A025, A026, A027, A028, A029。依赖门：无。
 
 ## BOUNDS
 
@@ -26,7 +26,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_native_resources.py`, `tests/test_u2_resources_local.py`, `tests/test_forge_analysis_storage_limits.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_resource_and_performance_envelope`。
 
-叶任务：S002, S003, S008, R004, R012, Q001, Q002, Q003, Q004, Q005, Q006, M006, L010, L011, V018, R016, M011, L034, L035, L036, L037, L038, L039。依赖门：无。
+叶任务：S002, S003, S008, R004, R012, Q001, Q002, Q003, Q004, Q005, Q006, M006, L010, L011, V018, R016, M011, L034, L035, L036, L037, L038, L039, M013, M014, L045, Q007, Q008。依赖门：无。
 
 ## BUFFER
 
@@ -36,7 +36,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_stream_grouping_lookup.py`, `tests/test_native_barrier.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_grouped_and_prepend_buffers`。
 
-叶任务：R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R012, M005, V008, R015, R016。依赖门：无。
+叶任务：R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R012, M005, V008, R015, R016, R017, R018, R019, R020, R021, R022。依赖门：无。
 
 ## CASE
 
@@ -66,7 +66,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_native_delivery_barrier.py`。
 
-叶任务：A001, A005, A006, A007, S012。依赖门：ADMISSION, BOUNDS。
+叶任务：A001, A005, A006, A007, S012, A009, A010, A011, A012, A013, A014。依赖门：ADMISSION, BOUNDS。
 
 ## DEMO
 
@@ -76,7 +76,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_forge_analysis_case_demo_browser.py`, `tests/test_forge_workbench_config_run_browser.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_demo_navigation_and_layout`。
 
-叶任务：V016, W016, W017, W018, W019, W020, W021。依赖门：无。
+叶任务：V016, W016, W017, W018, W019, W020, W021, W025, W026, W027。依赖门：无。
 
 ## DEVELOPMENT
 
@@ -96,7 +96,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_embeddings.py`, `tests/test_document_embeddings.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_embedding_batch_recovery`。
 
-叶任务：F002, R006, M003, M004, M005, M006, M007, V007, R015, M008, M009, M010, M011, M012。依赖门：无。
+叶任务：F002, R006, M003, M004, M005, M006, M007, V007, R015, M008, M009, M010, M011, M012, M013, M014。依赖门：无。
 
 ## FACTS
 
@@ -116,7 +116,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_u3_graph_local.py`, `tests/test_u3_graph_restore.py`, `tests/test_u3_graph_code_pin.py`, `tests/test_u3_graph_router.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_graph_queue_commit_authority`。
 
-叶任务：F005, L003, L017, L018, L020, L024, L025, L026, V012, L034, L035。依赖门：无。
+叶任务：F005, L003, L017, L018, L020, L024, L025, L026, V012, L034, L035, Q007, Q008。依赖门：无。
 
 ## HISTORY
 
@@ -126,7 +126,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_execution_recovery_identity.py`, `tests/test_workbench_sealed_facts.py`, `tests/test_code_pin_serialization.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_historical_read_and_code_drift`, `tests/test_upgrade_v2_acceptance.py::test_v2_nested_program_code_pin`。
 
-叶任务：F001, F002, F003, F004, F005, A008, S010, S013, R013, R014, L001, L002, L004, L005, L006, L008, L012, L014, L021, L022, L023, L024, L025, L026, L027, L028, L029, W001, W002, W003, W004, W005, W006, W007, W008, W009, W010, W011, W012, W013, V020, L030, L031, L033, W014, V021, W015, W016, W017, W018, W019, W020, W021。依赖门：无。
+叶任务：F001, F002, F003, F004, F005, A008, S010, S013, R013, R014, L001, L002, L004, L005, L006, L008, L012, L014, L021, L022, L023, L024, L025, L026, L027, L028, L029, W001, W002, W003, W004, W005, W006, W007, W008, W009, W010, W011, W012, W013, V020, L030, L031, L033, W014, V021, W015, W016, W017, W018, W019, W020, W021, A009, A010, A011, A012, A013, M015, L040, L041, L042, L043, L044, W022, W023, W024, W025, W026, W027。依赖门：无。
 
 ## IDENTITY
 
@@ -136,7 +136,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_execution_recovery_identity.py`, `tests/test_code_pin_serialization.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_identity_distinguishes_business_configuration`。
 
-叶任务：S001, S013, V003。依赖门：无。
+叶任务：S001, S013, V003, M015, L041, L042, L043。依赖门：无。
 
 ## LAYOUT
 
@@ -146,7 +146,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_execution_layout.py`, `tests/test_sealed_execution_bindings.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_write_routes_consume_layout`, `tests/test_upgrade_v2_acceptance.py::test_v2_nested_program_code_pin`。
 
-叶任务：F004, A008, S009, S010, R011, L001, L002, L003, L004, L005, L006, L007, L008, L009, L012, L013, L014, L015, L016, L020, L021, L022, L023, V010, R016, L030, L031, L032, V021, L036, L037, L039。依赖门：无。
+叶任务：F004, A008, S009, S010, R011, L001, L002, L003, L004, L005, L006, L007, L008, L009, L012, L013, L014, L015, L016, L020, L021, L022, L023, V010, R016, L030, L031, L032, V021, L036, L037, L039, A015, A016, A017, A018, A019, A020, A021, A022, A023, A024, A025, L045, A026, A027, A028, A029。依赖门：无。
 
 ## NOTEBOOK
 
@@ -176,7 +176,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_prompt_http_stream.py`, `tests/test_prompt_stream_recovery.py`, `tests/test_inference_execution.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_prompt_policy_and_unknown`。
 
-叶任务：M001, M002, V009。依赖门：无。
+叶任务：M001, M002, V009, M013, M015。依赖门：无。
 
 ## QUEUE
 
@@ -206,7 +206,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_u2_chain_faults.py`, `tests/test_u3_graph_faults.py`, `tests/test_native_barrier.py`。
 
-叶任务：S007, S008, S014, S015, R002, R003, R007, R008, R009, R012, R013, Q003, L015, L017, L019, L021, L022, L023, L024, L025, L026, L027, L028, L029, R015, L034, L035, S016。依赖门：STATE, BUFFER, WRITE。
+叶任务：S007, S008, S014, S015, R002, R003, R007, R008, R009, R012, R013, Q003, L015, L017, L019, L021, L022, L023, L024, L025, L026, L027, L028, L029, R015, L034, L035, S016, A014, R017, R018, R019, R020, R021, Q007, Q008。依赖门：STATE, BUFFER, WRITE。
 
 ## RELATIONAL
 
@@ -216,7 +216,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_local_join_chain.py`, `tests/test_c_write_seam.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_nested_program_code_pin`。
 
-叶任务：F004, A008, L007, L009, L010, L011, L030, L031, V021, L036, L037, L038, L039。依赖门：无。
+叶任务：F004, A008, L007, L009, L010, L011, L030, L031, V021, L036, L037, L038, L039, A016, L040, L041, L042, L043, L044, L045。依赖门：无。
 
 ## STATE
 
@@ -236,7 +236,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_stream.py`, `tests/test_stream_timeout_propagation.py`。
 
-叶任务：A003, A004, A007, Q004, Q006。依赖门：ADMISSION, REGRESSION117。
+叶任务：A003, A004, A007, Q004, Q006, A017, A018, A019, A020, A021, A022, A023, A024, A025。依赖门：ADMISSION, REGRESSION117。
 
 ## UNKNOWN
 
@@ -246,7 +246,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_prompt_stream_recovery.py`, `tests/test_managed_image_execution.py`。
 
-叶任务：R002, R007, R012, M001, M002, M003, M004, M007, M008, M010, M012。依赖门：PROMPT。
+叶任务：R002, R007, R012, M001, M002, M003, M004, M007, M008, M010, M012, M014, R017, R018, R019, R020。依赖门：PROMPT。
 
 ## VECTOR
 
@@ -266,7 +266,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_workbench_sealed_facts.py`, `tests/test_forge_workbench_config_run_browser.py`, `tests/test_forge_workbench_runtime_browser.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_workbench_history_end_to_end`。
 
-叶任务：W001, W002, W003, W004, W005, W006, W007, W008, W009, W010, W011, W012, W013, V013, W014, W015, W016, W017, W018, W019, W020, W021。依赖门：无。
+叶任务：W001, W002, W003, W004, W005, W006, W007, W008, W009, W010, W011, W012, W013, V013, W014, W015, W016, W017, W018, W019, W020, W021, W022, W023, W024, W025, W026, W027。依赖门：无。
 
 ## WRITE
 
@@ -276,7 +276,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_gpt_write_recovery.py`, `tests/test_execution_recovery_lance.py`, `tests/test_c_write_seam.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_write_create_recovery`。
 
-叶任务：A008, R009, R013, R014, L009, L011, L012, L013, W007, W008, W009, W010, W011, W012, W013, V011, L032, L033。依赖门：无。
+叶任务：A008, R009, R013, R014, L009, L011, L012, L013, W007, W008, W009, W010, W011, W012, W013, V011, L032, L033, L044, A026, A027, A028, A029。依赖门：无。
 
 ## REGRESSION117
 
@@ -297,3 +297,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 实际选择：`tests/test_stream.py::test_unordered_emission_no_head_of_line_blocking`。
 
 叶任务：全局验收。依赖门：无。
+
+## 跨门聚合
+
+所有结果产生后，使用 tools/aggregate_gates.py 检查同revision、同gate配置及完整依赖闭包；缺门或混revision不通过。该聚合不代替产品、性能和全局意图验收。

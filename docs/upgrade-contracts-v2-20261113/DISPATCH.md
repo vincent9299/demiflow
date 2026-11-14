@@ -19,7 +19,7 @@ CONTRACTS.md条目及interfaces.pyi。原始两大root见README；不另改验�
 设计包：docs/contracts-v2-20261113
 回执目录：<DELIVERY_ROOT>
 
-只实现/核验任务卡指定函数；允许新增 tests/test_upgrade_v2_unit_<TASK_ID>.py。
+只实现/核验任务卡指定代码单元；声明叶仅改指定slots/字段，其他键保持。允许新增 tests/test_upgrade_v2_unit_<TASK_ID>.py。
 不要写其他agent的checkout。同文件import、类声明、构造器/slots按
 FILE-OWNERSHIP.md由唯一负责人装配；给出明确装配补丁，不静默扩大scope。
 

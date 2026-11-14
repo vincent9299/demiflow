@@ -233,11 +233,11 @@ def add(owner,path,symbol,result,behavior,gates,*,contract='C10',calls=(),new_si
     n=None if new_signature else locate(path,symbol)
     if n is not None:
         signature=('async ' if isinstance(n,ast.AsyncFunctionDef) else '')+symbol+'('+ast.unparse(n.args)+')'
-        params=[a.arg for a in [*n.args.posonlyargs,*n.args.args,*n.args.kwonlyargs]]
+        params=[a.arg for a in [*n.args.posonlyargs,*n.args.args,*n.args.kwonlyargs,*([n.args.vararg] if n.args.vararg else []),*([n.args.kwarg] if n.args.kwarg else [])]]
         src=ast.get_source_segment((ROOT/path).read_text(),n)
     else:
         signature=new_signature; fn=ast.parse(new_signature.replace(symbol, symbol.split('.')[-1],1)+'\n    pass').body[0]
-        params=[a.arg for a in [*fn.args.posonlyargs,*fn.args.args,*fn.args.kwonlyargs]];src=''
+        params=[a.arg for a in [*fn.args.posonlyargs,*fn.args.args,*fn.args.kwonlyargs,*([fn.args.vararg] if fn.args.vararg else []),*([fn.args.kwarg] if fn.args.kwarg else [])]];src=''
     task={'id':tid,'owner':owner,'file':path,'symbol':symbol,'mode':mode,'signature':signature,'baseline_signature':signature if n else None,'language':'python',
           'baseline_line':getattr(n,'lineno',None),'baseline_function_sha256':hashlib.sha256(src.encode()).hexdigest() if src else None,
           'input':{p:PARAMS[p] for p in params},
@@ -418,7 +418,7 @@ for t in TASKS:
  if t['file']=='demiflow/execution/dataset_native.py' and t['symbol']=='execute':sig='def execute(executor, source, plan, *, arrow=False, sink_schema=None, execution=None):'
  if t['file']=='demiflow/execution/arrow_batch_sink.py' and t['symbol']=='execute':sig='def execute(executor, source, plan, schema, *, execution=None):'
  if sig:
-  fn=ast.parse(sig+'\n    pass').body[0];t['signature']=sig;t['input']={a.arg:PARAMS[a.arg] for a in [*fn.args.posonlyargs,*fn.args.args,*fn.args.kwonlyargs]}
+  fn=ast.parse(sig+'\n    pass').body[0];t['signature']=sig;t['input']={a.arg:PARAMS[a.arg] for a in [*fn.args.posonlyargs,*fn.args.args,*fn.args.kwonlyargs,*([fn.args.vararg] if fn.args.vararg else []),*([fn.args.kwarg] if fn.args.kwarg else [])]}
 
 # JS leaf tasks: explicitly scoped function anchors, no module-global fake class.
 def add_js(file,symbol,signature,behavior,calls=()):
@@ -436,6 +436,9 @@ for sym,sig,beh in [
  add_js('demiflow/workbench/web/workbench.js',sym,sig,beh)
 add_js('demiflow/workbench/web/workbench-graph.js','mountLogical.update','update(dag, nodeMap, labels, selectedId, basis)','按occurrence_id绘制；相同logical id多次出现保留不同节点；选择/来源状态更新一致。')
 add_js('demiflow/workbench/web/workbench-graph.js','mountLogical.select','select(id)','只高亮匹配occurrence，删除/换图清空旧高亮；可访问性aria与真实选择一致。')
+
+from revise_plan_r2 import apply as apply_second_review
+apply_second_review(TASKS, add, add_js, PARAMS, ROOT)
 
 for t in TASKS:
  if t['language']=='python':
@@ -498,11 +501,13 @@ def render():
         t['dispatch_ready']=False
         if t['id']=='F001':t['mode']='verify_preserve'
         if t['id'] in ('L034','L035'):t['errors'] += ['TimeoutError', 'CancelledError；pending future 必须有界清理']
-        lines=[f"# {t['id']} · {t['symbol']}", '\n> **修订中，不能按本旧卡直接派发。** 先读 [独立Review裁决](../review-20261114/RESPONSE.md)。当前签名/调用链尚未全部按修订闭合。',f"\n文件：`{t['file']}`；文件装配负责人：**{t['owner']}**；任务状态：planned。",f"\n动作：{t['mode']}。只修改这个函数/方法；不得同时改同文件其他函数。需要 import/类字段变更时列入单独装配补丁，由文件负责人应用，不改别人工作树。",'\n## 冻结签名',f"\n```{t['language']}\n{t['signature']}\n```",f"\n基线签名：`{t['baseline_signature']}`。\n基线行：{t['baseline_line']}；基线函数 SHA-256：`{t['baseline_function_sha256']}`。新增函数无基线摘要。",'\n## 输入', '\n| 参数 | 类型、约束与所有权 |','|---|---|']
+        lines=[f"# {t['id']} · {t['symbol']}", '\n> **修订中，本包尚不可整包派发。** 先读 [独立Review裁决](../review-20261114/RESPONSE.md)。当前签名/调用链尚未全部按修订闭合；第二轮修订见 RESPONSE-2.md。',f"\n文件：`{t['file']}`；文件装配负责人：**{t['owner']}**；任务状态：planned。",f"\n动作：{t['mode']}。只修改这个函数/方法；不得同时改同文件其他函数。需要 import/类字段变更时列入单独装配补丁，由文件负责人应用，不改别人工作树。",'\n## 目标签名（修订中）',f"\n```{t['language']}\n{t['signature']}\n```",f"\n基线签名：`{t['baseline_signature']}`。\n基线行：{t['baseline_line']}；基线函数 SHA-256：`{t['baseline_function_sha256']}`。新增函数无基线摘要。",'\n## 输入', '\n| 参数 | 类型、约束与所有权 |','|---|---|']
         lines += [f'| `{k}` | {v} |' for k,v in t['input'].items()]
-        lines += ['\n## 输出与行为',f"\n**返回：** {t['output']}",f"\n{t['behavior']}",f"\n数据/状态/预算细则：共享契约 **{t['contract']}**；不得自行增删返回字段。",'\n## 连接',f"\n已列 caller 任务：{', '.join(t['caller_tasks']) or '由原公开入口/现有调用者调用；见总链路'}。",f"\ncallee：{', '.join(t['calls']) or '沿用本函数现有依赖，不新增跨层执行权威'}。",f"\ncallee 任务：{', '.join(t['callee_tasks']) or '既有依赖或无新增依赖'}。",'\n## 异常与副作用',f"\n错误：{'；'.join(t['errors'])}。不得吞异常继续执行、补造成功或读损坏历史后重算。",f"\n副作用类别：`{t['effects']}`。pure/read_only 不允许构造用户 Actor/读源/写 journal；runtime_state 只操作本对象；durable_write 必须通过原 RunJournal/CommitCoordinator/StateArtifacts。test_only 产物仅 /tmp/demiflow-*。",'\n## 验收与独立实现',f"\n验收门：{', '.join(t['gates'])}（详见 INTEGRATION-ACCEPTANCE.md）。",'\n对稳定签名编码；同一函数的阳性、错误、资源边界测试先独立跑，组合门由集成树跑。可使用本包固定 schema 样例；不得写生产 fallback。mock interpreter/journal/commit 得到的绿色不算集成通过。', '\n提交前逐项：检查模块来源；只含本函数窄补丁和本任务独立测试；保留原已有断言；记录准确命令/退出码/commit/基线。不要 push 或合主仓。',f"\n回执：`DELIVERY_ROOT/{t['id']}.json`。需裁决填 needs_decision；不得把消息发往已停止的旧总控后继续等待。"]
+        lines += ['\n## 输出与行为',f"\n**返回：** {t['output']}",f"\n{t['behavior']}",f"\n数据/状态/预算细则：共享契约 **{t['contract']}**；不得自行增删返回字段。",'\n## 连接',f"\n已列 caller 任务：{', '.join(t['caller_tasks']) or '由原公开入口/现有调用者调用；见总链路'}。",f"\ncallee：{', '.join(t['calls']) or '沿用本函数现有依赖，不新增跨层执行权威'}。",f"\ncallee 任务：{', '.join(t['callee_tasks']) or '既有依赖或无新增依赖'}。",'\n## 异常与副作用',f"\n错误：{'；'.join(t['errors'])}。不得吞异常继续执行、补造成功或读损坏历史后重算。",f"\n副作用类别：`{t['effects']}`。pure/read_only 不构造用户Actor/读业务源/写journal；runtime_state可借用声明的既有权威，不得复制；declaration_only仅改指定声明且不得改变其他键；durable_write必须通过原权威。test_only产物仅/tmp/demiflow-*。",'\n## 验收与独立实现',f"\n验收门：{', '.join(t['gates'])}（详见 INTEGRATION-ACCEPTANCE.md）。",'\n对稳定签名编码；同一函数的阳性、错误、资源边界测试先独立跑，组合门由集成树跑。可使用本包固定 schema 样例；不得写生产 fallback。mock interpreter/journal/commit 得到的绿色不算集成通过。', '\n提交前逐项：检查模块来源；只含本函数窄补丁和本任务独立测试；保留原已有断言；记录准确命令/退出码/commit/基线。不要 push 或合主仓。',f"\n回执：`DELIVERY_ROOT/{t['id']}.json`。需裁决填 needs_decision；不得把消息发往已停止的旧总控后继续等待。"]
+        if t.get('acceptance_assertions'):
+            lines += ['\n## 必需验收断言'] + ['\n- '+item for item in t['acceptance_assertions']]
         (OUT/'tasks'/f"{t['id']}.md").write_text('\n'.join(lines)+'\n')
-    data={'schema':'demiflow.implementation_plan.v2','dispatch_ready':False,'review_revision':'20261114-r1','base_commit':baseline['base_commit'],'tasks':TASKS}
+    data={'schema':'demiflow.implementation_plan.v2','dispatch_ready':False,'review_revision':'20261114-r2','base_commit':baseline['base_commit'],'tasks':TASKS}
     (OUT/'plan.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
     table=['# 函数级任务总表','\n**修订中，旧卡不可直接派发。** 见 [Review裁决](review-20261114/RESPONSE.md)。','\n一个叶任务=一个函数/方法。数据类声明、imports/slots 的装配按 FILE-OWNERSHIP.md 处理；不能让函数 agent 自由改变公共字段。','\n`verify_preserve` 表示有实现，先验证并保留，只有发现该合同的真实缺陷才修改该函数；不能重复实现。','\n| ID | 包 | 文件/函数 | 动作 | 输出 | 验收 |','|---|---|---|---|---|---|']
     for t in TASKS:table.append(f"| [{t['id']}](tasks/{t['id']}.md) | {t['owner']} | `{t['file']}` · `{t['symbol']}` | {t['mode']} | {t['output']} | {', '.join(t['gates'])} |")
@@ -512,7 +517,7 @@ def render():
         ts=[t for t in TASKS if t['file']==p];owners={t['owner'] for t in ts}
         assert len(owners)==1,(p,owners)
         own.append(f"| `{p}` | {next(iter(owners))} | {', '.join(t['id'] for t in ts)} |")
-    own += ['\n## 非函数代码的唯一装配责任','\n- A：capabilities.py 的 ActionDecision 声明和 imports；所有字段见 C03。','- S：operator_policy.py 的 StatePolicy 声明；OperatorStates 只增加策略选择所需私有映射，不改变已有 owners/aliases/identities 语义。','- R：stage_buffers.py 的类声明；stream._Stage.__slots__ 加 buffer_adapter，初始化见 R 叶任务；不能让别的函数 agent单独发另一版本 slots。','- F：dataset_dag.py 的 ProgramSlice 声明，精确字段见 interfaces.pyi。', '- L：plan_interpreter.py 的 ExecutionPlacement 声明及 ExecutionLayout 末尾 executions 默认值；v1/v2常量/schema键集由 L 一次装配。','- W：前端六个函数已进入任务表；事实生产者 _sealed_entry 与消费者同步装配。','- V：共享验收文件的 imports/fixture；单函数 agent只能新增自己的测试函数。','\n构造器和 slots 是一个接口事务：字段声明与 __init__ 必须在同一文件装配提交中出现，不能先合一个会 AttributeError 的半成品。']
+    own += ['\n## 非函数代码的唯一装配责任','\n- A：capabilities.py 的 ActionDecision 声明和 imports；所有字段见 C03。','- S：operator_policy.py 的 StatePolicy 声明；OperatorStates 只增加策略选择所需私有映射，不改变已有 owners/aliases/identities 语义。','- R：stage_buffers.py 的类声明；stream._Stage.__slots__ 加 buffer_adapter，初始化见 R 叶任务；不能让别的函数 agent单独发另一版本 slots。','- F：dataset_dag.py 的 ProgramSlice 声明，精确字段见 interfaces.pyi。', '- L：plan_interpreter.py 的 ExecutionPlacement 声明及 ExecutionLayout 末尾 executions 默认值；v1/v2常量/schema键集由 L 一次装配。','- W：前端图/详情/源码与HTTP字段声明已进入任务表；事实生产者 _sealed_entry 与消费者同步装配。','- V：共享验收文件的 imports/fixture；单函数 agent只能新增自己的测试函数。','\n构造器和 slots 是一个接口事务：字段声明与 __init__ 必须在同一文件装配提交中出现，不能先合一个会 AttributeError 的半成品。']
     (OUT/'FILE-OWNERSHIP.md').write_text('\n'.join(own)+'\n')
     print('tasks',len(TASKS),'files',len({t['file'] for t in TASKS}))
 

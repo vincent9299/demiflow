@@ -1,6 +1,6 @@
 {
   "base_commit": "bbd93ffcc136c361093c5a4b6d79d0352c4c2557",
-  "captured_at": "2026-11-14T09:13:41.444774+08:00",
+  "captured_at": "2026-11-14T10:50:09.540149+08:00",
   "files": {
     "demiflow/data/dataset.py": "732a86b04a8cf6f7ba57dbf243471870b9b6dfb01dab4071c0d73afe7f403382",
     "demiflow/data/plan.py": "9389bd4f0d206dd5128fdbebaf831bc512f586aeafce0be93bd498e72252d748",
@@ -21,9 +21,12 @@
     "demiflow/execution/plan_interpreter.py": "5d1d9bd39de970c5311540e3307c0cf55512693a530411ea23760e495ebe0008",
     "demiflow/execution/queue_chain.py": "8c0fb0f2c805ea7f11c576bdedb8b2f7537067a02a55718b70ed6417ad1c0c39",
     "demiflow/execution/recovery_identity.py": "c779131b2bf10045449dbbcf131ebc0648b2290896ee9a42f2ac81c78a23cbed",
+    "demiflow/execution/reservation.py": "e041908daba9e9f7373ec3dd3317574cbb6973a58d61203b661c8a1eb8b6a3a1",
     "demiflow/execution/run_context.py": "c077d2908c532d82fb33fdad989e967ceb5b669a2f27c9b0a33588bc049159b0",
     "demiflow/execution/sealed_plans.py": "7d50957a3fe5453d4ccadddc6d5fd942576882927cb9777b7ce095dc30702863",
     "demiflow/execution/stream.py": "e5b291c30b6fb30963c362f0ff30a8f11c60bc82935f92649f5832181d140c82",
+    "demiflow/execution/stream_barrier.py": "7e9b016e0c858cd20672bb52dc8d8973fa8f51f5d2b36ce9afeeef44233ecbc3",
+    "demiflow/execution/stream_delivery.py": "9c5a29a9260d37a9af698bb33cadd367a31f7a7b2f2bb7ca948780006eb47d7c",
     "demiflow/execution/stream_map.py": "d134a7b2980f708614115533117142acf3474d43562e8352ef813a4e1aa997d8",
     "demiflow/execution/stream_materialize.py": "30de4e8f2c663e12b287c995a98914e4baf8b6564893394b040984787fa1a795",
     "demiflow/execution/stream_resources.py": "59b1c210e4de6a82325eb2f6d546d3328f1a9b73074de78935c599e7edceca1e",
@@ -32,14 +35,18 @@
     "demiflow/execution/worker/layout.py": "ad16539f88cc6ff1704896cdf5813a303d0b1d1a09b7c3121498e3123783726b",
     "demiflow/execution/worker/queue_transform.py": "a5bb01cdb404da9a9e19dce4e1980123afa391e928d53643cb699edd79e9ec40",
     "demiflow/lance/search.py": "49dc4135990f89ef8339a2eaa6aa8d0038122a9ecb433760026c833f5a9edcf9",
+    "demiflow/operator_llm/http_options.py": "1a4ab45c94a6ba1f78c9768f0f0b42fa9bfe4d0efb8352329727ac27905424c2",
     "demiflow/operator_llm/stream_recovery.py": "1655718bbfa3d164474051a23856407ca20933d568483c06c412e7b4662ba54c",
     "demiflow/planning/graph_dag.py": "1773b02a73c4e69a4e03fbc0de6318252cb9207b88f82c7631fa58eed02dfb77",
     "demiflow/planning/traits.py": "7ddbc701046d30b179c723ca44f0b983d3afdd0007a8821aab25d506bcef5025",
+    "demiflow/workbench/api.py": "4472c71d8f4d223cc2552b8f2144cd5fc1e736ada6bcf29cea5c682da1f31df0",
     "demiflow/workbench/graph/model.py": "d827630034b963ac91e85d9873f0bbc0addd3bb61f10a66a9bba26c41ce5add1",
+    "demiflow/workbench/graph/source_view.py": "11ceaab08217862b508db2ae9a6bb3b29dfa10cd465976bd925ec71ee678f845",
     "demiflow/workbench/runs/facts.py": "1ca14cd5192f8fbdd611513e29dcc6c2bd6e2deab1dfdd59dbe491cf9def090e",
     "demiflow/workbench/runs/manager.py": "edb7547fde66d8927357cd97923538a0ecc10a1a3df74a9ca5514ca4d297e0cd",
     "demiflow/workbench/runs/worker.py": "fffb25dd7e6b778f01787b4319a4cca5b955f833f414f870cec1bb765c01791c",
     "demiflow/workbench/web/workbench-graph.js": "49a45bf3a03bf165108a649367194c8ac2e2a278ffd902a811cf689b2701c622",
+    "demiflow/workbench/web/workbench-state.js": "3760cee29c55ade098e8efe3e64e0c6144d20598cce72b044c99b84ee07cc8fa",
     "demiflow/workbench/web/workbench.js": "0410007c5178d921758cc132fc2d72e1703f0dc0967860dd7721017e3f9e8192"
   }
 }

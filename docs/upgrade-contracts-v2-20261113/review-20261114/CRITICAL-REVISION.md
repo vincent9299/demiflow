@@ -46,12 +46,12 @@ def native_request_budget(run, *, node_id: str, max_requests: int | None):
 完整交接：
 
 1. `_exchange` 先查询已保存响应/unknown，命中已完成响应时不 fresh reserve；unknown 保持既有恢复规则。
-2. 真正 fresh `_fresh_exchange` 的 reserve 边界进入预算上下文，设置既有 CALL_RESERVATION `(reservation_id, charges)`。
-3. RunPromptJournal._enqueue 在调用线程读出该上下文，附加保护载荷；_apply_operation 在同一数据库事务内 reserve_budgets + intent。**不允许先外部 reserve 再内部 reserve 计两次。**
-4. 如跨线程 `_io`，在提交工作时复制当前 context；进入/异常/取消都 reset token，不能污染下一请求。
+2. 在 `_exchange` 的 `_request_slots/request_gate` 内、真实 `await io(journal.reserve, request)` 之前进入预算上下文，设置既有 CALL_RESERVATION `(reservation_id, charges)`。
+3. RunPromptJournal._enqueue 在调用线程读出该上下文，附加保护载荷；_apply_operation 在同一数据库事务内 reserve_budgets + intent。同集合/额度的重复 reserve 已幂等，当前Prompt互斥分支并无双扣。新路径只通过该事务预留，禁止组件集合不一致的第二次 reserve。
+4. 跨线程 `_io` 复用已有 BlockingIOPool.run 的 copy_context；不新建传播设施；进入/异常/取消都 reset token，不能污染下一请求。
 5. reserve 失败禁止发 transport；reserve 成功但 transport 状态未知不能退款后无条件重发。响应复用、额度、unknown 与原生恢复仍是同一账本。
 
-必须新增函数级任务：上述 contextmanager、`NativeEmbeddingRecovery.bind_actor` 预算/原 journal 绑定消费、`EmbeddingActor._fresh_exchange` 上下文入口、跨线程 context 传播核验；原 M007/M008 的身份构造与请求作用域不能冒充预算预留。
+必须新增函数级任务：上述 contextmanager、`NativeEmbeddingRecovery.bind_actor` 预算/原 journal 绑定消费、M007 `_exchange` 的真实 reserve 边界、M004 借用run journal、M011 关闭前drain。M012 `_fresh_exchange` 继续 verify_preserve；M008 scope_request只管请求身份，不能代替预算。NativeEmbeddingRecovery.inflight持有真实执行Task，覆盖reserve到HTTP/持久化结束，不复制journal unknown状态。
 
 验收：总额度=1 的两个 fresh 调用只有一个真正 transport；响应重放不再 fresh；两个不同 node 共同受 run 总额约束；额度=0 在发请求前拒绝；事务失败不出现仅扣额度无 intent；取消/异常后 ContextVar 不泄漏；worker 崩溃/恢复不自动重发 unknown。保留 prompt_facts 与 execution-owned journal 守卫。
 
@@ -92,7 +92,7 @@ ObservationKey = (run_id, action_id, attempt, logical_node_id, occurrence_id)
 
 无 occurrence 的历史记录可以显示“未绑定到具体出现位置”，不能随便取第一个。封存身份桥负责从实际执行位置绑定报告/source；工作台只读 join，不能重算另一份 DAG 授予“契约通过”。
 
-职责分开：graph `update` 收逻辑图和只读节点观测投影；`select` 使用 Selection；`onSelect` 回传同值；physical summary 继续按 logical ID 索引；源码请求携带 action/attempt/report_digest 和 Selection。`loadSource`/`chooseNode`/`chooseLogicalNode` 与后端 `bound_source`/bridge resolver 需要各自任务，不能只派 render/update/select。
+职责分开：graph `update` 收逻辑图和只读节点观测投影；`select` 使用 Selection；`onSelect` 回传同值；physical summary 继续按 logical ID 索引；源码请求携带 action/attempt/report_digest 和 Selection。扩展既有 `loadSource`/`chooseNode`/`chooseLogicalNode`；后端 `bound_source`/bridge resolver 已存在且有生产调用，按各自任务核验，不能只派 render/update/select。
 
 来源可信等级与运行状态是两个字段：sealed 是事实来源，不是 succeeded。节点没有可信映射时显示 unknown/unavailable，不通过整 action 的成功状态捏造节点成功。历史读取只校验有界载体、摘要和绑定；不运行当前环境 verify_seal，不导入当前业务模块，不因今日代码改动抹掉旧图。
 
@@ -109,7 +109,7 @@ ObservationKey = (run_id, action_id, attempt, logical_node_id, occurrence_id)
 
 ProgramRef 现有五键不变，不凭同样键形状猜载体类型。execution/backend 已封存的交付方式必须决定验证器。多 input_path 的 native program 需要稳定、碰撞安全的 per-action program key；原只含 action 的 write pin key 不够表达多 slice。新 key 与旧记录兼容规则必须在 `seal_write_plan_ref` 对应任务中定义；恢复加载旧 record，不重 pickle。
 
-source-side callable 的收集新增窄入口，返回真实 CallableSpec/函数/声明，不执行用户代码。复用现有 dependency collector 的有界 BFS、代码源摘要和归档规则；plan_code_pin 与 snapshot_code_sources 用同一个依赖集合。`describe(source)` 用于声明语义，但不能替代 globals/导入依赖的 code pin。不要借一个假的 MapOp 包住 source 以绕过模型。
+source-side callable 的收集新增窄入口，返回真实 CallableSpec/函数/声明，不执行用户代码。复用现有 dependency collector 的有界 BFS、代码源摘要和归档规则；现状 plan_code_pin 与 snapshot_code_sources 已共用同一有界依赖收集器；本轮只增加source callable根并核两次收集的一致性。`describe(source)` 用于声明语义，但不能替代 globals/导入依赖的 code pin。不要借一个假的 MapOp 包住 source 以绕过模型。
 
 秘密字段边界：operation_facts 的模型/推理语义字段按白名单投影；transport 凭据、Authorization、API key 和仅运行环境路径不能原样写进永久事实。业务确实引用的数据路径按原源身份契约处理，不能笼统删掉所有路径导致输入碰撞。凭据轮换不改业务 identity；模型/revision/参数变化应改变身份。验证只用合成凭据，不打印真实配置。
 

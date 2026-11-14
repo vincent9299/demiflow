@@ -210,6 +210,35 @@
     },
     "init_source": "def __init__(self, name, fn, concurrency, queue_depth, catch,\n                 pre_filters, post_filters, hard_timeout=None,\n                 max_batch=None, flush_interval=None, execution='inline', flat_map=False):\n        self.operation_index = None\n        self.stage_budget = None\n        self.name = name\n        self.fn = fn\n        self.concurrency = concurrency\n        self.queue_depth = queue_depth\n        self.catch = catch\n        self.pre_filters = pre_filters\n        self.post_filters = post_filters\n        self.hard_timeout = hard_timeout\n        self.max_batch = max_batch          # 非 None 即攒批级（BatchMapOp）\n        self.flush_interval = flush_interval\n        self.execution = execution\n        self.executor = None\n        self.pending = set()\n        self.flat_map=flat_map\n        self.grouping = None\n        self.prefix = None\n        self.validation = None\n        self.observation = None\n        self.recovery_buffer = None\n        self.native_recovery = None\n        self.native_snapshot = False\n        self.native_pending = {}\n        self.native_restore = []\n        self.native_input_lock = asyncio.Lock()\n        self.native_emit_lock = asyncio.Lock()\n        self.native_idle = asyncio.Event()\n        self.native_idle.set()\n        self.batch_ordinal = 0\n        self.scope_id = None"
   },
+  "demiflow/execution/stream_barrier.py:_CheckpointBarrier": {
+    "fields": {
+      "arrivals": "{}",
+      "local": "[asyncio.Event() for _ in stages]",
+      "done": "asyncio.Event()",
+      "snapshot_bytes": "0",
+      "status": "'created'",
+      "started": "time.monotonic()",
+      "stats": "getattr(progress, 'stats', None)",
+      "timer": "asyncio.get_running_loop().call_later(timeout, self.fail, TimeoutError('Checkpoint coordination deadline exceeded')) if timeout is not None else None",
+      "error": "error",
+      "task": "asyncio.create_task(publish(), name='demiflow-checkpoint')"
+    },
+    "init_source": "def __init__(self, stages, queues, commit, *, progress=None, final=False, track=None):\n        self.stages, self.queues, self.commit = stages, queues, commit\n        self.progress, self.final, self.track = progress, final, track\n        self.arrivals = {}\n        self.local = [asyncio.Event() for _ in stages]\n        self.done = asyncio.Event()\n        self.states, self.buffers = {}, {}\n        self.snapshot_bytes = 0\n        self.task, self.error = None, None\n        self.status = 'created'\n        self.started = time.monotonic()\n        self.stats = getattr(progress, 'stats', None)\n        self.count('created')\n        timeout = progress.run.limits['checkpoint_timeout_s'] if progress is not None else None\n        self.timer = (asyncio.get_running_loop().call_later(timeout, self.fail,\n                      TimeoutError('Checkpoint coordination deadline exceeded'))\n                      if timeout is not None else None)"
+  },
+  "demiflow/execution/stream_barrier.py:CheckpointControl": {
+    "fields": {
+      "gate": "asyncio.Lock()",
+      "pending": "None",
+      "unconfirmed": "deque()",
+      "bytes": "0",
+      "last_ordinal": "progress.inputs",
+      "next_tick": "time.monotonic() + self.interval",
+      "final_requested": "False",
+      "error": "None",
+      "capacity_requested": "False"
+    },
+    "init_source": "def __init__(self, progress, stages, queues, track):\n        self.progress, self.stages, self.queues, self.track = progress, stages, queues, track\n        self.gate = asyncio.Lock()\n        self.changed, self.capacity, self.finished = (asyncio.Event() for _ in range(3))\n        self.pending = None\n        self.unconfirmed = deque()\n        self.bytes = 0\n        self.last_ordinal = progress.inputs\n        self.next_tick = time.monotonic() + self.interval\n        self.final_requested = False\n        self.error = None\n        self.capacity_requested = False"
+  },
   "demiflow/execution/stream_map.py:_MapWorker": {
     "fields": {
       "operation": "operation",

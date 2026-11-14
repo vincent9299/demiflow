@@ -74,5 +74,6 @@ gates['HISTORICAL_TIMING'].update(selectors=timing,required_nodeids=timing,repea
 lines=['# 验收命令索引（2026-11-14 修订）','\n本文件列未来验收命令，**不是已通过报告**。python 使用自己的已验证环境，PYTHONPATH 必须指向隔离集成树。','\n命令需从隔离树根运行。run_gate.py 记录 commit、收集结果和逐测试结果；缺测试、缺环境、skip、xfail、零测试均不得通过。输出仅 /tmp/demiflow-*，不覆盖旧证据。RAY 使用实际具备 Ray 的环境；其他门使用具备各自依赖的环境。','\n新验收文件 `tests/test_upgrade_v2_acceptance.py` 尚待 V 实现；以下已选择21个函数，文件缺失会阻塞。没有用 -k 把已有回归一起过滤掉。REGRESSION117 执行11个历史文件，117个原失败ID必须实际通过；单独时间敏感项在 HISTORICAL_TIMING 连续3轮执行。','\n依赖门须在同一集成源码 revision 分别通过；脚本不擅自重复跑依赖。命令通过仍不代表两大root全部完成。']
 for g,v in gates.items():
  lines += ['\n## '+g,'\n```bash','PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-20261113/tools/run_gate.py '+g+' --output /tmp/demiflow-v2-'+g.lower()+'-REPLACE_WITH_UNIQUE_RUN_ID','```','\n实际选择：`'+'`, `'.join(v['selectors'])+'`。','\n叶任务：'+(', '.join(v['leaf_tasks']) or '全局验收')+'。依赖门：'+(', '.join(v['depends_on']) or '无')+'。']
+lines += ['\n## 跨门聚合', '\n所有结果产生后，使用 tools/aggregate_gates.py 检查同revision、同gate配置及完整依赖闭包；缺门或混revision不通过。该聚合不代替产品、性能和全局意图验收。']
 (O/'TEST-COMMANDS.md').write_text('\n'.join(lines)+'\n')
 print(len(gates),'gates;',len(rootmap),'root leaves')

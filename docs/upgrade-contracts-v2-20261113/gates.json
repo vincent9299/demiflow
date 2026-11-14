@@ -13,7 +13,28 @@
       "A006",
       "S005",
       "Q005",
-      "V001"
+      "V001",
+      "A009",
+      "A010",
+      "A011",
+      "A012",
+      "A013",
+      "A014",
+      "A015",
+      "A016",
+      "A017",
+      "A018",
+      "A019",
+      "A020",
+      "A021",
+      "A022",
+      "A023",
+      "A024",
+      "A025",
+      "A026",
+      "A027",
+      "A028",
+      "A029"
     ],
     "new_acceptance_tests": [
       "test_v2_supported_stream_terminals"
@@ -73,7 +94,12 @@
       "L036",
       "L037",
       "L038",
-      "L039"
+      "L039",
+      "M013",
+      "M014",
+      "L045",
+      "Q007",
+      "Q008"
     ],
     "new_acceptance_tests": [
       "test_v2_resource_and_performance_envelope"
@@ -126,7 +152,13 @@
       "M005",
       "V008",
       "R015",
-      "R016"
+      "R016",
+      "R017",
+      "R018",
+      "R019",
+      "R020",
+      "R021",
+      "R022"
     ],
     "new_acceptance_tests": [
       "test_v2_grouped_and_prepend_buffers"
@@ -254,7 +286,13 @@
       "A005",
       "A006",
       "A007",
-      "S012"
+      "S012",
+      "A009",
+      "A010",
+      "A011",
+      "A012",
+      "A013",
+      "A014"
     ],
     "new_acceptance_tests": [],
     "status": "not_run",
@@ -292,7 +330,10 @@
       "W018",
       "W019",
       "W020",
-      "W021"
+      "W021",
+      "W025",
+      "W026",
+      "W027"
     ],
     "new_acceptance_tests": [
       "test_v2_demo_navigation_and_layout"
@@ -379,7 +420,9 @@
       "M009",
       "M010",
       "M011",
-      "M012"
+      "M012",
+      "M013",
+      "M014"
     ],
     "new_acceptance_tests": [
       "test_v2_embedding_batch_recovery"
@@ -463,7 +506,9 @@
       "L026",
       "V012",
       "L034",
-      "L035"
+      "L035",
+      "Q007",
+      "Q008"
     ],
     "new_acceptance_tests": [
       "test_v2_graph_queue_commit_authority"
@@ -555,7 +600,24 @@
       "W018",
       "W019",
       "W020",
-      "W021"
+      "W021",
+      "A009",
+      "A010",
+      "A011",
+      "A012",
+      "A013",
+      "M015",
+      "L040",
+      "L041",
+      "L042",
+      "L043",
+      "L044",
+      "W022",
+      "W023",
+      "W024",
+      "W025",
+      "W026",
+      "W027"
     ],
     "new_acceptance_tests": [
       "test_v2_historical_read_and_code_drift",
@@ -599,7 +661,11 @@
     "leaf_tasks": [
       "S001",
       "S013",
-      "V003"
+      "V003",
+      "M015",
+      "L041",
+      "L042",
+      "L043"
     ],
     "new_acceptance_tests": [
       "test_v2_identity_distinguishes_business_configuration"
@@ -667,7 +733,23 @@
       "V021",
       "L036",
       "L037",
-      "L039"
+      "L039",
+      "A015",
+      "A016",
+      "A017",
+      "A018",
+      "A019",
+      "A020",
+      "A021",
+      "A022",
+      "A023",
+      "A024",
+      "A025",
+      "L045",
+      "A026",
+      "A027",
+      "A028",
+      "A029"
     ],
     "new_acceptance_tests": [
       "test_v2_write_routes_consume_layout",
@@ -782,7 +864,9 @@
     "leaf_tasks": [
       "M001",
       "M002",
-      "V009"
+      "V009",
+      "M013",
+      "M015"
     ],
     "new_acceptance_tests": [
       "test_v2_prompt_policy_and_unknown"
@@ -925,7 +1009,15 @@
       "R015",
       "L034",
       "L035",
-      "S016"
+      "S016",
+      "A014",
+      "R017",
+      "R018",
+      "R019",
+      "R020",
+      "R021",
+      "Q007",
+      "Q008"
     ],
     "new_acceptance_tests": [],
     "status": "not_run",
@@ -972,7 +1064,14 @@
       "L036",
       "L037",
       "L038",
-      "L039"
+      "L039",
+      "A016",
+      "L040",
+      "L041",
+      "L042",
+      "L043",
+      "L044",
+      "L045"
     ],
     "new_acceptance_tests": [
       "test_v2_nested_program_code_pin"
@@ -1067,7 +1166,16 @@
       "A004",
       "A007",
       "Q004",
-      "Q006"
+      "Q006",
+      "A017",
+      "A018",
+      "A019",
+      "A020",
+      "A021",
+      "A022",
+      "A023",
+      "A024",
+      "A025"
     ],
     "new_acceptance_tests": [],
     "status": "not_run",
@@ -1110,7 +1218,12 @@
       "M007",
       "M008",
       "M010",
-      "M012"
+      "M012",
+      "M014",
+      "R017",
+      "R018",
+      "R019",
+      "R020"
     ],
     "new_acceptance_tests": [],
     "status": "not_run",
@@ -1207,7 +1320,13 @@
       "W018",
       "W019",
       "W020",
-      "W021"
+      "W021",
+      "W022",
+      "W023",
+      "W024",
+      "W025",
+      "W026",
+      "W027"
     ],
     "new_acceptance_tests": [
       "test_v2_workbench_history_end_to_end"
@@ -1263,7 +1382,12 @@
       "W013",
       "V011",
       "L032",
-      "L033"
+      "L033",
+      "L044",
+      "A026",
+      "A027",
+      "A028",
+      "A029"
     ],
     "new_acceptance_tests": [
       "test_v2_write_create_recovery"
