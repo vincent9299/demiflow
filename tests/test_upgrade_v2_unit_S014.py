@@ -12,7 +12,7 @@ import demiflow
 from demiflow.lance.search import VectorSearch
 from demiflow.execution.recovery_contract import document
 
-ROOT = Path('/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/e_dfamily_20261113')
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _module_source_ok():

@@ -19,8 +19,7 @@ _BASELINE_SHA = "75a4013106efddc70407c8ced4b53766e9c6b6b83c0a30d6e55b013799303ea
 
 
 def test_module_source_is_worktree():
-    assert demiflow.__file__.startswith(
-        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/v2_f_20261114")
+    assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])
 
 
 def test_function_body_matches_baseline_sha():

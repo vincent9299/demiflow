@@ -33,8 +33,7 @@ def _compile(source, plan, *, action_id="act", terminal_kind="take_all", sink_id
 
 
 def test_module_source_is_worktree():
-    assert demiflow.__file__.startswith(
-        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/v2_f_20261114")
+    assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])
 
 
 def test_linear_program_structure_and_local_identities():

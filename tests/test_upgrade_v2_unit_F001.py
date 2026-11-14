@@ -30,8 +30,7 @@ def _spec():
 
 
 def test_module_source_is_worktree():
-    assert demiflow.__file__.startswith(
-        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/v2_f_20261114")
+    assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])
 
 
 def test_function_body_matches_baseline_sha():
