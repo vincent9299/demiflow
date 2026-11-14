@@ -1,0 +1,52 @@
+PINNED_ROOT=/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________ test_public_embedding_materialization_aligns_all_workers ___________
+demiflow/execution/stream.py:1083: in _arun
+    await feed_task
+demiflow/execution/stream.py:869: in feed
+    chunk = await asyncio.to_thread(
+../../../env/lib/python3.11/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   asyncio.exceptions.CancelledError: pipeline_failed:RecoveryContractError
+
+During handling of the above exception, another exception occurred:
+/tmp/demiflow-gpt-integration-review-20261114/test_embedding_alignment.py:36: in test_public_embedding_materialization_aligns_all_workers
+    max_requests=8,options={'trust_env':False,'max_response_bytes':1048576}).materialize().take_all()
+                                                                             ^^^^^^^^^^^^^
+demiflow/data/dataset.py:1913: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:903: in materialize_stream
+    dataset._run_stream(source=selected, plan=plan, consume=terminal.append,
+demiflow/data/dataset.py:1122: in _run_stream
+    stats = _run_stream(
+demiflow/execution/stream.py:1236: in run_stream
+    asyncio.run(execute())
+../../../env/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:1212: in execute
+    await _arun(source_iter, stages, stats,
+demiflow/execution/stream.py:1088: in _arun
+    raise fatal[0]
+demiflow/execution/stream.py:428: in worker
+    return await batch_worker(st)   # 攒批级：走批循环
+           ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:632: in batch_worker
+    await row.arrive(stage, batch, worker_slot=worker_slot)
+demiflow/execution/stream_barrier.py:78: in arrive
+    raise RecoveryContractError('Native row-local stage arrives without a worker slot')
+E   demiflow.execution.recovery_contract.RecoveryContractError: Native row-local stage arrives without a worker slot
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+=========================== short test summary info ============================
+FAILED ../../../../../../../tmp/demiflow-gpt-integration-review-20261114/test_embedding_alignment.py::test_public_embedding_materialization_aligns_all_workers
+1 failed in 3.73s

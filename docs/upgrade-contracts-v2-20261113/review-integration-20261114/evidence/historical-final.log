@@ -1,0 +1,841 @@
+PINNED_ROOT=/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114
+.FFFFF.....F..............F.........FFFFFFFFFFFFFFFFFFFFFFFFFF..FF...... [ 61%]
+.....F.F.................FFFFFFFFFFFFFFFFFFFF                            [100%]
+=================================== FAILURES ===================================
+_______ test_same_execution_configuration_works_for_two_model_identities _______
+tests/test_inference_execution.py:95: in test_same_execution_configuration_works_for_two_model_identities
+    model=replace(embedding_server['model'], name=name), inputs={'text': 'text'}, **cfg).materialize().take_all()
+                                                                                         ^^^^^^^^^^^^^
+demiflow/data/dataset.py:1913: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:903: in materialize_stream
+    dataset._run_stream(source=selected, plan=plan, consume=terminal.append,
+demiflow/data/dataset.py:1122: in _run_stream
+    stats = _run_stream(
+demiflow/execution/stream.py:1236: in run_stream
+    asyncio.run(execute())
+../../../env/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:1209: in execute
+    if inspect.isawaitable(result): await result
+                                    ^^^^^^^^^^^^
+demiflow/execution/stream_resources.py:74: in prepare
+    await begin()
+demiflow/embeddings/runtime.py:129: in astart
+    self._native_recovery.bind_actor()
+demiflow/embeddings/stream_recovery.py:40: in bind_actor
+    raise RecoveryContractError('Native response ceiling exceeds the admitted journal record budget')
+E   demiflow.execution.recovery_contract.RecoveryContractError: Native response ceiling exceeds the admitted journal record budget
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+_________________ test_prepend_bounds[rows0-bounds0-max_rows] __________________
+tests/test_stream_checkpoint_resume.py:62: in test_prepend_bounds
+    data.from_items([]).prepend(data.from_items(rows), **bounds).run_stream()
+demiflow/data/dataset.py:1024: in run_stream
+    stats = self._run_stream(
+demiflow/data/dataset.py:1122: in _run_stream
+    stats = _run_stream(
+demiflow/execution/stream.py:1236: in run_stream
+    asyncio.run(execute())
+../../../env/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:1212: in execute
+    await _arun(source_iter, stages, stats,
+demiflow/execution/stream.py:1119: in _arun
+    await _abort_check()
+demiflow/execution/stream.py:1101: in _abort_check
+    raise fatal[0]
+demiflow/execution/stream.py:408: in worker
+    row = await read_one()
+          ^^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:401: in read_one
+    return await asyncio.shield(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:397: in advance
+    return next(prefix, SENTINEL)
+           ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:2152: in _scoped
+    with action("iter_rows", self._source, self._plan, arguments={}) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:634: in action
+    with run.action(declaration, action_id=value.identity) as execution:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/run_context.py:283: in action
+    raise RecoveryContractError("Nested Dataset actions need an explicit completed data boundary")
+E   demiflow.execution.recovery_contract.RecoveryContractError: Nested Dataset actions need an explicit completed data boundary
+________________ test_prepend_bounds[rows1-bounds1-chunk_bytes] ________________
+tests/test_stream_checkpoint_resume.py:62: in test_prepend_bounds
+    data.from_items([]).prepend(data.from_items(rows), **bounds).run_stream()
+demiflow/data/dataset.py:1024: in run_stream
+    stats = self._run_stream(
+demiflow/data/dataset.py:1122: in _run_stream
+    stats = _run_stream(
+demiflow/execution/stream.py:1236: in run_stream
+    asyncio.run(execute())
+../../../env/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:1212: in execute
+    await _arun(source_iter, stages, stats,
+demiflow/execution/stream.py:1119: in _arun
+    await _abort_check()
+demiflow/execution/stream.py:1101: in _abort_check
+    raise fatal[0]
+demiflow/execution/stream.py:408: in worker
+    row = await read_one()
+          ^^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:401: in read_one
+    return await asyncio.shield(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:397: in advance
+    return next(prefix, SENTINEL)
+           ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:2152: in _scoped
+    with action("iter_rows", self._source, self._plan, arguments={}) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:634: in action
+    with run.action(declaration, action_id=value.identity) as execution:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/run_context.py:283: in action
+    raise RecoveryContractError("Nested Dataset actions need an explicit completed data boundary")
+E   demiflow.execution.recovery_contract.RecoveryContractError: Nested Dataset actions need an explicit completed data boundary
+______ test_prepend_injects_pending_at_boundary_even_when_upstream_empty _______
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:115: in <listcomp>
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                            ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/plan_facts.py:172: in operation_facts
+    native = save_facts(target, operation)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:106: in save_facts
+    return {'contract': 'demiflow.save_lance', 'arguments': normalize_save(values), 'when': actor.when is not None}
+                                                            ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:64: in normalize_save
+    raise ValueError('Managed stream save requires checkpoint-owned append')
+E   ValueError: Managed stream save requires checkpoint-owned append
+
+The above exception was the direct cause of the following exception:
+tests/test_stream_checkpoint_resume.py:35: in test_prepend_injects_pending_at_boundary_even_when_upstream_empty
+    .save_lance(tmp_path/'out.lance', schema=SCHEMA, key='id', stage='out').run_stream())
+                                                                            ^^^^^^^^^^^^
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Managed stream save requires checkpoint-owned append
+______________ test_prepend_streams_without_waiting_for_upstream _______________
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:115: in <listcomp>
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                            ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/plan_facts.py:172: in operation_facts
+    native = save_facts(target, operation)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:106: in save_facts
+    return {'contract': 'demiflow.save_lance', 'arguments': normalize_save(values), 'when': actor.when is not None}
+                                                            ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:64: in normalize_save
+    raise ValueError('Managed stream save requires checkpoint-owned append')
+E   ValueError: Managed stream save requires checkpoint-owned append
+
+The above exception was the direct cause of the following exception:
+tests/test_stream_checkpoint_resume.py:52: in test_prepend_streams_without_waiting_for_upstream
+    .run_stream())
+     ^^^^^^^^^^^^
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Managed stream save requires checkpoint-owned append
+__________ test_prepend_rejects_configured_maps_but_accepts_plain_map __________
+../../../env/lib/python3.11/asyncio/tasks.py:500: in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/queues.py:120: in put
+    await putter
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+demiflow/execution/stream.py:1107: in _arun
+    await asyncio.wait_for(queues[i].put(SENTINEL), 2)
+../../../env/lib/python3.11/asyncio/tasks.py:502: in wait_for
+    raise exceptions.TimeoutError() from exc
+E   TimeoutError
+
+During handling of the above exception, another exception occurred:
+tests/test_stream_map.py:373: in test_prepend_rejects_configured_maps_but_accepts_plain_map
+    stats = live.prepend(source.map(lambda row: row), max_rows=1).run_stream()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1024: in run_stream
+    stats = self._run_stream(
+demiflow/data/dataset.py:1122: in _run_stream
+    stats = _run_stream(
+demiflow/execution/stream.py:1236: in run_stream
+    asyncio.run(execute())
+../../../env/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:1212: in execute
+    await _arun(source_iter, stages, stats,
+demiflow/execution/stream.py:1110: in _arun
+    await _abort_check()
+demiflow/execution/stream.py:1101: in _abort_check
+    raise fatal[0]
+demiflow/execution/stream.py:408: in worker
+    row = await read_one()
+          ^^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:401: in read_one
+    return await asyncio.shield(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:397: in advance
+    return next(prefix, SENTINEL)
+           ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:2152: in _scoped
+    with action("iter_rows", self._source, self._plan, arguments={}) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:634: in action
+    with run.action(declaration, action_id=value.identity) as execution:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/run_context.py:283: in action
+    raise RecoveryContractError("Nested Dataset actions need an explicit completed data boundary")
+E   demiflow.execution.recovery_contract.RecoveryContractError: Nested Dataset actions need an explicit completed data boundary
+_________ test_invalid_queries_fail_instead_of_dropping_rows[vector4] __________
+tests/test_vector_search_stream.py:112: in test_invalid_queries_fail_instead_of_dropping_rows
+    stream.run_stream()
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:633: in action
+    declaration = plan_identity(kind, value.source, value.plan, spec, arguments)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:185: in plan_identity
+    return dict(kind=kind, source=source_identity(source) if source is not None else None,
+                                  ^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:140: in source_identity
+    return {'literal_materialization': identity(describe(source.handle.blocks)),
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_contract.py:73: in identity
+    return hashlib.sha256(document(value)).hexdigest()
+                          ^^^^^^^^^^^^^^^
+demiflow/execution/recovery_contract.py:56: in document
+    raise RecoveryContractError("Nonfinite execution metadata")
+E   demiflow.execution.recovery_contract.RecoveryContractError: Nonfinite execution metadata
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options0] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options1] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options2] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options3] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options4] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options5] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_nested_relations_and_lazy_workers_reject_before_source_access[process] __
+tests/test_stream_map.py:423: in test_nested_relations_and_lazy_workers_reject_before_source_access
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+__ test_nested_relations_and_lazy_workers_reject_before_source_access[thread] __
+tests/test_stream_map.py:423: in test_nested_relations_and_lazy_workers_reject_before_source_access
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_______ test_concurrent_rows_pool_reuse_gate_lifetime_and_replay[False] ________
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:115: in <listcomp>
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                            ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/plan_facts.py:208: in operation_facts
+    native = prompt_facts(target)
+             ^^^^^^^^^^^^^^^^^^^^
+demiflow/operator_llm/flow_contract.py:270: in prompt_facts
+    raise ValueError('Native prompt lowering/configuration copies differ')
+E   ValueError: Native prompt lowering/configuration copies differ
+
+The above exception was the direct cause of the following exception:
+tests/test_prompt_http_stream.py:114: in test_concurrent_rows_pool_reuse_gate_lifetime_and_replay
+    rows=ds.materialize().take_all()
+         ^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1907: in materialize
+    with action("materialize", self._source, self._plan) as checked, observe_action("materialize", self._source, self._plan, self._executor) as observer:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Native prompt lowering/configuration copies differ
+________ test_concurrent_rows_pool_reuse_gate_lifetime_and_replay[True] ________
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:115: in <listcomp>
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                            ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/plan_facts.py:208: in operation_facts
+    native = prompt_facts(target)
+             ^^^^^^^^^^^^^^^^^^^^
+demiflow/operator_llm/flow_contract.py:270: in prompt_facts
+    raise ValueError('Native prompt lowering/configuration copies differ')
+E   ValueError: Native prompt lowering/configuration copies differ
+
+The above exception was the direct cause of the following exception:
+tests/test_prompt_http_stream.py:114: in test_concurrent_rows_pool_reuse_gate_lifetime_and_replay
+    rows=ds.materialize().take_all()
+         ^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1907: in materialize
+    with action("materialize", self._source, self._plan) as checked, observe_action("materialize", self._source, self._plan, self._executor) as observer:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Native prompt lowering/configuration copies differ
+_____________________ test_stage_bound_deps_not_deepcopied _____________________
+tests/test_stream.py:266: in test_stage_bound_deps_not_deepcopied
+    ds.run_stream()
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:633: in action
+    declaration = plan_identity(kind, value.source, value.plan, spec, arguments)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:184: in plan_identity
+    operations.append(describe(operation))
+                      ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:96: in describe
+    "fields": {f.name: describe(getattr(value, f.name), depth + 1)
+demiflow/execution/recovery_identity.py:96: in <dictcomp>
+    "fields": {f.name: describe(getattr(value, f.name), depth + 1)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:96: in describe
+    "fields": {f.name: describe(getattr(value, f.name), depth + 1)
+demiflow/execution/recovery_identity.py:96: in <dictcomp>
+    "fields": {f.name: describe(getattr(value, f.name), depth + 1)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:55: in describe
+    return {"method": value.__name__, "owner": describe(value.__self__, depth + 1)}
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:110: in describe
+    return {"actor": describe(type(value), depth + 1), "initial_state": describe(state, depth + 1)}
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:31: in describe
+    return {str(k): describe(v, depth + 1) for k, v in value.items()}
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:31: in <dictcomp>
+    return {str(k): describe(v, depth + 1) for k, v in value.items()}
+                    ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:129: in describe
+    raise RecoveryContractError("No native semantic identity for " + type(value).__name__)
+E   demiflow.execution.recovery_contract.RecoveryContractError: No native semantic identity for NoCopy
+_____ test_callable_instance_is_copied_per_action_and_list_results_expand ______
+tests/test_stream_map.py:497: in test_callable_instance_is_copied_per_action_and_list_results_expand
+    assert pipeline.materialize().take_all() == [{'i': 1}, {'i': 11}]
+           ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1913: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:896: in materialize_stream
+    precheck_plan_state(dataset._plan if plan is None else plan)
+demiflow/execution/operator_precheck.py:52: in precheck_plan_state
+    precheck_operator_state(callable_spec, {
+demiflow/execution/operator_precheck.py:39: in precheck_operator_state
+    raise ProtocolError("STATE_ADAPTER_MISSING",
+E   demiflow.execution.contracts.errors.ProtocolError: STATE_ADAPTER_MISSING: callable instance carries state without a state adapter
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+_____________ test_explicit_identity_migration_rebinds_checkpoint ______________
+tests/test_stream_checkpoint_migration.py:6: in test_explicit_identity_migration_rebinds_checkpoint
+    StreamCheckpoint(path, identity={"contract": "v1"})
+demiflow/execution/stream_checkpoint.py:43: in __init__
+    require_action('stream_checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: stream_checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+_________ test_checkpoint_rejects_missing_stage_and_foreign_table_head _________
+tests/test_stream_checkpoint_resume.py:119: in test_checkpoint_rejects_missing_stage_and_foreign_table_head
+    checkpoint = StreamCheckpoint(path, identity='graph')
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream_checkpoint.py:43: in __init__
+    require_action('stream_checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: stream_checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+______ test_global_checkpoint_never_publishes_downstream_without_upstream ______
+tests/test_stream_checkpoint_resume.py:99: in test_global_checkpoint_never_publishes_downstream_without_upstream
+    checkpoint = StreamCheckpoint(tmp_path/'checkpoint.json', identity='graph-v1')
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream_checkpoint.py:43: in __init__
+    require_action('stream_checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: stream_checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+______ test_global_checkpoint_recovers_commit_before_manifest_publication ______
+tests/test_stream_checkpoint_resume.py:81: in test_global_checkpoint_recovers_commit_before_manifest_publication
+    checkpoint = StreamCheckpoint(path, identity={'input': 1})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream_checkpoint.py:43: in __init__
+    require_action('stream_checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: stream_checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+_______ test_checkpoint_bridges_map_only_and_replays_without_calls[json] _______
+tests/test_stream_map.py:389: in test_checkpoint_bridges_map_only_and_replays_without_calls
+    assert sorted(save().take_all(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+                  ^^^^^^
+tests/test_stream_map.py:386: in save
+    return source.checkpoint(tmp_path / 'checkpoint.jsonl', version='v1')
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:306: in checkpoint
+    require_action('checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+______ test_checkpoint_bridges_map_only_and_replays_without_calls[lance] _______
+tests/test_stream_map.py:389: in test_checkpoint_bridges_map_only_and_replays_without_calls
+    assert sorted(save().take_all(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+                  ^^^^^^
+tests/test_stream_map.py:387: in save
+    return source.checkpoint_lance(str(tmp_path / 'checkpoint.lance'),
+demiflow/data/dataset.py:326: in checkpoint_lance
+    require_action('checkpoint_lance')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint_lance; native run recovery has one protocol; stage outputs require their P3 adapters
+_ test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[schema] _
+tests/test_stream_map.py:613: in test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers
+    plan.checkpoint_lance(str(uri), schema=pa.schema([('i', pa.int64())]),
+demiflow/data/dataset.py:326: in checkpoint_lance
+    require_action('checkpoint_lance')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint_lance; native run recovery has one protocol; stage outputs require their P3 adapters
+_ test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[writer] _
+tests/test_stream_map.py:613: in test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers
+    plan.checkpoint_lance(str(uri), schema=pa.schema([('i', pa.int64())]),
+demiflow/data/dataset.py:326: in checkpoint_lance
+    require_action('checkpoint_lance')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint_lance; native run recovery has one protocol; stage outputs require their P3 adapters
+_________ test_stream_sink_checkpoint_accepts_thread_map_policy_change _________
+tests/test_stream_map.py:396: in test_stream_sink_checkpoint_accepts_thread_map_policy_change
+    checkpoint = StreamCheckpoint(tmp_path / 'checkpoint.json', identity={'input': 'fixed'})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream_checkpoint.py:43: in __init__
+    require_action('stream_checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: stream_checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_____________ test_save_when_passes_unsaved_rows_and_append_bound ______________
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+demiflow/execution/payload_limits.py:91: in stream_limits
+    raise ValueError('Stream fixed residency exceeds its run memory budget')
+E   ValueError: Stream fixed residency exceeds its run memory budget
+
+The above exception was the direct cause of the following exception:
+tests/test_stream_checkpoint_resume.py:71: in test_save_when_passes_unsaved_rows_and_append_bound
+    .map(lambda r: seen.append(r['id']) or r).run_stream())
+                                              ^^^^^^^^^^^^
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Stream fixed residency exceeds its run memory budget
+________ test_composite_stream_keys_preserve_same_sha_for_two_concepts _________
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:115: in <listcomp>
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                            ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/plan_facts.py:172: in operation_facts
+    native = save_facts(target, operation)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:106: in save_facts
+    return {'contract': 'demiflow.save_lance', 'arguments': normalize_save(values), 'when': actor.when is not None}
+                                                            ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:64: in normalize_save
+    raise ValueError('Managed stream save requires checkpoint-owned append')
+E   ValueError: Managed stream save requires checkpoint-owned append
+
+The above exception was the direct cause of the following exception:
+tests/test_stream_grouping_lookup.py:67: in test_composite_stream_keys_preserve_same_sha_for_two_concepts
+    .run_stream())
+     ^^^^^^^^^^^^
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Managed stream save requires checkpoint-owned append
+_______ test_microbatch_references_allow_downstream_before_final_commit ________
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:115: in <listcomp>
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                            ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/plan_facts.py:172: in operation_facts
+    native = save_facts(target, operation)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:106: in save_facts
+    return {'contract': 'demiflow.save_lance', 'arguments': normalize_save(values), 'when': actor.when is not None}
+                                                            ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:64: in normalize_save
+    raise ValueError('Managed stream save requires checkpoint-owned append')
+E   ValueError: Managed stream save requires checkpoint-owned append
+
+The above exception was the direct cause of the following exception:
+tests/test_stream_lance_references.py:18: in test_microbatch_references_allow_downstream_before_final_commit
+    .run_stream())
+     ^^^^^^^^^^^^
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Managed stream save requires checkpoint-owned append
+____________ test_reference_field_collision_fails_before_row_commit ____________
+demiflow/execution/payload_limits.py:115: in payload_scope
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:115: in <listcomp>
+    limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
+                            ^^^^^^^^^^^^^^^^^^^
+demiflow/execution/plan_facts.py:172: in operation_facts
+    native = save_facts(target, operation)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:106: in save_facts
+    return {'contract': 'demiflow.save_lance', 'arguments': normalize_save(values), 'when': actor.when is not None}
+                                                            ^^^^^^^^^^^^^^^^^^^^^^
+demiflow/lance/flow_contract.py:64: in normalize_save
+    raise ValueError('Managed stream save requires checkpoint-owned append')
+E   ValueError: Managed stream save requires checkpoint-owned append
+
+The above exception was the direct cause of the following exception:
+tests/test_stream_lance_references.py:27: in test_reference_field_collision_fails_before_row_commit
+    .save_lance(uri,schema=schema,key='id',stage='out',output_ref='source').run_stream())
+                                                                            ^^^^^^^^^^^^
+demiflow/data/dataset.py:1023: in run_stream
+    with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:623: in action
+    with execution_scope() as run, payload_scope(run, plan,
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/payload_limits.py:119: in payload_scope
+    raise RecoveryContractError(str(exc)) from exc
+E   demiflow.execution.recovery_contract.RecoveryContractError: Managed stream save requires checkpoint-owned append
+______________________ test_queue_factory_transport_seam _______________________
+tests/test_stream.py:340: in test_queue_factory_transport_seam
+    .run_stream(queue_factory=lambda d: CountingQueue(d)))
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1024: in run_stream
+    stats = self._run_stream(
+demiflow/data/dataset.py:1122: in _run_stream
+    stats = _run_stream(
+demiflow/execution/stream.py:1236: in run_stream
+    asyncio.run(execute())
+../../../env/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../env/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+demiflow/execution/stream.py:1212: in execute
+    await _arun(source_iter, stages, stats,
+demiflow/execution/stream.py:799: in _arun
+    queues.append(make_queue(s.queue_depth))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream_resources.py:51: in make_queue
+    raise RecoveryContractError('Execution requires native byte-bounded queues; custom transports need their adapter')
+E   demiflow.execution.recovery_contract.RecoveryContractError: Execution requires native byte-bounded queues; custom transports need their adapter
+=========================== short test summary info ============================
+FAILED tests/test_inference_execution.py::test_same_execution_configuration_works_for_two_model_identities
+FAILED tests/test_stream_checkpoint_resume.py::test_prepend_bounds[rows0-bounds0-max_rows]
+FAILED tests/test_stream_checkpoint_resume.py::test_prepend_bounds[rows1-bounds1-chunk_bytes]
+FAILED tests/test_stream_checkpoint_resume.py::test_prepend_injects_pending_at_boundary_even_when_upstream_empty
+FAILED tests/test_stream_checkpoint_resume.py::test_prepend_streams_without_waiting_for_upstream
+FAILED tests/test_stream_map.py::test_prepend_rejects_configured_maps_but_accepts_plain_map
+FAILED tests/test_vector_search_stream.py::test_invalid_queries_fail_instead_of_dropping_rows[vector4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options5]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options5]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options5]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options5]
+FAILED tests/test_stream_map.py::test_nested_relations_and_lazy_workers_reject_before_source_access[process]
+FAILED tests/test_stream_map.py::test_nested_relations_and_lazy_workers_reject_before_source_access[thread]
+FAILED tests/test_prompt_http_stream.py::test_concurrent_rows_pool_reuse_gate_lifetime_and_replay[False]
+FAILED tests/test_prompt_http_stream.py::test_concurrent_rows_pool_reuse_gate_lifetime_and_replay[True]
+FAILED tests/test_stream.py::test_stage_bound_deps_not_deepcopied - demiflow....
+FAILED tests/test_stream_map.py::test_callable_instance_is_copied_per_action_and_list_results_expand
+FAILED tests/test_stream_checkpoint_migration.py::test_explicit_identity_migration_rebinds_checkpoint
+FAILED tests/test_stream_checkpoint_resume.py::test_checkpoint_rejects_missing_stage_and_foreign_table_head
+FAILED tests/test_stream_checkpoint_resume.py::test_global_checkpoint_never_publishes_downstream_without_upstream
+FAILED tests/test_stream_checkpoint_resume.py::test_global_checkpoint_recovers_commit_before_manifest_publication
+FAILED tests/test_stream_map.py::test_checkpoint_bridges_map_only_and_replays_without_calls[json]
+FAILED tests/test_stream_map.py::test_checkpoint_bridges_map_only_and_replays_without_calls[lance]
+FAILED tests/test_stream_map.py::test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[schema]
+FAILED tests/test_stream_map.py::test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[writer]
+FAILED tests/test_stream_map.py::test_stream_sink_checkpoint_accepts_thread_map_policy_change
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options5]
+FAILED tests/test_stream_checkpoint_resume.py::test_save_when_passes_unsaved_rows_and_append_bound
+FAILED tests/test_stream_grouping_lookup.py::test_composite_stream_keys_preserve_same_sha_for_two_concepts
+FAILED tests/test_stream_lance_references.py::test_microbatch_references_allow_downstream_before_final_commit
+FAILED tests/test_stream_lance_references.py::test_reference_field_collision_fails_before_row_commit
+FAILED tests/test_stream.py::test_queue_factory_transport_seam - demiflow.exe...
+57 failed, 60 passed in 80.24s (0:01:20)

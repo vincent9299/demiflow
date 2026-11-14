@@ -5,9 +5,12 @@ def main():
     label = sys.argv[2]
     args = sys.argv[3:]
     evidence = pathlib.Path('/tmp/demiflow-gpt-integration-review-20261114')
+    if root == pathlib.Path('/yzp/zhaozy/yangzepeng/0905/demiflow').resolve():
+        raise SystemExit('The live main checkout is read-only; select an isolated worktree')
     os.chdir(root)
     os.environ['PYTHONPATH'] = str(root) + os.pathsep + str(root/'tests')
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+    os.environ['FORGE_WORKBENCH_EVIDENCE'] = str(evidence/(label+'-browser'))
     sys.dont_write_bytecode = True
     sys.path[:0] = [str(root), str(root/'tests')]
     import demiflow

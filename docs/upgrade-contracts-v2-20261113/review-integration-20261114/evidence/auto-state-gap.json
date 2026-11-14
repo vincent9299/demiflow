@@ -1,0 +1,10 @@
+{
+  "classification": {
+    "mode": "auto_json",
+    "ownership": "shared_colocated",
+    "adapter_present": true,
+    "reason": null
+  },
+  "sealed_ownership": "none",
+  "error": "STATE_ADAPTER_MISSING: callable instance carries state without a state adapter"
+}

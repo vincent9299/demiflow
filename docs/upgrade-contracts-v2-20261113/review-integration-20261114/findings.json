@@ -1,0 +1,73 @@
+{
+  "status": "reviewed_not_accepted",
+  "dispatch_or_merge_approved": false,
+  "core_fixed": [
+    "IL009",
+    "IL012 verification entry and portable source assertions"
+  ],
+  "findings": [
+    {
+      "id": "IR-01",
+      "severity": "P0",
+      "title": "公开终端没有消费封存 execution",
+      "owner": "A",
+      "file": "demiflow/execution/executors/local.py",
+      "line": 562,
+      "status": "awaiting_user_confirmation_for_consolidated_fix"
+    },
+    {
+      "id": "IR-02",
+      "severity": "P0",
+      "title": "Embedding 原生配置与恢复身份碰撞",
+      "owner": "F + M + 身份装配",
+      "file": "demiflow/execution/plan_facts.py",
+      "line": 284,
+      "status": "awaiting_user_confirmation_for_consolidated_fix"
+    },
+    {
+      "id": "IR-03",
+      "severity": "P0",
+      "title": "Embedding 默认预算及 batch/native cut 不相容",
+      "owner": "M + R + 契约总控",
+      "file": "demiflow/execution/stream_materialize.py",
+      "line": 236,
+      "status": "awaiting_user_confirmation_for_consolidated_fix"
+    },
+    {
+      "id": "IR-04",
+      "severity": "P1",
+      "title": "join/union DAG 被线性切片误分类",
+      "owner": "F + L-contract",
+      "file": "demiflow/execution/native_plan.py",
+      "line": 161,
+      "status": "awaiting_user_confirmation_for_consolidated_fix"
+    },
+    {
+      "id": "IR-05",
+      "severity": "P1",
+      "title": "prepend 在父 action 内重入公开 iter_rows",
+      "owner": "A + R",
+      "file": "demiflow/execution/stream.py",
+      "line": 393,
+      "status": "awaiting_user_confirmation_for_consolidated_fix"
+    },
+    {
+      "id": "IR-06",
+      "severity": "P1",
+      "title": "auto_json 实例的 ownership 分类与准入不一致",
+      "owner": "S",
+      "file": "demiflow/planning/traits.py",
+      "line": 85,
+      "status": "awaiting_user_confirmation_for_consolidated_fix"
+    },
+    {
+      "id": "IR-07",
+      "severity": "P1",
+      "title": "Arrow retained/IPC 字节未被真实预算覆盖",
+      "owner": "L-native",
+      "file": "demiflow/execution/arrow_batch_sink.py",
+      "line": 28,
+      "status": "awaiting_user_confirmation_for_consolidated_fix"
+    }
+  ]
+}
