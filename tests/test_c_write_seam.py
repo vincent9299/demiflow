@@ -88,7 +88,7 @@ def test_relational_write_seals_executed_plan(tmp_path):
     with RunContext.start(tmp_path / "run") as run:
         ds.write_lance(str(target), mode="create", return_receipt=True)
         assert_sealed_readable(tmp_path / "run", run,
-                               ["KeyedSource", "map", "filter", "write_lance"])
+                               ["KeyedSource", "map", "filter", "MaterializedSource", "MaterializedSource", "write_lance"])
     rows = lance.dataset(str(target)).to_table().to_pylist()
     expected = [{"id": i, "a": i, "b": i * 10, "v": i * 2}
                 for i in range(8) if (i * 2) % 4 == 0]
@@ -163,13 +163,14 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
     """
     import demiflow.execution.chain as chain_mod
 
-    real_seal = chain_mod.seal_write_topology
+    from demiflow.execution import native_plan
+    real_seal = native_plan.bind_native_execution
 
-    def drift_seal(action, source, plan, *, host_id="local"):
+    def drift_seal(action, source, plan, **options):
         return real_seal(action, source, drifted_relational_dataset()._plan,
-                         host_id=host_id)
+                         **options)
 
-    monkeypatch.setattr(chain_mod, "seal_write_topology", drift_seal)
+    monkeypatch.setattr(native_plan, "bind_native_execution", drift_seal)
     ds = relational_dataset()
     assert type(ds._source).__name__ == "KeyedSource"
     target = tmp_path / "out.lance"
@@ -191,10 +192,11 @@ def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypa
     import demiflow.execution.stream_materialize as stream_materialize
 
     captured = {"terminals": [], "queues": []}
-    real_seal = chain_mod.seal_write_topology
+    from demiflow.execution import native_plan
+    real_seal = native_plan.bind_native_execution
 
-    def capture_seal(action, source, plan, *, host_id="local"):
-        handle = real_seal(action, source, plan, host_id=host_id)
+    def capture_seal(action, source, plan, **options):
+        handle = real_seal(action, source, plan, **options)
         captured["handle"] = handle
         return handle
 
@@ -210,7 +212,7 @@ def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypa
         captured["queues"].append(kwargs)
         return real_queue(*args, **kwargs)
 
-    monkeypatch.setattr(chain_mod, "seal_write_topology", capture_seal)
+    monkeypatch.setattr(native_plan, "bind_native_execution", capture_seal)
     monkeypatch.setattr(stream_materialize.StreamMaterialization, "__init__", spy_init)
     monkeypatch.setattr(stream_resources, "ObservedQueue", spy_queue)
 
@@ -225,7 +227,9 @@ def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypa
               "checkpoint_unconfirmed_bytes": 8 * 1024 ** 2}
     with RunContext.start(tmp_path / "run", limits=limits) as run:
         ds.write_lance(str(target), mode="create", return_receipt=True)
-        policy, stage_limits = captured["handle"].layout()
+        layout, placement = captured["handle"]
+        policy = layout.checkpoint
+        stage_limits = native_plan.root_stage_limits(placement)
         # The layout reader round-trips the run.limits-derived sealed budgets.
         assert policy.interval_ms == run.limits["checkpoint_interval_ms"]
         assert policy.unconfirmed_rows == run.limits["checkpoint_unconfirmed_rows"]
@@ -297,7 +301,7 @@ def test_identity_bridge_carrier_survives_run_exit(tmp_path):
 
 # --- Deferred branch: honest absence of a sealed plan -------------------------
 
-def test_deferred_pure_copy_seals_nothing(tmp_path):
+def test_pure_copy_consumes_sealed_native_plan(tmp_path):
     source = tmp_path / "src.lance"
     lance.write_dataset(pa.table({"id": [1, 2, 3]}), str(source))
     ds = data.read_lance(str(source))
@@ -308,7 +312,8 @@ def test_deferred_pure_copy_seals_nothing(tmp_path):
             actions = [r[0] for r in db.execute("SELECT action_id FROM runtime_actions")]
         sealed = [a for a in actions
                   if run.journal.source_binding(a + "-sealed-plan") is not None]
-        assert sealed == [], "a deferred branch must not seal a plan it does not bind"
+        assert len(sealed) == 1
+        assert_sealed_readable(tmp_path / "run", run, ["LanceSource", "write_lance"])
     assert lance.dataset(str(target)).count_rows() == 3
 
 
@@ -324,14 +329,15 @@ def test_code_pin_source_archive_survives_run_exit(tmp_path, monkeypatch):
     import demiflow.execution.chain as chain_mod
 
     captured = {}
-    real_seal = chain_mod.seal_write_topology
+    from demiflow.execution import native_plan
+    real_seal = native_plan.bind_native_execution
 
-    def capture_seal(action, source, plan, *, host_id="local"):
-        handle = real_seal(action, source, plan, host_id=host_id)
-        captured["plan_ref"] = handle._plan_ref
+    def capture_seal(action, source, plan, **options):
+        handle = real_seal(action, source, plan, **options)
+        captured["plan_ref"] = next(p["plan_ref"] for p in handle[1].programs if not p["input_path"])
         return handle
 
-    monkeypatch.setattr(chain_mod, "seal_write_topology", capture_seal)
+    monkeypatch.setattr(native_plan, "bind_native_execution", capture_seal)
     ds = relational_dataset()
     target = tmp_path / "out.lance"
     run_dir = tmp_path / "run"
@@ -359,13 +365,14 @@ def test_write_seam_bundle_identity_is_code_pin_carrier_survives(tmp_path, monke
     from demiflow.execution.recovery_contract import document, identity
 
     captured = {}
-    real_seal = chain_mod.seal_write_topology
+    from demiflow.execution import native_plan
+    real_seal = native_plan.bind_native_execution
     real_manifest = chain_mod._build_sealed_manifest
 
-    def capture_seal(action, source, plan, *, host_id="local"):
-        handle = real_seal(action, source, plan, host_id=host_id)
-        captured["plan_ref"] = handle._plan_ref
-        captured["code_pin"] = chain_mod.plan_code_pin(plan)
+    def capture_seal(action, source, plan, **options):
+        handle = real_seal(action, source, plan, **options)
+        captured["plan_ref"] = next(p["plan_ref"] for p in handle[1].programs if not p["input_path"])
+        captured["code_pin"] = chain_mod.plan_code_pin(plan, source=source)
         return handle
 
     def capture_manifest(run, plan_ref, *, entrypoint="chain"):
@@ -373,7 +380,7 @@ def test_write_seam_bundle_identity_is_code_pin_carrier_survives(tmp_path, monke
         captured["manifest"] = manifest
         return manifest, mref
 
-    monkeypatch.setattr(chain_mod, "seal_write_topology", capture_seal)
+    monkeypatch.setattr(native_plan, "bind_native_execution", capture_seal)
     monkeypatch.setattr(chain_mod, "_build_sealed_manifest", capture_manifest)
     ds = relational_dataset()
     target = tmp_path / "out.lance"

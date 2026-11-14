@@ -130,6 +130,22 @@ class StageBufferAdapter:
         self.prefix_position = 0
         self.prefix_exhausted = False
         self._sinks = {}
+        import asyncio
+        self.next_slot = 0
+        self._input_turn = asyncio.Condition()
+
+    async def read(self, queue, slot):
+        """Deterministic row-to-slot routing, including cut and EOF tokens.
+
+        A shared queue's scheduler race must not decide paid request membership.
+        The cursor is cut state; each worker retains its own partial batch.
+        """
+        async with self._input_turn:
+            await self._input_turn.wait_for(lambda: self.next_slot == slot)
+            row = await queue.get()
+            self.next_slot = (slot + 1) % self.participants
+            self._input_turn.notify_all()
+            return row
 
     # -- worker-side lineage -------------------------------------------------
     def next_ordinal(self, slot):
@@ -140,6 +156,19 @@ class StageBufferAdapter:
         if slot == 0:
             self.stage.batch_ordinal = self.slot_ordinals[0]
         return ordinal
+
+    def replay_batch_size(self, slot):
+        """Recover an already-dispatched native batch's original time boundary."""
+        from .recovery_contract import identity
+        scope = self.scope_identity(slot, self.slot_ordinals[slot])
+        key = identity(['native-batch-size', self.action.action_id, scope])
+        fact = self.run.journal.source_binding(key)
+        return None if fact is None else fact['rows']
+
+    def seal_batch_size(self, slot, ordinal, rows):
+        from .recovery_contract import identity
+        key = identity(['native-batch-size', self.action.action_id, self.scope_identity(slot, ordinal)])
+        self.run.journal.bind_source(self.run.fence, key, {'rows': rows})
 
     def scope_identity(self, slot, ordinal):
         """Row-scope identity for a flush.
@@ -205,6 +234,7 @@ class StageBufferAdapter:
             slots[str(slot)] = entry
         snapshot = {"schema": SCHEMA, "kind": self.kind, "stage_key": self.stage_key,
                     "participants": self.participants, "slots": slots}
+        snapshot['next_slot'] = self.next_slot
         if self.kind == "prepend":
             snapshot["prefix"] = {"position": self.prefix_position,
                                   "exhausted": self.prefix_exhausted}
@@ -281,6 +311,10 @@ class StageBufferAdapter:
         if type(participants) is not int or participants != self.participants:
             raise RecoveryContractError("Buffer snapshot participants differ from the sealed stage")
         slots = snapshot.get("slots")
+        next_slot = snapshot.get('next_slot', 0)
+        if type(next_slot) is not int or not 0 <= next_slot < self.participants:
+            raise RecoveryContractError('Buffer routing cursor is outside its worker slots')
+        self.next_slot = next_slot
         if not isinstance(slots, dict) or set(slots) != {str(s) for s in range(self.participants)}:
             raise RecoveryContractError("Buffer snapshot slots do not match active participants")
         from ..data.runtime_contract import check_size

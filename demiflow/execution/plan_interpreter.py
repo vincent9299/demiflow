@@ -586,7 +586,8 @@ def _validate_program_binding(binding, execution_stage_ids):
     occurrence stages. The local logical_node_id is deliberately not cross-checked
     against the full dag here -- verify_native_programs owns that semantic mapping.
     """
-    _require(type(binding) is dict and set(binding) == _PROGRAM_BINDING_KEYS,
+    _require(type(binding) is dict and _PROGRAM_BINDING_KEYS <= set(binding)
+             <= _PROGRAM_BINDING_KEYS | {'source_stage_id'},
              "invalid_contract", "program binding key set is unsupported")
     _check_identifier(binding["program_id"], "program_id")
     input_path = binding["input_path"]
@@ -622,6 +623,12 @@ def _validate_program_binding(binding, execution_stage_ids):
         bound_stages.add(stage_id)
     _require(seen_index == set(range(len(sealed_operators))),
              "invalid_contract", "operator indices are not contiguous from 0")
+    if 'source_stage_id' in binding:
+        source_stage = binding['source_stage_id']
+        _check_identifier(source_stage, 'source_stage_id')
+        _require(source_stage in execution_stage_ids and source_stage not in bound_stages,
+                 'invalid_contract', 'composite source stage is outside execution or duplicated')
+        bound_stages.add(source_stage)
     return bound_stages
 
 

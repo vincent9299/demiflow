@@ -285,21 +285,18 @@ class Dataset:
         from .plan import reject_streaming_map_options
         for dataset in (self, *others):
             reject_streaming_map_options(dataset._plan, 'local union')
-        if getattr(self._executor, '_local_kernel', None) is not None:
-            from ..execution.local_kernel import UnionSource, PlanInput
-            datasets = (self, *others)
-            if any(ds._executor is not self._executor for ds in datasets):
-                raise ValueError('parallel union inputs must belong to the same local_execution context')
-            inputs = []
-            for ds in datasets:
-                if isinstance(ds._source, UnionSource) and not ds._plan.operations:
-                    inputs.extend(ds._source.inputs)
-                else:
-                    inputs.append(PlanInput(ds._source, ds._plan))
-            return Dataset(UnionSource(tuple(inputs)), LogicalPlan(), self._executor)
-        return DataAPI(self._executor).read_datasource(UnionDatasource((self,*others)))
+        from ..execution.local_kernel import UnionSource, PlanInput
+        datasets = (self, *others)
+        if self._executor._local_kernel is not None and any(ds._executor is not self._executor for ds in datasets):
+            raise ValueError('parallel union inputs must belong to the same local_execution context')
+        inputs = []
+        for ds in datasets:
+            if isinstance(ds._source, UnionSource) and not ds._plan.operations:
+                inputs.extend(ds._source.inputs)
+            else:
+                inputs.append(PlanInput(ds._source, ds._plan))
+        return Dataset(UnionSource(tuple(inputs)), LogicalPlan(), self._executor)
 
-    @_flow_api("checkpoint", datasets=("self",), execution="action")
     def checkpoint(self, path, *, version):
         """Retired facade; execution-owned recovery uses the platform RunRef."""
         from ..execution.capabilities import require_action
@@ -915,6 +912,10 @@ class Dataset:
         operation = declared._plan.operations[-1]
         typed = DeduplicateOp(**{**vars(operation), 'label': 'deduplicate_'+output},
                               on=fields, key=key, output=output)
+        from ..execution.plan_facts import _deduplicate_arguments
+        from ..execution.recovery_contract import identity
+        actor = operation.callable.target.__self__
+        actor._deduplicate_declaration = identity(_deduplicate_arguments(actor))
         result = Dataset(self._source, self._plan.append(typed), self._executor, declared._stages)
         return result if keep_duplicates else result.filter(lambda r: r[output]['status'] != 'duplicate')
 
@@ -1012,6 +1013,9 @@ class Dataset:
         """
         from ..execution.checked import action
         from ..execution.checked import current
+        if checkpoint is not None:
+            from ..execution.recovery_contract import RecoveryContractError
+            raise RecoveryContractError('Explicit checkpoint mode is retired; use RunContext recovery')
         checkpoint_facts = checkpoint
         arguments = dict(on_progress=on_progress, on_drain=on_drain, log_every=log_every,
                          cancellation=cancellation, queue_factory=queue_factory,
@@ -1021,8 +1025,26 @@ class Dataset:
         from ..execution.capabilities import validate_stream_plan
         validate_stream_plan(self._plan)
         with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
+            from ..execution.queue_execution import queue_source
+            from ..execution.queue_producer import producer_actor
+            source = checked.source
+            stage_limits = None
+            if queue_source(source) is None and producer_actor(checked.plan) is None:
+                from ..errors import UnsupportedExecutionOptionError
+                from ..execution.run_context import current_action
+                from ..execution.source_snapshot import freeze_source
+                from ..execution.native_plan import root_stage_limits
+                if getattr(self._executor, 'NAME', None) != 'local':
+                    raise UnsupportedExecutionOptionError('run_stream is only supported by the local executor')
+                active = current_action()
+                source = freeze_source(active, source)
+                layout, placement = self._executor._bind_plan(active, source, checked.plan,
+                                                              action_kind='run_stream')
+                if placement.backend != 'local_stream' or placement.recovery != 'delivery_only':
+                    raise RuntimeError('run_stream requires its sealed delivery layout')
+                stage_limits = root_stage_limits(placement)
             stats = self._run_stream(
-                source=checked.source, plan=checked.plan,
+                source=source, plan=checked.plan, stage_limits=stage_limits,
                 on_progress=on_progress, on_drain=on_drain, log_every=log_every,
                 cancellation=cancellation, queue_factory=queue_factory,
                 stall_timeout=stall_timeout, stop_file=stop_file,
@@ -1118,7 +1140,7 @@ class Dataset:
                 result = on_drain(stats)
                 if inspect.isawaitable(result): await result
 
-        rows = self._executor.iter_rows(source, LogicalPlan()) if source_iter is None else source_iter
+        rows = self._executor._apply_plan(source, LogicalPlan()) if source_iter is None else source_iter
         stats = _run_stream(
             rows, plan, consume=consume,
             on_progress=on_progress, on_drain=drain, log_every=log_every,
@@ -1330,8 +1352,9 @@ class Dataset:
         declared = self.map_async(actor, concurrency=concurrency,
             queue_depth=queue_depth, label=label, execution='thread')
         operation = declared._plan.operations[-1]
+        from copy import deepcopy
         typed = VectorSearchOp(**vars(operation), query=query, output=output,
-                               search_spec=actor.spec)
+                               search_spec=deepcopy(actor.spec))
         return Dataset(self._source, self._plan.append(typed), self._executor,
                        declared._stages)
 
@@ -1384,6 +1407,9 @@ class Dataset:
             call_output=call_output, error_output=error_output, concurrency=concurrency,
             label=label, options=execution['options'], max_requests=max_requests,
             service=service, request_gate=request_gate)
+        from ..embeddings.flow_contract import freeze_declaration
+        actor._request_policy = execution['request_policy']
+        freeze_declaration(actor)
         declared = self.batch_map(actor.__call__, max_batch=batch_size,
             concurrency=concurrency + prefetch_batches, queue_depth=queue_depth,
             flush_interval=flush_interval, label=actor.label)

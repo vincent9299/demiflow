@@ -41,6 +41,7 @@ class ProgramSlice:
     plan: LogicalPlan
     sealed_operators: tuple[Mapping[str, str], ...]
     operator_bindings: tuple[Mapping[str, int | str], ...]
+    source_occurrence_id: str | None = None
 
 
 def compile_dataset_logical_dag(*, action_id, source, plan, terminal_kind, sink_ids):
@@ -126,7 +127,8 @@ def compile_dataset_logical_dag(*, action_id, source, plan, terminal_kind, sink_
                         "occurrence_id": op["occurrence_id"]} for op in local_ops)
         bindings = tuple({"program_index": j, "occurrence_id": full_ops[j]["occurrence_id"]}
                          for j in range(len(full_ops)))
-        slices.append(ProgramSlice(program_id, tuple(input_path), src, pl, sealed, bindings))
+        slices.append(ProgramSlice(program_id, tuple(input_path), src, pl, sealed, bindings,
+                                   full_source['occurrence_id']))
         if not composite:
             semantic = source_identity(src)
             source_entries.append({

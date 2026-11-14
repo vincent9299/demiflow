@@ -273,7 +273,9 @@ def test_precheck_plan_fires_before_stream_materialization(tmp_path):
     from demiflow import data
     with pytest.raises(ProtocolError) as error:
         with RunContext.start(tmp_path / "run"):
-            data.from_items([{"id": 1}]).map_async(_StatefulNoAdapter()).materialize()
+            # Plain JSON state at concurrency=1 is now auto-adapted. Sharing one
+            # mutable instance concurrently still needs an explicit adapter.
+            data.from_items([{"id": 1}]).map_async(_StatefulNoAdapter(), concurrency=2).materialize()
     assert error.value.code == "STATE_ADAPTER_MISSING"
 
 

@@ -160,12 +160,14 @@ class EmbeddingActor:
                     raise EmbeddingProtocolError('Embedding response exceeds max_response_bytes')
             return response.status_code, bytes(content).decode('utf-8')
 
-    async def _exchange(self, request, encoded, timings):
+    async def _exchange(self, request, encoded, timings, *, request_part=0):
         journal = self._journal
         native = self._native_recovery
         if native is not None:
-            request = native.scope_request(request)
+            request = native.scope_request(request, part=request_part)
         io = partial(self._io, _phase='journal', _timings=timings)
+        if native is not None:
+            await io(native.verify_request_membership, request)
         record = await io(journal.lookup, request) if journal is not None else None
         references = None
         reused = record is not None
@@ -192,13 +194,15 @@ class EmbeddingActor:
                             reused = True
                         if record is None:
                             self._calls += 1  # observation only; the run journal is the budget authority
-                            task = asyncio.ensure_future(drain_on_service_stop(
-                                self._fresh_exchange(request, encoded, timings), enabled=True))
+                            task = asyncio.create_task(self._fresh_exchange(request, encoded, timings))
                             native.inflight[reservation] = task
                             try:
-                                record, references = await task
+                                record, references = await asyncio.shield(task)
                             finally:
-                                native.inflight.pop(reservation, None)
+                                # Cooperative cancellation leaves admitted work
+                                # registered until aclose drains and persists it.
+                                if task.done():
+                                    native.inflight.pop(reservation, None)
                 elif journal is not None:
                     reserved = await io(journal.reserve, request)
                     if not reserved:
@@ -282,6 +286,7 @@ class EmbeddingActor:
                                   document_reader=self._document_reader)
         output = []
         try:
+            request_part = 0
             while True:
                 prepared = await self._io(next, batches, None,
                     _phase='prepare', _timings=preparation_timings, _prepare=True)
@@ -291,7 +296,8 @@ class EmbeddingActor:
                 try:
                     if prepared is None:
                         break
-                    output.extend(await self._encode_prepared(prepared, call_timings))
+                    output.extend(await self._encode_prepared(prepared, call_timings, request_part=request_part))
+                    request_part += 1
                     del prepared  # Release encoded request before preparing its successor.
                 finally:
                     for key, value in (call_timings or {}).items():
@@ -300,7 +306,7 @@ class EmbeddingActor:
             await self._io(batches.close, _prepare=True)
         return output
 
-    async def _encode_prepared(self, prepared, timings):
+    async def _encode_prepared(self, prepared, timings, *, request_part=0):
         valid, invalid, metadata, encoded, request = prepared
         output = []
         for row, error in invalid:
@@ -316,7 +322,7 @@ class EmbeddingActor:
         entry[1] += 1
         try:
             async with entry[0]:
-                record, call = await self._exchange(request, encoded, timings)
+                record, call = await self._exchange(request, encoded, timings, request_part=request_part)
         finally:
             entry[1] -= 1
             if not entry[1]:

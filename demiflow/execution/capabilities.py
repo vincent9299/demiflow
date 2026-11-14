@@ -134,8 +134,10 @@ def admit_action_plan(source, plan, *, action_kind, backend='local', sink_spec=N
         if action_kind in _MATERIALIZE_TERMINALS:
             return ActionDecision(action_kind, 'local_stream', 'stream_materialize', 'native_checkpoint')
         if action_kind == 'run_stream':
+            from .queue_producer import producer_actor
             route = 'queue_stream' if _is_queue_source(source) else 'stream_delivery'
-            return ActionDecision(action_kind, 'local_stream', route, 'native_checkpoint')
+            recovery = 'native_checkpoint' if route == 'queue_stream' or producer_actor(plan) else 'delivery_only'
+            return ActionDecision(action_kind, 'local_stream', route, recovery)
         return ActionDecision(action_kind, 'local_stream', 'stream_delivery', 'delivery_only')
 
     composition = check_composition(capabilities, backend='local', driver='pull')

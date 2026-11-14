@@ -51,4 +51,4 @@ def precheck_plan_state(plan):
         options = getattr(op, "stream_options", None)
         precheck_operator_state(callable_spec, {
             "state_ownership": getattr(traits, "state_ownership", "none"),
-            "concurrency": getattr(options, "concurrency", 1) if options is not None else 1})
+            "concurrency": getattr(options, "concurrency", 1) if options is not None else getattr(op, 'concurrency', 1)})

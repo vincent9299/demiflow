@@ -851,22 +851,8 @@ def plan_code_pin(plan, *, source=None):
     callable dependencies (reducer/factory) to the same manifest; omitting it
     keeps the historical bytes exactly.
     """
-    from .plan_facts import operation_facts
-    from .recovery_identity import describe
-    operations = []
-    for operation in plan.operations:
-        native = None
-        try:
-            native = operation_facts(operation).get("native")
-        except (RuntimeError, ValueError, TypeError):
-            pass
-        if native is not None:
-            operations.append({"native": native,
-                "policy": {name: describe(getattr(operation, name)) for name in
-                    ("concurrency", "queue_depth", "catch", "hard_timeout", "execution")
-                    if hasattr(operation, name)}})
-        else:
-            operations.append(describe(operation))
+    from .recovery_identity import operation_identity
+    operations = [operation_identity(operation) for operation in plan.operations]
     return {"operations": _stable_code_identity(operations),
             "dependencies": _business_dependency_manifest(plan, source=source)}
 
@@ -1535,7 +1521,7 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
     admit_stream(plan)
     selected = freeze_source(action, source)
     source_sink, source_reference = capture_source(
-        action, lambda: executor.iter_rows(selected, LogicalPlan()))
+        action, lambda: executor._apply_plan(selected, LogicalPlan()))
     source_rows = source_reference["data"]["rows"]
     output_child_id = action.action_id + "-chain"
     source_child_id = action.action_id + "-source"
@@ -1780,7 +1766,7 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
     from .executors.local import LocalDatasetExecutor
     capture_executor = LocalDatasetExecutor(workers=1)
     source_sink, source_reference = capture_source(
-        action, lambda: capture_executor.iter_rows(selected, LogicalPlan()))
+        action, lambda: capture_executor._apply_plan(selected, LogicalPlan()))
     source_rows = source_reference["data"]["rows"]
     output_child_id = action.action_id + "-chain"
     source_child_id = action.action_id + "-source"

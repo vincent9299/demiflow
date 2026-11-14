@@ -15,7 +15,7 @@ from __future__ import annotations
 import dataclasses
 
 from .recovery_contract import RecoveryContractError, identifier, identity
-from .recovery_identity import describe
+from .recovery_identity import describe, source_identity
 from .plan_interpreter import PlanContractError, interpret_physical_plan
 from .sealed_plans import (
     load_sealed_plan, load_execution_bindings, seal_execution_bindings,
@@ -77,7 +77,7 @@ def stage_native_programs(action, program_slices):
             "program_id": program_slice.program_id,
             "input_path": list(program_slice.input_path),
             "plan_ref": plan_ref,
-            "source_identity_ref": identity(describe(program_slice.source)),
+            "source_identity_ref": identity(source_identity(program_slice.source)),
             "sealed_operators": [dict(op) for op in program_slice.sealed_operators],
             "operator_bindings": [dict(ob) for ob in program_slice.operator_bindings],
         })
@@ -107,7 +107,7 @@ def verify_native_programs(source, plan, *, programs, action_id):
         if binding["program_id"] != identity([action_id, input_path]):
             raise PlanContractError("identity_mismatch",
                                     "program_id does not bind action_id and input_path")
-        if binding["source_identity_ref"] != identity(describe(sub_source)):
+        if binding["source_identity_ref"] != identity(source_identity(sub_source)):
             raise PlanContractError("identity_mismatch",
                                     "source_identity_ref does not bind the located source")
         plan_ref = binding["plan_ref"]
@@ -123,7 +123,7 @@ def verify_native_programs(source, plan, *, programs, action_id):
     return None
 
 
-def compile_native_topology(action, source, plan, *, decision):
+def compile_native_topology(action, source, plan, *, decision, profile=None):
     """Compile the real Dataset DAG and seal a driver-only native layout (durable_write).
 
     The driver placement binds the decision's actual backend/recovery; source,
@@ -151,18 +151,28 @@ def compile_native_topology(action, source, plan, *, decision):
             for binding in program_slice.operator_bindings))
         for program_slice in program_slices)
     programs = stage_native_programs(action, program_slices)
+    nodes_by_occurrence = {n['occurrence_id']: n for n in logical_dag['nodes']}
+    for program, program_slice in zip(programs, program_slices, strict=True):
+        if (program_slice.source_occurrence_id is not None
+                and nodes_by_occurrence[program_slice.source_occurrence_id]['input_ports']):
+            # A join/union/reduce is the source expression of this program, not
+            # one of its local operators. Bind it without inventing an index.
+            program['source_stage_id'] = identity(
+                [logical_dag['dag_id'], program_slice.source_occurrence_id])
 
-    root_ref = seal_write_plan_ref(action, plan, source=source,
-                                   program_id=identity([action.action_id, []]))
+    root_ref = next(program['plan_ref'] for program in programs if not program['input_path'])
     manifest, mref = _build_sealed_manifest(run, root_ref, entrypoint="native")
 
     nodes = logical_dag["nodes"]
     dag_id = logical_dag["dag_id"]
-    op_nodes = nodes[1:-1]
+    op_nodes = [node for node in nodes if node['input_ports'] and node['output_ports']]
     op_stage_ids = [identity([dag_id, node["occurrence_id"]]) for node in op_nodes]
-    driver_stage_ids = ([identity([dag_id, nodes[0]["occurrence_id"]])] + op_stage_ids
-                        + [identity([dag_id, nodes[-1]["occurrence_id"]])])
-    profile_doc = {"requests": {"cpu_millis": 1000, "memory_bytes": 1024 ** 3}}
+    driver_stage_ids = [identity([dag_id, node['occurrence_id']]) for node in nodes]
+    # Profile memory is the admitted resident envelope; run.memory_bytes is the
+    # smaller payload/compute pool and must not masquerade as process RSS.
+    profile_doc = profile or {"requests": {"cpu_millis": 1000,
+        "memory_bytes": max(1, run.limits['max_rss_bytes'] // 2),
+        "scratch_bytes": run.limits['max_scratch_bytes']}}
     profile_ref = identity(profile_doc)
     row_bytes = run.limits["max_row_bytes"] + 256
     queue_bytes = max(row_bytes, run.limits["max_batch_bytes"])
@@ -181,9 +191,12 @@ def compile_native_topology(action, source, plan, *, decision):
         partition_count=1, scheme_kind="single", stage_budgets=stage_budgets)
 
     src = logical_dag["sources"][0]
-    source_bindings = [{"stage_id": driver_stage_ids[0], "kind": "fixed_source",
-                        "ref": {"source_id": src["source_id"],
-                                "source_identity_ref": src["source_identity_ref"]}}]
+    source_bindings = [{"stage_id": identity([dag_id, node['occurrence_id']]),
+                        "kind": "fixed_source", "ref": {
+                            "source_id": leaf['source_id'],
+                            "source_identity_ref": leaf['source_identity_ref']}}
+                       for node, leaf in zip((n for n in nodes if not n['input_ports']),
+                                             logical_dag['sources'], strict=True)]
     scheme_version = src["partition_scheme"]["scheme_version"]
     channel_options = [{"channel_id": channel_id_for(edge["edge_id"], scheme_version),
                         "logical_edge_ids": [edge["edge_id"]]} for edge in logical_dag["edges"]]
@@ -218,6 +231,71 @@ def load_native_execution(run, action_id, *, execution_id):
     return layout, placement
 
 
+def bind_native_execution(action, source, plan, *, decision, profile=None):
+    """Seal once, then consume and verify the immutable execution on every attempt."""
+    from ..planning.dataset_dag import compile_dataset_logical_dag
+    run = action.context
+    execution_id = identity([action.action_id, 'driver', decision.route])
+    if run.journal.source_binding(action.action_id + '-sealed-plan') is None:
+        compile_native_topology(action, source, plan, decision=decision, profile=profile)
+    layout, placement = load_native_execution(run, action.action_id, execution_id=execution_id)
+    if placement.backend != decision.backend or placement.recovery != decision.recovery:
+        raise PlanContractError('identity_mismatch', 'Decision differs from sealed execution')
+    sealed = load_sealed_plan(run.directory, action.action_id)
+    actual, slices = compile_dataset_logical_dag(action_id=action.action_id, source=source, plan=plan,
+        terminal_kind=decision.action_kind,
+        sink_ids=('lance',) if decision.action_kind == 'write_lance' else ('output',))
+    if actual != sealed['logical_dag']:
+        raise PlanContractError('identity_mismatch', 'Actual DAG differs from sealed execution')
+    expected = {s.program_id: s for s in slices}
+    if set(expected) != {p['program_id'] for p in placement.programs}:
+        raise PlanContractError('identity_mismatch', 'Sealed programs differ from actual DAG')
+    for program in placement.programs:
+        s = expected[program['program_id']]
+        operators = [{'program_index': b['program_index'],
+                      'stage_id': identity([actual['dag_id'], b['occurrence_id']])}
+                     for b in s.operator_bindings]
+        composite = any(n['occurrence_id'] == s.source_occurrence_id and n['input_ports']
+                        for n in actual['nodes'])
+        source_stage = identity([actual['dag_id'], s.source_occurrence_id]) if composite else None
+        if (list(program['input_path']) != list(s.input_path)
+                or [dict(b) for b in program['operator_bindings']] != operators
+                or program.get('source_stage_id') != source_stage):
+            raise PlanContractError('identity_mismatch', 'Program stages differ from actual DAG')
+    verify_native_programs(source, plan, programs=placement.programs, action_id=action.action_id)
+    seal_native_identity_bridge(run, action, actual, slices)
+    return layout, placement
+
+
+def seal_native_identity_bridge(run, action, logical_dag, program_slices):
+    """Bind each real sub-program occurrence to its existing report observation."""
+    from .checked import current
+    from .identity_bridge import build_identity_bridge, seal_identity_bridge
+    checked = current()
+    if checked is None or not checked.report_digest:
+        return None
+    nodes = {n['occurrence_id']: n for n in logical_dag['nodes']}
+    bindings = []
+    for program in program_slices:
+        resolved = checked.execution_bindings(program.source, program.plan, action_id=action.action_id)
+        for item in resolved:
+            if item['role'] == 'terminal':
+                if program.input_path:
+                    continue
+                node = logical_dag['nodes'][-1]
+            elif item['role'] == 'source':
+                node = nodes[program.source_occurrence_id]
+            else:
+                node = nodes[program.operator_bindings[item['program_index']]['occurrence_id']]
+            bindings.append({key: item[key] for key in ('report_node_id', 'report_occurrence', 'mode')} |
+                            {key: node[key] for key in ('logical_node_id', 'occurrence_id')})
+    if not bindings:
+        return None
+    bridge = build_identity_bridge(logical_dag, action_id=action.action_id,
+                                   report_digest=checked.report_digest, bindings=bindings)
+    return seal_identity_bridge(run, action, bridge)
+
+
 def execute_native_plan(executor, source, plan, *, layout, execution_id,
                         arrow=False, sink_schema=None):
     """Verify then dispatch the sealed backend/profile/program (runtime_state).
@@ -239,13 +317,38 @@ def execute_native_plan(executor, source, plan, *, layout, execution_id,
     if placement.backend == "arrow_batch":
         from .arrow_batch_sink import execute as backend_execute
         iterator = backend_execute(executor, source, plan, sink_schema, execution=placement)
-    else:
+    elif placement.backend == 'datafusion':
         from .dataset_native import execute as backend_execute
         iterator = backend_execute(executor, source, plan, arrow=arrow,
                                    sink_schema=sink_schema, execution=placement)
+    elif placement.backend == 'lance_scan':
+        from ..lance.read import iter_lance_batches
+        from .native_resources import _sealed_ceilings
+        ceiling = _sealed_ceilings(placement)
+        iterator = iter_lance_batches(source.query, batch_size=ceiling['inflight_rows'] or 256)
+    elif placement.backend == 'local_pull':
+        iterator = executor._apply_plan(source, plan, _native=False, execution=placement)
+        if arrow:
+            iterator = executor._rows_as_batches(iterator, batch_format='pyarrow',
+                schema=sink_schema, byte_limits=action.context.limits)
+    elif placement.backend == 'local_stream':
+        from .stream_delivery import iter_stream_rows
+        arguments = action.declaration.get('arguments') or {}
+        limit = (arguments.get('limit', arguments.get('batch_size'))
+                 if action.declaration.get('kind') in {'take', 'take_batch'} else None)
+        iterator = iter_stream_rows(executor, source, plan, action=action, execution=placement, limit=limit)
+    else:
+        raise PlanContractError('unsupported_layout', 'Unsupported native execution backend')
     try:
         yield from iterator
     finally:
         close = getattr(iterator, "close", None)
         if close is not None:
             close()
+
+
+def root_stage_limits(placement):
+    """Map sealed full-graph stage budgets to root stream operator ordinals."""
+    return {binding['program_index']: dict(placement.stage_limits[binding['stage_id']])
+            for program in placement.programs if not program['input_path']
+            for binding in program['operator_bindings']}

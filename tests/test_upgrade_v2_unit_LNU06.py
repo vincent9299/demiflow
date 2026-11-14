@@ -35,7 +35,7 @@ def test_unbound_writes_ipc_and_reports_rows(tmp_path):
 def test_fitting_output_budget_admits(tmp_path):
     path = str(tmp_path / 'out.arrow')
     table = batch()
-    result = apply_batch(table, encoded_op(lambda b: b), path, table.schema, table.nbytes)
+    result = apply_batch(table, encoded_op(lambda b: b), path, table.schema, 4096, memory_bytes=table.nbytes)
     assert result.value.rows == 4
 
 
@@ -55,8 +55,8 @@ def test_cumulative_multi_output_budget(tmp_path):
         yield b
 
     # Two emitted tables accumulate; a ceiling of one table fails on the second.
-    with pytest.raises(RecoveryContractError, match='output staging byte budget'):
-        apply_batch(table, encoded_op(twice), path, table.schema, table.nbytes)
+    with pytest.raises(RecoveryContractError, match='scratch byte budget'):
+        apply_batch(table, encoded_op(twice), path, table.schema, 320, memory_bytes=table.nbytes)
 
 
 def test_error_path_closes_writer(tmp_path):
@@ -69,8 +69,6 @@ def test_error_path_closes_writer(tmp_path):
 
     with pytest.raises(ValueError, match='deliberate output failure'):
         apply_batch(table, encoded_op(fail_after_first), path, table.schema)
-    # The writer was closed in finally: the partial spill is readable, not locked,
-    # and the enclosing temporary directory owns its removal.
-    with pa.OSFile(path, 'rb') as stream:
-        partial = pa.ipc.open_stream(stream).read_all()
-    assert partial.num_rows == 4
+    # Failed task output is removed; no partial IPC file can be consumed.
+    from pathlib import Path
+    assert not Path(path).exists()

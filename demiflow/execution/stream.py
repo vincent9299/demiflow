@@ -390,7 +390,16 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             skip = 0
             if adapter is not None:
                 skip, _exhausted = adapter.take_prefix()
-            prefix = iter(op.source_dataset.iter_rows())
+            # The prefix is a subprogram of this action. Calling its public
+            # terminal would create a nested action and a second settlement.
+            prefix_dataset = op.source_dataset
+            from .run_context import current_action
+            if current_action() is not None and stage.scope_id is not None:
+                from .source_snapshot import prefix_rows
+                prefix = iter(prefix_rows(current_action(), prefix_dataset, stage_key=stage.scope_id,
+                    max_rows=op.max_rows, max_row_bytes=op.max_row_bytes))
+            else:
+                prefix = iter(prefix_dataset._executor._apply_plan(prefix_dataset._source, prefix_dataset._plan))
             reader_context = contextvars.copy_context()
             # next(default) avoids propagating StopIteration through a Future.
             def advance():
@@ -604,6 +613,8 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             stage.recovery_buffer = None
         while True:
             batch, restored, deadline = restored, [], None
+            replay_size = (adapter.replay_batch_size(worker_slot)
+                           if adapter is not None and stage.native_recovery is not None else None)
             if batch and stage.flush_interval is not None:
                 # A restored remainder restarts its advisory flush window; the
                 # durable contract is the rows and ordinal, not the old deadline.
@@ -612,13 +623,14 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             batch_bytes = 64 + sum(check_size(row, batch_limits['max_row_bytes']) + 16 for row in batch) if batch_limits else 64
             while True:
                 timeout = None
-                if batch and stage.flush_interval is not None:
+                if batch and stage.flush_interval is not None and replay_size is None:
                     timeout = deadline - loop.time()
                     if timeout <= 0:
                         break                        # 时间窗到，刷出
                 try:
                     row = await asyncio.wait_for(
-                        q_in.get(), None if timeout is None else timeout)
+                        adapter.read(q_in, worker_slot) if adapter is not None else q_in.get(),
+                        None if timeout is None else timeout)
                 except asyncio.TimeoutError:
                     break                            # 时间窗到，刷出
                 if row is SENTINEL:
@@ -630,6 +642,11 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                         await _flush(batch)
                         batch, batch_bytes = [], 64
                     await row.arrive(stage, batch, worker_slot=worker_slot)
+                    if stage.native_recovery is not None:
+                        # Buffered effects have drained at this cut. Do not
+                        # reserve the next paid batch while its publication can
+                        # still fail; recovery must start at this exact boundary.
+                        await row.wait()
                     continue
                 row = row.row if type(row) is ScopedRow else row
                 check_row(row)
@@ -650,7 +667,7 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                         and st["in"] % log_every == 0
                         and on_progress is not None):
                     await _call(on_progress, stats)
-                if len(batch) >= stage.max_batch:
+                if len(batch) >= (replay_size or stage.max_batch):
                     break                            # 条数满，刷出
             if batch:
                 await _flush(batch)
@@ -722,6 +739,8 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             adapter = stage.buffer_adapter
             if adapter is not None:
                 ordinal = adapter.next_ordinal(worker_slot)
+                if stage.native_recovery is not None:
+                    adapter.seal_batch_size(worker_slot, ordinal, len(batch))
                 set_row_scope(RowScope(adapter.scope_identity(worker_slot, ordinal)))
             else:
                 from .recovery_contract import identity

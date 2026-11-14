@@ -258,6 +258,19 @@ def _model_map_options(options):
     return projected
 
 
+def _deduplicate_arguments(actor):
+    from .recovery_identity import describe
+    from .stream_admission import canonical
+    policy = {name: getattr(actor, name) for name in
+              ('key', 'quotas', 'max_entries', 'max_key_bytes', 'max_disk_bytes')}
+    policy['unique_on'] = list(actor.unique_on)
+    if canonical(policy) != actor.config:
+        raise RuntimeContractError('Deduplicate actor policy differs from its configuration')
+    return dict(on=list(actor.unique_on), key=actor.key, output=actor.output,
+                when=describe(actor.when), quotas=describe(actor.quotas),
+                **{name: getattr(actor, name) for name in ('max_entries', 'max_key_bytes', 'max_disk_bytes')})
+
+
 def _specialization_domain(operation):
     """Bounded native facts for the in-module stream specializations.
 
@@ -266,6 +279,14 @@ def _specialization_domain(operation):
     """
     if type(operation) is ops.VectorSearchOp:
         from .recovery_contract import identity
+        from ..lance.search import VectorSearch
+        target = operation.callable.target
+        actor = getattr(target, '__self__', None)
+        if (type(actor) is not VectorSearch or getattr(target, '__func__', None) is not VectorSearch.__call__
+                or actor.spec != operation.search_spec or actor.query != operation.query
+                or actor.output != operation.output or actor.options != operation.search_spec.get('options')
+                or actor.filter_column != operation.search_spec.get('filter_column')):
+            raise RuntimeContractError('VectorSearch actor differs from its declared plan')
         spec = dict(operation.search_spec)
         storage = spec.get("storage_options") or {}
         # Reference storage options by bounded identity; never copy credential
@@ -279,11 +300,21 @@ def _specialization_domain(operation):
                 'arguments': {name: getattr(operation, name) for name in
                               ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}
     if type(operation) is ops.DeduplicateOp:
-        return {'contract': 'demiflow.deduplicate',
-                'arguments': {name: getattr(operation, name) for name in ('on', 'key', 'output')}}
+        from .stream_admission import StreamAdmission
+        from .recovery_contract import identity
+        target = operation.callable.target
+        actor = getattr(target, '__self__', None)
+        if type(actor) is not StreamAdmission or getattr(target, '__func__', None) is not StreamAdmission.__call__:
+            raise RuntimeContractError('Deduplicate must bind the native admission actor')
+        arguments = _deduplicate_arguments(actor)
+        if (tuple(actor.unique_on) != tuple(operation.on) or actor.key != operation.key
+                or actor.output != operation.output
+                or getattr(actor, '_deduplicate_declaration', None) != identity(arguments)):
+            raise RuntimeContractError('Deduplicate actor differs from its declared plan')
+        return {'contract': 'demiflow.deduplicate', 'arguments': arguments}
     if type(operation) is ops.EmbeddingMapOp:
-        return {'contract': 'demiflow.embeddings',
-                'arguments': {name: getattr(operation, name) for name in ('model_contract', 'inputs', 'output')}}
+        from ..embeddings.flow_contract import embedding_facts
+        return embedding_facts(operation)
     if type(operation) is ops.StreamPrependOp:
         from .recovery_identity import plan_identity
         other = operation.source_dataset

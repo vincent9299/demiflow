@@ -438,6 +438,10 @@ class TaskScheduler:
         self.task_output_bytes = None
 
     def __enter__(self):
+        from .recovery_contract import RecoveryContractError
+        for key in ('inflight_bytes', 'output_bytes'):
+            if key in self.budget and self.budget[key] is not None and self.budget[key] < self._width:
+                raise RecoveryContractError('Native stage byte budget cannot admit all task slots')
         if self.options.worker_mode == "process":
             context = multiprocessing.get_context("spawn")
             self.pool = ProcessPoolExecutor(max_workers=self.options.workers, mp_context=context,
@@ -791,7 +795,19 @@ class LocalTaskEngine:
         return runs
 
 
-def execute(executor, source, plan):
+def execute(executor, source, plan, *, execution=None):
+    owner_executor = executor
+    if execution is not None:
+        import copy
+        from dataclasses import replace
+        from .native_resources import _sealed_ceilings
+        cap = _sealed_ceilings(execution)
+        executor = copy.copy(executor)
+        options = executor._local_kernel
+        executor._local_kernel = replace(options,
+            workers=min(options.workers, max(1, (cap['cpu_millis'] or 1000) // 1000)),
+            batch_rows=min(options.batch_rows, cap['inflight_rows'] or options.batch_rows),
+            memory_bytes=min(options.memory_bytes, cap['memory_bytes']))
     if executor._local_kernel_closed:
         raise RuntimeError("local_execution is closed; execute actions inside its context")
     # Validate the entire graph before scanning or executing any callback.
@@ -816,6 +832,7 @@ def execute(executor, source, plan):
     stats = {"worker_mode": options.worker_mode, "workers": options.workers, "partitions": options.partitions,
              "peak_pending_tasks": 0, "workers_used": [], "stages": [], "status": "running"}
     executor._local_kernel_stats = stats
+    owner_executor._local_kernel_stats = stats
     started = time.monotonic()
     try:
         validate(source, plan)

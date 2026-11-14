@@ -1,0 +1,21 @@
+PINNED_ROOT=/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114
+...................................................................F.... [ 32%]
+........................................................................ [ 65%]
+.....................................................F.................s [ 98%]
+.s.                                                                      [100%]
+=================================== FAILURES ===================================
+________ test_run_stream_consumes_sealed_limits_without_claiming_replay ________
+tests/test_gpt_integration_repairs.py:43: in test_run_stream_consumes_sealed_limits_without_claiming_replay
+    with RunContext.resume(run.ref):
+demiflow/execution/run_context.py:162: in __enter__
+    raise RecoveryContractError("A completed run cannot create another attempt")
+E   demiflow.execution.recovery_contract.RecoveryContractError: A completed run cannot create another attempt
+__________ test_byte_packing_large_singleton_errors_and_exact_replay ___________
+tests/test_embeddings.py:615: in test_byte_packing_large_singleton_errors_and_exact_replay
+    assert len(server['bodies']) == 3
+E   AssertionError: assert 6 == 3
+E    +  where 6 = len([{'encoding_format': 'float', 'input': ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...': ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], 'model': 'fixture'}])
+=========================== short test summary info ============================
+FAILED tests/test_gpt_integration_repairs.py::test_run_stream_consumes_sealed_limits_without_claiming_replay
+FAILED tests/test_embeddings.py::test_byte_packing_large_singleton_errors_and_exact_replay
+2 failed, 215 passed, 2 skipped in 114.19s (0:01:54)

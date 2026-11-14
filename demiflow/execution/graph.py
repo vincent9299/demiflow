@@ -562,7 +562,7 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
     capture_executor = LocalDatasetExecutor(workers=1)
     selected = freeze_source(action, source)
     source_sink, source_reference = capture_source(
-        action, lambda: capture_executor.iter_rows(selected, LogicalPlan()))
+        action, lambda: capture_executor._apply_plan(selected, LogicalPlan()))
     ancestor_plan_ref = stage_plan_artifact(action, ancestor["plan"])
     target_plan_refs = [stage_plan_artifact(action, target["plan"]) for target in targets]
     ancestor_sealed = _sealed_operators(ancestor["plan"])
@@ -1014,7 +1014,7 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
     capture_executor = LocalDatasetExecutor(workers=1)
     selected = freeze_source(action, source)
     source_sink, source_reference = capture_source(
-        action, lambda: capture_executor.iter_rows(selected, LogicalPlan()))
+        action, lambda: capture_executor._apply_plan(selected, LogicalPlan()))
     ancestor_plan_ref = stage_plan_artifact(action, ancestor["plan"])
     target_plan_refs = [stage_plan_artifact(action, target["plan"]) for target in targets]
     ancestor_sealed = _sealed_operators(ancestor["plan"])

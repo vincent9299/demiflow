@@ -95,6 +95,7 @@ def test_actor_without_state_contract_fails_before_first_call(tmp_path):
     class UnsafeCounter:
         def __init__(self):
             self.n = 0
+            self.opaque_resource = object()  # Plain counters now use auto_json.
         async def __call__(self, row):
             calls.append(row)
             self.n += 1

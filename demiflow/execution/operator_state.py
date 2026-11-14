@@ -75,6 +75,12 @@ class OperatorStates:
             return
         policy = classify_operator_state(owner, phase="instance")
         if policy.mode not in ("hooks", "auto_json"):
+            # Native effects own their resources through their explicit recovery
+            # adapter. An ordinary factory must not silently lose business state
+            # just because constructing it exposed a non-JSON field.
+            if not callable(getattr(owner, 'native_stream_recovery', None)):
+                raise RecoveryContractError('Actor ' + type(owner).__name__ +
+                    ' needs snapshot_state/restore_state: ' + str(policy.reason))
             return
         if id(owner) in self.identities:
             self.aliases[key] = self.identities[id(owner)]

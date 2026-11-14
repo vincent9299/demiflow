@@ -17,7 +17,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution import chain
 from demiflow.execution.native_plan import stage_native_programs
 from demiflow.execution.recovery_contract import identity
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.recovery_identity import describe, source_identity
 from test_execution_layout import PROGRAM_REF
 import _v2_native_fixtures as fx
 
@@ -55,7 +55,7 @@ def test_stage_binds_each_slice(monkeypatch):
                             "sealed_operators", "operator_bindings"}
     assert binding["program_id"] == slices[0].program_id
     assert binding["input_path"] == []
-    assert binding["source_identity_ref"] == identity(describe(source))
+    assert binding["source_identity_ref"] == identity(source_identity(source))
     assert binding["sealed_operators"] == [dict(op) for op in slices[0].sealed_operators]
     assert binding["operator_bindings"] == [dict(ob) for ob in slices[0].operator_bindings]
     # plan_ref is the seal's return value verbatim (source-inclusive code-pin)

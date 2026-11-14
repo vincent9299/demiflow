@@ -76,11 +76,11 @@ def test_streaming_materialize_termals_use_native_checkpoint():
                                           "native_checkpoint"), kind
 
 
-def test_run_stream_non_queue_delivers_with_checkpoint():
+def test_run_stream_non_queue_is_delivery_only():
     decision = admit_action_plan(_source(), _plan(_stream_map()), action_kind="run_stream",
                                  available_backends=LOCAL)
     assert decision == ActionDecision("run_stream", "local_stream", "stream_delivery",
-                                      "native_checkpoint")
+                                      "delivery_only")
 
 
 def test_run_stream_queue_source_selects_queue_stream():

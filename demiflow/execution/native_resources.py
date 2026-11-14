@@ -154,7 +154,9 @@ def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=
         row_ceiling = min(options.max_row_bytes, sealed_memory)
         if ceilings['inflight_bytes'] is not None:
             row_ceiling = min(row_ceiling, ceilings['inflight_bytes'])
-        row_limit = native_row_limit(effective_pool, effective_rss, row_ceiling)
+        # Intersect the already admitted row ceiling with the sealed grant.
+        # Re-running the default pool estimate would erase an explicit allowance.
+        row_limit = min(row_ceiling, effective_pool, max(1, effective_rss // 2))
         scratch = options.max_scratch_bytes
         if ceilings['scratch_bytes'] is not None:
             scratch = min(scratch, ceilings['scratch_bytes'])
@@ -171,6 +173,8 @@ def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=
             threads=eff_threads, partitions=min(options.partitions, eff_threads))
     resources = executor.resource_root / '_demiflow' / 'dataset_native'
     managed = getattr(executor, 'diagnostics_root', None)
+    if managed is None and run is not None:
+        managed = run.directory / 'diagnostics' / 'native'
     if envelope is None:
         group_id = hashlib.sha256(Path('/proc/self/cgroup').read_bytes()).hexdigest()[:16]
         admission_root = Path(tempfile.gettempdir()) / f'demiflow-dataset-{os.getuid()}-{group_id}'

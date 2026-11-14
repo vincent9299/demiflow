@@ -22,7 +22,7 @@ def test_bound_execution_rejected_with_plan_contract_error():
     ds = _plain()
     with pytest.raises(PlanContractError, match="sealed execution binding") as exc:
         list(ex._apply_plan(ds._source, ds._plan, execution=object()))
-    assert exc.value.reason == "unsupported_layout"
+    assert exc.value.reason == "invalid_contract"
 
 
 def test_bound_execution_rejected_before_read(monkeypatch):

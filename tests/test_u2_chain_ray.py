@@ -165,7 +165,10 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
     assert len(set(local_commits["commit_ids"])) == len(local_commits["commit_ids"])
     assert len(set(ray_commits["commit_ids"])) == len(ray_commits["commit_ids"])
     # K6 manifest shape identical (participants/source-progress vector/channel cuts/seal).
-    assert local_k6 == ray_k6
+    # Hash-addressed artifact filenames are not checkpoint order. Positions and
+    # sequences are compared above; compare the manifest shapes as a multiset.
+    import json
+    assert sorted(map(json.dumps, local_k6)) == sorted(map(json.dumps, ray_k6))
     assert local_k6, "no K6 checkpoint manifest was produced"
     # Exactly one manifest is the sealed final cut; hash-named files are not
     # cut-ordered, so check the sealed invariant rather than the last element.

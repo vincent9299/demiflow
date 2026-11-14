@@ -45,14 +45,10 @@ def test_astart_native_borrows_run_journal(tmp_path):
 def test_astart_native_rejects_private_journal(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor(sqlite_journal={'path': str(tmp_path / 'private.sqlite')})
-        actor.native_stream_recovery(_action(run), 'node')
-
-        async def exercise():
-            with pytest.raises(RecoveryContractError, match='private SQLite journal'):
-                await actor.astart()
-            await actor.aclose()  # release partially started resources
-
-        asyncio.run(exercise())
+        with pytest.raises(RecoveryContractError, match='private SQLite journal'):
+            actor.native_stream_recovery(_action(run), 'node')
+        assert not (tmp_path / 'private.sqlite').exists()
+        assert actor._client is None
 
 
 def test_astart_non_native_keeps_private_journal(tmp_path):

@@ -98,12 +98,12 @@ def test_register_auto_json_restored_replaces_fields():
     assert s.policies['stage'] == 'auto_json'
 
 
-def test_register_drops_unsupported_resource_instance():
+def test_register_rejects_unsupported_resource_instance():
     s = OperatorStates(ctx())
     actor = Locked()
-    asyncio.run(s.register(actor, 'stage'))
-    # A locked hookless instance bears resources it cannot serialize: it is not
-    # registered as a state participant (plain execution may still run it).
+    with pytest.raises(RecoveryContractError, match='snapshot_state/restore_state'):
+        asyncio.run(s.register(actor, 'stage'))
+    # A durable execution cannot silently omit the state of a factory instance.
     assert s.owners == {} and s.policies == {}
 
 

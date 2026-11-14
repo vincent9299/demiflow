@@ -75,6 +75,8 @@ class _RayGraphWorkerHost:
         return {"receipt": receipt}
 
     def pull_events(self, limit):
+        if self.executor.error is not None:
+            raise self.executor.error
         with self._lock:
             batch = []
             while self._outbox and len(batch) < limit:

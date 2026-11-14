@@ -107,8 +107,14 @@ def test_empty_input_does_not_open_table(monkeypatch):
 @pytest.mark.parametrize('vector', [None, [], [1.], [[1., 0.]], [float('nan'), 0.],
                                    [1e40, 0.], [True, 0.], ['1', '0']])
 def test_invalid_queries_fail_instead_of_dropping_rows(table, vector):
+    from demiflow.execution.recovery_contract import RecoveryContractError
     stream = plan(table[0], [dict(vector=vector)])
-    with pytest.raises(InvalidLanceRequest):
+    # A nonfinite literal is refused by the sealed source identity before a
+    # search actor starts. Other malformed vectors reach its domain validator.
+    import math
+    nonfinite = isinstance(vector, list) and any(isinstance(v, float) and not math.isfinite(v) for v in vector)
+    with pytest.raises(RecoveryContractError if nonfinite else InvalidLanceRequest,
+                       match='Nonfinite' if nonfinite else None):
         stream.run_stream()
     assert stream._stages[-1]._dataset is None
 

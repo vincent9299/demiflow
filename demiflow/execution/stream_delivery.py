@@ -22,7 +22,7 @@ class _DeliveryStopped(Exception):
     pass
 
 
-def iter_stream_rows(executor,source,plan,*,limit=None,action=None):
+def iter_stream_rows(executor,source,plan,*,limit=None,action=None,execution=None):
     if limit is not None and (type(limit) is not int or limit<0):
         raise ValueError('Native delivery limit must be a nonnegative integer')
     from .queue_producer import producer_actor
@@ -107,7 +107,10 @@ def iter_stream_rows(executor,source,plan,*,limit=None,action=None):
             def produce():
                 try:
                     consume=execute()
-                    try:stream_view(executor,source,plan)._run_stream(consume=consume)
+                    try:
+                        from .native_plan import root_stage_limits
+                        stream_view(executor,source,plan)._run_stream(consume=consume,
+                            stage_limits=root_stage_limits(execution) if execution is not None else None)
                     except _DeliveryStopped:pass
                     if not stopped.is_set():flush()
                     if owns_complete:

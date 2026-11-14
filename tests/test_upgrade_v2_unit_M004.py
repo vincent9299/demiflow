@@ -43,7 +43,5 @@ def test_bind_rejects_coexisting_private_journal(tmp_path):
 
 def test_bind_rejects_response_ceiling_over_record_budget(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
-        actor, rec = _setup(run, max_response_bytes=64 * 1024 ** 2)
         with pytest.raises(RecoveryContractError, match='record budget'):
-            rec.bind_actor()
-        assert actor._journal is None
+            _setup(run, max_response_bytes=64 * 1024 ** 2)

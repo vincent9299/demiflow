@@ -344,6 +344,25 @@ class DataFusionSession:
                 raise TimeoutError('DataFusion resource admission timed out; no query was launched')
             time.sleep(0.05)
 
+    @contextmanager
+    def borrow_resources(self):
+        """Admit a native caller through the existing slot authority, without SQL.
+
+        The caller retains this lease until its workers and consumer buffers have
+        drained. This is admission, not a kernel-enforced limit on arbitrary UDFs.
+        """
+        with self._condition:
+            if self._closed:
+                raise RuntimeError('Native execution session is closed')
+            self._active += 1
+        try:
+            with self._admit():
+                yield self.options
+        finally:
+            with self._condition:
+                self._active -= 1
+                self._condition.notify_all()
+
     def query(self, sql, *, sources, schema=None, views=None, batch_transform=None, label='query', _dataset_spec=None):
         """Execute one read-only SELECT and materialize a private typed result.
 

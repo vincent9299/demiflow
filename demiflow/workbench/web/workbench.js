@@ -20,7 +20,7 @@
     let logOffset=0,logBody='',eventCursor=null,eventRows=[],lastMetricAt=0,lastEventAt=0;
     let records=null,cursors=[null],page=0,listSequence=0,sourceOpen=true,comparison=null,outputFingerprint=null,runFilter='';
     let observationCursor=null,observationPages=[],graphSequence=0,scopeNode=null,nodeOffset=0,inspectorWhole=false;
-    let graphKind='declared',logicalAction=null,logicalSelected=null;
+    let graphKind='declared',logicalAction=null,logicalSelected=null,lastRunGraphAt=0,graphStatus=null;
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     const aliasDrafts=new Map();
     const data=()=>state.current();
@@ -168,11 +168,12 @@
     }
     async function fetchGraph(ticket,{preserveSelection=false,refresh=false}={}){
       const selected=data(),query=selected.run?{basis_kind:'run',run_id:selected.run,attempt:selected.attempt}:selected.report?{basis_kind:'report',report_digest:selected.report}:{basis_kind:'source',entry:selected.entry,...(selected.params?{params:selected.params}:{})};
-      const sequence=++graphSequence;if(scopeNode)query.node_id=scopeNode;if(nodeOffset)query.node_offset=nodeOffset;
+      const sequence=++graphSequence,requestedStatus=run?.status;if(scopeNode)query.node_id=scopeNode;if(nodeOffset)query.node_offset=nodeOffset;
       const value=await request('graph',query);if(!current(ticket)||sequence!==graphSequence)return;
       if(refresh&&Object.keys(getDraft().values).length){message('项目内容已变化；配置草稿保留，请核对后再保存。');return;}
       const previous=preserveSelection?data().node:null,keepWhole=preserveSelection&&inspectorWhole;
       if(!state.acceptGraph(ticket,value))return;
+      if(selected.run){lastRunGraphAt=Date.now();graphStatus=requestedStatus;}
       const selectedNode=value.nodes.some(n=>n.id===previous)?previous:value.nodes.some(n=>n.id===scopeNode)?scopeNode:value.nodes[0]?.id;
       if(value.binding.basis_kind==='report')working={entry:value.binding.entry,params:value.binding.params};
       graphTitle.textContent='数据算子图 · '+value.completeness.total_nodes+' 节点 / '+value.completeness.total_edges+' 条边';
@@ -860,12 +861,16 @@
         if(!current(target.ticket))return;
         if(notice.dataset.observationError)message('');
         if(value.availability==='unsupported'){snapshot={...value,observations:[],outputs:run.outputs,observation_availability:'unsupported'};graphView.paint(snapshot);message('此历史运行没有当前观测契约；封存图、记录和原始日志仍按已有材料显示。');return;}
-        if(value.unchanged){paintRunFacts(value.freshness);return;}
+        // The worker seals plans after the initial graph request. Refresh from
+        // the same run/attempt; observation revisions alone do not carry F1.
+        const refreshGraph=()=>data().graph&&fetchGraph(target.ticket,{preserveSelection:true});
+        if(value.unchanged){paintRunFacts(value.freshness);if(active(run.status)&&Date.now()-lastRunGraphAt>=5000)await refreshGraph();return;}
         snapshot=value;run={...run,...value,attempts:run.attempts?.map(a=>a.attempt===value.attempt?{...a,status:value.status}:a)};
         paintRunBar();paintRunFacts();paintResults();graphView.paint(value);
         if(data().graph&&data().node&&data().mode!=='checks'){
           const stateLabel=inspector.querySelector('.wb-tag');if(stateLabel){const node=data().graph.nodes.find(n=>n.id===data().node);if(node)stateLabel.textContent=ForgeWorkbenchGraph.status(node,value).label;}
         }
+        if(graphStatus!==value.status||Date.now()-lastRunGraphAt>=5000)await refreshGraph();
       },
       onFailure:(error,target)=>{message('连接暂不可用，保留上次观测并退避重试。 '+error.message,'error-box',target.ticket);if(current(target.ticket))notice.dataset.observationError='true';},
       onDetails:async()=>{

@@ -15,7 +15,7 @@ from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.plan_interpreter import EXECUTION_BINDINGS_SCHEMA_V2
 from demiflow.execution.recovery_contract import identity
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.recovery_identity import describe, source_identity
 from demiflow.planning.dag import (
     _operation_semantics, channel_id_for, compile_logical_dag,
     compile_physical_execution_plan,
@@ -69,7 +69,7 @@ def root_program_binding(action_id, ld, source, plan, *, program_ref=None):
         "program_id": identity([action_id, []]),
         "input_path": [],
         "plan_ref": copy.deepcopy(PROGRAM_REF if program_ref is None else program_ref),
-        "source_identity_ref": identity(describe(source)),
+        "source_identity_ref": identity(source_identity(source)),
         "sealed_operators": local_operators(plan),
         "operator_bindings": [{"program_index": i, "stage_id": s}
                               for i, s in enumerate(op_stages)],

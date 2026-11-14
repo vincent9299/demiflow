@@ -4,9 +4,12 @@ import hashlib
 import inspect
 from pathlib import Path
 import types
+from contextvars import ContextVar
 
 from .artifacts import code_record
 from .recovery_contract import identity, document, RecoveryContractError, MAX_DOCUMENT_BYTES
+
+_SOURCE_WALK = ContextVar('demiflow_source_identity_walk', default=None)
 
 
 def describe(value, depth=0):
@@ -130,7 +133,33 @@ def describe(value, depth=0):
 
 
 def source_identity(source):
+    prior = _SOURCE_WALK.get()
+    stack, count = prior if prior is not None else ((), [0])
+    count[0] += 1
+    if id(source) in stack or len(stack) >= 32 or count[0] > 4096:
+        raise RecoveryContractError('Source identity cycle or graph budget exceeded')
+    token = _SOURCE_WALK.set((stack + (id(source),), count))
+    try:
+        return _source_identity(source)
+    finally:
+        _SOURCE_WALK.reset(token)
+
+
+def _source_identity(source):
     from ..data.sources import MaterializedSource, DatasourceSource, FileSource, ItemsSource
+    from .local_kernel import UnionSource, KeyedSource
+    # Composite plans bind child identities, never runtime handles/executors.
+    # In particular a captured materialization is identified by its receipts,
+    # not by serializing the lazy _CheckpointBlocks reader into a declaration.
+    if isinstance(source, UnionSource):
+        return {'union': [plan_identity('input', p.source, p.plan) for p in source.inputs]}
+    if isinstance(source, KeyedSource):
+        import dataclasses
+        return {'keyed': {f.name: describe(getattr(source, f.name))
+                          for f in dataclasses.fields(source) if f.name not in {'left', 'right'}},
+                'left': plan_identity('input', source.left.source, source.left.plan),
+                'right': (plan_identity('input', source.right.source, source.right.plan)
+                          if source.right is not None else None)}
     if isinstance(source, ItemsSource):
         return {'literal_source': identity(describe(source)), 'rows': len(source.items)}
     if isinstance(source, MaterializedSource):
@@ -163,25 +192,39 @@ def source_identity(source):
     return describe(source)
 
 
+def operation_identity(operation):
+    """One semantic projection for action identity and code pins.
+
+    Newly supported stream specializations include their complete batch policy.
+    Existing prompt identities retain their historical representation. Invalid
+    native declarations must never fall back to describing a mutable actor.
+    """
+    from ..data import plan as ops
+    from .plan_facts import operation_facts
+    specialized = type(operation) in {ops.EmbeddingMapOp, ops.VectorSearchOp,
+        ops.StreamGroupBatchesOp, ops.DeduplicateOp, ops.StreamPrependOp}
+    try:
+        fact = operation_facts(operation)
+    except (RuntimeError, ValueError, TypeError):
+        if specialized or type(operation) is ops.OperatorLLMMapOp:
+            raise
+        return describe(operation)
+    native = fact.get('native')
+    if native is None:
+        return describe(operation)
+    names = ('concurrency', 'queue_depth', 'catch', 'hard_timeout', 'execution')
+    if specialized:
+        names += ('max_batch', 'flush_interval')
+    return {'native': describe(native), 'policy': {name: describe(getattr(operation, name))
+                                        for name in names if hasattr(operation, name)}}
+
+
 def plan_identity(kind, source, plan, spec=None, arguments=None):
     operations = []
     for operation in plan.operations if plan is not None else ():
         # Use existing native domain facts for clients/resources, not their live
         # sockets, locks, caches or constructor object identities.
-        native = None
-        try:
-            from .plan_facts import operation_facts
-            fact = operation_facts(operation)
-            native = fact.get("native")
-        except (RuntimeError, ValueError, TypeError):
-            pass
-        if native is not None:
-            operations.append({"native": native,
-                "policy": {name: describe(getattr(operation, name)) for name in
-                    ("concurrency", "queue_depth", "catch", "hard_timeout", "execution")
-                    if hasattr(operation, name)}})
-        else:
-            operations.append(describe(operation))
+        operations.append(operation_identity(operation))
     return dict(kind=kind, source=source_identity(source) if source is not None else None,
                 operations=operations, sink=describe(spec), arguments=describe(arguments))
 

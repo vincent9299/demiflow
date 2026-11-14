@@ -42,22 +42,22 @@ def _intent(run, action_id, spec):
 
 def _pause_native(tmp_path, monkeypatch, *, mode='create', fn=keep_row):
     """Fault after sealing, before any commit; capture real native identity."""
-    from demiflow.execution import chain
+    from demiflow.execution import native_plan
     spec = LanceWriteSpec(str(tmp_path / 'out.lance'), mode=mode,
                          on=('value',) if mode == 'merge' else ())
-    real_seal = chain.seal_write_topology
+    real_seal = native_plan.bind_native_execution
     captured = {}
 
     def stop(action, source, plan, **kwargs):
-        handle = real_seal(action, source, plan, **kwargs)
+        layout, placement = real_seal(action, source, plan, **kwargs)
         intent = _intent(action.context, action.action_id, spec)
         action.context.journal.action_event(action.action_id, 'intent', intent)
         captured.update(action_id=action.action_id, declaration=action.declaration,
-                        intent=intent, plan_ref=handle._plan_ref)
+                        intent=intent, plan_ref=dict(placement.programs[0]["plan_ref"]))
         raise InterruptedError('before native publication')
 
     with monkeypatch.context() as fault:
-        fault.setattr(chain, 'seal_write_topology', stop)
+        fault.setattr(native_plan, 'bind_native_execution', stop)
         with pytest.raises(InterruptedError, match='before native publication'):
             with RunContext.start(tmp_path / 'run') as run:
                 captured['ref'] = run.ref

@@ -18,6 +18,10 @@ class NativeEmbeddingRecovery:
     def __init__(self, actor, action, node_id):
         self.actor, self.action, self.node_id = actor, action, node_id
         run = action.context
+        if actor.options.get('sqlite_journal') is not None:
+            raise RecoveryContractError('Native embedding recovery cannot coexist with a private SQLite journal')
+        if actor.options['max_response_bytes'] + 64 * 1024 > min(16 * 1024**2, run.limits['max_control_bytes']):
+            raise RecoveryContractError('Native response ceiling exceeds the admitted journal record budget')
         journal = getattr(run, '_native_prompt_journal', None)
         if journal is None:
             journal = run._native_prompt_journal = RunPromptJournal(run)
@@ -41,18 +45,28 @@ class NativeEmbeddingRecovery:
         self._response_bound = bound
         self.actor._journal = _BorrowedJournal(self.journal)
 
-    def scope_request(self, request):
+    def scope_request(self, request, *, part=0):
         scope = current_row_scope()
         if scope is None:
             raise RecoveryContractError('Native embedding request lost its source occurrence')
+        occurrence = scope.occurrence if part == 0 else identity([scope.occurrence, 'part', part])
         return RequestRecord({**request, 'native_response_bytes': self._response_bound,
-            'native_occurrence': identity([self.action.action_id, self.node_id, scope.occurrence])})
+            'native_occurrence': identity([self.action.action_id, self.node_id, occurrence])})
+
+    def verify_request_membership(self, request):
+        # A known batch occurrence can never silently acquire different input
+        # membership (e.g. a non-deterministic upstream or timed boundary).
+        # Bind through the existing run journal before lookup/send, not another
+        # effect ledger. Unknown history is never interpreted as a fresh request.
+        key = identity(['embedding-request-membership', request['native_occurrence']])
+        run = self.action.context
+        run.journal.bind_source(run.fence, key, {'request_key': request.request_key})
 
     async def drain(self, *, timeout_s):
         if type(timeout_s) not in (int, float) or not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError('Native embedding drain timeout must be positive and finite')
         current = asyncio.current_task()
-        tasks = [task for task in self.inflight.values() if not task.done() and task is not current]
+        tasks = [task for task in self.inflight.values() if task is not current]
         if not tasks:
             return
         _, pending = await asyncio.wait(tasks, timeout=timeout_s)
@@ -60,3 +74,7 @@ class NativeEmbeddingRecovery:
             # Leave still-running tasks, the client and the journal untouched;
             # the original failure/isolation path owns the hard deadline.
             raise TimeoutError('Native embedding drain timed out with in-flight requests')
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for key, task in list(self.inflight.items()):
+            if task.done():
+                self.inflight.pop(key, None)

@@ -14,6 +14,7 @@ carriage_local: record identity and ref expansion are provider-neutral. Cross-ho
 read domains stay rejected (U6); this is single-host semantic-adaptation evidence.
 """
 import asyncio
+import base64
 import hashlib
 import pickle
 from pathlib import Path
@@ -130,8 +131,8 @@ class RayObjectStore:
 
     Mirrors LocalSegmentStore.write/read so the provider-neutral router/reader and
     ref_records/expand_records work unchanged. The producer pins each ObjectRef so
-    the object stays alive until the consumer reads it; the consumer reconstructs
-    the ObjectRef from its hex location and reads the same-host plasma directly
+    the object stays alive until the consumer reads it; the consumer restores
+    Ray's owner-bearing ObjectRef and reads the same-host plasma directly
     (never through the driver). Bytes + sha256 are verified before unpickling.
     """
 
@@ -150,7 +151,12 @@ class RayObjectStore:
             raise ValueError("ray_object carriage is provider-transient (ephemeral)")
         raw = pickle.dumps(list(rows), protocol=4)
         obj = ray.put(raw)
-        location = obj.hex()
+        # A bare object id loses owner registration across worker processes and
+        # ray.get can then wait forever. Use Ray's own bounded reference codec;
+        # only the handle travels in the control frame, never the business rows.
+        location = 'rayref-v1:' + base64.b64encode(ray.cloudpickle.dumps(obj)).decode('ascii')
+        if len(location) > 8192:
+            raise RecoveryContractError('Ray object reference exceeds control budget')
         self._objects[location] = obj
         digest = hashlib.sha256(raw).hexdigest()
         ref = build_data_ref(kind="ray_object", read_domain=self._domain, location=location,
@@ -165,12 +171,20 @@ class RayObjectStore:
         check_read_domain(ref, self._domain)
         if ref["kind"] != "ray_object":
             raise RecoveryContractError("Ray object carriage reads ray_object refs only")
-        return self._objects.get(ref["location"]) or ray.ObjectRef(bytes.fromhex(ref["location"]))
+        location = ref['location']
+        if location in self._objects:
+            return self._objects[location]
+        if not location.startswith('rayref-v1:') or len(location) > 8192:
+            raise RecoveryContractError('Ray object reference lacks its owner; transient data must be replayed')
+        obj = ray.cloudpickle.loads(base64.b64decode(location[len('rayref-v1:'):], validate=True))
+        if not isinstance(obj, ray.ObjectRef):
+            raise RecoveryContractError('Ray carriage requires an ObjectRef')
+        return obj
 
     def read(self, refs):
         rows = []
         for ref in refs:
-            raw = ray.get(self._resolve(ref))
+            raw = ray.get(self._resolve(ref), timeout=30)
             if len(raw) != ref["bytes"] or hashlib.sha256(raw).hexdigest() != ref["sha256"]:
                 raise ProtocolError("ARTIFACT_MISMATCH", "ray_object digest differs")
             rows.extend(pickle.loads(raw))

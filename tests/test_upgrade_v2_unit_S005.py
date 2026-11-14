@@ -67,12 +67,8 @@ def test_plan_empty_hookless_instance_passes():
     precheck_plan_state(LogicalPlan((mapop(EmptyHookless()),)))
 
 
-def test_plan_hookless_data_enforces_stateless_declaration_boundary():
-    # unified traits keep a hookless instance at the caller's 'none'; the
-    # precheck rejects undeclared cross-row state before any worker starts.
-    with pytest.raises(ProtocolError) as e:
-        precheck_plan_state(LogicalPlan((mapop(PlainData()),)))
-    assert e.value.code == 'STATE_ADAPTER_MISSING'
+def test_plan_hookless_data_admits_platform_auto_json():
+    precheck_plan_state(LogicalPlan((mapop(PlainData()),)))
 
 
 def test_plan_locked_instance_rejected():

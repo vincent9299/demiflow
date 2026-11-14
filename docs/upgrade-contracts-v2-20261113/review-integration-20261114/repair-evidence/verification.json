@@ -1,0 +1,111 @@
+{
+  "status": "accepted_for_IR01_through_IR07",
+  "branch": "engine/gpt-integration-review-20261114",
+  "tested_head": "b4dd41722130be3898a8a98057541d843777906e",
+  "tested_with_uncommitted_repairs": true,
+  "groups": [
+    {
+      "label": "accepted-units",
+      "passed": 916,
+      "skipped": 6,
+      "exit_code": 0,
+      "source_stable": true,
+      "provenance": "accepted-units-provenance.json",
+      "log": "accepted-units.console.log",
+      "elapsed_seconds": 156.85
+    },
+    {
+      "label": "accepted-core",
+      "passed": 420,
+      "skipped": 2,
+      "exit_code": 0,
+      "source_stable": true,
+      "provenance": "accepted-core-provenance.json",
+      "log": "accepted-core.console.log",
+      "elapsed_seconds": 727.07
+    },
+    {
+      "label": "accepted-browser",
+      "passed": 2,
+      "skipped": 0,
+      "exit_code": 0,
+      "source_stable": true,
+      "provenance": "accepted-browser-provenance.json",
+      "log": "accepted-browser.console.log",
+      "elapsed_seconds": 158.79
+    },
+    {
+      "label": "accepted-ray",
+      "passed": 3,
+      "skipped": 0,
+      "exit_code": 0,
+      "source_stable": true,
+      "provenance": "accepted-ray-provenance.json",
+      "log": "accepted-ray.console.log",
+      "elapsed_seconds": 21.06
+    },
+    {
+      "label": "accepted-ray-lifecycle",
+      "passed": 5,
+      "skipped": 0,
+      "exit_code": 0,
+      "source_stable": true,
+      "provenance": "accepted-ray-lifecycle-provenance.json",
+      "log": "accepted-ray-lifecycle.console.log",
+      "elapsed_seconds": 73.96
+    }
+  ],
+  "passed": 1346,
+  "recorded_skips": 8,
+  "skip_accounting": {
+    "ray_l016": "5 skips in ordinary interpreter; all 5 rerun successfully in accepted-ray-lifecycle",
+    "ray_l018": "1 legacy placeholder skipped; real graph equivalence and crash recovery passed separately in accepted-ray",
+    "postgresql": [
+      "tests/test_queue_producer_recovery.py::test_lance_recovery_seeks_after_confirmed_input_unit",
+      "tests/test_queue_producer_recovery.py::test_unfixed_search_exchange_cannot_repeat_http_in_a_new_run"
+    ]
+  },
+  "input_hash_reference": "accepted-core-provenance.json",
+  "source_files": 1038,
+  "test_files": 598,
+  "additional_test_inputs": {
+    "test_ray_lifecycle.py": "c07cedfdc5fc34c6a9db8e43d8b5cf2614c0cb6b6cab8189c1b34a91ecc5310c"
+  },
+  "runner_sha256": "285d4eb76cbcc59950f78e42d6ba2cb0152af45ed3d7f4d427467891a48e26ab",
+  "fixes": [
+    {
+      "id": "IR-01",
+      "status": "fixed_and_verified"
+    },
+    {
+      "id": "IR-02",
+      "status": "fixed_and_verified"
+    },
+    {
+      "id": "IR-03",
+      "status": "fixed_and_verified"
+    },
+    {
+      "id": "IR-04",
+      "status": "fixed_and_verified"
+    },
+    {
+      "id": "IR-05",
+      "status": "fixed_and_verified"
+    },
+    {
+      "id": "IR-06",
+      "status": "fixed_and_verified"
+    },
+    {
+      "id": "IR-07",
+      "status": "fixed_and_verified"
+    }
+  ],
+  "scope_limits": [
+    "No production rollout or main-checkout merge",
+    "No claim of complete V-card/business acceptance",
+    "No isolated PostgreSQL fixture supplied",
+    "No general Python UDF RSS sandbox or overall performance benchmark claim"
+  ]
+}

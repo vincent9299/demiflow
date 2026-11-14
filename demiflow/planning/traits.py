@@ -71,9 +71,8 @@ def unified_operation_traits(op):
         # Instance and class ownership share the single C04 policy. A class is a
         # factory (deferred shared_colocated); an instance with a native adapter
         # keeps that adapter instead of dropping it for not being a class. A
-        # hookless instance keeps the caller's declaration so the precheck still
-        # enforces the stateless-declaration boundary; its plain-data state is
-        # captured by auto_json at registration, not by upgrading sealed ownership.
+        # plain-data instance has the same shared owner as its auto_json adapter;
+        # precheck enforces concurrency 1 before any actor starts.
         from ..execution.operator_policy import classify_operator_state
         target = callable_spec.target
         if callable_spec.is_class:
@@ -82,7 +81,7 @@ def unified_operation_traits(op):
                 updates["state_ownership"] = "shared_colocated"
         else:
             policy = classify_operator_state(target, phase="instance")
-            if policy.mode == "hooks":
+            if policy.mode in {"hooks", "auto_json"}:
                 updates["state_ownership"] = "shared_colocated"
     return replace(base, **updates) if updates else base
 

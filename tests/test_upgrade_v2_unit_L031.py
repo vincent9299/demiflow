@@ -16,7 +16,7 @@ from demiflow.execution.local_kernel import KeyedSource, PlanInput, UnionSource
 from demiflow.execution.native_plan import verify_native_programs
 from demiflow.execution.plan_interpreter import PlanContractError
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.recovery_identity import describe, source_identity
 from test_execution_layout import PROGRAM_REF
 import _v2_native_fixtures as fx
 
@@ -33,7 +33,7 @@ def _binding_for(source, plan, input_path, *, pin_source=None):
         "program_id": identity([ACTION, input_path]),
         "input_path": list(input_path),
         "plan_ref": {**PROGRAM_REF, "code_pin_digest": digest},
-        "source_identity_ref": identity(describe(source)),
+        "source_identity_ref": identity(source_identity(source)),
         "sealed_operators": fx.local_operators(plan),
         "operator_bindings": [{"program_index": i, "stage_id": identity(["stage", i])}
                               for i in range(len(plan.operations))],

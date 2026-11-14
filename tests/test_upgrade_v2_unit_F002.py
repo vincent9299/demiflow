@@ -28,6 +28,14 @@ def _spec():
     return CallableSpec(target=_fn)
 
 
+def _vector_op(**options):
+    spec = dict(uri='file:///t', version=1, vector_column='vec',
+                columns=['id'], top_k=5, storage_options={})
+    spec.update(options)
+    return data.from_items([{'q': [1., 2.]}]).search_vectors(
+        query='q', output='out', **spec)._plan.operations[-1]
+
+
 def _dag_id(ds):
     return compile_logical_dag(
         action_id="act", source=ds._source, operations=ds._plan.operations,
@@ -141,18 +149,17 @@ def test_prepend_admitted_with_bounded_source_identity():
 
 
 def test_embedding_admitted_with_domain():
-    op = ops.EmbeddingMapOp(_spec(), model_contract={"name": "m", "dim": 4},
-                            inputs={"text": "t"}, output="emb")
-    fact = operation_facts(op)
+    from demiflow.embeddings import EmbeddingModel
+    ds = data.from_items([{'t': 'x'}]).map_embeddings(
+        model=EmbeddingModel('m', 'r1', 4, 'http://127.0.0.1:1/v1'), inputs={'text': 't'}, output='emb')
+    fact = operation_facts(ds._plan.operations[-1])
     document(fact)
-    assert fact["kind"] == "batch_map"
-    assert fact["native"]["contract"] == "demiflow.embeddings"
+    assert fact['kind'] == 'batch_map'
+    assert fact['native']['contract'] == 'demiflow.embeddings.v2'
 
 
 def test_vector_search_admitted_with_domain():
-    op = ops.VectorSearchOp(_spec(), query="q", output="out", search_spec={
-        "uri": "file:///t", "version": 1, "vector_column": "vec",
-        "columns": ["id"], "top_k": 5, "storage_options": {}})
+    op = _vector_op()
     fact = operation_facts(op)
     document(fact)
     assert fact["kind"] == "async_map"
@@ -229,7 +236,11 @@ def test_model_map_options_exclude_credentials_and_environment_paths():
         "stream": True,
         "stream_log_dir": "/secret/logs",
     }
-    _, op = _model_op(options)
+    with pytest.raises((ValueError, RuntimeError), match='request_options|journal_dir|Unsupported|Unknown|offline'):
+        _model_op(options)
+    from dataclasses import replace
+    _, original = _model_op()
+    op = replace(original, options=options)
     fact = operation_facts(op)
     blob = document(fact).decode()
     assert "SUPERSECRET-KEY" not in blob
@@ -250,20 +261,20 @@ def test_model_map_none_options_stay_none():
 # --- T9: VectorSearch storage_options referenced by bounded identity, not copied ---
 
 def test_vector_search_storage_options_secret_negative():
-    op = ops.VectorSearchOp(_spec(), query="q", output="out", search_spec={
-        "uri": "file:///t", "version": 1, "vector_column": "vec", "columns": ["id"],
-        "top_k": 5, "storage_options": {"secret_access_key": "SUPERSECRET-VALUE", "endpoint": "http://x"}})
+    with pytest.raises(ValueError, match='unsupported Lance storage option'):
+        _vector_op(storage_options={"secret_access_key": "SUPERSECRET-VALUE"})
+    op = _vector_op(storage_options={"endpoint": "http://SUPERSECRET-VALUE"})
     fact = operation_facts(op)
     blob = document(fact).decode()
     assert "SUPERSECRET-VALUE" not in blob
     ref = fact["native"]["arguments"]["storage_options"]
     assert set(ref) == {"sha256", "keys"}
-    assert ref["keys"] == ["endpoint", "secret_access_key"]
+    assert ref["keys"] == ["endpoint"]
 
 
 def test_vector_search_storage_options_identity_stable():
     spec = {"uri": "file:///t", "version": 1, "vector_column": "vec", "columns": ["id"],
             "top_k": 5, "storage_options": {"endpoint": "http://x", "region": "r"}}
-    a = ops.VectorSearchOp(_spec(), query="q", output="out", search_spec=dict(spec))
-    b = ops.VectorSearchOp(_spec(), query="q", output="out", search_spec=dict(spec))
+    a = _vector_op(**spec)
+    b = _vector_op(**spec)
     assert document(operation_facts(a)) == document(operation_facts(b))

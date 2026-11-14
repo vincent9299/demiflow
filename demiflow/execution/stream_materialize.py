@@ -80,7 +80,7 @@ def prepare_stream_blocks(executor, source, plan, action, context, *,
         token = _ACTION.set(child)
         try:
             selected = freeze_source(child, source)
-            terminal = StreamMaterialization(child, lambda: executor.iter_rows(selected, LogicalPlan()),
+            terminal = StreamMaterialization(child, lambda: executor._apply_plan(selected, LogicalPlan()),
                 object_specs=image_object_specs(plan), staging_only=True)
             if checkpoint_policy is not None:
                 terminal.checkpoint_policy = checkpoint_policy
@@ -233,7 +233,10 @@ class StreamStageProgress:
             capability = getattr(target, 'native_stream_recovery', None)
             if capability is not None:
                 stage.native_recovery = capability(self.action, key)
-                stage.native_snapshot = stage.native_recovery is not None and getattr(stage.native_recovery, 'row_local', True) and all(
+                # Effect replay and worker-buffer alignment are separate. A batch
+                # actor borrows the effect journal, but every batch worker must
+                # drain its request and contribute its remainder to the cut.
+                stage.native_snapshot = stage.buffer_adapter is None and stage.native_recovery is not None and getattr(stage.native_recovery, 'row_local', True) and all(
                     inspect.isfunction(owner_of(predicate)) or inspect.isbuiltin(owner_of(predicate))
                     for predicate in stage.pre_filters + stage.post_filters)
                 for number, owner in enumerate(getattr(stage.native_recovery, 'semantic_owners', ())):

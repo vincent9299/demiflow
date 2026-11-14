@@ -1,0 +1,396 @@
+"""Public execution and real journal counterexamples for IR-01 through IR-07."""
+from pathlib import Path
+import math
+
+import pytest
+import pyarrow as pa
+import lance
+
+from demiflow import data
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.recovery_identity import plan_identity
+from demiflow.execution.chain import plan_code_pin
+from demiflow.execution.plan_facts import operation_facts
+from test_embeddings import server as embedding_server
+
+
+def _identity(row):
+    return row
+
+
+def test_run_stream_consumes_sealed_limits_without_claiming_replay(tmp_path, monkeypatch):
+    from demiflow.execution.native_plan import load_native_execution
+    from demiflow.execution import stream
+    limits = []
+    original = stream.run_stream
+    def observed(*args, **kwargs):
+        limits.append(kwargs['stage_limits'])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(stream, 'run_stream', observed)
+    def pipeline():
+        return data.from_items([{'id': 1}, {'id': 2}]).map(_identity, execution='thread')
+    with RunContext.start(tmp_path/'run') as run:
+        stats = pipeline().run_stream()
+        assert stats is not None and limits[0][0]['inflight_rows'] > 0
+        from demiflow.execution.sealed_plans import load_sealed_plan, load_execution_bindings
+        plan = load_sealed_plan(run.directory, 'action-1')
+        bindings = load_execution_bindings(run.directory, 'action-1', sealed_plan=plan)
+        layout, placement = load_native_execution(run, 'action-1',
+            execution_id=bindings['document']['executions'][0]['execution_id'])
+        assert placement.backend == 'local_stream'
+        assert placement.recovery == 'delivery_only'
+    def fail(row):
+        raise RuntimeError('interrupted delivery fixture')
+    broken = data.from_items([{'id': 1}]).map(fail, execution='thread')
+    with pytest.raises(RuntimeError, match='interrupted delivery fixture'):
+        with RunContext.start(tmp_path/'interrupted') as interrupted:
+            broken.run_stream()
+    with pytest.raises(RecoveryContractError, match='delivery-only'):
+        with RunContext.resume(interrupted.ref):
+            broken.run_stream()
+
+
+@pytest.mark.parametrize('terminal', ['take', 'take_all', 'count', 'iter_rows', 'iter_batches',
+                                    'materialize', 'schema', 'size_bytes', 'write_lance'])
+def test_public_terminal_consumes_sealed_execution(tmp_path, monkeypatch, terminal):
+    from demiflow.execution import native_plan
+    calls = []
+    original = native_plan.execute_native_plan
+    def observed(*args, **kwargs):
+        calls.append(kwargs['layout'])
+        yield from original(*args, **kwargs)
+    monkeypatch.setattr(native_plan, 'execute_native_plan', observed)
+    with RunContext.start(tmp_path / 'run') as run:
+        ds = data.from_items([{'id': 1}, {'id': 2}]).map(_identity)
+        if terminal == 'take':
+            assert ds.take(1) == [{'id': 1}]
+        elif terminal == 'write_lance':
+            ds.write_lance(str(tmp_path / 'out.lance'), mode='create')
+            assert lance.dataset(str(tmp_path / 'out.lance')).count_rows() == 2
+        elif terminal in {'iter_rows', 'iter_batches'}:
+            assert list(getattr(ds, terminal)())
+        else:
+            assert getattr(ds, terminal)() is not None
+        assert calls and len(calls) == 1
+        assert calls[0].executions[0].backend == 'local_pull'
+        assert run.journal.source_binding('action-1-sealed-plan') is not None
+
+
+@pytest.mark.parametrize('change', [dict(batch_size=3), dict(call_output='audit'),
+                                   dict(error_output='error'), dict(max_requests=1),
+                                   dict(flush_interval=1)])
+def test_embedding_identity_binds_actual_options(change):
+    from demiflow.embeddings import EmbeddingModel
+    model = EmbeddingModel('fixture', 'r1', 3, 'http://127.0.0.1:1/v1')
+    def build(**extra):
+        return data.from_items([{'text': 'x'}]).map_embeddings(model=model,
+            inputs={'text': 'text'}, **{'batch_size': 2, **extra})
+    a, b = build(), build(**change)
+    assert plan_identity('materialize', a._source, a._plan) != plan_identity('materialize', b._source, b._plan)
+    assert plan_code_pin(a._plan) != plan_code_pin(b._plan)
+
+
+def test_embedding_actor_tampering_fails_before_seal():
+    from demiflow.embeddings import EmbeddingModel
+    from demiflow.data.runtime_contract import RuntimeContractError
+    ds = data.from_items([{'text': 'x'}]).map_embeddings(
+        model=EmbeddingModel('fixture', 'r1', 3, 'http://127.0.0.1:1/v1'), inputs={'text': 'text'})
+    ds._stages[-1].output = 'changed'
+    for check in (lambda: operation_facts(ds._plan.operations[0]),
+                  lambda: plan_code_pin(ds._plan),
+                  lambda: plan_identity('materialize', ds._source, ds._plan)):
+        with pytest.raises(RuntimeContractError, match='differs'):
+            check()
+
+
+def test_embedding_batch_workers_share_native_journal(embedding_server, tmp_path):
+    with RunContext.start(tmp_path / 'run', limits={'checkpoint_rows': 2,
+            'checkpoint_interval_ms': 60000, 'checkpoint_timeout_s': 5}) as run:
+        ds = data.from_items([{'text': str(i)} for i in range(7)]).map_embeddings(
+            model=embedding_server['model'], inputs={'text': 'text'}, batch_size=2,
+            concurrency=2, max_requests=8)
+        result = ds.materialize().take_all()
+        assert sorted(row['text'] for row in result) == list(map(str, range(7)))
+        assert run._native_prompt_journal.path == run.journal.path
+
+
+@pytest.mark.parametrize('kind', ['union', 'join'])
+def test_public_relational_graph_executes_one_bound_program_tree(kind, tmp_path):
+    with RunContext.start(tmp_path / 'run') as run:
+        left = data.from_items([{'id': 1, 'x': 2}])
+        right = data.from_items([{'id': 1, 'y': 3}])
+        ds = left.union(left) if kind == 'union' else left.join(right, on='id')
+        result = ds.take_all()
+        assert result == ([{'id': 1, 'x': 2}] * 2 if kind == 'union' else [{'id': 1, 'x': 2, 'y': 3}])
+        assert run.journal.source_binding('action-1-sealed-plan') is not None
+
+
+class Counter:
+    def __init__(self):
+        self.count = 0
+
+    def __call__(self, row):
+        self.count += 1
+        return dict(row, count=self.count)
+
+
+def test_plain_instance_auto_state_and_prepend_public_composition(tmp_path):
+    with RunContext.start(tmp_path / 'run'):
+        ds = data.from_items([{'id': 1}, {'id': 2}]).prepend(
+            data.from_items([{'id': 0}]), max_rows=1).map(Counter(), concurrency=1)
+        assert ds.materialize().take_all() == [dict(id=i, count=i+1) for i in range(3)]
+
+
+def test_arrow_detaches_small_slice_from_large_backing_buffer():
+    from demiflow.execution.arrow_batch_sink import rechunk
+    parent = pa.record_batch({'x': list(range(1024))})
+    rows = rechunk([parent], 1, max_bytes=16)
+    try:
+        assert next(rows).get_total_buffer_size() <= 16
+    finally:
+        rows.close()
+
+
+def test_arrow_ipc_bytes_rejected_before_disk_write(tmp_path):
+    import cloudpickle
+    from demiflow.execution.arrow_batch_sink import apply_batch
+    from demiflow.data.plan import MapBatchesOp, CallableSpec
+    op = MapBatchesOp(CallableSpec(target=_identity), batch_format='pyarrow')
+    path = tmp_path / 'output.arrow'
+    batch = pa.table({'id': [1]})
+    with pytest.raises(RecoveryContractError, match='scratch byte budget'):
+        apply_batch(batch, cloudpickle.dumps(op), str(path), batch.schema, max_bytes=8)
+    assert not path.exists()
+
+
+def test_arrow_public_write_uses_admitted_physical_reader(tmp_path, monkeypatch):
+    from demiflow.lance import read
+    reads = []
+    original = read.iter_lance_batches
+    def record(*args, **kwargs):
+        reads.append(kwargs.get('batch_size'))
+        yield from original(*args, **kwargs)
+    monkeypatch.setattr(read, 'iter_lance_batches', record)
+    schema = pa.schema([('id', pa.int64())])
+    source = tmp_path / 'source.lance'
+    lance.write_dataset(pa.table({'id': list(range(11))}), str(source))
+    with RunContext.start(tmp_path / 'run', limits={'batch_rows': 2}):
+        with data.local_execution(workers=1, worker_mode='thread', partitions=1, batch_rows=2):
+            data.read_lance(str(source), version=1).map_batches(_identity, batch_size=5,
+                batch_format='pyarrow').write_lance(str(tmp_path / 'out.lance'), mode='create', schema=schema)
+    assert reads and max(reads) <= 2
+    assert lance.dataset(str(tmp_path / 'out.lance')).count_rows() == 11
+
+
+@pytest.mark.parametrize('window', ['after_prepared', 'after_acked'])
+def test_embedding_resume_keeps_batches_and_does_not_repeat_paid_calls(embedding_server, tmp_path, monkeypatch, window):
+    from demiflow.execution import commit
+    from demiflow.execution.run_journal import RunJournal
+    root = tmp_path / 'run'
+    def build():
+        return data.from_items([{'text': str(i)} for i in range(11)]).map_embeddings(
+            model=embedding_server['model'], inputs={'text': 'text'}, batch_size=3,
+            concurrency=2, max_requests=20).materialize().take_all()
+    def crash(name, commit_id):
+        fact = RunJournal(root).execution_commit(commit_id)
+        if name == window and fact['intent']['sinks'] == ['output']:
+            raise RuntimeError('injected loss')
+    with monkeypatch.context() as m:
+        m.setattr(commit, 'fault_point', crash)
+        with pytest.raises(RuntimeError, match='injected loss'):
+            with RunContext.start(root, limits={'checkpoint_rows': 4,
+                    'checkpoint_interval_ms': 60000, 'checkpoint_timeout_s': 5}) as run:
+                ref = run.ref
+                build()
+    with RunContext.resume(ref):
+        rows = build()
+    assert sorted(int(row['text']) for row in rows) == list(range(11))
+    calls = [text for body in embedding_server['bodies'] for text in body['input']]
+    assert sorted(map(int, calls)) == list(range(11))
+
+
+def test_embedding_known_http_failure_is_replayed_without_request(embedding_server, tmp_path):
+    from httpx import HTTPStatusError
+    embedding_server['status'] = 500
+    def build():
+        return data.from_items([{'text': 'x'}]).map_embeddings(
+            model=embedding_server['model'], inputs={'text': 'text'}).materialize()
+    with pytest.raises(Exception):
+        with RunContext.start(tmp_path / 'run') as run:
+            ref = run.ref
+            build()
+    count = len(embedding_server['bodies'])
+    assert count == 1
+    embedding_server['status'] = 200
+    with pytest.raises(HTTPStatusError):
+        with RunContext.resume(ref):
+            build()
+    assert len(embedding_server['bodies']) == count
+
+
+def test_auto_json_state_restores_with_committed_prepend_frontier(tmp_path, monkeypatch):
+    from demiflow.execution import commit
+    from demiflow.execution.run_journal import RunJournal
+    def build():
+        return data.from_items([{'id': i} for i in range(1, 9)]).prepend(
+            data.from_items([{'id': 0}]), max_rows=1).map(Counter(), concurrency=1).materialize().take_all()
+    def crash(name, commit_id):
+        fact = RunJournal(tmp_path / 'run').execution_commit(commit_id)
+        if name == 'after_acked' and fact['intent']['sinks'] == ['output']:
+            raise RuntimeError('injected loss')
+    with monkeypatch.context() as m:
+        m.setattr(commit, 'fault_point', crash)
+        with pytest.raises(RuntimeError, match='injected loss'):
+            with RunContext.start(tmp_path / 'run', limits={'checkpoint_rows': 3,
+                    'checkpoint_interval_ms': 60000}) as run:
+                ref = run.ref
+                build()
+    with RunContext.resume(ref):
+        rows = build()
+    assert rows == [dict(id=i, count=i+1) for i in range(9)]
+
+
+@pytest.mark.parametrize('window', ['after_prepared', 'after_acked'])
+def test_embedding_actual_process_loss_resumes_without_duplicate_requests(embedding_server, tmp_path, window):
+    import os
+    import subprocess
+    import sys
+    import json
+    script = r'''
+import os, sys, json
+from pathlib import Path
+from demiflow import data
+from demiflow.embeddings import EmbeddingModel
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.recovery_contract import RunRef
+import demiflow.execution.commit as commit
+root, endpoint, window = sys.argv[1:]
+if window != 'resume':
+    def fault(name, commit_id):
+        fact = RunJournal(root).execution_commit(commit_id)
+        if name == window and fact['intent']['sinks'] == ['output'] and fact['sequence'] == 2:
+            os._exit(73)
+    commit.fault_point = fault
+prior = RunJournal(root).recovery_identity() if Path(root, 'run.sqlite').exists() else None
+scope = RunContext.resume(RunRef(root, prior['run_id'])) if prior else RunContext.start(root,
+    limits={'checkpoint_rows': 4, 'checkpoint_interval_ms': 60000, 'checkpoint_timeout_s': 5})
+with scope:
+    rows = data.from_items([{'text':str(i)} for i in range(23)]).map_embeddings(
+        model=EmbeddingModel('fixture', 'fixed-revision', 3, endpoint),
+        inputs={'text':'text'}, batch_size=3, concurrency=2, max_requests=30).materialize().take_all()
+Path(root, 'result.json').write_text(json.dumps(rows))
+'''
+    root = Path(__file__).resolve().parents[1]
+    env = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(root), str(root/'tests')]),
+           'PYTHONDONTWRITEBYTECODE': '1', 'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1'}
+    args = [sys.executable, '-B', '-c', script, str(tmp_path/'run'), embedding_server['model'].base_url]
+    failed = subprocess.run([*args, window], env=env, capture_output=True, text=True, timeout=60)
+    assert failed.returncode == 73, failed.stdout + failed.stderr
+    resumed = subprocess.run([*args, 'resume'], env=env, capture_output=True, text=True, timeout=60)
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    rows = json.loads((tmp_path/'run'/'result.json').read_text())
+    assert sorted(int(row['text']) for row in rows) == list(range(23))
+    calls = [int(text) for body in embedding_server['bodies'] for text in body['input']]
+    assert sorted(calls) == list(range(23))
+
+
+def test_materialized_inputs_survive_nested_relational_binding(tmp_path):
+    with RunContext.start(tmp_path / 'run'):
+        held = data.from_items([{'id': 1, 'x': 2}]).materialize()
+        combined = held.union(held).join(data.from_items([{'id': 1, 'y': 3}]), on='id')
+        assert combined.take_all() == [{'id': 1, 'x': 2, 'y': 3}] * 2
+
+
+def test_native_program_stage_swap_is_rejected_before_execution(tmp_path, monkeypatch):
+    import dataclasses
+    from demiflow.execution import native_plan
+    from demiflow.execution.capabilities import admit_action_plan
+    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.plan_interpreter import PlanContractError
+    ds = data.range(2).map(_identity).map(_identity)
+    decision = admit_action_plan(ds._source, ds._plan, action_kind='take_all')
+    with RunContext.start(tmp_path/'run') as run:
+        action = RunAction(run, 'mapping-proof', {'kind': 'take_all'})
+        layout, placement = native_plan.bind_native_execution(action, ds._source, ds._plan, decision=decision)
+        programs = [dict(p) for p in placement.programs]
+        bindings = [dict(b) for b in programs[0]['operator_bindings']]
+        bindings[0]['stage_id'], bindings[1]['stage_id'] = bindings[1]['stage_id'], bindings[0]['stage_id']
+        programs[0]['operator_bindings'] = bindings
+        swapped = dataclasses.replace(placement, programs=tuple(programs))
+        monkeypatch.setattr(native_plan, 'load_native_execution', lambda *a, **k: (layout, swapped))
+        with pytest.raises(PlanContractError, match='Program stages'):
+            native_plan.bind_native_execution(action, ds._source, ds._plan, decision=decision)
+
+
+def test_embedding_unknown_process_loss_never_resends(embedding_server, tmp_path):
+    import os
+    import subprocess
+    import sys
+    script = r'''
+import os, sys
+from pathlib import Path
+from demiflow import data
+from demiflow.embeddings import EmbeddingModel
+from demiflow.embeddings.runtime import EmbeddingActor
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.recovery_contract import RunRef
+root, endpoint, mode = sys.argv[1:]
+if mode == 'crash':
+    async def unknown(self, request, encoded, timings):
+        await self._http(encoded)
+        os._exit(73)
+    EmbeddingActor._fresh_exchange = unknown
+prior = RunJournal(root).recovery_identity() if Path(root, 'run.sqlite').exists() else None
+scope = RunContext.resume(RunRef(root, prior['run_id'])) if prior else RunContext.start(root)
+with scope:
+    data.from_items([{'text':'x'}]).map_embeddings(
+        model=EmbeddingModel('fixture', 'fixed-revision', 3, endpoint),
+        inputs={'text':'text'}, batch_size=1).materialize()
+'''
+    root = Path(__file__).resolve().parents[1]
+    env = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(root), str(root/'tests')]),
+           'PYTHONDONTWRITEBYTECODE': '1', 'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1'}
+    args = [sys.executable, '-B', '-c', script, str(tmp_path/'run'), embedding_server['model'].base_url]
+    failed = subprocess.run([*args, 'crash'], env=env, capture_output=True, text=True, timeout=60)
+    assert failed.returncode == 73, failed.stdout + failed.stderr
+    assert len(embedding_server['bodies']) == 1
+    resumed = subprocess.run([*args, 'resume'], env=env, capture_output=True, text=True, timeout=60)
+    assert resumed.returncode != 0 and 'UncertainPromptCall' in resumed.stderr, resumed.stdout + resumed.stderr
+    assert len(embedding_server['bodies']) == 1
+
+
+def test_timed_embedding_packed_requests_keep_distinct_membership(embedding_server, tmp_path):
+    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':4, 'checkpoint_interval_ms':60000}):
+        rows = [{'text': str(i) + 'x'*160} for i in range(9)]
+        result = data.from_items(rows).map_embeddings(model=embedding_server['model'],
+            inputs={'text':'text'}, batch_size=3, concurrency=2, flush_interval=.01,
+            options={'batch_request_bytes':300, 'max_request_bytes':1024}).materialize().take_all()
+    assert sorted(r['text'] for r in result) == sorted(r['text'] for r in rows)
+    assert sorted(t for body in embedding_server['bodies'] for t in body['input']) == sorted(r['text'] for r in rows)
+    assert len(embedding_server['bodies']) == 9
+
+
+def test_reduce_program_tree_executes_under_the_sealed_layout(tmp_path):
+    def fold(state, row):
+        return {'k': row['k'], 'n': (state or {}).get('n', 0) + 1}
+    with RunContext.start(tmp_path/'run') as run:
+        ds = data.from_items([{'k': 1}, {'k': 2}, {'k': 1}]).reduce_by_key('k', fold)
+        assert sorted(ds.take_all(), key=lambda r:r['k']) == [{'k':1, 'n':2}, {'k':2, 'n':1}]
+        from demiflow.execution.sealed_plans import load_sealed_plan
+        assert len(load_sealed_plan(run.directory, 'action-1')['logical_dag']['nodes']) == 3
+
+
+def test_bound_pull_rejects_wide_input_before_calling_business_code(tmp_path):
+    from demiflow.data.runtime_contract import RuntimeContractError
+    called = []
+    def operation(row):
+        called.append(True)
+        return row
+    ds = data.from_items([{'wide': 'x'*10000}]).map(operation)
+    with pytest.raises(RuntimeContractError):
+        with RunContext.start(tmp_path/'run', limits={'max_row_bytes':128, 'max_batch_bytes':256}):
+            ds.take(1)
+    assert called == []

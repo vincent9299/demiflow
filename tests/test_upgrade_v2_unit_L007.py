@@ -21,7 +21,7 @@ from demiflow.execution import chain
 from demiflow.execution.native_plan import compile_native_topology, load_native_execution
 from demiflow.execution.plan_interpreter import PlanContractError
 from demiflow.execution.recovery_contract import identity
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.recovery_identity import describe, source_identity
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.execution.sealed_plans import load_sealed_plan
 from demiflow.planning.dag import compile_logical_dag
@@ -57,6 +57,7 @@ class _SliceDouble:
     plan: object
     sealed_operators: tuple
     operator_bindings: tuple
+    source_occurrence_id: str | None = None
 
 
 def _program_slice(action_id, ld, source, plan):
@@ -134,7 +135,7 @@ def test_compile_seals_driver_only_native_layout(monkeypatch, workdir):
                                          for n in logical_dag["nodes"][1:-1]]
     assert len(placement.programs) == 1
     assert placement.programs[0]["program_id"] == identity([ACTION, []])
-    assert placement.programs[0]["source_identity_ref"] == identity(describe(source))
+    assert placement.programs[0]["source_identity_ref"] == identity(source_identity(source))
     # F004 delivers occurrence_id; L007 must resolve it to the physical stage_id
     assert [dict(ob) for ob in placement.programs[0]["operator_bindings"]] == [
         {"program_index": i, "stage_id": identity([logical_dag["dag_id"], node["occurrence_id"]])}

@@ -40,7 +40,7 @@ def _action_authority(action_id=ACTION):
         run_context._ACTION.reset(token)
 
 
-def _layout(monkeypatch, *, backend="local_stream", matching_pin=True):
+def _layout(monkeypatch, *, backend="datafusion", matching_pin=True):
     source, plan = fx.native_source_plan()
     program_ref = ({**PROGRAM_REF, "code_pin_digest": identity(_fake_pin(plan, source=source))}
                    if matching_pin else None)
@@ -69,7 +69,7 @@ def _install_backends(monkeypatch, rows=ROWS):
 
 
 def test_dispatches_sealed_backend_and_yields_rows(monkeypatch):
-    source, plan, layout, n = _layout(monkeypatch, backend="local_stream")
+    source, plan, layout, n = _layout(monkeypatch, backend="datafusion")
     dataset_calls, arrow_calls = _install_backends(monkeypatch)
     sentinel = object()
     with _action_authority():

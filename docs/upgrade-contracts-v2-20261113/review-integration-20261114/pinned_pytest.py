@@ -11,6 +11,7 @@ def main():
     os.environ['PYTHONPATH'] = str(root) + os.pathsep + str(root/'tests')
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
     os.environ['FORGE_WORKBENCH_EVIDENCE'] = str(evidence/(label+'-browser'))
+    os.environ['DEMIFLOW_FORGE_DOMAIN'] = str(evidence/(label+'-domain'))
     sys.dont_write_bytecode = True
     sys.path[:0] = [str(root), str(root/'tests')]
     import demiflow
@@ -20,16 +21,26 @@ def main():
     record = dict(root=str(root), module=demiflow.__file__, executable=sys.executable,
                   pid=os.getpid(), argv=sys.argv, head=git('rev-parse','HEAD'), dirty=git('status','--porcelain'),
                   started=time.time(), pytest_args=args)
-    record['source_sha256'] = {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in sorted((root/'demiflow').rglob('*.py'))}
+    def source_hashes():
+        return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted((root/'demiflow').rglob('*')) if p.is_file()
+            and p.suffix in {'.py', '.js', '.css', '.html'}}
+    record['source_sha256'] = source_hashes()
+    record['test_sha256'] = {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted((root/'tests').rglob('*.py'))}
     (evidence/(label+'-provenance.json')).write_text(json.dumps(record,indent=2))
     print('PINNED_ROOT='+str(root), flush=True)
     import pytest
     code=pytest.main(['--basetemp='+str(evidence/(label+'-tmp')), '-o',
                      'cache_dir='+str(evidence/(label+'-cache')), *args])
     record.update(exit_code=int(code), ended=time.time())
+    record['source_unchanged_during_run'] = record['source_sha256'] == source_hashes()
+    if not record['source_unchanged_during_run']:
+        record['pytest_exit_code'] = int(code)
+        record['exit_code'] = 1
+        code = 1
     record['imported_modules']={k:v.__file__ for k,v in list(sys.modules.items())
-        if k.startswith('demiflow') and getattr(v,'__file__',None)}
+        if (k == 'demiflow' or k.startswith('demiflow.')) and getattr(v,'__file__',None)}
     assert all(pathlib.Path(p).resolve().is_relative_to(root) for p in record['imported_modules'].values())
     (evidence/(label+'-provenance.json')).write_text(json.dumps(record,indent=2))
     raise SystemExit(code)

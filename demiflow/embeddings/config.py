@@ -15,7 +15,9 @@ def embedding_options(options=None):
                     max_image_bytes=64 * 1024**2,
                     max_decode_pixels=100_000_000, max_request_bytes=96 * 1024**2,
                     batch_request_bytes=None, batch_decode_pixels=None,
-                    max_response_bytes=64 * 1024**2, timeout_s=300,
+                    # Fits the run-owned 16 MiB journal record with metadata.
+                    # Explicit larger ceilings are rejected at native admission.
+                    max_response_bytes=8 * 1024**2, timeout_s=300,
                     connect_timeout_s=10, read_timeout_s=120, write_timeout_s=120,
                     pool_timeout_s=10, trust_env=False, sqlite_journal=None)
     if options is not None and (not isinstance(options, dict) or set(options) - defaults.keys()):

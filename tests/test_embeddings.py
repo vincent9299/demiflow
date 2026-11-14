@@ -63,6 +63,8 @@ def server():
 
 
 def node(server, tmp_path, rows=None, **kwargs):
+    # Explicit legacy request-cache mode: delivery-only take_all, not native
+    # checkpoint materialization. M004 forbids two journal authorities there.
     return data.from_items(rows if rows is not None else [{'text': str(i)} for i in range(5)]).map_embeddings(
         model=kwargs.pop('model', server['model']), inputs=kwargs.pop('inputs', {'text': 'text'}),
         batch_size=kwargs.pop('batch_size', 2), call_output='call', error_output='error',
@@ -103,12 +105,12 @@ def test_batch_indices_normalization_replay_and_plan(server, tmp_path):
     from demiflow.data.plan import EmbeddingMapOp
     ds = node(server, tmp_path, concurrency=2, queue_depth=1)
     assert isinstance(ds._plan.operations[-1], EmbeddingMapOp)
-    first = ds.materialize().take_all()
+    first = ds.take_all()
     assert len(first) == 5 and len(server['bodies']) == 3
     assert all(row['embedding'][0] == pytest.approx(.6) for row in first if row['call']['index'] == 0)
     assert all(sum(v*v for v in row['embedding']) == pytest.approx(1) for row in first)
     assert all(row['error'] is None and not row['call']['reused'] for row in first)
-    again = ds.materialize().take_all()
+    again = ds.take_all()
     assert len(server['bodies']) == 3 and all(row['call']['reused'] for row in again)
     assert ds._stages[-1]._pool is ds._stages[-1]._client is None
 
@@ -121,14 +123,14 @@ def test_images_fallback_sha_decode_and_text_share_chat_protocol(server, tmp_pat
     rows = [{'image': [{'uri': (tmp_path / 'missing.png').as_uri(), 'sha256': sha},
                        {'uri': image.as_uri(), 'sha256': sha}]},
             {'image': {'uri': image.as_uri(), 'sha256': 'a' * 64}}]
-    output = node(server, tmp_path, rows, model=model, inputs={'image': 'image'}).materialize().take_all()
+    output = node(server, tmp_path, rows, model=model, inputs={'image': 'image'}).take_all()
     assert sum(row['error'] is not None for row in output) == 1
     good = next(row for row in output if row['error'] is None)
     assert good['call']['image_uri'] == image.as_uri()
     content = server['bodies'][0]['messages'][0][0]['content'][0]
     with Image.open(io.BytesIO(base64.b64decode(content['image_url']['url'].split(',')[1]))) as actual:
         assert actual.getpixel((0, 0)) == (42, 0, 0)
-    node(server, tmp_path, [{'text': 'red object'}], model=model).materialize()
+    node(server, tmp_path, [{'text': 'red object'}], model=model).take_all()
     assert server['bodies'][-1]['messages'] == [[{'role': 'user', 'content': [{'type': 'text', 'text': 'red object'}]}]]
     with sqlite3.connect(tmp_path / 'calls.sqlite') as db:
         requests = ' '.join(row[0] for row in db.execute('SELECT request_json FROM calls'))
@@ -149,7 +151,7 @@ def test_invalid_response_is_durable_and_never_published(server, tmp_path, fault
     ds = node(server, tmp_path, [{'text': 'a'}, {'text': 'b'}])
     for _ in range(2):
         with pytest.raises(EmbeddingProtocolError):
-            ds.materialize()
+            ds.take_all()
     assert len(server['bodies']) == 1
 
 
@@ -157,9 +159,9 @@ def test_http_error_is_durable_and_requires_explicit_recovery(server, tmp_path):
     import httpx
     server['status'] = 503
     ds = node(server, tmp_path, [{'text': 'a'}])
-    with pytest.raises(httpx.HTTPStatusError): ds.materialize()
+    with pytest.raises(httpx.HTTPStatusError): ds.take_all()
     server['status'] = 200
-    with pytest.raises(httpx.HTTPStatusError): ds.materialize()
+    with pytest.raises(httpx.HTTPStatusError): ds.take_all()
     assert len(server['bodies']) == 1
     with sqlite3.connect(tmp_path / 'calls.sqlite') as db:
         key = db.execute('SELECT request_key FROM calls').fetchone()[0]
@@ -169,7 +171,7 @@ def test_http_error_is_durable_and_requires_explicit_recovery(server, tmp_path):
                                    reason='explicit retry', operation_id='test-retry')
     finally:
         journal.close()
-    assert len(ds.materialize().take_all()) == 1 and len(server['bodies']) == 2
+    assert len(ds.take_all()) == 1 and len(server['bodies']) == 2
 
 
 def test_adaptive_gate_bounds_fresh_requests_and_excludes_replay(server, tmp_path):
@@ -178,25 +180,25 @@ def test_adaptive_gate_bounds_fresh_requests_and_excludes_replay(server, tmp_pat
         window_s=.001, min_samples=1, recovery_s=.001, increase_step=1))
     ds = node(server, tmp_path, [{'text': str(i)} for i in range(9)],
               batch_size=1, concurrency=3, queue_depth=1, request_gate=gate)
-    ds.materialize()
+    ds.take_all()
     assert 1 < server['peak'] <= 3 and gate.capacity == 3 and gate.admitted == 9
-    ds.materialize()
+    ds.take_all()
     assert gate.admitted == 0 and gate.fresh_responses == 0
 
 
 def test_duplicate_concurrent_batches_singleflight(server, tmp_path):
     server['delay'] = .05
-    result = node(server, tmp_path, [{'text': 'same'}] * 6, batch_size=1, concurrency=3).materialize().take_all()
+    result = node(server, tmp_path, [{'text': 'same'}] * 6, batch_size=1, concurrency=3).take_all()
     assert len(result) == 6 and len(server['bodies']) == 1
 
 
 def test_readonly_miss_and_empty_inputs_never_dispatch(server, tmp_path):
-    node(server, tmp_path, [{'text': 'stored'}]).materialize()
+    node(server, tmp_path, [{'text': 'stored'}]).take_all()
     ds = data.from_items([{'text': 'absent'}]).map_embeddings(model=server['model'],
         inputs={'text': 'text'}, options={'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite'), 'read_only': True}})
-    with pytest.raises(LookupError, match='read-only'): ds.materialize()
-    assert node(server, tmp_path, []).materialize().take_all() == []
-    result = node(server, tmp_path, [{'text': ''}]).materialize().take_all()
+    with pytest.raises(LookupError, match='read-only'): ds.take_all()
+    assert node(server, tmp_path, []).take_all() == []
+    result = node(server, tmp_path, [{'text': ''}]).take_all()
     assert result[0]['embedding'] is None and result[0]['error']
     assert len(server['bodies']) == 1
 
@@ -204,11 +206,11 @@ def test_readonly_miss_and_empty_inputs_never_dispatch(server, tmp_path):
 def test_cached_requests_need_no_credentials_and_missing_key_is_not_reserved(server, tmp_path, monkeypatch):
     model = replace(server['model'], api_key_env='TEST_EMBEDDING_KEY')
     monkeypatch.setenv('TEST_EMBEDDING_KEY', 'fixture-key')
-    node(server, tmp_path, [{'text': 'stored'}], model=model).materialize()
+    node(server, tmp_path, [{'text': 'stored'}], model=model).take_all()
     monkeypatch.delenv('TEST_EMBEDDING_KEY')
-    assert node(server, tmp_path, [{'text': 'stored'}], model=model).materialize().take_all()[0]['call']['reused']
+    assert node(server, tmp_path, [{'text': 'stored'}], model=model).take_all()[0]['call']['reused']
     with pytest.raises(ValueError, match='API key'):
-        node(server, tmp_path, [{'text': 'fresh'}], model=model).materialize()
+        node(server, tmp_path, [{'text': 'fresh'}], model=model).take_all()
     with sqlite3.connect(tmp_path / 'calls.sqlite') as db:
         assert db.execute('SELECT count(*) FROM calls').fetchone()[0] == 1
 
@@ -222,8 +224,8 @@ def test_service_cleanup_and_cached_only_no_start(server, tmp_path, monkeypatch)
     service = ManagedHTTPService(['unused'], base_url=server['model'].base_url, root=tmp_path)
     monkeypatch.setattr(service, 'bind', lambda _: Owner())
     ds = node(server, tmp_path, [{'text': 'a'}], service=service)
-    ds.materialize()
-    ds.materialize()
+    ds.take_all()
+    ds.take_all()
     assert state == dict(started=1, closed=2)
 
 
@@ -266,9 +268,9 @@ ThreadingHTTPServer(('127.0.0.1', ''' + str(port) + '''), Handler).serve_forever
     try:
         fixture = {'model': EmbeddingModel('fixture', 'fixed', 3, endpoint)}
         ds = node(fixture, tmp_path, [{'text': 'a'}], service=service)
-        assert len(ds.materialize().take_all()) == 1
+        assert len(ds.take_all()) == 1
         assert len(processes) == 1 and processes[0].poll() is not None
-        assert ds.materialize().take_all()[0]['call']['reused']
+        assert ds.take_all()[0]['call']['reused']
         assert len(processes) == 1
     finally:
         for process in processes:
@@ -295,17 +297,17 @@ def test_budget_and_blocking_io_stay_bounded(server, tmp_path, monkeypatch):
             with lock: state['active'] -= 1
     monkeypatch.setattr(runtime, 'prepare', slow_prepare)
     ds = node(server, tmp_path, batch_size=1, concurrency=4, max_requests=2)
-    with pytest.raises(PromptBudgetExceededError): ds.materialize()
+    with pytest.raises(PromptBudgetExceededError): ds.take_all()
     assert len(server['bodies']) <= 2 and state['peak'] <= 2
     assert all(name.startswith('demiflow-embeddings') for name in state['threads'])
     assert state['active'] == 0
 
 
 def test_budget_without_journal_is_atomic_across_workers(server):
-    from demiflow.operator_llm.errors import PromptBudgetExceededError
+    from demiflow.execution.recovery_contract import RecoveryContractError
     ds = data.from_items([{'text': str(i)} for i in range(10)]).map_embeddings(
         model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=4, max_requests=1)
-    with pytest.raises(PromptBudgetExceededError): ds.materialize()
+    with pytest.raises(RecoveryContractError, match='Execution budget exhausted'): ds.materialize()
     assert len(server['bodies']) <= 1
 
 
@@ -513,7 +515,7 @@ def test_prefetch_overlaps_cpu_http_and_profiles_without_exceeding_request_limit
         model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=1,
         prefetch_batches=1, call_output='call', options={'prepare_workers': 1, 'io_workers': 1,
             'profile_path': str(profile), 'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}})
-    rows = ds.materialize().take_all()
+    rows = ds.take_all()
     assert overlaps == [True] and server['peak'] == 1 and len(rows) == 3
     assert all(row['call']['timings']['prepare_s'] >= 0 for row in rows)
     report = json.loads(profile.read_text())
@@ -587,7 +589,7 @@ def test_byte_packing_large_singleton_errors_and_exact_replay(server, tmp_path):
     def plan(concurrency):
         return data.from_items(rows).map_embeddings(model=server['model'], inputs={'text':'text'},
             batch_size=7, concurrency=concurrency, call_output='call', error_output='error', options=options)
-    first = plan(1).materialize().take_all()
+    first = plan(1).take_all()
     assert sorted(r['id'] for r in first) == list(range(7))
     assert sum(r['error'] is not None for r in first) == 2
     assert [len(b['input']) for b in server['bodies']] == [2, 1, 2]
@@ -597,7 +599,9 @@ def test_byte_packing_large_singleton_errors_and_exact_replay(server, tmp_path):
         if not row['error']:
             assert row['embedding'][2] == pytest.approx(row['call']['index'] / (25 + row['call']['index']**2)**.5)
             assert row['call']['response_ref'].get('attempt', 1) == 1
-    second = plan(3).materialize().take_all()
+    # Replay the same batching declaration. Changing worker count changes which
+    # inputs share a request and therefore cannot promise the same cache hits.
+    second = plan(1).take_all()
     assert len(server['bodies']) == 3
     assert all(r['call']['reused'] for r in second if not r['error'])
     assert {r['id']:r['embedding'] for r in second} == {r['id']:r['embedding'] for r in first}
@@ -656,7 +660,7 @@ def test_split_failure_replays_committed_groups_without_dispatching_tail(server,
             'sqlite_journal':{'path':str(tmp_path/'split_failure.sqlite')}})
     for _ in range(2):
         with pytest.raises(EmbeddingProtocolError):
-            ds.materialize()
+            ds.take_all()
     assert len(server['bodies']) == 2
     with sqlite3.connect(tmp_path/'split_failure.sqlite') as db:
         assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 2

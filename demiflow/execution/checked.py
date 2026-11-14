@@ -633,7 +633,15 @@ def action(kind, source, plan, spec=None, *, arguments=None):
         declaration = plan_identity(kind, value.source, value.plan, spec, arguments)
         with run.action(declaration, action_id=value.identity) as execution:
             value.execution = execution
-            yield value
+            try:
+                yield value
+            except GeneratorExit:
+                # Closing a delivery iterator is a completed consumption boundary,
+                # not proof that its full input ran. Inner adapters have drained
+                # and preserved every handed-out artifact before this unwinds.
+                if kind in {'iter_rows', 'iter_batches'} and execution.record['result'] is None:
+                    execution.complete(dict(kind=kind, delivery='closed'))
+                raise
             if execution.record["result"] is None:
                 # Per-format durable adapters replace this delivery-only fact.
                 # It is never proof that an arbitrary callback can be replayed.

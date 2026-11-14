@@ -49,11 +49,11 @@ def test_hooks_instance_derives_shared_colocated():
     assert unified_operation_traits(mapop(Hooked())).state_ownership == "shared_colocated"
 
 
-def test_hookless_instance_keeps_caller_declaration():
+def test_hookless_instance_derives_auto_json_ownership():
     # Plain-data state is captured by auto_json at registration; sealed ownership
     # is not silently upgraded for a hookless instance.
-    assert unified_operation_traits(mapop(PlainData())).state_ownership == "none"
-    assert unified_operation_traits(mapop(EmptyHookless())).state_ownership == "none"
+    assert unified_operation_traits(mapop(PlainData())).state_ownership == "shared_colocated"
+    assert unified_operation_traits(mapop(EmptyHookless())).state_ownership == "shared_colocated"
 
 
 def test_legacy_cardinality_and_ordering_unchanged():
