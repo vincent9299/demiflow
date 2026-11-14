@@ -79,8 +79,8 @@
 | [L014](tasks/L014.md) | L | `demiflow/execution/chain.py` · `verify_loaded_plan` | verify_preserve | None 或原拒绝错误 | HISTORY, LAYOUT |
 | [L015](tasks/L015.md) | L | `demiflow/execution/chain.py` · `run_local_chain` | verify_preserve | _LocalMaterializedHandle；含_ChainBlocks、terminal.rows、recovery_reference(run_id/action_id/semantic_id) | LAYOUT, RECOVERY |
 | [L016](tasks/L016.md) | L | `demiflow/execution/chain.py` · `run_ray_chain` | verify_preserve | _LocalMaterializedHandle；含_ChainBlocks、terminal.rows、recovery_reference(run_id/action_id/semantic_id) | RAY, LAYOUT |
-| [L017](tasks/L017.md) | L | `demiflow/execution/graph.py` · `run_local_graph` | verify_preserve | dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变 | GRAPH, RECOVERY |
-| [L018](tasks/L018.md) | L | `demiflow/execution/graph.py` · `run_ray_graph` | verify_preserve | dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变 | RAY, GRAPH |
+| [L017](tasks/L017.md) | L | `demiflow/execution/graph.py` · `run_local_graph` | implement | dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变 | GRAPH, RECOVERY |
+| [L018](tasks/L018.md) | L | `demiflow/execution/graph.py` · `run_ray_graph` | implement | dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变 | RAY, GRAPH |
 | [L019](tasks/L019.md) | L | `demiflow/execution/queue_chain.py` · `run_local_queue_chain` | verify_preserve | WriteResult(written_rows,failed_rows,blocks_written,target,metadata)；原claim/finalize/ACK权威不变 | QUEUE, RECOVERY |
 | [L020](tasks/L020.md) | L | `demiflow/execution/worker/layout.py` · `load_worker_layout` | implement | (WorkerPlacement,CheckpointPolicy,stage_limits) | LAYOUT, GRAPH, QUEUE |
 | [L021](tasks/L021.md) | L | `demiflow/execution/worker/execution.py` · `WorkerChainExecutor._load_plan` | verify_preserve | LogicalPlan；反序列化及code-pin/布局检查均通过后返回 | LAYOUT, HISTORY, RECOVERY |
@@ -196,3 +196,13 @@
 | [A027](tasks/A027.md) | A | `demiflow/data/dataset.py` · `Dataset.aggregate` | implement | 原公开/内部终端返回值 | ADMISSION, LAYOUT, WRITE |
 | [A028](tasks/A028.md) | A | `demiflow/data/dataset.py` · `Dataset.size_bytes` | implement | 原公开/内部终端返回值 | ADMISSION, LAYOUT, WRITE |
 | [A029](tasks/A029.md) | A | `demiflow/data/dataset.py` · `Dataset._write_file` | implement | 原公开/内部终端返回值 | ADMISSION, LAYOUT, WRITE |
+| [R023](tasks/R023.md) | R | `demiflow/execution/stream_materialize.py` · `StreamMaterialization.seal` | implement | PublicationThunk：调用后返回 Awaitable[None] | BUFFER, RECOVERY, GRAPH |
+| [R024](tasks/R024.md) | R | `demiflow/execution/stream_materialize.py` · `StreamMaterialization._commit` | verify_preserve | Awaitable[None]；receipt 成功后更新确认进度 | BUFFER, RECOVERY, GRAPH |
+| [R025](tasks/R025.md) | R | `demiflow/execution/stream_materialize.py` · `StreamMaterialization.finish` | verify_preserve | None；成功完成当前 action | BUFFER, RECOVERY, GRAPH |
+| [R026](tasks/R026.md) | R | `demiflow/execution/worker/progress.py` · `WorkerStreamProgress.seal` | implement | PublicationThunk：调用后返回 Awaitable[原 CommitReceipt dict] | BUFFER, RECOVERY, GRAPH |
+| [R027](tasks/R027.md) | R | `demiflow/execution/worker/graph_progress.py` · `GraphWorkerProgress.seal` | implement | PublicationThunk：无真实 cut 返回 None；发布返回 Awaitable[原 graph receipt dict] | BUFFER, RECOVERY, GRAPH |
+| [R028](tasks/R028.md) | R | `demiflow/execution/worker/graph_progress.py` · `GraphWorkerProgress.request_cut` | verify_preserve | None；登记已有 driver cut 并唤醒控制器 | BUFFER, RECOVERY, GRAPH |
+| [R029](tasks/R029.md) | R | `demiflow/execution/worker/graph_progress.py` · `GraphWorkerProgress.note_driver_cut` | verify_preserve | None；登记 target 的 final hint | BUFFER, RECOVERY, GRAPH |
+| [R030](tasks/R030.md) | R | `demiflow/execution/worker/graph_progress.py` · `GraphWorkerProgress.align_cut` | verify_preserve | threading.Event；目标 reader 在回执前等待 | BUFFER, RECOVERY, GRAPH |
+| [R031](tasks/R031.md) | R | `demiflow/execution/worker/graph_progress.py` · `GraphWorkerProgress._channel_cuts` | verify_preserve | list[原 K6 channel_cut]；保持字段结构 | BUFFER, RECOVERY, GRAPH |
+| [R032](tasks/R032.md) | R | `demiflow/execution/worker/graph_progress.py` · `GraphWorkerProgress.note_contribution_acked` | verify_preserve | None；确认 inputs 并释放当前 reader event | BUFFER, RECOVERY, GRAPH |

@@ -50,6 +50,8 @@ def signatures():
     return 'All Python final signatures parse; baseline functions/hashes and argument descriptions match.'
 check('signatures_inputs_and_type_declarations',signatures)
 def graph():
+    from task_graph_rules import wiring_errors
+    assert not wiring_errors(tasks), wiring_errors(tasks)
     ids={t['id'] for t in tasks};by={}
     for t in tasks:by.setdefault(t['symbol'],[]).append(t)
     for t in tasks:
@@ -59,7 +61,7 @@ def graph():
         if t['baseline_line'] is None and t['owner']!='V':assert t['caller_tasks'],('no consumer',t['id'])
         if t['file'].startswith('demiflow/execution/'):
             assert not any(next(x for x in tasks if x['id']==cid)['file'].startswith('demiflow/workbench/') for cid in t['callee_tasks']),t['id']
-    return 'All new implementation functions have task consumers; engine task graph has no workbench dependency.'
+    return 'New implementation functions have mutable consumers; preserve callers cannot claim new wiring; engine graph has no workbench dependency. Runtime reachability still requires acceptance.'
 check('producer_consumer_graph',graph)
 def gates():
     g=json.loads((OUT/'gates.json').read_text());r=json.loads((OUT/'root-map.json').read_text())

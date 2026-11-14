@@ -6,15 +6,15 @@
       "check": "source_baseline",
       "status": "passed",
       "detail": {
-        "unchanged_baseline_source_files": 46
+        "unchanged_baseline_source_files": 48
       }
     },
     {
       "check": "unique_function_and_file_owner",
       "status": "passed",
       "detail": {
-        "tasks": 188,
-        "files": 52
+        "tasks": 198,
+        "files": 54
       }
     },
     {
@@ -25,7 +25,7 @@
     {
       "check": "producer_consumer_graph",
       "status": "passed",
-      "detail": "All new implementation functions have task consumers; engine task graph has no workbench dependency."
+      "detail": "New implementation functions have mutable consumers; preserve callers cannot claim new wiring; engine graph has no workbench dependency. Runtime reachability still requires acceptance."
     },
     {
       "check": "root_coverage_and_test_targets",

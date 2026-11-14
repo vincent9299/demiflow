@@ -1,6 +1,7 @@
 """Draft under revision; dispatch_ready=False. See review-20261114/CRITICAL-REVISION.md. Not a runtime module."""
 from dataclasses import dataclass
-from typing import Any, Iterator, Literal, Mapping, TypedDict, ContextManager
+from typing import Any, Iterator, Literal, Mapping, TypedDict, ContextManager, Protocol, Callable, Awaitable
+from threading import Event
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.sources import SourcePlan
 from demiflow.execution.run_context import RunContext, RunAction
@@ -124,3 +125,48 @@ def source_callable_roots(source: SourcePlan) -> tuple[Any, ...]: ...
 def resolve_prefetch_credit(inflight_slots: int, *, inflight_bytes: int, credit_budget: Mapping[str,int], credit_explicit: bool) -> dict: ...
 # RecoveryGuarantee is descriptive execution metadata, not a public mode switch.
 # queue proof field "final_commit" is a different namespace; no value conversion.
+
+# C13: structural typing for EXISTING runtime objects, not new runtime classes.
+# Opaque bounded state values here do not freeze the unresolved buffer schema.
+class SealBarrierView(Protocol):
+    next_ordinal: int  # CheckpointControl.run captures source frontier
+    final: bool  # graph seal has the narrow C13 write-back right
+    states: dict[str, RuntimeValue]  # align produces; seal adds stream-progress
+    snapshot_bytes: int  # shared max_state_bytes accounting, not another budget
+
+class ObjectSealBarrierView(SealBarrierView, Protocol):
+    objects: Mapping[str, RuntimeValue]  # only for object mode; keys=root
+
+class GraphCommitReceipt(TypedDict):
+    status: Literal['acked']
+    checkpoint_id: str
+    sequence: int
+    commit_id: str
+    channel_cuts: list[dict[str, RuntimeValue]]  # existing K6 channel_cut schema
+
+# Chain keeps its existing validator/schema; graph receipt is a different wire.
+PublicationResult = None | Mapping[str, RuntimeValue]
+PublicationThunk = Callable[[], PublicationResult | Awaitable[PublicationResult]]
+
+class ProgressPublication(Protocol):
+    def seal(self, barrier: SealBarrierView) -> PublicationThunk: ...
+
+class StreamMaterialization:
+    def seal(self, barrier: SealBarrierView) -> Callable[[], Awaitable[None]]: ...
+    async def _commit(self, next_ordinal: int, sealed, states: dict[str, RuntimeValue]) -> None: ...
+    def finish(self) -> None: ...
+
+class WorkerStreamProgress:
+    def seal(self, barrier: SealBarrierView) -> Callable[[], Awaitable[Mapping[str, RuntimeValue]]]: ...
+
+class GraphWorkerProgress:
+    def seal(self, barrier: SealBarrierView) -> Callable[[], None | Awaitable[GraphCommitReceipt]]: ...
+    def request_cut(self, checkpoint_id: str, producer_sequence_bound: int, *, epoch: int=0, final: bool=False) -> None: ...
+    def note_driver_cut(self, checkpoint_id: str, *, final: bool=False) -> None: ...
+    def align_cut(self, checkpoint_id: str, consumed_rows: int, *, final: bool=False) -> Event: ...
+    def _channel_cuts(self) -> list[dict[str, RuntimeValue]]: ...
+    def note_contribution_acked(self, inputs: int) -> None: ...
+
+class _CheckpointBarrier:
+    async def arrive(self, stage, batch=None, *, worker_slot: int | None=None) -> None: ...
+    # Local cut identity is this object. No new persisted cut_id.

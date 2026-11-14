@@ -1,0 +1,5 @@
+[
+  "Q008: new symbol has no implement caller",
+  "L017 -> Q008: preserve caller cannot add new wiring",
+  "L018 -> Q008: preserve caller cannot add new wiring"
+]

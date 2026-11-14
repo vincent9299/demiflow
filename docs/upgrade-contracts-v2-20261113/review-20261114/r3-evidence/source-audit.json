@@ -1,0 +1,55 @@
+{
+  "base_progress_has_no_seal": true,
+  "three_seal_overrides": {
+    "demiflow/execution/stream_materialize.py:StreamMaterialization": 438,
+    "demiflow/execution/worker/progress.py:WorkerStreamProgress": 67,
+    "demiflow/execution/worker/graph_progress.py:GraphWorkerProgress": 204
+  },
+  "public_local_execution_unified_chain_default": true,
+  "workbench_uses_public_context": true,
+  "graph_prefetch_callers": {
+    "run_local_graph": [
+      546
+    ],
+    "run_ray_graph": [
+      979
+    ]
+  },
+  "bridge_has_real_caller": true,
+  "make_worker_nested_functions": [
+    "progress",
+    "check_row",
+    "invoke",
+    "worker",
+    "_emit",
+    "_record_dead",
+    "batch_worker",
+    "grouped_worker",
+    "_flush",
+    "flush",
+    "call",
+    "advance",
+    "read_one"
+  ],
+  "current_task_count": 198,
+  "old_0677_task_count": 188,
+  "runtime_unchanged": true,
+  "diagram_inputs": {
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/full_architecture_v6.html": "82759707041d41a9a62e5fbe86ebea963f492a2e40e28832a3a13dfcc2a8ab33",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/gen_architecture_v6.py": "bf12032bcd772571fbac7968652bc7ef7cea35e44a7c4facd179726f815bb7ec",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_1_modules.mmd": "23ead45909c7902080313ec632d8b43be04684bc0845537f9f635170ca7b9630",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_1_modules.svg": "f9abcc5f4b21858c9764cb6b65281b026ebe00aa9462fb783f368d7bcecf76ff",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_2_call.mmd": "1e20402adc604dd88981acfb08dca33ca1a80ada786d94880444ef74f7b2e60b",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_2_call.svg": "65da717dd1f0a728e7c97c02f2af1c2d4fce5e50ae62866be7da67d503aa8cb1",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_3_roles.mmd": "d7b5652ec07c589788ff2bd0da0285cd95aa8f9507b212e64cfff1ecff0ba759",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_3_roles.svg": "e87af58fa55d25c57711ba962affb310ee524557535093ef988be78c97819f2c",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_4_design.mmd": "971355ab66cd5e049928a544f5f9d44f4fa1dbb4b38579fdaf0fc7ebe37d245f",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/platform_coordination_20261104/unified_execution_architecture_20261107/architecture_v6_20261114/v6_4_design.svg": "5ac1afd08fecd0c8ccf4fadc9149a3e7a9eeb47e4d7ae82785a8e8be878c4f4f"
+  },
+  "review_reports_preserved": {
+    "QWEN-GRANULARITY-REVIEW.md": "5cea2d02b025d999418fde8068b13a008d8119662dbb6c2800397347ecbc61db",
+    "QWEN-RE-REVIEW-3.md": "9ca4d2e914a0b6ff333934d68b52dde4b2998801bb65e3f578c0042018ea86ee",
+    "QWEN-RE-REVIEW-2.md": "f0039717f71f02a7b296d9369e14dcb2fa4758b5ac5e6b4b924851f4783653d7",
+    "QWEN-INDEPENDENT-REVIEW.md": "fae2dce707e6e02fe558fa393f7ee5d72e761da41f7c905310b0d4cbf0b32558"
+  }
+}

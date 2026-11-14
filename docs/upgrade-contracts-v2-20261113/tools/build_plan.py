@@ -439,6 +439,8 @@ add_js('demiflow/workbench/web/workbench-graph.js','mountLogical.select','select
 
 from revise_plan_r2 import apply as apply_second_review
 apply_second_review(TASKS, add, add_js, PARAMS, ROOT)
+from revise_plan_r3 import apply as apply_third_review
+apply_third_review(TASKS, add, PARAMS)
 
 for t in TASKS:
  if t['language']=='python':
@@ -501,13 +503,13 @@ def render():
         t['dispatch_ready']=False
         if t['id']=='F001':t['mode']='verify_preserve'
         if t['id'] in ('L034','L035'):t['errors'] += ['TimeoutError', 'CancelledError；pending future 必须有界清理']
-        lines=[f"# {t['id']} · {t['symbol']}", '\n> **修订中，本包尚不可整包派发。** 先读 [独立Review裁决](../review-20261114/RESPONSE.md)。当前签名/调用链尚未全部按修订闭合；第二轮修订见 RESPONSE-2.md。',f"\n文件：`{t['file']}`；文件装配负责人：**{t['owner']}**；任务状态：planned。",f"\n动作：{t['mode']}。只修改这个函数/方法；不得同时改同文件其他函数。需要 import/类字段变更时列入单独装配补丁，由文件负责人应用，不改别人工作树。",'\n## 目标签名（修订中）',f"\n```{t['language']}\n{t['signature']}\n```",f"\n基线签名：`{t['baseline_signature']}`。\n基线行：{t['baseline_line']}；基线函数 SHA-256：`{t['baseline_function_sha256']}`。新增函数无基线摘要。",'\n## 输入', '\n| 参数 | 类型、约束与所有权 |','|---|---|']
+        lines=[f"# {t['id']} · {t['symbol']}", '\n> **修订中，本包尚不可整包派发。** 先读 [独立Review裁决](../review-20261114/RESPONSE.md)。当前签名/调用链尚未全部按修订闭合；第二轮见 RESPONSE-2.md；最新接线/提交边界见 RESPONSE-3.md。',f"\n文件：`{t['file']}`；文件装配负责人：**{t['owner']}**；任务状态：planned。",f"\n动作：{t['mode']}。只修改这个函数/方法；不得同时改同文件其他函数。需要 import/类字段变更时列入单独装配补丁，由文件负责人应用，不改别人工作树。",'\n## 目标签名（修订中）',f"\n```{t['language']}\n{t['signature']}\n```",f"\n基线签名：`{t['baseline_signature']}`。\n基线行：{t['baseline_line']}；基线函数 SHA-256：`{t['baseline_function_sha256']}`。新增函数无基线摘要。",'\n## 输入', '\n| 参数 | 类型、约束与所有权 |','|---|---|']
         lines += [f'| `{k}` | {v} |' for k,v in t['input'].items()]
         lines += ['\n## 输出与行为',f"\n**返回：** {t['output']}",f"\n{t['behavior']}",f"\n数据/状态/预算细则：共享契约 **{t['contract']}**；不得自行增删返回字段。",'\n## 连接',f"\n已列 caller 任务：{', '.join(t['caller_tasks']) or '由原公开入口/现有调用者调用；见总链路'}。",f"\ncallee：{', '.join(t['calls']) or '沿用本函数现有依赖，不新增跨层执行权威'}。",f"\ncallee 任务：{', '.join(t['callee_tasks']) or '既有依赖或无新增依赖'}。",'\n## 异常与副作用',f"\n错误：{'；'.join(t['errors'])}。不得吞异常继续执行、补造成功或读损坏历史后重算。",f"\n副作用类别：`{t['effects']}`。pure/read_only 不构造用户Actor/读业务源/写journal；runtime_state可借用声明的既有权威，不得复制；declaration_only仅改指定声明且不得改变其他键；durable_write必须通过原权威。test_only产物仅/tmp/demiflow-*。",'\n## 验收与独立实现',f"\n验收门：{', '.join(t['gates'])}（详见 INTEGRATION-ACCEPTANCE.md）。",'\n对稳定签名编码；同一函数的阳性、错误、资源边界测试先独立跑，组合门由集成树跑。可使用本包固定 schema 样例；不得写生产 fallback。mock interpreter/journal/commit 得到的绿色不算集成通过。', '\n提交前逐项：检查模块来源；只含本函数窄补丁和本任务独立测试；保留原已有断言；记录准确命令/退出码/commit/基线。不要 push 或合主仓。',f"\n回执：`DELIVERY_ROOT/{t['id']}.json`。需裁决填 needs_decision；不得把消息发往已停止的旧总控后继续等待。"]
         if t.get('acceptance_assertions'):
             lines += ['\n## 必需验收断言'] + ['\n- '+item for item in t['acceptance_assertions']]
         (OUT/'tasks'/f"{t['id']}.md").write_text('\n'.join(lines)+'\n')
-    data={'schema':'demiflow.implementation_plan.v2','dispatch_ready':False,'review_revision':'20261114-r2','base_commit':baseline['base_commit'],'tasks':TASKS}
+    data={'schema':'demiflow.implementation_plan.v2','dispatch_ready':False,'review_revision':'20261114-r3','base_commit':baseline['base_commit'],'tasks':TASKS}
     (OUT/'plan.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
     table=['# 函数级任务总表','\n**修订中，旧卡不可直接派发。** 见 [Review裁决](review-20261114/RESPONSE.md)。','\n一个叶任务=一个函数/方法。数据类声明、imports/slots 的装配按 FILE-OWNERSHIP.md 处理；不能让函数 agent 自由改变公共字段。','\n`verify_preserve` 表示有实现，先验证并保留，只有发现该合同的真实缺陷才修改该函数；不能重复实现。','\n| ID | 包 | 文件/函数 | 动作 | 输出 | 验收 |','|---|---|---|---|---|---|']
     for t in TASKS:table.append(f"| [{t['id']}](tasks/{t['id']}.md) | {t['owner']} | `{t['file']}` · `{t['symbol']}` | {t['mode']} | {t['output']} | {', '.join(t['gates'])} |")

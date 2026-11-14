@@ -1,7 +1,7 @@
 {
   "schema": "demiflow.implementation_plan.v2",
   "dispatch_ready": false,
-  "review_revision": "20261114-r2",
+  "review_revision": "20261114-r3",
   "base_commit": "bbd93ffcc136c361093c5a4b6d79d0352c4c2557",
   "tasks": [
     {
@@ -2887,7 +2887,7 @@
       "owner": "L",
       "file": "demiflow/execution/graph.py",
       "symbol": "run_local_graph",
-      "mode": "verify_preserve",
+      "mode": "implement",
       "signature": "def run_local_graph(graph_spec, *, host_id='local', resource_root=None, control_timeout_s=120):",
       "baseline_signature": "run_local_graph(graph_spec, *, host_id='local', resource_root=None, control_timeout_s=120)",
       "language": "python",
@@ -2900,7 +2900,7 @@
         "control_timeout_s": "float>0；control deadline，遵循原默认120秒"
       },
       "output": "dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变",
-      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。 初跑在封存之前resolve_prefetch_credit；恢复验证原封存credit与grant，不重新求另一份布局。",
+      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。 初跑在封存之前resolve_prefetch_credit；恢复验证原封存credit与grant，不重新求另一份布局。 必须迁移本函数内真实 derive_prefetch 调用点；Local 与 Ray 各有一处，不能只改另一条路线。窄改封存前联合求解和恢复验证；保持原 K6、路由、提交、资源退出协议。显式冲突在源读取和 worker 启动前拒绝。",
       "contract": "C08",
       "effects": "durable_write",
       "calls": [
@@ -2912,7 +2912,7 @@
         "RECOVERY"
       ],
       "status": "planned",
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [
         "L002",
         "Q008"
@@ -2929,7 +2929,7 @@
       "owner": "L",
       "file": "demiflow/execution/graph.py",
       "symbol": "run_ray_graph",
-      "mode": "verify_preserve",
+      "mode": "implement",
       "signature": "def run_ray_graph(graph_spec, *, host_id='local', resource_root=None, control_timeout_s=120):",
       "baseline_signature": "run_ray_graph(graph_spec, *, host_id='local', resource_root=None, control_timeout_s=120)",
       "language": "python",
@@ -2942,7 +2942,7 @@
         "control_timeout_s": "float>0；control deadline，遵循原默认120秒"
       },
       "output": "dict{target_rows,contributions,egress_rows,workers,ancestor_contributions,final_arrival,checkpoints}；基线键集不变",
-      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。 初跑在封存之前resolve_prefetch_credit；恢复验证原封存credit与grant，不重新求另一份布局。",
+      "behavior": "真实 graph spec→同一封存 layout→worker；route ordinal/ACK/recovery恢复一致；不手工重建不同拓扑。 初跑在封存之前resolve_prefetch_credit；恢复验证原封存credit与grant，不重新求另一份布局。 必须迁移本函数内真实 derive_prefetch 调用点；Local 与 Ray 各有一处，不能只改另一条路线。窄改封存前联合求解和恢复验证；保持原 K6、路由、提交、资源退出协议。显式冲突在源读取和 worker 启动前拒绝。",
       "contract": "C08",
       "effects": "durable_write",
       "calls": [
@@ -2954,7 +2954,7 @@
         "GRAPH"
       ],
       "status": "planned",
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [
         "L002",
         "Q008"
@@ -4162,12 +4162,12 @@
       ],
       "status": "planned",
       "acceptance_assertions": [
-        "普通buffer c=2各有pending，全部进入同cut；重复slot/错cut拒绝，EOF参与者不死等",
+        "普通buffer c=2各有pending，全入同barrier；重复slot、错stage、已终局barrier拒绝；相邻两个barrier的slot登记不串用，EOF参与者不死等。持久buffer payload仍待冻结。",
         "native row-local单token保存全注册表，原input/emit锁保护不被改变",
         "group timeout/压力flush/空源prepend及快照前后崩溃保持多重性和顺序",
         "restore batch_ordinal拒bool/负数/错类型；旧{batch_ordinal,data}可读，满批及字节守卫不削弱"
       ],
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4293,6 +4293,14 @@
         "GRAPH"
       ],
       "status": "planned",
+      "acceptance_assertions": [
+        "三个真实 progress 类继承的 align 与各自 seal 联跑：全部合法状态/多 object root 保留；后续追加不污染已封存输出。",
+        "本地 _commit 失败不前进 inputs/rows/sequence；chain 与 graph worker 只发请求，driver 唯一持久提交。",
+        "graph source 提前 final hint、target hint 先于 EOI、无命名压力 cut 三反例；hint 不能提前终止/错发 checkpoint。",
+        "operation/checkpoint 匹配的ACK才释放 reader post-cut data 和GC；错 checkpoint/超时后迟到ACK不得推进新cut，event-loop heartbeat仍运行。",
+        "queue pure maps suffix无progress仍由driver finalize_task结算；每任务结果与ACK同原协议，worker零提交权威。"
+      ],
+      "review_revision": "20261114-r3",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4480,9 +4488,10 @@
       "status": "planned",
       "acceptance_assertions": [
         "纯derive_prefetch(1,max_pending_floor=2)拒绝；joint resolver默认credit收紧、显式不兼容credit先拒绝；router/InputGate/封存同值",
-        "Arrow真实TaskScheduler和临时文件必须受同一grant约束；只传execution对象不算通过；该grant装配仍是发布阻塞项"
+        "Arrow真实TaskScheduler和临时文件必须受同一grant约束；只传execution对象不算通过；该grant装配仍是发布阻塞项",
+        "Local与Ray真实graph入口分别验证slots=1/default credit=64封存前一致收紧；显式冲突两路线均先拒绝；恢复不改原封存credit。Ray未运行须标not_run。"
       ],
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -4578,7 +4587,7 @@
         "worker_slot": "_arun创建worker时给定的稳定0..concurrency-1索引；checkpoint路径不得None，native单token分支不以slot数量改变协议"
       },
       "output": "Callable[[],Awaitable[None]]；真实stage worker协程工厂",
-      "behavior": "真正的batch/group/prepend循环在此；把pending/ordinal/计时安全点接buffer_adapter，恢复先消费pending，cut前不越界。 本叶唯一持有整_make_worker，含grouped/batch/native嵌套分支；不另派重叠嵌套任务。每个非native参与slot显式arrive，grouped不能把barrier当业务行。",
+      "behavior": "真正的batch/group/prepend循环在此；把pending/ordinal/计时安全点接buffer_adapter，恢复先消费pending，cut前不越界。 本叶唯一持有整_make_worker，含grouped/batch/native嵌套分支；不另派重叠嵌套任务。每个非native参与slot显式arrive，grouped不能把barrier当业务行。 这是一个包含闭包的复合实现单元，并不声称是一项简单函数；同一负责人覆盖所有分支，scope guard授权整个函数不证明嵌套分支正确。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [
@@ -4592,7 +4601,7 @@
         "RECOVERY"
       ],
       "status": "planned",
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [
         "R002",
         "R003",
@@ -5098,12 +5107,12 @@
       "input": {
         "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
         "next_ordinal": "int>=0；本cut之后的输入frontier，恢复不得从0重启",
-        "sealed": "原已prepare的output descriptor，receipt前不可视为提交",
-        "states": "本cut状态引用映射，由原StateArtifacts保存",
+        "sealed": "原 sink.detach() 的独占结果；不是已提交数据或单纯 descriptor；回执前不能回收",
+        "states": "该切点已验证的有界状态载体；含 stream-progress 与 node-*，并非一律为文件引用",
         "final": "bool；最后cut标志，不等于commit已经ACK"
       },
       "output": "CommitReceipt（async）；错误/取消抛出原异常",
-      "behavior": "等待driver ACK必须有限，async路径不得future.result阻塞event loop；deadline/取消保持unknown，不自动重发或提前释放。",
+      "behavior": "等待driver ACK必须有限，async路径不得future.result阻塞event loop；deadline/取消保持unknown，不自动重发或提前释放。 与 C13 publication thunk 对接；确认前保持 output/state 的所有权。超时/取消使 pending future 失效，迟到回执不能推进后续 cut。",
       "contract": "C08",
       "effects": "runtime_state",
       "calls": [],
@@ -5113,8 +5122,11 @@
         "BOUNDS"
       ],
       "status": "planned",
+      "review_revision": "20261114-r3",
       "callee_tasks": [],
-      "caller_tasks": [],
+      "caller_tasks": [
+        "R026"
+      ],
       "errors": [
         "PlanContractError(.reason)",
         "RecoveryContractError",
@@ -5137,23 +5149,30 @@
       "input": {
         "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
         "contribution": "graph worker贡献帧；operation/sequence/channel身份保持原协议",
-        "sealed": "原已prepare的output descriptor，receipt前不可视为提交",
-        "states": "本cut状态引用映射，由原StateArtifacts保存",
+        "sealed": "原 sink.detach() 的独占结果；不是已提交数据或单纯 descriptor；回执前不能回收",
+        "states": "该切点已验证的有界状态载体；含 stream-progress 与 node-*，并非一律为文件引用",
         "final": "bool；最后cut标志，不等于commit已经ACK"
       },
       "output": "CommitReceipt（async）；错误/取消抛出原异常",
-      "behavior": "等待driver ACK必须有限，async路径不得future.result阻塞event loop；deadline/取消保持unknown，不自动重发或提前释放。",
+      "behavior": "等待driver ACK必须有限，async路径不得future.result阻塞event loop；deadline/取消保持unknown，不自动重发或提前释放。 与 C13 publication thunk 对接；确认前保持 output/state 的所有权。超时/取消使 pending future 失效，迟到回执不能推进后续 cut。 必须验证 receipt.checkpoint_id==contribution.checkpoint_id；不能只检查 status。",
       "contract": "C08",
       "effects": "runtime_state",
-      "calls": [],
+      "calls": [
+        "GraphWorkerProgress.note_contribution_acked"
+      ],
       "gates": [
         "RECOVERY",
         "GRAPH",
         "BOUNDS"
       ],
       "status": "planned",
-      "callee_tasks": [],
-      "caller_tasks": [],
+      "review_revision": "20261114-r3",
+      "callee_tasks": [
+        "R032"
+      ],
+      "caller_tasks": [
+        "R027"
+      ],
       "errors": [
         "PlanContractError(.reason)",
         "RecoveryContractError",
@@ -6553,7 +6572,7 @@
         "track": "原后台任务登记回调或 None；取消时不得遗留发布任务"
       },
       "output": "原barrier返回语义；align每stage每cut一次",
-      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错误barrier实例/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。 本地cut归属就是队列传递的同一个barrier对象；arrivals按该对象+stage+worker_slot隔离。不新增持久cut_id字段，不把graph checkpoint_id注入普通chain/本地barrier。已失败/发布对象不得接受新到达；新barrier不能复用上一对象的slot登记。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [],
@@ -6563,7 +6582,7 @@
         "UNKNOWN"
       ],
       "status": "planned",
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -6587,7 +6606,7 @@
         "stage": "stream._Stage；stage_budget/operation_index/native adapter 与封存位置一致"
       },
       "output": "原barrier返回语义；align每stage每cut一次",
-      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错误barrier实例/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。 本地cut归属就是队列传递的同一个barrier对象；arrivals按该对象+stage+worker_slot隔离。不新增持久cut_id字段，不把graph checkpoint_id注入普通chain/本地barrier。已失败/发布对象不得接受新到达；新barrier不能复用上一对象的slot登记。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [],
@@ -6597,7 +6616,7 @@
         "UNKNOWN"
       ],
       "status": "planned",
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -6612,7 +6631,7 @@
       "file": "demiflow/execution/stream_barrier.py",
       "symbol": "_CheckpointBarrier.arrive",
       "mode": "implement",
-      "signature": "async def arrive(self, stage, batch=None, *, worker_slot=None, cut_id=None):",
+      "signature": "async def arrive(self, stage, batch=None, *, worker_slot=None):",
       "baseline_signature": "async _CheckpointBarrier.arrive(self, stage, batch=None)",
       "language": "python",
       "baseline_line": 56,
@@ -6621,15 +6640,17 @@
         "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
         "stage": "stream._Stage；stage_budget/operation_index/native adapter 与封存位置一致",
         "batch": "当前 buffer 的有界行序列；不得隐式物化全部流",
-        "worker_slot": "稳定非负 worker slot 或 None；普通 buffered 必须提供，native 阶段单 token 保留 None",
-        "cut_id": "当前 barrier 的稳定 checkpoint 身份；不得用 attempt/时钟；错误 cut 拒绝"
+        "worker_slot": "稳定非负 worker slot 或 None；普通 buffered 必须提供，native 阶段单 token 保留 None"
       },
       "output": "原barrier返回语义；align每stage每cut一次",
-      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错误barrier实例/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。 本地cut归属就是队列传递的同一个barrier对象；arrivals按该对象+stage+worker_slot隔离。不新增持久cut_id字段，不把graph checkpoint_id注入普通chain/本地barrier。已失败/发布对象不得接受新到达；新barrier不能复用上一对象的slot登记。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [
-        "StreamStageProgress.align"
+        "StreamStageProgress.align",
+        "StreamMaterialization.seal",
+        "WorkerStreamProgress.seal",
+        "GraphWorkerProgress.seal"
       ],
       "gates": [
         "BUFFER",
@@ -6637,9 +6658,12 @@
         "UNKNOWN"
       ],
       "status": "planned",
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [
-        "R007"
+        "R007",
+        "R023",
+        "R026",
+        "R027"
       ],
       "caller_tasks": [
         "R015"
@@ -6666,7 +6690,7 @@
         "error": "原异常对象；取消/超时不变成成功或自动重试"
       },
       "output": "原barrier返回语义；align每stage每cut一次",
-      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错cut/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。",
+      "behavior": "普通buffered按稳定worker_slot登记、去重和聚合全部pending；错误barrier实例/slot或重复arrive拒绝。expected slots来自真实活跃worker及EOF登记，不以整数重复计数替代。native row-local沿原单token+全阶段native_pending和双锁快照，不能改成全worker排空。fail必须唤醒所有等待者、保留原发布/取消/timeout路径。payload格式尚未冻结，禁止按旧groups字典猜写。 本地cut归属就是队列传递的同一个barrier对象；arrivals按该对象+stage+worker_slot隔离。不新增持久cut_id字段，不把graph checkpoint_id注入普通chain/本地barrier。已失败/发布对象不得接受新到达；新barrier不能复用上一对象的slot登记。",
       "contract": "C05",
       "effects": "runtime_state",
       "calls": [],
@@ -6676,7 +6700,7 @@
         "UNKNOWN"
       ],
       "status": "planned",
-      "review_revision": "20261114-r2",
+      "review_revision": "20261114-r3",
       "callee_tasks": [],
       "caller_tasks": [],
       "errors": [
@@ -7443,6 +7467,388 @@
       "errors": [
         "UnsupportedExecutionOptionError",
         "ValueError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R023",
+      "owner": "R",
+      "file": "demiflow/execution/stream_materialize.py",
+      "symbol": "StreamMaterialization.seal",
+      "mode": "implement",
+      "signature": "def seal(self, barrier):",
+      "baseline_signature": "StreamMaterialization.seal(self, barrier)",
+      "language": "python",
+      "baseline_line": 438,
+      "baseline_function_sha256": "fa338dc4a961dfc313cce3a10040d4961c2ff5286db930256cf1ed04313b05d1",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "barrier": "现有 cut/barrier 实例；snapshot_bytes/states 归唯一提交路径"
+      },
+      "output": "PublicationThunk：调用后返回 Awaitable[None]",
+      "behavior": "遵守 C13 SealBarrierView/PublicationThunk；只搬运已由 align 验证的状态，不发明 buffer payload、不丢 node-* 键。seal 同步 detach 输出并捕获本 cut 的 next_ordinal/final/states，发布只能由 barrier 调用一次；后续 append/reset 不能改变已交出的载体。内存不靠整份 deepcopy 翻倍，沿用 detach/独占所有权和状态预算。 final 只能由控制器确定，必须核固定源已耗尽；object_sinks 按 root 键传递。本方法不直接提交，thunk 调唯一 _commit。",
+      "contract": "C06",
+      "effects": "runtime_state",
+      "calls": [
+        "StreamMaterialization._commit"
+      ],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [
+        "R024"
+      ],
+      "caller_tasks": [
+        "R019"
+      ],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R024",
+      "owner": "R",
+      "file": "demiflow/execution/stream_materialize.py",
+      "symbol": "StreamMaterialization._commit",
+      "mode": "verify_preserve",
+      "signature": "async def _commit(self, next_ordinal, sealed, states):",
+      "baseline_signature": "async StreamMaterialization._commit(self, next_ordinal, sealed, states)",
+      "language": "python",
+      "baseline_line": 455,
+      "baseline_function_sha256": "6214a48f75d8fcfccb0bfa0539a726d32a84e7b26747a82661f25c8bc5dbd7e0",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "next_ordinal": "int>=0；本cut之后的输入frontier，恢复不得从0重启",
+        "sealed": "原 sink.detach() 的独占结果；不是已提交数据或单纯 descriptor；回执前不能回收",
+        "states": "该切点已验证的有界状态载体；含 stream-progress 与 node-*，并非一律为文件引用"
+      },
+      "output": "Awaitable[None]；receipt 成功后更新确认进度",
+      "behavior": "核验保留：唯一 driver CommitCoordinator.commit；输出、SourcePosition 与全部状态同一提交。只有真回执后更新 inputs/rows/sequence 与通知；异常/取消不推进确认，不补造ACK。",
+      "contract": "C06",
+      "effects": "durable_write",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "R023"
+      ],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R025",
+      "owner": "R",
+      "file": "demiflow/execution/stream_materialize.py",
+      "symbol": "StreamMaterialization.finish",
+      "mode": "verify_preserve",
+      "signature": "def finish(self):",
+      "baseline_signature": "StreamMaterialization.finish(self)",
+      "language": "python",
+      "baseline_line": 469,
+      "baseline_function_sha256": "4d3aaf92bf13d3046bde354ba163dcb95ccb956c778d089d1f77f4fead0f621e",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
+      },
+      "output": "None；成功完成当前 action",
+      "behavior": "核验保留：inputs==固定源行数且未提交 row_sink 为空才 complete。不能依据 barrier.final 或已发送 contribution 就标记动作成功。",
+      "contract": "C06",
+      "effects": "durable_write",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R026",
+      "owner": "R",
+      "file": "demiflow/execution/worker/progress.py",
+      "symbol": "WorkerStreamProgress.seal",
+      "mode": "implement",
+      "signature": "def seal(self, barrier):",
+      "baseline_signature": "WorkerStreamProgress.seal(self, barrier)",
+      "language": "python",
+      "baseline_line": 67,
+      "baseline_function_sha256": "99408c2a51e0e43b53005622ed4bed28c972dc3ff28dc6b2b7b878280590c784",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "barrier": "现有 cut/barrier 实例；snapshot_bytes/states 归唯一提交路径"
+      },
+      "output": "PublicationThunk：调用后返回 Awaitable[原 CommitReceipt dict]",
+      "behavior": "遵守 C13 SealBarrierView/PublicationThunk；只搬运已由 align 验证的状态，不发明 buffer payload、不丢 node-* 键。seal 同步 detach 输出并捕获本 cut 的 next_ordinal/final/states，发布只能由 barrier 调用一次；后续 append/reset 不能改变已交出的载体。内存不靠整份 deepcopy 翻倍，沿用 detach/独占所有权和状态预算。 fixed source EOF 门不变；只调用 L034 的异步 request_commit。worker 不构造 CommitCoordinator、不读写第二提交账本；保留所有 root 对象。",
+      "contract": "C06",
+      "effects": "runtime_state",
+      "calls": [
+        "WorkerChainExecutor._request_commit"
+      ],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [
+        "L034"
+      ],
+      "caller_tasks": [
+        "R019"
+      ],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R027",
+      "owner": "R",
+      "file": "demiflow/execution/worker/graph_progress.py",
+      "symbol": "GraphWorkerProgress.seal",
+      "mode": "implement",
+      "signature": "def seal(self, barrier):",
+      "baseline_signature": "GraphWorkerProgress.seal(self, barrier)",
+      "language": "python",
+      "baseline_line": 204,
+      "baseline_function_sha256": "6ca7a6a26125a11f5eb2ea638814b9bce09e27c959fe2df5b1d3c28587e09402",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "barrier": "现有 cut/barrier 实例；snapshot_bytes/states 归唯一提交路径"
+      },
+      "output": "PublicationThunk：无真实 cut 返回 None；发布返回 Awaitable[原 graph receipt dict]",
+      "behavior": "遵守 C13 SealBarrierView/PublicationThunk；只搬运已由 align 验证的状态，不发明 buffer payload、不丢 node-* 键。seal 同步 detach 输出并捕获本 cut 的 next_ordinal/final/states，发布只能由 barrier 调用一次；后续 append/reset 不能改变已交出的载体。内存不靠整份 deepcopy 翻倍，沿用 detach/独占所有权和状态预算。本方法有同步副作用：允许 router.barrier 注入控制帧；不等于持久提交。ancestor 的 final 仅由固定源 EOF 确认；target contribution.final 可带 driver hint，barrier.final 只能由输入真实 EOI 确认。timer/压力但无命名 cut 且非真正 final 时不得 detach/发布。保留 action namespace 的确定 checkpoint_id、source_progress/channel_cuts/egress ordinal。thunk 只将原 stage 状态经 StateArtifacts 写为 occurrence 的 state_ref，再调 L035；快照文件存在不代表 checkpoint 已确认。",
+      "contract": "C06",
+      "effects": "durable_write",
+      "calls": [
+        "GraphWorkerProgress._channel_cuts",
+        "GraphWorkerExecutor._request_contribution"
+      ],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [
+        "R031",
+        "L035"
+      ],
+      "caller_tasks": [
+        "R019"
+      ],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R028",
+      "owner": "R",
+      "file": "demiflow/execution/worker/graph_progress.py",
+      "symbol": "GraphWorkerProgress.request_cut",
+      "mode": "verify_preserve",
+      "signature": "def request_cut(self, checkpoint_id, producer_sequence_bound, *, epoch=0, final=False):",
+      "baseline_signature": "GraphWorkerProgress.request_cut(self, checkpoint_id, producer_sequence_bound, *, epoch=0, final=False)",
+      "language": "python",
+      "baseline_line": 137,
+      "baseline_function_sha256": "2d8f2748451d805e9c6d28c6176cbaa24494d6291ee0af0099d128ceef55bf65",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "checkpoint_id": "已有 graph driver 指定的 checkpoint ID；属于图提交协议，不是本地 barrier 对象标识",
+        "producer_sequence_bound": "int>=0；已有祖先源 cut frontier；不能替换为 egress/channel cursor",
+        "epoch": "int>=0；本次 graph cut epoch，保留原控制命令语义",
+        "final": "bool；本 barrier 是否最终 cut，语义沿用原协议"
+      },
+      "output": "None；登记已有 driver cut 并唤醒控制器",
+      "behavior": "核验保留 driver checkpoint_id/epoch/源 bound/final hint 到已有字段；只请求切点，不推进 confirmed inputs、不产生ACK、不把 hint 认定为 EOF。生产调用者 GraphWorkerExecutor._apply_cut_commands；只读保留该调度，非新增接口。",
+      "contract": "C06",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R029",
+      "owner": "R",
+      "file": "demiflow/execution/worker/graph_progress.py",
+      "symbol": "GraphWorkerProgress.note_driver_cut",
+      "mode": "verify_preserve",
+      "signature": "def note_driver_cut(self, checkpoint_id, *, final=False):",
+      "baseline_signature": "GraphWorkerProgress.note_driver_cut(self, checkpoint_id, *, final=False)",
+      "language": "python",
+      "baseline_line": 145,
+      "baseline_function_sha256": "1bd5912689a333d584df1e00acd48a085fa6ff146141150875d7c38514f3d510",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "checkpoint_id": "已有 graph driver 指定的 checkpoint ID；属于图提交协议，不是本地 barrier 对象标识",
+        "final": "bool；本 barrier 是否最终 cut，语义沿用原协议"
+      },
+      "output": "None；登记 target 的 final hint",
+      "behavior": "核验保留 checkpoint_id→final hint；仅供 align_cut 关联同一 graph cut，不能推进源位置或把未收到 EOI 的 reader 标完成。现有调用者 _apply_cut_commands。",
+      "contract": "C06",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R030",
+      "owner": "R",
+      "file": "demiflow/execution/worker/graph_progress.py",
+      "symbol": "GraphWorkerProgress.align_cut",
+      "mode": "verify_preserve",
+      "signature": "def align_cut(self, checkpoint_id, consumed_rows, *, final=False):",
+      "baseline_signature": "GraphWorkerProgress.align_cut(self, checkpoint_id, consumed_rows, *, final=False)",
+      "language": "python",
+      "baseline_line": 152,
+      "baseline_function_sha256": "bb4c2902c6c21d409a8de3ac93f3aad5fec6a993cc9a4a45e63f772222bc01b2",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "checkpoint_id": "已有 graph driver 指定的 checkpoint ID；属于图提交协议，不是本地 barrier 对象标识",
+        "consumed_rows": "int>=0；target reader 已交给 pipeline 的输入行数，不是预读游标",
+        "final": "bool；本 barrier 是否最终 cut，语义沿用原协议"
+      },
+      "output": "threading.Event；目标 reader 在回执前等待",
+      "behavior": "核验保留 InputGate 对齐后的 checkpoint_id/consumed_rows；pending_cut 用已喂入的行数。事件只归当前 outstanding cut，reader 不能提前释放 post-cut data。调用者 GraphWorkerExecutor._run 的 set_cut_hook；不在这里造提交。",
+      "contract": "C06",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [],
+      "caller_tasks": [],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R031",
+      "owner": "R",
+      "file": "demiflow/execution/worker/graph_progress.py",
+      "symbol": "GraphWorkerProgress._channel_cuts",
+      "mode": "verify_preserve",
+      "signature": "def _channel_cuts(self):",
+      "baseline_signature": "GraphWorkerProgress._channel_cuts(self)",
+      "language": "python",
+      "baseline_line": 189,
+      "baseline_function_sha256": "651a416bee2cb371ef243403fed5576f5672f47c045dceccaf2801e1a8612874",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改"
+      },
+      "output": "list[原 K6 channel_cut]；保持字段结构",
+      "behavior": "核验保留 producer.next_sequence 与 consumer cursor 的边界换算；这些是通道坐标，不能用 source ordinal、egress ordinal 或 batch ordinal 替代。InputGate/ChannelSequence 仍为通道权威；本方法不操作 ACK/GC。",
+      "contract": "C06",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "R027"
+      ],
+      "errors": [
+        "RuntimeContractError",
+        "RecoveryContractError"
+      ],
+      "dispatch_ready": false
+    },
+    {
+      "id": "R032",
+      "owner": "R",
+      "file": "demiflow/execution/worker/graph_progress.py",
+      "symbol": "GraphWorkerProgress.note_contribution_acked",
+      "mode": "verify_preserve",
+      "signature": "def note_contribution_acked(self, inputs):",
+      "baseline_signature": "GraphWorkerProgress.note_contribution_acked(self, inputs)",
+      "language": "python",
+      "baseline_line": 300,
+      "baseline_function_sha256": "3ce64eb6a1c898ef848c66c5c96b1a5f5161a13b4c382574d063d1fcf2159d03",
+      "input": {
+        "self": "所属类实例；内部字段见 class-state.json；只按本方法的 ownership 修改",
+        "inputs": "int>=0；该已确认贡献的输入 frontier；不是固定输入引用映射或 channel cursor"
+      },
+      "output": "None；确认 inputs 并释放当前 reader event",
+      "behavior": "核验保留：只能由 L035 在 operation future 与 checkpoint_id 均匹配且 status=acked 后调用。inputs 为该贡献中 stream-progress.inputs；迟到/错 cut/超时回执不调用本方法，不释放新 cut 的 event。由单 outstanding cut 的控制器和 reader 等待约束保证关联。",
+      "contract": "C06",
+      "effects": "runtime_state",
+      "calls": [],
+      "gates": [
+        "BUFFER",
+        "RECOVERY",
+        "GRAPH"
+      ],
+      "status": "planned",
+      "review_revision": "20261114-r3",
+      "callee_tasks": [],
+      "caller_tasks": [
+        "L035"
+      ],
+      "errors": [
+        "RuntimeContractError",
         "RecoveryContractError"
       ],
       "dispatch_ready": false

@@ -36,7 +36,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_stream_grouping_lookup.py`, `tests/test_native_barrier.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_grouped_and_prepend_buffers`。
 
-叶任务：R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R012, M005, V008, R015, R016, R017, R018, R019, R020, R021, R022。依赖门：无。
+叶任务：R001, R002, R003, R004, R005, R006, R007, R008, R009, R010, R011, R012, M005, V008, R015, R016, R017, R018, R019, R020, R021, R022, R023, R024, R025, R026, R027, R028, R029, R030, R031, R032。依赖门：无。
 
 ## CASE
 
@@ -116,7 +116,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_u3_graph_local.py`, `tests/test_u3_graph_restore.py`, `tests/test_u3_graph_code_pin.py`, `tests/test_u3_graph_router.py`, `tests/test_upgrade_v2_acceptance.py::test_v2_graph_queue_commit_authority`。
 
-叶任务：F005, L003, L017, L018, L020, L024, L025, L026, V012, L034, L035, Q007, Q008。依赖门：无。
+叶任务：F005, L003, L017, L018, L020, L024, L025, L026, V012, L034, L035, Q007, Q008, R023, R024, R025, R026, R027, R028, R029, R030, R031, R032。依赖门：无。
 
 ## HISTORY
 
@@ -206,7 +206,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" python docs/upgrade-contracts-v2-202
 
 实际选择：`tests/test_u2_chain_faults.py`, `tests/test_u3_graph_faults.py`, `tests/test_native_barrier.py`。
 
-叶任务：S007, S008, S014, S015, R002, R003, R007, R008, R009, R012, R013, Q003, L015, L017, L019, L021, L022, L023, L024, L025, L026, L027, L028, L029, R015, L034, L035, S016, A014, R017, R018, R019, R020, R021, Q007, Q008。依赖门：STATE, BUFFER, WRITE。
+叶任务：S007, S008, S014, S015, R002, R003, R007, R008, R009, R012, R013, Q003, L015, L017, L019, L021, L022, L023, L024, L025, L026, L027, L028, L029, R015, L034, L035, S016, A014, R017, R018, R019, R020, R021, Q007, Q008, R023, R024, R025, R026, R027, R028, R029, R030, R031, R032。依赖门：STATE, BUFFER, WRITE。
 
 ## RELATIONAL
 

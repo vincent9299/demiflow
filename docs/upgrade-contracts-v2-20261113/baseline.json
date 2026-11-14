@@ -1,6 +1,6 @@
 {
   "base_commit": "bbd93ffcc136c361093c5a4b6d79d0352c4c2557",
-  "captured_at": "2026-11-14T10:50:09.540149+08:00",
+  "captured_at": "2026-11-14T11:31:27.783156+08:00",
   "files": {
     "demiflow/data/dataset.py": "732a86b04a8cf6f7ba57dbf243471870b9b6dfb01dab4071c0d73afe7f403382",
     "demiflow/data/plan.py": "9389bd4f0d206dd5128fdbebaf831bc512f586aeafce0be93bd498e72252d748",
@@ -32,7 +32,9 @@
     "demiflow/execution/stream_resources.py": "59b1c210e4de6a82325eb2f6d546d3328f1a9b73074de78935c599e7edceca1e",
     "demiflow/execution/worker/execution.py": "316899a4381f7c497dd48bf113cb0c8ccfcb7a0c75707bacb6a5dbb22363e87d",
     "demiflow/execution/worker/graph_execution.py": "621c2f72fa53cf9c535f451996fdef695f81d516dad3cc45b55f696b140872f5",
+    "demiflow/execution/worker/graph_progress.py": "b14fa5a632952f5252ec5861e38aee3ad4c366d35948febedc3949679286330e",
     "demiflow/execution/worker/layout.py": "ad16539f88cc6ff1704896cdf5813a303d0b1d1a09b7c3121498e3123783726b",
+    "demiflow/execution/worker/progress.py": "c909037a48abb99209c1600170239d91a6e765f61466e02c814eee8ba2a6412e",
     "demiflow/execution/worker/queue_transform.py": "a5bb01cdb404da9a9e19dce4e1980123afa391e928d53643cb699edd79e9ec40",
     "demiflow/lance/search.py": "49dc4135990f89ef8339a2eaa6aa8d0038122a9ecb433760026c833f5a9edcf9",
     "demiflow/operator_llm/http_options.py": "1a4ab45c94a6ba1f78c9768f0f0b42fa9bfe4d0efb8352329727ac27905424c2",

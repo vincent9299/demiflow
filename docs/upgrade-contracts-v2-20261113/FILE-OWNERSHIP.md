@@ -36,11 +36,13 @@
 | `demiflow/execution/stream_barrier.py` | R | R017, R018, R019, R020, R021 |
 | `demiflow/execution/stream_delivery.py` | A | A014 |
 | `demiflow/execution/stream_map.py` | S | S012 |
-| `demiflow/execution/stream_materialize.py` | R | R006, R007, R008, R009 |
+| `demiflow/execution/stream_materialize.py` | R | R006, R007, R008, R009, R023, R024, R025 |
 | `demiflow/execution/stream_resources.py` | Q | Q006 |
 | `demiflow/execution/worker/execution.py` | L | L021, L022, L023, L034 |
 | `demiflow/execution/worker/graph_execution.py` | L | L024, L025, L026, L035 |
+| `demiflow/execution/worker/graph_progress.py` | R | R027, R028, R029, R030, R031, R032 |
 | `demiflow/execution/worker/layout.py` | L | L020 |
+| `demiflow/execution/worker/progress.py` | R | R026 |
 | `demiflow/execution/worker/queue_transform.py` | L | L027, L028, L029 |
 | `demiflow/lance/search.py` | S | S014, S015 |
 | `demiflow/operator_llm/http_options.py` | M | M015 |

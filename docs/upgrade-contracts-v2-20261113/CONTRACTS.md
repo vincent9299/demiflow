@@ -259,4 +259,35 @@ stage_limits不是“建议”：inflight_rows限制当前阶段同时在途行�
 
 C09 UI映射补充：图顶点、边、DOM/select/onSelect都保持logical_node_id；物理摘要仍按logical ID查询。occurrence只在详情Selection={logical_node_id,occurrence_id}中选择，复用已有identity_bridge/picker与_resolve_bridge_node。_bridge_node_map保留原logical键和多义省略规则，不新增occurrence图映射。state.node仍是报告节点ID，新增state.logical_selection；chooseNode更新二者并递增detail，transition清空；loadSource携带二元键并校验ticket及响应身份。GET_FIELDS['graph-source']仅扩两可选键；source_view.get已支持转发，按verify_preserve核验，不重复新建。
 
-C08 ACK回调固定为async：WorkerChainExecutor._request_commit与GraphWorkerExecutor._request_contribution返回Awaitable[CommitReceipt]。原progress.seal返回publication callable，stream_barrier已支持inspect.isawaitable后await，因此无需再造线程提交器。等待上限取既有 checkpoint_timeout_s 与有效运行/控制 deadline 的最小剩余值（不另造120秒默认），使用asyncio.wrap_future/有限await，取消按原信号传播；超时抛TimeoutError，保留unknown和未确认提交，不自动重发、不提前释放所有权。测试必须同时证明event-loop heartbeat未冻结及迟到ACK不能推动新cut；只测“最终返回”不足。
+C08 ACK回调固定为async：WorkerChainExecutor._request_commit返回Awaitable[原CommitReceipt]，GraphWorkerExecutor._request_contribution返回Awaitable[GraphCommitReceipt]（原graph receipt键集，见C13）；两者不是同一wire文档。原progress.seal返回publication callable，stream_barrier已支持inspect.isawaitable后await，因此无需再造线程提交器。等待上限取既有 checkpoint_timeout_s 与有效运行/控制 deadline 的最小剩余值（不另造120秒默认），使用asyncio.wrap_future/有限await，取消按原信号传播；超时抛TimeoutError，保留unknown和未确认提交，不自动重发、不提前释放所有权。测试必须同时证明event-loop heartbeat未冻结及迟到ACK不能推动新cut；只测“最终返回”不足。
+
+## C13 进度、封存、发布与回执的共同边界（第三轮裁决）
+
+以下是现有类的结构契约；不要求新增运行时基类、提交器或数据库。`interfaces.pyi` 的 Protocol 仅描述消费者必须看到的字段。10 张新增卡为 R023–R032；其中3个 seal 允许窄改，另外7个方法按保留核验处理。不能为凑卡数重写19个方法。
+
+| 输入/输出 | 生产者 | 所有权与消费者 |
+|---|---|---|
+| `barrier.next_ordinal:int>=0` | `CheckpointControl.run` 在源门内捕获 `progress.ordinal` | 当前切点的输入 frontier；不等于输出数、通道 cursor、batch ordinal |
+| `barrier.final:bool` | 控制器的真实结束判定 | 本地/chain seal 只读并核固定源 EOF；graph seal 有下述有限回写权 |
+| `barrier.states:dict[str,RuntimeValue]` | 基类 `align` 写各 node 状态；seal 补 `stream-progress` | 只传合法、有预算的既有载体；冻结新 buffer 内容前不可放开其准入 |
+| `barrier.objects` | `align` 在 object_cut detach | 仅 object 模式存在，键是 object root；不能按 worker_slot 解释或只保留第一个 root |
+| `snapshot_bytes` | 同一个 barrier 聚合各 stage 状态 | 复用 `run.limits.max_state_bytes`；不可每个 worker 获得一整份额度 |
+| `seal(barrier) -> PublicationThunk` | 各 progress 的覆写 | 同步完成输出 detach 与状态转交；barrier 独占调用 thunk 一次，并 await 返回的 awaitable |
+
+`sealed` 参数是原 sink 的 detach 结果，仍可提供 descriptor/prepare/commit 等既有行为；不是“已经提交的输出”，也不简单等同于一个 descriptor dict。快照文件和 contribution 存在均不能充当提交成功证据。
+
+三个适配器的具体规则：
+
+- `StreamMaterialization.seal` 返回调用 `_commit` 的 thunk，结果为 `Awaitable[None]`。`_commit` 在驱动内调用原 `CommitCoordinator`，成功回执后才推进 inputs/rows/sequence；finish 另核未确认源/输出均已处理。
+- `WorkerStreamProgress.seal` 返回调用异步 `_request_commit` 的 thunk，结果是原 chain `CommitReceipt`。worker 只能写暂存工件和发请求；持久结果、确认游标及ACK权威仍在驱动。
+- `GraphWorkerProgress.seal` 不是无副作用函数：它可 detach、回写 final，并调用 `output_router.barrier` 发有序控制帧。source 的 final 必须由固定源 EOF 确认；target 的 contribution.final 可携带 driver hint，但本地 `barrier.final` 只能由实际输入 EOI 确认。无命名 cut 的普通压力/定时触发不得提前发布。返回 thunk 持久化既有 StateArtifacts 引用并 await `_request_contribution`；无真实 cut 的 no-op 返回 None。
+
+graph receipt 保持 `{status:'acked',checkpoint_id,sequence,commit_id,channel_cuts}`。L035 在 operation future 关联正确、checkpoint_id 匹配、status=acked 后，才调用 `note_contribution_acked` 并推进 GC。超时/取消/错回执不能释放 reader 的 post-cut data 或推进下个 cut；不得用“收到任意回执”作为完成条件。
+
+本地 barrier 和 graph checkpoint 是两种身份：前者就是同一进程 FIFO 中传播的对象，arrivals 按该对象+stage+worker_slot 隔离；后者由 driver 的既有 checkpoint 协议命名，经 `request_cut/note_driver_cut/align_cut` 进入 graph progress。撤回 R019 旧草案的 `cut_id` 参数，保留 `arrive(stage,batch=None,*,worker_slot=None)`。不要为修无生产者参数另造持久 ID。R021 的 source frontier 与 `(ordinal>=replay_cut OR full)` 不改。
+
+状态转交后不得被后续 append/reset 修改；用现有 detach/独占持有和小型顶层映射捕获，不靠全量 deepcopy 增加一倍快照内存。失败释放等待者但保持未知提交；不把失败、未确认或缺页降格成成功。普通 buffered 的持久 payload、参与者/EOF具体协议仍未冻结，本节不宣称这项阻塞已解决。
+
+队列路径单列：纯 maps worker 没有 progress 是既有合法设计；源 claim/RawFetch/finalize_task/ACK 均在驱动，不能为“统一”给 worker 加提交权威。普通 delivery 的 final_commit/delivery_only 保证也不能伪装 native_checkpoint。
+
+任务图现在强制两条规则：新增非验收符号必须有 implement 调用方；verify_preserve 调用方不能声称接入新增符号。该检查只证明计划有授权装配点，不证明生产真实经过它；Local/Ray 的实际消费由 V012/V018 验收。
