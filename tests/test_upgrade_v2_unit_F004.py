@@ -6,6 +6,7 @@ a shared object at two positions, and structural cycle/budget pre-checks. Real
 producers only (RangeSource/ItemsSource + MapOp); no business read, no mock.
 """
 from __future__ import annotations
+from pathlib import Path
 
 import demiflow
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
