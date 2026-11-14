@@ -84,7 +84,7 @@ def validate_http_options(options):
     if options.get('gateway') == 'litellm' and set(request) & {
             'num_retries', 'max_retries', 'fallbacks', 'context_window_fallbacks', 'content_policy_fallbacks'}:
         raise ValueError('The litellm adapter owns retry/fallback settings')
-    if credentials_env and set(request) & {'api_key', 'extra_headers'}:
+    if set(request) & {'api_key', 'extra_headers'}:
         raise ValueError('Gateway credentials must not be placed in recorded request_options')
     return options
 

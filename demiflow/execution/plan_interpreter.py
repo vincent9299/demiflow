@@ -51,6 +51,33 @@ _SLICE_SOURCE_KIND = {"chain_v1": "fixed_source",
                       "queue_transform_v1": "queue_declaration",
                       "static_fanout_v1": "fixed_source"}
 
+# v2 is additive: it never changes the v1 key set or behaviour. It replaces the
+# v1 ``programs`` list with explicit driver/worker ``executions`` so a sealed
+# layout binds the real backend, program and profile. Historical v1 is never
+# auto-upgraded; an unknown schema is refused.
+EXECUTION_BINDINGS_SCHEMA_V2 = "demiflow.execution_bindings.v2"
+SUPPORTED_SLICES_V2 = frozenset({"native_driver_v1"})
+_BINDINGS_KEYS_V2 = frozenset({
+    "schema", "run_id", "action_id", "dag_id", "plan_id", "artifact_manifest_ref",
+    "supported_slice", "profiles", "executions", "driver_stage_ids",
+    "source_bindings", "channel_options", "checkpoint_rows",
+})
+_EXECUTION_KEYS = frozenset({
+    "execution_id", "placement", "group_id", "backend", "stage_ids",
+    "profile_ref", "programs", "recovery",
+})
+_PROGRAM_BINDING_KEYS = frozenset({
+    "program_id", "input_path", "plan_ref", "source_identity_ref",
+    "sealed_operators", "operator_bindings",
+})
+_PLACEMENTS = frozenset({"driver", "worker"})
+_BACKENDS = frozenset({"local_stream", "local_pull", "datafusion", "arrow_batch", "lance_scan"})
+_RECOVERY_GUARANTEES = frozenset({
+    "native_checkpoint", "final_commit", "delivery_only", "attempt_only",
+})
+_STAGE_BUDGET_KEYS = frozenset({"inflight_rows", "inflight_bytes", "output_bytes"})
+_V2_SOURCE_KIND = {"native_driver_v1": "fixed_source"}
+
 
 class PlanContractError(RecoveryContractError):
     """A sealed input cannot be interpreted or an assignment contradicts it.
@@ -96,6 +123,27 @@ class ChannelBinding:
 
 
 @dataclass(frozen=True)
+class ExecutionPlacement:
+    """A sealed v2 execution unit: real backend, profile, programs and budgets.
+
+    ``profile`` is the recursively frozen profile document resolved from the
+    entry's profile_ref; ``programs`` are read-only ProgramBinding mappings;
+    ``stage_limits`` is derived solely from physical.stages[].budgets (no second
+    wire authority). ``recovery`` is descriptive execution metadata, never a
+    user-selectable mode.
+    """
+    execution_id: str
+    placement: str
+    group_id: str | None
+    backend: str
+    stage_ids: tuple[str, ...]
+    profile: ReadonlyDocument
+    programs: tuple[ReadonlyDocument, ...]
+    stage_limits: Mapping[str, Mapping[str, int]]
+    recovery: str
+
+
+@dataclass(frozen=True)
 class ExecutionLayout:
     dag_id: str
     plan_id: str
@@ -109,6 +157,7 @@ class ExecutionLayout:
     workers: tuple[WorkerPlacement, ...]
     channels: tuple[ChannelBinding, ...]
     checkpoint: CheckpointPolicy
+    executions: tuple[ExecutionPlacement, ...] = ()
 
 
 def _require(condition, reason, detail):
@@ -225,6 +274,8 @@ def _validate_bindings(doc, logical_dag, physical_plan, manifest_ref):
     Returns derived mappings the interpreter reuses; raises PlanContractError on
     any violation. The v1 validators have already accepted the dag/plan shapes.
     """
+    if type(doc) is dict and doc.get("schema") == EXECUTION_BINDINGS_SCHEMA_V2:
+        return _validate_bindings_v2(doc, logical_dag, physical_plan, manifest_ref)
     _require(type(doc) is dict and set(doc) == _BINDINGS_KEYS,
              "invalid_contract", "execution bindings key set is unsupported")
     _require(doc["schema"] == EXECUTION_BINDINGS_SCHEMA,
@@ -527,6 +578,322 @@ def _validate_bindings(doc, logical_dag, physical_plan, manifest_ref):
             "options_by_channel": options_by_channel, "profiles": profiles}
 
 
+def _validate_program_binding(binding, execution_stage_ids):
+    """Validate one v2 ProgramBinding and return the full-DAG stages it binds.
+
+    sealed_operators stay in the sub-program's linear LOCAL order (the namespace
+    verify_loaded_plan expects); operator_bindings map local indices to full-DAG
+    occurrence stages. The local logical_node_id is deliberately not cross-checked
+    against the full dag here -- verify_native_programs owns that semantic mapping.
+    """
+    _require(type(binding) is dict and set(binding) == _PROGRAM_BINDING_KEYS,
+             "invalid_contract", "program binding key set is unsupported")
+    _check_identifier(binding["program_id"], "program_id")
+    input_path = binding["input_path"]
+    _require(type(input_path) is list
+             and all(type(part) is str or type(part) is int for part in input_path),
+             "invalid_contract", "input_path must be a list of fields/indices")
+    _validate_program_ref(binding["plan_ref"])
+    _check_identifier(binding["source_identity_ref"], "source_identity_ref")
+    sealed_operators = binding["sealed_operators"]
+    _require(type(sealed_operators) is list, "invalid_contract", "sealed_operators must be a list")
+    for operator in sealed_operators:
+        _require(type(operator) is dict and "logical_node_id" in operator
+                 and set(operator) <= {"logical_node_id", "occurrence_id"},
+                 "invalid_contract", "sealed operator key set is unsupported")
+        _check_identifier(operator["logical_node_id"], "sealed operator logical_node_id")
+        if "occurrence_id" in operator:
+            _check_identifier(operator["occurrence_id"], "sealed operator occurrence_id")
+    operator_bindings = binding["operator_bindings"]
+    _require(type(operator_bindings) is list and len(operator_bindings) == len(sealed_operators),
+             "invalid_contract", "operator_bindings must cover sealed_operators once")
+    seen_index, bound_stages = set(), set()
+    for item in operator_bindings:
+        _require(type(item) is dict and set(item) == {"program_index", "stage_id"},
+                 "invalid_contract", "operator binding key set is unsupported")
+        index = item["program_index"]
+        _require(type(index) is int and 0 <= index < len(sealed_operators),
+                 "invalid_contract", "program_index out of range")
+        _require(index not in seen_index, "invalid_contract", "duplicate program_index")
+        seen_index.add(index)
+        stage_id = item["stage_id"]
+        _require(stage_id in execution_stage_ids, "invalid_contract", "binding stage outside execution")
+        _require(stage_id not in bound_stages, "invalid_contract", "stage bound twice")
+        bound_stages.add(stage_id)
+    _require(seen_index == set(range(len(sealed_operators))),
+             "invalid_contract", "operator indices are not contiguous from 0")
+    return bound_stages
+
+
+def _validate_bindings_v2(doc, logical_dag, physical_plan, manifest_ref):
+    """Structural + relational validation for execution_bindings.v2.
+
+    Additive to v1: the v1 path is never relaxed. The first v2 batch is
+    driver-only (native_driver_v1); a v2 worker execution is explicitly refused
+    until implemented. stage_limits derive solely from physical.stages[].budgets.
+    """
+    _require(set(doc) == _BINDINGS_KEYS_V2,
+             "invalid_contract", "v2 execution bindings key set is unsupported")
+    supported_slice = doc["supported_slice"]
+    _require(type(supported_slice) is str and supported_slice in SUPPORTED_SLICES_V2,
+             "unsupported_layout", "unsupported v2 execution slice: " + str(supported_slice))
+    for key in ("run_id", "action_id", "dag_id", "plan_id"):
+        _check_identifier(doc[key], key)
+
+    _validate_manifest_ref(doc["artifact_manifest_ref"])
+    _require(doc["artifact_manifest_ref"] == manifest_ref == physical_plan["artifact_manifest_ref"],
+             "identity_mismatch", "artifact manifest reference differs")
+    _require(doc["dag_id"] == logical_dag["dag_id"] == physical_plan["logical_dag_ref"]["dag_id"],
+             "identity_mismatch", "dag_id differs across sealed inputs")
+    _require(doc["plan_id"] == physical_plan["plan_id"],
+             "identity_mismatch", "plan_id differs across sealed inputs")
+    _require(logical_dag["action_id"] == doc["action_id"],
+             "identity_mismatch", "logical dag action_id differs from bindings")
+    _require(physical_plan["logical_dag_ref"]["sha256"] == identity(logical_dag),
+             "identity_mismatch", "physical logical_dag_ref does not bind the dag")
+
+    nodes = logical_dag["nodes"]
+    node_by_id = {node["logical_node_id"]: node for node in nodes}
+    source_node_ids = {node["logical_node_id"] for node in nodes if not node["input_ports"]}
+    terminal_node_ids = {node["logical_node_id"] for node in nodes if not node["output_ports"]}
+    operation_node_ids = {node["logical_node_id"] for node in nodes
+                          if node["input_ports"] and node["output_ports"]}
+    _require(terminal_node_ids == {t["logical_node_id"] for t in logical_dag["terminals"]},
+             "invalid_contract", "terminal nodes differ from declared terminals")
+
+    sources = logical_dag["sources"]
+    _require(bool(sources), "invalid_contract", "logical dag has no sources")
+    _require(all(s["partition_scheme"]["kind"] == "single"
+                 and s["partition_scheme"]["partition_count"] == 1 for s in sources),
+             "unsupported_layout", "supported slices are single-partition single-scheme")
+    scheme_versions = {s["partition_scheme"]["scheme_version"] for s in sources}
+    _require(len(scheme_versions) == 1, "unsupported_layout", "mixed partition scheme versions")
+    scheme_version = scheme_versions.pop()
+
+    stage_by_id, stage_by_node, partition_owner = {}, {}, {}
+    seen_occurrence = set()
+    for stage in physical_plan["stages"]:
+        _require(type(stage) is dict and set(stage) == _STAGE_KEYS,
+                 "invalid_contract", "physical stage key set is unsupported")
+        stage_id = stage["stage_id"]
+        _check_identifier(stage_id, "stage_id")
+        _require(stage_id not in stage_by_id, "invalid_contract", "duplicate stage_id")
+        node = node_by_id.get(stage["logical_node_id"])
+        _require(node is not None, "invalid_contract", "stage references an unknown logical node")
+        _require(stage["occurrence_id"] == node["occurrence_id"],
+                 "identity_mismatch", "stage occurrence differs from its logical node")
+        _require(stage["occurrence_id"] not in seen_occurrence,
+                 "invalid_contract", "duplicate stage occurrence")
+        seen_occurrence.add(stage["occurrence_id"])
+        _require(stage_id == identity([logical_dag["dag_id"], node["occurrence_id"]]),
+                 "identity_mismatch", "stage_id does not bind dag/occurrence")
+        partitions = stage["partitions"]
+        _require(type(partitions) is list and len(partitions) == 1,
+                 "unsupported_layout", "supported slices use exactly one partition per stage")
+        partition = partitions[0]
+        _check_identifier(partition, "partition")
+        _require(partition not in partition_owner, "invalid_contract", "duplicate partition id")
+        _require(partition == partition_id_for(node["logical_node_id"], scheme_version, 0),
+                 "identity_mismatch", "partition id does not bind node/scheme")
+        _require(stage["logical_node_id"] not in stage_by_node,
+                 "invalid_contract", "logical node has multiple occurrence stages")
+        budgets = stage["budgets"]
+        _require(type(budgets) is dict and set(budgets) == _STAGE_BUDGET_KEYS
+                 and all(type(value) is int and value >= 1 for value in budgets.values()),
+                 "invalid_contract", "stage budgets need positive row/byte bounds")
+        partition_owner[partition] = stage_id
+        stage_by_id[stage_id] = stage
+        stage_by_node[stage["logical_node_id"]] = stage
+
+    groups = physical_plan["worker_groups"]
+    _require(type(groups) is list and not groups,
+             "unsupported_layout", "native_driver_v1 is driver-only; worker groups are not supported yet")
+
+    profiles = doc["profiles"]
+    _require(type(profiles) is dict, "invalid_contract", "profiles must be a map")
+    for profile_ref, profile_document in profiles.items():
+        _check_identifier(profile_ref, "profile_ref")
+        _validate_profile(profile_ref, profile_document)
+
+    executions = doc["executions"]
+    _require(type(executions) is list and bool(executions),
+             "invalid_contract", "v2 bindings need at least one execution")
+    owner, execution_by_id, operation_stage_owner = {}, {}, {}
+    for entry in executions:
+        _require(type(entry) is dict and set(entry) == _EXECUTION_KEYS,
+                 "invalid_contract", "execution key set is unsupported")
+        execution_id = entry["execution_id"]
+        _check_identifier(execution_id, "execution_id")
+        _require(execution_id not in execution_by_id, "invalid_contract", "duplicate execution_id")
+        _require(entry["placement"] in _PLACEMENTS, "invalid_contract", "unknown execution placement")
+        _require(entry["placement"] == "driver",
+                 "unsupported_layout", "v2 worker executions are not implemented; driver only")
+        _require(entry["group_id"] is None,
+                 "invalid_contract", "driver execution must not carry a worker group_id")
+        _require(entry["backend"] in _BACKENDS, "invalid_contract", "unknown execution backend")
+        _require(entry["recovery"] in _RECOVERY_GUARANTEES,
+                 "invalid_contract", "unknown recovery guarantee")
+        _require(entry["profile_ref"] in profiles,
+                 "invalid_contract", "unknown profile_ref: " + str(entry["profile_ref"]))
+        stage_ids = entry["stage_ids"]
+        _require(type(stage_ids) is list and all(type(s) is str for s in stage_ids),
+                 "invalid_contract", "execution stage_ids must be a list of ids")
+        _require(len(set(stage_ids)) == len(stage_ids), "invalid_contract", "duplicate execution stage_id")
+        execution_stage_set = set()
+        for stage_id in stage_ids:
+            _require(stage_id in stage_by_id, "invalid_contract", "execution references an unknown stage")
+            _require(stage_by_id[stage_id]["logical_node_id"] in operation_node_ids,
+                     "invalid_contract", "driver execution must own operation stages only")
+            _require(stage_id not in operation_stage_owner,
+                     "invalid_contract", "operation stage owned by multiple executions")
+            operation_stage_owner[stage_id] = execution_id
+            execution_stage_set.add(stage_id)
+            owner[stage_id] = ("driver", None)
+        programs = entry["programs"]
+        _require(type(programs) is list, "invalid_contract", "execution programs must be a list")
+        bound_stages, program_ids = set(), set()
+        for binding in programs:
+            bound = _validate_program_binding(binding, execution_stage_set)
+            _require(binding["program_id"] not in program_ids,
+                     "invalid_contract", "duplicate program_id in execution")
+            program_ids.add(binding["program_id"])
+            _require(not (bound & bound_stages), "invalid_contract", "stage bound by multiple programs")
+            bound_stages |= bound
+        _require(bound_stages == execution_stage_set,
+                 "invalid_contract", "execution stages are not fully bound to programs")
+        execution_by_id[execution_id] = entry
+
+    _require(set(operation_stage_owner) == {stage_by_node[nid]["stage_id"]
+                                            for nid in operation_node_ids if nid in stage_by_node},
+             "invalid_contract", "operation stages are not fully owned by executions")
+
+    driver_ids = doc["driver_stage_ids"]
+    _require(type(driver_ids) is list, "invalid_contract", "driver_stage_ids must be a list")
+    driver_set = set()
+    for stage_id in driver_ids:
+        _check_identifier(stage_id, "driver stage_id")
+        _require(stage_id in stage_by_id, "invalid_contract", "driver references an unknown stage")
+        _require(stage_id not in driver_set, "invalid_contract", "duplicate driver stage_id")
+        driver_set.add(stage_id)
+        owner[stage_id] = ("driver", None)
+    source_terminal_stages = {stage_by_node[nid]["stage_id"]
+                              for nid in source_node_ids | terminal_node_ids
+                              if nid in stage_by_node}
+    _require(driver_set == source_terminal_stages | set(operation_stage_owner),
+             "invalid_contract", "driver must own exactly the source/terminal and driver-execution stages")
+    _require(set(owner) == set(stage_by_id), "invalid_contract", "stages are not fully owned")
+
+    source_bindings = doc["source_bindings"]
+    _require(type(source_bindings) is list, "invalid_contract", "source_bindings must be a list")
+    expected_kind = _V2_SOURCE_KIND[supported_slice]
+    bound_source_stages = set()
+    for source_binding in source_bindings:
+        _require(type(source_binding) is dict and set(source_binding) == {"stage_id", "kind", "ref"},
+                 "invalid_contract", "source binding key set is unsupported")
+        stage_id = source_binding["stage_id"]
+        _require(stage_id in stage_by_id, "invalid_contract", "source binding references unknown stage")
+        _require(stage_by_id[stage_id]["logical_node_id"] in source_node_ids,
+                 "invalid_contract", "source binding on a non-source stage")
+        _require(owner[stage_id][0] == "driver",
+                 "invalid_contract", "source stage must be driver-owned")
+        _require(stage_id not in bound_source_stages, "invalid_contract", "duplicate source binding")
+        bound_source_stages.add(stage_id)
+        _require(source_binding["kind"] == expected_kind,
+                 "invalid_contract", "source kind differs from the supported slice")
+        ref = source_binding["ref"]
+        _require(type(ref) is dict, "invalid_contract", "source binding ref must be a document")
+        try:
+            document(ref)
+        except RecoveryContractError as exc:
+            raise PlanContractError("invalid_contract", "source binding ref invalid: " + str(exc))
+    _require(bound_source_stages == {stage_by_node[nid]["stage_id"]
+                                     for nid in source_node_ids if nid in stage_by_node},
+             "invalid_contract", "source stages are not fully bound")
+
+    channels = physical_plan["channels"]
+    channel_by_id = {channel["channel_id"]: channel for channel in channels}
+    _require(len(channel_by_id) == len(channels), "invalid_contract", "duplicate physical channel")
+    edges = logical_dag["edges"]
+    edge_by_id = {edge["edge_id"]: edge for edge in edges}
+    _require(len(edge_by_id) == len(edges), "invalid_contract", "duplicate logical edge")
+    channel_options = doc["channel_options"]
+    _require(type(channel_options) is list, "invalid_contract", "channel_options must be a list")
+    covered_edges, options_by_channel = {}, {}
+    for options in channel_options:
+        _require(type(options) is dict, "invalid_contract", "channel option must be a document")
+        channel_id = options.get("channel_id")
+        _require(channel_id in channel_by_id and channel_id not in options_by_channel,
+                 "invalid_contract", "channel option references an unknown or duplicate channel")
+        channel = channel_by_id[channel_id]
+        routing = channel["routing"]
+        allowed = {"channel_id", "logical_edge_ids", "queue_depth", "storage_bytes"}
+        if routing == "hash":
+            allowed.add("key_fields")
+        if routing == "target":
+            allowed.update({"target_field", "target_classes"})
+        _require({"channel_id", "logical_edge_ids"} <= set(options) <= allowed,
+                 "invalid_contract", "channel option key set is unsupported for its routing")
+        if routing == "hash":
+            _require("key_fields" in options, "invalid_contract", "hash routing needs key_fields")
+        if routing == "target":
+            _require("target_field" in options and "target_classes" in options,
+                     "invalid_contract", "target routing needs target_field/target_classes")
+        for name in ("queue_depth", "storage_bytes"):
+            if name in options:
+                _require(type(options[name]) is int and options[name] >= 1,
+                         "invalid_contract", name + " must be a positive int")
+        logical_edge_ids = options["logical_edge_ids"]
+        _require(type(logical_edge_ids) is list and bool(logical_edge_ids),
+                 "invalid_contract", "logical_edge_ids must be a nonempty list")
+        producer_nodes = set()
+        producer_union, consumer_union = set(), set()
+        for edge_id in logical_edge_ids:
+            _require(edge_id in edge_by_id, "invalid_contract", "channel option references unknown edge")
+            _require(edge_id not in covered_edges, "invalid_contract", "logical edge covered twice")
+            covered_edges[edge_id] = channel_id
+            edge = edge_by_id[edge_id]
+            producer_node = edge["from"]["logical_node_id"]
+            consumer_node = edge["to"]["logical_node_id"]
+            producer_nodes.add(producer_node)
+            producer_stage = stage_by_node[producer_node]
+            consumer_stage = stage_by_node[consumer_node]
+            producer_union.update(producer_stage["partitions"])
+            consumer_union.update(consumer_stage["partitions"])
+            _require(set(producer_stage["partitions"]) <= set(channel["producer_partitions"]),
+                     "invalid_contract", "producer endpoint partition is outside the channel")
+            _require(set(consumer_stage["partitions"]) <= set(channel["consumer_partitions"]),
+                     "invalid_contract", "consumer endpoint partition is outside the channel")
+        _require(len(producer_nodes) == 1,
+                 "invalid_contract", "joint routing must share one producer ancestor")
+        _require(producer_union == set(channel["producer_partitions"]),
+                 "invalid_contract", "channel producer partitions are not fully covered")
+        _require(consumer_union == set(channel["consumer_partitions"]),
+                 "invalid_contract", "channel consumer partitions are not fully covered")
+        if len(logical_edge_ids) == 1:
+            edge = edge_by_id[logical_edge_ids[0]]
+            producer_stage = stage_by_node[edge["from"]["logical_node_id"]]
+            consumer_stage = stage_by_node[edge["to"]["logical_node_id"]]
+            _require(producer_stage["partitions"] == channel["producer_partitions"],
+                     "invalid_contract", "producer partition order differs from the edge endpoint")
+            _require(consumer_stage["partitions"] == channel["consumer_partitions"],
+                     "invalid_contract", "consumer partition order differs from the edge endpoint")
+        _validate_routing_options(channel, options)
+        options_by_channel[channel_id] = options
+    _require(set(options_by_channel) == set(channel_by_id),
+             "invalid_contract", "channel_options must cover each physical channel exactly once")
+    _require(set(covered_edges) == set(edge_by_id),
+             "invalid_contract", "logical edges are not covered exactly once")
+
+    _require(type(doc["checkpoint_rows"]) is int and doc["checkpoint_rows"] >= 1,
+             "invalid_contract", "checkpoint_rows must be a positive int")
+
+    return {"stage_by_id": stage_by_id, "stage_by_node": stage_by_node,
+            "partition_owner": partition_owner, "owner": owner,
+            "group_by_id": {}, "program_by_group": {},
+            "options_by_channel": options_by_channel, "profiles": profiles,
+            "executions": executions}
+
+
 def _ordered_stage_ids(partitions, partition_owner):
     ordered = []
     for partition in partitions:
@@ -598,6 +965,29 @@ def interpret_physical_plan(logical_dag, physical_plan, *, bindings, manifest_re
         unconfirmed_rows=recovery["unconfirmed_rows"],
         unconfirmed_bytes=recovery["unconfirmed_bytes"])
 
+    # v1 seals no backend/recovery authority, so it derives no execution
+    # placements (fabricating them would invent capability v1 never bound); its
+    # workers tuple and carrier are unchanged. v2 binds explicit driver/worker
+    # executions; stage_limits come solely from the physical stage budgets.
+    executions = ()
+    if doc["schema"] == EXECUTION_BINDINGS_SCHEMA_V2:
+        placements = []
+        for entry in ctx["executions"]:
+            stage_limits = MappingProxyType({
+                stage_id: _freeze(ctx["stage_by_id"][stage_id]["budgets"])
+                for stage_id in entry["stage_ids"]})
+            placements.append(ExecutionPlacement(
+                execution_id=entry["execution_id"],
+                placement=entry["placement"],
+                group_id=entry["group_id"],
+                backend=entry["backend"],
+                stage_ids=tuple(entry["stage_ids"]),
+                profile=_freeze(ctx["profiles"][entry["profile_ref"]]),
+                programs=tuple(_freeze(program) for program in entry["programs"]),
+                stage_limits=stage_limits,
+                recovery=entry["recovery"]))
+        executions = tuple(placements)
+
     return ExecutionLayout(
         dag_id=logical_dag["dag_id"],
         plan_id=physical_plan["plan_id"],
@@ -610,7 +1000,8 @@ def interpret_physical_plan(logical_dag, physical_plan, *, bindings, manifest_re
         source_bindings=tuple(_freeze(sb) for sb in doc["source_bindings"]),
         workers=tuple(workers),
         channels=tuple(channels),
-        checkpoint=checkpoint)
+        checkpoint=checkpoint,
+        executions=executions)
 
 
 def _group_channel_ids(layout, placement):
@@ -644,6 +1035,11 @@ def validate_worker_assignment(layout, assignment, *, group_id) -> WorkerPlaceme
     _require(isinstance(layout, ExecutionLayout), "invalid_assignment", "layout is not an ExecutionLayout")
     placement = next((worker for worker in layout.workers if worker.group_id == group_id), None)
     _require(placement is not None, "invalid_assignment", "unknown worker group: " + str(group_id))
+    _require(group_id is not None, "invalid_assignment", "a driver placement cannot be validated as a worker")
+    for execution in layout.executions:
+        if execution.placement == "driver":
+            _require(group_id not in (execution.execution_id, execution.group_id),
+                     "invalid_assignment", "a driver execution cannot masquerade as a worker")
     try:
         validate_assignment(assignment)
     except (ProtocolError, RecoveryContractError, ValueError) as exc:

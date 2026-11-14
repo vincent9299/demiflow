@@ -1,6 +1,7 @@
 """Shared admission and budgets for Dataset native queries and Lance staging."""
 import hashlib
 import os
+from collections.abc import Mapping
 from pathlib import Path
 import tempfile
 from dataclasses import replace
@@ -37,7 +38,57 @@ def parse_native_resources(value):
     return tuple(sorted(value.items()))
 
 
-def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=False):
+def _sealed_ceilings(execution):
+    """Read-only sealed resource ceilings borrowed from a bound ExecutionPlacement.
+
+    Returns None when unbound. The profile carries cpu_millis/memory_bytes/
+    scratch_bytes (no threads/rows); stage_limits carries per-stage
+    inflight_rows/inflight_bytes/output_bytes. The tightest simultaneously-alive
+    stage bounds the shared session. These ceilings only tighten the existing
+    run/envelope/native authority; they never allocate a second host budget.
+    """
+    if execution is None:
+        return None
+    from .recovery_contract import RecoveryContractError
+    profile = getattr(execution, 'profile', None)
+    if not isinstance(profile, Mapping):
+        raise RecoveryContractError('Bound execution requires a sealed resource profile')
+    sealed = profile.get('limits') or profile.get('requests')
+    if not isinstance(sealed, Mapping):
+        raise RecoveryContractError('Bound execution profile requires requests or limits')
+    memory = sealed.get('memory_bytes')
+    if type(memory) is not int or memory <= 0:
+        raise RecoveryContractError('Sealed profile memory_bytes must be a positive integer')
+    scratch = sealed.get('scratch_bytes')
+    if scratch is not None and (type(scratch) is not int or scratch <= 0):
+        raise RecoveryContractError('Sealed profile scratch_bytes must be a positive integer')
+    cpu = sealed.get('cpu_millis')
+    if cpu is not None and (type(cpu) is not int or cpu <= 0):
+        raise RecoveryContractError('Sealed profile cpu_millis must be a positive integer')
+    stage_limits = getattr(execution, 'stage_limits', None) or {}
+    if not isinstance(stage_limits, Mapping):
+        raise RecoveryContractError('Bound execution stage_limits must be a mapping')
+    stage_ids = tuple(getattr(execution, 'stage_ids', ()) or ())
+    selected = [stage_limits[s] for s in stage_ids if s in stage_limits] if stage_ids else list(stage_limits.values())
+    inflight_rows = inflight_bytes = output_bytes = None
+    for budget in selected:
+        if not isinstance(budget, Mapping):
+            raise RecoveryContractError('Sealed stage budget must be a mapping')
+        for name in ('inflight_rows', 'inflight_bytes', 'output_bytes'):
+            value = budget.get(name)
+            if value is None:
+                continue
+            if type(value) is not int or value <= 0:
+                raise RecoveryContractError('Sealed stage ' + name + ' must be a positive integer')
+        rows, bytes_, out = budget.get('inflight_rows'), budget.get('inflight_bytes'), budget.get('output_bytes')
+        inflight_rows = rows if inflight_rows is None else min(inflight_rows, rows) if rows is not None else inflight_rows
+        inflight_bytes = bytes_ if inflight_bytes is None else min(inflight_bytes, bytes_) if bytes_ is not None else inflight_bytes
+        output_bytes = out if output_bytes is None else min(output_bytes, out) if out is not None else output_bytes
+    return {'memory_bytes': memory, 'scratch_bytes': scratch, 'cpu_millis': cpu,
+            'inflight_rows': inflight_rows, 'inflight_bytes': inflight_bytes, 'output_bytes': output_bytes}
+
+
+def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=False, execution=None):
     envelope = inherited_envelope()
     if envelope is None:
         cpus = _cpu_capacity()
@@ -92,6 +143,32 @@ def dataset_session(executor, directory, *, prefer_hash_join=False, lance_merge=
             timeout_s=min(options.timeout_s, max(0.001, run.deadline - time.time())),
             admission_timeout_s=min(options.admission_timeout_s, limits['admission_timeout_s'],
                                     max(0.001, run.deadline - time.time())))
+    ceilings = _sealed_ceilings(execution)
+    if ceilings is not None:
+        # The sealed placement is an additional ceiling on the same authority,
+        # not a new allocation. Intersect only downward; admission still charges
+        # the tightened options.max_rss_bytes through the original slot ledger.
+        sealed_memory = ceilings['memory_bytes']
+        effective_rss = min(options.max_rss_bytes, sealed_memory)
+        effective_pool = min(options.memory_bytes, max(1, effective_rss // 2), sealed_memory)
+        row_ceiling = min(options.max_row_bytes, sealed_memory)
+        if ceilings['inflight_bytes'] is not None:
+            row_ceiling = min(row_ceiling, ceilings['inflight_bytes'])
+        row_limit = native_row_limit(effective_pool, effective_rss, row_ceiling)
+        scratch = options.max_scratch_bytes
+        if ceilings['scratch_bytes'] is not None:
+            scratch = min(scratch, ceilings['scratch_bytes'])
+        batch_rows = options.batch_rows
+        eff_threads = options.threads
+        if ceilings['cpu_millis'] is not None:
+            eff_threads = min(eff_threads, max(1, ceilings['cpu_millis'] // 1000))
+        if ceilings['inflight_rows'] is not None:
+            batch_rows = min(batch_rows, ceilings['inflight_rows'])
+        if ceilings['inflight_bytes'] is not None:
+            batch_rows = min(batch_rows, max(1, ceilings['inflight_bytes'] // max(1, row_limit)))
+        options = replace(options, memory_bytes=effective_pool, max_rss_bytes=effective_rss,
+            max_row_bytes=row_limit, max_scratch_bytes=scratch, batch_rows=batch_rows,
+            threads=eff_threads, partitions=min(options.partitions, eff_threads))
     resources = executor.resource_root / '_demiflow' / 'dataset_native'
     managed = getattr(executor, 'diagnostics_root', None)
     if envelope is None:

@@ -461,7 +461,14 @@ def is_stream_operation(operation) -> bool:
 
 
 def reject_streaming_map_options(plan, backend):
-    """Reject before reading sources, constructing workers or opening a sink."""
+    """Reject only at boundaries that genuinely cannot run streaming options.
+
+    The local executor routes legal streaming maps to delivery/materialize, so
+    its terminals must not pre-reject here. Relational/union/Ray boundaries have
+    no streaming route and still reject before reading sources or opening sinks.
+    """
+    if backend == 'local':
+        return
     if any(isinstance(op, (MapOp, BoundMapOp)) and op.stream_options is not None
            for op in plan.operations):
         from ..errors import UnsupportedExecutionOptionError

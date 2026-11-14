@@ -9,9 +9,11 @@ terminal output. Each E1 seal requests a durable cut from the driver via a
 a commit authority; the driver assembles K6 and commits once (S4 wires full
 coverage). U2 WorkerChainExecutor is untouched.
 """
+import asyncio
 import hashlib
 import socket
 import threading
+import time
 import uuid
 from concurrent.futures import Future
 
@@ -215,7 +217,7 @@ class GraphWorkerExecutor:
     def _stop_requested(self):
         return not self.authority.active or self.authority._local_cancel
 
-    def _request_contribution(self, contribution, sealed, states, final):
+    async def _request_contribution(self, contribution, sealed, states, final):
         validate_cut_contribution(contribution)
         operation_id = uuid.uuid4().hex
         future = Future()
@@ -223,7 +225,22 @@ class GraphWorkerExecutor:
             self._pending[operation_id] = future
         self._send({"kind": "CutContribution", "operation_id": operation_id,
                     "contribution": contribution})
-        receipt = future.result()
+        authority = self.authority
+        now = time.time()
+        bound = min(authority.limits["checkpoint_timeout_s"],
+                    authority._grant["expires_at_ms"] / 1000.0 - now,
+                    authority.deadline - now,
+                    authority._limits["timeout_s"] - (time.monotonic() - authority.started))
+        try:
+            receipt = await asyncio.wait_for(asyncio.wrap_future(future), timeout=bound)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # Invalidate this pending contribution so a late ACK cannot advance a
+            # later cut; the commit stays unknown (no resend, no early release).
+            with self._lock:
+                self._pending.pop(operation_id, None)
+            raise
+        if receipt.get("checkpoint_id") != contribution["checkpoint_id"]:
+            raise RecoveryContractError("Graph commit receipt does not match the outstanding cut")
         if receipt.get("status") != "acked":
             raise RecoveryContractError("Worker cut was not durably acknowledged")
         self.progress.sequence += 1

@@ -3,7 +3,20 @@
 This module neither schedules work nor grants workspace effect permissions.
 Facts describe native semantics, never public API spellings.
 """
+from dataclasses import dataclass
+from typing import Literal
+
 VERSION = "demiflow_execution_capabilities_v1"
+
+
+@dataclass(frozen=True)
+class ActionDecision:
+    """Static admission outcome; descriptive metadata, not a user mode switch."""
+    action_kind: str
+    backend: Literal['local_pull', 'local_stream', 'datafusion', 'arrow_batch', 'lance_scan']
+    route: Literal['pull', 'stream_delivery', 'stream_materialize', 'native_relational',
+                   'arrow_batch', 'lance_scan', 'queue_stream', 'static_graph']
+    recovery: Literal['native_checkpoint', 'final_commit', 'delivery_only', 'attempt_only']
 
 
 def check_action(kind, arguments=None):
@@ -63,6 +76,92 @@ def check_composition(facts, *, backend="local", driver=None):
             "supported": True, "reason": None}
 
 
+_ACTION_KINDS = frozenset({
+    'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches', 'count',
+    'aggregate', 'schema', 'size_bytes', 'materialize', 'write_datasink',
+    'write_lance', 'write_file', 'run_stream',
+})
+_STREAM_TERMINALS = frozenset({
+    'run_stream', 'materialize', 'write_lance', 'write_datasink',
+    'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches', 'count',
+})
+_MATERIALIZE_TERMINALS = frozenset({'materialize', 'write_lance', 'write_datasink'})
+
+
+def _is_queue_source(source):
+    from ..data.sources import DatasourceSource
+    from .queue_source import QueueDatasource
+    return type(source) is DatasourceSource and type(source.datasource) is QueueDatasource
+
+
+def admit_action_plan(source, plan, *, action_kind, backend='local', sink_spec=None,
+                      available_backends=()):
+    """Pure static admission and route decision (C03).
+
+    Reuses the shared capability gates; never reads the source, constructs an
+    actor, opens a writer or claims a queue. ``available_backends`` is the
+    executor's declared capability, not a runtime probe; absent declarations
+    select only plain local routes.
+    """
+    from ..data import plan as ops
+    from ..errors import UnsupportedExecutionOptionError
+    from .plan_facts import operation_capability
+
+    if action_kind not in _ACTION_KINDS:
+        raise ValueError(f'Unknown public action kind: {action_kind!r}')
+    if backend != 'local':
+        raise UnsupportedExecutionOptionError(
+            f'Backend {backend!r} has no checked local admission contract')
+    if sink_spec is not None and action_kind != 'write_lance':
+        raise ValueError('sink_spec is only accepted for write_lance')
+    require_action(action_kind)
+
+    capabilities = [operation_capability(op) for op in plan.operations]
+    if any(fact.get('native_options') for fact in capabilities):
+        raise UnsupportedExecutionOptionError(
+            'Local execution does not accept backend_options; use the Ray executor')
+    has_stream = any(ops.is_stream_operation(op) for op in plan.operations)
+    available = frozenset(available_backends)
+
+    if has_stream:
+        if action_kind not in _STREAM_TERMINALS:
+            raise UnsupportedExecutionOptionError(
+                f'{action_kind} does not support streaming map options; '
+                'materialize the streaming prefix first')
+        composition = check_composition(capabilities, backend='local', driver='stream')
+        if not composition['supported']:
+            raise ValueError(composition['reason'])
+        if action_kind in _MATERIALIZE_TERMINALS:
+            return ActionDecision(action_kind, 'local_stream', 'stream_materialize', 'native_checkpoint')
+        if action_kind == 'run_stream':
+            route = 'queue_stream' if _is_queue_source(source) else 'stream_delivery'
+            return ActionDecision(action_kind, 'local_stream', route, 'native_checkpoint')
+        return ActionDecision(action_kind, 'local_stream', 'stream_delivery', 'delivery_only')
+
+    composition = check_composition(capabilities, backend='local', driver='pull')
+    if not composition['supported']:
+        raise ValueError(composition['reason'])
+    if action_kind == 'write_lance':
+        if 'lance_scan' in available:
+            return ActionDecision(action_kind, 'lance_scan', 'lance_scan', 'final_commit')
+        if 'arrow_batch' in available:
+            if sink_spec is None or getattr(sink_spec, 'schema', None) is None:
+                raise ValueError('Arrow batch write requires a sink schema')
+            return ActionDecision(action_kind, 'arrow_batch', 'arrow_batch', 'final_commit')
+        if 'datafusion' in available:
+            return ActionDecision(action_kind, 'datafusion', 'native_relational', 'final_commit')
+        return ActionDecision(action_kind, 'local_pull', 'pull', 'final_commit')
+    if 'datafusion' in available:
+        return ActionDecision(action_kind, 'datafusion', 'native_relational', 'attempt_only')
+    if action_kind == 'write_datasink':
+        recovery = 'final_commit'
+    elif action_kind == 'write_file':
+        recovery = 'delivery_only'
+    else:
+        recovery = 'attempt_only'
+    return ActionDecision(action_kind, 'local_pull', 'pull', recovery)
+
+
 def validate_stream_plan(plan):
     """Preflight the complete native plan before constructing any callable."""
     from ..data import plan as ops
@@ -70,10 +169,11 @@ def validate_stream_plan(plan):
 
     if not any(ops.is_stream_operation(op) for op in plan.operations):
         raise ValueError("run_stream requires map_async/batch_map or explicit map streaming options")
+    facts = [operation_capability(op) for op in plan.operations]
+    composition = check_composition(facts, backend="local", driver="stream")
+    if not composition["supported"]:
+        raise ValueError(composition["reason"])
     for op in plan.operations:
-        result = check_call(operation_capability(op), driver="stream")
-        if not result["supported"]:
-            raise ValueError(result["reason"])
         if isinstance(op, (ops.MapOp, ops.BoundMapOp)) and op.stream_options is not None:
             op.stream_options.validate_callable(op.callable)
 

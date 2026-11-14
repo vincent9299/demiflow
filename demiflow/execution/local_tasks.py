@@ -424,12 +424,18 @@ def _worker_ready():
 
 class TaskScheduler:
     """Action-owned pool, ordered bounded submission, no automatic UDF retry."""
-    def __init__(self, options, stats, *, preload_lance=False):
+    def __init__(self, options, stats, *, preload_lance=False, budget=None):
         self.options, self.stats = options, stats
         self.pool = None
         self.pending = set()
         self.preload_lance = preload_lance
         self.started = False
+        # Simultaneously-alive task width is the single authority that partitions
+        # the sealed stage byte ceilings; the whole stage, not each task, is bounded.
+        self._width = options.workers * 2
+        self.budget = dict(budget) if budget else {}
+        self.task_inflight_bytes = None
+        self.task_output_bytes = None
 
     def __enter__(self):
         if self.options.worker_mode == "process":
@@ -438,6 +444,12 @@ class TaskScheduler:
                 initializer=_process_init, initargs=(context.Barrier(self.options.workers), self.preload_lance))
         else:
             self.pool = ThreadPoolExecutor(max_workers=self.options.workers, thread_name_prefix="demiflow-partition")
+        # options.workers already borrows the sealed CPU budget. Activate the per-task
+        # byte shares once the pool that borrows them exists.
+        inflight = self.budget.get('inflight_bytes')
+        output = self.budget.get('output_bytes')
+        self.task_inflight_bytes = inflight // self._width if inflight else None
+        self.task_output_bytes = output // self._width if output else None
         return self
 
     def run(self, function, arguments, stage):
@@ -445,7 +457,7 @@ class TaskScheduler:
         checked = current()
         iterator = iter(arguments)
         pending = deque()
-        width = self.options.workers * 2
+        width = self._width
         def submit():
             try:
                 args = next(iterator)
@@ -512,6 +524,11 @@ class TaskScheduler:
                 for process in list((getattr(self.pool, "_processes", None) or {}).values()):
                     process.terminate()
         self.pool.shutdown(wait=True, cancel_futures=True)
+        # Release the borrowed stage byte shares and dropped task references; a
+        # closed scheduler holds no budget and pins no completed futures.
+        self.pending.clear()
+        self.task_inflight_bytes = None
+        self.task_output_bytes = None
 
 
 class LocalTaskEngine:

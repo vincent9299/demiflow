@@ -161,10 +161,55 @@ class VectorSearch:
         return dict(uri=self.spec['uri'], version=self._version,
                     queries=self._queries, hits=self._hits)
 
+    def snapshot_state(self):
+        # Semantic progress only: the lazily pinned table version (once fixed)
+        # and cumulative query/hit counters. The lock, dataset handle and Arrow
+        # vector type are action-owned resources rebuilt by astart/_open, so they
+        # are never serialized. version is omitted until the head is first pinned.
+        state = {'queries': self._queries, 'hits': self._hits}
+        if self._version is not None:
+            state['version'] = self._version
+        return state
+
+    def restore_state(self, state):
+        from ..execution.recovery_contract import RecoveryContractError
+        if type(state) is not dict:
+            raise RecoveryContractError('VectorSearch recovery state must be a JSON object')
+        unknown = set(state) - {'version', 'queries', 'hits'}
+        if unknown:
+            raise RecoveryContractError(
+                'VectorSearch recovery state has unknown fields: ' + str(sorted(unknown)))
+        for name in ('queries', 'hits'):
+            value = state.get(name)
+            if type(value) is not int or value < 0:
+                raise RecoveryContractError(
+                    'VectorSearch recovery ' + name + ' must be a nonnegative integer')
+        version = state.get('version')
+        if version is not None and (type(version) is not int or version < 1):
+            raise RecoveryContractError('VectorSearch recovery version must be a positive integer')
+        declared = self.spec['version']
+        if declared is not None and version != declared:
+            # An explicitly published version is part of the sealed search
+            # identity; a missing or drifted pin means the declaration or the
+            # external table changed, so refuse rather than search a new head.
+            raise RecoveryContractError(
+                'VectorSearch recovery version differs from the fixed search declaration')
+        # Every field is validated before the live actor is touched. Resources
+        # stay closed; astart/_open rebuild the handle at the restored pin.
+        self._version = version
+        self._queries = state['queries']
+        self._hits = state['hits']
+
     def _open(self):
         with self._lock:
             if self._dataset is None:
-                dataset = open_lance_dataset(self.spec['uri'], self.spec['version'],
+                # A restored pin (resume) reopens the SAME table version instead
+                # of re-fetching HEAD. spec['version'] remains the sealed
+                # declaration; the lazily resolved version lives in _version.
+                version = self.spec['version']
+                if version is None:
+                    version = self._version
+                dataset = open_lance_dataset(self.spec['uri'], version,
                     self.spec['storage_options'],
                     index_cache_size_bytes=self.options['index_cache_size_bytes'],
                     metadata_cache_size_bytes=self.options['metadata_cache_size_bytes'])

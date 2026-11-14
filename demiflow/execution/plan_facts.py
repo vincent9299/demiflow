@@ -116,37 +116,51 @@ def operation_facts(operation):
     """Read complete supported operation parameters independently of a report."""
     fact = operation_capability(operation)
     kind, arguments = fact["kind"], {}
-    supported = {ops.MapOp, ops.BoundMapOp, ops.FilterOp, ops.FlatMapOp,
-                 ops.AsyncMapOp, ops.SearchWebOp, ops.BatchMapOp, ops.SaveLanceOp, ops.LimitOp, ops.SelectColumnsOp,
-                 ops.DropColumnsOp, ops.RenameColumnsOp}
-    if type(operation) not in supported:
+    # operation_capability is the single admission authority: a kind it refuses
+    # cannot be described here, and a kind it grants must be described here.
+    if kind == "unknown":
         raise RuntimeContractError("Unknown actual operation contract: " + type(operation).__name__)
     if fact["native_options"]:
         raise RuntimeContractError("Backend option facts require a supported native contract")
-    if type(operation) in {ops.MapOp, ops.BoundMapOp}:
+    if kind == "map":
         arguments.update(inputs=None, output=None, outputs=None)
-        if type(operation) is ops.BoundMapOp:
+        if fact["bound"]:
             arguments.update(inputs=dict(operation.inputs), output=operation.output,
                              outputs=dict(operation.outputs) if operation.outputs is not None else None)
         if operation.stream_options is not None:
             arguments.update({f.name: getattr(operation.stream_options, f.name) for f in fields(ops.MapStreamOptions)})
             arguments["catch"] = _catch_facts(arguments["catch"])
             arguments["queue_depth"] = arguments["queue_depth"] or arguments["concurrency"]
-    elif type(operation) in {ops.AsyncMapOp, ops.SearchWebOp, ops.BatchMapOp, ops.SaveLanceOp}:
+    elif kind in {"async_map", "batch_map"}:
         names = ("concurrency", "queue_depth", "catch", "label", "hard_timeout")
         arguments.update({name: getattr(operation, name) for name in names})
         arguments["catch"] = _catch_facts(arguments["catch"])
         arguments["queue_depth"] = arguments["queue_depth"] or arguments["concurrency"]
-        if type(operation) in {ops.AsyncMapOp,ops.SearchWebOp}:
+        if kind == "async_map":
             arguments["execution"] = operation.execution
         else:
             arguments.update(max_batch=operation.max_batch, flush_interval=operation.flush_interval)
-    elif type(operation) is ops.LimitOp:
+    elif kind == "limit":
         arguments["limit"] = operation.limit
-    elif type(operation) in {ops.SelectColumnsOp, ops.DropColumnsOp}:
+    elif kind in {"project", "drop"}:
         arguments["cols"] = list(operation.columns)
-    elif type(operation) is ops.RenameColumnsOp:
+    elif kind == "rename":
         arguments["names"] = operation.names
+    elif kind == "map_batches":
+        arguments.update(batch_size=operation.batch_size, batch_format=operation.batch_format,
+                         zero_copy_batch=operation.zero_copy_batch)
+    elif kind == "add_column":
+        arguments.update(column=operation.column, batch_format=operation.batch_format)
+    elif kind == "sample":
+        arguments.update(fraction=operation.fraction, seed=operation.seed)
+    elif kind == "model_map":
+        arguments.update(prompt_name=operation.prompt_name, inputs=dict(operation.inputs),
+                         output=operation.output,
+                         outputs=dict(operation.outputs) if operation.outputs is not None else None,
+                         options=_model_map_options(operation.options),
+                         max_requests=operation.max_requests,
+                         config={"schema_version": str(operation.config.schema_version),
+                                 "content_hash": operation.config.content_hash})
     domain = {}
     if type(operation) is ops.SaveLanceOp:
         from .stream_lance import StreamLanceSink
@@ -212,4 +226,68 @@ def operation_facts(operation):
                 domain = collect_facts(target)
             elif type(target) is PackPromptInputs:
                 domain = packing_facts(target)
+    specialization = _specialization_domain(operation)
+    if specialization is not None:
+        domain = {"native": specialization}
     return {**fact, "arguments": arguments, **domain}
+
+
+# Business-semantic prompt options projected into permanent model_map facts.
+# Credentials (request_options.api_key/extra_headers) and runtime environment
+# paths (journal/log/offline/codex/object_store) never enter the sealed identity.
+_MODEL_MAP_OPTION_KEYS = (
+    "model_revision", "verify_model", "require_finish_reason_stop",
+    "stream", "stream_include_usage", "gateway", "request_options",
+    "nonfatal_http_errors", "http_error_retry", "image_encoding",
+    "limits", "input_limits", "systemone_batch",
+    "max_request_bytes", "max_response_bytes", "max_event_bytes", "max_stream_events",
+)
+
+
+def _model_map_options(options):
+    if options is None:
+        return None
+    projected = {}
+    for name in _MODEL_MAP_OPTION_KEYS:
+        if name not in options:
+            continue
+        value = options[name]
+        if name == "request_options":
+            value = {k: v for k, v in dict(value).items() if k not in {"api_key", "extra_headers"}}
+        projected[name] = value
+    return projected
+
+
+def _specialization_domain(operation):
+    """Bounded native facts for the in-module stream specializations.
+
+    Without these, recovery_identity and chain fall back to describe(), whose
+    32-level budget cannot carry a specialization's nested declarations.
+    """
+    if type(operation) is ops.VectorSearchOp:
+        from .recovery_contract import identity
+        spec = dict(operation.search_spec)
+        storage = spec.get("storage_options") or {}
+        # Reference storage options by bounded identity; never copy credential
+        # material into the permanent plan fact.
+        spec["storage_options"] = {"sha256": identity(sorted(storage.items())),
+                                   "keys": sorted(storage)}
+        return {'contract': 'demiflow.search_vectors',
+                'arguments': dict(spec, query=operation.query, output=operation.output)}
+    if type(operation) is ops.StreamGroupBatchesOp:
+        return {'contract': 'demiflow.stream_group_batches',
+                'arguments': {name: getattr(operation, name) for name in
+                              ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}
+    if type(operation) is ops.DeduplicateOp:
+        return {'contract': 'demiflow.deduplicate',
+                'arguments': {name: getattr(operation, name) for name in ('on', 'key', 'output')}}
+    if type(operation) is ops.EmbeddingMapOp:
+        return {'contract': 'demiflow.embeddings',
+                'arguments': {name: getattr(operation, name) for name in ('model_contract', 'inputs', 'output')}}
+    if type(operation) is ops.StreamPrependOp:
+        from .recovery_identity import plan_identity
+        other = operation.source_dataset
+        return {'contract': 'demiflow.stream_prepend',
+                'arguments': dict(max_rows=operation.max_rows, max_row_bytes=operation.max_row_bytes,
+                                  source=plan_identity('input', other._source, other._plan))}
+    return None

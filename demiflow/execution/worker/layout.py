@@ -43,6 +43,11 @@ def load_worker_layout(launch_spec, authority, assignment):
     if placement is None:
         raise PlanContractError("invalid_assignment",
                                 "unknown worker group: " + str(group_id))
+    # v1 workers carry no placement kind; a v2 execution may be a driver entry.
+    # Never hand a driver execution back as a worker even if its group_id collides.
+    if getattr(placement, "placement", "worker") != "worker":
+        raise PlanContractError("invalid_assignment",
+                                "driver execution is not a worker placement: " + str(group_id))
 
     if assignment and "schema_version" in assignment:
         validate_worker_assignment(layout, assignment, group_id=group_id)

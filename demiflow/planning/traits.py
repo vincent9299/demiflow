@@ -67,10 +67,23 @@ def unified_operation_traits(op):
     if isinstance(op, (ops.BatchMapOp, ops.MapBatchesOp)) or getattr(op, "stream_options", None) is not None:
         updates["batching"] = "batch"
     callable_spec = getattr(op, "callable", None)
-    if callable_spec is not None and callable_spec.is_class:
+    if callable_spec is not None:
+        # Instance and class ownership share the single C04 policy. A class is a
+        # factory (deferred shared_colocated); an instance with a native adapter
+        # keeps that adapter instead of dropping it for not being a class. A
+        # hookless instance keeps the caller's declaration so the precheck still
+        # enforces the stateless-declaration boundary; its plain-data state is
+        # captured by auto_json at registration, not by upgrading sealed ownership.
+        from ..execution.operator_policy import classify_operator_state
         target = callable_spec.target
-        if callable(getattr(target, "snapshot_state", None)) and callable(getattr(target, "restore_state", None)):
-            updates["state_ownership"] = "shared_colocated"
+        if callable_spec.is_class:
+            policy = classify_operator_state(target, phase="declaration")
+            if policy.mode == "factory":
+                updates["state_ownership"] = "shared_colocated"
+        else:
+            policy = classify_operator_state(target, phase="instance")
+            if policy.mode == "hooks":
+                updates["state_ownership"] = "shared_colocated"
     return replace(base, **updates) if updates else base
 
 

@@ -10,8 +10,10 @@ on the receipt. The main control thread delivers receipts and converges
 CheckpointRequest/Drain/Cancel onto the same barrier, so a cut can never overtake
 its pre-cut output descriptor.
 """
+import asyncio
 import hashlib
 import threading
+import time
 import traceback
 import uuid
 from concurrent.futures import Future
@@ -111,8 +113,8 @@ class WorkerChainExecutor:
     def _stop_requested(self):
         return not self.authority.active or self.authority._local_cancel
 
-    def _request_commit(self, next_ordinal, sealed, states, final):
-        """Lock-step commit request from the execution thread's barrier publish."""
+    async def _request_commit(self, next_ordinal, sealed, states, final):
+        """Lock-step commit request from the barrier publish, awaited on the loop."""
         descriptor = sealed.descriptor()
         operation_id = uuid.uuid4().hex
         checkpoint_id = identity([self.output_child_id, "ck", next_ordinal, operation_id])
@@ -126,7 +128,21 @@ class WorkerChainExecutor:
         with self._lock:
             self._pending = future
         self._send(cut)
-        receipt = future.result()
+        authority = self.authority
+        now = time.time()
+        bound = min(authority.limits["checkpoint_timeout_s"],
+                    authority._grant["expires_at_ms"] / 1000.0 - now,
+                    authority.deadline - now,
+                    authority._limits["timeout_s"] - (time.monotonic() - authority.started))
+        try:
+            receipt = await asyncio.wait_for(asyncio.wrap_future(future), timeout=bound)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # Invalidate the pending cut so a late ACK cannot advance a later cut;
+            # the commit stays unknown: no resend, no early ownership release.
+            with self._lock:
+                if self._pending is future:
+                    self._pending = None
+            raise
         validate_commit_receipt(receipt)
         if receipt["operation_id"] != operation_id or receipt["sequence"] != sequence:
             raise RecoveryContractError("CommitReceipt does not match the outstanding cut")

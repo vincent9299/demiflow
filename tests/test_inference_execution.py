@@ -12,6 +12,7 @@ from demiflow.embeddings import embedding_execution_config
 from demiflow.inference import request_admission_config
 from demiflow.execution.blocking_io import BlockingIOPool
 from demiflow.execution.request_limits import RequestGate
+from demiflow.execution.run_context import RunContext
 from test_embeddings import server as embedding_server
 from test_map_prompt_async import server as prompt_server, prompt, PACK
 
@@ -44,19 +45,23 @@ def test_invalid_execution_budgets_rejected_before_resources(kwargs):
 @pytest.mark.parametrize('kind', ['prompt', 'embedding'])
 def test_declared_admission_bounds_fresh_calls_and_excludes_replay(kind, prompt_server, embedding_server, tmp_path):
     policy = request_admission_config({'initial_concurrency': 2, 'max_concurrency': 2}, concurrency=4)
-    options = {'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}, 'collect_journal_totals': False}
     if kind == 'prompt':
+        # Prompt recovery is execution-owned; repeat-action replay and its
+        # admission/budget exclusion are covered by test_prompt_stream_recovery.py:133-145.
         prompt_server['respond'] = lambda *_: (time.sleep(.04) or {'result': 'ok'})
-        ds = prompt(data.from_items([{'item': i} for i in range(8)]), concurrency=4,
-                    request_policy=policy, options=options)
-        state, key = prompt_server, 'requests'
-    else:
-        embedding_server['delay'] = .04
-        ds = data.from_items([{'text': str(i)} for i in range(8)]).map_embeddings(
-            model=embedding_server['model'], inputs={'text': 'text'},
-            **embedding_execution_config(batch_size=1, concurrency=4,
-                request_policy=policy, options=options))
-        state, key = embedding_server, 'bodies'
+        ds = prompt(data.from_items([{'item': i} for i in range(8)]), concurrency=4, request_policy=policy)
+        first = ds.run_stream()
+        admission = next(iter(first.metrics['models'].values()))['shared_admission']
+        assert first.emitted == len(prompt_server['requests']) == admission['requests'] == 8
+        assert 1 < prompt_server['peak'] <= 2 and admission['adaptive']['fresh_responses'] == 8
+        return
+    options = {'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}, 'collect_journal_totals': False}
+    embedding_server['delay'] = .04
+    ds = data.from_items([{'text': str(i)} for i in range(8)]).map_embeddings(
+        model=embedding_server['model'], inputs={'text': 'text'},
+        **embedding_execution_config(batch_size=1, concurrency=4,
+            request_policy=policy, options=options))
+    state, key = embedding_server, 'bodies'
     first = ds.run_stream()
     admission = next(iter(first.metrics['models'].values()))['shared_admission']
     assert first.emitted == len(state[key]) == admission['requests'] == 8
@@ -149,7 +154,7 @@ async def test_prompt_response_pool_progresses_while_journal_pool_is_busy(prompt
 
 def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_server, tmp_path, monkeypatch):
     from demiflow.operator_llm import client as clients, call_ref
-    from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
+    from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
     observed, closed = {}, []
     def record(name, function):
         def wrapped(*args, **kwargs):
@@ -159,7 +164,7 @@ def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_serv
     monkeypatch.setattr(clients.AsyncOperatorLLMClient, 'prepare', record('prepare', clients.AsyncOperatorLLMClient.prepare))
     monkeypatch.setattr(clients.AsyncOperatorLLMClient, 'decode', record('decode', clients.AsyncOperatorLLMClient.decode))
     monkeypatch.setattr(clients, '_response_body', record('parse', clients._response_body))
-    monkeypatch.setattr(SQLitePromptJournal, 'reserve', record('reserve', SQLitePromptJournal.reserve))
+    monkeypatch.setattr(_SQLiteJournalShard, 'reserve', record('reserve', _SQLiteJournalShard.reserve))
     original_close = clients.AsyncOperatorLLMClient.aclose
     async def close(client):
         await original_close(client)
@@ -168,12 +173,12 @@ def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_serv
     def forbidden(*args, **kwargs):
         raise AssertionError('Historical journal audit was not requested')
     monkeypatch.setattr(call_ref, 'journal_totals', forbidden)
-    ds = prompt(data.from_items([{'item': i} for i in range(2)]), concurrency=2,
-                options={'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')},
-                         'collect_journal_totals': False})
-    for _ in range(2):
-        assert ds.run_stream().emitted == 2
-    assert len(prompt_server['requests']) == 2 and len(closed) == 2
+    ds = prompt(data.from_items([{'item': i} for i in range(2)]), concurrency=2)
+    with RunContext.start(tmp_path/'run'):
+        assert len(ds.materialize().take_all()) == 2
+    # Repeat-action reuse is execution-owned recovery now; see
+    # test_prompt_stream_recovery.py:133-137 (resume reuses, each row called once).
+    assert len(prompt_server['requests']) == 2 and len(closed) == 1
     for name, prefix in [('prepare', 'prepare'), ('decode', 'response'), ('parse', 'response'), ('reserve', 'journal')]:
         assert observed[name] and all(thread.startswith('demiflow-prompt-' + prefix) for thread in observed[name])
     assert all(pool._executor is None for client in closed

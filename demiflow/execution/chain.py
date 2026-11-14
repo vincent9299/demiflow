@@ -649,7 +649,91 @@ def _by_value_business_modules(function):
     return modules
 
 
-def _business_dependency_modules(plan):
+def source_callable_roots(source):
+    """Business callables a native source declaration carries, in input_path order.
+
+    ``describe(source)`` binds a reducer's own source/bytecode/closure but never
+    ``__globals__``, so an imported business helper escapes the code-pin exactly as
+    a plan UDF's does (gap④). These roots seed the SAME module BFS in
+    ``_business_dependency_modules``; the dependency-traversal authority is not
+    duplicated here.
+
+    Only explicit native source types are walked, depth-first in structural order
+    (a node's own callables, then ``left``/``right``/``inputs[i]``), so the root
+    order is the stable input_path order and does not depend on dict iteration or
+    object identity. Passive: no user property, ``__getattr__`` or callable is
+    invoked. A nested ``PlanInput.plan``'s operations belong to that slice's own
+    ``plan`` argument and are deliberately not re-walked. Shared substructures are
+    visited per position (no implicit folding); a true cycle, an over-budget
+    structure, or a callable that cannot be pinned fail closed.
+    """
+    import functools
+    import inspect
+    from ..data.plan import CallableSpec
+    from ..data.sources import IterableSource, SqlSource
+    from .local_kernel import KeyedSource, PlanInput, UnionSource
+
+    def pinnable(value):
+        """Reduce a declared callable to the function whose code must be pinned."""
+        if value is None or isinstance(value, (str, int, float, bool, bytes, bytearray)):
+            return None
+        if inspect.isfunction(value):
+            return value
+        if inspect.ismethod(value):
+            return value.__func__
+        if isinstance(value, CallableSpec):
+            return pinnable(value.target)
+        if isinstance(value, functools.partial):
+            return pinnable(value.func)
+        if callable(value):
+            raise RecoveryContractError(
+                "Source callable is not a pinnable function; code-pin refuses (fail-closed)")
+        return None
+
+    roots, pending = [], [(source, frozenset())]
+    nodes = 0
+    while pending:
+        value, ancestors = pending.pop()
+        if value is None:
+            continue
+        marker = id(value)
+        if marker in ancestors:
+            raise RecoveryContractError(
+                "Source declaration is cyclic; code-pin refuses (fail-closed)")
+        nodes += 1
+        if nodes > _DEP_MAX_NODES:
+            raise RecoveryContractError(
+                "Source declaration exceeds value budget; code-pin refuses (fail-closed)")
+        lineage = ancestors | {marker}
+        children = []
+        if type(value) is PlanInput:
+            children.append(value.source)
+        elif type(value) is KeyedSource:
+            for name in ("reducer", "initial"):
+                root = pinnable(getattr(value, name))
+                if root is not None:
+                    roots.append(root)
+            kwargs = value.reducer_kwargs or {}
+            for name in sorted(kwargs):
+                root = pinnable(kwargs[name])
+                if root is not None:
+                    roots.append(root)
+            children.extend((value.left, value.right))
+        elif type(value) is UnionSource:
+            children.extend(value.inputs)
+        elif type(value) is SqlSource:
+            root = pinnable(value.connection_factory)
+            if root is not None:
+                roots.append(root)
+        elif type(value) is IterableSource:
+            root = pinnable(value.factory)
+            if root is not None:
+                roots.append(root)
+        pending.extend((child, lineage) for child in reversed(children))
+    return tuple(roots)
+
+
+def _business_dependency_modules(plan, *, source=None):
     """Transitive closure of business modules a plan's pure UDF maps import.
 
     ``describe`` binds a UDF's own source/bytecode/closure but never ``__globals__``,
@@ -714,6 +798,14 @@ def _business_dependency_modules(plan):
     # through cells + composite state and seed the SAME module BFS (unchanged).
     for function in by_value_udfs():
         pending.extend(_by_value_business_modules(function))
+    # Source side of gap④: a native source's reducer/factory imports business
+    # helpers through its own __globals__/captures, which describe(source) never
+    # walks. Same roots, same by-reference split, same BFS and budgets.
+    for function in source_callable_roots(source) if source is not None else ():
+        if _is_by_reference_udf(function):
+            pending.extend(candidates(function.__globals__))
+        else:
+            pending.extend(_by_value_business_modules(function))
     visited, found, total = set(), {}, 0
     while pending:
         module = pending.popleft()
@@ -734,17 +826,17 @@ def _business_dependency_modules(plan):
     return {name: found[name] for name in sorted(found)}
 
 
-def _business_dependency_manifest(plan):
+def _business_dependency_manifest(plan, *, source=None):
     """Code-pin dependency digest: business module source identities, no paths.
 
     Paths are excluded so the driver-sealed and worker-recomputed manifests are
     identical for unedited code regardless of how each side resolved the module.
     """
     return {name: {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
-            for name, (path, raw) in _business_dependency_modules(plan).items()}
+            for name, (path, raw) in _business_dependency_modules(plan, source=source).items()}
 
 
-def plan_code_pin(plan):
+def plan_code_pin(plan, *, source=None):
     """Code-sensitive identity of the plan's actually-executed operations.
 
     Mirrors ``plan_identity``'s operation identity: native domain facts for native
@@ -755,7 +847,9 @@ def plan_code_pin(plan):
     key pins the transitive business modules each UDF imports (``describe`` never
     walks ``__globals__``), so editing an imported helper also changes the pin.
     The worker recomputes it from the loaded plan alone, so it is the load-time
-    code-pin authority.
+    code-pin authority. ``source`` adds the native source declaration's own
+    callable dependencies (reducer/factory) to the same manifest; omitting it
+    keeps the historical bytes exactly.
     """
     from .plan_facts import operation_facts
     from .recovery_identity import describe
@@ -774,10 +868,10 @@ def plan_code_pin(plan):
         else:
             operations.append(describe(operation))
     return {"operations": _stable_code_identity(operations),
-            "dependencies": _business_dependency_manifest(plan)}
+            "dependencies": _business_dependency_manifest(plan, source=source)}
 
 
-def snapshot_code_sources(action, plan):
+def snapshot_code_sources(action, plan, *, source=None):
     """Seal the business UDF source files as immutable run artifacts for audit.
 
     The code-pin digest already binds each UDF's source bytes (``describe`` carries
@@ -785,7 +879,9 @@ def snapshot_code_sources(action, plan):
     actual sealed source so a refused resume can be audited against the code that
     was pinned. Best-effort for plain module functions; native actors are engine
     code pinned by ``platform_revision``. Dependency modules archive through the
-    same content-addressed path — no second artifact authority.
+    same content-addressed path — no second artifact authority. ``source`` adds the
+    native source's own callable files and walks the identical dependency set the
+    pin used, so the archive can never cover less than the pin claims.
     """
     import inspect
     from pathlib import Path
@@ -818,12 +914,16 @@ def snapshot_code_sources(action, plan):
         filename = inspect.getsourcefile(function)
         if filename:
             archive(filename)
-    for name, (path, raw) in _business_dependency_modules(plan).items():
+    for function in source_callable_roots(source) if source is not None else ():
+        filename = inspect.getsourcefile(function)
+        if filename:
+            archive(filename)
+    for name, (path, raw) in _business_dependency_modules(plan, source=source).items():
         archive(path)
     return refs
 
 
-def _seal_plan_code(action, plan, pin_key):
+def _seal_plan_code(action, plan, pin_key, *, source=None):
     """Seal the code-pin binding + source archive shared by every plan-seal path.
 
     One implementation for the chain/graph pickle delivery and the in-process write
@@ -833,16 +933,17 @@ def _seal_plan_code(action, plan, pin_key):
     distinct per plan for graph's multiple plans per action); the write seam keys it
     on a fixed per-action key (one write plan per action), never on the code-pin
     identity itself, which would change with the code and defeat the resume refusal.
-    The source archive is the manifest definition_ref.location.
+    The source archive is the manifest definition_ref.location. ``source`` is passed
+    to the pin and the archive alike so both cover the identical dependency set.
     """
     run = action.context
-    code_pin = plan_code_pin(plan)
+    code_pin = plan_code_pin(plan, source=source)
     sealed = run.journal.source_binding(pin_key)
     if sealed is not None and sealed != code_pin:
         raise RecoveryContractError(
             "Business code changed since the plan was sealed; resume refused (fail-closed)")
     run.journal.bind_source(run.fence, pin_key, code_pin)
-    sources = snapshot_code_sources(action, plan)
+    sources = snapshot_code_sources(action, plan, source=source)
     return {"code_pin_digest": identity(code_pin), "code_sources": sources}
 
 
@@ -870,7 +971,7 @@ def stage_plan_artifact(action, plan):
             **code_facts}
 
 
-def seal_write_plan_ref(action, plan):
+def seal_write_plan_ref(action, plan, *, source=None, program_id=None):
     """Bundle identity for the in-process write seam: the code-pin, not a pickle.
 
     The streamed/relational write_lance path runs the live plan via
@@ -882,10 +983,24 @@ def seal_write_plan_ref(action, plan):
     carry plan_ref; the workbench audits it). The code-pin binding and source archive
     come from the same ``_seal_plan_code`` helper the delivery path uses: one sealing
     implementation, no second serialization authority.
+
+    ``program_id=None`` keeps the historical single-program key byte-for-byte. A
+    multi-slice native program must pass its stable ProgramSlice id, keyed as
+    ``identity([action_id, "code-pin-write", program_id])`` — never an attempt number
+    or pickle bytes, so a resume finds the original binding. ``source`` reaches the
+    pin and the archive as the same set; a sealed record that predates source
+    coverage therefore recomputes to a different digest and recovery refuses rather
+    than guessing that the old record protected the source's code.
     """
     from .state_artifacts import atomic_bytes
     run = action.context
-    code_pin = plan_code_pin(plan)
+    if program_id is None:
+        pin_key = action.action_id + "-code-pin-write"
+    else:
+        if type(program_id) is not str or not program_id:
+            raise RecoveryContractError("Program slice id must be a nonempty string")
+        pin_key = identity([action.action_id, "code-pin-write", program_id])
+    code_pin = plan_code_pin(plan, source=source)
     digest = identity(code_pin)
     raw = document(code_pin, MAX_SEALED_PLAN_BYTES)
     path = run.directory / "scratch" / "chain-write-pin" / (digest + ".json")
@@ -895,10 +1010,10 @@ def seal_write_plan_ref(action, plan):
         if not path.exists():
             atomic_bytes(path, raw)
     run.release_temporaries([path.with_name(path.name + ".staging")])
-    # Stable per-action pin key (one write plan per action): a resume with drifted
-    # business code finds the sealed pin and fail-closes. Keying on identity(code_pin)
-    # would change with the code and silently re-bind, defeating gap④.
-    code_facts = _seal_plan_code(action, plan, action.action_id + "-code-pin-write")
+    # Stable per-program pin key: a resume with drifted business code finds the
+    # sealed pin and fail-closes. Keying on identity(code_pin) would change with the
+    # code and silently re-bind, defeating gap④.
+    code_facts = _seal_plan_code(action, plan, pin_key, source=source)
     return {"path": str(path.relative_to(run.directory)), "sha256": digest, "bytes": len(raw),
             **code_facts}
 
@@ -1163,19 +1278,61 @@ class _WriteSeal:
     operator identities from the actually-executed plan and fail-closes on any
     drift before publication; ``layout`` reuses the worker layout reader (import
     only, no copied extraction) to recover the checkpoint policy and stage limits
-    that the streamed path consumes.
+    that the streamed path consumes. A v2 native seal binds the driver execution
+    instead: there is no worker group to load, so both gates read the sealed
+    placement rather than inventing one.
     """
 
-    def __init__(self, action, plan_ref, topology):
+    def __init__(self, action, plan_ref, topology, *, source=None,
+                 native_layout=None, native_execution_id=None):
         self._action = action
         self._plan_ref = plan_ref
         self.topology = topology
         self.bindings_ref = topology["bindings_ref"]
+        self._source = source
+        self._native_layout = native_layout
+        self._native_execution_id = native_execution_id
+        self._native_placement = None
+        if native_layout is None:
+            if native_execution_id is not None:
+                raise RecoveryContractError("A native execution id requires its sealed layout")
+            return
+        if native_execution_id is None:
+            raise RecoveryContractError("A native layout requires its sealed execution id")
+        if source is None:
+            raise RecoveryContractError("Native write verification requires the fixed source")
+        matches = [entry for entry in native_layout.executions
+                   if entry.execution_id == native_execution_id]
+        if len(matches) != 1:
+            raise RecoveryContractError("Sealed native execution id is absent or ambiguous")
+        if matches[0].placement != "driver":
+            raise RecoveryContractError("Native write binds driver executions only")
+        self._native_placement = matches[0]
 
     def verify(self, plan):
+        if self._native_placement is not None:
+            from .native_plan import verify_native_programs
+            verify_native_programs(self._source, plan,
+                                   programs=self._native_placement.programs,
+                                   action_id=self._action.action_id)
+            return
         verify_loaded_plan(plan, self._plan_ref, self.topology["operators"])
 
     def layout(self):
+        if self._native_placement is not None:
+            placement = self._native_placement
+            stage_limits = {}
+            for program in placement.programs:
+                # The streamed stage machine indexes root-plan operations only;
+                # sub-program budgets are consumed by the native backend itself.
+                if list(program["input_path"]) != []:
+                    continue
+                for binding in program["operator_bindings"]:
+                    stage_id = binding["stage_id"]
+                    if stage_id not in placement.stage_limits:
+                        raise RecoveryContractError("Sealed native stage budget is missing")
+                    stage_limits[binding["program_index"]] = dict(placement.stage_limits[stage_id])
+            return self._native_layout.checkpoint, stage_limits
         from .worker.layout import load_worker_layout
         launch_spec = {"execution_plan": {"action_id": self._action.action_id,
                        "group_id": "chain-group", "bindings_ref": self.bindings_ref}}
@@ -1184,7 +1341,7 @@ class _WriteSeal:
         return checkpoint_policy, stage_limits
 
 
-def seal_write_topology(action, source, plan, *, host_id="local"):
+def seal_write_topology(action, source, plan, *, host_id="local", decision=None):
     """Compile + seal the executed write_lance plan under the parent action (D1a).
 
     Route (b): native execution and the single LanceSink publication are unchanged;
@@ -1193,8 +1350,20 @@ def seal_write_topology(action, source, plan, *, host_id="local"):
     LogicalPlan that actually execute — not the discarded native ``physical`` of the
     relational branch. Deferred branches (pure Lance copy, arrow_batch_sink) never
     call this, so the D reader honestly reports no sealed plan for them.
+
+    ``decision`` is additive: a native driver route seals execution_bindings.v2 and
+    every other route keeps the v1 chain seal. On recovery the sealed bindings stay
+    the authority — a new decision only has to agree with them and can never
+    replace the historical backend.
     """
     run = action.context
+
+    def root_program(programs):
+        for program in programs:
+            if list(program["input_path"]) == []:
+                return program
+        return None
+
     if run.journal.source_binding(action.action_id + "-sealed-plan") is not None:
         from ..planning.dag import compile_logical_dag
         from .plan_interpreter import interpret_physical_plan, to_wire
@@ -1202,6 +1371,45 @@ def seal_write_topology(action, source, plan, *, host_id="local"):
         sealed = load_sealed_plan(run.directory, action.action_id)
         bindings = load_execution_bindings(run.directory, action.action_id, sealed_plan=sealed)
         logical_dag, physical = sealed["logical_dag"], sealed["physical_plan"]
+        if bindings["document"]["schema"] == "demiflow.execution_bindings.v2":
+            from ..planning.dataset_dag import compile_dataset_logical_dag
+            from .native_plan import load_native_execution, verify_native_programs
+            drivers = [entry for entry in bindings["document"]["executions"]
+                       if entry["placement"] == "driver"]
+            if len(drivers) != 1:
+                raise RecoveryContractError("Sealed native write requires one driver execution")
+            execution_id = drivers[0]["execution_id"]
+            if decision is not None:
+                if decision.backend != drivers[0]["backend"]:
+                    raise RecoveryContractError(
+                        "Native write decision backend differs from the sealed backend")
+                if identity([action.action_id, "driver", decision.route]) != execution_id:
+                    raise RecoveryContractError(
+                        "Native write decision route differs from the sealed execution")
+            layout, placement = load_native_execution(
+                run, action.action_id, execution_id=execution_id)
+            verify_native_programs(source, plan, programs=placement.programs,
+                                   action_id=action.action_id)
+            actual, _ = compile_dataset_logical_dag(
+                action_id=action.action_id, source=source, plan=plan,
+                terminal_kind="write_lance", sink_ids=("lance",))
+            if actual != logical_dag:
+                raise RecoveryContractError("Native write logical plan differs from the sealed plan")
+            program = root_program(placement.programs)
+            plan_ref = None if program is None else to_wire(program["plan_ref"])
+            operators = [] if program is None else to_wire(program["sealed_operators"])
+            topology = {"run_id": run.ref.run_id, "action_id": action.action_id,
+                        "epoch": run.attempt, "topology_revision": 0, "route_epoch": 0,
+                        "plan_revision": physical["plan_revision"],
+                        "artifact_manifest_ref": sealed["facts"]["artifact_manifest_ref"],
+                        "source_id": logical_dag["sources"][0]["source_id"],
+                        "channel_id": physical["channels"][-1]["channel_id"],
+                        "operators": operators, "sink_id": "lance", "bindings_ref": bindings["ref"]}
+            bridge_ref = _seal_chain_identity_bridge(run, action, logical_dag, source, plan)
+            if bridge_ref is not None:
+                topology["identity_bridge_ref"] = bridge_ref
+            return _WriteSeal(action, plan_ref, topology, source=source,
+                              native_layout=layout, native_execution_id=execution_id)
         layout = interpret_physical_plan(logical_dag, physical, bindings=bindings,
                                          manifest_ref=sealed["facts"]["artifact_manifest_ref"])
         if (layout.supported_slice != "chain_v1" or len(layout.workers) != 1
@@ -1230,6 +1438,29 @@ def seal_write_topology(action, source, plan, *, host_id="local"):
         if bridge_ref is not None:
             topology["identity_bridge_ref"] = bridge_ref
         return _WriteSeal(action, plan_ref, topology)
+    if decision is not None and decision.route in ("native_relational", "arrow_batch", "lance_scan"):
+        from .native_plan import compile_native_topology, load_native_execution
+        from .plan_interpreter import to_wire
+        logical_dag, physical, bindings_ref = compile_native_topology(
+            action, source, plan, decision=decision)
+        execution_id = identity([action.action_id, "driver", decision.route])
+        layout, placement = load_native_execution(
+            run, action.action_id, execution_id=execution_id)
+        program = root_program(placement.programs)
+        plan_ref = None if program is None else to_wire(program["plan_ref"])
+        operators = [] if program is None else to_wire(program["sealed_operators"])
+        topology = {"run_id": run.ref.run_id, "action_id": action.action_id,
+                    "epoch": run.attempt, "topology_revision": 0, "route_epoch": 0,
+                    "plan_revision": physical["plan_revision"],
+                    "artifact_manifest_ref": to_wire(layout.artifact_manifest_ref),
+                    "source_id": logical_dag["sources"][0]["source_id"],
+                    "channel_id": physical["channels"][-1]["channel_id"],
+                    "operators": operators, "sink_id": "lance", "bindings_ref": bindings_ref}
+        bridge_ref = _seal_chain_identity_bridge(run, action, logical_dag, source, plan)
+        if bridge_ref is not None:
+            topology["identity_bridge_ref"] = bridge_ref
+        return _WriteSeal(action, plan_ref, topology, source=source,
+                          native_layout=layout, native_execution_id=execution_id)
     plan_ref = seal_write_plan_ref(action, plan)
     # The write bindings are a linear chain (single group, fixed source, single
     # partition, forward channels), so they reuse B's chain_v1 slice unchanged;
@@ -1623,6 +1854,7 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
         MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
                         uuid.uuid4().hex, 0),
         ResourcePlan(scope_id, (request,), ()))
+    drained = False
     try:
         manager.reconcile_once(run.fence, time.monotonic() + 30, 16)
         snapshot = manager.get(scope_id)
@@ -1708,13 +1940,23 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
         command("Drain", {"deadline_ms": int(run.limits["cancel_grace_s"] * 1000) + 5000,
                           "reason": "chain drained"})
         terminal.finish(source_rows)
-        manager.close(
-            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
-                            uuid.uuid4().hex, accepted["desired_revision"]),
-            {"mode": "DRAINED", "engine_receipt_ref": allocation_id + "-drained",
-             "terminate_deadline_ms": 5000, "reason": "chain drained"})
-        manager.reconcile_once(run.fence, time.monotonic() + 15, 16)
+        drained = True
     finally:
+        # Unified resource terminal (F6, same protocol as run_local_chain): success,
+        # failure and cancel all convert confirmed exit to capacity release through
+        # ResourceManager close+reconcile. Only an unconfirmed exit keeps its charge;
+        # the actor kill below is a backstop for survivors the protocol could not confirm.
+        try:
+            manager.close(
+                MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence,
+                                uuid.uuid4().hex, accepted["desired_revision"]),
+                {"mode": "DRAINED" if drained else "ABANDON",
+                 "engine_receipt_ref": allocation_id + ("-drained" if drained else "-abandoned"),
+                 "terminate_deadline_ms": 5000,
+                 "reason": "chain drained" if drained else "chain terminal cleanup"})
+            manager.reconcile_once(run.fence, time.monotonic() + 15, 16)
+        except Exception:
+            logger.exception("Ray chain resource terminal failed; falling back to actor kill")
         connector.terminate(allocation_id)
         connector.close(allocation_id)
     return _LocalMaterializedHandle(

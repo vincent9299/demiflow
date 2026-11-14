@@ -7,6 +7,7 @@ thread affinity. Constructor arguments and fn_args/kwargs retain their existing
 reference semantics and are not recursively cloned per worker.
 """
 import asyncio
+import contextlib
 import inspect
 
 from ..data.plan import AsyncMapOp, BatchMapOp, BoundCallable, BoundMapOp, StandardCallable
@@ -30,6 +31,7 @@ class _MapWorker:
             if self.failure is not None:
                 raise self.failure
             if not self.started:
+                started = False
                 try:
                     self.callable = (BoundCallable(self.operation)
                                      if isinstance(self.operation, BoundMapOp)
@@ -41,11 +43,28 @@ class _MapWorker:
                     if self.recovery_state is not None:
                         self.recovery_state.validate(self.callable._fn)
                     await self._hook('astart')
+                    started = True
                     if self.recovery_state is not None:
                         await self.recovery_state.register(self.callable._fn, self.recovery_key)
                     self.started = True
                 except BaseException as exc:
                     self.failure = exc
+                    if started:
+                        # An instance whose astart succeeded but whose registration
+                        # failed/cancelled must be released here; the action-level
+                        # stop/aclose is only an idempotent fallback. Shield so a
+                        # cancelled registration still drains the started actor.
+                        async def release():
+                            await self.astop()
+                            await self.aclose()
+                        task = asyncio.create_task(release())
+                        try:
+                            await asyncio.shield(task)
+                        except asyncio.CancelledError:
+                            with contextlib.suppress(BaseException):
+                                await task
+                        except BaseException:
+                            pass
                     raise
 
     async def _hook(self, name):

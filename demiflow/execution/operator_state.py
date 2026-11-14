@@ -4,6 +4,8 @@ import asyncio
 import json
 
 from .recovery_contract import document, RecoveryContractError
+from .operator_policy import (classify_operator_state, snapshot_auto_state,
+                              restore_auto_state)
 
 
 def owner_of(callable):
@@ -47,18 +49,32 @@ class OperatorStates:
     def __init__(self, context, restored=None):
         self.context, self.restored = context, restored or {}
         self.owners, self.identities, self.aliases = {}, {}, {}
+        # Per-owner C04 mode ("hooks"/"auto_json"); a cache of the single policy,
+        # never a second checkpoint authority — persistence stays owners->snapshot.
+        self.policies = {}
 
     def validate(self, owner):
-        if inspect.isfunction(owner) or inspect.isbuiltin(owner):
+        # A class is a factory blueprint, exempt until constructed; a function or
+        # builtin carries no cross-row state. A hookless instance is NOT presumed
+        # stateless: its recoverability is decided by the single C04 policy at
+        # register (auto_json capture, or drop when it bears resources). The only
+        # always-invalid declaration is a half-declared adapter — exactly one hook
+        # — which the platform could neither snapshot nor restore safely.
+        if inspect.isfunction(owner) or inspect.isbuiltin(owner) or inspect.isclass(owner):
             return
-        if not callable(getattr(owner, "snapshot_state", None)) or not callable(getattr(owner, "restore_state", None)):
+        snapshot = callable(getattr(owner, "snapshot_state", None))
+        restore = callable(getattr(owner, "restore_state", None))
+        if snapshot != restore:
             raise RecoveryContractError(
                 "Actor " + type(owner).__name__ +
-                " needs snapshot_state/restore_state; resource handles must not be serialized")
+                " needs both snapshot_state/restore_state; resource handles must not be serialized")
 
     async def register(self, owner, key):
         self.validate(owner)
-        if inspect.isfunction(owner) or inspect.isbuiltin(owner):
+        if inspect.isfunction(owner) or inspect.isbuiltin(owner) or inspect.isclass(owner):
+            return
+        policy = classify_operator_state(owner, phase="instance")
+        if policy.mode not in ("hooks", "auto_json"):
             return
         if id(owner) in self.identities:
             self.aliases[key] = self.identities[id(owner)]
@@ -66,27 +82,47 @@ class OperatorStates:
         self.aliases[key] = key
         self.identities[id(owner)] = key
         self.owners[key] = owner
+        self.policies[key] = policy.mode
         bind = getattr(owner, 'bind_execution', None)
         if bind is not None:
             from .run_context import current_action
             bind(self.context, current_action().action_id + '-' + key)
         if len(self.owners) > 256:
             raise RecoveryContractError("Actor state participant count exceeds budget")
+        maximum = self.context.limits['max_state_bytes']
         if key in self.restored:
-            value = owner.restore_state(self.restored[key])
-            if inspect.isawaitable(value):
-                await value
-        else:
+            if policy.mode == "hooks":
+                value = owner.restore_state(self.restored[key])
+                if inspect.isawaitable(value):
+                    await value
+            else:
+                def restore():
+                    restore_auto_state(owner, self.restored[key], max_bytes=maximum)
+                task = asyncio.create_task(asyncio.to_thread(restore))
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    await task
+                    raise
+        elif policy.mode == "hooks":
             value = owner.snapshot_state()
             if inspect.isawaitable(value):
                 value = await value
             def validate():
                 from ..data.runtime_contract import check_size
-                maximum = self.context.limits['max_state_bytes']
                 check_size(value, maximum)
                 _admit_encoding(value, maximum)
                 document(value, maximum)
             task = asyncio.create_task(asyncio.to_thread(validate))
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                await task
+                raise
+        else:
+            def admit():
+                snapshot_auto_state(owner, max_bytes=maximum)
+            task = asyncio.create_task(asyncio.to_thread(admit))
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
@@ -103,20 +139,29 @@ class OperatorStates:
                     for alias, canonical in self.aliases.items() if canonical == key
                     for prefix in prefixes):
                 continue
-            value = owner.snapshot_state()
-            if inspect.isawaitable(value):
-                value = await value
             remaining = maximum - (budget.snapshot_bytes if budget is not None else total)
-            def freeze(value=value, remaining=remaining):
-                from ..data.runtime_contract import check_size
-                # Account for the copied Python containers before allocating an
-                # encoding or detached graph; the owner gate remains held.
-                amount = check_size(value, remaining)
-                _admit_encoding(value, remaining)
-                raw = document(value, remaining)
-                amount = max(amount, len(raw))
-                return json.loads(raw), amount
-            task = asyncio.create_task(asyncio.to_thread(freeze))
+            if self.policies.get(key) == "auto_json":
+                def freeze_auto(owner=owner, remaining=remaining):
+                    from ..data.runtime_contract import check_size
+                    state = snapshot_auto_state(owner, max_bytes=remaining)
+                    amount = check_size(state, remaining)
+                    raw = document(state, remaining)
+                    return json.loads(raw), max(amount, len(raw))
+                task = asyncio.create_task(asyncio.to_thread(freeze_auto))
+            else:
+                value = owner.snapshot_state()
+                if inspect.isawaitable(value):
+                    value = await value
+                def freeze(value=value, remaining=remaining):
+                    from ..data.runtime_contract import check_size
+                    # Account for the copied Python containers before allocating an
+                    # encoding or detached graph; the owner gate remains held.
+                    amount = check_size(value, remaining)
+                    _admit_encoding(value, remaining)
+                    raw = document(value, remaining)
+                    amount = max(amount, len(raw))
+                    return json.loads(raw), amount
+                task = asyncio.create_task(asyncio.to_thread(freeze))
             try:
                 detached, amount = await asyncio.shield(task)
             except asyncio.CancelledError:

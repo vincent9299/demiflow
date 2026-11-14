@@ -45,7 +45,7 @@ GET_FIELDS = {
     'run-context': ({'run_id'}, {'attempt'}),
     'run-tools': (set(), set()),
     'graph': ({'basis_kind'}, {'entry','params','report_digest','run_id','attempt','node_id','node_offset'}),
-    'graph-source': ({'graph_binding','node_id','kind'}, {'resource'}),
+    'graph-source': ({'graph_binding','node_id','kind'}, {'resource','logical_node_id','occurrence_id'}),
     'parameter-state': ({'path'}, set()),
     'run-observations': ({'run_id','attempt'}, {'node_id','action_id','cursor','limit'}),
     'project-discovery': (set(), set()),

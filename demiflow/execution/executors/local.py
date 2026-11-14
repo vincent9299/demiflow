@@ -39,7 +39,7 @@ from ...data.constraints import SourceReadConstraints, analyze_source_constraint
 from ...observability import current_action_observer
 from ...data.stats import ExecutionMetadata, StageStats
 from .base import DatasetExecutor
-from ..run_context import native_rows, native_file_action
+from ..run_context import native_rows
 from ...planning import BackendResourceSnapshot, ResourceBundle, plan_action
 from ...planning.traits import terminal_traits
 
@@ -559,7 +559,13 @@ class LocalDatasetExecutor(DatasetExecutor):
                 yield row
 
     @native_rows
-    def _apply_plan(self, source: SourcePlan, plan: LogicalPlan, *, action_kind="iter_rows", terminal_category="action", terminal_native_options=None, physical_plan=None, _native=True) -> Iterator[Any]:
+    def _apply_plan(self, source: SourcePlan, plan: LogicalPlan, *, action_kind="iter_rows", terminal_category="action", terminal_native_options=None, physical_plan=None, _native=True, execution=None) -> Iterator[Any]:
+        if execution is not None:
+            from ..plan_interpreter import PlanContractError
+            raise PlanContractError(
+                'unsupported_layout',
+                'A sealed execution binding is consumed by the L-contract native executor '
+                '(execute_native_plan); this revision runs the explicit unbound contract')
         reject_streaming_map_options(plan, 'local')
         if _native:
             from ..dataset_native import has_relational, execute
@@ -744,11 +750,27 @@ class LocalDatasetExecutor(DatasetExecutor):
         )
         yield from rows
 
+    def _execution_capabilities(self, source, plan, *, action_kind, sink_spec=None):
+        """Declared backend capabilities from configuration only; never reads data."""
+        from ..dataset_native import has_relational
+        backends = ['local_pull', 'local_stream']
+        if self._local_kernel is not None and has_relational(source, plan):
+            backends.append('datafusion')
+        if action_kind == 'write_lance' and sink_spec is not None:
+            from ..arrow_batch_sink import eligible
+            if isinstance(source, LanceSource) and not plan.operations and source.native_options is None:
+                backends.append('lance_scan')
+            if eligible(self, source, plan, sink_spec):
+                backends.append('arrow_batch')
+        return tuple(backends)
+
     def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[dict[str, Any]]:
-        from ..stream_materialize import has_stream
-        if has_stream(plan):
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="iter_rows")
+        decision = admit_action_plan(source, plan, action_kind="iter_rows", available_backends=available)
+        if decision.route == "stream_delivery":
             from ..stream_delivery import iter_stream_rows
-            return iter_stream_rows(self,source,plan)
+            return iter_stream_rows(self, source, plan)
         return self._apply_plan(source, plan, action_kind="iter_rows")
 
     def iter_batches(
@@ -756,8 +778,11 @@ class LocalDatasetExecutor(DatasetExecutor):
         batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
     ) -> Iterable[Any]:
         del prefetch_batches
-        from ..stream_materialize import has_stream,bounded_stream_batches
-        if has_stream(plan):
+        from ..capabilities import admit_action_plan
+        from ..stream_materialize import bounded_stream_batches
+        available = self._execution_capabilities(source, plan, action_kind="iter_batches")
+        decision = admit_action_plan(source, plan, action_kind="iter_batches", available_backends=available)
+        if decision.route == "stream_delivery":
             return bounded_stream_batches(self,self.iter_rows(source,plan),batch_size=batch_size,
                 batch_format=batch_format,drop_last=drop_last)
         rows = self._apply_plan(source, plan, action_kind="iter_batches")
@@ -816,6 +841,9 @@ class LocalDatasetExecutor(DatasetExecutor):
 
     def materialize(self, source: SourcePlan, plan: LogicalPlan) -> _LocalMaterializedHandle:
         """Use the existing pull executor and the same durable terminal protocol."""
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="materialize")
+        admit_action_plan(source, plan, action_kind="materialize", available_backends=available)
         from ..run_context import current_action
         from ..source_snapshot import capture_source, freeze_source
         from ..block_sink import BlockSink
@@ -978,16 +1006,22 @@ class LocalDatasetExecutor(DatasetExecutor):
             if isinstance(handle, _LocalMaterializedHandle):
                 handle.check_open()
                 return handle.row_count
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="count")
+        admit_action_plan(source, plan, action_kind="count", available_backends=available)
         return super().count(source, plan)
 
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,
     ) -> list[dict[str, Any]]:
-        from ..stream_materialize import has_stream
-        if has_stream(plan):
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="take")
+        decision = admit_action_plan(source, plan, action_kind="take", available_backends=available)
+        if limit == 0:
+            return []
+        if decision.route == "stream_delivery":
             from ..stream_delivery import iter_stream_rows
             return list(iter_stream_rows(self,source,plan,limit=limit))
-        reject_streaming_map_options(plan, 'local')
         if self._local_kernel is not None:
             plan = plan.append(LimitOp(limit))
         return list(itertools.islice(self.iter_rows(source, plan), limit))
@@ -1003,6 +1037,9 @@ class LocalDatasetExecutor(DatasetExecutor):
         self, source: SourcePlan, plan: LogicalPlan,
         aggregates: tuple[Any, ...],
     ) -> Any:
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="aggregate")
+        admit_action_plan(source, plan, action_kind="aggregate", available_backends=available)
         for aggregate in aggregates:
             self._validate_serialized(aggregate, f"aggregation {aggregate.name!r}")
             self._validate_state(aggregate.initial_state(), aggregate.name)
@@ -1062,6 +1099,9 @@ class LocalDatasetExecutor(DatasetExecutor):
             from ...lance.read import lance_scan_schema
             if isinstance(source.query, LanceScanSpec):
                 return lance_scan_schema(source.query)
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="schema")
+        admit_action_plan(source, plan, action_kind="schema", available_backends=available)
         rows = list(itertools.islice(self._apply_plan(source, plan, action_kind="schema"), 1))
         if not rows:
             return None
@@ -1081,6 +1121,9 @@ class LocalDatasetExecutor(DatasetExecutor):
         return list(names if names is not None else schema)
 
     def size_bytes(self, source: SourcePlan, plan: LogicalPlan) -> int:
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="size_bytes")
+        admit_action_plan(source, plan, action_kind="size_bytes", available_backends=available)
         total = 0
         iterator = iter(self._apply_plan(source, plan, action_kind="size_bytes"))
         while block := tuple(itertools.islice(iterator, self._block_size)):
@@ -1126,6 +1169,9 @@ class LocalDatasetExecutor(DatasetExecutor):
     ) -> WriteResult:
         if native_options is not None:
             raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="write_datasink")
+        admit_action_plan(source, plan, action_kind="write_datasink", available_backends=available)
         from ..run_context import current_action
         from ..commit import CommitCoordinator
         from ..recovery_contract import SourcePosition
@@ -1171,6 +1217,9 @@ class LocalDatasetExecutor(DatasetExecutor):
     def write_lance(self, source, plan, spec, *, native_options=None):
         if native_options is not None:
             raise UnsupportedExecutionOptionError("Ray native options require a Ray target")
+        from ..capabilities import admit_action_plan
+        available = self._execution_capabilities(source, plan, action_kind="write_lance", sink_spec=spec)
+        admit_action_plan(source, plan, action_kind="write_lance", sink_spec=spec, available_backends=available)
         from ..stream_materialize import has_stream,prepare_stream_blocks
         from ..chain import seal_write_topology
         streamed=has_stream(plan)
@@ -1245,8 +1294,32 @@ class LocalDatasetExecutor(DatasetExecutor):
                                      byte_limits=current_run().limits)
         return write_lance(spec,batches)
 
-    @native_file_action
     def write_file(
+        self, source: SourcePlan, plan: LogicalPlan, format_name: str,
+        path: str, options: dict[str, Any],
+    ) -> WriteResult:
+        from contextlib import nullcontext
+        from ..capabilities import admit_action_plan
+        from ..recovery_identity import plan_identity
+        from ..run_context import current_action, execution_scope
+        available = self._execution_capabilities(source, plan, action_kind="write_file")
+        admit_action_plan(source, plan, action_kind="write_file", available_backends=available)
+        with execution_scope() as run:
+            self._run_ref = run.ref
+            borrowed = current_action()
+            if borrowed is not None:
+                action_cm = nullcontext(borrowed); owns_complete = False
+            else:
+                declaration = plan_identity('write_file', source, plan,
+                    arguments={'format': format_name, 'path': path, 'options': options})
+                action_cm = run.action(declaration); owns_complete = True
+            with action_cm as action:
+                result = self._write_file_body(source, plan, format_name, path, options)
+                if owns_complete:
+                    action.complete({'kind': 'write_file', 'delivery': 'completed'})
+                return result
+
+    def _write_file_body(
         self, source: SourcePlan, plan: LogicalPlan, format_name: str,
         path: str, options: dict[str, Any],
     ) -> WriteResult:

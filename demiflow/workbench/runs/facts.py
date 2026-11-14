@@ -282,8 +282,9 @@ def _bridge_node_map(entries):
 
 
 def _sealed_entry(result, *, bridge=None):
-    entry = dict(action_id=result['action_id'], status='sealed', dag=result['logical_dag'],
-                 node_map={}, plan_id=result['plan_id'], sealed_at=result['sealed_at'],
+    entry = dict(action_id=result['action_id'], status='sealed', binding_level='sealed',
+                 dag=result['logical_dag'], node_map={}, plan_id=result['plan_id'],
+                 sealed_at=result['sealed_at'],
                  artifact_manifest_ref=result['artifact_manifest_ref'],
                  physical=_physical_summary(result['physical_plan']))
     if bridge is not None and bridge.get('available'):
@@ -322,12 +323,14 @@ def overlay_sealed(root, run_id, declared_view, *, report_digest=None):
                 new = _unavailable(action_id, 'sealed_plan_budget', '执行封存计划超出展示预算')
         elif result is not None and result['reason'] == NO_FACTS:
             new = dict(entry)
+            new['binding_level'] = 'declared'
             if new.get('status') == 'projected':
                 new['fallback'] = dict(reason=NO_FACTS, detail=NO_FACTS_DETAIL)
         elif result is not None:
             new = result
         else:
             new = dict(entry)
+            new['binding_level'] = 'declared'
         size = len(bounded_json(new, ACTION_BYTES)) + 1
         if used + size > TOTAL_BYTES:
             view['truncated'] = True

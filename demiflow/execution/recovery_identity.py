@@ -102,8 +102,30 @@ def describe(value, depth=0):
     if type(value).__module__.startswith("pyarrow") and type(value).__name__ == "Schema":
         return {"arrow_schema": value.serialize().to_pybytes().hex()}
     if callable(value):
+        # C04 identity rule 1: a plain callable's config/constructor args/
+        # initial_state must not disappear for lack of hooks. Instance data
+        # initial values participate in semantic identity, matching the accepted
+        # historical bytes; unadapted deps inside the state still fail closed.
         state = getattr(value, "__dict__", {})
         return {"actor": describe(type(value), depth + 1), "initial_state": describe(state, depth + 1)}
+    import threading
+    import contextvars
+    if isinstance(value, contextvars.ContextVar):
+        # C04 identity rule 2: a ContextVar carries a business value. Erasing it
+        # to a type name would collide distinct configurations on resume.
+        try:
+            current = value.get()
+        except LookupError:
+            current = None
+        return {"contextvar": value.name, "value": describe(current, depth + 1)}
+    if isinstance(value, (threading.Event, threading.Barrier, threading.Condition,
+                          threading.Semaphore, threading.BoundedSemaphore)) \
+            or (type(value).__module__ == '_thread'
+                and type(value).__qualname__ in ('lock', 'RLock')):
+        # C04 identity rule 3: only synchronization primitives proven to carry no
+        # business semantics get a stable, address-free, rebuildable declaration.
+        # Thread / thread-local / opaque handles are NOT swallowed by type here.
+        return {"runtime_resource": type(value).__module__ + "." + type(value).__qualname__}
     raise RecoveryContractError("No native semantic identity for " + type(value).__name__)
 
 

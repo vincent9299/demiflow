@@ -5,6 +5,8 @@ no real channels. Node ids map one-to-one to the reviewed design matrix.
 PRT-01/PRT-02 are covered by the separate baseline regression run and the
 protection evidence, not by this file.
 """
+import threading
+
 import pytest
 
 from demiflow.data import plan as ops
@@ -44,6 +46,19 @@ class _Counter:
 
 class _StatefulNoAdapter:
     def __call__(self, row):
+        return row
+
+
+class _LockedNoAdapter:
+    """Genuinely unsupported stateful form: a live lock handle, no hooks."""
+
+    def __init__(self):
+        self.value = 0
+        self.lock = threading.Lock()
+
+    def __call__(self, row):
+        with self.lock:
+            self.value += 1
         return row
 
 
@@ -614,12 +629,22 @@ def test_op_02_pickle_only_closures_do_not_enter_durable_protocol():
 
 
 def test_op_03_missing_state_adapter_fails_precheck():
+    # Q57 (RESPONSE.md:106, QWEN-INDEPENDENT-REVIEW:149): a hookless plain-data
+    # CLASS factory is sealed at declaration with deferred adapter_present=True;
+    # the real instance is the mandatory check after construction. The
+    # missing-adapter rejection moves to the instance checkpoint for genuinely
+    # unsupported forms (live lock/handle), preserving the original guard.
     ref = {"manifest_id": "m" * 64, "sha256": "a" * 64}
+    kwargs = dict(logical_node_id="n1", occurrence_id="o1",
+                  artifact_manifest_ref=ref, module_key="p_" + "b" * 24)
+    factory = operator.compile_operator_spec(
+        CallableSpec.create(_StatefulNoAdapter),
+        traits={"state_ownership": "shared_colocated"}, **kwargs)
+    assert factory["state"] == {"ownership": "shared_colocated", "adapter_present": True}
     with pytest.raises(ProtocolError) as error:
         operator.compile_operator_spec(
-            CallableSpec.create(_StatefulNoAdapter), logical_node_id="n1", occurrence_id="o1",
-            artifact_manifest_ref=ref, module_key="p_" + "b" * 24,
-            traits={"state_ownership": "shared_colocated"})
+            CallableSpec.create(_LockedNoAdapter()),
+            traits={"state_ownership": "shared_colocated"}, **kwargs)
     assert _code(error) == "STATE_ADAPTER_MISSING"
 
 

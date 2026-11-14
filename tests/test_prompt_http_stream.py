@@ -1,6 +1,7 @@
 """Real socket lifecycle and bounded SSE failures through Dataset.map_prompt_async."""
 import asyncio
 import json
+import sqlite3
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,7 +15,8 @@ from demiflow.operator_llm.http_stream import ChatCompletionStream
 from demiflow.operator_llm.model import OperatorLLMRequest, PromptModel, TextPart
 from demiflow.operator_llm.call_ref import PromptRecordRef, journal_totals
 from demiflow.operator_llm.journal import UncertainPromptCall
-from demiflow.execution.request_limits import RequestGate
+from demiflow.execution.request_limits import RequestGate, ServiceStopped
+from demiflow.execution.run_context import RunContext
 from test_map_prompt_async import PACK, prompt
 
 
@@ -105,50 +107,50 @@ def test_concurrent_rows_pool_reuse_gate_lifetime_and_replay(sse_server,tmp_path
         gate=AdaptiveRequestGate(dict(initial_concurrency=2,max_concurrency=2),state_path=tmp_path/'gate.json')
     else:
         gate=RequestGate(2)
-    options={'stream':True,'gateway':'litellm','trust_env':False,
-             'sqlite_journal':{'path':str(tmp_path/'calls.sqlite'),'max_requests':6}}
+    options={'stream':True,'gateway':'litellm','trust_env':False}
     ds=prompt(DataAPI().from_items([{'item':i} for i in range(6)]),concurrency=3,
               request_gate=gate, options=options,call_output='call')
-    rows=ds.checkpoint(tmp_path/'a.jsonl',version='a').take_all()
+    with RunContext.start(tmp_path/'run'):
+        rows=ds.materialize().take_all()
     assert sorted(json.loads(r['answer']) for r in rows)==list(range(6))
     assert 1<sse_server['peak']<=2 and gate.peak==2
     assert len(set(sse_server['ports']))<=2  # sockets survive successive requests
     assert all(r['call']['stream_complete'] and not r['call']['reused'] for r in rows)
     assert all(r['call']['usage']['completion_tokens']==7 for r in rows)
     assert all(b['num_retries']==b['max_retries']==0 and b['fallbacks']==[] for b in sse_server['requests'])
-    fresh_count=gate.fresh_responses if adaptive else None
-    reused=ds.checkpoint(tmp_path/'b.jsonl',version='b').take_all()
-    assert len(sse_server['requests'])==6 and all(r['call']['reused'] for r in reused)
     if adaptive:
-        assert fresh_count==6
-        assert gate.fresh_responses==0  # new action resets observations; replay never enters the gate
-    assert journal_totals(tmp_path/'calls.sqlite')['input_tokens']==66
+        assert gate.fresh_responses==6
+    # Repeat-action replay is execution-owned recovery now; see
+    # test_prompt_stream_recovery.py:133-145 (resume reuses, no re-billing).
+    assert journal_totals(tmp_path/'run'/'run.sqlite')['input_tokens']==66
 
 
 def test_truncation_saved_once_never_schema_retried_or_automatically_requeued(sse_server,tmp_path):
     sse_server['done']=False
-    options={'stream':True,'trust_env':False,'sqlite_journal':{'path':str(tmp_path/'calls.sqlite')}}
+    options={'stream':True,'trust_env':False}
     ds=prompt(DataAPI().from_items([{'item':'case'}]),pack=PACK.replace('schema_retries: 0','schema_retries: 1'),
               options=options,error_output='error')
-    failed=ds.checkpoint(tmp_path/'a.jsonl',version='a').take_all()[0]['error']
+    with RunContext.start(tmp_path/'run'):
+        failed=ds.materialize().take_all()[0]['error']
     assert failed['category']=='incomplete_response'
     assert 'partial_response' not in failed['call']
     ref=failed['call']['error_ref']
     saved=PromptRecordRef(**ref).read()
     assert json.loads(saved['call']['partial_response']['choices'][0]['message']['content'])['result']
     assert saved['call']['usage']['completion_tokens']==7
-    assert journal_totals(tmp_path/'calls.sqlite')['output_tokens']==7
-    again=ds.checkpoint(tmp_path/'b.jsonl',version='b').take_all()[0]['error']
-    assert again['category']=='uncertain_call' and len(sse_server['requests'])==1
+    assert journal_totals(tmp_path/'run'/'run.sqlite')['output_tokens']==7
+    assert len(sse_server['requests'])==1  # truncation is never schema-retried
+    # Refusal to auto-requeue an uncertain call is execution-owned recovery now;
+    # see test_prompt_stream_recovery.py:125-132 (UncertainPromptCall, zero new requests).
 
 
 def test_read_idle_and_total_timeouts_are_distinct(sse_server,tmp_path):
     for name, options in [('read_idle',{'read_timeout_s':.06,'timeout_s':1}),
                           ('total',{'read_timeout_s':1,'timeout_s':.06})]:
         sse_server['hold']=True
-        ds=prompt(DataAPI().from_items([{'item':name}]),options={'stream':True,'trust_env':False,**options,
-                  'sqlite_journal':{'path':str(tmp_path/(name+'.sqlite'))}},error_output='error')
-        row=ds.checkpoint(tmp_path/(name+'.jsonl'),version='v').take_all()[0]
+        ds=prompt(DataAPI().from_items([{'item':name}]),options={'stream':True,'trust_env':False,**options},error_output='error')
+        with RunContext.start(tmp_path/(name+'-run')):
+            row=ds.materialize().take_all()[0]
         call=row['error']['call']
         assert call['timeout_phase']==name and not call['stream_complete']
     assert len(sse_server['requests'])==2
@@ -218,8 +220,6 @@ def test_cancel_during_response_commit_preserves_cache(monkeypatch,tmp_path):
 @pytest.mark.parametrize('failure_kind', ['service', 'sqlite'])
 def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
         monkeypatch, tmp_path, request_timeout, expected_responses, failure_kind):
-    import sqlite3
-    from demiflow.execution.request_limits import ServiceStopped
     error = (ServiceStopped('search engine unavailable') if failure_kind == 'service'
              else sqlite3.OperationalError('database is locked'))
     import demiflow.execution.stream as execution
@@ -243,15 +243,21 @@ def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
         if state['received'] is None:state['received']=asyncio.Event()
         if row['item']=='stop':
             await state['received'].wait()
-            raise error
+            # Construct inside the row callable: managed recovery identity cannot
+            # capture an exception instance in a closure cell.
+            raised = (ServiceStopped('search engine unavailable') if failure_kind == 'service'
+                      else sqlite3.OperationalError('database is locked'))
+            state['raised']=raised
+            raise raised
         return row
-    path=tmp_path/'drain.sqlite';published=[]
+    published=[]
     ds=prompt(DataAPI().from_items([{'item':'paid'},{'item':'stop'}]).map_async(upstream,concurrency=2),
-        options={'stream':True,'timeout_s':request_timeout,'sqlite_journal':{'path':str(path)}})
+        options={'stream':True,'timeout_s':request_timeout})
     with pytest.raises(type(error), match=str(error)) as caught:
-        ds.map(lambda row:published.append(row) or row).run_stream()
-    assert caught.value is error
-    totals=journal_totals(path)
+        with RunContext.start(tmp_path/'run'):
+            ds.map(lambda row:published.append(row) or row).materialize().take_all()
+    assert caught.value is state['raised']
+    totals=journal_totals(tmp_path/'run'/'run.sqlite')
     assert state['requests']==1 and state['closed'] and not published
     assert totals['responses'] == expected_responses
     assert totals['transport_errors'] == 1 - expected_responses
@@ -260,9 +266,10 @@ def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
 def test_raw_stream_log_opt_in_and_pool_wait_timeout(sse_server,tmp_path):
     sse_server['hold']=True
     options={'stream':True,'trust_env':False,'max_connections':1,'pool_timeout_s':.03,'read_timeout_s':.07,
-             'stream_log_dir':str(tmp_path/'raw'),'sqlite_journal':{'path':str(tmp_path/'pool.sqlite')}}
+             'stream_log_dir':str(tmp_path/'raw')}
     ds=prompt(DataAPI().from_items([{'item':'a'},{'item':'b'}]),concurrency=2,options=options,error_output='error')
-    rows=ds.checkpoint(tmp_path/'pool.jsonl',version='v').take_all()
+    with RunContext.start(tmp_path/'run'):
+        rows=ds.materialize().take_all()
     assert {r['error']['call']['timeout_phase'] for r in rows}=={'pool','read_idle'}
     assert len(sse_server['requests'])==1
     logs=list((tmp_path/'raw').glob('*.sse'))
@@ -283,8 +290,9 @@ def test_failure_evidence_and_no_hidden_retries(monkeypatch,tmp_path,status,body
         requests.append(request)
         return httpx.Response(status,stream=Body(),headers={'content-type':content_type})
     monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:original(**{**kw,'transport':httpx.MockTransport(handler)}))
-    options={'stream':True,'sqlite_journal':{'path':str(tmp_path/'failure.sqlite')}}
-    row=prompt(DataAPI().from_items([{'item':'test'}]),options=options,error_output='error').checkpoint(tmp_path/'a.jsonl',version='a').take_all()[0]
+    options={'stream':True}
+    with RunContext.start(tmp_path/'run'):
+        row=prompt(DataAPI().from_items([{'item':'test'}]),options=options,error_output='error').materialize().take_all()[0]
     assert row['error']['category']==expected and len(requests)==1 and 'answer' not in row
     call=row['error']['call']
     ref=call['response_ref'] if status!=200 else call['error_ref']

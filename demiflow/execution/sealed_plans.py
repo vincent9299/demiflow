@@ -18,8 +18,8 @@ from pathlib import Path
 
 from .recovery_contract import RecoveryContractError, document, identifier, identity
 from .plan_interpreter import (
-    EXECUTION_BINDINGS_SCHEMA, PlanContractError, _validate_artifact_ref,
-    _validate_bindings, _validate_manifest_ref,
+    EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2, PlanContractError,
+    _validate_artifact_ref, _validate_bindings, _validate_manifest_ref,
 )
 from .run_journal import RunJournal
 from .state_artifacts import atomic_bytes
@@ -158,7 +158,7 @@ def load_execution_bindings(directory, action_id, *, sealed_plan) -> dict:
         raise PlanContractError("missing_bindings", "action has no execution bindings")
     _validate_artifact_ref(ref, "execution bindings")
     doc = read_plan_artifact(directory, ref, max_bytes=MAX_BINDINGS_BYTES)
-    _require(doc.get("schema") == EXECUTION_BINDINGS_SCHEMA,
+    _require(doc.get("schema") in (EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2),
              "invalid_contract", "unsupported execution bindings schema")
     _require(doc.get("run_id") == facts["run_id"],
              "identity_mismatch", "bindings run_id differs from the sealed plan")
@@ -177,7 +177,8 @@ def load_execution_bindings(directory, action_id, *, sealed_plan) -> dict:
 
 def seal_execution_bindings(run, action, *, logical_dag, physical_plan, profiles,
                             programs, driver_stage_ids, source_bindings,
-                            channel_options, checkpoint_rows, supported_slice) -> dict:
+                            channel_options, checkpoint_rows, supported_slice,
+                            executions=None) -> dict:
     """Seal the execution-bindings document; idempotent re-seal must be identical.
 
     The carrier is content-addressed and unregistered (mirroring F1) so it survives
@@ -192,12 +193,22 @@ def seal_execution_bindings(run, action, *, logical_dag, physical_plan, profiles
     except (ValueError, RecoveryContractError) as exc:
         raise PlanContractError("invalid_contract", str(exc))
     manifest_ref = physical_plan["artifact_manifest_ref"]
-    doc = {"schema": EXECUTION_BINDINGS_SCHEMA, "run_id": run.ref.run_id,
-           "action_id": action_id, "dag_id": logical_dag["dag_id"],
-           "plan_id": physical_plan["plan_id"], "artifact_manifest_ref": manifest_ref,
-           "supported_slice": supported_slice, "profiles": profiles, "programs": programs,
-           "driver_stage_ids": driver_stage_ids, "source_bindings": source_bindings,
-           "channel_options": channel_options, "checkpoint_rows": checkpoint_rows}
+    if executions is None:
+        doc = {"schema": EXECUTION_BINDINGS_SCHEMA, "run_id": run.ref.run_id,
+               "action_id": action_id, "dag_id": logical_dag["dag_id"],
+               "plan_id": physical_plan["plan_id"], "artifact_manifest_ref": manifest_ref,
+               "supported_slice": supported_slice, "profiles": profiles, "programs": programs,
+               "driver_stage_ids": driver_stage_ids, "source_bindings": source_bindings,
+               "channel_options": channel_options, "checkpoint_rows": checkpoint_rows}
+    else:
+        _require(not programs, "invalid_contract",
+                 "v2 bindings must pass an empty programs sequence")
+        doc = {"schema": EXECUTION_BINDINGS_SCHEMA_V2, "run_id": run.ref.run_id,
+               "action_id": action_id, "dag_id": logical_dag["dag_id"],
+               "plan_id": physical_plan["plan_id"], "artifact_manifest_ref": manifest_ref,
+               "supported_slice": supported_slice, "profiles": profiles, "executions": executions,
+               "driver_stage_ids": driver_stage_ids, "source_bindings": source_bindings,
+               "channel_options": channel_options, "checkpoint_rows": checkpoint_rows}
     _validate_bindings(doc, logical_dag, physical_plan, manifest_ref)
     try:
         raw = document(doc, MAX_BINDINGS_BYTES)

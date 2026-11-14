@@ -66,7 +66,7 @@
     function select(id){selected=id;for(const[key,value]of elements){value.group.classList.toggle('selected',key===id);value.group.setAttribute('aria-pressed',String(key===id));}}
     function update(dag,nodeMap,labels,selectedId,basis) {
       if(!host.contains(canvas))host.replaceChildren(canvas);
-      canvas.setAttribute('aria-label',basis==='executed'?'执行封存计划（E2）':'声明图投影（E2）');
+      canvas.setAttribute('aria-label',(basis==='sealed'||basis==='executed')?'运行封存计划（E2）':'声明图投影（E2）');
       current=dag;canvas.replaceChildren();elements.clear();
       const occurrences=new Map();
       for(const node of dag.nodes){if(!occurrences.has(node.logical_node_id))occurrences.set(node.logical_node_id,[]);occurrences.get(node.logical_node_id).push(node);}

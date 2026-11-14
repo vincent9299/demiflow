@@ -6,8 +6,10 @@ created. Only model-specific code interprets saved media references.
 """
 import json
 import asyncio
+import contextlib
 import inspect
 import time
+import uuid
 from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -18,6 +20,26 @@ from ..execution.recovery_contract import RecoveryContractError, identity
 
 
 CALL_RESERVATION = ContextVar('native_prompt_budget_reservation', default=None)
+
+
+@contextlib.contextmanager
+def native_request_budget(run, *, node_id, max_requests):
+    # The reservation is only staged here; RunPromptJournal applies it in the
+    # same savepoint as the request intent. None inherits the run ceiling while
+    # an explicit 0 forbids fresh dispatch, so the two must not collapse.
+    if max_requests is not None and (type(max_requests) is not int or max_requests < 0):
+        raise RecoveryContractError('Native request budget ceiling must be a non-negative integer or None')
+    run_ceiling = run.limits['max_requests']
+    node_ceiling = run_ceiling if max_requests is None else max_requests
+    reservation = 'operator-llm-' + uuid.uuid4().hex
+    charges = {'requests': (1, run_ceiling),
+               'requests-' + identity(node_id): (1, node_ceiling)}
+    run.check_stop()
+    token = CALL_RESERVATION.set((reservation, charges))
+    try:
+        yield reservation
+    finally:
+        CALL_RESERVATION.reset(token)
 
 
 class _CapacityPending(Exception):

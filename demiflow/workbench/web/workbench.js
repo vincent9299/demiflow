@@ -209,7 +209,7 @@
       button('返回全图范围',()=>locateNode(null,0),locatorBody,{disabled:!scopeNode});
       locatorBody.append($('span','已索引 '+index.total+' 个节点 · 当前显示 '+graph.nodes.length+' 个；局部视图仍绑定同一图依据。','wb-caption'));
     }
-    function logicalName(){return data().graph?.logical?.basis==='executed'?'执行封存计划（E2）':'声明图投影（E2）';}
+    function logicalName(){return logicalEntry()?.binding_level==='sealed'?'运行封存计划（E2）':'声明图投影（E2）';}
     function actionStatusLabel(a){return a.status==='sealed'?'已封存':a.status==='projected'?'已投影':a.status==='unavailable'?'不可用':'投影失败';}
     function logicalEntry(){
       const view=data().graph?.logical;
@@ -257,12 +257,12 @@
       }
       logicalBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
       if(view.run_sealed&&!view.run_sealed.available){
-        logicalBar.append($('span','声明投影（非执行封存计划）','wb-tag'),$('p',view.run_sealed.detail||'','wb-caption'));
+        logicalBar.append($('span','声明投影（非运行封存计划）','wb-tag'),$('p',view.run_sealed.detail||'','wb-caption'));
       }
       if(entry.status==='unavailable'){
-        graphTitle.textContent='执行封存计划（E2）· 不可用';
+        graphTitle.textContent='运行封存计划（E2）· 不可用';
         const box=$('div',undefined,'wb-logical-panel');
-        box.append($('strong','此 action 的执行封存计划不可用'),$('p','其它 action 不受影响。','wb-caption'),
+        box.append($('strong','此 action 的运行封存计划不可用'),$('p','其它 action 不受影响。','wb-caption'),
           $('p','reason：'+(entry.reason||'unknown')),$('p','detail：'+(entry.detail||'未提供')));
         graphHost.replaceChildren(box);return;
       }
@@ -275,7 +275,7 @@
         graphHost.replaceChildren(box);return;
       }
       const dag=entry.dag,sealed=entry.status==='sealed';
-      graphTitle.textContent=(sealed?'执行封存计划（E2）':'声明图投影（E2）')+' · '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
+      graphTitle.textContent=(sealed?'运行封存计划（E2）':'声明图投影（E2）')+' · '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
       logicalBar.append($('span','结构校验通过 · '+dag.schema_version,'wb-tag'));
       if(sealed){
         const sealedAt=entry.sealed_at!=null&&Number.isFinite(Number(entry.sealed_at))?new Date(Number(entry.sealed_at)).toISOString():'未提供';
@@ -286,10 +286,10 @@
           $('span','sealed_at '+sealedAt,'wb-caption'));
       }else{
         logicalBar.append($('span','未绑定本次执行计划','wb-tag'),$('span','声明图 dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
-        if(entry.fallback)logicalBar.append($('span','声明投影（非执行封存计划）','wb-tag'));
+        if(entry.fallback)logicalBar.append($('span','声明投影（非运行封存计划）','wb-tag'));
       }
       const labels={};for(const n of graph.nodes)labels[n.id]=n.operator?.name||n.api.split(/[.:]/).at(-1)||n.kind;
-      logicalView.update(dag,entry.node_map,labels,logicalSelected,sealed?'executed':'declared');
+      logicalView.update(dag,entry.node_map,labels,logicalSelected,entry.binding_level||(sealed?'sealed':'declared'));
     }
     function bridgeEntryFor(entry,logicalId,occurrenceId){
       const bridge=entry&&entry.identity_bridge;
@@ -318,7 +318,7 @@
         locateNode(reportId).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
         return;
       }
-      if(reportId)chooseNode(reportId);
+      if(reportId)chooseNode(reportId,{logical_node_id:id,occurrence_id:group[0]?.occurrence_id??null});
       logicalSelected=id;logicalView.select(id);
       if(!group.length)return;
       const node=group[0];
@@ -352,7 +352,7 @@
                 if(!be){message('该出现尚无节点身份桥，无法对应执行节点。','error-box');return;}
                 const rid=be.report_node_id;
                 if(!data().graph.nodes.some(n=>n.id===rid)){locateNode(rid).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});return;}
-                chooseNode(rid);logicalSelected=id;logicalView.select(id);
+                chooseNode(rid,{logical_node_id:id,occurrence_id:occ.occurrence_id});logicalSelected=id;logicalView.select(id);
               },picker,{disabled:!be});
             }
           }
@@ -479,10 +479,13 @@
         if(current(ticket)){if(result.no_change)message('配置值未变化，未写入文件。');else{await useWorking(working.entry,working.params);message('配置已保存，图和检查需要重新核对。');}}
       }finally{busy=false;if(root.isConnected&&data().graph){if(data().mode==='checks')paintIssues();else paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);}updateActions();}
     }
-    function chooseNode(id){
+    function chooseNode(id,selection=null){
       if(!data().graph?.nodes.some(n=>n.id===id)||disposed)return;
-      state.chooseNode(id);graphView.select(id);
-      if(graphKind==='logical'){logicalSelected=null;logicalView.select(null);}
+      state.chooseNode(id,selection);graphView.select(id);
+      if(graphKind==='logical'){
+        if(selection){logicalSelected=selection.logical_node_id;logicalView.select(logicalSelected);}
+        else{logicalSelected=null;logicalView.select(null);}
+      }
       observationCursor=null;observationPages=[];lastObservationRevision=null;
       const node=data().graph.nodes.find(n=>n.id===id),binding=data().graph.binding;
       sourceTitle.textContent=(binding.basis_kind==='run'?'封存源码 · ':'源码 · ')+(node.operator?.name||node.api.split(/[.:]/).at(-1)||node.kind);
@@ -496,10 +499,12 @@
     async function loadSource(){
       updateActions();disposeReaders(sourceBody);sourceBody.replaceChildren();
       if(!sourceOpen)return;
-      const g=data().graph,node=data().node,ticket=state.capture(true),sequence=++sourceSequence;
+      const g=data().graph,node=data().node,selection=data().logical_selection,ticket=state.capture(true),sequence=++sourceSequence;
       if(!g||!node){sourceBody.append($('p','选择节点后查看实现、调用点或公开配置。','wb-caption'));return;}
       sourceBody.append($('p','正在读取绑定来源…','wb-caption'));
-      try{const value=await request('graph-source',{graph_binding:JSON.stringify(g.binding),node_id:node,kind:sourceKind});
+      const query={graph_binding:JSON.stringify(g.binding),node_id:node,kind:sourceKind};
+      if(selection){query.logical_node_id=selection.logical_node_id;if(selection.occurrence_id!=null)query.occurrence_id=selection.occurrence_id;}
+      try{const value=await request('graph-source',query);
         if(!current(ticket)||sequence!==sourceSequence)return;
         if(value.node_id!==node||json(value.graph_binding)!==json(g.binding))throw new Error('源码响应身份不一致');
         disposeReaders(sourceBody);sourceBody.replaceChildren();

@@ -1017,6 +1017,9 @@ class Dataset:
                          cancellation=cancellation, queue_factory=queue_factory,
                          stall_timeout=stall_timeout, stop_file=stop_file,
                          source_batch_size=source_batch_size, checkpoint=checkpoint_facts)
+        # Before action(): payload-fact computation raises TypeError for backend_options, masking this ValueError.
+        from ..execution.capabilities import validate_stream_plan
+        validate_stream_plan(self._plan)
         with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
             stats = self._run_stream(
                 source=checked.source, plan=checked.plan,
@@ -1791,7 +1794,7 @@ class Dataset:
         """Append a Ray-only global sort; Local execution fails closed."""
         keys = _columns(key, "Dataset.sort")
         if isinstance(descending, bool):
-            normalized_descending: bool | tuple[bool, ...] = descending
+            normalized_descending: tuple[bool, ...] = (descending,) * len(keys)
         else:
             normalized_descending = tuple(descending)
         if (
@@ -1926,8 +1929,10 @@ class Dataset:
         maximum = int(limit)
         if maximum < 0:
             raise ValueError("Dataset.take limit must be non-negative")
-        with observe_action("take", self._source, self._plan, self._executor) as observer:
-            rows = self._executor.take(self._source, self._plan, maximum)
+        from ..execution.checked import action
+        with action("take", self._source, self._plan, arguments={"limit": maximum}) as checked, \
+                observe_action("take", self._source, self._plan, self._executor) as observer:
+            rows = self._executor.take(checked.source, checked.plan, maximum)
             observer.rows = len(rows)
             observer.complete(limit=maximum, early_stopped=len(rows) == maximum)
         return rows
@@ -1942,19 +1947,21 @@ class Dataset:
         same detail rows. On a non-materialized Dataset this action can repeat
         every upstream operation.
         """
-        with observe_action("take_all", self._source, self._plan, self._executor) as observer:
-            if limit is None:
-                stream = self._executor.iter_rows(self._source, self._plan)
+        from ..execution.checked import action
+        maximum = None if limit is None else int(limit)
+        if maximum is not None and maximum < 0:
+            raise ValueError("Dataset.take_all limit must be non-negative")
+        with action("take_all", self._source, self._plan, arguments={"limit": limit}) as checked, \
+                observe_action("take_all", self._source, self._plan, self._executor) as observer:
+            if maximum is None:
+                stream = self._executor.iter_rows(checked.source, checked.plan)
                 rows = []
                 for row in stream:
                     rows.append(row)
                     observer.progress(rows=1)
             else:
-                maximum = int(limit)
-                if maximum < 0:
-                    raise ValueError("Dataset.take_all limit must be non-negative")
                 rows = self._executor.take(
-                    self._source, self._plan, maximum + 1,
+                    checked.source, checked.plan, maximum + 1,
                 )
                 observer.rows = len(rows)
                 if len(rows) > maximum:
@@ -1971,11 +1978,12 @@ class Dataset:
         size = int(batch_size)
         if size <= 0:
             raise ValueError("Dataset.take_batch batch_size must be positive")
-        with observe_action(
-            "take_batch", self._source, self._plan, self._executor,
-        ) as observer:
+        from ..execution.checked import action
+        with action("take_batch", self._source, self._plan,
+                    arguments={"batch_size": size, "batch_format": batch_format}) as checked, \
+                observe_action("take_batch", self._source, self._plan, self._executor) as observer:
             batch = self._executor.take_batch(
-                self._source, self._plan, size,
+                checked.source, checked.plan, size,
                 batch_format=_batch_format(batch_format),
             )
             observer.rows = _batch_row_count(batch)
@@ -2006,6 +2014,8 @@ class Dataset:
     @_flow_api('count', datasets=('self',), role='query', execution='action')
     def count(self) -> int:
         """Execute the lazy plan and count rows without returning row payloads."""
+        from .plan import reject_streaming_map_options
+        reject_streaming_map_options(self._plan, self._executor.NAME)
         from ..execution.checked import action
         with action('count', self._source, self._plan, arguments={}) as checked, observe_action("count", self._source, self._plan, self._executor) as observer:
             count = self._executor.count(checked.source, checked.plan)
@@ -2058,11 +2068,13 @@ class Dataset:
         names = [aggregate.name for aggregate in aggs]
         if len(names) != len(set(names)):
             raise ValueError("Dataset.aggregate names must be unique")
-        with observe_action(
-            "aggregate", self._source, self._plan, self._executor,
-            aggregate_count=len(aggs),
-        ) as observer:
-            result = self._executor.aggregate(self._source, self._plan, tuple(aggs))
+        from ..execution.checked import action
+        with action("aggregate", self._source, self._plan, arguments={"aggregates": names}) as checked, \
+                observe_action(
+                    "aggregate", self._source, self._plan, self._executor,
+                    aggregate_count=len(aggs),
+                ) as observer:
+            result = self._executor.aggregate(checked.source, checked.plan, tuple(aggs))
             observer.complete()
         return result
 
@@ -2127,10 +2139,16 @@ class Dataset:
 
     def iter_rows(self) -> Iterable[dict[str, Any]]:
         """Execute and consume rows incrementally without building a driver list."""
-        return observe_rows(
-            "iter_rows", self._executor.iter_rows(self._source, self._plan),
-            self._source, self._plan, self._executor,
-        )
+        from ..execution.checked import action
+
+        def _scoped():
+            with action("iter_rows", self._source, self._plan, arguments={}) as checked:
+                yield from observe_rows(
+                    "iter_rows", self._executor.iter_rows(checked.source, checked.plan),
+                    checked.source, checked.plan, self._executor,
+                )
+
+        return _scoped()
 
     def iter_batches(
         self,
@@ -2144,23 +2162,34 @@ class Dataset:
         size = None if batch_size is None else int(batch_size)
         if size is not None and size <= 0:
             raise ValueError("Dataset.iter_batches batch_size must be positive or None")
-        batches = self._executor.iter_batches(
-            self._source,
-            self._plan,
-            prefetch_batches=prefetch_batches,
-            batch_size=size,
-            batch_format=_batch_format(batch_format),
-            drop_last=drop_last,
-        )
-        return observe_batches(
-            "iter_batches", batches, self._source, self._plan, self._executor,
-        )
+        from ..execution.checked import action
+
+        def _scoped():
+            with action("iter_batches", self._source, self._plan,
+                        arguments={"batch_size": size, "batch_format": batch_format,
+                                   "drop_last": drop_last}) as checked:
+                batches = self._executor.iter_batches(
+                    checked.source, checked.plan,
+                    prefetch_batches=prefetch_batches, batch_size=size,
+                    batch_format=_batch_format(batch_format), drop_last=drop_last,
+                )
+                yield from observe_batches(
+                    "iter_batches", batches, checked.source, checked.plan, self._executor,
+                )
+
+        return _scoped()
 
     def schema(self, fetch_if_missing: bool = True) -> Any:
         """Return the backend-native Dataset schema, fetching source metadata when requested."""
-        return self._executor.schema(
-            self._source, self._plan, fetch_if_missing=fetch_if_missing
-        )
+        if not fetch_if_missing:
+            return self._executor.schema(
+                self._source, self._plan, fetch_if_missing=False
+            )
+        from ..execution.checked import action
+        with action("schema", self._source, self._plan, arguments={}) as checked:
+            return self._executor.schema(
+                checked.source, checked.plan, fetch_if_missing=True
+            )
 
     def columns(self, fetch_if_missing: bool = True) -> list[str] | None:
         """Return known column names, fetching source metadata when requested."""
@@ -2170,10 +2199,10 @@ class Dataset:
 
     def size_bytes(self) -> int:
         """Execute or inspect the plan as required to return its estimated size in bytes."""
-        with observe_action(
-            "size_bytes", self._source, self._plan, self._executor,
-        ) as observer:
-            value = self._executor.size_bytes(self._source, self._plan)
+        from ..execution.checked import action
+        with action("size_bytes", self._source, self._plan, arguments={}) as checked, \
+                observe_action("size_bytes", self._source, self._plan, self._executor) as observer:
+            value = self._executor.size_bytes(checked.source, checked.plan)
             observer.complete(size_bytes=value)
         return value
 
@@ -2269,12 +2298,16 @@ class Dataset:
     def _write_file(
         self, format_name: str, path: str, options: Mapping[str, Any],
     ) -> None:
-        with observe_action(
-            f"write_{format_name}", self._source, self._plan, self._executor,
-            sink_target=str(path),
-        ) as observer:
+        from ..execution.checked import action
+        with action("write_file", self._source, self._plan,
+                    arguments={"format": format_name, "path": str(path),
+                               "options": dict(options)}) as checked, \
+                observe_action(
+                    f"write_{format_name}", self._source, self._plan, self._executor,
+                    sink_target=str(path),
+                ) as observer:
             result = validate_write_result(self._executor.write_file(
-                self._source, self._plan, format_name, str(path), dict(options),
+                checked.source, checked.plan, format_name, str(path), dict(options),
             ))
             observer.rows = int(result.written_rows or 0)
             observer.batches = int(result.blocks_written or 0)

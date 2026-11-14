@@ -191,32 +191,22 @@ class StreamStageProgress:
 
         for index, stage in enumerate(stages):
             key = "node-" + str(index)
-            # Only fixed batches (concurrency=1, no flush window) have a proven
-            # platform buffer snapshot. Concurrent/timed/grouped/prepend buffers
-            # hold rows across cuts under window semantics a naive cut snapshot
-            # cannot align (graph cut deadlock / unproven group preservation);
-            # keep the honest rejection rather than fake recovery (S3 boundary).
-            if (stage.grouping is not None or stage.prefix is not None or
-                    stage.max_batch is not None and
-                    (stage.concurrency != 1 or stage.flush_interval is not None)):
-                raise RecoveryContractError("Buffered native stage needs its P3 state adapter before partial commits")
-            if stage.max_batch is not None:
-                buffer = BlockSink(self.action, key + '-buffer', staging_only=True)
-                self.buffer_sinks[index] = buffer
+            # Native buffer kinds are carried by a per-stage StageBufferAdapter
+            # (C05). A kind is opened only once its crash-recovery counterexample
+            # passes; anything else keeps the honest fail-closed rejection rather
+            # than faking partial-commit recovery. native_row_local stays in the
+            # separate native_pending registry below, never in the buffer snapshot.
+            from .stage_buffers import classify_stage_buffer, make_stage_buffer_adapter, PROVEN_KINDS
+            kind = classify_stage_buffer(stage)
+            if kind is not None:
+                if kind not in PROVEN_KINDS:
+                    raise RecoveryContractError("Buffered native stage needs its P3 state adapter before partial commits")
+                restored_buffer = self.state.restored.get(key + '-buffer')
+                stage.buffer_adapter = make_stage_buffer_adapter(
+                    stage, action=self.action, stage_key=key, restored=restored_buffer)
                 stage.scope_id = key
-                restored = self.state.restored.get(key + '-buffer')
-                if restored is not None:
-                    stage.batch_ordinal = restored["batch_ordinal"]
-                    if restored["data"]["rows"] >= stage.max_batch:
-                        raise RecoveryContractError('Fixed batch state exceeds its original group')
-                    from ..data.runtime_contract import check_size
-                    stage.recovery_buffer = []
-                    used = 64
-                    for row in buffer.iter_rows(restored['data']):
-                        used += check_size(row, self.run.limits['max_row_bytes']) + 16
-                        if used > self.run.limits['max_batch_bytes']:
-                            raise RecoveryContractError('Fixed batch recovery exceeds byte budget')
-                        stage.recovery_buffer.append(row)
+            else:
+                stage.buffer_adapter = None
             if isinstance(stage.fn, StreamMapRuntime):
                 target = stage.fn.operation.callable.target
                 self.state.validate(target)
@@ -224,6 +214,11 @@ class StreamStageProgress:
                 stage.fn.recovery_key = key
             else:
                 target = owner_of(stage.fn)
+                if isinstance(target, partial):
+                    # A streaming group node binds its pure pack_group helper with
+                    # functools.partial; the semantic owner is the function itself,
+                    # which carries no mutable state to snapshot or restore.
+                    target = target.func
                 self.state.validate(target)
                 self.direct_owners.append((target, key))
             targets = [target]
@@ -355,21 +350,12 @@ class StreamStageProgress:
                 sink._flush()
                 return dict(data=sink.descriptor(), occurrences=[value.scope.occurrence for value in pending])
             barrier.states['node-' + str(index) + '-inflight'] = await self._io(freeze_pending)
-        if index in self.buffer_sinks:
-            from ..data.runtime_contract import check_size
-            barrier.snapshot_bytes += 1024 + check_size(batch, self.run.limits['max_state_bytes'] - barrier.snapshot_bytes)
-            if barrier.snapshot_bytes > self.run.limits['max_state_bytes']:
-                raise RecoveryContractError('Aggregate fixed-batch snapshot exceeds state budget')
-            sink = self.buffer_sinks[index]
-            def freeze_buffer():
-                for row in batch:
-                    sink.append(row)
-                sink._flush()
-                data = sink.descriptor()
-                sink.reset()
-                return data
-            barrier.states['node-' + str(index) + '-buffer'] = dict(
-                batch_ordinal=self.stages[index].batch_ordinal, data=await self._io(freeze_buffer))
+        adapter = getattr(stage, 'buffer_adapter', None)
+        if adapter is not None:
+            # ``batch`` is the barrier's per-slot pending mapping for buffered
+            # kinds. The adapter freezes every active slot's remainder into the
+            # one shared barrier budget; it never publishes downstream itself.
+            await adapter.align(barrier, batch)
         if self.group_ends[index] == index:
             prefixes = ['node-' + str(i) for i, end in enumerate(self.group_ends) if end == index]
             barrier.states.update(await self.state.snapshot(prefixes, budget=barrier))

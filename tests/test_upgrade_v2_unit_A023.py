@@ -1,0 +1,90 @@
+"""A023 · LocalDatasetExecutor.materialize admits within the single action before reads.
+
+The public Dataset.materialize routes streaming plans to materialize_stream and
+plain plans here; admission must reject unsupported options/compositions before
+the source is read, while preserving the durable BlockSink/CommitCoordinator
+protocol and the single-action boundary. Heavy durable-commit recovery is
+exercised by the LAYOUT/RECOVERY gate suites.
+"""
+import pytest
+
+from demiflow import data
+from demiflow.data.native_options import NativeOptions
+from demiflow.data.plan import CallableSpec, MapOp
+from demiflow.errors import UnsupportedExecutionOptionError
+from demiflow.execution.executors.local import LocalDatasetExecutor
+from demiflow.execution.run_context import RunContext
+
+
+def _action_spy(monkeypatch):
+    calls = []
+    orig = RunContext.action
+
+    def counting(self, declaration, **kw):
+        calls.append(declaration.get("kind"))
+        return orig(self, declaration, **kw)
+
+    monkeypatch.setattr(RunContext, "action", counting)
+    return calls
+
+
+def _read_spy(monkeypatch):
+    calls = []
+
+    def spy(self, source, **kwargs):
+        calls.append(source)
+        raise AssertionError("source read attempted before admission")
+
+    monkeypatch.setattr(LocalDatasetExecutor, "_iter_source", spy)
+    return calls
+
+
+def _plain():
+    return data.from_items([{"id": i} for i in range(6)]).map(lambda r: r)
+
+
+def _stream():
+    return data.from_items([{"id": i} for i in range(6)]).map(
+        lambda r: r, execution="thread", concurrency=2)
+
+
+def test_plain_materialize_single_action(monkeypatch):
+    calls = _action_spy(monkeypatch)
+    mat = _plain().materialize()
+    assert calls == ["materialize"]
+    assert mat.take_all() == [{"id": i} for i in range(6)]
+
+
+def test_empty_input_materialize_single_action(monkeypatch):
+    calls = _action_spy(monkeypatch)
+    mat = data.from_items([]).map(lambda r: r).materialize()
+    assert calls == ["materialize"]
+    assert mat.take_all() == []
+
+
+def test_plain_materialize_requires_action_context():
+    ex = LocalDatasetExecutor()
+    ds = _plain()
+    with pytest.raises(RuntimeError, match="native action context"):
+        ex.materialize(ds._source, ds._plan)
+
+
+def test_streaming_materialize_admits_then_requires_action_context():
+    ex = LocalDatasetExecutor()
+    ds = _stream()
+    # materialize is a streaming terminal: admission must not misreject the
+    # streaming plan as a global map-option error; it passes, then the pull
+    # driver requires the native action context.
+    with pytest.raises(RuntimeError, match="native action context"):
+        ex.materialize(ds._source, ds._plan)
+
+
+def test_ray_native_options_materialize_rejected_before_read(monkeypatch):
+    ex = LocalDatasetExecutor()
+    ds = _plain()
+    plan = ds._plan.append(MapOp(CallableSpec.create(lambda r: r),
+                                 native_options=NativeOptions(backend="ray")))
+    calls = _read_spy(monkeypatch)
+    with pytest.raises(UnsupportedExecutionOptionError, match="backend_options"):
+        ex.materialize(ds._source, plan)
+    assert calls == []

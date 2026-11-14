@@ -68,6 +68,11 @@ def _adapter_present(target):
     owner = target
     if inspect.isfunction(owner):
         return False
+    # A class is a factory blueprint: adapter_present means the platform's
+    # deferred adaptation is available, not that an instance was verified. The
+    # real instance is the mandatory check after construction (never built here).
+    if inspect.isclass(owner):
+        return True
     if inspect.ismethod(owner):
         owner = owner.__self__
     return callable(getattr(owner, "snapshot_state", None)) and callable(getattr(owner, "restore_state", None))
@@ -108,6 +113,13 @@ def compile_operator_spec(callable_spec, *, logical_node_id, occurrence_id,
             or ownership not in _OWNERSHIP or effect_kind not in _EFFECTS:
         raise ProtocolError("INVALID_SPEC", "unsupported trait value")
     adapter = _adapter_present(target)
+    if not adapter and not inspect.isfunction(target) and not inspect.isclass(target):
+        # A hookless plain-data instance is platform-adaptable (auto_json) only
+        # under shared_colocated; the same C04 policy gates precheck and compile.
+        from ..operator_policy import classify_operator_state
+        policy = classify_operator_state(target, phase="instance", ownership=ownership)
+        if policy.mode == "auto_json" and ownership == "shared_colocated":
+            adapter = True
     if ownership != "none" and not adapter:
         raise ProtocolError("STATE_ADAPTER_MISSING",
                             "stateful operator lacks snapshot_state/restore_state")

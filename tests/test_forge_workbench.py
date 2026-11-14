@@ -123,7 +123,7 @@ def test_revoke_and_external_change_at_last_checkpoint_preserve_file(isolated):
 def test_fsync_failure_after_replace_is_not_reported_applied(isolated,monkeypatch):
     body=replacement(isolated);p=parameters.preview(isolated,**body)
     def fail(_):raise OSError('owned fault injection')
-    monkeypatch.setattr(parameters,'_fsync_directory',fail)
+    monkeypatch.setattr(parameters,'fsync_directory',fail)
     with pytest.raises(ForgeError) as caught:
         parameters.update(isolated,authorize=lambda:None,**body,proposed_sha256=p['proposed_sha256'])
     assert caught.value.code=='operation_failed' and 'unknown after replace' in str(caught.value)
@@ -381,6 +381,7 @@ def test_observation_revision_detects_add_update_rollback_and_cleanup(isolated):
 
 def test_observation_cursor_rejects_same_run_reference_in_another_project(isolated,tmp_path):
     from demiflow.workbench.runs import domain as run_domain
+    from demiflow.workbench.runs.authority import LocalAuthority
     from demiflow.workbench.worker import operation
     first=runs.prepare(isolated,ENTRY,params=PARAMS)
     page=run_view.observations(isolated,first['run_id'],attempt=1,limit=1)
@@ -389,7 +390,8 @@ def test_observation_cursor_rejects_same_run_reference_in_another_project(isolat
     control=ws.read_control(other/'workspace.json');expected=content_digest(control);control['id']='w'+'f'*32
     ws.write_control(other/'workspace.json',control,expected=expected)
     with run_domain.preparation_lock():
-        second=operation('run_prepare',other,entry=ENTRY,params=PARAMS,reserved_run_id=first['run_id'])
+        second=operation('run_prepare',other,entry=ENTRY,params=PARAMS,reserved_run_id=first['run_id'],
+                         _authority=LocalAuthority(str(other.absolute())).bootstrap())
     assert second['run_id']==first['run_id'] and second['digest']!=first['digest']
     with pytest.raises(run_view.ObservationResetRequired) as caught:
         run_view.observations(other,second['run_id'],attempt=1,cursor=page['cursor'])

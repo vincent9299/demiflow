@@ -4,6 +4,7 @@ import hashlib
 import json
 import pickle
 import stat
+import struct
 import uuid
 
 from ..data.datasink import Datasink
@@ -79,8 +80,14 @@ def _canonical_row(value):
             out = tuple(cv for cv, _ in kids)
             containers[sig] = out
             return out, sig
-        if node is None or isinstance(node, (int, float, bool, complex)):
+        if node is None or isinstance(node, (int, bool)):
             return node, ('v', type(node).__name__, node)
+        # IEEE-754 bytes, not Python ==: -0.0/0.0 and distinct NaN payloads must
+        # never collapse a container signature (C06 value fidelity).
+        if isinstance(node, float):
+            return node, ('f', struct.pack('>d', node))
+        if isinstance(node, complex):
+            return node, ('c', struct.pack('>dd', node.real, node.imag))
         # Opaque objects pass through; an identity sig keeps distinct objects distinct (out of value-canonical scope).
         return node, ('o', id(node))
 

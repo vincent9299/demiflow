@@ -98,7 +98,7 @@ class _Stage:
     __slots__ = ("name", "fn", "concurrency", "queue_depth", "catch",
                  "pre_filters", "post_filters", "hard_timeout",
                  "max_batch", "flush_interval", "execution", "executor", "pending", "flat_map", "grouping", "prefix", "validation", "observation", "recovery_buffer", "native_recovery", "native_snapshot", "batch_ordinal", "scope_id", "native_pending", "native_restore", "native_input_lock", "native_emit_lock", "native_idle",
-                 "operation_index", "stage_budget")
+                 "operation_index", "stage_budget", "buffer_adapter")
 
     def __init__(self, name, fn, concurrency, queue_depth, catch,
                  pre_filters, post_filters, hard_timeout=None,
@@ -134,6 +134,7 @@ class _Stage:
         self.native_idle.set()
         self.batch_ordinal = 0
         self.scope_id = None
+        self.buffer_adapter = None
 
 
 def _materialize(plan: LogicalPlan, *, stage_limits=None) -> list[_Stage]:
@@ -321,7 +322,8 @@ def _post_filter(filters, out):
 
 
 def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
-                 stats: StreamStats, on_progress, log_every: int, consume=None, unit_driver=None):
+                 stats: StreamStats, on_progress, log_every: int, consume=None, unit_driver=None,
+                 worker_slot=0):
     name = stage.name
     map_worker = stage.fn.new_worker() if isinstance(stage.fn, StreamMapRuntime) else None
     from .checked import current
@@ -384,6 +386,10 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
         if stage.prefix is not None:
             from .stream_grouping import row_size
             op = stage.prefix
+            adapter = stage.buffer_adapter
+            skip = 0
+            if adapter is not None:
+                skip, _exhausted = adapter.take_prefix()
             prefix = iter(op.source_dataset.iter_rows())
             reader_context = contextvars.copy_context()
             # next(default) avoids propagating StopIteration through a Future.
@@ -401,12 +407,19 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                 while True:
                     row = await read_one()
                     if row is SENTINEL:
+                        if adapter is not None:
+                            adapter.prefix_exhausted = True
                         break
                     if count >= op.max_rows:
                         raise ValueError('prepend source exceeds max_rows')
                     row_size(row, op.max_row_bytes)
                     count += 1
+                    if count <= skip:
+                        # Already emitted in a prior committed cut; do not republish.
+                        continue
                     await _emit(row, st)
+                    if adapter is not None:
+                        adapter.prefix_position = count
             finally:
                 close = getattr(prefix, 'close', None)
                 if close is not None:
@@ -446,7 +459,12 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             if row is SENTINEL:
                 return
             if isinstance(row, _CheckpointBarrier):
-                await row.arrive(stage)
+                pending = None
+                adapter = stage.buffer_adapter
+                if adapter is not None and adapter.kind == 'prepend':
+                    pending = {"position": adapter.prefix_position,
+                               "exhausted": adapter.prefix_exhausted}
+                await row.arrive(stage, pending, worker_slot=worker_slot)
                 continue
             scope = row.scope if type(row) is ScopedRow else None
             row = row.row if type(row) is ScopedRow else row
@@ -577,10 +595,19 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
             await grouped_worker(st)
             return
         loop = asyncio.get_running_loop()
-        restored = stage.recovery_buffer or []
-        stage.recovery_buffer = None
+        adapter = stage.buffer_adapter
+        if adapter is not None:
+            restored, _ordinal = adapter.take_restored(worker_slot)
+            restored = restored or []
+        else:
+            restored = stage.recovery_buffer or []
+            stage.recovery_buffer = None
         while True:
             batch, restored, deadline = restored, [], None
+            if batch and stage.flush_interval is not None:
+                # A restored remainder restarts its advisory flush window; the
+                # durable contract is the rows and ordinal, not the old deadline.
+                deadline = loop.time() + stage.flush_interval
             from ..data.runtime_contract import check_size
             batch_bytes = 64 + sum(check_size(row, batch_limits['max_row_bytes']) + 16 for row in batch) if batch_limits else 64
             while True:
@@ -602,7 +629,7 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                     if row.final and batch:
                         await _flush(batch)
                         batch, batch_bytes = [], 64
-                    await row.arrive(stage, batch)
+                    await row.arrive(stage, batch, worker_slot=worker_slot)
                     continue
                 row = row.row if type(row) is ScopedRow else row
                 check_row(row)
@@ -632,12 +659,24 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
         from .stream_grouping import group_key, row_size
         op, groups, retained = stage.grouping, {}, 0
         loop = asyncio.get_running_loop()
+        adapter = stage.buffer_adapter
+        if adapter is not None:
+            restored_groups, _ordinal = adapter.take_restored(worker_slot)
+            for key, rows, deadline_ms in restored_groups or []:
+                size = sum(row_size(r, op.chunk_bytes) for r in rows)
+                groups[key] = [list(rows), size, loop.time() + max(0, deadline_ms) / 1000]
+                retained += size
 
         async def flush(key):
             nonlocal retained
             rows, size, deadline = groups.pop(key)
             retained -= size
             await _flush(rows)
+
+        def snapshot_groups():
+            now = loop.time()
+            return [(key, rows, max(0, int((deadline - now) * 1000)))
+                    for key, (rows, _size, deadline) in groups.items()]
 
         while True:
             now = loop.time()
@@ -652,6 +691,15 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
                 for key in list(groups):
                     await flush(key)
                 return
+            if isinstance(row, _CheckpointBarrier):
+                if row.final:
+                    for key in list(groups):
+                        await flush(key)
+                    pending = []
+                else:
+                    pending = snapshot_groups()
+                await row.arrive(stage, pending, worker_slot=worker_slot)
+                continue
             st['in'] += 1
             if any(not _predicate(predicate, row) for predicate in stage.pre_filters):
                 stats.add_miss(f'{name}:filtered')
@@ -671,9 +719,14 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
 
     async def _flush(batch):
         if stage.scope_id is not None:
-            from .recovery_contract import identity
-            set_row_scope(RowScope(identity(['fixed-batch', stage.scope_id, stage.batch_ordinal])))
-            stage.batch_ordinal += 1
+            adapter = stage.buffer_adapter
+            if adapter is not None:
+                ordinal = adapter.next_ordinal(worker_slot)
+                set_row_scope(RowScope(adapter.scope_identity(worker_slot, ordinal)))
+            else:
+                from .recovery_contract import identity
+                set_row_scope(RowScope(identity(['fixed-batch', stage.scope_id, stage.batch_ordinal])))
+                stage.batch_ordinal += 1
         st = stats.stage(name)
         if map_worker is not None:
             await map_worker.prepare()
@@ -752,10 +805,12 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         raise RuntimeContractError('Raw acquisition requires a row-local stream; materialize buffered transformations first')
     if progress is not None:
         progress.stats = stats
-    if progress is not None and any(
-            s.grouping is not None or s.prefix is not None or
-            s.max_batch is not None and (s.concurrency != 1 or s.flush_interval is not None) for s in stages):
-        raise RuntimeContractError('Automatic stream progress requires row-local stages; grouped state needs its own commit contract')
+    if progress is not None:
+        from .stage_buffers import classify_stage_buffer, PROVEN_KINDS
+        for s in stages:
+            kind = classify_stage_buffer(s)
+            if kind is not None and kind not in PROVEN_KINDS:
+                raise RuntimeContractError('Automatic stream progress requires row-local stages; grouped state needs its own commit contract')
     for stage in stages:
         stats.stage(stage.name)
         stats.stage_policies[stage.name] = {
@@ -893,8 +948,9 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
     for i, s in enumerate(stages):
         q_out = queues[i + 1] if i + 1 < len(stages) else None
         stage_tasks.append([asyncio.create_task(
-            _make_worker(s, queues[i], q_out, stats, on_progress, log_every, consume, unit_driver)())
-            for _ in range(s.concurrency)])
+            _make_worker(s, queues[i], q_out, stats, on_progress, log_every, consume, unit_driver,
+                         worker_slot=slot)())
+            for slot in range(s.concurrency)])
     if progress is not None:
         control = CheckpointControl(progress, stages, queues, track_commit)
         bind_control = getattr(progress, "_bind_checkpoint_control", None)
@@ -1109,6 +1165,12 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
                 await stop_stage(stage)
             except Exception as exc:
                 stop_errors.append(exc)
+        # Release per-stage staging buffers on every exit path. Committed state
+        # references are owned by StateArtifacts/CommitCoordinator and untouched.
+        for stage in stages:
+            adapter = getattr(stage, "buffer_adapter", None)
+            if adapter is not None:
+                adapter.close()
         if on_drain is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await asyncio.shield(_call(on_drain, stats))

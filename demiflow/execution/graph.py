@@ -33,7 +33,6 @@ from .graph_wire import (
     CUT_CONTRIBUTION_SCHEMA, build_graph_checkpoint, validate_cut_contribution,
 )
 from .recovery_contract import RecoveryContractError, SourcePosition, identity
-from .reservation import derive_prefetch
 from .run_context import RunAction, current_action
 from .source_snapshot import capture_source, freeze_source
 from .state_artifacts import StateArtifacts
@@ -542,9 +541,19 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
     budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
     # Prefetch bounds derive from the admitted inflight budget only when one is
     # configured; the default path injects no key and stays byte-identical (U3).
+    # The bound path joint-solves the slot+byte grant against channel credit before
+    # sealing so one solved credit feeds the router, InputGate and sealed layout.
     prefetch_slots = graph_spec.get("prefetch_slots")
-    prefetch = (derive_prefetch(prefetch_slots, max_pending_floor=budget["rows"])
-                if prefetch_slots is not None else None)
+    inflight_bytes = max(run.limits["max_row_bytes"] + 256, run.limits["max_batch_bytes"])
+    if prefetch_slots is not None:
+        from .reservation import resolve_prefetch_credit
+        resolved = resolve_prefetch_credit(
+            prefetch_slots, inflight_bytes=inflight_bytes, credit_budget=budget,
+            credit_explicit="credit_budget" in graph_spec)
+        prefetch = resolved["prefetch"]
+        budget = resolved["credit_budget"]
+    else:
+        prefetch = None
     queue_depth = graph_spec.get("queue_depth", 4096)
     if prefetch is not None:
         queue_depth = min(queue_depth, prefetch["queue_depth"])
@@ -654,6 +663,15 @@ def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_
     _bindings_ref = _bindings["ref"]
     restore = terminal.restore_point()
     restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
+    if restore is not None:
+        # Recovery: the sealed worker-stage inflight grant is authoritative; verify
+        # the re-derived byte grant matches it rather than re-solving another layout.
+        for stage in _layout.stages:
+            owner = _layout.stage_owners.get(stage["stage_id"])
+            if owner is not None and owner["kind"] == "worker" \
+                    and stage["budgets"]["inflight_bytes"] != inflight_bytes:
+                raise RecoveryContractError(
+                    "Recovery inflight byte grant differs from the sealed layout")
 
     def worker_state(occurrence_id):
         # Each worker's combined stage-state artifact is keyed by its occurrence;
@@ -975,9 +993,19 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
     budget = graph_spec.get("credit_budget", {"rows": 64, "bytes": 8 * 1024 ** 2})
     # Prefetch bounds derive from the admitted inflight budget only when one is
     # configured; the default path injects no key and stays byte-identical (U3).
+    # The bound path joint-solves the slot+byte grant against channel credit before
+    # sealing so one solved credit feeds the router, InputGate and sealed layout.
     prefetch_slots = graph_spec.get("prefetch_slots")
-    prefetch = (derive_prefetch(prefetch_slots, max_pending_floor=budget["rows"])
-                if prefetch_slots is not None else None)
+    inflight_bytes = max(run.limits["max_row_bytes"] + 256, run.limits["max_batch_bytes"])
+    if prefetch_slots is not None:
+        from .reservation import resolve_prefetch_credit
+        resolved = resolve_prefetch_credit(
+            prefetch_slots, inflight_bytes=inflight_bytes, credit_budget=budget,
+            credit_explicit="credit_budget" in graph_spec)
+        prefetch = resolved["prefetch"]
+        budget = resolved["credit_budget"]
+    else:
+        prefetch = None
     queue_depth = graph_spec.get("queue_depth", 4096)
     if prefetch is not None:
         queue_depth = min(queue_depth, prefetch["queue_depth"])
@@ -1068,6 +1096,15 @@ def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_ti
     _bindings_ref = _bindings["ref"]
     restore = terminal.restore_point()
     restore_ordinal = restore["position"]["next_ordinal"] if restore else 0
+    if restore is not None:
+        # Recovery: the sealed worker-stage inflight grant is authoritative; verify
+        # the re-derived byte grant matches it rather than re-solving another layout.
+        for stage in _layout.stages:
+            owner = _layout.stage_owners.get(stage["stage_id"])
+            if owner is not None and owner["kind"] == "worker" \
+                    and stage["budgets"]["inflight_bytes"] != inflight_bytes:
+                raise RecoveryContractError(
+                    "Recovery inflight byte grant differs from the sealed layout")
 
     def worker_state(occurrence_id):
         # Each worker's combined stage-state artifact is keyed by its occurrence;

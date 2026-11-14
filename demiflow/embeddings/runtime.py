@@ -14,6 +14,7 @@ from demiflow.execution.blocking_io import BlockingIOPool
 from demiflow.execution.stream_resources import CallMetrics
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
+from demiflow.operator_llm.stream_recovery import native_request_budget
 from demiflow.services.contracts import validate_service, service_request_slot
 from .model import EmbeddingModel
 from .payload import EmbeddingProtocolError, _add, prepare, prepare_batches, response_record, vectors
@@ -79,11 +80,23 @@ class EmbeddingActor:
         self._pool = self._prepare_pool = self._client = self._owner = self._journal = None
         self._response_pool = None
         self._document_reader = None
+        self._native_recovery = None
+
+    def native_stream_recovery(self, action, node_id):
+        from .stream_recovery import NativeEmbeddingRecovery
+        if (self._native_recovery is None or self._native_recovery.action is not action
+                or self._native_recovery.node_id != node_id):
+            self._native_recovery = NativeEmbeddingRecovery(self, action, node_id)
+        return self._native_recovery
 
     @property
     def cancel_drain_timeout_s(self):
         journal = self.options['sqlite_journal']
-        return self.options['timeout_s'] + 3 * journal.get('timeout_s', 30) + 1 if journal else 0
+        if journal:
+            return self.options['timeout_s'] + 3 * journal.get('timeout_s', 30) + 1
+        if self._native_recovery is not None:
+            return self.options['timeout_s'] + 3 * self._native_recovery.journal.timeout_s + 1
+        return 0
 
     async def astart(self):
         import httpx
@@ -112,6 +125,8 @@ class EmbeddingActor:
                                 keepalive_expiry=self.options['keepalive_expiry_s']),
             timeout=httpx.Timeout(connect=self.options['connect_timeout_s'], read=self.options['read_timeout_s'],
                                   write=self.options['write_timeout_s'], pool=self.options['pool_timeout_s']))
+        if self._native_recovery is not None:
+            self._native_recovery.bind_actor()
 
     async def _io(self, fn, *args, _phase=None, _timings=None, _prepare=False, _response=False, **kwargs):
         # Admission precedes submission: the executor cannot accumulate unbounded jobs.
@@ -147,6 +162,9 @@ class EmbeddingActor:
 
     async def _exchange(self, request, encoded, timings):
         journal = self._journal
+        native = self._native_recovery
+        if native is not None:
+            request = native.scope_request(request)
         io = partial(self._io, _phase='journal', _timings=timings)
         record = await io(journal.lookup, request) if journal is not None else None
         references = None
@@ -163,17 +181,39 @@ class EmbeddingActor:
             started = time.perf_counter()
             async with self._request_slots, self.request_gate.enter():
                 _add(timings, 'admission_wait_s', time.perf_counter() - started)
-                if journal is not None:
+                if native is not None:
+                    # The reservation covers reserve through fresh send/persist;
+                    # the run journal applies it in the same savepoint as intent.
+                    with native_request_budget(native.action.context, node_id=native.node_id,
+                                               max_requests=self.max_requests) as reservation:
+                        reserved = await io(journal.reserve, request)
+                        if not reserved:
+                            record = await io(journal.lookup, request)
+                            reused = True
+                        if record is None:
+                            self._calls += 1  # observation only; the run journal is the budget authority
+                            task = asyncio.ensure_future(drain_on_service_stop(
+                                self._fresh_exchange(request, encoded, timings), enabled=True))
+                            native.inflight[reservation] = task
+                            try:
+                                record, references = await task
+                            finally:
+                                native.inflight.pop(reservation, None)
+                elif journal is not None:
                     reserved = await io(journal.reserve, request)
                     if not reserved:
                         record = await io(journal.lookup, request)
                         reused = True
-                elif self.max_requests is not None and self._calls >= self.max_requests:
-                    raise PromptBudgetExceededError('Embedding request budget exhausted')
-                if record is None:
+                    if record is None:
+                        self._calls += 1
+                        record, references = await drain_on_service_stop(
+                            self._fresh_exchange(request, encoded, timings), enabled=True)
+                else:
+                    if self.max_requests is not None and self._calls >= self.max_requests:
+                        raise PromptBudgetExceededError('Embedding request budget exhausted')
                     self._calls += 1
                     record, references = await drain_on_service_stop(
-                        self._fresh_exchange(request, encoded, timings), enabled=journal is not None)
+                        self._fresh_exchange(request, encoded, timings), enabled=False)
         call = {key: record[key] for key in ('computed_at', 'elapsed_s')}
         call.update(request_id=request.request_key, reused=reused)
         if journal is not None:
@@ -305,6 +345,10 @@ class EmbeddingActor:
 
     async def aclose(self):
         errors = []
+        if self._native_recovery is not None:
+            # Drain in-flight native effects first. A timeout propagates without
+            # closing the still-used client/journal or clearing inflight.
+            await self._native_recovery.drain(timeout_s=self.cancel_drain_timeout_s)
         for resource in (self._client, self._owner):
             if resource is not None:
                 try:

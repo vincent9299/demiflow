@@ -101,7 +101,7 @@ class Relation:
 
 
 class Engine:
-    def __init__(self, executor, stack, directory, stats):
+    def __init__(self, executor, stack, directory, stats, *, execution=None):
         self.executor, self.stack = executor, stack
         self.directory, self.stats = Path(directory), stats
         self.views, self.sources, self.key_functions = {}, {}, []
@@ -110,6 +110,9 @@ class Engine:
         self.payload_sources = {}
         self.typed_cache = {}
         self.large = False
+        # One sealed placement borrowed end to end; sub-queries never re-pick a
+        # backend or mutate the shared executor configuration.
+        self.execution = execution
 
     def name(self, prefix='n'):
         return f'{prefix}{next(self.counter)}'
@@ -122,7 +125,17 @@ class Engine:
     def batch_rows(self, rel):
         # A join can carry one payload from each packed input in an output row.
         # Row count alone lets a native output batch grow to multiple GiB.
-        return min(self.session.options.batch_rows, max(1, (8 * 2**20) // max(1, rel.payload_row_bytes)))
+        from .payload_limits import BATCH_TARGET_BYTES
+        from .recovery_contract import RecoveryContractError
+        options = self.session.options
+        width = rel.payload_row_bytes
+        # max_row_bytes is the hard, admitted per-row ceiling (already tightened
+        # by the sealed inflight_bytes/memory). No indivisible row is exempt, so
+        # an over-wide row fails explicitly instead of being masked to one row.
+        if width > options.max_row_bytes:
+            raise RecoveryContractError('A single native output row exceeds the admitted row byte ceiling')
+        target = min(BATCH_TARGET_BYTES, options.max_row_bytes)
+        return min(options.batch_rows, max(1, target // max(1, width)))
 
     @property
     def session(self):
@@ -130,7 +143,8 @@ class Engine:
             from .native_resources import dataset_session
             self._session = self.stack.enter_context(dataset_session(
                 self.executor, self.directory,
-                prefer_hash_join=any(s.get('format') == 'csv' for s in self.sources.values())))
+                prefer_hash_join=any(s.get('format') == 'csv' for s in self.sources.values()),
+                execution=self.execution))
         # The configured native batch target applies to keys and typed columns
         # too; opaque payloads may tighten result hydration further per relation.
         return self._session
@@ -488,7 +502,7 @@ class Engine:
 
     def python_rows(self, executor, source, plan):
         try:
-            yield from executor._apply_plan(source, plan, _native=False)
+            yield from executor._apply_plan(source, plan, _native=False, execution=self.execution)
         finally:
             child = executor._local_kernel_stats
             if child is not self.stats and child.get('engine') != 'datafusion':
@@ -548,7 +562,7 @@ class Engine:
             yield from self.python_rows(executor, source, plan)
 
 
-def execute(executor, source, plan, *, arrow=False, sink_schema=None):
+def execute(executor, source, plan, *, arrow=False, sink_schema=None, execution=None):
     if executor._local_kernel_closed:
         raise RuntimeError('local_execution is closed; execute actions inside its context')
     # Preflight every branch before any source or callback has side effects.
@@ -586,7 +600,7 @@ def execute(executor, source, plan, *, arrow=False, sink_schema=None):
         temp = executor._local_kernel.temp_directory if executor._local_kernel else None
         with ExitStack() as stack:
             directory = stack.enter_context(tempfile.TemporaryDirectory(prefix='demiflow-dataset-', dir=temp))
-            engine = Engine(executor, stack, directory, stats)
+            engine = Engine(executor, stack, directory, stats, execution=execution)
             item = PlanInput(source, plan, executor)
             rel = engine.typed(item) if arrow else None
             from .local_tasks import NARROW

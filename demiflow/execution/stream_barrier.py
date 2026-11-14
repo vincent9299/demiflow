@@ -8,11 +8,17 @@ import inspect
 import time
 from collections import deque
 
+from .recovery_contract import RecoveryContractError
+
 
 class _CheckpointBarrier:
     def __init__(self, stages, queues, commit, *, progress=None, final=False, track=None):
         self.stages, self.queues, self.commit = stages, queues, commit
         self.progress, self.final, self.track = progress, final, track
+        # Local cut identity is this object itself; arrivals are isolated by
+        # (stage index, worker slot) on this instance only. next_ordinal is the
+        # source frontier captured by CheckpointControl.run inside the source gate.
+        self.next_ordinal = 0
         self.arrivals = {}
         self.local = [asyncio.Event() for _ in stages]
         self.done = asyncio.Event()
@@ -53,16 +59,47 @@ class _CheckpointBarrier:
         if self.error is not None:
             raise self.error
 
-    async def arrive(self, stage, batch=None):
+    async def arrive(self, stage, batch=None, *, worker_slot=None):
         self.check()
-        index = self.stages.index(stage)
-        self.status = 'aligning'
-        self.arrivals[index] = self.arrivals.get(index, 0) + 1
+        if self.done.is_set() or self.status in ('sealed', 'published', 'failed', 'cancelled'):
+            raise RecoveryContractError('Checkpoint barrier no longer accepts arrivals')
         try:
-            if self.arrivals[index] == self.tokens(stage):
+            index = self.stages.index(stage)
+        except ValueError:
+            raise RecoveryContractError('Barrier arrival from a foreign stage') from None
+        native = getattr(stage, 'native_snapshot', False)
+        buffered = (getattr(stage, 'max_batch', None) is not None
+                    or getattr(stage, 'grouping', None) is not None
+                    or getattr(stage, 'prefix', None) is not None)
+        if native:
+            # Native row-local keeps its single token and whole-stage native_pending
+            # snapshot; it is not drained per worker slot.
+            if worker_slot is not None:
+                raise RecoveryContractError('Native row-local stage arrives without a worker slot')
+            slot, expected = None, {None}
+        elif buffered or worker_slot is not None:
+            if type(worker_slot) is not int or not (0 <= worker_slot < stage.concurrency):
+                raise RecoveryContractError('Buffered stage requires a stable in-range worker_slot')
+            slot, expected = worker_slot, set(range(stage.concurrency))
+        else:
+            # Legacy row-local single-worker callers (no buffer, no slot) keep the
+            # original one-arrival semantics.
+            slot, expected = None, {None}
+        key = (index, slot)
+        if key in self.arrivals:
+            raise RecoveryContractError('Duplicate checkpoint arrival for a worker slot')
+        self.arrivals[key] = batch
+        self.status = 'aligning'
+        arrived = {s for (i, s) in self.arrivals if i == index}
+        try:
+            if arrived == expected:
+                if buffered:
+                    pending = {s: self.arrivals[(index, s)] for s in expected}
+                else:
+                    pending = None
                 if self.progress is not None:
                     started = time.monotonic()
-                    await self.progress.align(index, self, batch)
+                    await self.progress.align(index, self, pending)
                     if self.stats is not None:
                         self.stats.observe_duration('checkpoint.snapshot', time.monotonic() - started)
                         self.stats.observe_duration('checkpoint.arrival', started - self.started)

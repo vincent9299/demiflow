@@ -22,23 +22,37 @@ class _DeliveryStopped(Exception):
     pass
 
 
-def iter_stream_rows(executor,source,plan,*,limit=None):
+def iter_stream_rows(executor,source,plan,*,limit=None,action=None):
     if limit is not None and (type(limit) is not int or limit<0):
         raise ValueError('Native delivery limit must be a nonnegative integer')
     from .queue_producer import producer_actor
     if producer_actor(plan) is not None:
         raise RecoveryContractError('Incremental enqueue requires run_stream; delivery terminals cannot publish tasks')
     if limit==0:return
+    from contextlib import nullcontext
     from .payload_limits import payload_scope
+    from .run_context import admit_stream,current_action
+    from .recovery_identity import source_identity
+    borrowed=action if action is not None else current_action()
     with execution_scope() as run, payload_scope(run,plan,arguments={'_retained_rows':limit or 0}):
-        from .run_context import admit_stream
+        if borrowed is not None:
+            if borrowed.context is not run:
+                raise RecoveryContractError('Delivery action belongs to a different run context')
+            declaration=borrowed.declaration
+            if source_identity(source)!=declaration.get('source'):
+                raise RecoveryContractError('Delivery action source differs from the terminal source')
+            if len(plan.operations)!=len(declaration.get('operations',())):
+                raise RecoveryContractError('Delivery action plan differs from the terminal plan')
+            action_cm=nullcontext(borrowed);owns_complete=False
+        else:
+            action_cm=run.action(plan_identity('delivery',source,plan,arguments={'limit':limit}))
+            owns_complete=True
         residency=admit_stream(plan)
         retained_bytes=0
         delivered_rows=0
         result_budget=run.limits['memory_bytes']-residency['reserved_bytes']-run.limits['max_row_bytes']
         executor._run_ref=run.ref
-        declaration=plan_identity('delivery',source,plan,arguments={'limit':limit})
-        with run.action(declaration) as action:
+        with action_cm as action:
             sink=ObjectRowsSink(action,object_specs=image_object_specs(plan))
             action.object_sinks=sink.object_sinks
             coordinator=CommitCoordinator(action)
@@ -96,7 +110,8 @@ def iter_stream_rows(executor,source,plan,*,limit=None):
                     try:stream_view(executor,source,plan)._run_stream(consume=consume)
                     except _DeliveryStopped:pass
                     if not stopped.is_set():flush()
-                    action.complete({'kind':'delivery','rows':state['handoff_rows'],'commits':state['sequence']})
+                    if owns_complete:
+                        action.complete({'kind':'delivery','rows':state['handoff_rows'],'commits':state['sequence']})
                 except BaseException as exc:
                     state['error']=exc
                 finally:done.set()
