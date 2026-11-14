@@ -1,0 +1,394 @@
+{
+  "format": "demiflow_ui_design_review_v1",
+  "source_tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114",
+  "source_head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+  "design_only": true,
+  "product_acceptance": "not_run",
+  "limitations": [
+    "D1.9 is a simulated product demo",
+    "Current pipeline uses real private workspace/inspection, no business run",
+    "Case captures use real frontend/Records/Lance with metadata helper double; execution_profile=None; no runtime acceptance",
+    "First capture attempts had harness CSP wait / stale metadata double errors; temporary harness corrected; product files unchanged",
+    "Development and Readme reviewed in source, not recaptured"
+  ],
+  "inputs": [
+    {
+      "path": "demiflow/execution/contracts/exchange.py",
+      "sha256": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2"
+    },
+    {
+      "path": "demiflow/execution/queue_execution.py",
+      "sha256": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2"
+    },
+    {
+      "path": "demiflow/execution/queue_sinks.py",
+      "sha256": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074"
+    },
+    {
+      "path": "demiflow/execution/queue_source.py",
+      "sha256": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307"
+    },
+    {
+      "path": "demiflow/execution/raw_fetch.py",
+      "sha256": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493"
+    },
+    {
+      "path": "demiflow/planning/dag.py",
+      "sha256": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b"
+    },
+    {
+      "path": "demiflow/resources/contracts.py",
+      "sha256": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+    },
+    {
+      "path": "demiflow/workbench/analysis/case_pages.py",
+      "sha256": "463f2ccc7d138905251db3721b4c13885b1c1107f05d6b2e8bc0919c1623d716"
+    },
+    {
+      "path": "demiflow/workbench/analysis/case_query.py",
+      "sha256": "d00a2c5f7e2f8157da40b6edf5c7c565cabec2346057cc6be8fd7f4723fab7af"
+    },
+    {
+      "path": "demiflow/workbench/analysis/catalog_profile.py",
+      "sha256": "d58edf6e533664ae8141c8596528cb77254d5e2a3f90c25a1659872a8b309ac2"
+    },
+    {
+      "path": "demiflow/workbench/analysis/contracts.py",
+      "sha256": "7c3b99078eb33003646bf9a772b9fce9b28ff42ccbecaccec148ab641cd6aafd"
+    },
+    {
+      "path": "demiflow/workbench/analysis/media_source_export.py",
+      "sha256": "80955eeb50d51b4efbd4b61b9bdc209dcce1efc2330fd252ff9899a14b8682a0"
+    },
+    {
+      "path": "demiflow/workbench/analysis/metadata.py",
+      "sha256": "4caaee6b63735bab1b7c7f6db9f38b77e53c79750c5afbcdf380f11dbf60913d"
+    },
+    {
+      "path": "demiflow/workbench/analysis/source_export.py",
+      "sha256": "86c2d80cecbb9f28a1a9be4a453946d553d9b401c67eb33e88eda8b49ba36f08"
+    },
+    {
+      "path": "demiflow/workbench/analysis/sources.py",
+      "sha256": "9a12fd6b345c99f3f565be3096fc97fceff98a094877e2a7334f88d3a63cae9e"
+    },
+    {
+      "path": "demiflow/workbench/analysis/web_service.py",
+      "sha256": "636975d42a8019832786dab5509a215c6b38f8c942573e3b6f0e5b695a5a3a02"
+    },
+    {
+      "path": "demiflow/workbench/analysis/web_sources.py",
+      "sha256": "76e7ac46e4c4cffaa10004fd78c0fac4ffe216f0daabbedefab39f6c16ea3de9"
+    },
+    {
+      "path": "demiflow/workbench/api.py",
+      "sha256": "1ff82c6571b0abece4fd508a5be14426f3b03fd662b24c3efecff0a2755acb3a"
+    },
+    {
+      "path": "demiflow/workbench/graph/logical.py",
+      "sha256": "74ac82f250e724102c3b0913ba42acfe8b579231cdbf6b6e245a315883b42ab9"
+    },
+    {
+      "path": "demiflow/workbench/graph/model.py",
+      "sha256": "d827630034b963ac91e85d9873f0bbc0addd3bb61f10a66a9bba26c41ce5add1"
+    },
+    {
+      "path": "demiflow/workbench/projects/workspace.py",
+      "sha256": "2a9ff926b3359d430d6a807c94e177f168ff406a5baaa1d37ee3740c788d1b70"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-case-media.js",
+      "sha256": "3990a5bbe4f92f224ebbae0e2c50ce359951a8ec9d9eac6dd56f90c3b6aa7188"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-case.css",
+      "sha256": "a60addbb6fab0e814ab0d64e9a3b83676cf540ecbb0b1fe40c172b77e9271338"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-case.js",
+      "sha256": "adc86ec116b9e9594a4e8d5edde09fbef6ea35a86c486f67cbdf22da0ecb2593"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-output-media.js",
+      "sha256": "e33f0a2a1edb5f9c63f27c7751bec6b7741644634708ac6d933eb6962f659aeb"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-output.css",
+      "sha256": "5ec09d2bb861936fd01025a6b2e79602e26da28775714881d66a2ec887340126"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-output.js",
+      "sha256": "601b9230d9e4a0f4361f36921208b9beb135f488d24203e8f8107daa6090ffc9"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-render.js",
+      "sha256": "d31fe6f4bb16fe5f0e6751baf911f327c7acc7550acfe707f8207a7edad267c9"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-state.js",
+      "sha256": "e4b7531222b5eef79cc185d0397972a702d6b2d351ed763a025fd9292ec0f9f4"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis-transport.js",
+      "sha256": "ca6c3344538c0a43580ad8d6d37c0f6522f007e1df3a26a8ec3e42a3d11d7e58"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis.css",
+      "sha256": "f8629ab5c11b9f8ea8d8f4f2864d19782f1b9c7b28a5ff48563feff373781534"
+    },
+    {
+      "path": "demiflow/workbench/web/analysis.js",
+      "sha256": "937834fbaae5aa3fddd01807d221f8cccf06fbf61f31e782cb1c985b08628958"
+    },
+    {
+      "path": "demiflow/workbench/web/app.js",
+      "sha256": "08c95da087fe65fa6962bfcdd7425a4396e0191ca1d33f821d033d075af69fce"
+    },
+    {
+      "path": "demiflow/workbench/web/development.css",
+      "sha256": "a44592c60eca9b6a11dc987bbb2c07acb2a384f14224aca2465e8fa2742f174c"
+    },
+    {
+      "path": "demiflow/workbench/web/development.js",
+      "sha256": "0426f0b060557cd4304a2ebaafbea065dee3d83ec618ab0aa73c796f0d4bd2c7"
+    },
+    {
+      "path": "demiflow/workbench/web/index.html",
+      "sha256": "d3edcf2f6cc591db15d752ef1304797e592f2222add96e6dc2f45c1858504fdc"
+    },
+    {
+      "path": "demiflow/workbench/web/markdown-it.LICENSE.txt",
+      "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+    },
+    {
+      "path": "demiflow/workbench/web/markdown-it.NOTICES.txt",
+      "sha256": "822151a3210d4accfb3bc9653275aa399e33ff7d8582cdaeecbbd9c231c626a2"
+    },
+    {
+      "path": "demiflow/workbench/web/markdown-it.min.js",
+      "sha256": "38c70a1e7ca91ab40e2d9e6e60129851a717ed1c7d4acbbdd41bf9503791cf68"
+    },
+    {
+      "path": "demiflow/workbench/web/markdown-it.provenance.json",
+      "sha256": "142e9baf5f5ad664aa8bf5a482a1f615f1c0ee93b30b43a20aeb1ccbebf8aea5"
+    },
+    {
+      "path": "demiflow/workbench/web/markdown-worker.js",
+      "sha256": "5502dd763def7b7fbd680537e258c40a3454a4b579a633de8fe2952ca5362ac0"
+    },
+    {
+      "path": "demiflow/workbench/web/reading.css",
+      "sha256": "90a269c46458967c7d16e2e22b03f1a966ce9cb911880ab5ef3a6e55aa9eb786"
+    },
+    {
+      "path": "demiflow/workbench/web/reading.js",
+      "sha256": "0cf64058c84362e53cf9690262809461236e3cc9218a01171546731cc5acc7c6"
+    },
+    {
+      "path": "demiflow/workbench/web/style.css",
+      "sha256": "af1010b7cedf0d3b692cab1fd2dd955b05edd96e924d02cfd4230726b6c5270a"
+    },
+    {
+      "path": "demiflow/workbench/web/view.js",
+      "sha256": "3eeb283474bd51641928fbaec7b08713c48e6e665de6b84433e54b91088c527d"
+    },
+    {
+      "path": "demiflow/workbench/web/workbench-commands.js",
+      "sha256": "d4cc65236e6c55d17f939bd8a374bd3ef6d1ef62d4f32c2fa449da5e03927037"
+    },
+    {
+      "path": "demiflow/workbench/web/workbench-graph.js",
+      "sha256": "d4d18e6b956d44abacf6ebca811d6ba54b6cce8d5c18975fa03653c330e70632"
+    },
+    {
+      "path": "demiflow/workbench/web/workbench-observer.js",
+      "sha256": "8e8fda3ab348ca9d39362ec8163c5401b070d96e3df7e88be2d0143ef2a34eb5"
+    },
+    {
+      "path": "demiflow/workbench/web/workbench-state.js",
+      "sha256": "f581b78ee99ef93bed109ead320b154fd386864f6b77b0a8a167539ff897ed1a"
+    },
+    {
+      "path": "demiflow/workbench/web/workbench.css",
+      "sha256": "36a09452b31cdaebffb19e509ca6d4740a10d569aa49485b64bdd2b1993f9910"
+    },
+    {
+      "path": "demiflow/workbench/web/workbench.js",
+      "sha256": "e6328fa1dd89a78813f44885213400562b1bafcb3c0350bc8e1ebc0506bbdd96"
+    },
+    {
+      "path": "demiflow/workbench/worker.py",
+      "sha256": "296322900e0996f99d8e9450d3f1b967c6b06264614a85e795b40e224e20abc6"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/case-demo-clip.webm",
+      "sha256": "7c1b4fe4781e1cefabeabeae91a8924b40cd6805153648c283c9c389b0671508"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/case-demo-tone.wav",
+      "sha256": "dc24b334ed35264233357476f47940bc75c6ecd47cf7b18fa509346e7a00f4a9"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/case-demo.css",
+      "sha256": "4599cbeb26b22c6ababbdb78cd6a62241e95d66bc75cfbec282eb64f611e8114"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/case-demo.js",
+      "sha256": "53cdfd9bc30ee5476d1a3154e3dc796fbe418bfeb36500e9702e9c8b7803f85d"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/data-demo.css",
+      "sha256": "7ae1f399459231200a39830e8f204a97d76d94c97215756652aff3007bbfddb8"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/data-demo.js",
+      "sha256": "f6372f2e259fb084e2543e92c8c070524c91453c28d927920837dac9028d345e"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/index.html",
+      "sha256": "7747eb5cb0a5b7f64795bbb50c6aeaca6e85a670071c193aea98323e1d4d789d"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/prototype.css",
+      "sha256": "9756ca2f956b0437e038102443e97c271ea46a35fb88bbbdbca2dd63691c1401"
+    },
+    {
+      "path": "docs/assets/workflow-workbench-20261105/prototype.js",
+      "sha256": "166f767700f35286841f42b815d36fd1cc32f1b7176eb3cce53ef84810207ac8"
+    },
+    {
+      "path": "docs/forge-workflow-workbench-discussion-20261105.md",
+      "sha256": "4bee94e4e7afe504dc6d3e803c61f2782a662d57da8abfd889db155e62930bfa"
+    },
+    {
+      "path": "examples/forge_workspace/make_demo.py",
+      "sha256": "b83d5651ce23bee8732d00aea95f187e3e4e5b6ae898e661e894c964f3d4bdec"
+    },
+    {
+      "path": "tests/test_forge_analysis_case_demo_browser.py",
+      "sha256": "7b9486503ec06a4ba0e937158efb4d543b58153cbac03e3563a9edddad23d480"
+    },
+    {
+      "path": "tests/test_forge_analysis_case_groups_ui_browser.py",
+      "sha256": "b81b30a6f8d5c9610339bbbccb83c9efbd9c071c3f178539361b54aa5bff05a0"
+    },
+    {
+      "path": "tests/test_forge_analysis_case_ui_browser.py",
+      "sha256": "d09ee36abdd0aaee8cbcb3698664c1176478b4750c1bc7777d88fcf364a273e7"
+    },
+    {
+      "path": "tests/test_forge_analysis_media_shell_browser.py",
+      "sha256": "4bd117ce8a109f0670af03a1f6cc077351b39faa09c34c31063c2ba299188c55"
+    },
+    {
+      "path": "tests/test_forge_markdown_reading.py",
+      "sha256": "a7bf09e4c56e88d4604c169a793bd5da64df84f5571f96720abbde29341d68eb"
+    },
+    {
+      "path": "tests/test_forge_public_api.py",
+      "sha256": "1e0e1c2eb786702119db831c0aa67e81351fbe157f7e1c3d5f4fc6ab3209d8d8"
+    },
+    {
+      "path": "tests/test_forge_workbench_browser.py",
+      "sha256": "3c446c539046103238f739e2ed776a4fae727c4f37e0f3f6d187cc429a98f861"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "evidence/capture.py",
+      "sha256": "a5a1052eb96c167992191fd9c6eb56fbb9b5324e74544cc586debc553f89bee2"
+    },
+    {
+      "path": "evidence/case-capture.json",
+      "sha256": "ce443ffb4557face7e8759c61b48014f298265a1d4a978984ceccd0c34ec1c32"
+    },
+    {
+      "path": "evidence/case_capture.py",
+      "sha256": "5ecbcf87821a3861cafda48c01853bd2bdd76cc7f7c6ec5d1a19422cdd066538"
+    },
+    {
+      "path": "evidence/current-case.png",
+      "sha256": "6eeecb26bd1fb76d253ae367b92db55323405042334e36acd7bb9dcabcbc7edb"
+    },
+    {
+      "path": "evidence/current-case.txt",
+      "sha256": "47c9efbcacdec90b88b0069e6c02bd4a066adc386890850f3622d6a5de74348d"
+    },
+    {
+      "path": "evidence/current-checks.png",
+      "sha256": "630cbe880f2aeb8be7559dd537c7eeeb3e3d5cd440157d27625e5ab9c16b6255"
+    },
+    {
+      "path": "evidence/current-checks.txt",
+      "sha256": "c76a61a4e4820179612c6f6897e39eea18c35d87b47a82ba0fe3e277398b8e33"
+    },
+    {
+      "path": "evidence/current-mobile.png",
+      "sha256": "00631948d64aa439d50d467aeb1b87a786fd33f6b19daa7730e28dde1aad0244"
+    },
+    {
+      "path": "evidence/current-mobile.txt",
+      "sha256": "423e099c4dcc646178f3ec633756c5dddff4286054951288d910148540685df0"
+    },
+    {
+      "path": "evidence/current-notebook.png",
+      "sha256": "355f9b517e54f14becb3b141ee421a7ed07a36a3baaef1d259cfbd5188b937d0"
+    },
+    {
+      "path": "evidence/current-notebook.txt",
+      "sha256": "3f471f5c5c614f679be407d60c7f02e38d94ccc2d5e75f2278328622b5519354"
+    },
+    {
+      "path": "evidence/current-pipeline.png",
+      "sha256": "ade47c3d2b8e0182b98395f2d38673cc183325921c5b750fe4573dd140b0672b"
+    },
+    {
+      "path": "evidence/current-pipeline.txt",
+      "sha256": "b2112b8e95e05c0816f732a2786164bca0875c2bbb2d433e02a9c4c27a008dfd"
+    },
+    {
+      "path": "evidence/current-source.png",
+      "sha256": "2fdb3ce79c73c474db58ac363f9b1739df3f6ea3ed0eac663c6ad5e560186c7d"
+    },
+    {
+      "path": "evidence/current-source.txt",
+      "sha256": "8850343930472c2253c8123324a2597c34abe530e2a471f8cf6544a45a4ec569"
+    },
+    {
+      "path": "evidence/demo-case.png",
+      "sha256": "a63e40007fab77179ec394923ce51946a2a065c51214738c5d55733a896a0177"
+    },
+    {
+      "path": "evidence/demo-case.txt",
+      "sha256": "b9d0fd72d7e0d034f1855aa871e9a03bda90dcff600d255a2cbde7c72ed7fdcf"
+    },
+    {
+      "path": "evidence/demo-mobile.png",
+      "sha256": "fc7331ad130ed0bb335d6162267e18672fa12c638a56b57876c2b72ff34ef60d"
+    },
+    {
+      "path": "evidence/demo-mobile.txt",
+      "sha256": "9ce7e8e2b9b97e248d9fd650bc754d588f4d9424bf460701ff04721a0f81a277"
+    },
+    {
+      "path": "evidence/demo-notebook.png",
+      "sha256": "73c1b8438af17ebe1a7522d93e8064a9bc8237b6e86c2fb452977a796d68bebc"
+    },
+    {
+      "path": "evidence/demo-notebook.txt",
+      "sha256": "76f1512d3caa320bcca04688d0acf75d6f07656d7331238f7e9b3c6e37aaeee4"
+    },
+    {
+      "path": "evidence/demo-pipeline.png",
+      "sha256": "f99f1711003737497f75dfa64947ae127c1c81ffdc59fa130f01de83a5ddc3f9"
+    },
+    {
+      "path": "evidence/demo-pipeline.txt",
+      "sha256": "69c5ed1b7518eff569bceda220e8b2e2b176ee3f1ef5ba60d1ee47136b8181c5"
+    },
+    {
+      "path": "evidence/report-graph.json",
+      "sha256": "9a9e259e00b9c4adc7b674a301d3707621ff6e89bcd4950978139a63e5623c84"
+    }
+  ]
+}

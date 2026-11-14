@@ -1,0 +1,91 @@
+DemiFlow
+数据工作台
+项目
+question-experiments
+question-experiments
+管道
+同步异常
+暂未更新：Worker capacity exceeded 保留上次内容，将自动重试。 · 最近同步：8:46:52 PM
+开发
+管道
+数据
+Readme
+流程
+flows/questions.py:select
+配置
+flows/select_a.json
+flows/select_b.json
+检查报告图 · checked
+读图与配置
+检查问题
+运行监控
+输出结果
+检查
+运行
+运行记录
+接入与权限
+数据算子图 · 7 节点 / 6 条边
+整图配置
+声明图投影（E2）
+−
++
+适应
+数据输入
+read_lance
+未运行
+自定义算子
+normalize_question
+未运行
+数据输入
+read_lance
+未运行
+关联
+join
+未运行
+自定义算子
+above_threshold
+未运行
+筛选
+keep_selected
+未运行
+输出
+write_lance
+未运行
+
+实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用
+
+源码 · normalize_question
+收起代码
+实现
+调用点
+Prompt
+配置
+报告绑定来源 · operators/question_rules.py:8
+
+源码完整显示。
+
+复制代码
+def normalize_question(text: str | None, *, max_chars: int = 4096) -> str:
+    """将空题面归一为空串，合并空白；拒绝超长输入。"""
+    if not 1 <= max_chars <= 4096:
+        raise ValueError("max_chars must be within 1..4096")
+    if text is None:
+        return ""
+    if len(text) > max_chars:
+        raise ValueError("question exceeds max_chars")
+    return " ".join(text.split())
+
+原文信息
+normalize_question
+
+demiflow.data:MaterializedDataset.map · flows/questions.py:14
+
+未运行
+
+没有能证明来自登记参数文件的可写项。代码字面量与动态计算可在下方源码查看。
+
+保存配置
+放弃本地修改
+本次运行设置
+字段与实际调用参数
+当前项目检查与来源

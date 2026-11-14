@@ -1,0 +1,116 @@
+产品样稿 · D1.9
+全部为测试数据 · 管道模拟运行 · 数据 SQL 本地计算
+查看场景
+原生流程 · 检查有问题
+原生流程 · 可准备
+模型节点 · 代码与 Prompt
+历史运行 · 封存源码缺失
+原项目 · 尚未接通
+当前入口已移除 · 仍可停止原运行
+原生流程 · 依据已过期
+运行中 · 有指标
+运行失败 · 部分提交
+已停止 · 部分提交
+空项目 · 无数据和记录
+权限不足 · 只读
+仅控制 · 仍能停止
+运行中 · 暂无采样
+停止中 · 尚未确认
+准备响应丢失 · 待核对
+DemiFlow
+项目
+◇订单归档 · 示例
+◇原项目 · 示例
+◇空项目 · 示例
+本地工作区
+讨论草稿 · 测试数据
+订单归档 · 示例
+开发
+管道
+数据
+Readme
+通用平台 · 交互样稿
+管道
+流程
+订单归档 · flows/orders.py:archive
+订单汇总 · flows/orders.py:summary
+订单质检 · flows/orders.py:review
+配置
+settings/small.json · 小批次
+settings/full.json · 完整输入
+已检查原生图
+提交、控制已开放
+测试依据 · check-demo-17 · 非在线证据
+读图与配置
+检查问题
+运行监控
+输出结果
+检查
+运行
+运行记录
+接线检查通过。 行为与 Review 证据另列。
+数据算子图
+
+已检查原生图 · check-demo-17 · 6 节点 / 5 条边
+
+整图配置
+数据源
+订单输入
+读取固定版本订单
+orders.lance · v8
+数据源
+客户输入
+提供客户关联字段
+customers.lance · v3
+自定义算子
+金额标准化
+金额转数值并保留订单标识
+rounding_digits = 2
+算子
+关联客户
+为订单补充客户信息
+customer_id · left join
+输出
+订单结果
+保存加工后的订单
+archive.lance
+输出
+审计结果
+保存本次处理摘要
+共享 rounding_digits = 2
+实线：报告中的数据关系
+点节点：用途、配置、问题与来源
+只读源码 · 合成示例
+金额标准化
+收起代码
+图绑定快照 · fixture-r1 · check-demo-17
+实现
+调用点
+配置
+operators/normalize.py:7
+节点 clean · normalize_order
+def normalize_order(row, digits):
+    return {**row, "amount": round(float(row["amount"]), digits)}
+
+选中节点绑定的函数实现。
+
+查看节点与来源绑定
+
+节点用途与配置
+
+金额标准化
+
+调用 normalize_order，将金额转为数值并按指定精度舍入。
+
+金额保留小数位
+
+配置来源：settings/small.json#/arguments/rounding_digits
+
+共享参数 · 同时影响“金额标准化”和“审计结果”。
+
+查看实现与来源
+实现、字段与配置依据
+
+管道按钮仅演示交互；真实作业提交在正式 API 中接入。
+
+native · configure · 尚未准备
