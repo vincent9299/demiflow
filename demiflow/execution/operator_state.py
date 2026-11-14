@@ -2,10 +2,29 @@
 import inspect
 import asyncio
 import json
+import functools
+import threading
 
 from .recovery_contract import document, RecoveryContractError
 from .operator_policy import (classify_operator_state, snapshot_auto_state,
-                              restore_auto_state)
+                              restore_auto_state, _json_fields)
+
+
+def runtime_resource_state(owner):
+    """Recognize ordinary lifecycle resources, never pretend to snapshot them.
+
+    Everything outside this small resource set must still be strict JSON. In
+    particular an opaque business object is not made stateless by having close().
+    """
+    if type(owner).__getattribute__ is not object.__getattribute__:
+        return False
+    fields = getattr(owner, '__dict__', None)
+    if type(fields) is not dict or len(fields) > 16384:
+        return False
+    resources = (type(threading.Lock()), type(threading.RLock()), asyncio.Task,
+                 asyncio.Lock, asyncio.Event, threading.Event)
+    plain = {k: v for k, v in fields.items() if not isinstance(v, resources)}
+    return len(plain) != len(fields) and _json_fields(plain, 16 * 1024**2)[0]
 
 
 def owner_of(callable):
@@ -46,8 +65,11 @@ def _admit_encoding(value, maximum):
 
 
 class OperatorStates:
-    def __init__(self, context, restored=None):
+    def __init__(self, context, restored=None, *, runtime_only_action=None):
         self.context, self.restored = context, restored or {}
+        # Only the local driver may record an attempt-only restriction. Remote
+        # workers and strict state consumers continue to reject missing adapters.
+        self.runtime_only_action = runtime_only_action
         self.owners, self.identities, self.aliases = {}, {}, {}
         # Per-owner C04 mode ("hooks"/"auto_json"); a cache of the single policy,
         # never a second checkpoint authority — persistence stays owners->snapshot.
@@ -69,7 +91,13 @@ class OperatorStates:
                 "Actor " + type(owner).__name__ +
                 " needs both snapshot_state/restore_state; resource handles must not be serialized")
 
-    async def register(self, owner, key):
+    async def register(self, owner, key, *, concurrency=1):
+        # partial is a binding wrapper, not an actor whose empty __dict__ can
+        # hide the wrapped actor's state. Delegate to the actual callable owner.
+        while isinstance(owner, functools.partial):
+            if vars(owner):
+                raise RecoveryContractError('Stateful partial needs a native state adapter')
+            owner = owner_of(owner.func)
         self.validate(owner)
         if inspect.isfunction(owner) or inspect.isbuiltin(owner) or inspect.isclass(owner):
             return
@@ -79,9 +107,22 @@ class OperatorStates:
             # adapter. An ordinary factory must not silently lose business state
             # just because constructing it exposed a non-JSON field.
             if not callable(getattr(owner, 'native_stream_recovery', None)):
+                if self.runtime_only_action is not None and runtime_resource_state(owner):
+                    # Persist before the first business call, even before the
+                    # first checkpoint. A crash must never bypass this restriction.
+                    action = self.runtime_only_action
+                    self.context.journal.bind_source(self.context.fence,
+                        action.action_id + '-state-recovery-restriction', {
+                            'schema': 'demiflow.state_recovery_restriction.v1',
+                            'recovery': 'attempt_only',
+                            'reason': 'Actor runtime resources require snapshot_state/restore_state for resume'})
+                    return
                 raise RecoveryContractError('Actor ' + type(owner).__name__ +
                     ' needs snapshot_state/restore_state: ' + str(policy.reason))
             return
+        if policy.mode == 'auto_json' and vars(owner) and concurrency != 1:
+            raise RecoveryContractError('auto_json state requires concurrency 1; '
+                                        'declare snapshot_state/restore_state for higher concurrency')
         if id(owner) in self.identities:
             self.aliases[key] = self.identities[id(owner)]
             return

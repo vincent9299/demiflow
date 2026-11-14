@@ -125,7 +125,7 @@ class StreamResources:
                     result = close()
                     if inspect.isawaitable(result): await result
                     completed = True
-                except Exception as exc: errors.append(exc)
+                except BaseException as exc: errors.append(exc)
                 finally:
                     if checked is not None:
                         checked.actor_lifecycle(resource, 'closed', completed)
@@ -134,5 +134,5 @@ class StreamResources:
             try:
                 result=cleanup()
                 if inspect.isawaitable(result): await result
-            except Exception as exc: errors.append(exc)
-        if errors: raise ExceptionGroup('Stream resource cleanup failed', errors)
+            except BaseException as exc: errors.append(exc)
+        if errors: raise BaseExceptionGroup('Stream resource cleanup failed', errors)

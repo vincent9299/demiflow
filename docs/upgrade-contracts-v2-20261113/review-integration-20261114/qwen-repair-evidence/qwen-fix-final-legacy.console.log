@@ -1,0 +1,357 @@
+PINNED_ROOT=/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114
+.............................FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF..FFFFF...... [ 73%]
+......FF.F..F.F.F.F.F...F.                                               [100%]
+=================================== FAILURES ===================================
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options0] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options1] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options2] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options3] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options4] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take-options5] __
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[count-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options0] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options1] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options2] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options3] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options4] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options5] _
+tests/test_stream_map.py:331: in test_every_explicit_option_rejects_lazy_actions_before_reads
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_______ test_checkpoint_bridges_map_only_and_replays_without_calls[json] _______
+tests/test_stream_map.py:389: in test_checkpoint_bridges_map_only_and_replays_without_calls
+    assert sorted(save().take_all(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+                  ^^^^^^
+tests/test_stream_map.py:386: in save
+    return source.checkpoint(tmp_path / 'checkpoint.jsonl', version='v1')
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:303: in checkpoint
+    require_action('checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+______ test_checkpoint_bridges_map_only_and_replays_without_calls[lance] _______
+tests/test_stream_map.py:389: in test_checkpoint_bridges_map_only_and_replays_without_calls
+    assert sorted(save().take_all(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+                  ^^^^^^
+tests/test_stream_map.py:387: in save
+    return source.checkpoint_lance(str(tmp_path / 'checkpoint.lance'),
+demiflow/data/dataset.py:323: in checkpoint_lance
+    require_action('checkpoint_lance')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint_lance; native run recovery has one protocol; stage outputs require their P3 adapters
+_________ test_stream_sink_checkpoint_accepts_thread_map_policy_change _________
+tests/test_stream_map.py:396: in test_stream_sink_checkpoint_accepts_thread_map_policy_change
+    checkpoint = StreamCheckpoint(tmp_path / 'checkpoint.json', identity={'input': 'fixed'})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/stream_checkpoint.py:43: in __init__
+    require_action('stream_checkpoint')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: stream_checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters
+__ test_nested_relations_and_lazy_workers_reject_before_source_access[thread] __
+tests/test_stream_map.py:423: in test_nested_relations_and_lazy_workers_reject_before_source_access
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_nested_relations_and_lazy_workers_reject_before_source_access[process] __
+tests/test_stream_map.py:423: in test_nested_relations_and_lazy_workers_reject_before_source_access
+    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
+E   Failed: DID NOT RAISE UnsupportedExecutionOptionError
+_ test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[schema] _
+tests/test_stream_map.py:613: in test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers
+    plan.checkpoint_lance(str(uri), schema=pa.schema([('i', pa.int64())]),
+demiflow/data/dataset.py:323: in checkpoint_lance
+    require_action('checkpoint_lance')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint_lance; native run recovery has one protocol; stage outputs require their P3 adapters
+_ test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[writer] _
+tests/test_stream_map.py:613: in test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers
+    plan.checkpoint_lance(str(uri), schema=pa.schema([('i', pa.int64())]),
+demiflow/data/dataset.py:323: in checkpoint_lance
+    require_action('checkpoint_lance')
+demiflow/execution/capabilities.py:42: in require_action
+    raise RecoveryContractError(capability['reason'])
+E   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint_lance; native run recovery has one protocol; stage outputs require their P3 adapters
+_____________ test_unbound_async_none_and_list_keep_map_semantics ______________
+tests/test_bound_result_cache.py:55: in test_unbound_async_none_and_list_keep_map_semantics
+    assert run() == run() == [{'answer':1},{'answer':2}]
+           ^^^^^
+tests/test_bound_result_cache.py:54: in run
+    return data.from_items([{'n':0},{'n':1}]).map_cached(compute,cache_dir=tmp_path,version='v1').materialize().take(4)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1939: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:960: in materialize_stream
+    precheck_plan_state(dataset._plan if plan is None else plan)
+demiflow/execution/operator_precheck.py:52: in precheck_plan_state
+    precheck_operator_state(callable_spec, {
+demiflow/execution/operator_precheck.py:39: in precheck_operator_state
+    raise ProtocolError("STATE_ADAPTER_MISSING",
+E   demiflow.execution.contracts.errors.ProtocolError: STATE_ADAPTER_MISSING: callable instance carries state without a state adapter
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+______________ test_only_computation_result_is_shared[None-False] ______________
+tests/test_bound_result_cache.py:85: in test_only_computation_result_is_shared
+    result = (rows if synchronous else rows.materialize()).take(4)
+                                       ^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1939: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:960: in materialize_stream
+    precheck_plan_state(dataset._plan if plan is None else plan)
+demiflow/execution/operator_precheck.py:52: in precheck_plan_state
+    precheck_operator_state(callable_spec, {
+demiflow/execution/operator_precheck.py:39: in precheck_operator_state
+    raise ProtocolError("STATE_ADAPTER_MISSING",
+E   demiflow.execution.contracts.errors.ProtocolError: STATE_ADAPTER_MISSING: callable instance carries state without a state adapter
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+____________ test_only_computation_result_is_shared[answer1-False] _____________
+tests/test_bound_result_cache.py:85: in test_only_computation_result_is_shared
+    result = (rows if synchronous else rows.materialize()).take(4)
+                                       ^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1939: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:960: in materialize_stream
+    precheck_plan_state(dataset._plan if plan is None else plan)
+demiflow/execution/operator_precheck.py:52: in precheck_plan_state
+    precheck_operator_state(callable_spec, {
+demiflow/execution/operator_precheck.py:39: in precheck_operator_state
+    raise ProtocolError("STATE_ADAPTER_MISSING",
+E   demiflow.execution.contracts.errors.ProtocolError: STATE_ADAPTER_MISSING: callable instance carries state without a state adapter
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+____________ test_only_computation_result_is_shared[answer2-False] _____________
+tests/test_bound_result_cache.py:85: in test_only_computation_result_is_shared
+    result = (rows if synchronous else rows.materialize()).take(4)
+                                       ^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1939: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:960: in materialize_stream
+    precheck_plan_state(dataset._plan if plan is None else plan)
+demiflow/execution/operator_precheck.py:52: in precheck_plan_state
+    precheck_operator_state(callable_spec, {
+demiflow/execution/operator_precheck.py:39: in precheck_operator_state
+    raise ProtocolError("STATE_ADAPTER_MISSING",
+E   demiflow.execution.contracts.errors.ProtocolError: STATE_ADAPTER_MISSING: callable instance carries state without a state adapter
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+________________ test_shared_wait_cancellation_and_actor_hooks _________________
+tests/test_bound_result_cache.py:105: in test_shared_wait_cancellation_and_actor_hooks
+    version='v1', inputs=['url'], output='answer', queue_depth=1).materialize().take(5)
+                                                                  ^^^^^^^^^^^^^
+demiflow/data/dataset.py:1939: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:960: in materialize_stream
+    precheck_plan_state(dataset._plan if plan is None else plan)
+demiflow/execution/operator_precheck.py:52: in precheck_plan_state
+    precheck_operator_state(callable_spec, {
+demiflow/execution/operator_precheck.py:39: in precheck_operator_state
+    raise ProtocolError("STATE_ADAPTER_MISSING",
+E   demiflow.execution.contracts.errors.ProtocolError: STATE_ADAPTER_MISSING: callable instance carries state without a state adapter
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+_______________ test_async_materialize_spills_reuses_and_writes ________________
+tests/test_async_materialize.py:40: in test_async_materialize_spills_reuses_and_writes
+    .materialize()
+     ^^^^^^^^^^^^^
+demiflow/data/dataset.py:1939: in materialize
+    handle = execute(self, source=checked.source, plan=checked.plan)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/executors/local.py:960: in materialize_stream
+    precheck_plan_state(dataset._plan if plan is None else plan)
+demiflow/execution/operator_precheck.py:52: in precheck_plan_state
+    precheck_operator_state(callable_spec, {
+demiflow/execution/operator_precheck.py:30: in precheck_operator_state
+    raise ProtocolError("STATE_ADAPTER_MISSING",
+E   demiflow.execution.contracts.errors.ProtocolError: STATE_ADAPTER_MISSING: auto_json state requires concurrency 1; declare a native adapter for higher concurrency
+------------------------------ Captured log call -------------------------------
+ERROR    demiflow.data.dataset:logging.py:95 demiflow.dataset.action_failed
+________ test_wide_rows_spill_before_row_limit_and_restore_individually ________
+tests/test_async_materialize.py:113: in test_wide_rows_spill_before_row_limit_and_restore_individually
+    cached = DataAPI(executor).from_iter(rows).materialize()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/data/dataset.py:1933: in materialize
+    with action("materialize", self._source, self._plan) as checked, observe_action("materialize", self._source, self._plan, self._executor) as observer:
+../../../env/lib/python3.11/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+demiflow/execution/checked.py:633: in action
+    declaration = plan_identity(kind, value.source, value.plan, spec, arguments)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:231: in plan_identity
+    return dict(kind=kind, source=source_identity(source) if source is not None else None,
+                                  ^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:143: in source_identity
+    return _source_identity(source)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:192: in _source_identity
+    return describe(source)
+           ^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:99: in describe
+    "fields": {f.name: describe(getattr(value, f.name), depth + 1)
+demiflow/execution/recovery_identity.py:99: in <dictcomp>
+    "fields": {f.name: describe(getattr(value, f.name), depth + 1)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:66: in describe
+    closure.append(describe(item, depth + 1))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+demiflow/execution/recovery_identity.py:132: in describe
+    raise RecoveryContractError("No native semantic identity for " + type(value).__name__)
+E   demiflow.execution.recovery_contract.RecoveryContractError: No native semantic identity for LocalDatasetExecutor
+=========================== short test summary info ============================
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options5]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options5]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options5]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options5]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options0]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options1]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options2]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options3]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options4]
+FAILED tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options5]
+FAILED tests/test_stream_map.py::test_checkpoint_bridges_map_only_and_replays_without_calls[json]
+FAILED tests/test_stream_map.py::test_checkpoint_bridges_map_only_and_replays_without_calls[lance]
+FAILED tests/test_stream_map.py::test_stream_sink_checkpoint_accepts_thread_map_policy_change
+FAILED tests/test_stream_map.py::test_nested_relations_and_lazy_workers_reject_before_source_access[thread]
+FAILED tests/test_stream_map.py::test_nested_relations_and_lazy_workers_reject_before_source_access[process]
+FAILED tests/test_stream_map.py::test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[schema]
+FAILED tests/test_stream_map.py::test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[writer]
+FAILED tests/test_bound_result_cache.py::test_unbound_async_none_and_list_keep_map_semantics
+FAILED tests/test_bound_result_cache.py::test_only_computation_result_is_shared[None-False]
+FAILED tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer1-False]
+FAILED tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer2-False]
+FAILED tests/test_bound_result_cache.py::test_shared_wait_cancellation_and_actor_hooks
+FAILED tests/test_async_materialize.py::test_async_materialize_spills_reuses_and_writes
+FAILED tests/test_async_materialize.py::test_wide_rows_spill_before_row_limit_and_restore_individually
+44 failed, 54 passed in 66.15s (0:01:06)

@@ -1182,7 +1182,7 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
         for stage in stages:
             try:
                 await stop_stage(stage)
-            except Exception as exc:
+            except BaseException as exc:
                 stop_errors.append(exc)
         # Release per-stage staging buffers on every exit path. Committed state
         # references are owned by StateArtifacts/CommitCoordinator and untouched.
@@ -1194,7 +1194,7 @@ async def _arun(source_iter, stages, stats, *, on_progress, on_drain,
             with contextlib.suppress(asyncio.CancelledError):
                 await asyncio.shield(_call(on_drain, stats))
         if stop_errors:
-            raise ExceptionGroup('Stream actor stop failed', stop_errors)
+            raise BaseExceptionGroup('Stream actor stop failed', stop_errors)
 
 
 def run_stream(source_iter, plan: LogicalPlan, *,
@@ -1243,10 +1243,10 @@ def run_stream(source_iter, plan: LogicalPlan, *,
                         if isinstance(stage.fn, StreamMapRuntime):
                             try:
                                 await stage.fn.aclose()
-                            except Exception as exc:
+                            except BaseException as exc:
                                 errors.append(exc)
                     if errors:
-                        raise ExceptionGroup('Stream map cleanup failed', errors)
+                        raise BaseExceptionGroup('Stream map cleanup failed', errors)
                 finally:
                     if on_close is not None:
                         result = on_close()

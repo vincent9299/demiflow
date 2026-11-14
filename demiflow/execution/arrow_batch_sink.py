@@ -81,6 +81,62 @@ class _CappedWriter(io.RawIOBase):
         return count
 
 
+def _cast_allocation(table, schema):
+    """Upper bound on new payload buffers, while the source remains resident.
+
+    Equal types share their buffers. Reserve data and validity allocations at
+    Arrow's 64-byte alignment for conversions, including nested arrays. Unknown
+    allocation shapes fail before cast, never after an unbounded allocation.
+    This is payload admission, not an RSS bound on Arrow's implementation.
+    """
+    import pyarrow as pa
+    from .recovery_contract import RecoveryContractError
+    def aligned(size):
+        return ((size + 63) // 64) * 64
+    def bound(array, target, depth=0):
+        if array.type == target:
+            return 0
+        if depth > 16:
+            raise RecoveryContractError('Arrow cast type depth exceeds admission budget')
+        n = len(array)
+        validity = aligned((n + 7) // 8)
+        if pa.types.is_null(target):
+            return 0
+        try:
+            bits = target.bit_width
+        except (ValueError, AttributeError):
+            bits = None
+        if bits is not None:
+            dictionary = (bound(array.dictionary, target, depth + 1)
+                          if pa.types.is_dictionary(array.type) else 0)
+            return validity + aligned((n * bits + 7) // 8) + dictionary
+        if pa.types.is_struct(target) and pa.types.is_struct(array.type):
+            if array.type.names != target.names:
+                raise RecoveryContractError('Arrow cast field mapping has no bounded allocation contract')
+            return validity + sum(bound(array.field(i), f.type, depth + 1)
+                                  for i, f in enumerate(target))
+        if (pa.types.is_list(target) or pa.types.is_large_list(target)) and (
+                pa.types.is_list(array.type) or pa.types.is_large_list(array.type)):
+            width = 8 if pa.types.is_large_list(target) else 4
+            return validity + aligned((n + 1) * width) + bound(array.values, target.value_type, depth + 1)
+        binary = (pa.types.is_string, pa.types.is_large_string, pa.types.is_binary, pa.types.is_large_binary)
+        if any(check(target) for check in binary):
+            width = 8 if pa.types.is_large_string(target) or pa.types.is_large_binary(target) else 4
+            if any(check(array.type) for check in binary) or pa.types.is_fixed_size_binary(array.type):
+                data = array.get_total_buffer_size()
+            elif (pa.types.is_integer(array.type) or pa.types.is_floating(array.type)
+                  or pa.types.is_boolean(array.type) or pa.types.is_decimal(array.type)):
+                data = n * 128  # bounded textual representation of primitive values
+            else:
+                raise RecoveryContractError('Arrow cast needs a bounded allocation contract for ' + str(target))
+            return validity + aligned((n + 1) * width) + aligned(data)
+        raise RecoveryContractError('Arrow cast needs a bounded allocation contract for ' + str(target))
+    if table.schema.names != schema.names:
+        raise RecoveryContractError('Arrow cast schema fields differ')
+    return sum(bound(chunk, field.type) for column, field in zip(table.columns, schema)
+               for chunk in column.chunks)
+
+
 def apply_batch(batch, encoded, path, schema, max_bytes=None, memory_bytes=None):
     import cloudpickle
     import pyarrow as pa
@@ -90,13 +146,13 @@ def apply_batch(batch, encoded, path, schema, max_bytes=None, memory_bytes=None)
     result = StandardCallable(operation.callable)(batch)
     outputs = result if isinstance(result, Iterator) else (result,)
     rows = 0
-    written = 0
     writer = None
     stream = None
     memory_bytes = max_bytes if memory_bytes is None else memory_bytes
     failed = True
     try:
         for output in outputs:
+            python_retained = 0
             if isinstance(output, pa.RecordBatch):
                 output = pa.Table.from_batches([output])
             elif not isinstance(output, pa.Table):
@@ -105,25 +161,33 @@ def apply_batch(batch, encoded, path, schema, max_bytes=None, memory_bytes=None)
                 values, retained = [], 0
                 for row in LocalDatasetExecutor(workers=1)._batch_to_rows(output):
                     retained += check_size(row, memory_bytes or 128 * 1024**2) + 64
-                    if memory_bytes is not None and retained > memory_bytes:
+                    # Python rows coexist with the Arrow builder/result. Count
+                    # both before invoking from_pylist, including builder slack.
+                    if memory_bytes is not None and retained * 4 > memory_bytes:
                         raise RecoveryContractError('Arrow callback conversion exceeds admitted memory bytes')
                     values.append(row)
                 output = pa.Table.from_pylist(values)
+                python_retained = retained
+                del values
             if not output.num_rows:
                 continue
             if memory_bytes is not None and output.get_total_buffer_size() > memory_bytes:
                 raise RecoveryContractError('Arrow callback retained output exceeds the sealed output staging byte budget')
+            if memory_bytes is not None:
+                peak = python_retained + output.get_total_buffer_size() + _cast_allocation(output, schema)
+                if peak > memory_bytes:
+                    raise RecoveryContractError('Arrow cast live input and output exceed admitted memory bytes')
             output = output.cast(schema)
             # Output staging borrows the sealed output byte ceiling; an over-budget
             # callback fails before publishing rather than spilling without limit.
-            if memory_bytes is not None and output.get_total_buffer_size() > memory_bytes:
+            if memory_bytes is not None and python_retained + output.get_total_buffer_size() > memory_bytes:
                 raise RecoveryContractError('Arrow callback output exceeds the sealed output staging byte budget')
             if writer is None:
                 stream = open(path, 'wb')
                 writer = pa.ipc.new_stream(pa.PythonFile(_CappedWriter(stream, max_bytes)), output.schema)
             writer.write_table(output)
-            written += output.nbytes
             rows += output.num_rows
+            del output
         if writer is not None:
             writer.close()
             writer = None

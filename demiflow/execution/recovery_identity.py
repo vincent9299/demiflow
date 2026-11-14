@@ -215,7 +215,10 @@ def operation_identity(operation):
     names = ('concurrency', 'queue_depth', 'catch', 'hard_timeout', 'execution')
     if specialized:
         names += ('max_batch', 'flush_interval')
-    return {'native': describe(native), 'policy': {name: describe(getattr(operation, name))
+    # Native producers already own their canonical JSON declaration. Running it
+    # through describe would hash long enums/lists and rewrite accepted history.
+    # New domains must normalize their own non-JSON configuration at the producer.
+    return {'native': native, 'policy': {name: describe(getattr(operation, name))
                                         for name in names if hasattr(operation, name)}}
 
 

@@ -853,6 +853,12 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
         if state.get('cleanup') != 'complete':
             raise ForgeError('Explicitly reconcile pending cleanup before resuming', code='conflict')
         remaining_limits(manifest['limits'], state)
+        recovery_journal = RunJournal(target)
+        for action_id in _fact_actions(_report(target, manifest), manifest['outputs']):
+            action = recovery_journal.execution_action(action_id)
+            if (action is not None and action['result'] is None and
+                    recovery_journal.source_binding(action_id + '-state-recovery-restriction') is not None):
+                raise ForgeError('该执行的资源 actor 未声明状态恢复钩子，不能从中断处恢复；请新建运行。')
         _check_basis(root, target, manifest, phase='resume')
         errors = register_results(root, run_id, recover=True)
         if errors:

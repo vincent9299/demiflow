@@ -362,7 +362,8 @@
           box.append($('p',ib.detail||'该 action 尚无节点身份桥；封存计划仍可查看，执行节点与报告观测的对应不猜测。','wb-caption'));
         }
         if(stage)raw('stage.budgets',stage.budgets,box);
-        if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
+        if(entry.recovery_restriction)box.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。已完成的结果仍可读取。','wb-caption'));
+        if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,recovery_restriction:entry.recovery_restriction||null,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
       }
       if(entry.dag.shared_ancestors.some(s=>s.logical_node_id===id))box.append($('p','共享祖先 / 复用：该逻辑节点被多个消费方共享。','wb-caption'));
       raw('traits',node.traits,box);raw('occurrence_id',group.map(n=>n.occurrence_id),box);

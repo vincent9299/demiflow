@@ -1,0 +1,13 @@
+PINNED_ROOT=/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114
+................F....................................................... [ 22%]
+........................................................................ [ 45%]
+........................................................................ [ 68%]
+........................................................................ [ 91%]
+...........................                                              [100%]
+=================================== FAILURES ===================================
+__________ test_registration_failure_closes_actor_even_if_stop_fails ___________
+tests/test_gpt_qwen_review_repairs.py:244: in test_registration_failure_closes_actor_even_if_stop_fails
+    assert actor.stops == actor.closes == 1
+E   assert 0 == 1
+E    +  where 0 = <test_gpt_qwen_review_repairs.test_registration_failure_closes_actor_even_if_stop_fails.<locals>.BrokenStop object at 0x7ff6549c3050>.closes
+1 failed, 314 passed in 338.72s (0:05:38)

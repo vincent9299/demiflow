@@ -1,0 +1,72 @@
+{
+  "status": "targeted_repairs_verified_with_known_failures",
+  "full_suite_clean": false,
+  "branch": "engine/gpt-integration-review-20261114",
+  "baseline": "8830efa01f46d25fb7cd9ccd8dc5828638213e21",
+  "groups": [
+    {
+      "label": "qwen-fix-final-core",
+      "result": "1 failed, 314 passed in 338.72s (0:05:38)",
+      "exit_code": 1,
+      "source_stable": true,
+      "source_matches_final": false,
+      "provenance": "qwen-fix-final-core-provenance.json",
+      "log": "qwen-fix-final-core.console.log"
+    },
+    {
+      "label": "qwen-fix-final-counterexamples",
+      "result": "23 passed in 5.12s",
+      "exit_code": 0,
+      "source_stable": true,
+      "source_matches_final": false,
+      "provenance": "qwen-fix-final-counterexamples-provenance.json",
+      "log": "qwen-fix-final-counterexamples.console.log"
+    },
+    {
+      "label": "qwen-fix-final-state-delta",
+      "result": "160 passed in 22.32s",
+      "exit_code": 0,
+      "source_stable": true,
+      "source_matches_final": true,
+      "provenance": "qwen-fix-final-state-delta-provenance.json",
+      "log": "qwen-fix-final-state-delta.console.log"
+    },
+    {
+      "label": "qwen-fix-final-ray",
+      "result": "8 passed in 97.58s (0:01:37)",
+      "exit_code": 0,
+      "source_stable": true,
+      "source_matches_final": false,
+      "provenance": "qwen-fix-final-ray-provenance.json",
+      "log": "qwen-fix-final-ray.console.log"
+    },
+    {
+      "label": "qwen-fix-final-browser",
+      "result": "2 passed in 209.45s (0:03:29)",
+      "exit_code": 0,
+      "source_stable": true,
+      "source_matches_final": false,
+      "provenance": "qwen-fix-final-browser-provenance.json",
+      "log": "qwen-fix-final-browser.console.log"
+    },
+    {
+      "label": "qwen-fix-final-legacy",
+      "result": "44 failed, 54 passed in 66.15s (0:01:06)",
+      "exit_code": 1,
+      "source_stable": true,
+      "source_matches_final": false,
+      "provenance": "qwen-fix-final-legacy-provenance.json",
+      "log": "qwen-fix-final-legacy.console.log"
+    }
+  ],
+  "final_source_inputs": "inputs.json",
+  "delta_explanation": "After broad tests, added only the 16384-field pre-copy bound shown in field-bound-delta.patch. Final state delta ran all 160 state/counterexample/recovery tests on final source bytes. No claim that earlier whole-source inventories equal final bytes.",
+  "core_failure_explanation": "One new cleanup assertion inspected the declaration instead of the executor-owned copy. Corrected to inspect w.callable._fn; reran all counterexamples, S012 and then full state/recovery scope. Original failure log retained.",
+  "state_boundary": "Local ordinary execution may run recognized resource actors, but records attempt_only before business calls; interrupted actions cannot resume. Strict workers still require adapters.",
+  "known_failures": "known-failures.json",
+  "not_run": [
+    "Full repository suite",
+    "PostgreSQL live backend",
+    "New resource-warning browser scenario (facts/engine tested; general browser flows tested)"
+  ]
+}

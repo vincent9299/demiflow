@@ -44,7 +44,8 @@ class FailingRegister:
     def validate(self, fn):
         self.validated = fn
 
-    async def register(self, fn, key):
+    async def register(self, fn, key, *, concurrency=1):
+        assert concurrency == 1
         raise self.exc
 
 
@@ -52,8 +53,8 @@ class OkRegister:
     def validate(self, fn):
         pass
 
-    async def register(self, fn, key):
-        pass
+    async def register(self, fn, key, *, concurrency=1):
+        assert concurrency == 1
 
 
 def worker(actor, recovery):

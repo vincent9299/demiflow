@@ -1,5 +1,7 @@
 # DemiFlow 七项集成问题修复与验收
 
+> 复审更正：本文件原有“七项全部闭环”结论已被 qwen 的三个新增反例推翻；1346 项通过仅为当时所选测试的真实结果，不再作为整批关闭结论。后续补修、恢复能力边界和新验收见 [QWEN-REPAIR-REPORT.md](QWEN-REPAIR-REPORT.md)。旧证据保留供追溯。
+
 对应原报告 `REPORT.md` 的 IR-01–IR-07。原报告、失败日志和原始 lane 回执保留，不改写历史结论。本次在 `engine/gpt-integration-review-20261114` 隔离分支实施；主仓不参与修改或测试。
 
 最终验收结果见文末和 `repair-evidence/verification.json`。本批交付范围是七项已确认问题及其暴露的组合退步，不把卡片数量或测试数量换算为整个产品/平台的完成百分比。

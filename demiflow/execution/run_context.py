@@ -284,6 +284,10 @@ class RunContext:
         self.position += 1
         action_id = action_id or "action-" + str(self.position)
         old = self.journal.execution_action(action_id)
+        restriction = self.journal.source_binding(action_id + '-state-recovery-restriction')
+        if old is not None and old.get('result') is None and restriction is not None:
+            raise RecoveryContractError('Cannot resume attempt-only actor state; '
+                                        'snapshot_state/restore_state is required')
         if old is not None and declaration.get('kind')=='delivery':
             raise RecoveryContractError('Delivery has no replay guarantee; committed image artifacts remain readable')
         source=declaration.get('source')

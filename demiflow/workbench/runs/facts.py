@@ -130,7 +130,8 @@ def read_sealed_plan(target, action_id):
         return dict(available=True, action_id=action_id, dag_id=facts['dag_id'],
                     plan_id=facts['plan_id'], sealed_at=facts['sealed_at'],
                     artifact_manifest_ref=facts['artifact_manifest_ref'],
-                    logical_dag=logical_dag, physical_plan=physical)
+                    logical_dag=logical_dag, physical_plan=physical,
+                    recovery_restriction=journal.source_binding(action_id + '-state-recovery-restriction'))
     except _CarrierError as exc:
         return _unavailable(action_id, exc.reason, str(exc)[:512])
     except ForgeError as exc:
@@ -287,6 +288,8 @@ def _sealed_entry(result, *, bridge=None):
                  sealed_at=result['sealed_at'],
                  artifact_manifest_ref=result['artifact_manifest_ref'],
                  physical=_physical_summary(result['physical_plan']))
+    if result.get('recovery_restriction') is not None:
+        entry['recovery_restriction'] = result['recovery_restriction']
     if bridge is not None and bridge.get('available'):
         entry['node_map'] = _bridge_node_map(bridge['bridge']['entries'])
         entry['identity_bridge'] = bridge

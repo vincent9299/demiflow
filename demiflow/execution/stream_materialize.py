@@ -265,7 +265,9 @@ class StreamStageProgress:
 
     async def restore_stages(self):
         for owner, key in self.direct_owners:
-            await self.state.register(owner, key)
+            # Includes predicates folded into a concurrent upstream stage.
+            index = int(key.split('-')[1])
+            await self.state.register(owner, key, concurrency=self.stages[index].concurrency)
 
     async def append(self, row):
         if self.stop_requested():
@@ -411,7 +413,7 @@ class StreamMaterialization(StreamStageProgress):
             if summary is None:
                 raise RecoveryContractError('Stream checkpoint has no protocol progress summary')
             self.rows = summary['rows']
-        self.state = OperatorStates(self.run, restored)
+        self.state = OperatorStates(self.run, restored, runtime_only_action=action)
         self.ordinal = 0
         self.complete = action.record["result"] is not None
         self.append_lock = asyncio.Lock()

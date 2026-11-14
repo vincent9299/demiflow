@@ -45,7 +45,11 @@ class _MapWorker:
                     await self._hook('astart')
                     started = True
                     if self.recovery_state is not None:
-                        await self.recovery_state.register(self.callable._fn, self.recovery_key)
+                        options = getattr(self.operation, 'stream_options', None)
+                        concurrency = (1 if options is not None and options.callable_scope == 'worker'
+                                       else getattr(options, 'concurrency', getattr(self.operation, 'concurrency', 1)))
+                        await self.recovery_state.register(self.callable._fn, self.recovery_key,
+                                                           concurrency=concurrency)
                     self.started = True
                 except BaseException as exc:
                     self.failure = exc
@@ -55,8 +59,10 @@ class _MapWorker:
                         # stop/aclose is only an idempotent fallback. Shield so a
                         # cancelled registration still drains the started actor.
                         async def release():
-                            await self.astop()
-                            await self.aclose()
+                            try:
+                                await self.astop()
+                            finally:
+                                await self.aclose()
                         task = asyncio.create_task(release())
                         try:
                             await asyncio.shield(task)
@@ -124,10 +130,10 @@ class StreamMapRuntime:
         for worker in self.workers:
             try:
                 await getattr(worker, hook)()
-            except Exception as exc:
+            except BaseException as exc:
                 errors.append(exc)
         if errors:
-            raise ExceptionGroup(f'Stream map {hook} failed', errors)
+            raise BaseExceptionGroup(f'Stream map {hook} failed', errors)
 
     async def astop(self):
         await self._all('astop')

@@ -1,5 +1,5 @@
 {
-  "status": "accepted_for_IR01_through_IR07",
+  "status": "superseded_after_independent_review",
   "branch": "engine/gpt-integration-review-20261114",
   "tested_head": "b4dd41722130be3898a8a98057541d843777906e",
   "tested_with_uncommitted_repairs": true,
@@ -107,5 +107,12 @@
     "No claim of complete V-card/business acceptance",
     "No isolated PostgreSQL fixture supplied",
     "No general Python UDF RSS sandbox or overall performance benchmark claim"
+  ],
+  "historical_status": "accepted_for_IR01_through_IR07",
+  "superseded_by": "../qwen-repair-evidence/verification.json",
+  "retraction_reasons": [
+    "QWEN-01",
+    "QWEN-02",
+    "QWEN-03"
   ]
 }
