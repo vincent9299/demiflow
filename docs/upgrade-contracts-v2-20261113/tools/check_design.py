@@ -55,15 +55,35 @@ def graph():
 check('producer_consumer_graph',graph)
 def gates():
     g=json.loads((OUT/'gates.json').read_text());r=json.loads((OUT/'root-map.json').read_text())
-    assert {k for t in tasks for k in t['gates']}==set(g)
+    assert {k for t in tasks for k in t['gates']} | {'REGRESSION117','HISTORICAL_TIMING'}==set(g)
     for k,v in g.items():
         assert v['status']=='not_run'
         assert all((ROOT/p).is_file() for p in v['required_existing_files']),(k,'missing regression')
         assert set(v['leaf_tasks'])=={t['id'] for t in tasks if k in t['gates']}
+        assert set(v['required_new_nodeids']) <= set(v['selectors'])
+        assert all('::test_v2_' in n for n in v['required_new_nodeids'])
+        assert set(v['depends_on'])<=set(g)
+        assert v['policy']['skipped']==v['policy']['missing']==v['policy']['xfail']=='blocked'
+    selected={n.split('::')[-1] for v in g.values() for n in v['required_new_nodeids']}
+    assert selected=={t['symbol'] for t in tasks if t['owner']=='V'}
+    history=json.loads((OUT/'review-20261114/historical-failures.json').read_text())
+    assert len(history['deterministic'])==117 and history['old_gate_missing_count']==73
+    assert set(g['REGRESSION117']['required_nodeids'])=={r['nodeid'] for r in history['deterministic']}
+    def visit(name, ancestors):
+        assert name not in ancestors,('gate dependency cycle',name)
+        for dep in g[name]['depends_on']:visit(dep,ancestors|{name})
+    for name in g:visit(name,set())
     assert all(set(v)<=set(g) for v in r.values())
     assert len([k for k in r if k.startswith('R.')])==15
     return {'acceptance_gates':len(g),'intent_leaves':len(r),'runtime_acceptance':'not_run'}
 check('root_coverage_and_test_targets',gates)
+def frozen_files():
+    sys.path.insert(0,str(OUT/'tools'))
+    from run_gate import frozen_mismatches
+    guard=json.loads((OUT/'review-20261114/frozen-files.json').read_text())
+    assert not frozen_mismatches(ROOT,guard)
+    return {'explicitly_frozen_files':len(guard['files']),'scope':'preservation only; old design not dispatch-ready'}
+check('explicit_frozen_files',frozen_files)
 def fixtures():
     from demiflow.execution.plan_interpreter import interpret_physical_plan
     from demiflow.planning.dag import validate_logical_dag,validate_physical_execution_plan
@@ -116,6 +136,6 @@ def final():
     assert 'stage_limits' in (OUT/'interfaces.pyi').read_text()
     return 'Ten dimension-specific review records present; this does not establish ten complete reviews. Runtime acceptance remains separate.'
 check('final_consistency',final)
-report={'kind':'design_validation_not_runtime_acceptance','base_commit':BASE,'checks':checks,'runtime_accepted':False,'limitations':['v2 bindings interpreter and implementation remain to be written','browser/Ray/performance/business acceptance not executed by this design task']}
+report={'kind':'design_validation_not_runtime_acceptance','base_commit':BASE,'checks':checks,'dispatch_ready':False,'runtime_accepted':False,'limitations':['Qwen review requires substantive contract/task-card revision; structural checks do not close those findings','v2 bindings interpreter and implementation remain to be written','browser/Ray/performance/business acceptance not executed by this design task']}
 (OUT/'design-validation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
 print(json.dumps({'design_checks_passed':len(checks),'tasks':len(tasks),'files':len({t['file'] for t in tasks}),'runtime_accepted':False},ensure_ascii=False))

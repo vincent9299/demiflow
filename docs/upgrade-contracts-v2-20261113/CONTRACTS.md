@@ -1,5 +1,7 @@
 # v2 共享接口与数据契约
 
+> **2026-11-14：修订中，不可按旧任务卡直接派发。** Qwen Review 发现真实接口与验收缺口；当前 `dispatch_ready=false`。先读 [逐条裁决](review-20261114/RESPONSE.md) 和 [七组关键修订](review-20261114/CRITICAL-REVISION.md)。下文旧目标/草案保留追溯，不代表已经闭合。
+
 以下为待实现目标。保留接口按基线签名；新增/修改签名以任务卡为准。`plan.json` 是派工索引，本文是语义权威；两者矛盾必须修设计，不能让 agent 各选一种。
 
 ## C01 通用值、引用与权限
@@ -110,7 +112,7 @@ auto_json 初版只接纳普通 `__dict__` 数据实例，不能执行 property/
 4. 对未证明可重建的运行时依赖，使用现有显式 `recovery_identity()` 及原生适配器，或明确拒绝 durable 路径；不得声称 plain run_stream 的成功等于可恢复。
 5. 已接纳历史身份的规范化字节不变；增加过去明确拒绝类型须有碰撞反例。platform_revision 变化导致旧运行拒绝执行仍保留；历史阅读不重算、不改写载体。
 
-S 可提出 recovery_identity.py 的必要最小修复，但只接受上述语义，不继承“两个对象当前被某一路拒绝，所以允许抹掉身份”的推理。其余六个承重文件字节冻结。签名保留，不增加隐式全局模式开关。
+S 可提出 recovery_identity.py 的必要最小修复，但只接受上述语义，不继承“两个对象当前被某一路拒绝，所以允许抹掉身份”的推理。本修订的字节冻结路径和摘要明确列在 review-20261114/frozen-files.json，不再使用未枚举的“其余六个”。签名保留，不增加隐式全局模式开关。
 
 ## C05 buffer/barrier 与恢复：R 负责
 
@@ -175,7 +177,7 @@ PromptActor 与 EmbeddingActor 的资源生命周期仍由各 actor 开关 pools
 {execution_id:str, placement:'driver'|'worker', group_id:str|null,
  backend:'local_stream'|'local_pull'|'datafusion'|'arrow_batch'|'lance_scan',
  stage_ids:list[str], profile_ref:str, programs:list[ProgramBinding],
- recovery:'native_checkpoint'|'final_commit'}
+ recovery:'native_checkpoint'|'final_commit'|'delivery_only'|'attempt_only'}
 ProgramBinding = {program_id:str,input_path:list[str|int],plan_ref:ProgramRef,
  source_identity_ref:str,
  sealed_operators:list[{logical_node_id:str,occurrence_id:str}],
@@ -231,7 +233,7 @@ Notebook/Python/SQL、Case、媒体、开发会话继续独立生命周期，不
 
 ## C10 错误、副作用与连接规则
 
-PlanContractError 的 reason 保留现有固定集合；S 使用 STATE_ADAPTER_MISSING/INVALID_SPEC；A 使用既有 UnsupportedExecutionOptionError/退休契约错误；预算使用原 RecoveryContractError。不得用空 dict/None 表示验证通过但没有值；未预期异常不得伪装 missing。
+PlanContractError 的 reason 保留现有固定集合；S 使用既有 ProtocolError(STATE_ADAPTER_MISSING/INVALID_SPEC)；A 使用既有 UnsupportedExecutionOptionError/退休契约错误；预算使用原 RecoveryContractError。不得用空 dict/None 表示验证通过但没有值；未预期异常不得伪装 missing。
 
 所有读取/编译/helper 标注 pure、read_only、runtime_state、durable_write 之一。durable_write 必须写明原 RunJournal/commit/StateArtifacts 中的 owner。前置拒绝应满足源读取=0、Actor 构造=0、请求数=0、目标副作用=0；运行中失败则排空/收尾并如实保留 unknown。
 
@@ -253,4 +255,4 @@ stage_limits不是“建议”：inflight_rows限制当前阶段同时在途行�
 
 C09 UI映射补充：原node_map的logical键语义兼容保留；sealed entry新增occurrence_node_map。`_bridge_node_map(entries,*,key_kind='logical')` 在occurrence模式返回occurrence→唯一report_node_id；冲突省略。renderLogical向mountLogical.update传occurrence映射；其DOM/select/onSelect键统一occurrence_id；chooseLogicalNode先按occurrence定位，再用该node.logical_node_id读取bridge/观测。声明图无桥时只按无歧义的声明映射展示，不把当前代码猜成历史源码。
 
-C08 ACK回调固定为async：WorkerChainExecutor._request_commit与GraphWorkerExecutor._request_contribution返回Awaitable[CommitReceipt]。原progress.seal返回publication callable，stream_barrier已支持inspect.isawaitable后await，因此无需再造线程提交器。默认本次等待上限120秒（若已有更短运行/控制deadline则取更短），使用asyncio.wrap_future/有限await，取消按原信号传播；超时抛TimeoutError，保留unknown和未确认提交，不自动重发、不提前释放所有权。测试必须同时证明event-loop heartbeat未冻结及迟到ACK不能推动新cut；只测“最终返回”不足。
+C08 ACK回调固定为async：WorkerChainExecutor._request_commit与GraphWorkerExecutor._request_contribution返回Awaitable[CommitReceipt]。原progress.seal返回publication callable，stream_barrier已支持inspect.isawaitable后await，因此无需再造线程提交器。等待上限取既有 checkpoint_timeout_s 与有效运行/控制 deadline 的最小剩余值（不另造120秒默认），使用asyncio.wrap_future/有限await，取消按原信号传播；超时抛TimeoutError，保留unknown和未确认提交，不自动重发、不提前释放所有权。测试必须同时证明event-loop heartbeat未冻结及迟到ACK不能推动新cut；只测“最终返回”不足。

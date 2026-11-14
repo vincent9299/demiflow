@@ -1,4 +1,4 @@
-"""Design declarations only. Not a runtime module. Exact behavior: CONTRACTS.md."""
+"""Draft under revision; dispatch_ready=False. See review-20261114/CRITICAL-REVISION.md. Not a runtime module."""
 from dataclasses import dataclass
 from typing import Any, Iterator, Literal, Mapping, TypedDict
 from demiflow.data.plan import LogicalPlan
@@ -81,7 +81,7 @@ class ExecutionPlacement:
     profile: Mapping[str,Any]
     programs: tuple[Mapping[str,Any],...]
     stage_limits: Mapping[str,Mapping[str,int]]
-    recovery: Literal['native_checkpoint','final_commit']
+    recovery: Literal['native_checkpoint','final_commit','delivery_only','attempt_only']
 # Existing four layout classes are retained exactly; ExecutionLayout adds only:
 # executions: tuple[ExecutionPlacement,...] = ()
 # Existing declarations/constructors are captured in class-state.json.

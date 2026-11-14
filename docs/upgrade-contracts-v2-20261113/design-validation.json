@@ -31,9 +31,17 @@
       "check": "root_coverage_and_test_targets",
       "status": "passed",
       "detail": {
-        "acceptance_gates": 27,
+        "acceptance_gates": 29,
         "intent_leaves": 20,
         "runtime_acceptance": "not_run"
+      }
+    },
+    {
+      "check": "explicit_frozen_files",
+      "status": "passed",
+      "detail": {
+        "explicitly_frozen_files": 7,
+        "scope": "preservation only; old design not dispatch-ready"
       }
     },
     {
@@ -62,8 +70,10 @@
       "detail": "Ten dimension-specific review records present; this does not establish ten complete reviews. Runtime acceptance remains separate."
     }
   ],
+  "dispatch_ready": false,
   "runtime_accepted": false,
   "limitations": [
+    "Qwen review requires substantive contract/task-card revision; structural checks do not close those findings",
     "v2 bindings interpreter and implementation remain to be written",
     "browser/Ray/performance/business acceptance not executed by this design task"
   ]

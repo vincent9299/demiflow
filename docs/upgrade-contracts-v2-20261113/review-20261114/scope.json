@@ -1,0 +1,17 @@
+{
+  "take": {
+    "action_present": false,
+    "run_present": true,
+    "action_id": null
+  },
+  "iter_rows": {
+    "action_present": false,
+    "run_present": true,
+    "action_id": null
+  },
+  "count": {
+    "action_present": true,
+    "run_present": true,
+    "action_id": "action-1"
+  }
+}

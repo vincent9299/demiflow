@@ -1,12 +1,14 @@
 # 函数级任务总表
 
+**修订中，旧卡不可直接派发。** 见 [Review裁决](review-20261114/RESPONSE.md)。
+
 一个叶任务=一个函数/方法。数据类声明、imports/slots 的装配按 FILE-OWNERSHIP.md 处理；不能让函数 agent 自由改变公共字段。
 
 `verify_preserve` 表示有实现，先验证并保留，只有发现该合同的真实缺陷才修改该函数；不能重复实现。
 
 | ID | 包 | 文件/函数 | 动作 | 输出 | 验收 |
 |---|---|---|---|---|---|
-| [F001](tasks/F001.md) | F | `demiflow/execution/plan_facts.py` · `operation_capability` | implement | CapabilityFact，C02 基础键，不新增 admitted 字段 | FACTS, HISTORY |
+| [F001](tasks/F001.md) | F | `demiflow/execution/plan_facts.py` · `operation_capability` | verify_preserve | CapabilityFact，C02 基础键，不新增 admitted 字段 | FACTS, HISTORY |
 | [F002](tasks/F002.md) | F | `demiflow/execution/plan_facts.py` · `operation_facts` | implement | OperationFact：C02 arguments/native/reserved_bytes | FACTS, VECTOR, EMBED, PREPEND, HISTORY |
 | [F003](tasks/F003.md) | F | `demiflow/execution/plan_facts.py` · `_catch_facts` | verify_preserve | None 或 sorted list[str]；原空值 null/[] 不变 | FACTS, HISTORY |
 | [F004](tasks/F004.md) | F | `demiflow/planning/dataset_dag.py` · `compile_dataset_logical_dag` | implement | (LogicalDag v1, tuple[ProgramSlice,...])；路径完整且局部程序→全图stage映射唯一 | LAYOUT, RELATIONAL, HISTORY |

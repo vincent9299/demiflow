@@ -1,5 +1,7 @@
 # 两大意图完成后，用户实际看到什么
 
+> **2026-11-14：修订中，不可按旧任务卡直接派发。** Qwen Review 发现真实接口与验收缺口；当前 `dispatch_ready=false`。先读 [逐条裁决](review-20261114/RESPONSE.md) 和 [七组关键修订](review-20261114/CRITICAL-REVISION.md)。下文旧目标/草案保留追溯，不代表已经闭合。
+
 这是完成后的验收目标，不是当前已完成声明。对应实现见 FUNCTION-TASKS.md，证据门见 INTEGRATION-ACCEPTANCE.md。既有公开 API 尽量保留；内部的新类不要求业务用户学习。
 
 ## 一、产品：一个能完成工作的工作台

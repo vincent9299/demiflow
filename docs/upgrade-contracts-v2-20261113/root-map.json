@@ -63,9 +63,11 @@
     "STATE",
     "IDENTITY",
     "CODEC",
-    "RELATIONAL"
+    "RELATIONAL",
+    "REGRESSION117"
   ],
   "P.unified_execution": [
+    "ADMISSION",
     "LAYOUT",
     "GRAPH",
     "QUEUE",
@@ -89,6 +91,7 @@
   ],
   "P.resources_performance": [
     "BOUNDS",
-    "DELIVERY"
+    "DELIVERY",
+    "HISTORICAL_TIMING"
   ]
 }
