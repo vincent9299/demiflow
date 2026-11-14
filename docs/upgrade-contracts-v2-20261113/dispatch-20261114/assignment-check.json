@@ -1,0 +1,13 @@
+{
+  "tasks": 198,
+  "lanes": 12,
+  "card_files": 54,
+  "additional_files": 1,
+  "duplicate_tasks": 0,
+  "missing_tasks": 0,
+  "shared_file_owner_conflicts": 0,
+  "actual_sessions_dispatched": 0,
+  "all_contracts_frozen": false,
+  "runtime_accepted": false,
+  "additional_function_units": 6
+}
