@@ -1573,7 +1573,8 @@ class Dataset:
                            declared._stages+tuple(actors.values()))
         if route is not None or isolate_route_failures:
             raise ValueError('route/isolate_route_failures require routes')
-        from ..inference import _resolve_request_gate
+        from ..inference import _resolve_request_gate, request_admission_config
+        declared_request_policy = request_admission_config(request_policy, concurrency=concurrency)
         request_gate = _resolve_request_gate(policy=request_policy, gate=request_gate, concurrency=concurrency)
         if isinstance(token_budget, Mapping):
             from ..operator_llm.tokens import input_budget
@@ -1608,6 +1609,12 @@ class Dataset:
             validate_http_options({**(options or {}),
                 'max_connections': (options or {}).get('max_connections', concurrency)})
         actor._runtime.request_gate = request_gate
+        if declared_request_policy is not None:
+            # Immutable declaration, independent of the adaptive gate's mutable
+            # observations. Preserve the owned reference through serialization
+            # so replacing it with a caller-owned gate fails sealing.
+            actor._request_policy = tuple(sorted(declared_request_policy.items()))
+            actor._owned_request_gate = request_gate
         actor._runtime.token_budget = token_budget
         actor._runtime.concurrency = concurrency
         actor.when=when;actor.call_output=call_output;actor.error_output=error_output

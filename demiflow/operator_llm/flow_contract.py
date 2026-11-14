@@ -38,8 +38,10 @@ def normalize_prompt(arguments):
         raise ValueError('Managed prompt requires a named prompt and sealed configuration file')
     if (result['output'] is None) == (result['outputs'] is None):
         raise ValueError('Prompt requires exactly one of output or outputs')
-    if any(result.get(k) is not None for k in ('service', 'request_gate', 'request_policy', 'routes', 'route')) or result['isolate_route_failures']:
+    if any(result.get(k) is not None for k in ('service', 'request_gate', 'routes', 'route')) or result['isolate_route_failures']:
         raise ValueError('This managed prompt contract requires a fixed external HTTP endpoint without routing or service construction')
+    from ..inference import request_admission_config
+    result['request_policy'] = request_admission_config(result.get('request_policy'), concurrency=result['concurrency'])
     if type(result['max_requests']) is not int or not 0 <= result['max_requests'] <= 2**40:
         raise ValueError('Managed prompt requires a finite nonnegative request budget <= 2**40')
     from .tokens import budget_declaration
@@ -87,12 +89,16 @@ def _schema_type(schema, depth=0):
     return scalar(types[kind])
 
 
-def _native(prompt, inputs, output, outputs, options, maximum, when, call_output, error_output, budget):
+def _native(prompt, inputs, output, outputs, options, maximum, when, call_output, error_output, budget, request_policy=None):
     from .tokens import budget_declaration
-    return {'contract': 'demiflow.prompt.http', 'prompt': _value(prompt), 'inputs': dict(inputs),
+    result = {'contract': 'demiflow.prompt.http', 'prompt': _value(prompt), 'inputs': dict(inputs),
             'output': output, 'outputs': dict(outputs) if outputs is not None else None,
             'options': _value(options), 'max_requests': maximum, 'when': when,
             'call_output': call_output, 'error_output': error_output, 'token_budget': budget_declaration(budget)}
+    # No-policy facts retain their historical bytes and identity.
+    if request_policy is not None:
+        result['request_policy'] = dict(request_policy)
+    return result
 
 
 def _systemone_result(prompt):
@@ -228,7 +234,7 @@ def analyze_prompt(arguments, *, inputs, callables, resources):
             result[target] = field(typ, required=False)
     return {'fields': result, 'cardinality': 'one', 'order': 'unspecified', 'driver': 'stream', 'kind': 'async_map',
             'callable_form': 'awaitable', 'placement': 'inline', 'scope': 'stage',
-            'native': _native(prompt, a['inputs'], a['output'], a['outputs'], options, a['max_requests'], when, a['call_output'], a['error_output'], budget),
+            'native': _native(prompt, a['inputs'], a['output'], a['outputs'], options, a['max_requests'], when, a['call_output'], a['error_output'], budget, a.get('request_policy')),
             'stream_arguments': dict(concurrency=a['concurrency'], queue_depth=a['queue_depth'], catch=[], label=a['label'] or a['prompt'], hard_timeout=None, execution='inline'),
             'reserved_bytes': (reserved_media_bytes(options,a['concurrency']) if image else a['concurrency'] * 8 * (options['max_request_bytes'] + options['max_response_bytes']))
                               + (64 * resources['tokenizer']['size'] + 64 * 1024**2 if 'tokenizer' in resources else 0),
@@ -246,11 +252,21 @@ def analyze_prompt(arguments, *, inputs, callables, resources):
 def prompt_facts(actor):
     op, runtime = actor._operation, actor._runtime
     prompt = resolve_prompt(op.config, op.prompt_name)
+    from ..execution.adaptive_requests import AdaptiveRequestGate
+    from ..inference import request_admission_config
+    declaration = getattr(actor, '_request_policy', None)
+    policy = request_admission_config(dict(declaration), concurrency=runtime.concurrency) if declaration is not None else None
+    gate = runtime.request_gate
+    gate_matches = gate is None if policy is None else (
+        type(gate) is AdaptiveRequestGate
+        and gate is getattr(actor, '_owned_request_gate', None)
+        and gate.policy == policy and gate.concurrency == policy['max_concurrency']
+        and gate.state_path is None and gate.failures == 5 and gate.interval_s == 0)
     if (_value(prompt) != _value(resolve_prompt(runtime.config, op.prompt_name)) or _value(prompt) != _value(actor._prompt)
             or op.options != runtime.options or runtime.coordinator.max_requests != op.max_requests
             or actor.environment is not None or runtime._service is not None
-            or runtime.request_gate is not None
+            or not gate_matches
             or runtime._clients or runtime._service_owner is not None or runtime._service_owners):
         raise ValueError('Native prompt lowering/configuration copies differ')
     return _native(prompt, op.inputs, op.output, op.outputs, runtime.options, op.max_requests,
-                   actor.when is not None, actor.call_output, actor.error_output, runtime.token_budget)
+                   actor.when is not None, actor.call_output, actor.error_output, runtime.token_budget, policy)
