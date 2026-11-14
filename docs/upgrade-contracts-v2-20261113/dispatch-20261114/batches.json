@@ -851,5 +851,20 @@
       },
       "additional_units": []
     }
-  ]
+  ],
+  "execution_workflow": {
+    "intermediate_external_review": false,
+    "implementer_self_tests_required": true,
+    "review_trigger": "all_lanes_deliver_code_and_self_test_evidence",
+    "integration_owner": "GPT",
+    "final_reviewers": [
+      "GPT",
+      "Qwen"
+    ],
+    "repair_owner": "GPT",
+    "repair_validation": "affected_real_integration_and_business_acceptance",
+    "mid_execution_escalation": "only_blocking_interface_or_data_history_protection_issue",
+    "routine_redispatch_of_repairs": false,
+    "acceptance_suite_delivery": "V_delivers_tests_before_final_combined_execution"
+  }
 }
