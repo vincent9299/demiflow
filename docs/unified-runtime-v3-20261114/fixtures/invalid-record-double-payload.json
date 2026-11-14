@@ -1,0 +1,20 @@
+{
+  "schema": "demiflow.runtime_wire.v3",
+  "type": "Record",
+  "payload": {
+    "record_id": "634768dae1474506e4bf7d341890542b09987d7e6aea5d446c02e37581a56954",
+    "source_position": {
+      "next": 6
+    },
+    "payload_ref": {
+      "digest": "06ef5892a96037b4eaac8d9b3dd5ee8765933a1f199b36cea53d2a163e091ae0",
+      "size_bytes": 13,
+      "store_id": "test-store",
+      "key": "objects/06ef5892a96037b4eaac8d9b3dd5ee8765933a1f199b36cea53d2a163e091ae0",
+      "media_type": "application/vnd.demiflow.record.v3"
+    },
+    "inline": {},
+    "encoded_bytes": 13,
+    "sequence": 6
+  }
+}

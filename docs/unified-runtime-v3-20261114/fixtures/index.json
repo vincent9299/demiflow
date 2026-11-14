@@ -1,0 +1,74 @@
+[
+  {
+    "file": "source-cursor.json",
+    "type": "SourceCursor",
+    "expected_valid": true,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "source-pending.json",
+    "type": "SourcePoll",
+    "expected_valid": true,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "source-eoi.json",
+    "type": "SourcePoll",
+    "expected_valid": true,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "source-record.json",
+    "type": "SourcePoll",
+    "expected_valid": true,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "reserve-inline.json",
+    "type": "WorkerEvent",
+    "expected_valid": true,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "reply-error.json",
+    "type": "ControlReply",
+    "expected_valid": true,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "finite-scope.json",
+    "type": "FiniteScope",
+    "expected_valid": true,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "invalid-event-double-payload.json",
+    "type": "WorkerEvent",
+    "expected_valid": false,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "invalid-cursor.json",
+    "type": "SourceCursor",
+    "expected_valid": false,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "invalid-pending.json",
+    "type": "SourcePoll",
+    "expected_valid": false,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "invalid-record-double-payload.json",
+    "type": "Record",
+    "expected_valid": false,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  },
+  {
+    "file": "invalid-authority-command.json",
+    "type": "WorkerEvent",
+    "expected_valid": false,
+    "purpose": "wire contract example, no real engine/artifact acceptance"
+  }
+]

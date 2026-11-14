@@ -1,0 +1,11 @@
+{
+  "dispatch_ready": true,
+  "scope": "design_contracts_only",
+  "planned_review_rounds": 10,
+  "implementation_complete": false,
+  "runtime_acceptance": "not_run",
+  "required_final_review": [
+    "GPT",
+    "Qwen"
+  ]
+}

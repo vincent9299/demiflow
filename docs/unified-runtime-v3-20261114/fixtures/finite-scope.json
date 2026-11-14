@@ -1,0 +1,13 @@
+{
+  "schema": "demiflow.runtime_wire.v3",
+  "type": "FiniteScope",
+  "payload": {
+    "scope_id": "5f161c9149882e0e10124bc5dd5c11f0fbe8ec452edd52bcec76b01e9252cb33",
+    "generation": 0,
+    "membership": [
+      "stage0:part0",
+      "stage0:part1"
+    ],
+    "completion_condition": "input_eoi"
+  }
+}

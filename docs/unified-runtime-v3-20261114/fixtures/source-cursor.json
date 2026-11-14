@@ -1,0 +1,22 @@
+{
+  "schema": "demiflow.runtime_wire.v3",
+  "type": "SourceCursor",
+  "payload": {
+    "split_id": "ad1a64057f9ab34fecfe3f4ee78660bb0316dbda9370581ffbeb1e8bddf3d598",
+    "offset": {
+      "next": 7
+    },
+    "next_sequence": 7,
+    "end_of_input": false,
+    "lease_ref": null,
+    "pending_refs": [
+      {
+        "digest": "06ef5892a96037b4eaac8d9b3dd5ee8765933a1f199b36cea53d2a163e091ae0",
+        "size_bytes": 13,
+        "store_id": "test-store",
+        "key": "objects/06ef5892a96037b4eaac8d9b3dd5ee8765933a1f199b36cea53d2a163e091ae0",
+        "media_type": "application/vnd.demiflow.record.v3"
+      }
+    ]
+  }
+}
