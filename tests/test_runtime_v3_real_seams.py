@@ -189,7 +189,10 @@ def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, mon
             graph, physical, pin = load_sealed_dataflow(ex._sealed,
                 action_id=ex._action.action_id, store=services.store, bounds=services.bounds)
             programs = _load_programs(runtime.assignment, store=services.store, bounds=services.bounds)
-            assert set(programs) == set(pin["programs"])
+            owned = {occ for stage in runtime.assignment.stages for occ in stage.occurrences}
+            assert set(programs) == owned & set(pin['programs'])
+            assert set(programs) < set(pin['programs'])  # a worker never loads other stages' code
+            runtime = replace(runtime, programs=programs)
             worker = DataflowWorkerExecutor(services=runtime,
                 mailbox=ControlMailbox(bounds=services.bounds, check_stop=lambda: None))
             try:

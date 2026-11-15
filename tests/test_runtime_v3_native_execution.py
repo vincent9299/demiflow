@@ -163,6 +163,7 @@ def test_prompt_partial_checkpoint_resume_does_not_resend(tmp_path, native_serve
 
 def test_unknown_model_request_blocks_resume_before_new_http(tmp_path, native_server):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.operator_llm.journal import UncertainPromptCall
     def pipeline():
         return data.from_items([{'item': 'a'}, {'item': '__drop_response__'}]).map_prompt_async(
             'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'item'},
@@ -182,7 +183,7 @@ def test_unknown_model_request_blocks_resume_before_new_http(tmp_path, native_se
         assert failure['type'] == 'RemoteProtocolError'
         assert failure['call'].get('request_sent') is not False
         assert db.execute("SELECT consumed FROM runtime_budgets WHERE name='requests'").fetchone()[0] == 2
-    with pytest.raises(DataflowError):
+    with pytest.raises(UncertainPromptCall):
         with RunContext.resume(ref), data.local_execution():
             pipeline().take_all()
     assert len(native_server) == 2

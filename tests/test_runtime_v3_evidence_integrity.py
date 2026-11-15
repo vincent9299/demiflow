@@ -6,7 +6,7 @@ import runtime_v3_support as support
 
 
 @pytest.mark.parametrize("scenario", [
-    "api_matrix", "shared_diamond", "incremental_first_row", "three_exchange_modes",
+    "api_matrix",
     "cpu_gpu_isolation", "fairness_deadlock", "multiworker_barrier", "route_recovery",
     "commit_crash_matrix", "model_effect_recovery", "actor_state_lifecycle",
     "queue_full_business", "memory_peak", "disk_gc", "remote_journal", "two_hosts",

@@ -906,21 +906,93 @@ def _api_negative(ds: Any, name: str) -> str:
 
 
 def _s_shared_diamond(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'worker-side effect counts need durable observations; driver closure counters cannot count subprocess calls'}
-    fx._record_not_run('shared_diamond', detail)
-    raise NotRunError('shared_diamond', detail)
+    log = str(fx.evidence_dir / 'shared-calls.jsonl')
+    def observe(row):
+        with open(log, 'a') as stream:
+            stream.write(str(row['n']) + '\n')
+        return row
+    shared = _data().from_items([{'n': i} for i in range(3)]).map(observe)
+    result = shared.map(lambda row: {**row, 'branch': 'left'}).union(
+        shared.map(lambda row: {**row, 'branch': 'right'})).take_all()
+    fx.assert_semantics([{'n': i, 'branch': b} for b in ('left', 'right') for i in range(3)],
+                        result, ordering='unordered')
+    first = Path(log).read_text().splitlines()
+    fx.assert_semantics(['0', '1', '2'], first, ordering='unordered')
+    base = _data().from_items([{'n': 3}])
+    result = base.map(observe).union(base.map(observe)).take_all()
+    fx.assert_semantics([{'n': 3}, {'n': 3}], result, ordering='unordered')
+    last = Path(log).read_text().splitlines()
+    fx.assert_semantics(['3', '3'], last[len(first):], ordering='unordered')
+    return {'shared_calls': len(first), 'independent_calls': len(last) - len(first)}
 
 
 def _s_incremental_first_row(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'the source must use a serializable owned synchronization fixture, not a captured threading.Event'}
-    fx._record_not_run('incremental_first_row', detail)
-    raise NotRunError('incremental_first_row', detail)
+    released = str(fx.evidence_dir / 'consumer-received')
+    exhausted = str(fx.evidence_dir / 'source-exhausted')
+    def source():
+        from pathlib import Path
+        import time
+        yield {'n': 0}
+        deadline = time.monotonic() + 10
+        while not Path(released).exists():
+            if time.monotonic() > deadline:
+                raise AssertionError('First row was held until source completion')
+            time.sleep(.01)
+        yield {'n': 1}
+        Path(exhausted).write_text('done')
+    rows = _data().from_iter(source).iter_rows()
+    try:
+        first = next(rows)
+        fx.assert_semantics({'n': 0}, first, ordering='ordered')
+        before_eoi = not Path(exhausted).exists()
+        assert before_eoi
+        Path(released).write_text('received')
+        fx.assert_semantics([{'n': 1}], list(rows), ordering='ordered')
+        assert Path(exhausted).exists()
+    finally:
+        Path(released).touch()
+        rows.close()
+    return {'first_row_before_eoi': before_eoi}
 
 
 def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must configure and inspect all three real exchanges and producer-success seals'}
-    fx._record_not_run('three_exchange_modes', detail)
-    raise NotRunError('three_exchange_modes', detail)
+    from dataclasses import replace
+    from pytest import MonkeyPatch
+    from demiflow.execution import dataflow_api as api
+    from demiflow.execution.dataflow import DataflowExecution
+    resolve, prepare = api.resolve_runtime_policy, DataflowExecution.prepare
+    observed, results = [], {}
+    for mode in ('memory_incremental', 'durable_incremental', 'finite_sealed'):
+        def policy(options, limits, *, provider):
+            policy, bounds = resolve(options, limits, provider=provider)
+            return replace(policy, fusion=False,
+                durability='durable' if mode == 'durable_incremental' else 'ephemeral'), bounds
+        def capture(execution):
+            sealed = prepare(execution)
+            observed.append(execution)
+            return sealed
+        with MonkeyPatch.context() as patch:
+            patch.setattr(api, 'resolve_runtime_policy', policy)
+            patch.setattr(DataflowExecution, 'prepare', capture)
+            ds = _data().from_items([{'n': i} for i in range(6)]).map(lambda row: row)
+            if mode == 'finite_sealed':
+                ds = ds.sort('n')
+            rows = ds.take_all()
+        fx.assert_semantics([{'n': i} for i in range(6)], rows, ordering='unordered')
+        execution = observed[-1]
+        channels = [edge for edge in execution._physical.exchanges if edge.mode == mode]
+        assert channels and execution.finish().complete
+        if mode == 'finite_sealed':
+            for edge in channels:
+                assert edge.channel_id in execution._finite_seals
+                # The consumer ran only after every real producer succeeded.
+                ref = execution._finite_seals[edge.channel_id]
+                assert execution._store.inspect(ref)
+                seal = json.loads(b''.join(execution._store.read(ref, max_bytes=execution._bounds.max_control_bytes)))
+                assert set(seal['membership']) == set(edge.producer_partitions)
+                assert all(member['status'] == 'succeeded' for member in seal['producers'])
+        results[mode] = len(rows)
+    return {'modes': results}
 
 
 def _s_cpu_gpu_isolation(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
