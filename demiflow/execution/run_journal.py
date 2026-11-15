@@ -18,6 +18,7 @@ from ..errors import ExecutionConflict
 OBSERVATION_BYTES = 8192
 OBSERVATION_TOTAL_BYTES = 8 * 1024**2
 OBSERVATION_COUNT = min(4096, OBSERVATION_TOTAL_BYTES // OBSERVATION_BYTES)
+_MAX_ARTIFACT_OWNERS = 16384
 _NODE_STATES = {'pending', 'running', 'succeeded', 'failed', 'incomplete', 'reused'}
 _TERMINAL_NODE_STATES = {'succeeded', 'failed', 'incomplete', 'reused'}
 
@@ -204,6 +205,7 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_receipts (commit_id TEXT NOT NULL, sink_id TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(commit_id,sink_id));
           CREATE TABLE IF NOT EXISTS runtime_budgets (name TEXT PRIMARY KEY, consumed INTEGER NOT NULL, ceiling INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_reservations (name TEXT NOT NULL, reservation_id TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(name,reservation_id));
+          CREATE TABLE IF NOT EXISTS artifact_owner (digest TEXT NOT NULL, store_id TEXT NOT NULL, key TEXT NOT NULL, owner TEXT NOT NULL, operation_id TEXT NOT NULL, PRIMARY KEY(digest,store_id,key,owner));
         ''')
 
         # Additive ownership metadata; historical execution identity is unchanged.
@@ -223,6 +225,8 @@ class RunJournal:
           END;
           CREATE INDEX IF NOT EXISTS runtime_artifacts_protected ON runtime_artifacts(protected,path);
           CREATE INDEX IF NOT EXISTS runtime_artifacts_reference_commit ON runtime_artifacts(reference_commit_id);
+          CREATE INDEX IF NOT EXISTS artifact_owner_operation ON artifact_owner(operation_id);
+          CREATE INDEX IF NOT EXISTS artifact_owner_owner ON artifact_owner(owner);
           CREATE TRIGGER IF NOT EXISTS runtime_artifact_added AFTER INSERT ON runtime_artifacts BEGIN
             UPDATE runtime_storage SET items=items+1,bytes=bytes+NEW.bytes,object_bytes=object_bytes+CASE WHEN NEW.path LIKE 'materializations/@objects-%' THEN NEW.bytes ELSE 0 END WHERE singleton=1;
           END;
@@ -708,6 +712,66 @@ class RunJournal:
     def release_execution(self, fence):
         with self.execution_guard(fence) as db:
             db.execute('DELETE FROM runtime_owner WHERE fence=?', (fence,))
+
+    @staticmethod
+    def _artifact_ref_key(ref):
+        from .recovery_contract import identifier, RecoveryContractError
+        try:
+            return identifier(ref.digest), identifier(ref.store_id), identifier(ref.key)
+        except (AttributeError, RecoveryContractError):
+            raise RecoveryContractError('Invalid artifact reference identity')
+
+    def bind_artifact_owner(self, fence, ref, *, owner, operation_id):
+        """Idempotent owner pin in the original journal; fence and quota checked."""
+        from .recovery_contract import identifier, RecoveryContractError
+        digest, store_id, key = self._artifact_ref_key(ref)
+        identifier(owner)
+        identifier(operation_id)
+        with self.execution_guard(fence) as db:
+            for row in db.execute('SELECT digest,store_id,key,owner FROM artifact_owner WHERE operation_id=?',
+                                  (operation_id,)):
+                if tuple(row) != (digest, store_id, key, owner):
+                    raise RecoveryContractError('Artifact operation_id reused with a different pin')
+            if db.execute('SELECT 1 FROM artifact_owner WHERE digest=? AND store_id=? AND key=? AND owner=?',
+                          (digest, store_id, key, owner)).fetchone() is not None:
+                return
+            if db.execute('SELECT count(*) FROM artifact_owner').fetchone()[0] >= _MAX_ARTIFACT_OWNERS:
+                raise RecoveryContractError('Artifact owner pin count exceeds budget')
+            db.execute('INSERT INTO artifact_owner VALUES (?,?,?,?,?)',
+                       (digest, store_id, key, owner, operation_id))
+
+    def release_artifact_owner(self, fence, ref, *, owner, operation_id):
+        """Idempotent unpin of one owner; never a whole-object GC delete decision."""
+        from .recovery_contract import identifier, RecoveryContractError
+        digest, store_id, key = self._artifact_ref_key(ref)
+        identifier(owner)
+        identifier(operation_id)
+        with self.execution_guard(fence) as db:
+            for row in db.execute('SELECT digest,store_id,key,owner FROM artifact_owner WHERE operation_id=?',
+                                  (operation_id,)):
+                if tuple(row) != (digest, store_id, key, owner):
+                    raise RecoveryContractError('Artifact operation_id reused with a different pin')
+            db.execute('DELETE FROM artifact_owner WHERE digest=? AND store_id=? AND key=? AND owner=?',
+                       (digest, store_id, key, owner))
+
+    def artifact_owners(self, ref, *, limit, cursor=None):
+        """Bounded keyset page of pins for one ref; a failed page raises, never empty."""
+        from .recovery_contract import identifier, RecoveryContractError
+        digest, store_id, key = self._artifact_ref_key(ref)
+        if type(limit) is not int or not 1 <= limit <= 1024:
+            raise RecoveryContractError('Artifact owner page limit is invalid')
+        if cursor is not None:
+            identifier(cursor)
+        with self._connection() as db:
+            if cursor is None:
+                rows = db.execute('SELECT owner FROM artifact_owner WHERE digest=? AND store_id=? AND key=? '
+                                  'ORDER BY owner LIMIT ?', (digest, store_id, key, limit + 1)).fetchall()
+            else:
+                rows = db.execute('SELECT owner FROM artifact_owner WHERE digest=? AND store_id=? AND key=? '
+                                  'AND owner>? ORDER BY owner LIMIT ?',
+                                  (digest, store_id, key, cursor, limit + 1)).fetchall()
+        owners = tuple(row[0] for row in rows[:limit])
+        return owners, owners[-1] if len(rows) > limit else None
 
     def bind_execution_action(self, fence, action_id, declaration):
         from .recovery_contract import document, identifier, RecoveryContractError
