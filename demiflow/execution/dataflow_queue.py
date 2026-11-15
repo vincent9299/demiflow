@@ -109,6 +109,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         self._io_condition = threading.Condition(self._lock)
         self._source: QueueDatasource | None = None
         self._fetch: RawFetch | None = None
+        self._fetches: dict[str, RawFetch] = {}
         self._sink: QueueResultSink | None = None
         self._mode = 'raw_fetch'
         self._binding: QueueBinding | None = None
@@ -159,6 +160,9 @@ class NativeAcquisitionService(NativeSearchOperations):
             raise DataflowError('INVALID_CONTRACT', 'configure requires a SourcePlan and LogicalPlan')
         native = queue_source(source)
         action_id = self._action.action_id
+        if native is None and graph is not None:
+            from .dataflow_fetch import configure_fetch_graph
+            return configure_fetch_graph(self, source, plan, graph)
         if native is not None:
             if not isinstance(native, QueueDatasource):
                 raise DataflowError('INVALID_CONTRACT', 'queue source must be a native QueueDatasource')
@@ -254,6 +258,10 @@ class NativeAcquisitionService(NativeSearchOperations):
         if self._mode == 'native_search':
             return bool(self._action.context.resuming and
                         self._prior_search_binding == asdict(self._binding))
+        if self._mode == 'raw_fetch' and self._fetches:
+            # No Dataset cut has published rows. Native RawFetch reuses its
+            # original commit/budget scopes, including ACK-before-return gaps.
+            return bool(self._action.replaying and self._prior_fetch_binding == asdict(self._binding))
         if self._source is None:
             return False
         binding = journal.source_binding(self.action_id + '-queue')
@@ -293,6 +301,8 @@ class NativeAcquisitionService(NativeSearchOperations):
                 await self._source.astart()
             if self._fetch is not None:
                 await self._fetch.astart()
+            for fetch in self._fetches.values():
+                await fetch.astart()
             runtime = getattr(self, '_search_runtime', None)
             if runtime is not None:
                 await runtime.start()
@@ -355,24 +365,30 @@ class NativeAcquisitionService(NativeSearchOperations):
     def acquire(self, command: QueueCommand, *, lease: WorkerLease) -> QueueReply:
         self._check_started()
         self._check_lease(lease)
-        self._check_role(lease, 'acquire')
         self._validate_command(command, 'acquire', require_refs=True)
         self._validate_binding(command.binding)
+        if self._fetches:
+            if command.node_id not in self._fetches or command.node_id not in self._worker_occurrences.get(
+                    (lease.allocation_id, lease.boot_id), ()):
+                raise DataflowError('FENCED', 'Worker does not own this native fetch occurrence')
+        else:
+            self._check_role(lease, 'acquire')
         return self._run_operation(command, lambda: self._acquire_impl(command, lease))
 
     def _acquire_impl(self, command: QueueCommand, lease: WorkerLease) -> QueueReply:
         if self._source is None:
+            fetch = self._fetches[command.node_id] if self._fetches else self._fetch
             descriptor = self._read_json(command.delivery_ref, max_bytes=self._services.bounds.max_control_bytes)
             if descriptor != {'occurrence': command.record_id}:
                 raise DataflowError('FENCED', 'Raw acquisition occurrence differs')
             row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
             self._admit_io()
             try:
-                receipt = self._run_io(self._acquire_io(row, None, command.record_id),
+                receipt = self._run_io(self._acquire_io(row, None, command.record_id, fetch=fetch),
                     timeout_s=self._services.bounds.timeout_ms / 1000)
             finally:
                 self._release_io()
-            fact = self._acquisition_fact(receipt)
+            fact = self._acquisition_fact(receipt, fetch=fetch)
             with self._lock:
                 self._raw_acquisition_count += 1
             return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
@@ -403,11 +419,11 @@ class NativeAcquisitionService(NativeSearchOperations):
         return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
                           row_ref, fact_ref, 0)
 
-    async def _acquire_io(self, row, delivery, occurrence):
+    async def _acquire_io(self, row, delivery, occurrence, *, fetch=None):
         action_token = _ACTION.set(self._action)
         scope_token = set_row_scope(RowScope(occurrence, delivery))
         try:
-            return await self._fetch(row)
+            return await (fetch or self._fetch)(row)
         finally:
             set_row_scope(None)
             _ACTION.reset(action_token)
@@ -528,9 +544,9 @@ class NativeAcquisitionService(NativeSearchOperations):
                 self._run_io(runtime.close(), timeout_s=self._services.bounds.timeout_ms / 1000)
             except BaseException as exc:
                 errors.append(exc)
-        if self._fetch is not None:
+        for fetch in ([self._fetch] if self._fetch is not None else []) + list(self._fetches.values()):
             try:
-                self._run_io(self._fetch.aclose(), timeout_s=self._services.bounds.timeout_ms / 1000)
+                self._run_io(fetch.aclose(), timeout_s=self._services.bounds.timeout_ms / 1000)
             except BaseException as exc:  # noqa: BLE001
                 errors.append(exc)
         if self._source is not None:
@@ -630,8 +646,8 @@ class NativeAcquisitionService(NativeSearchOperations):
                     worker_id=delivery.worker_id, lease_until=delivery.lease_until,
                     domain=delivery.domain)
 
-    def _acquisition_fact(self, receipt: dict) -> dict:
-        result = receipt[self._fetch.output]
+    def _acquisition_fact(self, receipt: dict, *, fetch=None) -> dict:
+        result = receipt[(fetch or self._fetch).output]
         commit_id = result['acquisition_ref']['commit_id']
         if self._source is not None:
             from .queue_commit import QueueCommitStore

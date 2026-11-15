@@ -354,6 +354,10 @@ def compile_kernel_spec(
     from ..execution.dataflow_producer import ProducerCall
     if native_declaration is not None and native_declaration.target is AcquisitionCall:
         configuration['native_operation'] = native_declaration.constructor_args[0]
+        if configuration['native_operation'] == 'acquire':
+            actor = getattr(operation.callable.target, '__self__', operation.callable.target)
+            from ..execution.dataflow_fetch import fetch_declaration_key
+            configuration['native_key'] = fetch_declaration_key(actor)
     if native_declaration is not None and native_declaration.target is ProducerCall:
         configuration['native_operation'] = 'producer'
         state, effect, role, mergeable = 'adapter', 'journaled', 'io', False

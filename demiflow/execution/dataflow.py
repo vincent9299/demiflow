@@ -346,12 +346,8 @@ class DataflowExecution:
                 self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
             self._services.journal_service.bind_queue(self._acquisition)
         from .queue_execution import queue_source
-        from .raw_fetch import RawFetch
-        from ..data.plan import AsyncMapOp
         requires_acquisition = queue_source(self._request.source) is not None or any(
-            isinstance(op, AsyncMapOp) and isinstance(
-                getattr(op.callable.target, "__self__", op.callable.target), RawFetch)
-            for op in self._request.plan.operations)
+            node.kernel.configuration.get('native_operation') == 'acquire' for node in graph.nodes)
         if requires_acquisition:
             self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure(self._request.source, self._request.plan, self._request.sink, graph=graph)

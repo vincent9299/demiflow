@@ -492,6 +492,7 @@ class DriverJournalService:
         if self._native is not None and hasattr(self._native, 'binding'):
             from dataclasses import asdict
             result['queue_binding'] = asdict(self._native.binding)
+            result['fetch_occurrences'] = list(getattr(self._native, '_fetches', {}))
         return result
 
     def _check_grant(self):

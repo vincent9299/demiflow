@@ -30,6 +30,11 @@ class AcquisitionCall:
         self.services = services
         facts = services.journal.read_configuration()
         self.binding = QueueBinding(**dict(facts['queue_binding']))
+        if self.operation == 'acquire' and self.binding.mode == 'raw_fetch' and facts.get('fetch_occurrences'):
+            if occurrence_id not in facts['fetch_occurrences']:
+                raise DataflowError('FENCED', 'Fetch call differs from the sealed occurrences')
+            self.native_occurrence = occurrence_id
+            return
         assigned = self.binding.fetch_occurrence if self.operation == 'acquire' else self.binding.final_occurrence
         if assigned != occurrence_id:
             raise DataflowError('FENCED', 'Native acquisition call differs from the sealed occurrence')
@@ -61,7 +66,7 @@ class AcquisitionCall:
         row_ref = put(request, services.bounds.max_row_bytes)
         command = QueueCommand(identity([self.binding.action_id, record_id, self.operation]),
             self.operation, self.binding, record_id, delivery, row_ref,
-            node_id=getattr(self, 'search_occurrence', None))
+            node_id=getattr(self, 'search_occurrence', getattr(self, 'native_occurrence', None)))
         reply = queue_service_request(command, services=services)
         if reply.status != 'confirmed' or reply.row_ref is None or reply.native_fact_ref is None:
             if self.binding.mode in ('sink', 'explicit'):

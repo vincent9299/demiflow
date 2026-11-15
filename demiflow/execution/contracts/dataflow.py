@@ -1608,8 +1608,11 @@ class QueueCommand:
         _opt_ref(self.row_ref, "QueueCommand.row_ref")
         if self.node_id is not None:
             _sha256(self.node_id, "QueueCommand.node_id")
-        if (self.operation == 'search') != (self.node_id is not None):
-            raise _err('Only native search requires an explicit owning occurrence')
+        if self.operation == 'search' and self.node_id is None:
+            raise _err('Native search requires an explicit owning occurrence')
+        if self.node_id is not None and not (self.operation == 'search' or
+                self.operation == 'acquire' and self.binding.mode == 'raw_fetch'):
+            raise _err('Only native search or ordinary fetch accepts an owning occurrence')
         if self.operation in ("acquire", "finalize", "search"):
             if self.row_ref is None:
                 raise _err("QueueCommand." + self.operation + " requires row_ref")

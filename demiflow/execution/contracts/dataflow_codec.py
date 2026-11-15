@@ -670,8 +670,11 @@ def _cross_journalreply(p):
 
 
 def _cross_queuecommand(p):
-    if (p['operation'] == 'search') != (p['node_id'] is not None):
-        raise _err('Only native search requires an explicit owning occurrence')
+    if p['operation'] == 'search' and p['node_id'] is None:
+        raise _err('Native search requires an explicit owning occurrence')
+    if p['node_id'] is not None and not (p['operation'] == 'search' or
+            p['operation'] == 'acquire' and p['binding']['mode'] == 'raw_fetch'):
+        raise _err('Only native search or ordinary fetch accepts an owning occurrence')
     if p["operation"] in ("acquire", "finalize", "search"):
         if p["row_ref"] is None:
             raise _err("QueueCommand." + p["operation"] + " requires row_ref")
