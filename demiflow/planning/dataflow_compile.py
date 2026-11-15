@@ -111,7 +111,7 @@ _NATIVE_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
 })
 _ORDERING_KINDS = frozenset({"SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp"})
 _FINITE_COMPLETE_KINDS = frozenset({
-    "SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp",
+    "SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp", "RepartitionOp",
     "OperatorLLMMapOp", "EmbeddingMapOp", "AgentMapOp",
 })
 
@@ -731,6 +731,23 @@ class _Capture:
                 if default_batch is not None:
                     kernel = replace(kernel, configuration={**dict(kernel.configuration),
                         'default_batch_size': int(default_batch)})
+            if kernel.kind == 'RandomShuffleOp' and kernel.configuration.get('num_blocks') is None:
+                executor = getattr(self.request.action, '_dataflow_executor', None)
+                local = getattr(executor, '_local_kernel', None)
+                partitions = getattr(local, 'partitions', None)
+                if partitions is not None:
+                    kernel = replace(kernel, configuration={**dict(kernel.configuration),
+                        'num_blocks': int(partitions)})
+            if kernel.kind == 'RepartitionOp':
+                config = kernel.configuration
+                if (config.get('keys') or config.get('sort')) and not config.get('shuffle'):
+                    raise _error('INVALID_CONTRACT', 'repartition keys/sort require shuffle=True')
+                if config.get('sort') and not config.get('keys'):
+                    raise _error('INVALID_CONTRACT', 'sorted repartition requires keys')
+            if kernel.kind in ('RepartitionOp', 'RandomShuffleOp'):
+                count = kernel.configuration.get('num_blocks')
+                if count is not None and count > self.bounds.max_partitions:
+                    raise _error('BUDGET_EXCEEDED', 'logical block count exceeds max_partitions')
             callable_spec = getattr(operation, "callable", None)
             from ..execution.dataflow_model_factory import native_model_declaration
             callable_spec = native_model_declaration(operation) or callable_spec

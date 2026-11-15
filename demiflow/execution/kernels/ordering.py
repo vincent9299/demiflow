@@ -138,9 +138,15 @@ def _descending_flags(spec: KernelSpec, count: int) -> tuple[bool, ...]:
 
 
 def _record_sort_key(
-    record: Record, row: Mapping[str, Any], spec: KernelSpec, services: RuntimeServices
+    record: Record, row: Mapping[str, Any], spec: KernelSpec, services: RuntimeServices, *, ordinal=None
 ) -> tuple:
     kind = spec.kind
+    if kind == 'RepartitionOp':
+        from .dataflow import _group_key
+        keys = tuple(spec.configuration.get('keys') or ())
+        bucket = int.from_bytes(hashlib.sha256(_group_key(row, keys).encode()).digest()[:8], 'big') % spec.configuration['num_blocks']
+        fields = tuple(_field_token(row[key], False) for key in keys) if spec.configuration.get('sort') else ()
+        return ((0, bucket), *fields)
     if kind == "SortOp":
         keys = tuple(_cfg(spec, "keys"))
         flags = _descending_flags(spec, len(keys))
@@ -154,10 +160,10 @@ def _record_sort_key(
     if kind == "RandomShuffleOp":
         return ((_shuffle_key_bytes(record.record_id, seed=seed, occurrence_id=occurrence),),)
     if kind == "RandomizeBlockOrderOp":
-        block = record.source_position.get("split_id") or record.source_position.get("partition")
-        block_id = _canonical(block) if block is not None else record.record_id
+        from .block_partition import block_identity
+        block_id = block_identity(record)
         block_key = _shuffle_key_bytes(block_id, seed=seed, occurrence_id=occurrence)
-        return ((block_key, record.sequence),)
+        return ((block_key, record.sequence if ordinal is None else ordinal),)
     raise _err("INVALID_CONTRACT", "kind is not an ordering kernel", kind=kind)
 
 
@@ -269,13 +275,13 @@ def build_sort_runs(
         used = 0
 
     try:
-        for record in records:
+        for ordinal, record in enumerate(records):
             _check_stop(services)
             size = _input_row_bytes(record)
             if size > bounds.max_row_bytes:
                 raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=size)
             row = _materialize_row(record, services)
-            key = _record_sort_key(record, row, spec, services)
+            key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
             prov = _provenance(record)
             encoded = _encode_frame(key, prov, record, max_bytes=bounds.max_row_bytes)
             frame_bytes = len(encoded) + _FRAME_OVERHEAD

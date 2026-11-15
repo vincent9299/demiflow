@@ -370,6 +370,7 @@ class StoredMaterializedHandle:
         self._declared_schema_ref = None
         self._declared_schema = None
         pinned: list["ArtifactRef"] = []
+        blocks, pinned_tree_count = (), 0
         try:
             store.retain(self._manifest_ref, owner=owner)
             pinned.append(self._manifest_ref)
@@ -378,9 +379,11 @@ class StoredMaterializedHandle:
             rows = manifest["rows"]
             if result.rows is not None and result.rows != rows:
                 raise _error("CORRUPT_ARTIFACT", "manifest row count differs from result")
-            for ref in blocks:
-                store.retain(ref, owner=owner)
-                pinned.append(ref)
+            from .dataflow_segments import tree_refs
+            for block in blocks:
+                for ref in tree_refs(store, block, store._bounds):
+                    store.retain(ref, owner=owner)
+                    pinned_tree_count += 1
             self._blocks = blocks
             self._rows = rows
             self._schema = manifest.get("columns")
@@ -391,6 +394,13 @@ class StoredMaterializedHandle:
                 store.retain(self._declared_schema_ref, owner=owner)
                 pinned.append(self._declared_schema_ref)
         except Exception:
+            from itertools import islice
+            from .dataflow_segments import tree_refs
+            try:
+                for ref in islice((ref for block in blocks for ref in tree_refs(store, block, store._bounds)), pinned_tree_count):
+                    store.release(ref, owner=owner)
+            except Exception:
+                pass
             for ref in pinned:
                 try:
                     store.release(ref, owner=owner)
@@ -484,8 +494,10 @@ class StoredMaterializedHandle:
         from .record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._store._bounds) if with_schema else None
         count = 0
-        for ref in self._blocks:
-            stream = _ChunkStream(self._store.read(ref, max_bytes=ref.size_bytes))
+        from .dataflow_segments import segment_refs
+        for ref in (leaf for block in self._blocks
+                    for leaf in segment_refs(self._store, block, self._store._bounds)):
+            stream = _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes)))
             while True:
                 try:
                     if ref.media_type == "application/x-demiflow-records-v3":
@@ -526,9 +538,13 @@ class StoredMaterializedHandle:
                 return
             if self._owner is not None:
                 release = getattr(self._store, 'release_materialized', self._store.release)
-                for ref in (self._manifest_ref, *self._blocks,
-                            *((self._declared_schema_ref,) if self._declared_schema_ref is not None else ())):
-                    release(ref, owner=self._owner)
+                from .dataflow_segments import tree_refs
+                for block in self._blocks:
+                    for ref in tree_refs(self._store, block, self._store._bounds):
+                        release(ref, owner=self._owner)
+                release(self._manifest_ref, owner=self._owner)
+                if self._declared_schema_ref is not None:
+                    release(self._declared_schema_ref, owner=self._owner)
             # An unknown/failed unpin remains retryable. Immutable data and
             # committed owners remain intact throughout a partial release.
             self._released = True

@@ -78,12 +78,15 @@ class WorkerGraphRunner:
         self._terminal_columns = None
         self._terminal_schema_ref = None
         self._restored_terminal = False
-        from ..dataflow_scratch import ScratchStream
-        self._terminal_file = ScratchStream(self.services.store,
-            max_bytes=self.bounds.max_spill_bytes,
-            max_io_bytes=self.bounds.max_row_bytes + self.bounds.max_control_bytes)
         self._terminal_spec = next((n.kernel for n in executor._node_specs.values()
                                     if n.kind == 'terminal'), None)
+        from .terminal_blocks import TerminalBlocks, declared_blocks
+        occurrence = next((occ for occ, node in executor._node_specs.items() if node.kind == 'terminal'), None)
+        declaration = declared_blocks(executor._graph, occurrence, self.bounds) if occurrence else None
+        scalar = self._terminal_spec is not None and self._terminal_spec.kind in (
+            'count', 'schema', 'columns', 'size_bytes', 'aggregate', 'collect_summary')
+        self._terminal_blocks = TerminalBlocks(self.services, self.partition,
+            declaration=declaration, partitioned=not scalar)
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -101,9 +104,7 @@ class WorkerGraphRunner:
             if ref is None:
                 continue
             manifest = json.loads(b"".join(self.services.store.read(ref, max_bytes=self.bounds.max_control_bytes)))
-            data = _artifact_from_json(manifest["data_ref"])
-            for chunk in self.services.store.read(data, max_bytes=max(1, data.size_bytes)):
-                self._terminal_file.write(chunk)
+            self._terminal_blocks.restore(manifest)
             self._terminal_rows, self._terminal_bytes = manifest["rows"], manifest["bytes"]
             self._terminal_columns = manifest["columns"]
             from ..record_schema import RecordSchemas
@@ -493,7 +494,7 @@ class WorkerGraphRunner:
             raw = _encode_record(record, self.bounds) + b'\n'
             if self._terminal_bytes + len(raw) > self.bounds.max_spill_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'terminal durable spool exceeds disk bound')
-            self._terminal_file.write(raw)
+            self._terminal_blocks.append(record, raw)
             self._terminal_bytes += len(raw)
             self._terminal_rows += 1
             self._metrics[occ]['rows_output'] += 1
@@ -668,31 +669,21 @@ class WorkerGraphRunner:
         refs = snapshot_channels(self.e._channels, cut=request, store=self.services.store)
         sinks = {}
         if self._terminal_spec is not None:
-            self._terminal_file.flush()
-            self._terminal_file.seek(0)
-            def chunks():
-                while True:
-                    chunk = self._terminal_file.read(65536)
-                    if not chunk:
-                        return
-                    yield chunk
-            data_ref = self.services.store.put(chunks(), max_bytes=max(1, self._terminal_bytes),
-                                                media_type=RECORDS_MEDIA)
+            partitions = self._terminal_blocks.manifest_partitions()
             sink_id = self._terminal_spec.kind
             manifest = {'schema': 'demiflow.dataflow_sink_manifest.v3', 'sink_id': sink_id,
                         'partition_id': self.partition, 'rows': self._terminal_rows,
                         'bytes': self._terminal_bytes, 'columns': self._terminal_columns,
-                        'data_ref': _artifact_json(data_ref)}
+                        'partitions': partitions}
             if self._terminal_schema_ref is not None:
                 manifest['schema_ref'] = _artifact_json(self._terminal_schema_ref)
             if request.final:
                 from .dataflow_terminal import terminal_scalar
                 occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
-                manifest['scalar'] = terminal_scalar(self._terminal_file, spec=self._terminal_spec,
+                manifest['scalar'] = terminal_scalar(self._terminal_blocks.stream(), spec=self._terminal_spec,
                     services=self.services, occurrence_id=occurrence, schema_ref=self._terminal_schema_ref)
-            raw = document(manifest)
+            raw = document(manifest, self.bounds.max_control_bytes)
             sinks[sink_id] = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type=MANIFEST_MEDIA)
-            self._terminal_file.seek(0, 2)
         result = CutContribution(cut_id=request.cut_id, participant_id=self.e._participant_ids()[0],
             boot_id=self.e.assignment.lease.boot_id,
             sources=tuple(r.snapshot() for r in self.e._readers.values()),
@@ -710,6 +701,6 @@ class WorkerGraphRunner:
             if self._thread.is_alive():
                 raise DataflowError('DEADLINE_EXCEEDED', 'Business thread still owns its scratch buffers')
         self._peer.close()
-        self._terminal_file.close()
+        self._terminal_blocks.close()
         for stream, _, _ in self._finite.values():
             stream.close()

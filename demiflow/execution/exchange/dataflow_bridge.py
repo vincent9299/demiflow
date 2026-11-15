@@ -14,7 +14,7 @@ import sys
 import re
 from collections.abc import Mapping
 
-from demiflow.execution.contracts.dataflow import (ArtifactRef, CutRequest, ExchangeSpec, Record,
+from demiflow.execution.contracts.dataflow import (ArtifactRef, BlockPartition, CutRequest, ExchangeSpec, Record,
                                                   _FrozenRowList, _FrozenRowSet, thaw_record_value)
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.exchange import (
@@ -363,6 +363,9 @@ def _encode_record_document(record, *, max_bytes):
                "p": None, "r": _ref_document(record.payload_ref)}
     if record.schema_ref is not None:
         doc["s"] = _ref_document(record.schema_ref)
+    if record.block_partition is not None:
+        from dataclasses import asdict
+        doc["bp"] = asdict(record.block_partition)
     raw = _codec_dumps(doc)
     if len(raw) > max_bytes:
         _fail("BUDGET_EXCEEDED", "encoded record document exceeds the row byte budget")
@@ -375,8 +378,14 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
     doc = _codec_loads(raw)
     if type(doc) is not dict or doc.get("v") != _CODEC_VERSION:
         _fail("CORRUPT_ARTIFACT", "record document version is unsupported")
-    if set(doc) not in ({"v", "sp", "eb", "p", "r"}, {"v", "sp", "eb", "p", "r", "s"}):
+    if set(doc) - {"s", "bp"} != {"v", "sp", "eb", "p", "r"}:
         _fail("CORRUPT_ARTIFACT", "record document key set is unsupported")
+    block_partition = None
+    if "bp" in doc:
+        try:
+            block_partition = BlockPartition(**doc["bp"])
+        except (TypeError, ValueError) as exc:
+            raise DataflowError("CORRUPT_ARTIFACT", "record block partition is malformed") from exc
     schema_ref = None
     if "s" in doc:
         try:
@@ -399,7 +408,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
         if len(_encode_payload(row, max_bytes=max_bytes)) != doc["eb"]:
             _fail("CORRUPT_ARTIFACT", "record document payload size mismatch")
         return Record(record_id=record_id, source_position=doc["sp"], payload_ref=None,
-                      inline=row, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref)
+                      inline=row, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref, block_partition=block_partition)
     ref_doc = doc["r"]
     if type(ref_doc) is not dict or set(ref_doc) != {"digest", "size_bytes", "store_id", "key", "media_type"}:
         _fail("CORRUPT_ARTIFACT", "record document ref is malformed")
@@ -411,7 +420,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
     if doc["eb"] != ref.size_bytes:
         _fail("CORRUPT_ARTIFACT", "record document ref size mismatch")
     return Record(record_id=record_id, source_position=doc["sp"], payload_ref=ref,
-                  inline=None, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref)
+                  inline=None, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref, block_partition=block_partition)
 
 
 # -- X012 ---------------------------------------------------------------------

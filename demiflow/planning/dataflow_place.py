@@ -125,7 +125,7 @@ def _replica_bounds(node, partitions: int, policy: RuntimePolicy) -> tuple[int, 
         kernel.state != "none"
         or kernel.effect != "pure"
         or node.kind == "terminal"
-        or kernel.kind in {"LimitOp", "RandomizeBlockOrderOp"}
+        or kernel.kind in {"LimitOp", "RandomizeBlockOrderOp", "SortOp", "RandomShuffleOp", "RepartitionOp"}
         or _is_multi_input(node)
     )
     if pinned:

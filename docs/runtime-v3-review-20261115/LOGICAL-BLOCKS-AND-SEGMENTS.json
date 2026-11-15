@@ -1,0 +1,122 @@
+{
+  "head_before_commit": "49948d55a0b7a174876d71c6c3ec73d9164dc026",
+  "dirty": true,
+  "cwd": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_residency_20261115",
+  "commands": [
+    "DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-blocks5-capacity PYTHONPATH=\"$PWD:$PWD/tests\" /yzp/zhaozy/yangzepeng/0905/env/bin/python -B -m pytest tests/test_runtime_v3_blocks.py tests/test_runtime_v3_durable_residency.py::test_two_stage_dataset_progresses_when_only_one_stage_fits -q --basetemp=/tmp/demiflow-blocks5 --junitxml=/tmp/demiflow-blocks5.xml",
+    "DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-blocks-ray-capacity PYTHONPATH=\"$PWD:$PWD/tests\" /yzp/zhaozy/yangzepeng/0905/env-ray/bin/python -B -m pytest tests/test_runtime_v3_blocks.py::test_ray_core_uses_same_logical_block_manifest -q --basetemp=/tmp/demiflow-blocks-ray --junitxml=/tmp/demiflow-blocks-ray.xml"
+  ],
+  "source_sha256": {
+    "demiflow/execution/contracts/dataflow.py": "808fbdc32c2ae3778101d9ee2f946b58b7f4bb801cd8d66c7dc7b3ce11102620",
+    "demiflow/execution/contracts/dataflow_codec.py": "1ce39d3af938853bd525d383ff584c39e1386ef6e1ca0a495adeee4e0c213d61",
+    "demiflow/execution/dataflow.py": "27d099416792063842ccac621c70699e90f8846d20c1cc4f7c22d86e5b9cf0ca",
+    "demiflow/execution/dataflow_handles.py": "b95d22eb9c4cd853eabda325607aa7fb5943c6cd362350b50348395364ff6094",
+    "demiflow/execution/dataflow_segments.py": "ba8c3b41a737bec8f4cc3c9d4289ebfc6862850973f8d80767b69e3b46b28bc3",
+    "demiflow/execution/dataflow_sinks.py": "a5f0ca91dc3f74e7aebed6562c16f3a088a05836cfc63b321d35e486a93cca06",
+    "demiflow/execution/exchange/dataflow_bridge.py": "6fbcd69764bbc882d31066f952bb5156a45f1f2fe46671543c8f3ec995e33629",
+    "demiflow/execution/kernels/block_partition.py": "e508f51b5e70c6f25ab1577051b122f2144ea908e3175d297b5be9bd0ef647ec",
+    "demiflow/execution/kernels/operator.py": "2f0be78c5bf62fc35538d430d74b9f6bb77877e526a8460b38f19daf3654f1cb",
+    "demiflow/execution/kernels/ordering.py": "129622539bd4eeb82819f10e3605a9fcaa483f4cda63a7e6699e98fb6a583edd",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "f79eddd7b47ef757709b0261f6a054e0118239d4024f595ac6f4fe17b9a15e17",
+    "demiflow/execution/worker/terminal_blocks.py": "7644c7898c9f6d3ed068472311f45f115ea0fd22f980ef920a7e900a06e1d13b",
+    "demiflow/planning/dataflow_compile.py": "2cc6aa0907f1a9ac91249cbad8e8cbff946bba79b5ea95c68eaaae92318a6274",
+    "demiflow/planning/dataflow_place.py": "749d9b76520cfe01271befb30a8b6f7d65d4f128621e5b5babac606e6d3dfea1",
+    "tests/test_runtime_v3_blocks.py": "b154e6bae9e2461fe25575a00abdf47a721d5b7df03ae17f0a01083f05245ad8"
+  },
+  "reports": [
+    {
+      "xml": "/tmp/demiflow-blocks-unit.xml",
+      "sha256": "61d1d4b77623d1ba4f7eeee39808050771f3618ff8783af3b5a48391b609ad45",
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "0.590",
+      "failed": []
+    },
+    {
+      "xml": "/tmp/demiflow-blocks1.xml",
+      "sha256": "a1dd2656327608ee8c9c12455e8170d14d4f6dcc9eaef24c49ef3104a9bfad50",
+      "tests": 7,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "77.683",
+      "failed": [
+        "test_repartition_count_is_admitted_before_worker_launch"
+      ]
+    },
+    {
+      "xml": "/tmp/demiflow-blocks2.xml",
+      "sha256": "a0a927d26d31f24d705ecfce6aa1b5f76935ebbe662a67bba1239efdd549c9a3",
+      "tests": 139,
+      "failures": 12,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "179.612",
+      "failed": [
+        "test_real_hash_blocks_colocate_keys_sort_and_keep_multiplicity",
+        "test_batch_flushes_at_real_block_boundary_and_scalar_is_global",
+        "test_empty_typed_public_result_keeps_exact_schema[schema-arrow]",
+        "test_empty_typed_public_result_keeps_exact_schema[schema-pandas]",
+        "test_empty_typed_public_result_keeps_exact_schema[schema-lance]",
+        "test_empty_typed_public_result_keeps_exact_schema[materialize-arrow]",
+        "test_empty_typed_public_result_keeps_exact_schema[materialize-pandas]",
+        "test_empty_typed_public_result_keeps_exact_schema[materialize-lance]",
+        "test_empty_typed_materialized_same_run_restore_keeps_schema[arrow]",
+        "test_empty_typed_materialized_same_run_restore_keeps_schema[pandas]",
+        "test_empty_typed_materialized_same_run_restore_keeps_schema[lance]",
+        "test_filter_projection_keeps_declared_empty_types_and_field_order"
+      ]
+    },
+    {
+      "xml": "/tmp/demiflow-blocks3.xml",
+      "sha256": "292568784cf0f0b34c2999883b49e7e973c7369613d1ce9462fd85d0cd79719a",
+      "tests": 41,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 1,
+      "seconds": "337.363",
+      "failed": [
+        "test_real_hash_blocks_colocate_keys_sort_and_keep_multiplicity"
+      ]
+    },
+    {
+      "xml": "/tmp/demiflow-blocks4.xml",
+      "sha256": "2692dd3fe359c3c46975310f9d2a47aa31c40ff8e6bbc6d08409810e04d12588",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "16.058",
+      "failed": []
+    },
+    {
+      "xml": "/tmp/demiflow-blocks5.xml",
+      "sha256": "e87877922705cd77fcb383cf89d3348bd6bea3e569a8cd8cb9e6196f4ef129b6",
+      "tests": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "seconds": "130.674",
+      "failed": []
+    },
+    {
+      "xml": "/tmp/demiflow-blocks-ray.xml",
+      "sha256": "d4c2252a29cbabe6bc846a6f6ab574a07f3cbec9957ebd8101c0e0755ef3acba",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": "12.599",
+      "failed": []
+    }
+  ],
+  "not_claimed": [
+    "thread_host",
+    "multi_host",
+    "GPU_inference",
+    "linear_historical_pin_cost",
+    "full_repository_suite"
+  ]
+}

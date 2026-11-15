@@ -567,6 +567,21 @@ class SourceCursor:
 
 
 @dataclass(frozen=True)
+class BlockPartition:
+    """Logical output block, independent of its bounded physical worker host."""
+    occurrence_id: str
+    index: int
+    count: int
+
+    def __post_init__(self):
+        _sha256(self.occurrence_id, "BlockPartition.occurrence_id")
+        _int(self.index, "BlockPartition.index")
+        _int(self.count, "BlockPartition.count", minimum=1)
+        if self.index >= self.count:
+            raise _err("BlockPartition.index must be below count")
+
+
+@dataclass(frozen=True)
 class Record:
     record_id: str
     source_position: Mapping[str, Json]
@@ -575,6 +590,7 @@ class Record:
     encoded_bytes: int
     sequence: int
     schema_ref: ArtifactRef | None = None
+    block_partition: BlockPartition | None = None
 
     def __post_init__(self):
         _sha256(self.record_id, "Record.record_id")
@@ -586,6 +602,8 @@ class Record:
         _int(self.encoded_bytes, "Record.encoded_bytes")
         _int(self.sequence, "Record.sequence")
         _opt_ref(self.schema_ref, "Record.schema_ref")
+        if self.block_partition is not None and type(self.block_partition) is not BlockPartition:
+            raise _err("Record.block_partition must be a BlockPartition")
 
 
 @dataclass(frozen=True)

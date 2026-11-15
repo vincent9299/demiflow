@@ -151,7 +151,9 @@ class _DataflowArtifactSink(Datasink):
                                   media_type=PUBLICATION_MEDIA)
         for partition in blocks["partitions"]:
             data_ref = _artifact_from_json(partition["data_ref"])
-            self._store.retain(data_ref, owner=context.commit_id)
+            from .dataflow_segments import tree_refs
+            for ref in tree_refs(self._store, data_ref, self._bounds):
+                self._store.retain(ref, owner=context.commit_id)
         self._store.retain(pub_ref, owner=context.commit_id)
         self._action.context.allocate_artifact(self._marker(context), commit_id=context.commit_id)
         return {"ref": _artifact_json(pub_ref), "sink_id": self._sink_id,
@@ -204,7 +206,9 @@ class _DataflowArtifactSink(Datasink):
         pub_ref = _artifact_from_json(prepared["ref"])
         self._store.release(pub_ref, owner=context.commit_id)
         for partition in prepared.get("manifest", {}).get("partitions", ()):
-            self._store.release(_artifact_from_json(partition["data_ref"]), owner=context.commit_id)
+            from .dataflow_segments import tree_refs
+            for ref in tree_refs(self._store, _artifact_from_json(partition["data_ref"]), self._bounds):
+                self._store.release(ref, owner=context.commit_id)
 
 
 # -- D009 -----------------------------------------------------------------
@@ -297,14 +301,32 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
                 columns = manifest_columns
             elif manifest_columns != columns:
                 raise DataflowError("SOURCE_CHANGED", "Prepared partition schema drifted")
-        _artifact_from_json(manifest["data_ref"])
+        entries = manifest.get('partitions', [manifest])
+        if not isinstance(entries, list) or len(entries) + len(partitions) > bounds.max_partitions:
+            raise DataflowError('BUDGET_EXCEEDED', 'logical sink partition count exceeds bound')
+        if sum(p['rows'] for p in entries) != manifest['rows'] or sum(p['bytes'] for p in entries) != manifest['bytes']:
+            raise DataflowError('CORRUPT_ARTIFACT', 'logical sink partition totals disagree')
+        for part in entries:
+            pid = part['partition_id']
+            if pid in partitions:
+                raise DataflowError('INVALID_CONTRACT', 'duplicate logical sink partition')
+            _artifact_from_json(part['data_ref'])
+            entry = {'partition_id': pid, 'rows': part['rows'], 'bytes': part['bytes'],
+                     'data_ref': part['data_ref'], 'scalar': manifest.get('scalar')}
+            if 'block_partition' in part:
+                from .contracts.dataflow import BlockPartition
+                tag = BlockPartition(**part['block_partition'])
+                if tag.count > bounds.max_partitions:
+                    raise DataflowError('BUDGET_EXCEEDED', 'logical partition count exceeds bound')
+                entry['block_partition'] = dict(part['block_partition'])
+            partitions[pid] = entry
         total_rows += manifest["rows"]
         total_bytes += manifest["bytes"]
-        partitions[partition_id] = {"partition_id": partition_id, "rows": manifest["rows"],
-                                    "bytes": manifest["bytes"], "data_ref": manifest["data_ref"],
-                                    "scalar": manifest.get("scalar")}
+    def order(part):
+        tag = part.get('block_partition')
+        return (tag['occurrence_id'], tag['index']) if tag else (part['partition_id'], -1)
     combined = {"schema": _COMBINED_SCHEMA, "sink_id": sink_id,
-                "partitions": [partitions[k] for k in sorted(partitions)],
+                "partitions": sorted(partitions.values(), key=order),
                 "total_rows": total_rows, "total_bytes": total_bytes, "columns": columns}
     if schema_ref is not None:
         combined['schema_ref'] = _artifact_json(schema_ref)
@@ -362,7 +384,8 @@ class NativeTerminalSink(_DataflowArtifactSink):
             return result
         for partition in manifest['partitions']:
             ref = _artifact_from_json(partition['data_ref'])
-            stream = _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes)))
+            from .dataflow_segments import block_chunks
+            stream = _ChunkStream(block_chunks(self._store, ref, self._bounds))
             while True:
                 line = stream.readline(self._bounds.max_row_bytes + 1)
                 if not line:

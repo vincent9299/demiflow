@@ -18,6 +18,7 @@ import asyncio
 import pickle
 from . import state_codec
 from .async_instance import AsyncInstance
+from .block_partition import preserve_block
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -458,10 +459,12 @@ class OperatorKernel:
             if self._task_rows:
                 record = self._task_record(record)
             if self._calls is None:
-                yield from self._emit(invoke_unary(self._spec, record, instance=self._slot_instance(0) if kind in _INSTANCE_KINDS else self._instance, services=self._services, schemas=self._schemas))
+                yield from self._emit(preserve_block(invoke_unary(self._spec, record,
+                    instance=self._slot_instance(0) if kind in _INSTANCE_KINDS else self._instance,
+                    services=self._services, schemas=self._schemas), record.block_partition))
             else:
-                yield from self._emit(self._calls.submit(lambda slot: invoke_unary(self._spec, record,
-                    instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), scope=self._call_scope, input=record))
+                yield from self._emit(self._calls.submit(lambda slot: preserve_block(invoke_unary(self._spec, record,
+                    instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), record.block_partition), scope=self._call_scope, input=record))
         elif kind in _BATCH_INSTANCE_KINDS:
             yield from self._push_batch(record)
         elif kind in _STREAM_GROUP_KINDS:
@@ -496,7 +499,8 @@ class OperatorKernel:
         return record
 
     def _push_batch(self, record: Record) -> Iterator[Record]:
-        if self._batch and self._batch[0].schema_ref != record.schema_ref:
+        if self._batch and (self._batch[0].schema_ref != record.schema_ref
+                            or self._batch[0].block_partition != record.block_partition):
             batch, self._batch = tuple(self._batch), []
             yield from self._invoke_batch(batch)
         if sum(r.encoded_bytes for r in self._batch) + record.encoded_bytes > self._services.bounds.max_batch_bytes:
@@ -509,10 +513,11 @@ class OperatorKernel:
 
     def _invoke_batch(self, batch):
         if self._calls is None:
-            yield from self._emit(invoke_batch(self._spec, batch, instance=self._slot_instance(0), services=self._services, schemas=self._schemas))
+            yield from self._emit(preserve_block(invoke_batch(self._spec, batch,
+                instance=self._slot_instance(0), services=self._services, schemas=self._schemas), batch[0].block_partition))
         else:
-            yield from self._emit(self._calls.submit(lambda slot: invoke_batch(self._spec, batch,
-                instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), scope=self._call_scope, input=batch))
+            yield from self._emit(self._calls.submit(lambda slot: preserve_block(invoke_batch(self._spec, batch,
+                instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), batch[0].block_partition), scope=self._call_scope, input=batch))
 
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
         from .dataflow import _group_key, _materialize_row
@@ -607,7 +612,7 @@ class OperatorKernel:
 
             left = self._ports[self._port_order[0]].records()
             right = self._ports[self._port_order[1]].records()
-            yield from self._emit(join_partitions(left, right, spec=self._spec, services=self._services))
+            yield from self._emit(preserve_block(join_partitions(left, right, spec=self._spec, services=self._services), None))
         elif kind == "reduce":
             from .relational import reduce_partition
 
@@ -620,13 +625,33 @@ class OperatorKernel:
             from .relational import union_inputs
 
             inputs = tuple(self._ports[name].records() for name in self._port_order)
-            yield from self._emit(union_inputs(inputs, spec=self._spec, services=self._services))
-        elif kind in _ORDERING_KINDS and kind != "RepartitionOp":
+            yield from self._emit(preserve_block(union_inputs(inputs, spec=self._spec, services=self._services), None))
+        elif kind in _ORDERING_KINDS:
             from .ordering import build_sort_runs, merge_sort_runs
-
-            records = self._ports[self._port_order[0]].records()
-            runs = build_sort_runs(records, spec=self._spec, services=self._services)
-            yield from self._emit(merge_sort_runs(runs, spec=self._spec, services=self._services))
+            from .block_partition import partition_records, block_count
+            from dataclasses import replace
+            port = self._ports[self._port_order[0]]
+            records = port.records()
+            layout = None
+            if kind == 'RandomizeBlockOrderOp':
+                from .block_partition import shuffled_block_layout
+                layout = shuffled_block_layout(port.records(), spec=self._spec, services=self._services)
+            if kind != 'RepartitionOp' or self._spec.configuration.get('keys'):
+                sort_spec = self._spec
+                if kind == 'RepartitionOp':
+                    sort_spec = replace(sort_spec, configuration={**dict(sort_spec.configuration),
+                        'keys': list(sort_spec.configuration.get('keys') or ()),
+                        'num_blocks': block_count(sort_spec, rows=port._count, bounds=self._services.bounds)})
+                runs = build_sort_runs(records, spec=sort_spec, services=self._services)
+                records = merge_sort_runs(runs, spec=sort_spec, services=self._services)
+            if kind in ('RepartitionOp', 'RandomShuffleOp'):
+                records = partition_records(records, spec=self._spec, rows=port._count, services=self._services)
+            elif layout is not None:
+                from .block_partition import reordered_records
+                records = reordered_records(records, layout=layout, spec=self._spec)
+            else:
+                records = preserve_block(records, None)
+            yield from self._emit(records)
         elif kind in _AGGREGATE_KINDS:
             from .aggregate import accumulate_partial
 

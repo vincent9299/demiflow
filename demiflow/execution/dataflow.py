@@ -959,10 +959,11 @@ class DataflowExecution:
 
     def _published_records(self, publication):
         from .dataflow_handles import _ChunkStream
+        from .dataflow_segments import block_chunks
         from .exchange.dataflow_bridge import _decode_record_document
         for partition in publication["manifest"]["partitions"]:
             ref = ArtifactRef(**partition["data_ref"])
-            stream = _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes)))
+            stream = _ChunkStream(block_chunks(self._store, ref, self._bounds))
             while True:
                 line = stream.readline(self._bounds.max_row_bytes + 1)
                 if not line:

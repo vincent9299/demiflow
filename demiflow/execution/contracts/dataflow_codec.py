@@ -60,6 +60,7 @@ from .dataflow import (
     QueueReply,
     ReadyWork,
     Record,
+    BlockPartition,
     RecoveryImage,
     ResidencyPlan,
     RoutedRecord,
@@ -228,9 +229,10 @@ _WIRE_TYPES = {
         ("split_id", _S), ("offset", _JM), ("next_sequence", _i()), ("end_of_input", _B),
         ("lease_ref", _OR), ("pending_refs", _RS),
     )),
+    "BlockPartition": (BlockPartition, (("occurrence_id", _S), ("index", _i()), ("count", _i(1)))),
     "Record": (Record, (
         ("record_id", _S), ("source_position", _JM), ("payload_ref", _OR), ("inline", ("opt_row",)),
-        ("encoded_bytes", _i()), ("sequence", _i()), ("schema_ref", _OR),
+        ("encoded_bytes", _i()), ("sequence", _i()), ("schema_ref", _OR), ("block_partition", _odto("BlockPartition")),
     )),
     "SourcePoll": (SourcePoll, (
         ("status", _e(_POLL_STATUSES)), ("record", _odto("Record")), ("retry_after_ms", _i()),
@@ -617,6 +619,8 @@ def _validate_payload(payload, type_name):
     if type_name == "Record" and "schema_ref" not in payload:
         # The optional typed-row sidecar does not rewrite legacy row frames.
         payload = dict(payload, schema_ref=None)
+    if type_name == "Record" and "block_partition" not in payload:
+        payload = dict(payload, block_partition=None)
     if type_name == "RuntimePolicy" and "max_active_workers" not in payload:
         payload = dict(payload, max_active_workers=None)
     if set(payload) != expected:
@@ -767,7 +771,7 @@ def _construct_payload(payload, type_name):
     cls, fields = entry
     kwargs = {}
     for name, spec in fields:
-        optional = (type_name, name) in {("Record", "schema_ref"), ("RuntimePolicy", "max_active_workers")}
+        optional = (type_name, name) in {("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers")}
         value = payload.get(name) if optional else payload[name]
         kwargs[name] = _construct_field(value, spec, type_name + "." + name)
     return cls(**kwargs)
@@ -825,7 +829,7 @@ def _project_payload(value, type_name):
     fields = entry[1]
     payload = {}
     for name, spec in fields:
-        if type_name == "Record" and name == "schema_ref" and value.schema_ref is None:
+        if type_name == "Record" and name in ("schema_ref", "block_partition") and getattr(value, name) is None:
             continue
         if type_name == "RuntimePolicy" and name == "max_active_workers" and value.max_active_workers is None:
             continue
@@ -1005,6 +1009,8 @@ def _identity_project(value):
             for field in dataclasses.fields(value)
             if not (isinstance(value, RuntimePolicy) and field.name == "max_active_workers"
                     and value.max_active_workers is None)
+            and not (isinstance(value, Record) and field.name == "block_partition"
+                     and value.block_partition is None)
         }
     if isinstance(value, Mapping):
         return {key: _identity_project(item) for key, item in value.items()}
