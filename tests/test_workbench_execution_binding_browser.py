@@ -2,15 +2,25 @@
 
 Runs the genuine workbench execution path (service auto-allocates port=0, never
 the reserved 55971/55972/59865/59866), opens the sealed run graph, and checks the
-logical projection's F10 sealed_at rendering plus the actual identity bridge
-to source nodes and recorded observations. The merged engine must produce the
-binding; a missing bridge is not accepted as a successful integration.
+F10 sealed_at rendering plus the actual identity bridge to source nodes and
+recorded observations. The merged engine must produce the binding; a missing
+bridge is not accepted as a successful integration.
+
+Migrated to the C main-graph entry: the executed sealed plan IS the main graph
+(the old "运行封存计划（E2）" logical-projection toggle and .wb-logical-bar were
+removed by the A-F merge). The business/identity/exception assertions are kept;
+only the replaced DOM/文案 selectors move to the main graph, the node inspector
+and the 节点证据 panel. The F10 sealed_at identity assertion is preserved
+unchanged in intent: the merged main graph currently renders no sealed_at
+instant although the server still publishes it, so that assertion fails honestly
+and is recorded as a production defect (not weakened to pass).
 
 Requires Chromium (FORGE_CHROMIUM or the Playwright cache); skips otherwise.
 Evidence and pytest tmp are confined to /tmp/demiflow-d-* via FORGE_WORKBENCH_EVIDENCE
 and --basetemp. No shared coordination directory is written.
 """
 import os
+import re
 from pathlib import Path
 
 os.environ.setdefault('FORGE_WORKBENCH_EVIDENCE', '/tmp/demiflow-d-browser-evidence')
@@ -73,23 +83,39 @@ def test_real_run_sealed_graph_f10_and_honest_bridge(isolated, browser):
         expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
         shot(page, 'd-real-run-sealed-graph')
 
-        # Logical projection of the executed sealed plan.
-        page.get_by_role('button', name='运行封存计划（E2）', exact=True).click()
-        expect(page.locator('.wb-logical-bar')).to_contain_text('结构校验通过')
-        expect(page.locator('.wb-logical-bar')).to_contain_text('已绑定本次执行计划')
-        # F10: sealed_at is epoch milliseconds rendered as a real ISO instant.
-        expect(page.locator('.wb-logical-bar')).to_contain_text('sealed_at 2026-')
-        expect(page.locator('.wb-logical-bar')).not_to_contain_text('Invalid Date')
-        expect(page.locator('.wb-logical-bar')).not_to_contain_text('sealed_at 未提供')
-        shot(page, 'd-logical-sealed-bar-f10')
-
-        # The integrated engine must publish a real bridge and observations.
+        # The executed sealed plan IS the main graph now: the A-F merge removed
+        # the old "运行封存计划（E2）" logical-projection toggle and .wb-logical-bar.
+        # The integrated engine must publish a real identity bridge and recorded
+        # observations on the main graph (a missing bridge is not a pass).
         page.locator('.wb-graph .wb-node').filter(has_text='normalize_question').click()
-        expect(page.locator('.wb-inspector')).to_contain_text('执行逻辑节点（E2）')
-        expect(page.locator('.wb-inspector')).to_contain_text('已绑定报告节点')
-        expect(page.locator('.wb-inspector')).to_contain_text('已有观测')
+        expect(page.locator('.wb-inspector')).to_contain_text('normalize_question')
+        # A bound execution identity proves the node is bridged to this run's plan.
+        expect(page.locator('.wb-inspector')).to_contain_text('执行身份')
+        expect(page.locator('.wb-inspector')).not_to_contain_text('未桥接')
         expect(page.locator('.wb-inspector')).not_to_contain_text('D1b')
-        shot(page, 'd-logical-node-bound-observations')
+        # Real recorded observations for this node (节点证据 panel, not inferred
+        # from the whole-run status).
+        page.get_by_role('button', name='节点证据', exact=True).click()
+        expect(page.locator('.wb-run-detail-body')).to_contain_text('节点关联观测')
+        expect(page.locator('.wb-run-detail-body')).to_contain_text('动作 ')
+        shot(page, 'd-main-graph-node-bound-observations')
+
+        # F10 (identity assertion, preserved unchanged in intent): the sealed-plan
+        # view must render the seal time as a real ISO instant. The server still
+        # publishes sealed_at in the run facts, but the merged C main graph dropped
+        # the old .wb-logical-bar rendering and no replacement surface (advanced
+        # diagnostics execution identity / run seal) carries it. This fails honestly
+        # until the rendering is restored -- recorded as a production defect for the
+        # fix lane, never weakened to pass.
+        page.get_by_text('高级诊断', exact=True).click()
+        advanced = page.locator('.wb-advanced')
+        expect(advanced).to_be_visible()
+        text = advanced.inner_text()
+        assert re.search(r'sealed_at\D+2026-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', text), (
+            'F10 regression: merged main graph renders no sealed_at ISO instant '
+            '(server still exposes sealed_at); advanced diagnostics text=' + text[:2000])
+        assert 'Invalid Date' not in text and '未提供' not in text
+        shot(page, 'd-main-graph-sealed-at-f10')
         assert not errors, errors
 
 

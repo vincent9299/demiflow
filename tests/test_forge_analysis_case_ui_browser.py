@@ -83,6 +83,7 @@ def owned_case(browser,tmp_path,monkeypatch):
         class TestHelper(web_service.WebService):
             def __init__(self,server,config):self.server=server
             def ceiling(self):return dict(analysis_execute=False,analysis_write=True,case_annotate=True)
+            def execution_profile(self):return None # Metadata-only double has no admitted runtime.
             def assert_ready(self):return True
             def stop_generation(self,*args,**kwargs):return dict(accepted=True,cleanup_proven=True)
             def close(self):pass

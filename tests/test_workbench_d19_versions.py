@@ -40,6 +40,21 @@ def _sha(path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _jpeg_thumbnail(raw: bytes) -> bytes:
+    # /api/media serves a re-encoded JPEG thumbnail (preview.image_bytes_preview:
+    # thumbnail 1000x1000, RGB, JPEG q85), not the stored PNG bytes. Mirror that
+    # exact pipeline so the version-correctness check is a deterministic byte
+    # comparison against the selected version's own image.
+    import io
+    from PIL import Image
+    with Image.open(io.BytesIO(raw)) as picture:
+        picture.load()
+        picture.thumbnail((1000, 1000))
+        output = io.BytesIO()
+        picture.convert('RGB').save(output, format='JPEG', quality=85)
+        return output.getvalue()
+
+
 def _get(fx, endpoint, **query):
     path = '/api/' + endpoint
     if query:
@@ -96,16 +111,23 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
         assert selected['alias_binding'] == alias_binding, selected
         assert selected['reference']['ref']['lance_version'] == version
         assert selected['metadata']['row_count'] == facts['row_count']
-        assert list(selected['metadata']['fields']) == facts['columns']
+        # metadata.fields is a mapping (server orders keys alphabetically); the
+        # authoritative column order is asserted via sample.columns in section 3.
+        assert sorted(selected['metadata']['fields']) == sorted(facts['columns'])
         assert selected['metadata']['schema_hash'] == facts['schema_hash']
         # opening a historical version never moves the fixed alias binding
         assert opened['binding']['digest'] == alias_binding
     fx.record('v02-selected', dict(v1_binding=v1['binding'], v2_binding=v2['binding']))
 
     # -- 3. sample reads the selected version, not the current alias (F03) ----
+    # Request the version's full schema columns explicitly: without an explicit
+    # columns arg the worker defaults to the display-field subset, so asking for
+    # the whole schema verifies the selected version's real columns (v2 adds
+    # rating/extra) in native order.
     for version, facts in ((1, v1), (2, v2)):
         code, sampled = _get(fx, 'sample', alias=alias, expected_binding=alias_binding,
-                             version=version, version_binding=facts['binding'], limit=100)
+                             version=version, version_binding=facts['binding'],
+                             columns=json.dumps(facts['columns']), limit=100)
         assert code == 200, sampled
         assert sampled['binding']['digest'] == facts['binding'], sampled
         assert [row['case_id'] for row in sampled['rows']] == [r['case_id'] for r in facts['rows']]
@@ -121,15 +143,31 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
                          columns=json.dumps(v1['columns']))
     assert code == 200, profile
     assert profile['binding'] == v1['binding'], profile
-    assert profile['rows'] == v1['row_count']
+    # profile reports coverage, not a top-level row count: the selected version's
+    # full row set is scanned (2 rows < the 1000-row limit) and its columns profiled.
+    assert profile['coverage']['total_rows'] == v1['row_count'], profile
+    assert profile['coverage']['complete'] is True, profile
+    assert [field['name'] for field in profile['fields']] == v1['columns'], profile
 
     # -- 5. media reads the selected version's image bytes (F14/F16) ----------
     for version, facts in ((1, v1), (2, v2)):
+        # row_id is a physical Lance _rowid, not a positional index: after the
+        # overwrite that creates v2 its first row lives at fragment 1 (_rowid
+        # 1<<32), so address the Case row by the real _rowid from the sample.
+        code, located = _get(fx, 'sample', alias=alias, expected_binding=alias_binding,
+                             version=version, version_binding=facts['binding'],
+                             columns=json.dumps(['case_id', 'image_uri']), limit=100)
+        assert code == 200, located
+        first = located['rows'][0]
+        assert first['case_id'] == facts['rows'][0]['case_id'], located
+        row_id = int(first['_rowid'])
         code, image = _get(fx, 'media', alias=alias, expected_binding=alias_binding,
                            version=version, version_binding=facts['binding'],
-                           row_id=0, field='image_uri')
+                           row_id=row_id, field='image_uri')
         assert code == 200, image
-        assert image == facts['image_bytes'], (version, len(image))
+        assert image == _jpeg_thumbnail(facts['image_bytes']), (version, len(image))
+        other = v2 if version == 1 else v1
+        assert image != _jpeg_thumbnail(other['image_bytes']), version
     # a historical text row must never be paired with the other version's image
     code, wrong = _get(fx, 'media', alias=alias, expected_binding=alias_binding,
                        version=1, version_binding=v2['binding'], row_id=0, field='image_uri')
@@ -164,7 +202,7 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     assert web_sources.verify(root, locator=historical, source=source, target=target) == {'verified': True}
     membership = ws.sample_table(root, alias, expected_binding=alias_binding,
                                  version=1, version_binding=v1['binding'],
-                                 columns=[], row_id=0)
+                                 columns=['case_id'], row_id=0)
     assert membership['binding']['digest'] == v1['binding']
     assert membership['rows'][0]['case_id'] == v1['rows'][0]['case_id']
     # verifying the historical source against the current alias value must fail
@@ -176,18 +214,24 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     with fx.open_page(browser) as (page, log):
         page.locator('.function-nav').get_by_role('button', name='数据', exact=True).click()
         page.get_by_label('当前数据表', exact=True).select_option(alias)
+        # The version list loads on the panel's first toggle and reads fixed.aliasBinding;
+        # opening it before the fixed table context is ready throws pre-fetch and the
+        # versionsLoaded latch blocks retry. Wait for the initial (unversioned) sample
+        # read, which is only issued once the fixed context is applied.
+        for _ in range(80):
+            page.wait_for_timeout(100)
+            if any('/sample' in r['url'] and 'version=' not in r['url'] for r in log['requests']):
+                break
         page.locator('details.bound-versions > summary').click()
         # registered facts preview shows the two genuinely different versions
         versions_panel = page.locator('details.bound-versions')
         versions_panel.get_by_text('v1').first.wait_for()
         fx.shot(page, 'v02-versions-listed')
-        # A06 selectTableVersion: choosing v1 replaces the fixed context and
-        # re-reads sample with version/version_binding. The control is not yet
-        # integrated; locate it by the frozen version affordance and fail honest.
-        switch = page.get_by_role('button', name='固定到 v1')
-        if switch.count() == 0:
-            switch = page.get_by_role('button', name='v1', exact=True)
-        assert switch.count() > 0, 'A06 selectTableVersion not integrated: no historical version switch affordance'
+        # A06 selectTableVersion: the merged data page renders each registered
+        # version as a clickable button.version-row[data-version]; choosing v1
+        # replaces the fixed context and re-reads sample with version/version_binding.
+        switch = page.locator('button.version-row[data-version="1"]')
+        assert switch.count() > 0, 'A06 selectTableVersion: no historical version row affordance'
         switch.first.click()
         # wait for the real historical sample re-read to be issued (bounded)
         for _ in range(40):

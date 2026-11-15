@@ -304,13 +304,18 @@ def _make_versioned_table(root: Path) -> dict:
     ])
     ws.set_table_view(root, alias, expected=attached['digest'], display=display, provenance={})
 
-    from demiflow.workbench.projects.workspace import preview_binding, table_binding, location_root, relative_path
+    from demiflow.workbench.projects.workspace import preview_binding, table_binding
     control, ref, table_uri = table_binding(root, ws.load_workspace(root)[1], alias)
-    base = location_root(root, ws.load_workspace(root)[1]['locations'][control['location_id']])
 
     def version_binding(version: int) -> dict:
-        virtual = {**control, 'ref': {**control['ref'], 'lance_version': version}}
-        return preview_binding(root, virtual, relative_path(base, ref.relative_uri))
+        # Mirror catalog_versions.resolve_version: the virtual control replaces the
+        # whole ref with the registered version DatasetRef (its real schema_hash /
+        # schema_version / row_count), not merely a lance_version swap on the
+        # current ref. preview_binding then digests that full version identity.
+        registered_ref = catalog.get(alias, relative_uri=alias + '.lance', lance_version=version)
+        assert registered_ref is not None, version
+        virtual = {**control, 'ref': registered_ref.to_dict()}
+        return preview_binding(root, virtual, table_uri)
 
     binding_v1 = version_binding(1)
     binding_v2 = version_binding(2)
