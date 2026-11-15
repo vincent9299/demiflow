@@ -12,6 +12,7 @@ from test_map_prompt_async import PACK, server
 from test_agentmap_async import collect, resource, api_call
 from test_codex_agent import app_server, events
 from test_prompt_http_stream import sse_server, event, chunk
+from _agent_runtime_fixtures import collect_before_commit, resume_collect
 
 
 def entries(tmp_path, *, codex=None, operators=()):
@@ -54,7 +55,10 @@ def test_yaml_codex_owns_model_and_native_tools(tmp_path, app_server, monkeypatc
     path, _, _ = entries(tmp_path, codex=app_server[0])
     agent = load_agent_config(path)
     assert agent.prompt_pack.required_environment_names == ()
-    row = collect(node(path, options={'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}}))[0]
+    from demiflow.execution.run_context import RunContext
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution():
+        row = collect(node(path))[0]
+        assert run.journal.budget_consumed('requests') == 1
     assert row['answer'] == 'done'
     start = next(e['received']['params'] for e in events(app_server)
                  if e.get('received', {}).get('method') == 'thread/start')
@@ -62,7 +66,7 @@ def test_yaml_codex_owns_model_and_native_tools(tmp_path, app_server, monkeypatc
 
 
 @pytest.mark.parametrize('complete', [True, False])
-def test_yaml_stream_survives_tool_turns_repairs_and_replay(tmp_path, sse_server, resource, complete):
+def test_yaml_stream_survives_tool_turns_repairs_and_replay(tmp_path, sse_server, resource, complete, monkeypatch):
     """Exercise the actual agent YAML -> multi-turn HTTP SSE -> journal path."""
     path, _, raw = entries(tmp_path, operators=('read_documents',))
     raw['options'] = {'stream': True, 'trust_env': False, 'read_timeout_s': 2,
@@ -80,9 +84,9 @@ def test_yaml_stream_survives_tool_turns_repairs_and_replay(tmp_path, sse_server
                 + (event('[DONE]') if complete or index < 2 else b''))
 
     sse_server['respond'] = respond
-    ds = node(path, resources={'D1': resource},
-              options={'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}})
-    first = collect(ds)[0]
+    ds = node(path, resources={'D1': resource})
+    first_rows, reference = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    first = first_rows[0]
     assert len(sse_server['requests']) == 3
     assert all(body['stream'] is True and body['stream_options']['include_usage'] is True
                and body['response_format'] == {'type': 'json_object'}
@@ -96,13 +100,20 @@ def test_yaml_stream_survives_tool_turns_repairs_and_replay(tmp_path, sse_server
     else:
         assert first.get('answer') is None
         assert first['error']['category'] == 'incomplete_response'
-    replay = collect(ds)[0]
-    assert len(sse_server['requests']) == 3  # no new request or non-stream fallback
     if complete:
+        replay = resume_collect(ds, reference)[0]
         assert replay['answer'] == 'verified'
         assert all(turn['reused'] for turn in replay['call']['environment']['turns'])
     else:
-        assert replay['error']['category'] == 'uncertain_call'
+        from demiflow.operator_llm.journal import UncertainPromptCall
+        with pytest.raises(UncertainPromptCall):
+            resume_collect(ds, reference)
+    assert len(sse_server['requests']) == 3  # no new request or non-stream fallback
+    from demiflow.execution.run_journal import RunJournal
+    journal = RunJournal(reference.directory)
+    assert journal.budget_consumed('requests') == 3
+    with journal._connection() as db:
+        assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NULL').fetchone()[0] == (0 if complete else 1)
 
 
 def test_family_mismatch_and_split_configuration_fail_before_execution(tmp_path):

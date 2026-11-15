@@ -13,6 +13,7 @@ from demiflow.environment import OperatorEnvironment
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.operator_llm.tokens import CharacterBudget
 from test_map_prompt_async import PACK, server
+from _agent_runtime_fixtures import collect_before_commit, resume_collect, call_metrics, collect_actor_component
 
 
 @pytest.fixture
@@ -94,7 +95,7 @@ def test_yaml_visibility_is_enforced_and_not_just_prompt_text(server, resource, 
     monkeypatch.setattr(module, 'read_documents', forbidden)
     server['respond'] = lambda body, index: ({'api_calls': [api_call(resource)], 'response': None} if index == 0
         else {'api_calls': [], 'response': {'result': 'no tool available'}})
-    row = collect(agent([{'item': 'question', 'resources': {'D1': resource}}],
+    row = collect_actor_component(agent([{'item': 'question', 'resources': {'D1': resource}}],
                         agent_config=yaml_agent(tmp_path, operators=())))[0]
     assert row['answer'] == 'no tool available' and len(server['requests']) == 2
     assert row['call']['environment']['observations'][0]['result']['code'] == 'operator_not_allowed'
@@ -163,7 +164,7 @@ def test_agent_and_prompt_yaml_contracts_stay_separate(tmp_path):
         OperatorEnvironment.from_yaml(path, resources='resources')
 
 
-def test_two_turn_native_read_and_replay(server, resource, tmp_path):
+def test_two_turn_native_read_and_replay(server, resource, tmp_path, monkeypatch):
     def respond(body, index):
         if index == 0:
             return {'api_calls': [api_call(resource)], 'response': None}
@@ -171,23 +172,23 @@ def test_two_turn_native_read_and_replay(server, resource, tmp_path):
         assert 'Full qualifying context.' in sent and 'readings' in sent
         return {'api_calls': [], 'response': {'result': 'based on full context'}}
     server['respond'] = respond
-    for replay in (False, True):
-        stream = agent([{'item': 'question', 'resources': {'D1': resource}}],
-                       options={'journal_dir': str(tmp_path / 'calls')}, max_requests=2)
-        assert len(stream._plan.operations) == 1 and isinstance(stream._plan.operations[0], AgentMapOp)
-        row = collect(stream)[0]
+    stream = agent([{'item': 'question', 'resources': {'D1': resource}}], max_requests=2)
+    assert len(stream._plan.operations) == 1 and isinstance(stream._plan.operations[0], AgentMapOp)
+    first, reference = collect_before_commit(stream, tmp_path / 'run', monkeypatch)
+    for replay, rows in ((False, first), (True, resume_collect(stream, reference))):
+        row = rows[0]
         assert 'error' not in row, row.get('error')
         assert row['answer'] == 'based on full context'
         assert row['call']['reused'] is replay
-        metrics = stream._stages[-1].call_metrics.summary()
+        metrics = call_metrics(row)
         assert metrics['call_records'] == 2 and metrics['reused'] == (2 if replay else 0)
         assert metrics['input_tokens'] == (0 if replay else 20)
         trace = row['call']['environment']
         assert len(trace['turns']) == 2 and len(trace['observations']) == 1
-        assert any(
-            m['text'] == 'Full qualifying context.' for m in trace['observations'][0]['result']['materials'])
+        assert any(m['text'] == 'Full qualifying context.' for m in trace['observations'][0]['result']['materials'])
     assert len(server['requests']) == 2
-
+    from demiflow.execution.run_journal import RunJournal
+    assert RunJournal(reference.directory).budget_consumed('requests') == 2
 
 
 @pytest.mark.parametrize('reuse_workers', [0, 2])
@@ -217,7 +218,7 @@ def test_out_of_scope_reference_is_observation_not_io(server, resource, monkeypa
     call = api_call({'$ref': 'other_row'} if kind == 'unknown' else foreign)
     server['respond'] = lambda body, index: ({'api_calls': [call], 'response': None} if index == 0
         else {'api_calls': [], 'response': {'result': 'cannot verify'}})
-    row = collect(agent([{'item': 'question', 'resources': {'D1': resource}}]))[0]
+    row = collect_actor_component(agent([{'item': 'question', 'resources': {'D1': resource}}]))[0]
     assert row['answer'] == 'cannot verify'
     assert row['call']['environment']['observations'][0]['result']['code'] == 'invalid_arguments'
 
@@ -342,7 +343,7 @@ def test_model_repairs_call_before_native_execution(server, resource, monkeypatc
         assert len(invoked) == 1 and 'Full qualifying context.' in sent
         return {'api_calls': [], 'response': {'result': 'verified'}}
     server['respond'] = respond
-    row = collect(agent([{'item': 'question', 'resources': {'D1': resource}}], max_requests=3))[0]
+    row = collect_actor_component(agent([{'item': 'question', 'resources': {'D1': resource}}], max_requests=3))[0]
     assert row['answer'] == 'verified'
     assert len(row['call']['environment']['turns']) == 3
     assert row['call']['environment']['observations'][0]['result']['code'] == code
@@ -357,26 +358,25 @@ def test_model_repairs_call_before_native_execution(server, resource, monkeypatc
     ({'api_calls': [], 'response': None}, 'invalid_response'),
     ({'api_calls': [], 'response': {'result': 123}}, 'invalid_final_response'),
 ])
-def test_invalid_response_repair_uses_turn_budget_and_replays(server, tmp_path, invalid, code):
+def test_invalid_response_repair_uses_turn_budget_and_replays(server, tmp_path, invalid, code, monkeypatch):
     def respond(body, index):
         if index == 0:
             return invalid
         assert code in json.dumps(body['messages'])
         return {'api_calls': [], 'response': {'result': 'repaired'}}
     server['respond'] = respond
-    options = {'journal_dir': str(tmp_path / 'calls')}
-    for replay in (False, True):
-        stream = agent([{'item': 'question', 'resources': {}}],
-            pack=PACK.replace('schema_retries: 0', 'schema_retries: 1'),
-            environment=OperatorEnvironment(resources='resources', max_turns=2),
-            options=options, max_requests=0 if replay else 2)
-        row = collect(stream)[0]
+    stream = agent([{'item': 'question', 'resources': {}}],
+        pack=PACK.replace('schema_retries: 0', 'schema_retries: 1'),
+        environment=OperatorEnvironment(resources='resources', max_turns=2), max_requests=2)
+    first, reference = collect_before_commit(stream, tmp_path / 'run', monkeypatch)
+    for replay, rows in ((False, first), (True, resume_collect(stream, reference))):
+        row = rows[0]
         assert row['answer'] == 'repaired', row
         trace = row['call']['environment']
         assert len(trace['turns']) == 2 and len(trace['observations']) == 1
         assert trace['observations'][0]['result']['code'] == code
         assert row['call']['reused'] is replay
-        metrics = stream._stages[-1].call_metrics.summary()
+        metrics = call_metrics(row)
         assert metrics['call_records'] == 2
         assert metrics['input_tokens'] == (0 if replay else 20)
     assert len(server['requests']) == 2
@@ -416,7 +416,7 @@ def test_operator_failure_is_feedback(server, resource, monkeypatch, failure):
         assert 'execution_error' in json.dumps(body['messages']) and str(failure) in json.dumps(body['messages'])
         return {'api_calls': [], 'response': {'result': 'cannot verify'}}
     server['respond'] = respond
-    row = collect(agent([{'item': 'question', 'resources': {'D1': resource}}]))[0]
+    row = collect_actor_component(agent([{'item': 'question', 'resources': {'D1': resource}}]))[0]
     assert row['answer'] == 'cannot verify'
 
 
@@ -428,7 +428,7 @@ def test_internal_operator_failure_stops_loop(server, resource, monkeypatch, fai
         raise failure
     monkeypatch.setattr(module, 'read_documents', fail)
     server['respond'] = lambda body, index: {'api_calls': [api_call(resource)], 'response': None}
-    row = collect(agent([{'item': 'question', 'resources': {'D1': resource}}]))[0]
+    row = collect_actor_component(agent([{'item': 'question', 'resources': {'D1': resource}}]))[0]
     assert row['error']['type'] == type(failure).__name__ and len(server['requests']) == 1
 
 
@@ -439,7 +439,7 @@ def test_response_cap_fails_before_operator_execution(server, resource, monkeypa
         pytest.fail('oversized response must not execute')
     monkeypatch.setattr(module, 'read_documents', forbidden)
     server['respond'] = lambda body, index: {'api_calls': [api_call(resource, questions=[{'id': 'q', 'text': 'x' * 200}])], 'response': None}
-    row = collect(agent([{'item': 'question', 'resources': {'D1': resource}}],
+    row = collect_actor_component(agent([{'item': 'question', 'resources': {'D1': resource}}],
         environment=OperatorEnvironment(resources='resources', max_response_chars=100)))[0]
     assert row['error']['type'] == 'PromptBudgetExceededError'
     assert len(row['error']['call']['environment']['turns']) == 1 and len(server['requests']) == 1
@@ -511,7 +511,7 @@ def test_accumulated_history_stops_before_next_model_request(server, resource, m
         raise OSError('x' * 10000)
     monkeypatch.setattr(module, 'read_documents', fail)
     server['respond'] = lambda body, index: {'api_calls': [api_call(resource)], 'response': None}
-    row = collect(agent([{'item': 'question', 'resources': {'D1': resource}}],
+    row = collect_actor_component(agent([{'item': 'question', 'resources': {'D1': resource}}],
         environment=OperatorEnvironment(resources='resources', max_context_chars=10000,
                                         max_observation_chars=12000)))[0]
     assert row['error']['type'] == 'PromptBudgetExceededError'
