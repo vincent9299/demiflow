@@ -208,6 +208,23 @@ def route_record(record, *, spec, state):
     # business payload into a legacy control envelope just to discard it: v3
     # sends bounded data bytes and small authenticated control locators. The
     # explicit frozen K4 bridge still validates its own inline/ref callers.
+    targets = _route_targets(record, spec=spec, ordinal=ordinal, window=window)
+    return tuple(RoutedRecord(reader_id=target,
+                              delivery_id=identity(["dataflow-delivery-v3", record.record_id,
+                                                    spec.edge_id, target, ordinal]),
+                              record=record)
+                 for target in targets)
+
+
+def _route_targets(record, *, spec, ordinal, window):
+    """Select original reader IDs after the caller authenticates the record.
+
+    Live routing owns validation, the ordinal and delivery identities above.
+    Reading an immutable finite input already verifies the complete canonical
+    record, so it can check this same rule without encoding the payload again
+    or creating delivery identities that will never be sent.
+    """
+    consumers = spec.consumer_partitions
     if spec.routing == "forward":
         if len(consumers) != 1:
             _fail("INVALID_CONTRACT", "forward routing needs exactly one reader")
@@ -240,11 +257,7 @@ def route_record(record, *, spec, state):
         targets = (value,)
     else:
         targets = consumers
-    return tuple(RoutedRecord(reader_id=target,
-                              delivery_id=identity(["dataflow-delivery-v3", record.record_id,
-                                                    spec.edge_id, target, ordinal]),
-                              record=record)
-                 for target in targets)
+    return targets
 
 
 # -- X005 ---------------------------------------------------------------------

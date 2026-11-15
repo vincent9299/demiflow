@@ -105,13 +105,11 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes):
             else:
                 # Reuse the versioned typed hash/target rule. This is only
                 # validation of immutable evidence, not execution of a route.
-                from .exchange.dataflow_channels import route_record
-                from .exchange.dataflow_state import RoutingCounters
-                state = RoutingCounters(values={spec.channel_id: count}, route_epoch=spec.route_epoch)
-                routes = route_record(record, spec=spec, state=state)
+                from .exchange.dataflow_channels import _route_targets
+                routes = _route_targets(record, spec=spec, ordinal=count, window=spec.storage_bytes)
                 if len(routes) != 1:
                     _fail('finite keyed route has multiple unexpected readers')
-                expected = routes[0].reader_id
+                expected = routes[0]
             if item['target'] != expected:
                 _fail('finite record target does not match original routing')
             count += 1
