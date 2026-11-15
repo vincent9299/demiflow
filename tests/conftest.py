@@ -1,92 +1,61 @@
-"""Env-guarded evidence capture for the lane H gate G-H (inert unless activated).
+"""Shared pytest configuration.
 
-Set DEMIFLOW_H_EVIDENCE=/tmp/demiflow-h-evidence.json to record a strict
-evidence_guard report: per-nodeid setup/call/teardown outcomes, in-process real
-module paths bound to this worktree, and source digests before/after the run.
-Synthetic test-domain doubles (no __file__) are excluded from module_paths and
-listed separately under test_doubles so real modules and fakes stay distinct.
+Lane V owns only the ``runtime_v3_fixture`` addition (V036). No existing
+fixture/hook/collection logic is modified here, so the 577 historical test
+files keep collecting unchanged.
 """
-import hashlib
+from __future__ import annotations
+
 import os
-import sys
-from pathlib import Path
+from typing import Iterator
 
-_ACTIVE = os.environ.get('DEMIFLOW_H_EVIDENCE')
-_TREE = Path(__file__).resolve().parents[1]
-_OWNED = [
-    'demiflow/execution/dataflow_authority.py',
-    'demiflow/execution/dataflow_hosts.py',
-    'demiflow/execution/dataflow_artifacts.py',
-    'demiflow/execution/dataflow_services.py',
-    'demiflow/execution/dataflow_store.py',
-    'demiflow/execution/dataflow_control.py',
-    'demiflow/execution/worker/dataflow_host.py',
-    'demiflow/execution/run_journal.py',
-    'tests/test_runtime_v3_h.py',
-    'tests/_runtime_v3_h_doubles.py',
-    'tests/conftest.py',
-]
-_state = {'collected': [], 'results': [], 'collection_errors': [], 'deselected': [], 'before': {}}
+import pytest
+
+from runtime_v3_support import (
+    DEFAULT_BOUNDS,
+    RuntimeV3Fixture,
+    assert_tree_binding,
+    make_scope,
+)
 
 
-def _digests():
-    out = {}
-    for rel in _OWNED:
-        path = _TREE / rel
-        out[rel] = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
-    return out
+@pytest.fixture
+def runtime_v3_fixture(tmp_path, request) -> Iterator[RuntimeV3Fixture]:
+    """Tree-bound acceptance fixture.
 
+    Reads an explicit ``runtime_v3(provider=..., environment=...)`` marker (or
+    the DEMIFLOW_V3_PROVIDER / DEMIFLOW_V3_ENV overrides), creates a scoped
+    RuntimeV3Fixture under /tmp/demiflow-*, asserts the in-process worktree
+    binding, yields, and always closes in ``finally``. A missing environment is
+    recorded not_run (never a skip counted as pass); a same-host two_hosts claim
+    or a missing worktree binding fails.
+    """
+    marker = request.node.get_closest_marker("runtime_v3")
+    provider = os.environ.get("DEMIFLOW_V3_PROVIDER")
+    environment = os.environ.get("DEMIFLOW_V3_ENV")
+    if marker is not None:
+        provider = marker.kwargs.get("provider", provider)
+        environment = marker.kwargs.get("environment", environment)
+    provider = provider or "local"
+    declared_envs = tuple(e.strip() for e in environment.split(",")) if environment else ("local",)
 
-def _module_paths():
-    paths = {}
-    for name, module in list(sys.modules.items()):
-        if not name.startswith('demiflow'):
-            continue
-        file = getattr(module, '__file__', None)
-        if not file:
-            continue
-        resolved = Path(file).resolve()
-        if resolved.is_relative_to(_TREE):
-            paths[name] = str(resolved)
-    return paths
+    # Every fixture invocation re-asserts the worktree binding in-process.
+    assert_tree_binding()
 
-
-def _test_doubles():
-    return [name for name, module in list(sys.modules.items())
-            if name.startswith('demiflow.execution.contracts.dataflow')
-            and getattr(module, '__file__', None) is None]
-
-
-if _ACTIVE:
-    def pytest_configure(config):
-        _state['before'] = _digests()
-
-    def pytest_collection_modifyitems(session, config, items):
-        _state['collected'] = [item.nodeid for item in items]
-
-    def pytest_collectreport(report):
-        if report.failed:
-            _state['collection_errors'].append(str(report.longrepr))
-
-    def pytest_runtest_logreport(report):
-        _state['results'].append({
-            'nodeid': report.nodeid,
-            'when': report.when,
-            'outcome': report.outcome,
-            'wasxfail': bool(getattr(report, 'wasxfail', False)),
-            'rerun': 0,
-        })
-
-    def pytest_sessionfinish(session, exitstatus):
-        report = {
-            'exit_code': int(exitstatus),
-            'collection_errors': _state['collection_errors'],
-            'deselected': _state['deselected'],
-            'collected': _state['collected'],
-            'source_before': _state['before'],
-            'source_after': _digests(),
-            'module_paths': _module_paths(),
-            'test_doubles': _test_doubles(),
-            'results': _state['results'],
-        }
-        Path(_ACTIVE).write_text(__import__('json').dumps(report, indent=2, sort_keys=True))
+    scope = make_scope()
+    fixture = RuntimeV3Fixture(scope, provider=provider, bounds=DEFAULT_BOUNDS)
+    # A declared environment that this machine cannot satisfy is not_run, and a
+    # ray_core provider without ray fails rather than silently falling back.
+    if provider == "ray_core":
+        fixture.require_environment("ray")
+    for env in declared_envs:
+        if env != "local":
+            fixture.require_environment(env)
+    try:
+        yield fixture
+    except BaseException as exc:
+        fixture.record_original_failure(exc)
+        raise
+    finally:
+        assert_tree_binding()
+        fixture.close()
