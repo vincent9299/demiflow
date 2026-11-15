@@ -235,6 +235,11 @@ class WorkerGraphRunner:
                     processed += 1
         with self._condition:
             command = self._queue.popleft() if self._queue else None
+            if command is not None:
+                # receive() may enqueue while the previous step is publishing
+                # its idle notification. Consuming new work invalidates that
+                # notification again, before any output crosses the frontier.
+                self._idle_sent = False
         if command:
             if command['kind'] == 'data':
                 self._receive_data(command)
@@ -351,7 +356,8 @@ class WorkerGraphRunner:
                 from dataclasses import replace
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
-                routed_input = replace(record, inline=row, payload_ref=None, encoded_bytes=_row_bytes(row))
+                routed_input = replace(record, inline=row, payload_ref=None,
+                    encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             route_sequence = self.e._channels.routing.values().get(spec.channel_id, 0)
             for routed in route_record(routed_input, spec=spec, state=self.e._channels.routing):
                 from ..recovery_contract import identity
@@ -364,7 +370,7 @@ class WorkerGraphRunner:
         if spec is not None and spec.mode == 'finite_sealed':
             stream, total, count = self._finite_buffer(spec)
             line = document({'record_id': record.record_id, 'sequence': record.sequence,
-                             'target': target, 'document': raw.decode()}) + b'\n'
+                             'target': target, 'document': raw.decode()}, self.bounds.max_row_bytes) + b'\n'
             if total + len(line) > spec.storage_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite producer exceeds reserved storage')
             stream.write(line)
@@ -444,7 +450,8 @@ class WorkerGraphRunner:
                 from dataclasses import replace
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
-                record = replace(record, inline=row, payload_ref=None, encoded_bytes=_row_bytes(row))
+                record = replace(record, inline=row, payload_ref=None,
+                    encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._terminal_spec.kind == 'write_datasink':
                 from ..contracts.dataflow import thaw_record_value
                 facts = self.services.journal.read_configuration()
@@ -463,7 +470,8 @@ class WorkerGraphRunner:
                         row = self._queue_finalizer(thaw_record_value(record.inline))
                     finally:
                         set_row_scope(None)
-                    record = replace(record, inline=row, payload_ref=None, encoded_bytes=_row_bytes(row))
+                    record = replace(record, inline=row, payload_ref=None,
+                        encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._limit is not None and self._terminal_rows >= self._limit:
                 return
             raw = _encode_record(record, self.bounds) + b'\n'

@@ -181,7 +181,8 @@ def route_record(record, *, spec, state):
     stable codec digest (never Python hash); broadcast delivers to every reader
     with a per-(record, edge, reader, ordinal) delivery identity. The record is gated
     through the shared codec (X002 encoding) against the channel byte window
-    and framed through the frozen K4 envelope validator (X014) before routing.
+    before routing. K4 control envelopes remain a separate explicit bridge;
+    routing never embeds business bytes in a discarded control document.
     """
     _validate_record(record)
     if not isinstance(spec, ExchangeSpec):
@@ -203,8 +204,10 @@ def route_record(record, *, spec, state):
             _fail("INVALID_CONTRACT", "record encoded_bytes misreports the inline payload size")
     elif record.encoded_bytes > window:
         _fail("BUDGET_EXCEEDED", "record exceeds the channel byte window")
-    record_to_envelope(record, channel_id=spec.channel_id, route_epoch=spec.route_epoch,
-                       sequence=ordinal)
+    # Routing validates the actual typed data record above. It must not copy
+    # business payload into a legacy control envelope just to discard it: v3
+    # sends bounded data bytes and small authenticated control locators. The
+    # explicit frozen K4 bridge still validates its own inline/ref callers.
     if spec.routing == "forward":
         if len(consumers) != 1:
             _fail("INVALID_CONTRACT", "forward routing needs exactly one reader")

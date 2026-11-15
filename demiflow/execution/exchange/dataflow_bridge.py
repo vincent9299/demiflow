@@ -331,6 +331,11 @@ def _validate_record(record):
     if not isinstance(record.source_position, Mapping):
         _fail("INVALID_CONTRACT", "source_position must be a Json mapping")
     _document(thaw_record_value(record.source_position), "source_position")
+    parents = record.source_position.get('parent_record_ids', ())
+    if type(parents) not in (list, tuple):
+        _fail('INVALID_CONTRACT', 'parent_record_ids must be a sequence')
+    for parent in parents:
+        _digest(parent, 'parent_record_id')
     if record.schema_ref is not None:
         from ..record_schema import SCHEMA_MEDIA_TYPE
         _validate_artifact_ref(record.schema_ref, 'schema_ref')

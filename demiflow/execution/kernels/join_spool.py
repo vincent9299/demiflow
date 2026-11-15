@@ -22,7 +22,8 @@ _NONE = -1
 
 def _resident_limit(services):
     stages = getattr(services.assignment, 'stages', ())
-    grant = sum(stage.resident_bytes for stage in stages) if stages else services.bounds.max_resident_bytes
+    grant = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
+                for stage in stages) if stages else services.bounds.max_resident_bytes
     return min(grant, services.bounds.max_resident_bytes)
 
 
@@ -50,8 +51,8 @@ class _Spool:
         self.document_limit = bounds.max_row_bytes + min(bounds.max_control_bytes, 65536)
         # Leave space for encoded/decoded inputs, two output rows, the codec,
         # hash dictionaries and the caller's transport batch at the same time.
-        self.index_limit = max(1, _resident_limit(services) // 8)
-        self.row_window = max(1, _resident_limit(services) // 8)
+        self.index_limit = max(1, _resident_limit(services) // 16)
+        self.row_window = max(1, _resident_limit(services) // 4)
 
     def append(self, record, fields):
         _check_stop(self.services)
@@ -175,7 +176,7 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services):
     if bounds.max_open_files < 2:
         raise _err('RESOURCE_INFEASIBLE', 'Join needs one scratch file and its owner lease')
     with services.store.scratch(max_bytes=bounds.max_spill_bytes,
-            max_io_bytes=max(1, _resident_limit(services) // 8)) as file:
+            max_io_bytes=max(1, _resident_limit(services) // 4)) as file:
         spool = _Spool(file, services)
         lparts, rparts = [_Chain() for _ in range(_FANOUT)], [_Chain() for _ in range(_FANOUT)]
         for records, keys, chains in ((left, left_keys, lparts), (right, right_keys, rparts)):

@@ -75,7 +75,8 @@ def _occurrence(spec: KernelSpec) -> str:
 def _seed(spec: KernelSpec, services: RuntimeServices) -> int:
     value = spec.configuration.get("seed")
     if value is None:
-        value = services.constants.get("random_seed")
+        per_node = services.constants.get('constants', {}).get(_occurrence(spec), {})
+        value = per_node.get('seed', per_node.get('random_seed', services.constants.get('random_seed')))
     if isinstance(value, bool) or not isinstance(value, int):
         raise _err("INVALID_CONTRACT", "a resolved integer seed is required")
     return value
@@ -116,10 +117,9 @@ def _group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
     return _canonical([_key_token(row[field]) for field in fields])
 
 
-def _dumps_row(row: Mapping[str, Any]) -> bytes:
+def _dumps_row(row: Mapping[str, Any], *, max_bytes: int) -> bytes:
     from ..exchange.dataflow_bridge import _encode_payload
-    from ..recovery_contract import MAX_DOCUMENT_BYTES
-    return _encode_payload(row, max_bytes=MAX_DOCUMENT_BYTES)
+    return _encode_payload(row, max_bytes=max_bytes)
 
 
 def _loads_row(data: bytes) -> dict[str, Any]:
@@ -127,8 +127,8 @@ def _loads_row(data: bytes) -> dict[str, Any]:
     return _decode_payload(data, max_bytes=max(1, len(data)))
 
 
-def _row_bytes(row: Mapping[str, Any]) -> int:
-    return len(_dumps_row(row))
+def _row_bytes(row: Mapping[str, Any], *, max_bytes: int) -> int:
+    return len(_dumps_row(row, max_bytes=max_bytes))
 
 
 def _input_row_bytes(record: Record) -> int:

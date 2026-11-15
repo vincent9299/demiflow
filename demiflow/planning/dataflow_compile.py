@@ -679,10 +679,15 @@ class _Capture:
             reducer = replace(reducer, runtime_contract=source.reducer_contract)
         code_identity = _callable_code_identity(reducer) if reducer is not None else {}
         inputs = tuple(_input_port(port, kind) for _, port in child_indices)
+        profile = _default_profile(None, bounds=self.bounds)
+        if kind in ('join', 'exclude_keys'):
+            requests = dict(profile.requests)
+            requests['memory_bytes'] = self.bounds.max_batch_bytes + 6 * self.bounds.max_row_bytes
+            profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=inputs,
             state="none", effect="pure", resource_role="cpu",
-            profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
+            profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         if isinstance(source, KeyedSource) and source.kind == "exclude_keys":

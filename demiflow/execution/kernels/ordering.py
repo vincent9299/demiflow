@@ -116,7 +116,9 @@ def _field_token(value: Any, descending: bool) -> tuple[int, bytes]:
 
 
 def _provenance(record: Record) -> tuple[bytes, int, str]:
-    return (_canonical(thaw_record_value(record.source_position)).encode("utf-8"), record.sequence, record.record_id)
+    # Source offsets are numbers, not JSON text (2 must precede 10). The same
+    # closed typed token order handles nested expansion/source coordinates.
+    return (_value_token(thaw_record_value(record.source_position)), record.sequence, record.record_id)
 
 
 def _descending_flags(spec: KernelSpec, count: int) -> tuple[bool, ...]:
