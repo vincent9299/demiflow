@@ -80,3 +80,22 @@ def test_unknown_growth_is_never_retried_as_an_exact_reservation(tmp_path, monke
             assert scratch.path.stat().st_size == 0
         assert attempted == [128 << 10]
         assert consumed(run) == 0  # Explicit physical removal precedes release.
+
+
+def test_large_disk_grant_amortizes_rpc_without_uncharged_headroom(tmp_path, monkeypatch):
+    with store_fixture(tmp_path, ceiling=512 << 20) as (run, store, port):
+        original, grows = port.artifact, []
+        def observed(command):
+            if command.kind == 'grow_staging':
+                grows.append(command.size_bytes)
+            return original(command)
+        monkeypatch.setattr(port, 'artifact', observed)
+        with store.scratch(max_bytes=48 << 20, max_io_bytes=65536) as scratch:
+            for _ in range(512):
+                scratch.append(b'a' * 65536)
+                assert scratch.size <= consumed(run) == scratch.reserved
+                assert scratch.reserved - scratch.size <= 8 << 20
+            assert scratch.size == 32 << 20
+            assert len(grows) <= 10
+            assert scratch.read_at(scratch.size - 65536, 65536) == b'a' * 65536
+        assert consumed(run) == 0

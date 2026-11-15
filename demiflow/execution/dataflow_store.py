@@ -137,7 +137,8 @@ class RunArtifactStore:
                         # Do not reserve an entire source/spill ceiling up front.
                         from .dataflow_staging_growth import grow_staging
                         reserved = grow_staging(self._journal, operation_id,
-                            reserved=reserved, required=size, maximum=max_bytes)
+                            reserved=reserved, required=size, maximum=max_bytes,
+                            spill_budget=self._bounds.max_spill_bytes)
                     view = memoryview(chunk)
                     for offset in range(0, len(view), _MAX_CHUNK_BYTES):
                         part = view[offset:offset + _MAX_CHUNK_BYTES]

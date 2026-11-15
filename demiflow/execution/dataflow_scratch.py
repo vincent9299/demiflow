@@ -78,7 +78,8 @@ class KernelScratch:
         if end > self.reserved:
             from .dataflow_staging_growth import grow_staging
             self.reserved = grow_staging(self.store._journal, self.operation,
-                reserved=self.reserved, required=end, maximum=self.maximum)
+                reserved=self.reserved, required=end, maximum=self.maximum,
+                spill_budget=self.store._bounds.max_spill_bytes)
         view = memoryview(raw)
         written = 0
         while written < len(view):

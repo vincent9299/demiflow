@@ -5,11 +5,14 @@ from .recovery_contract import identity
 from .run_journal import ExecutionBudgetExceeded
 
 
-def grow_staging(journal, operation, *, reserved, required, maximum):
+def grow_staging(journal, operation, *, reserved, required, maximum, spill_budget=None):
     # Disk reservation only: this does not allocate a resident byte buffer.
-    # Start small and grow geometrically, then in at most 1 MiB increments.
+    # Start small and grow geometrically. Large disk grants amortize control
+    # round-trips in at most 8 MiB steps, also capped at 1/64 of the task grant
+    # (with the original 1 MiB step retained for small grants).
     # Every unused byte is charged to the SAME original journal until settlement.
-    extent = min(maximum, max(required, reserved + min(max(reserved, 65536), 1 << 20)))
+    step = 1 << 20 if spill_budget is None else max(1 << 20, min(8 << 20, spill_budget // 64))
+    extent = min(maximum, max(required, reserved + min(max(reserved, 65536), step)))
 
     def admit(size):
         reply = journal.artifact(ArtifactCommand(identity([operation, 'grow', size]),
