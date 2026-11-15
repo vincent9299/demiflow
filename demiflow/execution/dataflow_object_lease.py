@@ -74,10 +74,11 @@ def inode(path, fd):
 
 
 class ObjectLease:
-    def __init__(self, root, *, create=False, exclusive=False, expected=None):
+    def __init__(self, root, *, create=False, exclusive=False, expected=None, on_close=None):
         from .dataflow_store import _no_symlink, _sync_directory
         self.path = Path(root) / NAME
         self.fd = None
+        self._on_close = on_close
         _no_symlink(self.path)
         flags = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC
         if create:
@@ -98,7 +99,12 @@ class ObjectLease:
     def close(self):
         if self.fd is not None:
             fd, self.fd = self.fd, None
-            os.close(fd)
+            try:
+                os.close(fd)
+            finally:
+                if self._on_close is not None:
+                    callback,self._on_close = self._on_close,None
+                    callback()
 
     def __del__(self):
         self.close()

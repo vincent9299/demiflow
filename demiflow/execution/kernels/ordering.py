@@ -317,15 +317,23 @@ def merge_sort_runs(
     """K010: finite fan-in multi-pass merge; releases only owned intermediates."""
     if not runs:
         return
-    if len(runs) > 1 and services.bounds.max_open_files < 2:
-        raise _err("BUDGET_EXCEEDED", "sort merge requires at least two input file slots")
-    fan_in = min(_MERGE_FAN_IN, services.bounds.max_open_files)
+    from ..dataflow_store import RunArtifactStore
+    if isinstance(services.store, RunArtifactStore):
+        store = services.store
+        available = min(services.bounds.max_open_files,store._bounds.max_open_files) - store.open_file_slots
+        final_fan_in = min(_MERGE_FAN_IN,max(0,available // store.READ_FILES))
+        fan_in = min(_MERGE_FAN_IN,max(0,(available - store.PUT_FILES) // store.READ_FILES))
+    else:
+        # In-memory contract stores have no physical files or lease overhead.
+        final_fan_in = fan_in = min(_MERGE_FAN_IN,services.bounds.max_open_files)
+    if final_fan_in < 1 or (len(runs)>1 and final_fan_in<2) or (len(runs)>final_fan_in and fan_in<2):
+        raise _err("BUDGET_EXCEEDED", "sort merge requires at least two input file slots plus owned leases/output")
     max_spill = services.bounds.max_spill_bytes
     owned: list[ArtifactRef] = []
     current = tuple(runs)
     spill_total = 0
     try:
-        while len(current) > fan_in:
+        while len(current) > final_fan_in:
             merged: list[ArtifactRef] = []
             for start in range(0, len(current), fan_in):
                 _check_stop(services)

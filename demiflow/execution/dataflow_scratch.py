@@ -26,10 +26,25 @@ class KernelScratch:
         self.fd = None
         self.lease = None
         self.begun = False
+        self._file_slots = None
         self.operation = store._staging_operation()
         self.owner, self.path = staging_paths(store.root, store.store_id, self.operation)
 
     def __enter__(self):
+        self._file_slots = self.store.file_slots(self.store.SCRATCH_FILES)
+        self._file_slots.__enter__()
+        try:
+            return self._open()
+        except BaseException:
+            self._release_file_slots()
+            raise
+
+    def _release_file_slots(self):
+        slots,self._file_slots = self._file_slots,None
+        if slots is not None:
+            slots.__exit__(None,None,None)
+
+    def _open(self):
         self.lease = StagingLease.create(self.owner)
         try:
             self.reserved = min(65536, self.maximum)
@@ -110,6 +125,7 @@ class KernelScratch:
             if self.lease is not None:
                 self.lease.close()
                 self.lease = None
+            self._release_file_slots()
 
     def __exit__(self, kind, value, traceback):
         try:
@@ -126,6 +142,7 @@ class KernelScratch:
             if self.lease is not None:
                 self.lease.close()
                 self.lease = None
+            self._release_file_slots()
 
 
 class ScratchStream:

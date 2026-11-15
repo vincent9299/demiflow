@@ -613,9 +613,7 @@ class DriverJournalService:
                 run._native_prompt_journal = journal
             journal.stores.update(getattr(self._action, 'object_sinks', {}))
             if getattr(journal, '_dataflow_object_lease', None) is None:
-                from .dataflow_object_lease import ObjectLease
-                journal._dataflow_object_lease = ObjectLease(self._store.root,
-                    expected=self._store._lease_identity)
+                journal._dataflow_object_lease = self._store.native_owner_lease()
             return journal
 
     def _native_request(self, command: NativeJournalCommand):

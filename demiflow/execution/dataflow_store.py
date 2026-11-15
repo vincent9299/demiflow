@@ -11,6 +11,9 @@ import hashlib
 import os
 import secrets
 import stat
+import threading
+import weakref
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -25,6 +28,30 @@ ARTIFACT_STAGING_BUDGET = "artifact_staging_bytes"
 _MAX_CHUNK_BYTES = 1 << 20
 _OBJECTS = "objects"
 _STAGING = "staging"
+
+
+class _OpenFiles:
+    """Live handles of this physical store, shared by its local view objects."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.used = 0
+        self.limits = {}
+
+
+_FILE_VIEWS = weakref.WeakValueDictionary()
+_FILE_VIEWS_LOCK = threading.Lock()
+
+
+def _open_files(root):
+    # Weak values expire after all views and outstanding leases are gone; no
+    # run registry, durable reservation or second resource allocator is created.
+    key = (os.getpid(), str(Path(root).resolve()))
+    with _FILE_VIEWS_LOCK:
+        state = _FILE_VIEWS.get(key)
+        if state is None:
+            state = _OpenFiles()
+            _FILE_VIEWS[key] = state
+        return state
 
 
 def _no_symlink(path: Path) -> None:
@@ -47,6 +74,26 @@ def _sync_directory(path):
 
 class RunArtifactStore:
     def __init__(self, *, root: Path, store_id: str, journal: "ArtifactAuthorityPort", bounds: "Bounds", readonly: bool = False):
+        self._bounds = bounds
+        self._file_state = _open_files(root)
+        self._writer_slot = False
+        self._writer_lease = None
+        self._writer_closed = False
+        # Initial writer lease plus header/directory fsync; readonly bootstrap
+        # only authenticates the header. Transfer the surviving writer slot.
+        initial_slots = 2 if not readonly and journal is not None else 1
+        initial_limit = self._acquire_files(initial_slots)
+        try:
+            self._initialize(root=root, store_id=store_id, journal=journal,
+                             bounds=bounds, readonly=readonly)
+        except BaseException:
+            _release_files(self._file_state,initial_slots,initial_limit)
+            raise
+        self._writer_slot = self._writer_lease is not None
+        self._writer_limit = initial_limit
+        _release_files(self._file_state,initial_slots - int(self._writer_slot),initial_limit,final=not self._writer_slot)
+
+    def _initialize(self, *, root, store_id, journal, bounds, readonly):
         identifier(store_id)
         root = Path(root)
         if not root.is_absolute():
@@ -129,6 +176,54 @@ class RunArtifactStore:
             self.close()
             raise
 
+    # Conservative simultaneous artifact FDs, including physical lease and
+    # native-journal metadata access while staging is open. Not process RLIMIT:
+    # resource-provider sockets/SQLite connections retain their original owner.
+    READ_FILES = 2
+    PUT_FILES = 5
+    SCRATCH_FILES = 3
+
+    @property
+    def open_file_slots(self):
+        with self._file_state.lock:
+            return self._file_state.used
+
+    def require_file_slots(self, count, *, maximum=None):
+        maximum = self._bounds.max_open_files if maximum is None else min(maximum,self._bounds.max_open_files)
+        with self._file_state.lock:
+            maximum = min(maximum,*self._file_state.limits) if self._file_state.limits else maximum
+            if self._file_state.used + count > maximum:
+                raise DataflowError('BUDGET_EXCEEDED', 'Artifact open file budget is insufficient')
+
+    def _acquire_files(self, count):
+        with self._file_state.lock:
+            limit = self._bounds.max_open_files
+            maximum = min(limit,*self._file_state.limits) if self._file_state.limits else limit
+            if self._file_state.used + count > maximum:
+                raise DataflowError('BUDGET_EXCEEDED', 'Artifact open file budget is insufficient')
+            self._file_state.used += count
+            self._file_state.limits[limit] = self._file_state.limits.get(limit,0)+1
+            return limit
+
+    @contextmanager
+    def file_slots(self, count):
+        limit = self._acquire_files(count)
+        try:
+            yield
+        finally:
+            _release_files(self._file_state,count,limit)
+
+    def native_owner_lease(self):
+        from .dataflow_object_lease import ObjectLease
+        limit = self._acquire_files(1)
+        state = self._file_state
+        try:
+            return ObjectLease(self.root,expected=self._lease_identity,
+                               on_close=lambda: _release_files(state,1,limit))
+        except BaseException:
+            _release_files(state,1,limit)
+            raise
+
     @property
     def root(self) -> Path:
         return self._root
@@ -157,10 +252,18 @@ class RunArtifactStore:
         from .dataflow_object_lease import shared_access
         if self._writer_closed:
             raise DataflowError('FENCED', 'Artifact writer scope is closed')
-        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+        self.require_file_slots(self.PUT_FILES)
+        with self.file_slots(1), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             return self._put(chunks, max_bytes=max_bytes, media_type=media_type)
 
     def _put(self, chunks, *, max_bytes, media_type):
+        # Owner plus fsync/journal inspection headroom. The data FD is counted
+        # only while open, so same-thread settlement inspection is not double
+        # charged against a closed staging data descriptor.
+        with self.file_slots(2):
+            return self._put_owned(chunks,max_bytes=max_bytes,media_type=media_type)
+
+    def _put_owned(self, chunks, *, max_bytes, media_type):
         if self._readonly:
             raise DataflowError("FENCED", "historical artifact store is read-only")
         if type(max_bytes) is not int or max_bytes <= 0:
@@ -189,29 +292,30 @@ class RunArtifactStore:
                 lease.remove()
                 raise
             begun = True
-            descriptor = _create_staging(pending)
-            staging = pending
-            with os.fdopen(descriptor, "wb") as stream:
-                for chunk in chunks:
-                    if type(chunk) is not bytes:
-                        raise DataflowError("INVALID_CONTRACT", "artifact chunks must be bytes")
-                    size += len(chunk)
-                    if size > max_bytes:
-                        raise DataflowError("BUDGET_EXCEEDED", "artifact exceeds max_bytes")
-                    if size > reserved:
-                        # Admission precedes every write beyond the owned extent.
-                        # Do not reserve an entire source/spill ceiling up front.
-                        from .dataflow_staging_growth import grow_staging
-                        reserved = grow_staging(self._journal, operation_id,
-                            reserved=reserved, required=size, maximum=max_bytes,
-                            spill_budget=self._bounds.max_spill_bytes)
-                    view = memoryview(chunk)
-                    for offset in range(0, len(view), _MAX_CHUNK_BYTES):
-                        part = view[offset:offset + _MAX_CHUNK_BYTES]
-                        digest.update(part)
-                        stream.write(part)
-                stream.flush()
-                os.fsync(stream.fileno())
+            with self.file_slots(1):
+                descriptor = _create_staging(pending)
+                staging = pending
+                with os.fdopen(descriptor, "wb") as stream:
+                    for chunk in chunks:
+                        if type(chunk) is not bytes:
+                            raise DataflowError("INVALID_CONTRACT", "artifact chunks must be bytes")
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise DataflowError("BUDGET_EXCEEDED", "artifact exceeds max_bytes")
+                        if size > reserved:
+                            # Admission precedes every write beyond the owned extent.
+                            # Do not reserve an entire source/spill ceiling up front.
+                            from .dataflow_staging_growth import grow_staging
+                            reserved = grow_staging(self._journal, operation_id,
+                                reserved=reserved, required=size, maximum=max_bytes,
+                                spill_budget=self._bounds.max_spill_bytes)
+                        view = memoryview(chunk)
+                        for offset in range(0, len(view), _MAX_CHUNK_BYTES):
+                            part = view[offset:offset + _MAX_CHUNK_BYTES]
+                            digest.update(part)
+                            stream.write(part)
+                    stream.flush()
+                    os.fsync(stream.fileno())
             hex_digest = digest.hexdigest()
             ref = ArtifactRef(digest=hex_digest, size_bytes=size, store_id=self.store_id,
                               key=hex_digest, media_type=media_type)
@@ -263,7 +367,7 @@ class RunArtifactStore:
     def read(self, ref: ArtifactRef, *, max_bytes: int) -> Iterator[bytes]:
         from .dataflow_object_lease import shared_access
         # This lease covers the generator's actual FD lifetime, including yield.
-        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+        with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             yield from self._read(ref, max_bytes=max_bytes)
 
     def _read(self, ref, *, max_bytes):
@@ -301,7 +405,7 @@ class RunArtifactStore:
 
     def inspect(self, ref: ArtifactRef) -> bool:
         from .dataflow_object_lease import shared_access
-        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+        with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             return self._inspect(ref)
 
     def _inspect(self, ref):
@@ -320,7 +424,7 @@ class RunArtifactStore:
 
     def retain(self, ref: ArtifactRef, *, owner: str) -> None:
         from .dataflow_object_lease import shared_access
-        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+        with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
             if not self._inspect(ref):
                 raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
             self._retain(ref, owner=owner)
@@ -357,12 +461,27 @@ class RunArtifactStore:
         self._writer_closed = True
         lease, self._writer_lease = self._writer_lease, None
         if lease is not None:
-            lease.close()
+            try:
+                lease.close()
+            finally:
+                if self._writer_slot:
+                    self._writer_slot = False
+                    _release_files(self._file_state,1,self._writer_limit)
 
     def __del__(self):
-        lease = getattr(self, '_writer_lease', None)
-        if lease is not None:
-            lease.close()
+        if getattr(self, '_writer_lease', None) is not None:
+            self.close()
+
+
+def _release_files(state, count, limit, *, final=True):
+    with state.lock:
+        state.used -= count
+        if final:
+            state.limits[limit] -= 1
+            if not state.limits[limit]:
+                del state.limits[limit]
+        if state.used < 0:
+            raise RuntimeError('Artifact file window released twice')
 
 
 def _pin_identity(ref: ArtifactRef, owner: str) -> str:

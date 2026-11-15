@@ -175,6 +175,12 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services):
     bounds = services.bounds
     if bounds.max_open_files < 2:
         raise _err('RESOURCE_INFEASIBLE', 'Join needs one scratch file and its owner lease')
+    from ..dataflow_store import RunArtifactStore
+    if isinstance(services.store,RunArtifactStore):
+        # One scratch extent, a streaming input record and a possible external
+        # payload read coexist. Preserve the original same-store file authority.
+        services.store.require_file_slots(services.store.SCRATCH_FILES + 2*services.store.READ_FILES,
+                                          maximum=bounds.max_open_files)
     with services.store.scratch(max_bytes=bounds.max_spill_bytes,
             max_io_bytes=max(1, _resident_limit(services) // 4)) as file:
         spool = _Spool(file, services)
