@@ -117,6 +117,7 @@ def scene(browser,tmp_path,monkeypatch,*,count=3,reserved=False):
             principal='fixture-reader';features=dict(case_media=True,annotation_media_basis=True,case_output_groups=True,case_review_filter=True)
             def __init__(self,server,config):self.server=server
             def ceiling(self):return dict(analysis_write=True,case_annotate=True,analysis_execute=False)
+            def execution_profile(self):return None # Metadata-only double has no admitted runtime.
             def assert_ready(self):return True
             def close(self):pass
             def cancel_output(self,key):pass
