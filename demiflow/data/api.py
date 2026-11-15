@@ -72,7 +72,8 @@ class DataAPI:
         if not isinstance(items, list) or isinstance(items, Iterator):
             raise TypeError("from_items requires a materialized list")
         bounded_items = list(items)
-        handle = self._executor.from_items(bounded_items)
+        from ..execution.dataflow_inputs import build_input_handle
+        handle = build_input_handle(bounded_items, format="items")
         return MaterializedDataset(
             MaterializedSource(handle, len(bounded_items)), LogicalPlan(), self._executor,
         )
@@ -105,8 +106,6 @@ class DataAPI:
         """
         from pathlib import Path
         from .records import FileRecords
-        if self._executor.__class__.__module__ != 'demiflow.execution.executors.local':
-            raise NotImplementedError('read_records currently supports local execution')
         paths=[str(paths)] if isinstance(paths,(str,Path)) else [str(p) for p in paths]
         if not paths:raise ValueError('read_records requires paths')
         if report_path is not None and len(paths)!=1:raise ValueError('report_path requires exactly one file')
@@ -127,21 +126,24 @@ class DataAPI:
 
     def from_arrow(self, tables: Any) -> MaterializedDataset:
         """Create a current-run materialized Dataset from bounded Arrow table data."""
-        handle = self._executor.from_arrow(tables)
+        from ..execution.dataflow_inputs import build_input_handle
+        handle = build_input_handle(tables, format="arrow")
         return MaterializedDataset(
             MaterializedSource(handle), LogicalPlan(), self._executor,
         )
 
     def from_numpy(self, arrays: Any) -> MaterializedDataset:
         """Create a current-run materialized Dataset from bounded NumPy array data."""
-        handle = self._executor.from_numpy(arrays)
+        from ..execution.dataflow_inputs import build_input_handle
+        handle = build_input_handle(arrays, format="numpy")
         return MaterializedDataset(
             MaterializedSource(handle), LogicalPlan(), self._executor,
         )
 
     def from_pandas(self, frames: Any) -> MaterializedDataset:
         """Create a current-run materialized Dataset from bounded pandas frame data."""
-        handle = self._executor.from_pandas(frames)
+        from ..execution.dataflow_inputs import build_input_handle
+        handle = build_input_handle(frames, format="pandas")
         return MaterializedDataset(
             MaterializedSource(handle), LogicalPlan(), self._executor,
         )

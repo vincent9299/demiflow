@@ -250,9 +250,9 @@ def join_node_observations(bridge, observations, *, action_id, attempt, plan_id=
     if plan_id is not None:
         if observations.get('plan_id') != plan_id:
             raise ForgeError('Observation page lacks the sealed plan scope; cannot verify this-run association', code='conflict')
-        if dag_id is not None and observations.get('dag_id') not in (None, dag_id):
+        if dag_id is not None and observations.get('dag_id') != dag_id:
             raise ForgeError('Observation page dag scope differs from the sealed plan', code='conflict')
-        if plan_revision is not None and observations.get('plan_revision') not in (None, plan_revision):
+        if plan_revision is not None and observations.get('plan_revision') != plan_revision:
             raise ForgeError('Observation page plan revision differs from the sealed plan', code='conflict')
     rows = observations.get('observations')
     if type(rows) is not list:
@@ -269,7 +269,9 @@ def join_node_observations(bridge, observations, *, action_id, attempt, plan_id=
         if plan_id is not None:
             # v3 scope: a row must explicitly carry the verified plan; a plan-less
             # legacy row is never promoted by defaulting it to the current plan.
-            if row.get('plan_id') != plan_id:
+            if (row.get('plan_id') != plan_id
+                    or dag_id is not None and row.get('dag_id') != dag_id
+                    or plan_revision is not None and row.get('plan_revision') != plan_revision):
                 continue
             row_plan = plan_id
         else:
@@ -283,6 +285,8 @@ def join_node_observations(bridge, observations, *, action_id, attempt, plan_id=
     for entry in bridge['entries']:
         key = (entry.get('report_node_id'), entry.get('report_occurrence'), page_plan)
         row = index.get(key)
+        if plan_id is not None and row is not None and row.get('occurrence_id') != entry.get('occurrence_id'):
+            row = None
         joined.append(dict(entry, observation=row, availability='observed' if row is not None else 'not_in_page'))
     return tuple(joined)
 
@@ -352,6 +356,8 @@ def _sealed_entry(result, *, bridge=None):
         entry['recovery_restriction'] = result['recovery_restriction']
     if bridge is not None and bridge.get('available'):
         entry['node_map'] = _bridge_node_map(bridge['bridge']['entries'])
+        if result.get('version') == 'v3':
+            entry['node_map'].update({e['occurrence_id']: e['report_node_id'] for e in bridge['bridge']['entries']})
         entry['identity_bridge'] = bridge
     else:
         entry['identity_bridge'] = bridge if bridge is not None else _bridge_unavailable(NO_BRIDGE, NO_BRIDGE_DETAIL)

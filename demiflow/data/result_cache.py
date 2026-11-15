@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import inspect
+import functools
 import json
 import math
 from pathlib import Path
@@ -24,6 +25,14 @@ def selected(predicate, value):
     if type(result) is not bool:
         raise TypeError('cache_when must return a boolean synchronously')
     return result
+
+
+def _state_owner(value):
+    while isinstance(value, functools.partial):
+        if vars(value):
+            raise TypeError('Cached partial with mutable wrapper attributes needs an explicit adapter')
+        value = value.func
+    return value.__self__ if inspect.ismethod(value) else value
 
 
 class CacheCall:
@@ -60,6 +69,81 @@ class CacheCall:
         for name, default in (('label', 'map_cached'), ('concurrency', 1), ('queue_depth', 1), ('catch', ())):
             setattr(self, name, getattr(fn, name, default))
         self.hard_timeout = getattr(fn, 'hard_timeout', None)
+
+    async def _hook(self, name):
+        hook = getattr(_state_owner(self.fn), name, None)
+        if hook is not None:
+            result = hook()
+            if inspect.isawaitable(result):
+                await result
+
+    async def astart(self):
+        await self._hook('astart')
+
+    async def astop(self):
+        await self._hook('astop')
+
+    async def aclose(self):
+        await self._hook('aclose')
+
+    def validate_runtime_state(self, concurrency=1):
+        from ..execution.operator_policy import classify_operator_state
+        from ..execution.recovery_contract import RecoveryContractError
+        for owner in (self.fn, self.when, self.cache_when):
+            if owner is None:
+                continue
+            owner = _state_owner(owner)
+            from ..operator_llm.runtime import PromptActor
+            if type(owner) is PromptActor:
+                continue  # Explicitly rebound to the native journal in the worker.
+            policy = classify_operator_state(owner, phase='instance')
+            if policy.mode == 'unsupported':
+                raise RecoveryContractError('Cached callable requires snapshot_state/restore_state: ' + str(policy.reason))
+            if policy.mode == 'auto_json' and vars(owner) and concurrency != 1:
+                raise RecoveryContractError('auto_json state requires concurrency 1')
+
+    async def snapshot_state(self):
+        from ..execution.operator_policy import classify_operator_state, snapshot_auto_state
+        from ..operator_llm.runtime import PromptActor
+        result = {}
+        self.validate_runtime_state()
+        for name in ('fn', 'when', 'cache_when'):
+            owner = getattr(self, name)
+            owner = _state_owner(owner)
+            if owner is None or type(owner) is PromptActor:
+                result[name] = None
+                continue
+            policy = classify_operator_state(owner, phase='instance')
+            if policy.mode == 'hooks':
+                state = owner.snapshot_state()
+                if inspect.isawaitable(state):
+                    state = await state
+                result[name] = {'mode': 'hooks', 'value': state}
+            elif policy.mode == 'auto_json':
+                result[name] = {'mode': 'auto_json', 'value': snapshot_auto_state(owner,
+                    max_bytes=self.max_input_bytes)}
+            else:
+                result[name] = None
+        return result
+
+    async def restore_state(self, state):
+        from ..execution.operator_policy import restore_auto_state
+        from ..execution.recovery_contract import RecoveryContractError
+        if set(state) != {'fn', 'when', 'cache_when'}:
+            raise RecoveryContractError('Cached callable state ownership differs')
+        for name, image in state.items():
+            if image is None:
+                continue
+            owner = getattr(self, name)
+            owner = _state_owner(owner)
+            if image['mode'] == 'auto_json':
+                restore_auto_state(owner, image['value'], max_bytes=self.max_input_bytes)
+            elif image['mode'] == 'hooks':
+                restored = owner.restore_state(image['value'])
+                if inspect.isawaitable(restored):
+                    await restored
+            else:
+                raise RecoveryContractError('Unknown cached callable state mode')
 
     def prepare(self, row):
         value = row if self.inputs is None else {arg: row[field] for arg, field in self.inputs.items()}
@@ -185,19 +269,3 @@ class CachedMap(CacheCall):
             except Exception as exc:
                 await self._io(self.error, key, exc)
                 raise
-
-    async def _hook(self, name):
-        hook = getattr(self.fn, name, None)
-        if hook is not None:
-            value = hook()
-            if inspect.isawaitable(value):
-                await value
-
-    async def astart(self):
-        await self._hook('astart')
-
-    async def astop(self):
-        await self._hook('astop')
-
-    async def aclose(self):
-        await self._hook('aclose')

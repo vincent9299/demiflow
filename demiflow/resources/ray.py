@@ -177,10 +177,12 @@ class RayResourceProvider:
             num_gpus = sum(item["count"] for item in effective["accelerators"])
         name = self._actor_name(allocation_id)
         host = self._control.host_class()
+        placement_options = (self._control.placement_options(allocation_id)
+                             if hasattr(self._control, 'placement_options') else {})
         try:
             actor = host.options(
                 name=name, get_if_exists=True, num_cpus=num_cpus,
-                memory=effective["memory_bytes"], num_gpus=num_gpus,
+                memory=effective["memory_bytes"], num_gpus=num_gpus, **placement_options,
             ).remote(launch_spec, expected_hash, boot_id)
         except Exception as exc:
             self._release_devices(allocation_id, "launch-failed:" + allocation_id)
@@ -256,17 +258,23 @@ class RayResourceProvider:
                     "evidence_ref": "never-created:" + allocation_id, "observed_at_ms": _now_ms()}
         actor, identity, _ = entry
         ray.kill(actor, no_restart=True)
-        # ray.kill having been called is not cleanup confirmation: observe death.
-        try:
-            ray.get(actor.identity.remote(), timeout=max(0.001, terminate_deadline_ms / 1000.0))
-        except RayActorError:
-            self._actors.pop(allocation_id, None)
-            self._control.close(allocation_id)
-            self._release_devices(allocation_id, "ray-actor-dead:" + name)
-            return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
-                    "evidence_ref": "ray-actor-dead:" + name, "observed_at_ms": _now_ms()}
-        except GetTimeoutError:
-            return {"allocation_id": allocation_id, "cleanup": "UNCONFIRMED",
-                    "evidence_ref": "ray-actor-unconfirmed:" + name, "observed_at_ms": _now_ms()}
+        # Kill is asynchronous. A queued identity request may still finish while
+        # the actor is exiting; keep observing within this release's deadline.
+        # Returning immediately on that success strands the native cleanup intent
+        # until its claim lease expires (the same length as the caller deadline).
+        deadline = time.monotonic() + terminate_deadline_ms / 1000.0
+        while time.monotonic() < deadline:
+            try:
+                ray.get(actor.identity.remote(),
+                        timeout=max(0.001, deadline - time.monotonic()))
+            except RayActorError:
+                self._actors.pop(allocation_id, None)
+                self._control.close(allocation_id)
+                self._release_devices(allocation_id, "ray-actor-dead:" + name)
+                return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
+                        "evidence_ref": "ray-actor-dead:" + name, "observed_at_ms": _now_ms()}
+            except GetTimeoutError:
+                break
+            time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
         return {"allocation_id": allocation_id, "cleanup": "UNCONFIRMED",
-                "evidence_ref": "ray-actor-alive:" + name, "observed_at_ms": _now_ms()}
+                "evidence_ref": "ray-actor-unconfirmed:" + name, "observed_at_ms": _now_ms()}

@@ -272,10 +272,14 @@ class LocalResourceProvider:
         process = self._spawned.get(allocation_id)
         found = self.unit.inspect(scope_id, allocation_id, process=process)
         if found["phase"] == "REQUESTED":
-            self.pool.release(allocation_id, {
-                "confirmed": True, "identity": None,
-                "evidence_ref": "never-spawned:" + allocation_id,
-            })
+            # A capacity-pending request may never have reserved anything.
+            # Unit absence proves no host existed; only an existing unbound
+            # reservation needs release. A bound record still fails closed.
+            if self.pool.reservation_view(allocation_id) is not None:
+                self.pool.release(allocation_id, {
+                    "confirmed": True, "identity": None,
+                    "evidence_ref": "never-spawned:" + allocation_id,
+                })
             self._release_devices(allocation_id, "never-spawned:" + allocation_id)
             return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
                     "evidence_ref": "never-spawned:" + allocation_id, "observed_at_ms": _now_ms()}

@@ -38,7 +38,7 @@ from .run_journal import RunJournal
 # Original sealed-plan facts schema for the native v1/v2 chain/graph generation.
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
 # v3 native seal marker bound by seal_dataflow through the same journal slot family.
-DATAFLOW_SEALED_SCHEMA = "demiflow.dataflow_sealed.v3"
+from .dataflow_seal import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA
 # The only listed native checkpoint format translated into an in-memory image.
 CHECKPOINT_MANIFEST_SCHEMA = "demiflow.checkpoint_manifest.v1"
 PLAN_VIEW_SCHEMA = "demiflow.plan_view.v3"
@@ -49,7 +49,7 @@ _MAX_SEALED_PLAN_BYTES = 4 * 1024 ** 2
 _MANIFEST_KEYS = frozenset({"schema", "run_id", "action_id", "dag_id", "plan_id",
                             "logical_ref", "physical_ref", "programs", "code_pin_ref",
                             "identity_bridge_ref", "source_refs", "constants_ref",
-                            "sealed_at"})
+                            "plan_revision", "graph_digest", "physical_digest"})
 _SEALED_REF_KEYS = ("logical_ref", "physical_ref", "code_pin_ref",
                     "identity_bridge_ref", "constants_ref")
 _CODE_PIN_MEDIA = "application/x-demiflow-code-pin"
@@ -194,6 +194,14 @@ def _load_v3(journal, directory, action_id, marker):
                              programs=programs, code_pin_ref=refs["code_pin_ref"],
                              identity_bridge_ref=refs["identity_bridge_ref"],
                              source_refs=source_refs, constants_ref=refs["constants_ref"])
+    from .sealed_plans import _v3_read_store
+    from .dataflow_seal import load_sealed_dataflow
+    store, bounds = _v3_read_store(directory, store_id=sealed.physical_ref.store_id)
+    graph, physical, _ = load_sealed_dataflow(sealed, action_id=action_id, store=store, bounds=bounds)
+    if (graph.dag_id != marker["dag_id"] or physical.plan_id != marker["plan_id"]
+            or graph.dag_id != marker["graph_digest"] or physical.plan_id != marker["physical_digest"]
+            or physical.plan_revision != marker["plan_revision"]):
+        raise _err("CORRUPT_ARTIFACT", "sealed facts differ from original graph/physical artifacts")
     return HistoricalBinding(schema_version=schema, original_plan_ref=sealed.physical_ref,
                              original_code_pin_ref=sealed.code_pin_ref, compatible=True,
                              reason=None, restore_image=None)
@@ -491,9 +499,27 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
         reasons.append("original sealed plan unreadable: " + exc.code)
     if plan is not None:
         if binding.schema_version == DATAFLOW_SEALED_SCHEMA:
-            recovery = plan.get("recovery", "attempt_only")
-            domains = sorted({s.get("required_domain") for s in plan.get("splits", [])
-                              if type(s.get("required_domain")) is str})
+            from .contracts.dataflow_codec import decode_wire, compute_physical_digest
+            try:
+                from .sealed_plans import _v3_read_bounds
+                physical = decode_wire(json.dumps(plan, separators=(",", ":")).encode(),
+                                       type_name="PhysicalDataflow", bounds=_v3_read_bounds())
+                if physical.plan_id != compute_physical_digest(physical):
+                    reasons.append("original sealed plan identity differs from history binding")
+                recovery = physical.recovery
+                domains = sorted({s.required_domain for s in physical.splits})
+                profiles = list(stage.profile for stage in physical.stages)
+            except DataflowError as exc:
+                reasons.append("original physical plan invalid: " + exc.code)
+            try:
+                pin = _store_read_json(store, binding.original_code_pin_ref,
+                                      max_bytes=_MAX_SEALED_PLAN_BYTES)
+                if pin.get("platform_revision") != current_runtime:
+                    reasons.append("original platform code differs from the current runtime")
+            except DataflowError as exc:
+                reasons.append("original platform code pin unreadable: " + exc.code)
+            if binding.restore_image is None:
+                reasons.append("historical binding has no journal-proven recovery image")
         else:
             recovery = _v1_recovery(plan)
             domain = plan.get("read_domain")
@@ -657,9 +683,8 @@ def _shared_ancestors(graph):
     shared = []
     seen = set()
     for node in graph.nodes:
-        if len(consumers.get(node.occurrence_id, ())) > 1 and node.semantic_id not in seen:
-            shared.append({"logical_node_id": node.semantic_id})
-            seen.add(node.semantic_id)
+        if len(consumers.get(node.occurrence_id, ())) > 1:
+            shared.append({"logical_node_id": node.semantic_id, "occurrence_id": node.occurrence_id})
     return shared
 
 

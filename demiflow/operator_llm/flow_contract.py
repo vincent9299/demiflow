@@ -270,3 +270,21 @@ def prompt_facts(actor):
         raise ValueError('Native prompt lowering/configuration copies differ')
     return _native(prompt, op.inputs, op.output, op.outputs, runtime.options, op.max_requests,
                    actor.when is not None, actor.call_output, actor.error_output, runtime.token_budget, policy)
+
+
+def agent_facts(actor, environment):
+    """Agent declaration: guarded prompt copies plus the exact native environment.
+
+    prompt_facts keeps rejecting an environment on a prompt-only declaration.
+    This separate domain validates and seals the environment explicitly.
+    """
+    from copy import copy
+    from ..environment import OperatorEnvironment
+    if type(environment) is not OperatorEnvironment or actor.environment is not environment:
+        raise ValueError('Native agent environment differs from its declaration')
+    environment.prompt(actor._prompt)
+    projection = copy(actor)
+    projection.environment = None
+    result = prompt_facts(projection)
+    return {**result, 'contract': 'demiflow.agent.node.v3',
+            'environment': _value(environment.identity())}

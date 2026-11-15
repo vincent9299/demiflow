@@ -15,6 +15,9 @@ class CharacterCounter:
     """Count actual textual context; images are excluded, no token claim."""
     unit = 'chars'
 
+    def recovery_identity(self):
+        return {'unit': self.unit}
+
     def text(self, text):
         return len(text)
 
@@ -62,6 +65,9 @@ class CharacterBudget:
 
 
 class TextTokenCounter:
+    def recovery_identity(self):
+        return {'profile': self.profile}
+
     def __init__(self, profile, *, resource_root=None):
         import tiktoken
         self.profile = dict(profile)

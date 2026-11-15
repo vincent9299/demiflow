@@ -86,6 +86,25 @@ class CheckedExecution:
                                   'timing_scope': 'unknown'}
         return key
 
+    def bind_observation_scope(self, key, *, plan_id, dag_id, plan_revision, occurrence_id):
+        """Bind a native producer's observation to its sealed execution instance.
+
+        The scope is written with the existing observation, never reconstructed
+        by a history reader from whichever plan happens to be selected later.
+        """
+        if key is None or self.observe is None:
+            return
+        from .run_journal import _node_document
+        scope = dict(plan_id=plan_id, dag_id=dag_id, plan_revision=plan_revision,
+                     occurrence_id=occurrence_id)
+        with self.observation_lock:
+            item = self.observations[tuple(key)]
+            if any(name in item and item[name] != value for name, value in scope.items()):
+                raise RuntimeContractError('Native observation execution scope changed')
+            candidate = {**item, **scope, 'sequence': item['sequence'] + 1}
+            _node_document(candidate)
+            item.update(candidate)
+
     def progress(self, key, **counts):
         if key is None or self.observe is None:
             return
@@ -641,7 +660,8 @@ def action(kind, source, plan, spec=None, *, arguments=None):
         return
     from .payload_limits import payload_scope
     with execution_scope() as run, payload_scope(run, plan,
-            owner_limits=owner._limits if owner is not None else None, arguments=arguments,source=source), checks as value:
+            owner_limits=owner._limits if owner is not None else None, arguments=arguments,source=source,
+            physical_dataflow=True), checks as value:
         if value.plan is not None:
             from .queue_producer import producer_actor, validate_source
             producer = producer_actor(value.plan)

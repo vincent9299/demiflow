@@ -98,32 +98,45 @@ class CountFactory:
 
 @pytest.mark.parametrize('scope', ['stage', 'worker'])
 def test_constructed_factory_uses_actual_owner_concurrency(tmp_path, scope, monkeypatch):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    called = tmp_path / 'called'
+    class CountFactory:
+        def __init__(self):
+            self.count = 0
+        def __call__(self, row):
+            called.write_text('called')
+            self.count += 1
+            return {'count': self.count}
     ds = data.from_items([{'i': n} for n in range(6)]).map(
         CountFactory, concurrency=3, execution='thread', callable_scope=scope)
     if scope == 'stage':
-        def no_business_call(self, row):
-            raise AssertionError('Shared auto_json actor ran before concurrency admission')
-        monkeypatch.setattr(CountFactory, '__call__', no_business_call)
-        with pytest.raises(RecoveryContractError, match='auto_json state requires concurrency 1'):
+        with pytest.raises(DataflowError, match='auto_json state requires concurrency 1'):
             with RunContext.start(tmp_path/'run'):
                 ds.materialize()
+        assert not called.exists()
     else:
         with RunContext.start(tmp_path/'run'):
             rows = ds.materialize().take_all()
-            assert len(rows) == 6 and max(row['count'] for row in rows) <= 6
+            assert len(rows) == 6
+            assert sum(row['count'] == 1 for row in rows) == 3
+            assert all(1 <= row['count'] <= 4 for row in rows)
 
 
-class RuntimeLock:
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.count = 0
-    def __call__(self, row):
-        with self.lock:
-            self.count += 1
-        return row
+def runtime_lock_factory():
+    class RuntimeLock:
+        def __init__(self):
+            import threading
+            self.lock = threading.Lock()
+            self.count = 0
+        def __call__(self, row):
+            with self.lock:
+                self.count += 1
+            return row
+    return RuntimeLock
 
 
 def test_runtime_resource_execution_is_honest_and_resume_fails_closed(tmp_path):
+    RuntimeLock = runtime_lock_factory()
     from demiflow.execution.operator_state import OperatorStates
     from demiflow.workbench.runs.facts import read_sealed_plan, _sealed_entry
     from demiflow.execution.executors.local import LocalDatasetExecutor
@@ -134,19 +147,21 @@ def test_runtime_resource_execution_is_honest_and_resume_fails_closed(tmp_path):
         asyncio.run(strict.register(RuntimeLock(), 'node-0'))
     executor = LocalDatasetExecutor(workers=1)
     api = DataAPI(executor)
-    ds = api.from_items([{'i': 1}]).map(RuntimeLock, execution='thread')
+    ds = api.from_items([{'i': i} for i in range(4)]).map(RuntimeLock, execution='thread')
     try:
         with pytest.raises(RuntimeError, match='interrupt'):
-            with RunContext.start(tmp_path/'run') as run:
+            with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2}) as run:
                 reference = run.ref
-                # Force an interruption after registration, before final commit.
-                from demiflow.execution import stream
-                original = stream._arun
-                async def interrupt(*args, **kwargs):
-                    await original(*args, **kwargs)
-                    raise RuntimeError('interrupt')
+                # Interrupt the actual worker graph after a non-final native commit.
+                from demiflow.execution.dataflow import DataflowExecution
+                original = DataflowExecution.pump
+                def interrupt(execution, **kwargs):
+                    result = original(execution, **kwargs)
+                    if execution._restore_image is not None and not execution._restore_image.cut.final:
+                        raise RuntimeError('interrupt')
+                    return result
                 from unittest.mock import patch
-                with patch.object(stream, '_arun', interrupt):
+                with patch.object(DataflowExecution, 'pump', interrupt):
                     ds.materialize()
         fact = read_sealed_plan(tmp_path/'run', 'action-1')
         assert fact['available']
@@ -185,6 +200,7 @@ def test_partial_delegates_state_to_wrapped_actor():
 
 
 def test_resource_restriction_does_not_block_completed_result_reuse(tmp_path):
+    RuntimeLock = runtime_lock_factory()
     from demiflow.execution.executors.local import LocalDatasetExecutor
     from demiflow.data.api import DataAPI
     executor = LocalDatasetExecutor(workers=1)
@@ -203,15 +219,22 @@ def test_resource_restriction_does_not_block_completed_result_reuse(tmp_path):
 
 
 def test_folded_predicate_uses_actual_stage_concurrency(tmp_path):
+    # The unified compiler puts this stateful predicate in its own serial stage.
+    # Upstream concurrency must neither leak into its state nor disable calls.
+    observed = tmp_path / 'predicate-counts'
     class Predicate:
         def __init__(self):
             self.count = 0
         def __call__(self, row):
-            raise AssertionError('Predicate ran before actual concurrency admission')
-    ds = data.from_items([{'i': 1}]).map_async(lambda row: row, concurrency=3).filter(Predicate())
-    with pytest.raises(RecoveryContractError, match='auto_json state requires concurrency 1'):
-        with RunContext.start(tmp_path/'run'):
-            ds.materialize()
+            self.count += 1
+            with observed.open('a') as file:
+                file.write(str(self.count) + '\n')
+            return True
+    ds = data.from_items([{'i': i} for i in range(6)]).map_async(
+        lambda row: row, concurrency=3).filter(Predicate())
+    with RunContext.start(tmp_path/'run'):
+        assert sorted(ds.materialize().take_all(), key=lambda r: r['i']) == [{'i': i} for i in range(6)]
+    assert observed.read_text().splitlines() == [str(i) for i in range(1, 7)]
 
 
 def test_map_cleanup_cancellation_does_not_abandon_sibling_workers():
@@ -249,6 +272,6 @@ def test_registration_failure_closes_actor_even_if_stop_fails():
 
 def test_runtime_resource_inventory_is_bounded_before_copying_fields():
     from demiflow.execution.operator_state import runtime_resource_state
-    actor = RuntimeLock()
+    actor = runtime_lock_factory()()
     actor.__dict__.update({str(i): actor.lock for i in range(16384)})
     assert not runtime_resource_state(actor)

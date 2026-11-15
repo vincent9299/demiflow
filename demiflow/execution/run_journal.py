@@ -18,6 +18,7 @@ from ..errors import ExecutionConflict
 OBSERVATION_BYTES = 8192
 OBSERVATION_TOTAL_BYTES = 8 * 1024**2
 OBSERVATION_COUNT = min(4096, OBSERVATION_TOTAL_BYTES // OBSERVATION_BYTES)
+_MAX_ARTIFACT_OWNERS = 16384
 _NODE_STATES = {'pending', 'running', 'succeeded', 'failed', 'incomplete', 'reused'}
 _TERMINAL_NODE_STATES = {'succeeded', 'failed', 'incomplete', 'reused'}
 
@@ -32,11 +33,23 @@ def _node_key(action_id, node_id, occurrence):
 
 def _node_document(document):
     keys = {'sequence', 'state', 'rows_input', 'rows_output', 'calls', 'dropped', 'errors',
-            'elapsed_s', 'timing_scope', 'group_members', 'evidence', 'detail', 'lifecycle'}
+            'elapsed_s', 'timing_scope', 'group_members', 'evidence', 'detail', 'lifecycle',
+            'plan_id', 'dag_id', 'plan_revision', 'occurrence_id'}
     if type(document) is not dict or set(document) - keys or not {'sequence', 'state'} <= document.keys():
         raise ValueError('Invalid node observation fields')
     if type(document['sequence']) is not int or not 0 <= document['sequence'] < 2**63 or document['state'] not in _NODE_STATES:
         raise ValueError('Invalid node sequence/state')
+    scope = {'plan_id', 'dag_id', 'plan_revision', 'occurrence_id'}
+    if scope.intersection(document):
+        if not scope <= document.keys():
+            raise ValueError('Incomplete native observation plan scope')
+        for name in ('plan_id', 'dag_id', 'occurrence_id'):
+            value = document[name]
+            if type(value) is not str or len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+                raise ValueError('Invalid native observation plan identity')
+        revision = document['plan_revision']
+        if type(revision) is not int or not 0 <= revision < 2**63:
+            raise ValueError('Invalid native observation plan revision')
     for name in ('rows_input', 'rows_output', 'calls', 'dropped', 'errors'):
         value = document.get(name)
         if value is not None and (type(value) is not int or not 0 <= value < 2**63):
@@ -197,6 +210,9 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), document TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), attempt INTEGER NOT NULL, fence TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_actions (action_id TEXT PRIMARY KEY, declaration TEXT NOT NULL, snapshot TEXT, result TEXT);
+          CREATE TABLE IF NOT EXISTS runtime_effects (action_id TEXT NOT NULL, effect_id TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(action_id,effect_id));
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_objects (store_id TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY(store_id,digest));
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_settlements (reservation_id TEXT PRIMARY KEY, store_id TEXT, digest TEXT, bytes INTEGER NOT NULL, charged INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_artifacts (path TEXT PRIMARY KEY, commit_id TEXT, protected INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0);
           CREATE TABLE IF NOT EXISTS runtime_object_roots (root_id TEXT PRIMARY KEY, logical_root TEXT UNIQUE NOT NULL, physical_root TEXT NOT NULL, run_id TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_sources (action_id TEXT PRIMARY KEY, document TEXT NOT NULL);
@@ -204,6 +220,7 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_receipts (commit_id TEXT NOT NULL, sink_id TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(commit_id,sink_id));
           CREATE TABLE IF NOT EXISTS runtime_budgets (name TEXT PRIMARY KEY, consumed INTEGER NOT NULL, ceiling INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_reservations (name TEXT NOT NULL, reservation_id TEXT NOT NULL, amount INTEGER NOT NULL, PRIMARY KEY(name,reservation_id));
+          CREATE TABLE IF NOT EXISTS artifact_owner (digest TEXT NOT NULL, store_id TEXT NOT NULL, key TEXT NOT NULL, owner TEXT NOT NULL, operation_id TEXT NOT NULL, PRIMARY KEY(digest,store_id,key,owner));
         ''')
 
         # Additive ownership metadata; historical execution identity is unchanged.
@@ -223,6 +240,8 @@ class RunJournal:
           END;
           CREATE INDEX IF NOT EXISTS runtime_artifacts_protected ON runtime_artifacts(protected,path);
           CREATE INDEX IF NOT EXISTS runtime_artifacts_reference_commit ON runtime_artifacts(reference_commit_id);
+          CREATE INDEX IF NOT EXISTS artifact_owner_operation ON artifact_owner(operation_id);
+          CREATE INDEX IF NOT EXISTS artifact_owner_owner ON artifact_owner(owner);
           CREATE TRIGGER IF NOT EXISTS runtime_artifact_added AFTER INSERT ON runtime_artifacts BEGIN
             UPDATE runtime_storage SET items=items+1,bytes=bytes+NEW.bytes,object_bytes=object_bytes+CASE WHEN NEW.path LIKE 'materializations/@objects-%' THEN NEW.bytes ELSE 0 END WHERE singleton=1;
           END;
@@ -563,11 +582,17 @@ class RunJournal:
             scope, parameters = self._scope(db)
             where = scope + (' AND ' if scope else ' WHERE ') + 'action_id=? AND node_id=? AND occurrence=?'
             for key, sequence, terminal, raw in values:
-                old = db.execute('SELECT sequence,terminal FROM node_observations' + where, (*parameters, *key)).fetchone()
+                old = db.execute('SELECT sequence,terminal,document FROM node_observations' + where, (*parameters, *key)).fetchone()
                 if old is None:
                     raise ValueError('Node observation was not reserved before execution')
                 if old[1] or sequence <= old[0]:
                     continue
+                previous = json.loads(old[2])
+                incoming = json.loads(raw)
+                if 'plan_id' in previous and any(
+                        previous[name] != incoming.get(name)
+                        for name in ('plan_id', 'dag_id', 'plan_revision', 'occurrence_id')):
+                    raise ValueError('Native observation execution scope changed')
                 db.execute('UPDATE node_observations SET sequence=?,terminal=?,document=?' + where,
                            (sequence, int(terminal), raw, *parameters, *key))
 
@@ -708,6 +733,66 @@ class RunJournal:
     def release_execution(self, fence):
         with self.execution_guard(fence) as db:
             db.execute('DELETE FROM runtime_owner WHERE fence=?', (fence,))
+
+    @staticmethod
+    def _artifact_ref_key(ref):
+        from .recovery_contract import identifier, RecoveryContractError
+        try:
+            return identifier(ref.digest), identifier(ref.store_id), identifier(ref.key)
+        except (AttributeError, RecoveryContractError):
+            raise RecoveryContractError('Invalid artifact reference identity')
+
+    def bind_artifact_owner(self, fence, ref, *, owner, operation_id):
+        """Idempotent owner pin in the original journal; fence and quota checked."""
+        from .recovery_contract import identifier, RecoveryContractError
+        digest, store_id, key = self._artifact_ref_key(ref)
+        identifier(owner)
+        identifier(operation_id)
+        with self.execution_guard(fence) as db:
+            for row in db.execute('SELECT digest,store_id,key,owner FROM artifact_owner WHERE operation_id=?',
+                                  (operation_id,)):
+                if tuple(row) != (digest, store_id, key, owner):
+                    raise RecoveryContractError('Artifact operation_id reused with a different pin')
+            if db.execute('SELECT 1 FROM artifact_owner WHERE digest=? AND store_id=? AND key=? AND owner=?',
+                          (digest, store_id, key, owner)).fetchone() is not None:
+                return
+            if db.execute('SELECT count(*) FROM artifact_owner').fetchone()[0] >= _MAX_ARTIFACT_OWNERS:
+                raise RecoveryContractError('Artifact owner pin count exceeds budget')
+            db.execute('INSERT INTO artifact_owner VALUES (?,?,?,?,?)',
+                       (digest, store_id, key, owner, operation_id))
+
+    def release_artifact_owner(self, fence, ref, *, owner, operation_id):
+        """Idempotent unpin of one owner; never a whole-object GC delete decision."""
+        from .recovery_contract import identifier, RecoveryContractError
+        digest, store_id, key = self._artifact_ref_key(ref)
+        identifier(owner)
+        identifier(operation_id)
+        with self.execution_guard(fence) as db:
+            for row in db.execute('SELECT digest,store_id,key,owner FROM artifact_owner WHERE operation_id=?',
+                                  (operation_id,)):
+                if tuple(row) != (digest, store_id, key, owner):
+                    raise RecoveryContractError('Artifact operation_id reused with a different pin')
+            db.execute('DELETE FROM artifact_owner WHERE digest=? AND store_id=? AND key=? AND owner=?',
+                       (digest, store_id, key, owner))
+
+    def artifact_owners(self, ref, *, limit, cursor=None):
+        """Bounded keyset page of pins for one ref; a failed page raises, never empty."""
+        from .recovery_contract import identifier, RecoveryContractError
+        digest, store_id, key = self._artifact_ref_key(ref)
+        if type(limit) is not int or not 1 <= limit <= 1024:
+            raise RecoveryContractError('Artifact owner page limit is invalid')
+        if cursor is not None:
+            identifier(cursor)
+        with self._connection() as db:
+            if cursor is None:
+                rows = db.execute('SELECT owner FROM artifact_owner WHERE digest=? AND store_id=? AND key=? '
+                                  'ORDER BY owner LIMIT ?', (digest, store_id, key, limit + 1)).fetchall()
+            else:
+                rows = db.execute('SELECT owner FROM artifact_owner WHERE digest=? AND store_id=? AND key=? '
+                                  'AND owner>? ORDER BY owner LIMIT ?',
+                                  (digest, store_id, key, cursor, limit + 1)).fetchall()
+        owners = tuple(row[0] for row in rows[:limit])
+        return owners, owners[-1] if len(rows) > limit else None
 
     def bind_execution_action(self, fence, action_id, declaration):
         from .recovery_contract import document, identifier, RecoveryContractError
@@ -965,6 +1050,120 @@ class RunJournal:
         if old is not None and old[0] != raw:
             raise RecoveryContractError('Durable receipt changed')
         db.execute('INSERT OR IGNORE INTO runtime_receipts VALUES (?,?,?)', (commit_id, sink_id, raw))
+
+    def grow_dataflow_staging(self, fence, reservation_id, size, *, ceiling):
+        """Admit an increase before writing, in the same fenced byte ledger.
+
+        Retransmission and stale smaller requests do not charge twice. A settled
+        reservation cannot be reopened, including after an unknown RPC reply.
+        """
+        from .recovery_contract import identifier, RecoveryContractError
+        identifier(reservation_id)
+        if any(type(v) is not int or not 0 < v < 2**63 for v in (size, ceiling)):
+            raise RecoveryContractError('Invalid staging growth')
+        with self.execution_guard(fence) as db:
+            if db.execute('SELECT 1 FROM runtime_dataflow_settlements WHERE reservation_id=?',
+                          (reservation_id,)).fetchone():
+                raise RecoveryContractError('Settled staging cannot grow')
+            old = db.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                             (reservation_id,)).fetchone()
+            budget = db.execute("SELECT consumed,ceiling FROM runtime_budgets WHERE name='artifact_staging_bytes'").fetchone()
+            if old is None or budget is None or budget[1] != ceiling:
+                raise RecoveryContractError('Unknown staging reservation or changed ceiling')
+            delta = max(0, size - old[0])
+            if budget[0] + delta > ceiling:
+                raise RecoveryContractError('Execution budget exhausted: artifact_staging_bytes')
+            db.execute("UPDATE runtime_budgets SET consumed=consumed+? WHERE name='artifact_staging_bytes'", (delta,))
+            db.execute("UPDATE runtime_reservations SET amount=amount+? WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                       (delta, reservation_id))
+            return old[0] + delta
+
+    def settle_dataflow_staging(self, fence, reservation_id, ref):
+        """Replace the staging maximum with unique durable bytes, atomically.
+
+        No refund for an unknown publication: callers release only after deleting
+        their temporary file, or settle a verified immutable object. Repeat RPCs
+        bind the same settlement and cannot refund twice.
+        """
+        from .recovery_contract import identifier, RecoveryContractError
+        identifier(reservation_id)
+        store_id, digest, size = (ref.store_id, ref.digest, ref.size_bytes) if ref is not None else (None, None, 0)
+        with self.execution_guard(fence) as db:
+            old = db.execute('SELECT store_id,digest,bytes,charged FROM runtime_dataflow_settlements WHERE reservation_id=?',
+                             (reservation_id,)).fetchone()
+            if old:
+                if old[:3] != (store_id, digest, size):
+                    raise RecoveryContractError('Artifact settlement changed')
+                return old[3]
+            reservation = db.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                                     (reservation_id,)).fetchone()
+            if reservation is None or size > reservation[0]:
+                raise RecoveryContractError('Artifact settlement exceeds its staging reservation')
+            prior = db.execute('SELECT bytes FROM runtime_dataflow_objects WHERE store_id=? AND digest=?', (store_id,digest)).fetchone() if digest else None
+            if prior and prior[0] != size:
+                raise RecoveryContractError('Immutable artifact size changed')
+            charged = 0 if prior else size
+            if digest:
+                db.execute('INSERT OR IGNORE INTO runtime_dataflow_objects VALUES (?,?,?)', (store_id, digest, size))
+            db.execute("UPDATE runtime_budgets SET consumed=consumed-? WHERE name='artifact_staging_bytes'",
+                       (reservation[0] - charged,))
+            db.execute("UPDATE runtime_reservations SET amount=? WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                       (charged, reservation_id))
+            db.execute('INSERT INTO runtime_dataflow_settlements VALUES (?,?,?,?,?)', (reservation_id, store_id, digest, size, charged))
+            return charged
+
+    def transition_effect(self, fence, action_id, command, *, ceilings):
+        """Native generic effect intent and budget share one fenced transaction.
+
+        A reserved record proves no send yet; a sent/unknown record never grants
+        another send. Lost replies may repeat the same transition idempotently.
+        """
+        from .contracts.dataflow_errors import DataflowError
+        from .recovery_contract import document, identifier, identity
+        from dataclasses import asdict
+        for value in (action_id, command.effect_id, command.actor_id, command.request_digest):
+            identifier(value)
+        with self.execution_guard(fence) as db:
+            row = db.execute('SELECT document FROM runtime_effects WHERE action_id=? AND effect_id=?',
+                             (action_id, command.effect_id)).fetchone()
+            record = json.loads(row[0]) if row else None
+            if record and (record['request_digest'] != command.request_digest or record['actor_id'] != command.actor_id):
+                raise DataflowError('INVALID_CONTRACT', 'Effect identity reused for a different actor/request')
+            state = record['state'] if record else 'absent'
+            if command.kind == 'lookup':
+                return record or {'state': 'absent'}
+            if command.kind == 'reserve':
+                if state == 'absent':
+                    if db.execute('SELECT count(*) FROM runtime_effects').fetchone()[0] >= 100000:
+                        raise DataflowError('BUDGET_EXCEEDED', 'Native effect record count exceeds budget')
+                    charges = {name: (amount, ceilings[name]) for name, amount in command.budget.items()}
+                    if charges:
+                        reservation = identity(['native-effect', action_id, command.effect_id])
+                        self.reserve_budgets_in_transaction(db, reservation, charges)
+                    record = {'state': 'reserved', 'actor_id': command.actor_id,
+                              'request_digest': command.request_digest,
+                              'budget': dict(command.budget), 'result_ref': None, 'receipt_ref': None}
+                elif state != 'reserved' or record.get('budget') != dict(command.budget):
+                    raise DataflowError('INVALID_CONTRACT', 'Effect cannot acquire a new reservation')
+            else:
+                transitions = {'mark_sent': ('reserved', 'sent'), 'confirm': ('sent', 'confirmed'),
+                               'unknown': ('sent', 'unknown'), 'release_unsent': ('reserved', 'unsent')}
+                if command.kind not in transitions:
+                    raise DataflowError('INVALID_CONTRACT', 'Unknown native effect transition')
+                before, after = transitions[command.kind]
+                if state not in (before, after):
+                    raise DataflowError('UNKNOWN_EFFECT', 'Effect state does not permit this transition')
+                record = dict(record, state=after)
+                if command.kind == 'confirm':
+                    if command.payload_ref is None:
+                        raise DataflowError('INVALID_CONTRACT', 'Confirm requires a durable result reference')
+                    result_ref = asdict(command.payload_ref)
+                    if state == after and record['result_ref'] != result_ref:
+                        raise DataflowError('INVALID_CONTRACT', 'Confirmed effect result changed')
+                    record['result_ref'] = result_ref
+            db.execute('INSERT OR REPLACE INTO runtime_effects VALUES (?,?,?)',
+                       (action_id, command.effect_id, document(record).decode()))
+            return record
 
     def reserve_budget(self, fence, name, reservation_id, amount, ceiling):
         """Cumulative admission. Unknown consumed work is never refunded."""

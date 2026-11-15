@@ -187,6 +187,7 @@ def test_native_bounded_take_commits_image_before_return(tmp_path,fixture_http):
     logical=tmp_path/'assets'
     with RunContext.start(tmp_path/'run',limits=run_limits()):
         rows=native_dataset(logical,fixture_http).take(1)
+    assert not rows[0].get('error'), rows[0]
     assert len(rows)==1 and ObjectRef(**rows[0]['image']).read(max_bytes=4096)==rows[0]['pixels']
     assert 1<=len(fixture_http['requests'])<=4
 
@@ -363,13 +364,16 @@ def test_response_boundaries_do_not_publish_invalid_images(tmp_path,fixture_http
 
 
 def test_native_run_stream_keeps_generated_images_without_request_journal(tmp_path,fixture_http):
-    rows=[]
+    result_file = tmp_path / 'worker-rows.jsonl'
     def collect(row):
-        rows.append(row)
+        # Observe real worker output without assuming shared driver memory.
+        with result_file.open('a') as stream:
+            stream.write(json.dumps({'image': row['image'], 'pixels': row['pixels'].hex()}) + '\n')
         return row
     with RunContext.start(tmp_path/'run',limits=run_limits()):
         native_dataset(tmp_path/'assets',fixture_http,1).map(collect).run_stream()
-    assert len(rows)==1 and ObjectRef(**rows[0]['image']).read(max_bytes=4096)==rows[0]['pixels']
+    rows = [json.loads(line) for line in result_file.read_text().splitlines()]
+    assert len(rows)==1 and ObjectRef(**rows[0]['image']).read(max_bytes=4096)==bytes.fromhex(rows[0]['pixels'])
 
 
 def test_native_iterator_batches_keep_requested_grouping_and_readable_images(tmp_path,fixture_http):
