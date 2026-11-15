@@ -151,6 +151,7 @@ class _SpoolPort:
         self._services = services
         self._segment_rows = segment_rows
         self._refs: list[ArtifactRef] = []
+        self._borrowed = []
         self._pending: list[bytes] = []
         self._empty_bytes = len(state_codec.dumps([], max_bytes=services.bounds.max_batch_bytes))
         self._pending_bytes = self._empty_bytes
@@ -199,10 +200,34 @@ class _SpoolPort:
         self._flush()
         self._eoi = True
 
+    def adopt(self, entry):
+        if self._eoi:
+            raise _err('INVALID_CONTRACT', 'finite reference after port EOI', port=self.name)
+        from ..dataflow_finite_input import validate_borrowed_entry
+        validate_borrowed_entry(self._services, entry)
+        if len(self._borrowed) >= self._services.bounds.max_partitions:
+            raise _err('BUDGET_EXCEEDED', 'borrowed port membership exceeds max_partitions')
+        if any((item['input']['edge_id'], item['input']['producer'], item['input']['target']) ==
+               (entry['edge_id'], entry['producer'], entry['target']) for item in self._borrowed):
+            raise _err('CORRUPT_ARTIFACT', 'duplicate borrowed input member')
+        self._flush()  # Preserve any historical/local owned prefix before a ref.
+        candidate = {'position':len(self._refs),'input':dict(entry)}
+        state_codec.dumps(self._borrowed + [candidate], max_bytes=self._services.bounds.max_state_bytes)
+        self._borrowed.append(candidate)
+        self._count += entry['rows']
+
     def records(self) -> Iterator[Record]:
-        for ref in self._refs:
-            data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes))
-            yield from state_codec.loads(data, max_bytes=self._services.bounds.max_batch_bytes)
+        from ..dataflow_finite_input import borrowed_records
+        borrowed = iter(self._borrowed)
+        pending = next(borrowed, None)
+        for index in range(len(self._refs) + 1):
+            while pending is not None and pending['position'] == index:
+                yield from borrowed_records(self._services, pending['input'])
+                pending = next(borrowed, None)
+            if index < len(self._refs):
+                ref = self._refs[index]
+                data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes))
+                yield from state_codec.loads(data, max_bytes=self._services.bounds.max_batch_bytes)
         for fragment in self._pending:
             raw = b''.join(state_codec.record_list_chunks((fragment,)))
             yield from state_codec.loads(raw, max_bytes=self._services.bounds.max_batch_bytes)
@@ -211,6 +236,8 @@ class _SpoolPort:
         for ref in self._refs:
             self._services.store.release(ref, owner=_SPOOL_OWNER)
         self._refs = []
+        # A borrower never releases or deletes the producer's immutable refs.
+        self._borrowed = []
         self._pending = []
         self._pending_bytes = self._empty_bytes
 
@@ -221,10 +248,32 @@ class _SpoolPort:
         return {
             "refs": list(self._refs), "pending": list(self._pending),
             "eoi": self._eoi, "count": self._count, "bytes": self._bytes,
+            **({'borrowed':[{'position':x['position'],'input':dict(x['input'])}
+                            for x in self._borrowed]} if self._borrowed else {}),
         }
 
     def restore(self, snap: Mapping[str, Any]) -> None:
         self._refs = list(snap["refs"])
+        borrowed = snap.get('borrowed', [])
+        if type(borrowed) is not list or len(borrowed) > self._services.bounds.max_partitions:
+            raise _err('CORRUPT_ARTIFACT', 'invalid borrowed input membership')
+        from ..dataflow_finite_input import validate_borrowed_entry
+        previous = 0
+        members = set()
+        for item in borrowed:
+            if (type(item) is not dict or set(item) != {'position','input'}
+                    or type(item['position']) is not int
+                    or not previous <= item['position'] <= len(self._refs)):
+                raise _err('CORRUPT_ARTIFACT', 'borrowed input order differs from owned prefix')
+            validate_borrowed_entry(self._services, item['input'])
+            entry = item['input']
+            member = (entry['edge_id'], entry['producer'], entry['target'])
+            if member in members:
+                raise _err('CORRUPT_ARTIFACT', 'duplicate borrowed input member')
+            members.add(member)
+            previous = item['position']
+        state_codec.dumps(borrowed, max_bytes=self._services.bounds.max_state_bytes)
+        self._borrowed = list(borrowed)
         pending = list(snap["pending"])
         # Old images may contain in-memory pending records. Retain that format
         # and derive byte admission from the actual restored data, never a new
@@ -239,8 +288,12 @@ class _SpoolPort:
         if self._pending_bytes > self._services.bounds.max_batch_bytes:
             raise _err('BUDGET_EXCEEDED', 'restored spool exceeds batch byte bound')
         self._eoi = bool(snap["eoi"])
-        self._count = int(snap["count"])
-        self._bytes = int(snap["bytes"])
+        if (type(snap['count']) is not int or type(snap['bytes']) is not int
+                or snap['count'] < sum(item['input']['rows'] for item in borrowed)
+                or snap['bytes'] < 0):
+            raise _err('CORRUPT_ARTIFACT', 'invalid restored spool row or byte count')
+        self._count = snap['count']
+        self._bytes = snap['bytes']
 
 
 class OperatorKernel:
@@ -519,6 +572,17 @@ class OperatorKernel:
                 port.release()
             except BaseException:
                 pass
+
+    def accepts_finite_reference(self, port):
+        return (self._spec.kind != 'StreamPrependOp' and port in self._ports
+                and any(p.name == port and p.requirement == 'finite_complete' for p in self._spec.inputs))
+
+    def adopt_finite_reference(self, port, entry):
+        self._require_started()
+        _check_stop(self._services)
+        if not self.accepts_finite_reference(port):
+            raise _err('INVALID_CONTRACT', 'input port cannot borrow finite producer records')
+        self._ports[port].adopt(entry)
 
     # -- K018 push ----------------------------------------------------------
     def push(self, port: str, record: Record) -> Iterator[Record]:

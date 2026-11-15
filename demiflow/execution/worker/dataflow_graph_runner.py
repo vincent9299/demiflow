@@ -736,6 +736,21 @@ class WorkerGraphRunner:
                 or seal['status'] != 'success' or seal['generation'] != spec.route_epoch):
             raise DataflowError('FENCED', 'finite scope seal differs from physical membership')
         edge = next(e for e in self.e._graph.edges if e.edge_id == spec.edge_id)
+        kernel = self.e._kernels.get((edge.consumer, self.partition))
+        if kernel is not None and kernel.accepts_finite_reference(edge.input_port):
+            from ..dataflow_finite_input import validate_finite_members
+            # All members are authenticated before mutating the kernel port.
+            entries = validate_finite_members(self.services, ref, spec, target=self.partition)
+            for entry in entries:
+                if (spec.edge_id, entry['producer']) in self._finished_inputs:
+                    continue
+                if edge.consumer not in self._finished:
+                    kernel.adopt_finite_reference(edge.input_port, entry)
+                    self._metrics[edge.consumer]['rows_input'] += entry['rows']
+                    self._dirty_metrics.add(edge.consumer)
+                self._edge_eoi(spec.edge_id, entry['producer'])
+            self._send('ack', {'delivery_id': command['delivery_id'], 'producer_partition': None})
+            return
         for member in seal['producers']:
             if (spec.edge_id, member['partition_id']) in self._finished_inputs:
                 continue

@@ -21,6 +21,8 @@ Cross-lane runtime edges (frozen vocabulary, producer implemented by the owning 
 """
 from __future__ import annotations
 
+from .contracts.dataflow_errors import DataflowError
+
 import json
 import pickle
 import threading
