@@ -1159,6 +1159,7 @@ class RunJournal:
             db.execute("UPDATE runtime_budgets SET consumed=consumed+? WHERE name='artifact_staging_bytes'", (delta,))
             db.execute("UPDATE runtime_reservations SET amount=amount+? WHERE name='artifact_staging_bytes' AND reservation_id=?",
                        (delta, reservation_id))
+            self._storage_usage(db)
             return old[0] + delta
 
     def settle_dataflow_staging(self, fence, reservation_id, ref):
@@ -1303,6 +1304,8 @@ class RunJournal:
         for name, (consumed, ceiling, amount) in pending.items():
             db.execute('INSERT OR REPLACE INTO runtime_budgets VALUES (?,?,?)', (name, consumed, ceiling))
             db.execute('INSERT INTO runtime_reservations VALUES (?,?,?)', (name, reservation_id, amount))
+        if 'artifact_staging_bytes' in charges:
+            RunJournal._storage_usage(db)
         return totals
 
     def allocate_artifact(self, fence, path, *, commit_id=None, size=0, atomic=True):
@@ -1354,6 +1357,13 @@ class RunJournal:
         metadata = db.execute("SELECT consumed FROM runtime_budgets WHERE name='object_namespace_metadata_bytes'").fetchone()
         total += metadata[0] if metadata else 0
         limit = json.loads(db.execute('SELECT document FROM runtime_identity').fetchone()[0])['limits']['max_scratch_bytes']
+        # Both are original journal-owned byte ledgers. Dataflow staging and
+        # immutable objects may coexist with native Lance/legacy temporaries;
+        # checking either component alone admits up to twice the shared budget.
+        dataflow = db.execute("SELECT consumed,ceiling FROM runtime_budgets WHERE name='artifact_staging_bytes'").fetchone()
+        if dataflow is not None:
+            total += dataflow[0]
+            limit = min(limit, dataflow[1])
         if total > limit:
             raise RecoveryContractError('Runtime storage exceeds scratch admission budget')
         return total

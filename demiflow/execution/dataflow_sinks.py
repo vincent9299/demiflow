@@ -364,10 +364,18 @@ class NativeTerminalSink(_DataflowArtifactSink):
     Staging streams bounded Arrow batches from worker-produced data. Native
     prepare/inspect/commit/abort retain all destination CAS and recovery rules.
     """
-    def __init__(self, *, native, batch_rows=256, **kwargs):
+    def __init__(self, *, native, batch_rows=256, native_limits=None, **kwargs):
         super().__init__(**kwargs)
         self.native = native
         self._batch_rows = batch_rows
+        self._native_limits = dict(native_limits or {})
+
+    def _native_scope(self):
+        from .payload_limits import payload_scope
+        limits = dict(self._native_limits, memory_bytes=self._bounds.max_resident_bytes,
+                      max_row_bytes=self._bounds.max_row_bytes,
+                      max_batch_bytes=self._bounds.max_batch_bytes, batch_rows=self._batch_rows)
+        return payload_scope(self._action.context, None, owner_limits=limits)
 
     def _blocks(self, manifest):
         import pyarrow as pa
@@ -421,8 +429,9 @@ class NativeTerminalSink(_DataflowArtifactSink):
         result = super().prepare(manifest, context)
         # An intermediate cut commits the durable result prefix, while the
         # external destination publishes exactly once when all inputs finish.
-        result['native'] = (self.native.prepare(self._blocks(manifest), context)
-                            if manifest.get('final', True) else None)
+        with self._native_scope():
+            result['native'] = (self.native.prepare(self._blocks(manifest), context)
+                                if manifest.get('final', True) else None)
         return result
 
     def inspect(self, prepared, context):
@@ -439,7 +448,8 @@ class NativeTerminalSink(_DataflowArtifactSink):
             return super().commit(prepared, context)
         native = self.native.inspect(prepared['native'], context)
         if native is None:
-            native = self.native.commit(prepared['native'], context)
+            with self._native_scope():
+                native = self.native.commit(prepared['native'], context)
         artifact = super().commit(prepared, context)
         return {**artifact, 'data': {**artifact['data'], 'native_receipt': native}}
 
@@ -499,7 +509,8 @@ def make_native_terminal_sink(spec, *, request, services):
     else:
         raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')
     batch_rows = min(256, (services.policy.native_limits or {}).get("batch_rows", 256))
-    return NativeTerminalSink(native=native, batch_rows=batch_rows, sink_id=request.kind, store=services.store,
+    return NativeTerminalSink(native=native, batch_rows=batch_rows, native_limits=services.policy.native_limits,
+        sink_id=request.kind, store=services.store,
         action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))
 
 
