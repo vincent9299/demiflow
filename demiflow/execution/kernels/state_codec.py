@@ -7,6 +7,28 @@ from ..contracts.dataflow import Record, ArtifactRef, AggregateState
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_value, _decode_value, _encode_record_document, _decode_record_document
 
+RECORD_LIST_PREFIX = b'["demiflow.kernel-state.v3",["list",['
+RECORD_LIST_SUFFIX = b']]]'
+
+
+def record_fragment(record, *, max_bytes):
+    """One original list element, reusable for byte admission and publication."""
+    raw = json.dumps(['record', record.record_id, record.sequence,
+        _encode_record_document(record, max_bytes=max_bytes).decode()],
+        separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode()
+    if len(raw) + len(RECORD_LIST_PREFIX) + len(RECORD_LIST_SUFFIX) > max_bytes:
+        raise DataflowError('BUDGET_EXCEEDED', 'kernel image exceeds state byte budget')
+    return raw
+
+
+def record_list_chunks(fragments):
+    yield RECORD_LIST_PREFIX
+    for index, raw in enumerate(fragments):
+        if index:
+            yield b','
+        yield raw
+    yield RECORD_LIST_SUFFIX
+
 
 def dumps(value, *, max_bytes):
     def pack(v):

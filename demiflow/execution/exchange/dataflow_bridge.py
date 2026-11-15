@@ -374,6 +374,7 @@ def _encode_record_document(record, *, max_bytes):
         doc = {"v": _CODEC_VERSION, "sp": record.source_position, "eb": record.encoded_bytes,
                "p": payload, "r": None}
     else:
+        payload_raw = None
         doc = {"v": _CODEC_VERSION, "sp": record.source_position, "eb": record.encoded_bytes,
                "p": None, "r": _ref_document(record.payload_ref)}
     if record.schema_ref is not None:
@@ -381,10 +382,25 @@ def _encode_record_document(record, *, max_bytes):
     if record.block_partition is not None:
         from dataclasses import asdict
         doc["bp"] = asdict(record.block_partition)
-    raw = _codec_dumps(doc)
-    if len(raw) > max_bytes:
-        _fail("BUDGET_EXCEEDED", "encoded record document exceeds the row byte budget")
-    return raw
+    return _record_document_bytes(doc, payload_raw=payload_raw, max_bytes=max_bytes)
+
+
+def _record_document_bytes(doc, *, payload_raw, max_bytes):
+    # Reuse the already sized canonical payload. Serializing the whole document
+    # again duplicates the widest field's JSON encoding at every spool/channel.
+    # The sorted keys and separators are exactly the original wire format.
+    parts, size = [b'{'], 2
+    for index, key in enumerate(sorted(doc)):
+        value = payload_raw if key == 'p' and payload_raw is not None else _codec_dumps(doc[key])
+        prefix = _codec_dumps(key) + b':'
+        size += len(prefix) + len(value) + bool(index)
+        if size > max_bytes:
+            _fail('BUDGET_EXCEEDED', 'encoded record document exceeds the row byte budget')
+        if index:
+            parts.append(b',')
+        parts.extend((prefix, value))
+    parts.append(b'}')
+    return b''.join(parts)
 
 
 def _decode_record_document(raw, *, record_id, sequence, max_bytes):
@@ -414,17 +430,20 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
         _fail("CORRUPT_ARTIFACT", "record document must carry exactly one payload")
     if type(doc["sp"]) is not dict or type(doc["eb"]) is not int or doc["eb"] < 0:
         _fail("CORRUPT_ARTIFACT", "record document provenance is malformed")
-    if _codec_dumps(doc) != raw:
-        _fail("CORRUPT_ARTIFACT", "record document bytes are not canonical")
     if doc["p"] is not None:
         row = _decode_value(doc["p"])
         if type(row) is not dict:
             _fail("CORRUPT_ARTIFACT", "record document payload must be a row mapping")
-        if len(_encode_payload(row, max_bytes=max_bytes)) != doc["eb"]:
+        payload_raw = _encode_payload(row, max_bytes=max_bytes)
+        if len(payload_raw) != doc["eb"]:
             _fail("CORRUPT_ARTIFACT", "record document payload size mismatch")
+        if _record_document_bytes(doc, payload_raw=payload_raw, max_bytes=max_bytes) != raw:
+            _fail("CORRUPT_ARTIFACT", "record document bytes are not canonical")
         return Record(record_id=record_id, source_position=doc["sp"], payload_ref=None,
                       inline=row, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref, block_partition=block_partition)
     ref_doc = doc["r"]
+    if _record_document_bytes(doc, payload_raw=None, max_bytes=max_bytes) != raw:
+        _fail("CORRUPT_ARTIFACT", "record document bytes are not canonical")
     if type(ref_doc) is not dict or set(ref_doc) != {"digest", "size_bytes", "store_id", "key", "media_type"}:
         _fail("CORRUPT_ARTIFACT", "record document ref is malformed")
     ref = ArtifactRef(digest=ref_doc["digest"], size_bytes=ref_doc["size_bytes"],

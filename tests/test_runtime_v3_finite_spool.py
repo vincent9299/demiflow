@@ -46,3 +46,23 @@ def test_old_snapshot_pending_rows_remain_readable_and_new_input_respects_bytes(
         with pytest.raises(DataflowError,match='row'):
             _SpoolPort('right',services,_segment_rows(services)).push(rec({'text':'x'*2200}))
         raise PreparationOnly()
+
+
+def test_streamed_port_bytes_equal_original_kernel_state_and_pending_read(tmp_path):
+    with pytest.raises(PreparationOnly), RunContext.start(tmp_path/'run') as run:
+        store, _, bounds = _store(run, ceiling=4 * 1024**2)
+        bounds = replace(bounds, max_row_bytes=16384, max_batch_bytes=65536)
+        services = SimpleNamespace(store=store, bounds=bounds)
+        records = [rec({'id': i, 'blob': b'\x00\xff' * 1000,
+                        'tuple': (-0.0, 0.0), 'nested': ['中文', None]}, sequence=i) for i in range(3)]
+        original = state_codec.dumps(records, max_bytes=bounds.max_batch_bytes)
+        port = _SpoolPort('left', services, _segment_rows(services))
+        for record in records:
+            port.push(record)
+        assert list(port.records()) == records
+        snap = port.snapshot()
+        assert len(snap['refs']) == 1 and snap['pending'] == []
+        actual = b''.join(store.read(snap['refs'][0], max_bytes=bounds.max_batch_bytes))
+        assert actual == original
+        assert snap['bytes'] == len(original)
+        raise PreparationOnly()

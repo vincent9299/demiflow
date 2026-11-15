@@ -151,7 +151,7 @@ class _SpoolPort:
         self._services = services
         self._segment_rows = segment_rows
         self._refs: list[ArtifactRef] = []
-        self._pending: list[Record] = []
+        self._pending: list[bytes] = []
         self._empty_bytes = len(state_codec.dumps([], max_bytes=services.bounds.max_batch_bytes))
         self._pending_bytes = self._empty_bytes
         # Retained records coexist with their encoded segment during a flush.
@@ -170,13 +170,13 @@ class _SpoolPort:
             raise _err("INVALID_CONTRACT", "push after port EOI", port=self.name)
         if _input_row_bytes(record) > self._services.bounds.max_row_bytes:
             raise _err("BUDGET_EXCEEDED", "input spool row exceeds max_row_bytes", port=self.name)
-        single = len(state_codec.dumps([record], max_bytes=self._services.bounds.max_batch_bytes))
-        contribution = single - self._empty_bytes
+        raw = state_codec.record_fragment(record, max_bytes=self._services.bounds.max_batch_bytes)
+        contribution = len(raw)
         projected = self._pending_bytes + contribution + bool(self._pending)
         if self._pending and (projected > self._segment_bytes or len(self._pending) >= self._segment_rows):
             self._flush()
         self._pending_bytes += contribution + bool(self._pending)
-        self._pending.append(record)
+        self._pending.append(raw)
         self._count += 1
         if len(self._pending) >= self._segment_rows or self._pending_bytes >= self._segment_bytes:
             self._flush()
@@ -184,12 +184,14 @@ class _SpoolPort:
     def _flush(self) -> None:
         if not self._pending:
             return
-        raw = state_codec.dumps(self._pending, max_bytes=self._services.bounds.max_batch_bytes)
-        if self._bytes + len(raw) > self._services.bounds.max_spill_bytes:
+        if self._bytes + self._pending_bytes > self._services.bounds.max_spill_bytes:
             raise _err("BUDGET_EXCEEDED", "input spool exceeds max_spill_bytes", port=self.name)
-        ref = self._services.store.put(iter([raw]), max_bytes=len(raw), media_type=RECORD_MEDIA_TYPE)
+        # Keep the original list encoding, but stream already admitted fragments
+        # into the store. No second payload encoding or full-batch copy exists.
+        ref = self._services.store.put(state_codec.record_list_chunks(self._pending),
+            max_bytes=self._pending_bytes, media_type=RECORD_MEDIA_TYPE)
         self._refs.append(ref)
-        self._bytes += len(raw)
+        self._bytes += self._pending_bytes
         self._pending = []
         self._pending_bytes = self._empty_bytes
 
@@ -201,7 +203,9 @@ class _SpoolPort:
         for ref in self._refs:
             data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes))
             yield from state_codec.loads(data, max_bytes=self._services.bounds.max_batch_bytes)
-        yield from self._pending
+        for fragment in self._pending:
+            raw = b''.join(state_codec.record_list_chunks((fragment,)))
+            yield from state_codec.loads(raw, max_bytes=self._services.bounds.max_batch_bytes)
 
     def release(self) -> None:
         for ref in self._refs:
@@ -221,16 +225,19 @@ class _SpoolPort:
 
     def restore(self, snap: Mapping[str, Any]) -> None:
         self._refs = list(snap["refs"])
-        self._pending = list(snap["pending"])
+        pending = list(snap["pending"])
         # Old images may contain in-memory pending records. Retain that format
         # and derive byte admission from the actual restored data, never a new
         # claimed counter or a row-size estimate.
-        if len(self._pending) > self._segment_rows:
+        if len(pending) > self._segment_rows:
             raise _err("BUDGET_EXCEEDED", "restored spool exceeds segment row bound")
-        if any(_input_row_bytes(record) > self._services.bounds.max_row_bytes for record in self._pending):
+        if any(_input_row_bytes(record) > self._services.bounds.max_row_bytes for record in pending):
             raise _err("BUDGET_EXCEEDED", "restored spool row exceeds max_row_bytes")
-        self._pending_bytes = len(state_codec.dumps(self._pending,
-            max_bytes=self._services.bounds.max_batch_bytes))
+        self._pending = [state_codec.record_fragment(record,
+            max_bytes=self._services.bounds.max_batch_bytes) for record in pending]
+        self._pending_bytes = self._empty_bytes + sum(map(len, self._pending)) + max(0, len(self._pending) - 1)
+        if self._pending_bytes > self._services.bounds.max_batch_bytes:
+            raise _err('BUDGET_EXCEEDED', 'restored spool exceeds batch byte bound')
         self._eoi = bool(snap["eoi"])
         self._count = int(snap["count"])
         self._bytes = int(snap["bytes"])
