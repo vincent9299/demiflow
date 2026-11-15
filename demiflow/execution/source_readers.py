@@ -396,17 +396,45 @@ class FileReader(_BaseReader):
 
     def _image_rows(self, path: str) -> Iterator[Any]:
         from PIL import Image
-
-        max_pixels = int(self._options.get("max_pixels", 64 * 1024 * 1024))
-        with Image.open(path) as image:
-            width, height = image.size
-            if width * height > max_pixels:
-                raise DataflowError("BUDGET_EXCEEDED", "image exceeds decode pixel budget")
-            if width * height * max(4, len(image.getbands())) > self._services.bounds.max_row_bytes:
+        import numpy as np
+        options, bounds = self._options, self._services.bounds
+        maximum = int(options.get('max_pixels', 64 * 1024 * 1024))
+        size, mode = options.get('size'), options.get('mode')
+        if size is not None and (not isinstance(size, (tuple, list)) or len(size) != 2
+                or any(type(n) is not int or n <= 0 for n in size)):
+            raise DataflowError('INVALID_CONTRACT', 'Image size requires positive (height, width)')
+        if mode is not None and (not isinstance(mode, str) or mode not in Image.MODES):
+            raise DataflowError('INVALID_CONTRACT', 'Image mode is not supported by Pillow')
+        with Image.open(path) as opened:
+            width, height = opened.size
+            target_height, target_width = size or (height, width)
+            source_bytes = width * height * max(4, len(opened.getbands()))
+            target_bytes = target_width * target_height * 4
+            if max(width * height, target_width * target_height) > maximum:
+                raise DataflowError('BUDGET_EXCEEDED', 'Image exceeds decode pixel budget')
+            if max(source_bytes, target_bytes) > bounds.max_row_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'Decoded image exceeds max_row_bytes')
-            image.load()
-            yield {"path": path, "width": width, "height": height, "mode": image.mode,
-                   "bytes": image.tobytes()}
+            # Input decoder, resize/conversion and ndarray/serialization copies
+            # can coexist. Admit their conservative upper bound before load.
+            peak = source_bytes + 4 * target_bytes
+            if peak > min(bounds.max_resident_bytes, bounds.max_batch_bytes):
+                raise DataflowError('BUDGET_EXCEEDED', 'Image decode/conversion copies exceed resident budget')
+            opened.load()
+            image, temporary = opened, []
+            try:
+                if image.size != (target_width, target_height):
+                    image = image.resize((target_width, target_height), resample=Image.Resampling.BILINEAR)
+                    temporary.append(image)
+                if mode is not None and image.mode != mode:
+                    image = image.convert(mode)
+                    temporary.append(image)
+                # Own the ndarray bytes; closing Pillow cannot retain a decoder
+                # buffer or mutate a row already handed to the next stage.
+                array = np.array(image, copy=True)
+                yield {'image': array, **({'path': path} if options.get('include_paths', False) else {})}
+            finally:
+                for image in reversed(temporary):
+                    image.close()
 
     def _close_stream(self) -> None:
         if self._stream is not None:
