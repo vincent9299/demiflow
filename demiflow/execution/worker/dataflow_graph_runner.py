@@ -171,10 +171,14 @@ class WorkerGraphRunner:
             if ref is not None:
                 value = json.loads(b''.join(self.services.store.read(ref, max_bytes=self.bounds.max_control_bytes)))
                 data = ArtifactRef(**value['ref'])
-                stream, _, _ = self._finite_buffer(spec)
-                for chunk in self.services.store.read(data, max_bytes=max(1, data.size_bytes)):
-                    stream.write(chunk)
-                self._finite[spec.channel_id] = (stream, data.size_bytes, value['count'])
+                from ..dataflow_segments import block_totals
+                rows, size = block_totals(self.services.store, data, self.bounds)
+                if (rows is not None and rows != value['count']) or size > spec.storage_bytes:
+                    raise DataflowError('CORRUPT_ARTIFACT', 'finite spool restore counts differ')
+                if value.get('bytes', size) != size:
+                    raise DataflowError('CORRUPT_ARTIFACT', 'finite spool restore size differs')
+                self._finite_buffer(spec).restore({'rows': value['count'], 'bytes': size,
+                    'partitions': [{'data_ref': value['ref'], 'rows': value['count'], 'bytes': size}]})
         for edge_id in self._closed_inputs:
             edge = next(e for e in self.e._graph.edges if e.edge_id == edge_id)
             if edge.producer not in self.e._node_specs:
@@ -388,13 +392,12 @@ class WorkerGraphRunner:
     def _publish(self, record, *, edge=None, spec=None, target=None, delivery=None, route_sequence=None):
         raw = _encode_record_document(record, max_bytes=self.bounds.max_row_bytes)
         if spec is not None and spec.mode == 'finite_sealed':
-            stream, total, count = self._finite_buffer(spec)
+            stream = self._finite_buffer(spec)
             line = document({'record_id': record.record_id, 'sequence': record.sequence,
                              'target': target, 'document': raw.decode()}, self.bounds.max_row_bytes) + b'\n'
-            if total + len(line) > spec.storage_bytes:
+            if stream.bytes + len(line) > spec.storage_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite producer exceeds reserved storage')
-            stream.write(line)
-            self._finite[spec.channel_id] = (stream, total + len(line), count + 1)
+            stream.append(record, line)
             return
         delivery = delivery or self.e._next_operation_id('terminal')
         deadline = time.monotonic() + self.bounds.timeout_ms / 1000
@@ -586,26 +589,14 @@ class WorkerGraphRunner:
         if spec.channel_id not in self._finite:
             if (len(self._finite) + 2) * 2 >= self.bounds.max_open_files:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite spool exceeds open file budget')
-            from ..dataflow_scratch import ScratchStream
-            stream = ScratchStream(self.services.store, max_bytes=spec.storage_bytes,
-                max_io_bytes=self.bounds.max_row_bytes + self.bounds.max_control_bytes)
-            self._finite[spec.channel_id] = (stream, 0, 0)
+            from .terminal_blocks import TerminalBlocks
+            self._finite[spec.channel_id] = TerminalBlocks(self.services, self.partition, partitioned=False)
         return self._finite[spec.channel_id]
 
     def _seal_finite_producer(self, spec):
-        stream, size, count = self._finite_buffer(spec)
-        stream.flush()
-        stream.seek(0)
-        def chunks():
-            while True:
-                chunk = stream.read(65536)
-                if not chunk:
-                    return
-                yield chunk
-        ref = self.services.store.put(chunks(), max_bytes=max(1, size),
-                                      media_type='application/x-demiflow-finite-records-v3')
-        stream.seek(0, 2)
-        return ref, count
+        stream = self._finite_buffer(spec)
+        part = stream.manifest_partitions()[0]
+        return ArtifactRef(**part['data_ref']), part['rows']
 
     def _receive_finite(self, command):
         from ..dataflow_handles import _ChunkStream
@@ -621,9 +612,13 @@ class WorkerGraphRunner:
             if (spec.edge_id, member['partition_id']) in self._finished_inputs:
                 continue
             data = ArtifactRef(**member['manifest_ref'])
-            if data.size_bytes > spec.storage_bytes:
+            from ..dataflow_segments import block_chunks, block_totals
+            declared_rows, size = block_totals(self.services.store, data, self.bounds)
+            if size > spec.storage_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite producer exceeds storage reservation')
-            stream = _ChunkStream(self.services.store.read(data, max_bytes=max(1, data.size_bytes)))
+            if declared_rows is not None and declared_rows - 1 != member['last_sequence']:
+                raise DataflowError('CORRUPT_ARTIFACT', 'finite producer index row count differs from seal')
+            stream = _ChunkStream(block_chunks(self.services.store, data, self.bounds))
             count = 0
             while True:
                 line = stream.readline(self.bounds.max_row_bytes + 1)
@@ -657,7 +652,8 @@ class WorkerGraphRunner:
         for spec in self.e._output_specs:
             if spec.mode == 'finite_sealed':
                 ref, count = self._seal_finite_producer(spec)
-                raw = document({'ref': _artifact_json(ref), 'count': count})
+                raw = document({'ref': _artifact_json(ref), 'count': count,
+                                'bytes': self._finite_buffer(spec).bytes})
                 states[identity(['finite-spool', spec.channel_id])] = self.services.store.put(
                     iter([raw]), max_bytes=len(raw), media_type='application/json')
         frontier = document({'schema': 'demiflow.worker-frontier.v3',
@@ -705,5 +701,5 @@ class WorkerGraphRunner:
                 raise DataflowError('DEADLINE_EXCEEDED', 'Business thread still owns its scratch buffers')
         self._peer.close()
         self._terminal_blocks.close()
-        for stream, _, _ in self._finite.values():
+        for stream in self._finite.values():
             stream.close()

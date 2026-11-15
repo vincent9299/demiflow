@@ -1,0 +1,7 @@
+# Finite-input checkpoints append payload tails
+
+`WorkerGraphRunner` now uses the same `TerminalBlocks(partitioned=False)` / `SegmentForest` implementation for finite producer buffers. Every cut publishes only the new tail; a resumed producer retains its original immutable roots. Consumers validate aggregate size and row count before bounded traversal and still verify the original scope membership and success receipt. Source/state/commit/ACK authorities are unchanged.
+
+Old direct `application/x-demiflow-finite-records-v3` references remain readable and may become a leaf in a newer forest. New finite state adds the original payload byte total, because a forest root's own byte size is only metadata. No history reference is rewritten. Temporary bytes and published tails continue through the original store and journal. This removes repeated payload-prefix copies; historical index/pin traversal and global performance acceptance remain separate work.
+
+Evidence: `/tmp/demiflow-finite-tail.xml`, **5 passed in 27.43s**. A real 24-row sort with frequent cuts has exactly 24 finite payload rows across all its immutable segment files, rather than cumulative prefix copies. Also passed: old flat prefix append/read, interrupt within first finite phase and resume, write-Lance phase recovery with original single commit, and finite join feeding a parked consumer. Seven frozen files were independently compared byte-for-byte against `362d8528c27ae60a0d6ae0ccc986a0ff93847de8` and remain unchanged.
