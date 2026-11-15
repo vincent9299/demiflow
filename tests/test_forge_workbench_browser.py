@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import os
+import tempfile
 from contextlib import contextmanager
 
 import pytest
@@ -16,7 +17,8 @@ from test_forge_workspace import demo,isolated
 from test_forge_public_api import service
 from test_forge_markdown_reading import browser
 
-EVIDENCE=Path(os.environ.get('FORGE_WORKBENCH_EVIDENCE','/yzp/zhaozy/yangzepeng/0905/_demiflow/forge_coordination_20261104/workflow_workbench_20261105/P1'))
+EVIDENCE=Path(os.environ['FORGE_WORKBENCH_EVIDENCE']) if os.environ.get('FORGE_WORKBENCH_EVIDENCE') else Path(
+    tempfile.mkdtemp(prefix='demiflow-workbench-evidence-', dir='/tmp'))
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +51,7 @@ def pipeline(page):
 
 
 def screenshot(page,name):
-    path=EVIDENCE/'screenshots'/(name+'.png');path.parent.mkdir(exist_ok=True)
+    path=EVIDENCE/'screenshots'/(name+'.png');path.parent.mkdir(parents=True,exist_ok=True)
     page.screenshot(path=str(path),full_page=True)
 
 
