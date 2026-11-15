@@ -5,7 +5,7 @@ or environmental prerequisite is an explicit gap, never a counted pass.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from dataclasses import dataclass
 import asyncio
 import hashlib
@@ -118,7 +118,7 @@ def _fixtures(root):
     vectors = pa.table({'id': [1, 2], 'vector': pa.array([[1., 0.], [0., 1.]], type=pa.list_(pa.float32(), 2))})
     lance.write_dataset(vectors, str(root/'vectors.lance'), mode='create')
     Image.new('RGB', (2, 1), (10, 20, 30)).save(root/'image.png')
-    with sqlite3.connect(root/'input.sqlite') as db:
+    with closing(sqlite3.connect(root/'input.sqlite')) as db, db:
         db.execute('CREATE TABLE rows(id INTEGER,k TEXT,v INTEGER)')
         db.executemany('INSERT INTO rows VALUES (:id,:k,:v)', ROWS)
     return root
