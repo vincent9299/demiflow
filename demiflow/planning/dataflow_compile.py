@@ -643,6 +643,10 @@ class _Capture:
         if source_registry().get(kind) is None and kind != "literal_empty":
             raise _error("UNSUPPORTED_CAPABILITY", "source kind is not registered: " + kind)
         semantic = _source_semantic_facts(source)
+        from ..execution.dataflow_schema import literal_schema, encode, KEY
+        schema = literal_schema(source, bounds=self.bounds)
+        if schema is not None:
+            semantic = {**semantic, KEY: encode(schema, bounds=self.bounds)}
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=(),
             state="none", effect="pure", resource_role="io",

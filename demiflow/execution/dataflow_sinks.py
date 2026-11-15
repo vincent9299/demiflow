@@ -271,6 +271,9 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
         raise DataflowError("BUDGET_EXCEEDED", "Prepared sink partition count exceeds budget")
     partitions, seen = {}, set()
     total_rows, total_bytes, columns = 0, 0, None
+    from .record_schema import RecordSchemas
+    schemas = RecordSchemas(services)
+    schema_ref, declared_schema = None, None
     for ref in refs:
         manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=MANIFEST_MEDIA)
         if type(manifest) is not dict or manifest.get("schema") != _MANIFEST_SCHEMA:
@@ -282,6 +285,12 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
             raise DataflowError("INVALID_CONTRACT",
                                 "Duplicate prepared partition; two workers submitted one partition")
         seen.add(partition_id)
+        if manifest.get('schema_ref') is not None:
+            current_ref = _artifact_from_json(manifest['schema_ref'])
+            current = schemas.read(current_ref)
+            if declared_schema is not None and not declared_schema.equals(current, check_metadata=True):
+                raise DataflowError('SOURCE_CHANGED', 'Prepared partition Arrow schema drifted')
+            schema_ref, declared_schema = current_ref, current
         manifest_columns = manifest["columns"]
         if manifest_columns is not None:
             if columns is None:
@@ -297,6 +306,8 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
     combined = {"schema": _COMBINED_SCHEMA, "sink_id": sink_id,
                 "partitions": [partitions[k] for k in sorted(partitions)],
                 "total_rows": total_rows, "total_bytes": total_bytes, "columns": columns}
+    if schema_ref is not None:
+        combined['schema_ref'] = _artifact_json(schema_ref)
     document(combined, bounds.max_control_bytes)
     return combined
 

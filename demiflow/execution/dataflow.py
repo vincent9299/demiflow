@@ -285,6 +285,8 @@ class DataflowExecution:
             from .recovery_identity import platform_identity
             graph, physical, sealed = load_dataflow(self._action.context.directory,
                 self._action.action_id, store=self._store, bounds=self._bounds)
+            from .dataflow_schema import validate_literal_schema_replay
+            validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
             _, _, pin = load_sealed_dataflow(sealed, action_id=self._action.action_id,
                                              store=self._store, bounds=self._bounds)
             if pin.get("platform_revision") != platform_identity():

@@ -367,6 +367,8 @@ class StoredMaterializedHandle:
         self._blocks: tuple["ArtifactRef", ...] = ()
         self._rows = 0
         self._schema = None
+        self._declared_schema_ref = None
+        self._declared_schema = None
         pinned: list["ArtifactRef"] = []
         try:
             store.retain(self._manifest_ref, owner=owner)
@@ -382,6 +384,12 @@ class StoredMaterializedHandle:
             self._blocks = blocks
             self._rows = rows
             self._schema = manifest.get("columns")
+            if manifest.get('schema_ref') is not None:
+                from .record_schema import RecordSchemas
+                self._declared_schema_ref = _artifact_ref(manifest['schema_ref'])
+                self._declared_schema = RecordSchemas(store=store, bounds=store._bounds).read(self._declared_schema_ref)
+                store.retain(self._declared_schema_ref, owner=owner)
+                pinned.append(self._declared_schema_ref)
         except Exception:
             for ref in pinned:
                 try:
@@ -405,7 +413,9 @@ class StoredMaterializedHandle:
             manifest = {"schema": MANIFEST_SCHEMA,
                         "blocks": [p["data_ref"] for p in manifest["manifest"]["partitions"]],
                         "rows": manifest["manifest"]["total_rows"],
-                        "columns": manifest["manifest"]["columns"]}
+                        "columns": manifest["manifest"]["columns"],
+                        **({'schema_ref': manifest['manifest']['schema_ref']}
+                           if 'schema_ref' in manifest['manifest'] else {})}
         if not isinstance(manifest, dict) or manifest.get("schema") != MANIFEST_SCHEMA:
             raise _error("CORRUPT_ARTIFACT", "unknown materialized manifest schema")
         if not isinstance(manifest.get("blocks"), list):
@@ -423,9 +433,12 @@ class StoredMaterializedHandle:
         # Sealed source programs contain immutable location facts, never the
         # driver's live journal, pin authority or locks.
         self._check_open()
-        return {"root": self._store.root, "store_id": self._store.store_id,
+        state = {"root": self._store.root, "store_id": self._store.store_id,
                 "bounds": self._store._bounds, "manifest": self._manifest_ref,
                 "blocks": self._blocks, "rows": self._rows, "schema": self._schema}
+        if self._declared_schema_ref is not None:
+            state['schema_ref'] = self._declared_schema_ref
+        return state
 
     def __setstate__(self, state):
         from .dataflow_store import RunArtifactStore
@@ -433,7 +446,16 @@ class StoredMaterializedHandle:
             journal=None, bounds=state["bounds"], readonly=True)
         self._manifest_ref, self._blocks = state["manifest"], state["blocks"]
         self._rows, self._schema = state["rows"], state["schema"]
+        from .record_schema import RecordSchemas
+        self._declared_schema_ref = state.get('schema_ref')
+        self._declared_schema = RecordSchemas(store=self._store,
+            bounds=self._store._bounds).read(self._declared_schema_ref)
         self._owner, self._released, self._lock = None, False, threading.Lock()
+
+    @property
+    def declared_schema(self):
+        self._check_open()
+        return self._declared_schema
 
     @property
     def row_count(self):
@@ -504,7 +526,8 @@ class StoredMaterializedHandle:
                 return
             if self._owner is not None:
                 release = getattr(self._store, 'release_materialized', self._store.release)
-                for ref in (self._manifest_ref, *self._blocks):
+                for ref in (self._manifest_ref, *self._blocks,
+                            *((self._declared_schema_ref,) if self._declared_schema_ref is not None else ())):
                     release(ref, owner=self._owner)
             # An unknown/failed unpin remains retryable. Immutable data and
             # committed owners remain intact throughout a partial release.

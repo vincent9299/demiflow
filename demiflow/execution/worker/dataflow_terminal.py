@@ -12,7 +12,7 @@ from ..kernels.dataflow import _materialize_row
 from ..kernels import state_codec
 
 
-def terminal_scalar(stream, *, spec, services, occurrence_id):
+def terminal_scalar(stream, *, spec, services, occurrence_id, schema_ref=None):
     kind = spec.kind
     if kind not in ('schema', 'columns', 'size_bytes', 'aggregate', 'collect_summary'):
         return None
@@ -26,6 +26,7 @@ def terminal_scalar(stream, *, spec, services, occurrence_id):
     rows, size, schema = 0, 0, None
     from ..record_schema import RecordSchemas
     schemas = RecordSchemas(services)
+    schema = schemas.read(schema_ref)
     stream.flush()
     stream.seek(0)
     try:

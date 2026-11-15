@@ -103,6 +103,11 @@ def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds
         handle._cleanup()  # cancel producers without masking the active failure
         raise
     records.close()
+    if not rows and schema_receiver is not None:
+        from .dataflow_schema import result_schema_ref
+        ref = result_schema_ref(handle.result(), services=handle.services)
+        if ref is not None:
+            schema_receiver(ref)
     handle.close()
     return rows
 

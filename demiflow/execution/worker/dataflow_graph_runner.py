@@ -76,6 +76,8 @@ class WorkerGraphRunner:
         self._producer_expansion = {}
         self._terminal_bytes = 0
         self._terminal_columns = None
+        self._terminal_schema_ref = None
+        self._restored_terminal = False
         from ..dataflow_scratch import ScratchStream
         self._terminal_file = ScratchStream(self.services.store,
             max_bytes=self.bounds.max_spill_bytes,
@@ -104,11 +106,25 @@ class WorkerGraphRunner:
                 self._terminal_file.write(chunk)
             self._terminal_rows, self._terminal_bytes = manifest["rows"], manifest["bytes"]
             self._terminal_columns = manifest["columns"]
+            from ..record_schema import RecordSchemas
+            self._terminal_schema_ref = (_artifact_from_json(manifest['schema_ref'])
+                                        if manifest.get('schema_ref') is not None else None)
+            RecordSchemas(self.services).read(self._terminal_schema_ref)
+            self._restored_terminal = True
 
     def start(self):
         if self._thread is not None:
             return
         self._restore_terminal()
+        if self._terminal_spec is not None and not self._restored_terminal:
+            from ..dataflow_schema import terminal_schema
+            from ..record_schema import RecordSchemas
+            occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
+            schema = terminal_schema(self.e._graph, self.e._physical,
+                terminal=occurrence, bounds=self.bounds)
+            if schema is not None:
+                self._terminal_schema_ref = RecordSchemas(self.services).put(schema)
+                self._terminal_columns = sorted(schema.names)
         from ..recovery_contract import identity
         frontier_ref = self.e._restored_states.get(identity(['worker-frontier', self.partition]))
         if self.e._restore_image is not None:
@@ -667,11 +683,13 @@ class WorkerGraphRunner:
                         'partition_id': self.partition, 'rows': self._terminal_rows,
                         'bytes': self._terminal_bytes, 'columns': self._terminal_columns,
                         'data_ref': _artifact_json(data_ref)}
+            if self._terminal_schema_ref is not None:
+                manifest['schema_ref'] = _artifact_json(self._terminal_schema_ref)
             if request.final:
                 from .dataflow_terminal import terminal_scalar
                 occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
                 manifest['scalar'] = terminal_scalar(self._terminal_file, spec=self._terminal_spec,
-                    services=self.services, occurrence_id=occurrence)
+                    services=self.services, occurrence_id=occurrence, schema_ref=self._terminal_schema_ref)
             raw = document(manifest)
             sinks[sink_id] = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type=MANIFEST_MEDIA)
             self._terminal_file.seek(0, 2)

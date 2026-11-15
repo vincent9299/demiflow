@@ -218,6 +218,11 @@ def snapshot_source(
         kind, replay, finite = "LanceSource", "seek", True
         version = _lance_version(source)
         immutable = {"kind": "LanceSource", "version": version, "query": source.query.to_dict()}
+        if isinstance(source.query, LanceScanSpec):
+            from dataclasses import replace
+            from ..lance.read import lance_scan_schema
+            from .dataflow_schema import encode, KEY
+            immutable[KEY] = encode(lance_scan_schema(replace(source.query, version=version)), bounds=bounds)
     elif isinstance(source, MaterializedSource):
         kind, replay, finite = "MaterializedSource", "seek", True
         immutable = facts
