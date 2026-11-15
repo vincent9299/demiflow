@@ -1,4 +1,4 @@
-"""Actual worker concurrency, ordered delivery and per-owner checkpoint state."""
+"""Actual worker concurrency, timely delivery and per-owner checkpoint state."""
 import pytest
 
 from demiflow import data
@@ -6,7 +6,7 @@ from demiflow.execution.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
-def test_async_calls_really_overlap_and_preserve_output_order(tmp_path):
+def test_async_calls_really_overlap_without_losing_outputs(tmp_path):
     class Actor:
         async def astart(self):
             import asyncio
@@ -18,7 +18,7 @@ def test_async_calls_really_overlap_and_preserve_output_order(tmp_path):
             return {'n': row['n']}
     with RunContext.start(tmp_path / 'run'), data.local_execution():
         actual = data.from_items([{'n': i} for i in range(6)]).map_async(Actor, concurrency=3).take_all()
-        assert actual == [{'n': i} for i in range(6)]
+        assert sorted(actual, key=lambda r: r['n']) == [{'n': i} for i in range(6)]
 
 
 def test_shared_auto_json_actor_rejected_before_any_business_call(tmp_path):
@@ -45,18 +45,21 @@ def test_thread_calls_really_overlap(tmp_path):
             self.barrier.wait(timeout=3)
             return row
     with RunContext.start(tmp_path / 'run'), data.local_execution():
-        assert data.from_items([{'n': i} for i in range(6)]).map(Actor,
-            concurrency=3, execution='thread').take_all() == [{'n': i} for i in range(6)]
+        rows = data.from_items([{'n': i} for i in range(6)]).map(Actor,
+            concurrency=3, execution='thread').take_all()
+        assert sorted(rows, key=lambda r: r['n']) == [{'n': i} for i in range(6)]
 
 
 def test_worker_callable_slots_and_rotation_resume(tmp_path, monkeypatch):
     from demiflow.execution.dataflow import DataflowExecution
     class Counter:
         def __init__(self):
+            import uuid
+            self.owner = uuid.uuid4().hex
             self.count = 0
         def __call__(self, row):
             self.count += 1
-            return {'n': row['n'], 'count': self.count}
+            return {'n': row['n'], 'owner': self.owner, 'count': self.count}
     def pipeline():
         return data.from_items([{'n': i} for i in range(9)]).map(Counter,
             concurrency=3, execution='thread', callable_scope='worker')
@@ -75,4 +78,31 @@ def test_worker_callable_slots_and_rotation_resume(tmp_path, monkeypatch):
                 patch.setattr(DataflowExecution, 'pump', interrupt)
                 pipeline().take_all()
     with RunContext.resume(ref), data.local_execution():
-        assert pipeline().take_all() == [{'n': i, 'count': i // 3 + 1} for i in range(9)]
+        rows = pipeline().take_all()
+        assert sorted(r['n'] for r in rows) == list(range(9))
+        owners = {r['owner'] for r in rows}
+        assert len(owners) == 3
+        for owner in owners:
+            counts = [r['count'] for r in rows if r['owner'] == owner]
+            assert counts == list(range(1, len(counts) + 1))
+
+
+def test_fast_result_reaches_consumer_while_predecessor_is_blocked(tmp_path):
+    import time
+    consumed = tmp_path / 'fast-consumed'
+    def produce(row):
+        if row['n'] == 0:
+            end = time.monotonic() + 5
+            while not consumed.exists():
+                if time.monotonic() >= end:
+                    raise AssertionError('Fast result was blocked by its predecessor')
+                time.sleep(.01)
+        return row
+    def consume(row):
+        if row['n'] == 1:
+            consumed.write_text('consumed')
+        return row
+    with RunContext.start(tmp_path / 'run'), data.local_execution():
+        rows = data.from_items([{'n': 0}, {'n': 1}]).map(produce, concurrency=2,
+            execution='thread').map(consume).take_all()
+        assert rows == [{'n': 1}, {'n': 0}]

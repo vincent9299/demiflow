@@ -238,7 +238,11 @@ def operation_facts(operation):
         elif type(target) is LanceLookup:
             domain = {'native': lookup_facts(target), 'reserved_bytes': 8 * 1024**2 + 2 * target.max_bytes}
         elif type(target) is PromptActor:
-            native = prompt_facts(target)
+            if type(operation) is ops.AgentMapOp:
+                from ..operator_llm.flow_contract import agent_facts
+                native = agent_facts(target, operation.environment)
+            else:
+                native = prompt_facts(target)
             options = native['options'] or {}
             token_bytes = 0
             if native['token_budget'] and native['token_budget']['unit'] == 'tokens':

@@ -316,7 +316,7 @@ def test_private_actor_state_resumes_at_committed_prefix(tmp_path, monkeypatch):
 
 def test_resource_actor_partial_resume_rejects_before_any_new_call(tmp_path, monkeypatch):
     from demiflow.execution.dataflow import DataflowExecution
-    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.recovery_contract import RecoveryContractError
     log = str(tmp_path / 'calls')
     class ResourceActor:
         def __init__(self):
@@ -343,10 +343,9 @@ def test_resource_actor_partial_resume_rejects_before_any_new_call(tmp_path, mon
                 patch.setattr(DataflowExecution, 'pump', interrupt)
                 pipeline().count()
     first_attempt = Path(log).read_bytes()
-    with pytest.raises(DataflowError, match='actor state cannot resume') as error:
+    with pytest.raises(RecoveryContractError, match='attempt-only'):
         with RunContext.resume(ref), data.local_execution():
             pipeline().count()
-    assert error.value.code == 'INCOMPATIBLE_HISTORY'
     assert Path(log).read_bytes() == first_attempt
 
 

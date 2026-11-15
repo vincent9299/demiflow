@@ -236,7 +236,12 @@ def _invoke_scoped(instance, value, records, spec):
     else:
         occurrence = _hash_id(['dataflow-call-v3', _occurrence(spec),
                                [record.record_id for record in records]])
-    set_row_scope(RowScope(occurrence))
+    delivery = None
+    if len(records) == 1 and records[0].source_position.get('queue_delivery_ref'):
+        import json
+        from ..contracts.dataflow import ArtifactRef
+        delivery = ArtifactRef(**json.loads(records[0].source_position['queue_delivery_ref']))
+    set_row_scope(RowScope(occurrence, delivery))
     try:
         return instance(value)
     finally:
@@ -258,9 +263,12 @@ def invoke_unary(
     position = record.source_position
     sequence = record.sequence
 
-    if kind in ("MapOp", "BoundMapOp"):
+    if kind in ("MapOp", "BoundMapOp") and not cfg.get("streaming_map"):
         result = instance(row)
         if not isinstance(result, Mapping):
+            if position.get('queue_delivery_ref'):
+                from ..recovery_contract import RecoveryContractError
+                raise RecoveryContractError('Task map must preserve exactly one row')
             raise _err("INVALID_CONTRACT", "map callable must return a mapping row")
         yield _output_record(record.record_id, position, result, sequence, services)
     elif kind == "FilterOp":
@@ -286,7 +294,7 @@ def invoke_unary(
             close = getattr(iterator, "close", None)
             if close is not None:
                 close()
-    elif kind in ("AsyncMapOp", "DeduplicateOp", "AgentMapOp", "OperatorLLMMapOp",
+    elif kind in ("MapOp", "BoundMapOp", "AsyncMapOp", "DeduplicateOp", "AgentMapOp", "OperatorLLMMapOp",
                   "prompt", "agent", "fetch", "document", "VectorSearchOp", "SearchWebOp",
                   "RegisterDocumentsOp", "ReadDocumentsOp"):
         try:
@@ -297,6 +305,9 @@ def invoke_unary(
             if not (admitted & names):
                 raise
             return
+        if position.get('queue_delivery_ref') and not isinstance(result, Mapping):
+            from ..recovery_contract import RecoveryContractError
+            raise RecoveryContractError('Task map must preserve exactly one row')
         if result is None:
             return
         rows = (result,) if isinstance(result, Mapping) else result
@@ -383,20 +394,42 @@ def _rows_to_batch(
     raise _err("UNSUPPORTED_CAPABILITY", "unknown batch_format", format=batch_format)
 
 
-def _batch_to_rows(result: Any, batch_format: str) -> list[dict[str, Any]]:
-    if isinstance(result, Mapping):
+def _batch_to_rows(result: Any, batch_format: str) -> Iterator[dict[str, Any]]:
+    if isinstance(result, (list, tuple)):
+        # Public map_batches accepts row lists for every input batch format.
+        # Iterator outputs remain a lazy stream of batches below.
+        for row in result:
+            if not isinstance(row, Mapping):
+                raise _err('INVALID_CONTRACT', 'batch row lists must contain mappings')
+            yield dict(row)
+    elif isinstance(result, Mapping):
         lengths = {len(column) for column in result.values()}
         if len(lengths) > 1:
             raise _err("INVALID_CONTRACT", "batch columns must have equal lengths")
         import numpy as np
         def value(item):
             return item.item() if isinstance(item, np.generic) else item.tolist() if isinstance(item, np.ndarray) else item
-        return [{name: value(column[i]) for name, column in result.items()} for i in range(next(iter(lengths), 0))]
-    if hasattr(result, "to_pylist"):
-        return [dict(row) for row in result.to_pylist()]
-    if hasattr(result, "to_dict"):
-        return [dict(row) for row in result.to_dict(orient="records")]
-    return [dict(row) for row in result]
+        for i in range(next(iter(lengths), 0)):
+            yield {name: value(column[i]) for name, column in result.items()}
+    elif hasattr(result, "to_pylist"):
+        for batch in result.to_batches(max_chunksize=1) if hasattr(result, 'to_batches') else (result,):
+            for index in range(batch.num_rows):
+                yield batch.slice(index, 1).to_pylist()[0]
+    elif hasattr(result, "iloc"):
+        for index in range(len(result)):
+            yield result.iloc[index:index + 1].to_dict(orient='records')[0]
+    else:
+        iterator = iter(result)
+        try:
+            for row in iterator:
+                if batch_format == 'rows':
+                    yield dict(row)
+                else:
+                    yield from _batch_to_rows(row, batch_format)
+        finally:
+            close = getattr(iterator, 'close', None)
+            if close is not None:
+                close()
 
 
 def invoke_batch(
@@ -444,24 +477,29 @@ def invoke_batch(
             out_rows = [{**row, column: value} for row, value in zip(rows, values)]
         else:
             result = _invoke_scoped(instance, rows, records, spec)
-            out_rows = [dict(row) for row in result]
+            out_rows = _batch_to_rows(result, "rows")
     else:
         raise _err("INVALID_CONTRACT", "kind is not a batch kernel", kind=kind)
 
     occurrence = spec.configuration.get("occurrence_id")
-    for index, out_row in enumerate(out_rows):
-        _check_stop(services)
-        if index < len(records):
-            source = records[index]
-            record_id = source.record_id
-            position = source.source_position
-        else:
-            source = records[-1]
-            record_id = _hash_id([RECORD_DOMAIN, source.record_id, occurrence, index])
-            position = source.source_position
-        out = _output_record(record_id, position, out_row, source.sequence, services)
-        budget.charge(out)
-        yield out
+    try:
+        for index, out_row in enumerate(out_rows):
+            _check_stop(services)
+            if index < len(records):
+                source = records[index]
+                record_id = source.record_id
+                position = source.source_position
+            else:
+                source = records[-1]
+                record_id = _hash_id([RECORD_DOMAIN, source.record_id, occurrence, index])
+                position = source.source_position
+            out = _output_record(record_id, position, out_row, source.sequence, services)
+            budget.charge(out)
+            yield out
+    finally:
+        close = getattr(out_rows, 'close', None)
+        if close is not None:
+            close()
 
 
 def finish_kernel(

@@ -161,8 +161,9 @@ class HostedDataflowWorker:
                 self._runtime.close()
         except ProtocolError as exc:
             return {"error": exc.to_dict()}
-        except DataflowError as exc:
-            return {"error": {"code": exc.code, "message": str(exc)}}
+        except Exception as exc:
+            from ..dataflow_failures import failure_payload
+            return {"error": failure_payload(exc)}
         if message["kind"] == "Restore":
             self._runtime.ready(message["payload"]["assignment_ref"])
         if message["kind"] == "Assign":

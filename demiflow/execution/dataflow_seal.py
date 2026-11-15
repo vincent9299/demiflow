@@ -112,7 +112,13 @@ def _program_value(declaration: ProgramDeclaration):
     if declaration.callable_spec is not None:
         return declaration.callable_spec
     if declaration.source_spec is not None:
-        return declaration.source_spec
+        from ..data.sources import DatasourceSource
+        from .queue_source import QueueDatasource
+        source = declaration.source_spec
+        if isinstance(source, DatasourceSource) and type(source.datasource) is QueueDatasource:
+            from .dataflow_acquisition_call import QueueSourceDeclaration
+            return replace(source, datasource=QueueSourceDeclaration(source.datasource.declaration()))
+        return source
     if declaration.action_program is not None:
         return declaration.action_program.value
     raise DataflowError("INVALID_CONTRACT", "ProgramDeclaration has no program body")

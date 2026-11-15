@@ -58,6 +58,7 @@ class WorkerGraphRunner:
             import ray
             host = ray.util.get_node_ip_address()
         self._peer = PeerBuffers(bounds=self.bounds, host=host)
+        self._queue_finalizer = None
         self._terminal_rows = 0
         self._terminal_bytes = 0
         self._terminal_columns = None
@@ -176,9 +177,8 @@ class WorkerGraphRunner:
                         self._condition.wait(.005)
         except BaseException as exc:
             if not self.e._cancel_event.is_set():
-                import traceback
-                self._send('failure', {'code': getattr(exc, 'code', 'INTERNAL_PROTOCOL'),
-                                      'message': str(exc), 'traceback': traceback.format_exc()[-8000:]})
+                from ..dataflow_failures import failure_payload
+                self._send('failure', failure_payload(exc))
 
     def step(self, *, max_records, deadline_ms):
         if max_records <= 0 or deadline_ms <= 0:
@@ -360,6 +360,25 @@ class WorkerGraphRunner:
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
                 record = replace(record, inline=row, payload_ref=None, encoded_bytes=_row_bytes(row))
+            if self._terminal_spec.kind == 'write_datasink':
+                from ..contracts.dataflow import thaw_record_value
+                facts = self.services.journal.read_configuration()
+                binding = facts.get('queue_binding')
+                if binding and binding['mode'] == 'sink':
+                    from ..dataflow_acquisition_call import AcquisitionCall
+                    from ..row_scope import RowScope, set_row_scope
+                    from dataclasses import replace
+                    from ..kernels.dataflow import _row_bytes
+                    if self._queue_finalizer is None:
+                        self._queue_finalizer = AcquisitionCall('finalize')
+                        self._queue_finalizer.bind(self.services, occ)
+                    delivery = ArtifactRef(**json.loads(record.source_position['queue_delivery_ref']))
+                    set_row_scope(RowScope(record.record_id, delivery))
+                    try:
+                        row = self._queue_finalizer(thaw_record_value(record.inline))
+                    finally:
+                        set_row_scope(None)
+                    record = replace(record, inline=row, payload_ref=None, encoded_bytes=_row_bytes(row))
             if self._limit is not None and self._terminal_rows >= self._limit:
                 return
             raw = _encode_record(record, self.bounds) + b'\n'
@@ -559,6 +578,7 @@ class WorkerGraphRunner:
 
     def close(self):
         self.e._cancel_event.set()
+        self.e._mailbox.cancel_pending()
         self.wake()
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout=self.bounds.timeout_ms / 1000)

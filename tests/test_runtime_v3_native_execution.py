@@ -35,6 +35,7 @@ prompts:
 def native_server(monkeypatch):
     class Requests(list):
         barrier = None
+        response = None
     requests = Requests()
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
@@ -52,6 +53,8 @@ def native_server(monkeypatch):
             if self.path.endswith('/embeddings'):
                 response = {'data': [{'index': i, 'embedding': [1., 0., 0.]}
                                      for i in range(len(request['input']))], 'usage': {'prompt_tokens': 1}}
+            if requests.response is not None:
+                response['choices'][0]['message']['content'] = json.dumps(requests.response)
             encoded = json.dumps(response).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -115,10 +118,9 @@ def test_embedding_worker_native_journal(tmp_path, native_server):
 
 def test_prompt_run_budget_is_atomic_before_second_http(tmp_path, native_server):
     from demiflow.execution.recovery_contract import RecoveryContractError
-    from demiflow.execution.contracts.dataflow_errors import DataflowError
     with pytest.raises(RecoveryContractError, match='unconfirmed'), \
             RunContext.start(tmp_path / 'run', limits={'max_requests': 1}) as run, data.local_execution():
-        with pytest.raises(DataflowError):
+        with pytest.raises(RecoveryContractError, match='budget exhausted: requests'):
             data.from_items([{'item': 'a'}, {'item': 'b'}]).map_prompt(
                 'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'item'},
                 output='answer', max_requests=2).take_all()
@@ -203,6 +205,24 @@ def test_native_prompt_requests_overlap_with_one_budget_authority(tmp_path, nati
         rows = data.from_items([{'item': str(i)} for i in range(6)]).map_prompt_async(
             'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'item'},
             output='answer', max_requests=6, concurrency=3).take_all()
-        assert len(rows) == 6 and [r['item'] for r in rows] == [str(i) for i in range(6)]
+        assert len(rows) == 6 and sorted(r['item'] for r in rows) == [str(i) for i in range(6)]
         assert run.journal.budget_consumed('requests') == 6
     assert len(native_server) == 6
+
+
+def test_native_agent_final_turn_runs_in_same_journal(tmp_path, native_server):
+    from demiflow.agent import AgentConfig
+    from demiflow.environment import OperatorEnvironment
+    from demiflow.operator_llm.flow_contract import prompt_facts
+    native_server.response = {'api_calls': [], 'response': {'result': 'agent-ok'}}
+    config = AgentConfig(parse_prompt_pack(PACK), OperatorEnvironment(operators=()), {}, 2)
+    with RunContext.start(tmp_path / 'agent') as run, data.local_execution():
+        ds = data.from_items([{'item': 'one'}]).agentmap_async('enrich', config=config,
+            inputs={'payload': 'item'}, output='answer')
+        with pytest.raises(ValueError, match='copies differ'):
+            prompt_facts(ds._stages[-1])
+        rows = ds.take_all()
+        assert rows == [{'item': 'one', 'answer': 'agent-ok'}]
+        assert run.journal.budget_consumed('requests') == 1
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    assert len(native_server) == 1

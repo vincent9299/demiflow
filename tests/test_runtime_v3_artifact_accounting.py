@@ -115,3 +115,34 @@ def test_release_cannot_refund_a_live_owned_temporary(tmp_path):
         pending.unlink()
         port.artifact(command)
         assert consumed(run) == 0
+
+
+def test_stream_growth_is_idempotent_and_quota_precedes_write(tmp_path, monkeypatch):
+    with store_fixture(tmp_path, ceiling=256 * 1024) as (run, store, port):
+        apply = port.artifact
+        grows = []
+        def inspect_growth(command):
+            if command.kind == 'grow_staging':
+                owned = list((store.root / store.store_id / 'staging').glob('.pending-' + command.owner + '-*'))
+                assert len(owned) == 1
+                assert owned[0].stat().st_size < command.size_bytes
+                first = apply(command)
+                before = consumed(run)
+                assert apply(command) == first
+                assert consumed(run) == before
+                grows.append(command)
+                return first
+            return apply(command)
+        monkeypatch.setattr(port, 'artifact', inspect_growth)
+        ref = store.put(iter([b'a' * 32768, b'b' * 65536]), max_bytes=256 * 1024,
+                        media_type='application/octet-stream')
+        assert consumed(run) == ref.size_bytes == 98304
+        assert grows
+        with pytest.raises(RecoveryContractError, match='Settled staging'):
+            apply(grows[0])
+        with pytest.raises(RecoveryContractError, match='budget exhausted'):
+            store.put(iter([b'x' * 200000]), max_bytes=256 * 1024,
+                      media_type='application/octet-stream')
+        assert consumed(run) == 98304
+        assert not list((store.root / store.store_id / 'staging').iterdir())
+        assert len(list((store.root / store.store_id / 'objects').iterdir())) == 1

@@ -138,8 +138,8 @@ def _run_v3_worker(launch_spec, sock):
                     error = exc.to_dict() if isinstance(exc, ProtocolError) else {"code": exc.code, "message": str(exc)}
                     send({"response_to": message.get("operation_id"), "error": error})
                 except BaseException as exc:
-                    send({"response_to": message.get("operation_id"),
-                          "error": {"code": "INTERNAL_PROTOCOL", "message": str(exc)}})
+                    from ..dataflow_failures import failure_payload
+                    send({"response_to": message.get("operation_id"), "error": failure_payload(exc)})
                 finally:
                     commands.task_done()
         finally:

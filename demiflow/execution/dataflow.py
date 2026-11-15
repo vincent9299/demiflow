@@ -196,6 +196,7 @@ class DataflowExecution:
                                      media_type="application/json")
             from dataclasses import replace
             lease = replace(lease, grant_ref=staged)
+        self._services.journal_service.register_worker(lease, stage.occurrences)
         endpoint = make_host_endpoint(lease, services=self._services)
         endpoint._recovery_image = self._restore_image
         endpoint.prepare(self._assignment(lease, stage))
@@ -304,7 +305,7 @@ class DataflowExecution:
             for op in self._request.plan.operations)
         if requires_acquisition:
             self._acquisition = NativeAcquisitionService(self._action, services=self._services)
-            self._acquisition.configure(self._request.source, self._request.plan, self._request.sink)
+            self._acquisition.configure(self._request.source, self._request.plan, self._request.sink, graph=graph)
             self._services.journal_service.bind_queue(self._acquisition)
         self._prepared = True
         return sealed
@@ -325,8 +326,10 @@ class DataflowExecution:
             self._scheduler.scope_id, self._run_id(), {"provider": self._policy.provider},
             self._fence(), budget))
         self._scope_open = True
+        queue_owned_recovery = (self._acquisition is not None and
+            self._acquisition.can_recover_without_dataflow_cut())
         self._restore_image = (self._checkpoint.recover(sinks=self._sinks)
-                               if self._action.context.resuming else None)
+            if self._action.context.resuming and not queue_owned_recovery else None)
         if self._restore_image is not None:
             pub = self._publication(self._restore_image)
             self._terminal_seen = pub["manifest"]["total_rows"]
@@ -434,14 +437,8 @@ class DataflowExecution:
         endpoint = self._endpoints[event.allocation_id]
         lease = self._scheduler.leases[event.allocation_id]
         if event.kind == "failure":
-            from .contracts.dataflow_errors import DATAFLOW_ERROR_CODES
-            code = payload.get("code", "INTERNAL_PROTOCOL")
-            if code not in DATAFLOW_ERROR_CODES:
-                code = "INTERNAL_PROTOCOL"
-            message = payload.get("message") or "worker failed"
-            self._failure = DataflowError(code, message[:1024])
-            if payload.get("traceback"):
-                self._failure.add_note(payload["traceback"][-8000:])
+            from .dataflow_failures import restore_failure
+            self._failure = restore_failure(payload)
             self._state = "failed"
             raise self._failure
         if event.kind == "progress":
@@ -597,6 +594,8 @@ class DataflowExecution:
             for endpoint in self._endpoints.values():
                 endpoint.request_cut(self._cut)
         if self._cut is not None and set(self._cut.participants) <= self._contributions.keys():
+            if self._cut.final and self._acquisition is not None:
+                self._acquisition.finish()
             image = self._checkpoint.commit(self._cut.cut_id, sinks=self._sinks)
             self._restore_image = image
             self._last_checkpoint_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
@@ -637,9 +636,9 @@ class DataflowExecution:
         if self._request.kind in ("write_lance", "write_datasink"):
             from ..data.datasink import WriteResult
             fact = self._action.context.journal.execution_commit(image.commit_id)
-            receipt = fact["receipts"][self._request.kind]["data"]["native_receipt"]
+            receipt = fact["receipts"][self._request.kind]["data"].get("native_receipt")
             write = WriteResult(written_rows=rows, blocks_written=len(publication["manifest"]["partitions"]),
-                                metadata={"native_receipt": receipt})
+                                metadata={"native_receipt": receipt, "queue_settled": self._acquisition is not None and self._acquisition.binding.mode == "sink"})
         self._terminal_result = TerminalResult(kind=self._request.kind, rows=rows,
             scalar=rows if self._request.kind == "count" else publication["manifest"]["partitions"][0].get("scalar"),
             result_ref=image.confirmed_sinks[self._request.kind], write_result=write, complete=True,

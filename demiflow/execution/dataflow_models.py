@@ -120,10 +120,10 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
         config = {'concurrency': operation.concurrency, 'queue_depth': operation.queue_depth,
                   'label': operation.label, 'runtime': runtime_kind,
                   'resources': getattr(environment, 'resources', None)}
-        kind, state = 'agent', 'nonrecoverable'
+        kind, state = 'agent', 'nonrecoverable' if runtime_kind == 'codex' else 'none'
         effect = 'unknown_replay_forbidden' if runtime_kind == 'codex' else 'journaled'
         role = 'remote_api'
-        ports = _input_ports(('row',))
+        ports = _input_ports(('main',))
     elif isinstance(operation, (SearchWebOp, VectorSearchOp)):
         config = {'output': operation.output, 'concurrency': operation.concurrency}
         if isinstance(operation, SearchWebOp):
@@ -132,11 +132,11 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
         else:
             config.update({'query': operation.query, 'search_spec': _json_config(operation.search_spec)})
         kind, state, effect, role = 'fetch', 'none', 'journaled', 'remote_api'
-        ports = _input_ports(('row',))
+        ports = _input_ports(('main',))
     elif isinstance(operation, (ReadDocumentsOp, RegisterDocumentsOp, RegisterDocumentsBatchOp)):
         config = {'request': operation.request, 'output': operation.output}
         kind, state, effect, role = 'document', 'none', 'journaled', 'io'
-        ports = _input_ports(('row',))
+        ports = _input_ports(('main',))
     else:
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Not a native model operation: ' + type(operation).__name__)
 

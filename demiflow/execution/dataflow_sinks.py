@@ -406,6 +406,13 @@ def make_native_terminal_sink(spec, *, request, services):
         native = LanceSink(services.action, declaration)
     elif request.kind == 'write_datasink':
         native = request.sink
+        from .queue_sinks import QueueResultSink
+        if isinstance(native, QueueResultSink):
+            # Each task is already atomically settled by the original queue
+            # authority before the terminal can publish it. This cut only owns
+            # the Dataset result manifest; never submit those tasks twice.
+            return _DataflowArtifactSink(sink_id=request.kind, store=services.store,
+                action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))
         _require_durable(native)
     else:
         raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')

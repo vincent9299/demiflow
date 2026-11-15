@@ -40,6 +40,7 @@ from .contracts.dataflow import (
 )
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_sources import spool_record
+from .contracts.dataflow import thaw_record_value
 from .recovery_contract import identity
 
 _RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
@@ -86,14 +87,14 @@ class _BaseReader:
             raise DataflowError("INVALID_CONTRACT", "reader is already open")
         if split.source_id != self._snapshot.source_id:
             raise DataflowError("INVALID_CONTRACT", "split belongs to another source")
-        if split.split_id != identity([self._snapshot.source_id, dict(split.locator)]):
+        if split.split_id != identity([self._snapshot.source_id, thaw_record_value(split.locator)]):
             raise DataflowError("INVALID_CONTRACT", "split_id does not match its locator")
         if cursor is not None:
             if cursor.split_id != split.split_id:
                 raise DataflowError("INVALID_CONTRACT", "cursor belongs to another split")
             if self._snapshot.replay == "attempt_only":
                 raise DataflowError("INVALID_CONTRACT", "attempt_only source cannot resume from a cursor")
-            self._offset = dict(cursor.offset)
+            self._offset = thaw_record_value(cursor.offset)
             self._next_sequence = cursor.next_sequence
             self._eoi = cursor.end_of_input
             self._pending = tuple(cursor.pending_refs)
@@ -355,8 +356,12 @@ class FileReader(_BaseReader):
             return
         if fmt == "binary_files":
             include_paths = bool(options.get("include_paths", False))
-            data = Path(path).read_bytes()
-            yield (path, data) if include_paths else {"bytes": data}
+            maximum = self._services.bounds.max_row_bytes
+            with open(path, 'rb') as stream:
+                data = stream.read(maximum + 1)
+            if len(data) > maximum:
+                raise DataflowError('BUDGET_EXCEEDED', 'Binary file exceeds max_row_bytes')
+            yield {'bytes': data, **({'path': path} if include_paths else {})}
             return
         if fmt == "csv":
             opener = gzip.open if path.endswith(".gz") else open
@@ -388,6 +393,8 @@ class FileReader(_BaseReader):
             width, height = image.size
             if width * height > max_pixels:
                 raise DataflowError("BUDGET_EXCEEDED", "image exceeds decode pixel budget")
+            if width * height * max(4, len(image.getbands())) > self._services.bounds.max_row_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'Decoded image exceeds max_row_bytes')
             image.load()
             yield {"path": path, "width": width, "height": height, "mode": image.mode,
                    "bytes": image.tobytes()}
@@ -510,7 +517,7 @@ class SqlReader(_BaseReader):
         self._connection = None
         self._cursor = None
         self._columns: tuple[str, ...] = ()
-        self._spooled: tuple[Any, ...] | None = None
+        self._spooled: Iterator[Any] | None = None
         self._spool_index = 0
         if self._snapshot.replay == "durable_spool":
             self._open_spool()
@@ -518,26 +525,55 @@ class SqlReader(_BaseReader):
             self._open_cursor()
 
     def _open_spool(self) -> None:
-        store = self._services.store
-        bounds = self._services.bounds
+        from .dataflow_handles import _ChunkStream
+        from .exchange.dataflow_bridge import _encode_payload, _decode_payload
+        store, bounds = self._services.store, self._services.bounds
         spool = self._offset.get("spool")
-        if spool is not None:
-            ref = ArtifactRef(spool["digest"], spool["size_bytes"], spool["store_id"],
-                              spool["key"], spool["media_type"])
-            raw = b"".join(store.read(ref, max_bytes=bounds.max_spill_bytes))
-            self._spooled = pickle.loads(raw)
-        else:
-            rows = tuple(self._capture())
-            raw = pickle.dumps(rows, protocol=4)
-            if len(raw) > bounds.max_spill_bytes:
-                raise DataflowError("BUDGET_EXCEEDED", "SQL capture exceeds spill byte budget")
-            ref = store.put(iter((raw,)), max_bytes=len(raw),
-                            media_type="application/vnd.demiflow.sql-spool.v3")
-            self._spooled = rows
+        media_type = "application/vnd.demiflow.sql-rows.v3+ndjson"
+        if spool is None:
+            def chunks():
+                rows = self._capture()
+                try:
+                    for row in rows:
+                        self._services.check_stop()
+                        yield _encode_payload(row, max_bytes=bounds.max_row_bytes) + b'\n'
+                finally:
+                    rows.close()
+            # put reserves the disk allowance before the generator queries SQL.
+            # It charges only published bytes and releases a failed capture.
+            ref = store.put(chunks(), max_bytes=bounds.max_spill_bytes, media_type=media_type)
             self._offset = {**self._offset, "spool": {
                 "digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
                 "key": ref.key, "media_type": ref.media_type}}
+        else:
+            ref = ArtifactRef(**dict(spool))
         self._spool_index = int(self._offset.get("last_key") or 0)
+        if ref.media_type == "application/vnd.demiflow.sql-spool.v3":
+            # Already sealed legacy images keep their identity. Admit their
+            # whole-object format before decoding; new captures never use it.
+            raw = b''.join(store.read(ref, max_bytes=bounds.max_batch_bytes))
+            self._spooled = iter(pickle.loads(raw))
+        elif ref.media_type == media_type:
+            stream = _ChunkStream(store.read(ref, max_bytes=bounds.max_spill_bytes))
+            def rows():
+                try:
+                    while True:
+                        raw = stream.readline(bounds.max_row_bytes + 1)
+                        if not raw:
+                            return
+                        if not raw.endswith(b'\n'):
+                            raise DataflowError('CORRUPT_ARTIFACT', 'SQL spool row is incomplete')
+                        yield _decode_payload(raw[:-1], max_bytes=bounds.max_row_bytes)
+                finally:
+                    stream.close()
+            self._spooled = rows()
+        else:
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Unknown SQL spool encoding')
+        for _ in range(self._spool_index):
+            try:
+                next(self._spooled)
+            except StopIteration:
+                raise DataflowError('CORRUPT_ARTIFACT', 'SQL cursor exceeds its sealed spool')
 
     def _connect(self) -> Any:
         return self._plan.connection_factory()
@@ -568,9 +604,10 @@ class SqlReader(_BaseReader):
 
     def _advance(self) -> tuple[Any, dict[str, Any]] | None:
         if self._spooled is not None:
-            if self._spool_index >= len(self._spooled):
+            try:
+                row = next(self._spooled)
+            except StopIteration:
                 return None
-            row = self._spooled[self._spool_index]
             position = {"snapshot_id": self._snapshot_id, "partition": "0",
                         "last_key": self._spool_index}
             self._spool_index += 1
@@ -587,6 +624,11 @@ class SqlReader(_BaseReader):
         return row, position
 
     def _teardown(self) -> None:
+        if self._spooled is not None:
+            close = getattr(self._spooled, 'close', None)
+            if close is not None:
+                close()
+            self._spooled = None
         if self._cursor is not None:
             try:
                 self._cursor.close()
@@ -685,16 +727,11 @@ class QueueReader(_BaseReader):
     """Claims only through the driver queue service port; close never ACKs."""
 
     def _setup(self, split: SourceSplit) -> None:
-        binding = dict(split.locator.get("binding", {}))
-        assignment = self._services.assignment
-        self._binding = QueueBinding(
-            action_id=assignment.action_id, source_id=self._snapshot.source_id,
-            mode=binding.get("mode", "sink"), contract_digest=binding.get("contract_digest", ""),
-            generation=binding.get("generation"), pool=binding.get("pool"),
-            source_occurrence=binding.get("source_occurrence", self._snapshot.source_id),
-            fetch_occurrence=binding.get("fetch_occurrence", self._snapshot.source_id),
-            final_occurrence=binding.get("final_occurrence"),
-        )
+        facts = self._services.journal.read_configuration()
+        self._binding = QueueBinding(**dict(facts['queue_binding']))
+        if (self._binding.action_id != self._services.assignment.action_id or
+                self._binding.source_occurrence != self._snapshot.source_id):
+            raise DataflowError('FENCED', 'Queue reader differs from the driver-sealed source')
         self._record_index = int(self._offset.get("record_index", 0))
         self._claim_ref = self._offset.get("claim_ref", "")
         self._delivery_ref: ArtifactRef | None = None
@@ -712,7 +749,7 @@ class QueueReader(_BaseReader):
         ])
         command = QueueCommand(
             operation_id=operation_id, operation="poll", binding=self._binding,
-            record_id=None, delivery_ref=self._delivery_ref, row_ref=None,
+            record_id=None, delivery_ref=None, row_ref=None,
         )
         reply = queue_service_request(command, services=self._services)
         if reply.status == "pending":
@@ -722,18 +759,25 @@ class QueueReader(_BaseReader):
             return SourcePoll("eoi", None, 0)
         if reply.status != "record" or reply.row_ref is None:
             raise DataflowError("INTERNAL_PROTOCOL", f"unexpected queue reply: {reply.status}")
-        row = _load_row(reply.row_ref, self._services.store, self._services.bounds.max_row_bytes)
-        position = {"claim_ref": reply.delivery_ref.key if reply.delivery_ref else "",
+        import json
+        from dataclasses import asdict
+        if reply.delivery_ref is None:
+            raise DataflowError('FENCED', 'Queue delivery lacks native ownership')
+        row = json.loads(b''.join(self._services.store.read(reply.row_ref,
+                         max_bytes=self._services.bounds.max_row_bytes)))
+        position = {"claim_ref": reply.delivery_ref.key,
+                    "queue_delivery_ref": json.dumps(asdict(reply.delivery_ref), sort_keys=True),
                     "record_index": self._record_index}
         sequence = self._next_sequence
         record_id = identity([self._snapshot.source_id, self._split.split_id, position])
-        record = Record(record_id, position, reply.row_ref, None, reply.row_ref.size_bytes, sequence)
+        record = Record(record_id, position, None, row,
+                        _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes), sequence)
         self._delivery_ref = reply.delivery_ref
         self._claim_ref = position["claim_ref"]
         self._record_index += 1
         self._next_sequence += 1
         self._offset = {"claim_ref": self._claim_ref, "record_index": self._record_index}
-        self._pending = (reply.row_ref,)
+        self._pending_record = record
         self._lease_ref = reply.delivery_ref
         return SourcePoll("record", record, 0)
 

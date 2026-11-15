@@ -9,7 +9,7 @@ class PromptFactory:
         from ..operator_llm.runtime import PromptActor, InProcessOperatorLLMCoordinator
         actor = PromptActor(operation, operation.config,
                             InProcessOperatorLLMCoordinator(operation.max_requests), operation.options)
-        for name in ('when', 'call_output', 'error_output'):
+        for name in ('when', 'call_output', 'error_output', 'environment'):
             setattr(actor, name, settings.get(name))
         actor._runtime.concurrency = settings.get('concurrency', 1)
         actor._runtime.token_budget = settings.get('token_budget')
@@ -29,6 +29,13 @@ class EmbeddingFactory:
         return actor
 
 
+class CacheFactory:
+    def __new__(cls, declaration, directory, version, options, synchronous):
+        from ..data.result_cache import CachedMap, CachedSyncMap
+        fn = declaration.instantiate()
+        return (CachedSyncMap if synchronous else CachedMap)(fn, directory, version, **options)
+
+
 def native_model_declaration(operation):
     """Return a factory only after validating the original native declaration.
 
@@ -42,11 +49,33 @@ def native_model_declaration(operation):
         return CallableSpec.create(PromptFactory, fn_constructor_args=(replace(operation, node_id=None), {}))
     target = getattr(getattr(operation, 'callable', None), 'target', None)
     actor = getattr(target, '__self__', target)
+    from .raw_fetch import RawFetch, raw_fetch_facts
+    from .queue_ack import QueueAcknowledge, ack_facts
+    if type(actor) in (RawFetch, QueueAcknowledge):
+        from .dataflow_acquisition_call import AcquisitionCall
+        (raw_fetch_facts if type(actor) is RawFetch else ack_facts)(actor)
+        return CallableSpec.create(AcquisitionCall, fn_constructor_args=(
+            'acquire' if type(actor) is RawFetch else 'finalize', getattr(actor, 'keep_row', True)))
+    from ..data.result_cache import CachedMap, CachedSyncMap
+    if type(actor) in (CachedMap, CachedSyncMap):
+        from types import SimpleNamespace
+        actor.validate_runtime_state()
+        wrapped = native_model_declaration(SimpleNamespace(callable=CallableSpec.create(actor.fn)))
+        wrapped = wrapped if wrapped is not None else CallableSpec.create(actor.fn)
+        options = {name: getattr(actor, name) for name in ('inputs', 'output', 'outputs',
+            'when', 'cache_when', 'wait_timeout_s', 'max_input_bytes')}
+        options.update(namespace=actor.store.namespace, max_result_bytes=actor.store.max_value_bytes,
+                       max_entries=actor.store.max_entries, max_cache_bytes=actor.store.max_bytes)
+        return CallableSpec.create(CacheFactory, fn_constructor_args=(wrapped, str(actor.directory),
+            actor.version, options, type(actor) is CachedSyncMap))
     from ..operator_llm.runtime import PromptActor
     if type(actor) is PromptActor:
-        from ..operator_llm.flow_contract import prompt_facts
-        prompt_facts(actor)
-        settings = {name: getattr(actor, name) for name in ('when', 'call_output', 'error_output')}
+        from ..operator_llm.flow_contract import prompt_facts, agent_facts
+        if actor.environment is not None:
+            agent_facts(actor, getattr(operation, 'environment', actor.environment))
+        else:
+            prompt_facts(actor)
+        settings = {name: getattr(actor, name) for name in ('when', 'call_output', 'error_output', 'environment')}
         settings.update(concurrency=actor._runtime.concurrency,
                         token_budget=actor._runtime.token_budget,
                         request_policy=dict(actor._request_policy) if hasattr(actor, '_request_policy') else None)

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from .run_context import RunAction
 
 _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown", "release_unsent"})
-_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "settle_staging", "release_staging"})
+_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
                          "references", "media_references", "bind_membership"})
@@ -95,6 +95,12 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
     identifier(command.owner)
     journal = action.context.journal
     fence = action.context.fence
+    if command.kind == 'grow_staging':
+        if command.ref is not None or command.size_bytes <= 0:
+            raise DataflowError('INVALID_CONTRACT', 'Growth requires a positive staging size without a ref')
+        charged = journal.grow_dataflow_staging(fence, command.owner, command.size_bytes,
+                                                ceiling=bounds.max_spill_bytes)
+        return ArtifactReply(operation_id=command.operation_id, present=None, charged_bytes=charged)
     if command.kind in {'settle_staging', 'release_staging'}:
         ref = command.ref
         if command.kind == 'release_staging' and ref is not None:
@@ -178,6 +184,7 @@ class DriverJournalService:
         self._lock = threading.Lock()
         self._closed = False
         self._native = None
+        self._leases = {}
         self._native_action_id = None
         self._workers: list[threading.Thread] = []
         self._stop = threading.Event()
@@ -185,6 +192,13 @@ class DriverJournalService:
             worker = threading.Thread(target=self._serve, name="dataflow-journal-%d" % index, daemon=True)
             worker.start()
             self._workers.append(worker)
+
+    def register_worker(self, lease, occurrences):
+        if len(self._leases) >= self._bounds.max_partitions and lease.allocation_id not in self._leases:
+            raise DataflowError('BUDGET_EXCEEDED', 'Worker authority table exceeds bound')
+        self._leases[lease.allocation_id] = lease
+        if self._native is not None and hasattr(self._native, 'register_worker'):
+            self._native.register_worker(lease, occurrences)
 
     # -- admission / completion (H066-H068) ---------------------------------
     def submit(self, event: WorkerEvent) -> bool:
@@ -269,12 +283,10 @@ class DriverJournalService:
                 continue
             try:
                 reply = self.dispatch(event)
-            except DataflowError as exc:
-                reply = ControlReply(operation_id=event.operation_id, status="error", payload=None,
-                                     payload_ref=None, error_code=exc.code)
-            except Exception:
-                reply = ControlReply(operation_id=event.operation_id, status="error", payload=None,
-                                     payload_ref=None, error_code="UNKNOWN_EFFECT")
+            except Exception as exc:
+                from .dataflow_failures import failure_payload
+                reply = ControlReply(operation_id=event.operation_id, status="error", payload=failure_payload(exc),
+                                     payload_ref=None, error_code=getattr(exc, 'code', 'UNKNOWN_EFFECT'))
             completed = CompletedControl(allocation_id=event.allocation_id, boot_id=event.boot_id, reply=reply)
             with self._lock:
                 self._inflight.pop(event.operation_id, None)
@@ -302,7 +314,10 @@ class DriverJournalService:
                 reply = self.artifact(_artifact_command(payload), lease=None)
                 value = {"operation_id": reply.operation_id, "present": reply.present, "charged_bytes": reply.charged_bytes}
             elif event.kind == "queue":
-                reply = self.queue(_queue_command(payload), lease=None)
+                lease = self._leases.get(event.allocation_id)
+                if lease is None or lease.boot_id != event.boot_id:
+                    raise DataflowError('FENCED', 'Queue command has no current worker authority')
+                reply = self.queue(_queue_command(payload), lease=lease)
                 value = {"operation_id": reply.operation_id, "status": reply.status,
                          "delivery_ref": _ref_to_json(reply.delivery_ref), "row_ref": _ref_to_json(reply.row_ref),
                          "native_fact_ref": _ref_to_json(reply.native_fact_ref), "retry_after_ms": reply.retry_after_ms}
@@ -320,7 +335,8 @@ class DriverJournalService:
                 self._check_grant()
                 value = {"operation_id": event.operation_id}
         except DataflowError as exc:
-            return ControlReply(operation_id=event.operation_id, status="error", payload=None,
+            from .dataflow_failures import failure_payload
+            return ControlReply(operation_id=event.operation_id, status="error", payload=failure_payload(exc),
                                 payload_ref=None, error_code=exc.code)
         return ControlReply(operation_id=event.operation_id, status="ok", payload=value,
                             payload_ref=None, error_code=None)
@@ -449,7 +465,11 @@ class DriverJournalService:
         identity_doc = self._journal.recovery_identity()
         if identity_doc is None:
             raise DataflowError("UNKNOWN_EFFECT", "sealed configuration is unavailable")
-        return {"limits": identity_doc["limits"], "run_id": identity_doc["run_id"]}
+        result = {"limits": identity_doc["limits"], "run_id": identity_doc["run_id"]}
+        if self._native is not None and hasattr(self._native, 'binding'):
+            from dataclasses import asdict
+            result['queue_binding'] = asdict(self._native.binding)
+        return result
 
     def _check_grant(self):
         if self._journal.recovery_identity() is None:
@@ -636,10 +656,14 @@ class WorkerJournalClient:
         if reply.operation_id != operation_id:
             raise DataflowError("INVALID_CONTRACT", "reply operation_id does not match the request")
         if reply.status == "error":
+            if reply.payload:
+                from .dataflow_failures import restore_failure
+                raise restore_failure(reply.payload)
             raise DataflowError(reply.error_code or "UNKNOWN_EFFECT", "driver rejected the journal command")
         if reply.status != "ok":
             raise DataflowError("UNKNOWN_EFFECT", "journal command did not complete")
-        return reply.payload or {}
+        from .contracts.dataflow import thaw_record_value
+        return thaw_record_value(reply.payload) if reply.payload is not None else {}
 
     def effect(self, command: EffectCommand) -> EffectReply:
         payload = {"operation_id": command.operation_id, "kind": command.kind, "effect_id": command.effect_id,

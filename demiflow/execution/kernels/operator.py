@@ -270,6 +270,17 @@ class OperatorKernel:
         if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
             from ..dataflow_models import bind_model_services
             instance = bind_model_services(instance, self._spec, services=self._services)
+        from ..dataflow_acquisition_call import AcquisitionCall
+        if type(instance) is AcquisitionCall:
+            instance.bind(self._services, self._occurrence)
+        from ...data.result_cache import CacheCall
+        if isinstance(instance, CacheCall):
+            instance.validate_runtime_state(1 if self._worker_scope else self._concurrency)
+            from ...operator_llm.runtime import PromptActor
+            if type(instance.fn) is PromptActor:
+                from ..dataflow_model_journal import bind_prompt_adapter, bind_agent_adapter
+                bind = bind_prompt_adapter if instance.fn.environment is None else bind_agent_adapter
+                bind(instance.fn, services=self._services, node_id=self._occurrence)
         instance = AsyncInstance(instance, self._services,
                                  timeout=self._spec.configuration.get('hard_timeout'))
         instance.native_scope = (self._occurrence, self._partition_id) + ((slot,) if self._worker_scope else ())
@@ -489,8 +500,6 @@ class OperatorKernel:
         self._require_started()
         if self.pending_calls:
             raise _err('INVALID_CONTRACT', 'Checkpoint requires drained kernel invocations')
-        if self._spec.state == "nonrecoverable":
-            raise _err("UNKNOWN_EFFECT", "nonrecoverable kernel cannot snapshot state")
         worker_states = [self._snapshot_state(instance) for instance in self._instances] if self._worker_scope else None
         image = {
             "schema_version": IMAGE_VERSION,

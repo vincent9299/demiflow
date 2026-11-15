@@ -149,6 +149,15 @@ class RuntimeActionHandle:
             self._cleanup_errors.append(exc)
         raise _error("DEADLINE_EXCEEDED", "terminal action exceeded its time budget")
 
+    def _pump(self, deadline_ms):
+        try:
+            return self._execution.pump(deadline_ms=deadline_ms)
+        except BaseException as exc:
+            # pump can surface a worker failure before it returns a status.
+            # Preserve that cause when close subsequently reports cleanup errors.
+            self._failure = exc
+            raise
+
     def _terminal_failure(self) -> BaseException:
         # finish() surfaces the original business failure for a failed action.
         try:
@@ -175,7 +184,7 @@ class RuntimeActionHandle:
                 remaining_ms = int((deadline - time.monotonic()) * 1000)
                 if remaining_ms <= 0:
                     self._raise_deadline()
-                status = self._execution.pump(deadline_ms=min(_CONTROL_POLL_MS, remaining_ms))
+                status = self._pump(min(_CONTROL_POLL_MS, remaining_ms))
                 records = self._subscription.read(
                     max_records=_PULL_CREDIT_RECORDS, deadline_ms=0
                 )
@@ -217,7 +226,7 @@ class RuntimeActionHandle:
             remaining_ms = int((deadline - time.monotonic()) * 1000)
             if remaining_ms <= 0:
                 self._raise_deadline()
-            status = self._execution.pump(deadline_ms=min(_CONTROL_POLL_MS, remaining_ms))
+            status = self._pump(min(_CONTROL_POLL_MS, remaining_ms))
             if status.state in ("succeeded", "failed", "cancelled"):
                 break
         if status.state == "failed":
@@ -316,6 +325,13 @@ class _ChunkStream:
                 data = bytes(self._buf)
                 self._buf.clear()
                 return data
+
+    def close(self):
+        self._eof = True
+        self._buf.clear()
+        close = getattr(self._it, 'close', None)
+        if close is not None:
+            close()
 
 
 class StoredMaterializedHandle:

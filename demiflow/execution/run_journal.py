@@ -1033,6 +1033,33 @@ class RunJournal:
             raise RecoveryContractError('Durable receipt changed')
         db.execute('INSERT OR IGNORE INTO runtime_receipts VALUES (?,?,?)', (commit_id, sink_id, raw))
 
+    def grow_dataflow_staging(self, fence, reservation_id, size, *, ceiling):
+        """Admit an increase before writing, in the same fenced byte ledger.
+
+        Retransmission and stale smaller requests do not charge twice. A settled
+        reservation cannot be reopened, including after an unknown RPC reply.
+        """
+        from .recovery_contract import identifier, RecoveryContractError
+        identifier(reservation_id)
+        if any(type(v) is not int or not 0 < v < 2**63 for v in (size, ceiling)):
+            raise RecoveryContractError('Invalid staging growth')
+        with self.execution_guard(fence) as db:
+            if db.execute('SELECT 1 FROM runtime_dataflow_settlements WHERE reservation_id=?',
+                          (reservation_id,)).fetchone():
+                raise RecoveryContractError('Settled staging cannot grow')
+            old = db.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                             (reservation_id,)).fetchone()
+            budget = db.execute("SELECT consumed,ceiling FROM runtime_budgets WHERE name='artifact_staging_bytes'").fetchone()
+            if old is None or budget is None or budget[1] != ceiling:
+                raise RecoveryContractError('Unknown staging reservation or changed ceiling')
+            delta = max(0, size - old[0])
+            if budget[0] + delta > ceiling:
+                raise RecoveryContractError('Execution budget exhausted: artifact_staging_bytes')
+            db.execute("UPDATE runtime_budgets SET consumed=consumed+? WHERE name='artifact_staging_bytes'", (delta,))
+            db.execute("UPDATE runtime_reservations SET amount=amount+? WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                       (delta, reservation_id))
+            return old[0] + delta
+
     def settle_dataflow_staging(self, fence, reservation_id, ref):
         """Replace the staging maximum with unique durable bytes, atomically.
 

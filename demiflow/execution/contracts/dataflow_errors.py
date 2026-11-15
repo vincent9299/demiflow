@@ -163,3 +163,9 @@ class DataflowError(Exception):
             _reconstruct_error,
             (self.code, self._message, self.retryable, _thaw(self.context)),
         )
+
+from ..recovery_contract import RecoveryContractError
+
+
+class DataflowRecoveryError(DataflowError, RecoveryContractError):
+    """A native recovery rejection, preserving both old and v3 catch surfaces."""

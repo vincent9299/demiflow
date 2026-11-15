@@ -497,3 +497,44 @@ def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
             assert all(math.copysign(1, r["left"][1]) == -1 for r in rows)
         finally:
             for reader in readers: reader.close()
+
+
+def test_control_cancel_wakes_waiter_without_confirming_unknown_effect(tmp_path):
+    import threading
+    from demiflow.execution.dataflow_hosts import ControlMailbox
+    from demiflow.execution.contracts.dataflow import WorkerEvent, ControlReply
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with prepared(tmp_path, data.from_items([])) as (ex, services):
+        mailbox = ControlMailbox(bounds=services.bounds, check_stop=lambda: None)
+        event = WorkerEvent('demiflow.dataflow_event.v3', 'check_grant', 'a' * 64,
+            ex._run_id(), ex._attempt(), ex._fence(), 'allocation', 'boot', 0, 'scope', 1, None, {})
+        outcomes = []
+        def request(value):
+            try:
+                outcomes.append(mailbox.request(value, deadline_ms=3000))
+            except Exception as exc:
+                outcomes.append(exc)
+        def take_request():
+            deadline = time.monotonic() + 2
+            while not (events := mailbox.drain(max_events=1)):
+                assert time.monotonic() < deadline
+                time.sleep(.005)
+            return events[0]
+        thread = threading.Thread(target=request, args=(event,))
+        thread.start()
+        assert take_request() == event
+        mailbox.cancel_pending()
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert isinstance(outcomes[0], DataflowError) and outcomes[0].code == 'UNKNOWN_EFFECT'
+        mailbox.deliver(ControlReply(event.operation_id, 'ok', {}, None, None))
+        # Cleanup can still use this port, with a fresh operation identity.
+        cleanup = replace(event, operation_id='b' * 64)
+        thread = threading.Thread(target=request, args=(cleanup,))
+        thread.start()
+        assert take_request() == cleanup
+        reply = ControlReply(cleanup.operation_id, 'ok', {}, None, None)
+        mailbox.deliver(reply)
+        thread.join(timeout=1)
+        assert not thread.is_alive() and outcomes[1] == reply
+        mailbox.close()

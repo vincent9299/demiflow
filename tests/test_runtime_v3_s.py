@@ -925,6 +925,7 @@ def test_s028(tmp_path):
     reader = open_reader(snap, split, services)
     first = [load_inline(reader.next_record().record, store) for _ in range(3)]
     assert [r["k"] for r in first] == [0, 1, 2]
+    reader.acknowledge_output()  # consumer has durably accepted the final pulled row
     cursor = reader.snapshot()  # carries the durable spool reference and last_key=3
     reader.close()
     # reconnect on recovery replays the spool; it must not splice a fresh snapshot
@@ -1291,3 +1292,7 @@ def test_s050():
     assert set(history_ds.calls) <= {"get_read_tasks", "read_fn"}
     with pytest.raises(DataflowError):
         reader.next_record()
+# Integrated lanes use the one production error vocabulary.
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+from demiflow.execution.contracts.dataflow import ArtifactRef

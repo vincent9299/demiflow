@@ -136,6 +136,19 @@ class ControlMailbox:
             waiter.done = True
             self._condition.notify_all()
 
+    def cancel_pending(self) -> None:
+        """Wake business RPC waits before joining their owner on cancellation.
+
+        A lost reply remains unknown. The port stays open for lifecycle cleanup;
+        neither cancellation nor a late reply manufactures an effect receipt.
+        """
+        with self._condition:
+            for waiter in self._pending.values():
+                if not waiter.done:
+                    waiter.error = DataflowError('UNKNOWN_EFFECT', 'RPC cancelled; remote effect remains unknown')
+                    waiter.done = True
+            self._condition.notify_all()
+
     def close(self) -> None:
         with self._condition:
             self._closed = True
@@ -394,7 +407,8 @@ class LocalHostEndpoint(_EndpointBase):
                 raise DataflowError("UNKNOWN_EFFECT", "local worker closed before responding")
             if message.get("response_to") == envelope["operation_id"]:
                 if "error" in message:
-                    raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(message["error"]))
+                    from .dataflow_failures import restore_failure
+                    raise restore_failure(message["error"])
                 if kind in ("Drain", "Quiesce", "Cancel"):
                     self._cleanup_completed = True
                 return message["receipt"]

@@ -314,7 +314,9 @@ def compile_kernel_spec(
     if native_declaration is not None and native_declaration.target is PromptFactory:
         from ..execution.dataflow_models import build_model_factory
         native_op, settings = native_declaration.constructor_args
-        model = build_model_factory(native_op, program_ref=program_ref, bounds=bounds)
+        from ..data.plan import AgentMapOp
+        model = build_model_factory(operation if isinstance(operation, AgentMapOp) else native_op,
+                                    program_ref=program_ref, bounds=bounds)
         configuration = _plain(model.configuration)
         configuration.update(concurrency=settings.get('concurrency', 1),
                              catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
@@ -348,9 +350,12 @@ def compile_kernel_spec(
         for field in fields(operation)
         if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
     }
+    from ..execution.dataflow_acquisition_call import AcquisitionCall
+    if native_declaration is not None and native_declaration.target is AcquisitionCall:
+        configuration['native_operation'] = native_declaration.constructor_args[0]
     stream_options = getattr(operation, 'stream_options', None)
     if stream_options is not None:
-        configuration.update(concurrency=stream_options.concurrency,
+        configuration.update(streaming_map=True, concurrency=stream_options.concurrency,
             callable_scope=stream_options.callable_scope, execution=stream_options.execution,
             queue_depth=stream_options.queue_depth,
             catch=[c.__module__ + '.' + c.__qualname__ for c in stream_options.catch])

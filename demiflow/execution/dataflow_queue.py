@@ -26,7 +26,7 @@ from .contracts.dataflow import (
     RuntimeServices,
     WorkerLease,
 )
-from .contracts.dataflow_errors import DataflowError
+from .contracts.dataflow_errors import DataflowError, DataflowRecoveryError
 from .queue_ack import QueueAcknowledge
 from .queue_contract import QueueIncomplete
 from .queue_execution import (
@@ -98,6 +98,7 @@ class NativeAcquisitionService:
             # Workers only hold RuntimeServices; native acquisition is driver IO.
             raise DataflowError('INVALID_CONTRACT', 'native acquisition service is driver-only')
         self._action = action
+        self._worker_occurrences = {}
         self._services = services
         self._state = 'constructed'
         self._lock = threading.Lock()
@@ -124,8 +125,28 @@ class NativeAcquisitionService:
         self._max_pending = max(1, services.bounds.max_pending_events)
         self._raw_acquisitions: list[str] = []
 
+    @property
+    def action_id(self):
+        return self._action.action_id
+
+    @property
+    def binding(self):
+        return self._binding
+
+    def register_worker(self, lease, occurrences):
+        self._worker_occurrences[(lease.allocation_id, lease.boot_id)] = frozenset(occurrences)
+
+    def _check_role(self, lease, role):
+        if not self._worker_occurrences:
+            return  # Direct driver callers still require the native owning lease.
+        occurrence = {'poll': self._binding.source_occurrence,
+                      'acquire': self._binding.fetch_occurrence,
+                      'finalize': self._binding.final_occurrence}[role]
+        if occurrence not in self._worker_occurrences.get((lease.allocation_id, lease.boot_id), ()):
+            raise DataflowError('FENCED', 'Worker does not own this native operation')
+
     # -- Q002 configure -------------------------------------------------
-    def configure(self, source: SourcePlan, plan: LogicalPlan, sink: object | None) -> QueueBinding:
+    def configure(self, source: SourcePlan, plan: LogicalPlan, sink: object | None, *, graph=None) -> QueueBinding:
         with self._lock:
             if self._state != 'constructed':
                 raise DataflowError('INVALID_CONTRACT', 'native acquisition already configured')
@@ -186,6 +207,18 @@ class NativeAcquisitionService:
         self._mode = mode
         self._contract = contract
         self._io_concurrency = fetch.concurrency
+        if graph is not None:
+            fetch_nodes = [n.occurrence_id for n in graph.nodes
+                           if n.kernel.configuration.get('native_operation') == 'acquire']
+            final_nodes = [n.occurrence_id for n in graph.nodes
+                           if n.kernel.configuration.get('native_operation') == 'finalize']
+            if len(fetch_nodes) != 1:
+                raise DataflowError('INVALID_CONTRACT', 'Native acquisition needs one sealed fetch occurrence')
+            fetch_occurrence = fetch_nodes[0]
+            source_occurrence = graph.sources[0] if native is not None else None
+            final_occurrence = (final_nodes[0] if final_nodes else graph.terminals[0]) if native is not None else None
+        else:
+            fetch_occurrence = _occurrence(action_id, index)
         binding = QueueBinding(
             action_id=action_id,
             source_id=source_occurrence,
@@ -194,13 +227,30 @@ class NativeAcquisitionService:
             generation=generation,
             pool=pool,
             source_occurrence=source_occurrence,
-            fetch_occurrence=_occurrence(action_id, index),
+            fetch_occurrence=fetch_occurrence,
             final_occurrence=final_occurrence,
         )
         with self._lock:
             self._binding = binding
             self._state = 'configured'
         return binding
+
+    def can_recover_without_dataflow_cut(self):
+        """Queue claims/commits have their own original native journal proof.
+
+        This narrowly admits a pre-cut queue attempt only. Stateless one-to-one
+        topology has already been validated; native startup reconciles the exact
+        bound queue and task commits before issuing another claim or request.
+        Ordinary sources, raw fetch and partial Dataset commits cannot use it.
+        """
+        if self._source is None:
+            return False
+        journal = self._action.context.journal
+        if journal.execution_commits(self.action_id):
+            return False
+        binding = journal.source_binding(self.action_id + '-queue')
+        return bool(binding and binding.get('consumer_contract') == identity(self._contract)
+                    and binding.get('queue_uuid') and binding.get('generation'))
 
     # -- Q003 start -----------------------------------------------------
     def start(self) -> None:
@@ -259,6 +309,7 @@ class NativeAcquisitionService:
     def poll(self, command: QueueCommand, *, lease: WorkerLease) -> QueueReply:
         self._check_started()
         self._check_lease(lease)
+        self._check_role(lease, 'poll')
         self._validate_command(command, 'poll', require_refs=False)
         self._validate_binding(command.binding)
         if self._source is None:
@@ -292,11 +343,28 @@ class NativeAcquisitionService:
     def acquire(self, command: QueueCommand, *, lease: WorkerLease) -> QueueReply:
         self._check_started()
         self._check_lease(lease)
+        self._check_role(lease, 'acquire')
         self._validate_command(command, 'acquire', require_refs=True)
         self._validate_binding(command.binding)
         return self._run_operation(command, lambda: self._acquire_impl(command, lease))
 
     def _acquire_impl(self, command: QueueCommand, lease: WorkerLease) -> QueueReply:
+        if self._source is None:
+            descriptor = self._read_json(command.delivery_ref, max_bytes=self._services.bounds.max_control_bytes)
+            if descriptor != {'occurrence': command.record_id}:
+                raise DataflowError('FENCED', 'Raw acquisition occurrence differs')
+            row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+            self._admit_io()
+            try:
+                receipt = self._run_io(self._acquire_io(row, None, command.record_id),
+                    timeout_s=self._services.bounds.timeout_ms / 1000)
+            finally:
+                self._release_io()
+            fact = self._acquisition_fact(receipt)
+            self._raw_acquisitions.append(fact['commit_id'])
+            return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
+                self._put_json(receipt, media_type=_ROW_MEDIA, max_bytes=self._services.bounds.max_row_bytes),
+                self._put_json(fact, media_type=_FACT_MEDIA, max_bytes=self._services.bounds.max_control_bytes), 0)
         claim = self._claim_for(command.delivery_ref, lease)
         if claim.acquisition_fact is not None:
             return self._acquisition_reply(command, claim)
@@ -337,6 +405,7 @@ class NativeAcquisitionService:
     def finalize(self, command: QueueCommand, *, lease: WorkerLease) -> QueueReply:
         self._check_started()
         self._check_lease(lease)
+        self._check_role(lease, 'finalize')
         self._validate_command(command, 'finalize', require_refs=True)
         self._validate_binding(command.binding)
         if self._source is None:
@@ -521,22 +590,22 @@ class NativeAcquisitionService:
                 or descriptor.get('epoch') != delivery.epoch
                 or descriptor.get('worker_id') != delivery.worker_id):
             raise DataflowError('INVALID_CONTRACT', 'queue delivery descriptor changed its native identity')
-        if lease.allocation_id != claim.allocation_id or lease.boot_id != claim.boot_id:
+        if not self._worker_occurrences and (lease.allocation_id != claim.allocation_id or lease.boot_id != claim.boot_id):
             raise DataflowError('FENCED', 'queue delivery owner changed')
         return claim
 
     def _validate_final_row(self, row, claim: _Claim) -> None:
         if type(row) is not dict:
-            raise DataflowError('INVALID_CONTRACT', 'finalize requires exactly one final record')
+            raise DataflowRecoveryError('INVALID_CONTRACT', 'finalize requires exactly one final record')
         delivery = claim.delivery
         display = dict(task_id=delivery.task_id, fingerprint=delivery.fingerprint, attempt=delivery.epoch)
         if row.get('_queue_delivery') != display:
-            raise DataflowError('INVALID_CONTRACT', 'final row changed its native delivery display')
+            raise DataflowRecoveryError('INVALID_CONTRACT', 'final row changed its native delivery display')
         result = row.get(self._fetch.output)
         if type(result) is not dict or type(result.get('acquisition_ref')) is not dict:
-            raise DataflowError('INVALID_CONTRACT', 'final row lost its acquisition receipt')
+            raise DataflowRecoveryError('INVALID_CONTRACT', 'final row lost its acquisition receipt')
         if result != claim.receipt_row.get(self._fetch.output):
-            raise DataflowError('INVALID_CONTRACT', 'final row changed its confirmed acquisition receipt')
+            raise DataflowRecoveryError('INVALID_CONTRACT', 'final row changed its confirmed acquisition receipt')
 
     def _delivery_descriptor(self, delivery) -> dict:
         return dict(generation=delivery.generation, task_id=delivery.task_id,
@@ -634,7 +703,8 @@ class NativeAcquisitionService:
         try:
             reply = handler()
             with self._lock:
-                self._replies[op_id] = reply
+                if reply.status != 'pending':
+                    self._replies[op_id] = reply
                 while len(self._replies) > self._max_pending:
                     self._replies.popitem(last=False)
             return reply

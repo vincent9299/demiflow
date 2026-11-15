@@ -95,7 +95,8 @@ class RunArtifactStore:
         if type(media_type) is not str or not media_type:
             raise DataflowError("INVALID_CONTRACT", "media_type must be a nonempty string")
         operation_id = self._staging_operation()
-        self._journal.reserve(operation_id, {ARTIFACT_STAGING_BUDGET: max_bytes})
+        reserved = min(max_bytes, 64 * 1024)
+        self._journal.reserve(operation_id, {ARTIFACT_STAGING_BUDGET: reserved})
         staging = None
         digest = hashlib.sha256()
         size = 0
@@ -110,6 +111,12 @@ class RunArtifactStore:
                     size += len(chunk)
                     if size > max_bytes:
                         raise DataflowError("BUDGET_EXCEEDED", "artifact exceeds max_bytes")
+                    if size > reserved:
+                        # Admission precedes every write beyond the owned extent.
+                        # Do not reserve an entire source/spill ceiling up front.
+                        self._journal.artifact(ArtifactCommand(identity([operation_id, 'grow', size]),
+                            'grow_staging', None, operation_id, size))
+                        reserved = size
                     view = memoryview(chunk)
                     for offset in range(0, len(view), _MAX_CHUNK_BYTES):
                         part = view[offset:offset + _MAX_CHUNK_BYTES]

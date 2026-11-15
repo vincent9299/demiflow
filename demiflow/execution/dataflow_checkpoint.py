@@ -63,7 +63,8 @@ def _artifact_from_json(value) -> ArtifactRef:
 
 
 def _cursor_json(cursor: SourceCursor) -> dict:
-    return {"split_id": cursor.split_id, "offset": dict(cursor.offset),
+    from .contracts.dataflow import thaw_record_value
+    return {"split_id": cursor.split_id, "offset": thaw_record_value(cursor.offset),
             "next_sequence": cursor.next_sequence, "end_of_input": cursor.end_of_input,
             "lease_ref": _artifact_json(cursor.lease_ref) if cursor.lease_ref is not None else None,
             "pending_refs": [_artifact_json(r) for r in cursor.pending_refs]}
@@ -96,11 +97,12 @@ def _cut_from_json(value) -> CutRequest:
 
 
 def _contribution_json(contribution: CutContribution) -> dict:
+    from .contracts.dataflow import thaw_record_value
     return {"cut_id": contribution.cut_id, "participant_id": contribution.participant_id,
             "boot_id": contribution.boot_id,
             "sources": [_cursor_json(c) for c in contribution.sources],
             "operator_states": {k: _artifact_json(v) for k, v in contribution.operator_states.items()},
-            "channels": {k: dict(v) for k, v in contribution.channels.items()},
+            "channels": thaw_record_value(contribution.channels),
             "buffers": [_artifact_json(r) for r in contribution.buffers],
             "effects": [_artifact_json(r) for r in contribution.effects],
             "sinks": {k: _artifact_json(v) for k, v in contribution.sinks.items()},
@@ -425,7 +427,8 @@ class DataflowCheckpointCoordinator:
             try:
                 self._commit.recover(sinks, acknowledge=None)
             except RecoveryContractError as exc:
-                raise DataflowError("UNKNOWN_EFFECT", str(exc)) from exc
+                from .contracts.dataflow_errors import DataflowRecoveryError
+                raise DataflowRecoveryError("UNKNOWN_EFFECT", str(exc)) from exc
             facts = journal.execution_commits(self._action.action_id)
             acked = [f for f in facts if f["status"] == "acked"
                      and _CUT_STATE_KEY in ((f.get("prepared") or {}).get("state") or {})]

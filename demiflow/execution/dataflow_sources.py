@@ -37,6 +37,7 @@ from .contracts.dataflow import (
     SourceSplit,
 )
 from .contracts.dataflow_errors import DataflowError
+from .contracts.dataflow import thaw_record_value
 from .recovery_contract import document, identity
 
 _RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
@@ -59,7 +60,8 @@ def _content_digest(value: Any) -> str:
 
 
 def _json_digest(value: Any) -> str:
-    return hashlib.sha256(document(value)).hexdigest()
+    from .contracts.dataflow import thaw_record_value
+    return hashlib.sha256(document(thaw_record_value(value))).hexdigest()
 
 
 def _options_digest(options: Mapping[str, Any]) -> str:
@@ -430,7 +432,7 @@ def open_source_reader(
     verify_source_snapshot(snapshot, store=services.store, bounds=services.bounds)
     if split.source_id != snapshot.source_id:
         raise DataflowError("INVALID_CONTRACT", "split belongs to another source")
-    if split.split_id != identity([snapshot.source_id, dict(split.locator)]):
+    if split.split_id != identity([snapshot.source_id, thaw_record_value(split.locator)]):
         raise DataflowError("INVALID_CONTRACT", "split_id does not match its locator")
     registry = source_registry()
     # Snapshot versions preserve their original class-name kind. The registry

@@ -112,6 +112,13 @@ def describe(value, depth=0):
     # Arrow schemas are declarations; Arrow buffers/data are never encoded here.
     if type(value).__module__.startswith("pyarrow") and type(value).__name__ == "Schema":
         return {"arrow_schema": value.serialize().to_pybytes().hex()}
+    # Nested native prompts were previously unrepresentable (live runtime).
+    # Reuse their guarded native facts; existing operation identities are unchanged.
+    from ..operator_llm.runtime import PromptActor
+    if type(value) is PromptActor:
+        from ..operator_llm.flow_contract import prompt_facts, agent_facts
+        return {'native_prompt': prompt_facts(value) if value.environment is None
+                else agent_facts(value, value.environment)}
     if callable(value):
         # C04 identity rule 1: a plain callable's config/constructor args/
         # initial_state must not disappear for lack of hooks. Instance data

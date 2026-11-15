@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from contextvars import ContextVar
 import queue
 import threading
+import time
 
 from ..contracts.dataflow_errors import DataflowError
 
@@ -14,7 +15,7 @@ _END = object()
 class ConcurrentCalls:
     """At most N inputs, N single-record outputs, and N active calls.
 
-    Results drain in input order. Slow consumers backpressure the producing
+    Completed results drain without waiting for slower calls. Slow consumers backpressure the producing
     invocation itself; a generator result is never collected into a list.
     """
     def __init__(self, count, *, check_stop):
@@ -72,25 +73,29 @@ class ConcurrentCalls:
         emitted = 0
         while self.jobs and emitted < max_records:
             self.check_stop()
-            slot, output, future = self.jobs[0]
-            try:
-                value = output.get(timeout=.05 if wait_for else 0)
-            except queue.Empty:
-                if wait_for:
+            available = False
+            for job in tuple(self.jobs):
+                slot, output, future = job
+                try:
+                    value = output.get_nowait()
+                except queue.Empty:
                     continue
-                return
-            if value is _END:
-                # END is sent after generator/lifecycle-local cleanup.
-                self.jobs.popleft()
-                self.slots.append(slot)
-                # Let submit refill the freed slot before waiting for a newer
-                # invocation. That invocation may need the same concurrency.
-                return
-            elif value[0] == 'error':
-                raise value[1]
-            else:
+                available = True
+                if value is _END:
+                    self.jobs.remove(job)
+                    self.slots.append(slot)
+                    # Refill released capacity before blocking on another call.
+                    return
+                if value[0] == 'error':
+                    raise value[1]
                 emitted += 1
                 yield value[1]
+                if emitted >= max_records:
+                    return
+            if not available:
+                if not wait_for:
+                    return
+                time.sleep(.005)
 
     def finish(self):
         while self.jobs:
