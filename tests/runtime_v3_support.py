@@ -1172,9 +1172,8 @@ def _s_memory_peak(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 
 def _s_disk_gc(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must verify live pins, orphan reclamation and scratch exhaustion using real artifacts'}
-    fx._record_not_run('disk_gc', detail)
-    raise NotRunError('disk_gc', detail)
+    from runtime_v3_gc_scenarios import disk_gc
+    return disk_gc(fx, fault)
 
 
 def _s_remote_journal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
