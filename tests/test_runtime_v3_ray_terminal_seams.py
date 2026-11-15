@@ -74,7 +74,11 @@ def test_final_ack_replay_without_worker_or_new_commit(tmp_path, monkeypatch, ac
     with RunContext.resume(ref) as run:
         assert data.read_json(str(source)).take_all() == rows
         assert run.journal.execution_commits('action-1') == before
-    assert actual_ray[-1]._verified_completed_image is not None
+    # Replayable sources restore through the ordinary native image. The
+    # completed-live special case is not the contract for every source kind.
+    image = actual_ray[-1]._restore_image
+    assert image is not None and image.cut.final
+    assert run.journal.execution_commit(image.commit_id)['status'] == 'acked'
 
 
 def test_iter_rows_close_keeps_real_nonfinal_prefix(tmp_path, actual_ray):
