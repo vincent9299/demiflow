@@ -2081,23 +2081,10 @@ class Dataset:
             raise ValueError("Dataset.take_all limit must be non-negative")
         with action("take_all", self._source, self._plan, arguments={"limit": limit}) as checked, \
                 observe_action("take_all", self._source, self._plan, self._executor) as observer:
-            if maximum is None:
-                request = make_action_request(self._executor, checked.source, checked.plan,
-                                              kind="iter_rows", arguments={})
-                stream = run_dataset_action(request)
-                rows = []
-                for row in stream:
-                    rows.append(row)
-                    observer.progress(rows=1)
-            else:
-                request = make_action_request(self._executor, checked.source, checked.plan,
-                                              kind="take", arguments={"limit": maximum + 1})
-                rows = run_dataset_action(request)
-                observer.rows = len(rows)
-                if len(rows) > maximum:
-                    raise ValueError(
-                        f"Dataset contains more than the take_all limit of {maximum} rows"
-                    )
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="take_all", arguments={"limit": maximum})
+            rows = run_dataset_action(request)
+            observer.rows = len(rows)
             observer.complete(limit=limit)
         return rows
 

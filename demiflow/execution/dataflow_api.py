@@ -288,11 +288,8 @@ def run_dataset_action(request: ActionRequest) -> object:
         if request.kind == "take":
             return collect_rows(handle, limit=arguments.get("limit", 20), bounds=bounds)
         if request.kind == "take_all":
-            limit = arguments.get("limit")
-            rows = collect_rows(handle, limit=None if limit is None else limit + 1, bounds=bounds)
-            if limit is not None and len(rows) > limit:
-                raise ValueError("Dataset contains more than the take_all limit")
-            return rows
+            return collect_rows(handle, limit=arguments.get("limit"), bounds=bounds,
+                                verify_complete=True)
         if request.kind == "take_batch":
             from .record_schema import RecordSchemas
             schemas, seen = RecordSchemas(handle.services), []

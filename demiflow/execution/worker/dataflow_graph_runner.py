@@ -564,6 +564,13 @@ class WorkerGraphRunner:
         self._metrics[occ]['rows_input'] += 1
         self._dirty_metrics.add(occ)
         if self.e._node_specs[occ].kind == 'terminal':
+            if self._terminal_spec.kind == 'take_all':
+                maximum = self._terminal_spec.configuration['arguments'].get('limit')
+                if maximum is not None and self._terminal_rows >= maximum:
+                    # This partition alone proves global overflow. Keep the
+                    # restored prefix; do not decode/encode/spool the probe.
+                    # Cross-partition totals remain the driver's responsibility.
+                    raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
             if record.inline is None:
                 from ..dataflow_records import clone_record
                 from ..kernels.dataflow import _materialize_row, _row_bytes

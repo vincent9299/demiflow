@@ -68,16 +68,19 @@ def _record_row(record: "Record", handle: "ActionHandle") -> "Row":
     raise _error("INVALID_CONTRACT", "record has neither inline nor payload_ref")
 
 
-def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds", schema_receiver=None) -> "list[Row]":
+def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds",
+                 schema_receiver=None, verify_complete: bool = False) -> "list[Row]":
     """Bounded driver collection. limit=0 reads nothing; exceeding a budget fails
     outright (never a truncated success). Reaching the limit closes the subscription
-    and keeps already-committed effect facts."""
+    and keeps already-committed effect facts. With verify_complete (take_all),
+    one extra Record proves overflow without decoding or collecting it. Thus
+    an exact-limit result needs no extra slot in the returned collection."""
     if limit is not None:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
             raise _error("INVALID_CONTRACT", "limit must be a non-negative integer or None")
         if limit > bounds.max_output_rows:
             raise _error("BUDGET_EXCEEDED", "take limit exceeds the output row budget")
-    if limit == 0:
+    if limit == 0 and not verify_complete:
         handle.result()
         handle.close()
         return []
@@ -86,21 +89,28 @@ def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds
     records = handle.rows()
     try:
         for record in records:
+            if verify_complete and limit is not None and len(rows) == limit:
+                raise ValueError(f"Dataset contains more than the take_all limit of {limit} rows")
+            if len(rows) >= bounds.max_output_rows:
+                raise _error("BUDGET_EXCEEDED", "collected rows exceed the output row budget")
+            next_bytes = total_bytes + record.encoded_bytes
+            if next_bytes > bounds.max_resident_bytes:
+                raise _error("BUDGET_EXCEEDED", "collected bytes exceed the driver resident budget")
             if schema_receiver is not None:
                 schema_receiver(record.schema_ref)
             rows.append(_record_row(record, handle))
-            total_bytes += record.encoded_bytes
-            if len(rows) > bounds.max_output_rows:
-                raise _error("BUDGET_EXCEEDED", "collected rows exceed the output row budget")
-            if total_bytes > bounds.max_resident_bytes:
-                raise _error("BUDGET_EXCEEDED", "collected bytes exceed the driver resident budget")
-            if limit is not None and len(rows) >= limit:
+            total_bytes = next_bytes
+            if not verify_complete and limit is not None and len(rows) >= limit:
                 if hasattr(handle._execution, "satisfy_terminal"):
                     handle._execution.satisfy_terminal()
                     handle.result()
                 break
     except BaseException:
         handle._cleanup()  # cancel producers without masking the active failure
+        try:
+            records.close()
+        except Exception:
+            pass  # the active collection error remains authoritative
         raise
     records.close()
     if not rows and schema_receiver is not None:
@@ -173,9 +183,10 @@ def _convert_batch(rows: "list[Row]", batch_format: str, handle: "ActionHandle",
 def iterate_batches(
     handle: "ActionHandle", *, batch_size: "int | None", batch_format: str, drop_last: bool
 ) -> "Iterator[object]":
-    """Preserve the original batch format and tail-batch convention. The conversion
-    peak is admitted against the batch byte budget; an unmet budget is rejected, not
-    silently copied or truncated."""
+    """Preserve the original batch size and tail convention. Admit the accumulation
+    window before decoding each record; conversion retains its existing size and
+    coexistence checks (these are not a pre-allocation RSS guarantee). An unmet
+    byte budget fails instead of silently shrinking the requested batch size."""
     if batch_format not in _BATCH_FORMATS:
         raise _error("INVALID_CONTRACT", "unsupported batch format", context={"batch_format": batch_format})
     if batch_size is not None and (
@@ -189,6 +200,8 @@ def iterate_batches(
         schemas = RecordSchemas(handle.services)
         rows_iter = handle.rows()
         batch: list = []
+        batch_bytes = 0
+        window_bytes = min(handle.bounds.max_batch_bytes, handle.bounds.max_resident_bytes)
         schema_ref = None
         try:
             for record in rows_iter:
@@ -197,11 +210,17 @@ def iterate_batches(
                     if not (drop_last and len(batch) < size):
                         yield _convert_batch(batch, batch_format, handle, schema=schemas.read(schema_ref))
                     batch = []
+                    batch_bytes = 0
                 schema_ref = current_ref
+                next_bytes = batch_bytes + record.encoded_bytes
+                if next_bytes > window_bytes:
+                    raise _error("BUDGET_EXCEEDED", "batch accumulation exceeds the batch byte budget")
                 batch.append(_record_row(record, handle))
+                batch_bytes = next_bytes
                 if len(batch) >= size:
                     yield _convert_batch(batch, batch_format, handle, schema=schemas.read(schema_ref))
                     batch = []
+                    batch_bytes = 0
             if batch and not (drop_last and len(batch) < size):
                 yield _convert_batch(batch, batch_format, handle, schema=schemas.read(schema_ref))
         except GeneratorExit:
