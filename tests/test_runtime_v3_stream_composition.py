@@ -36,7 +36,7 @@ def test_real_shared_and_nested_stream_input_join_limit_and_terminal(tmp_path, p
             for action_id in ('action-1', 'action-2'):
                 assert run.journal.execution_commits(action_id)[-1]['status'] == 'acked'
         assert [call['provider'] for call in calls.calls] == [provider, provider]
-        assert [call['terminal_kind'] for call in calls.calls] == ['iter_rows', 'run_stream']
+        assert [call['terminal_kind'] for call in calls.calls] == ['take_all', 'run_stream']
         assert not blocked.attempts
 
 

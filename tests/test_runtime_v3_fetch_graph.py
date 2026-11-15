@@ -100,7 +100,8 @@ def test_fetch_recovers_original_native_receipt_across_dataset_cut(tmp_path, mon
             parked_sources = []
             for fact in dataset_cuts:
                 assert fact['status'] == 'acked'
-                manifest = fact['prepared']['sinks']['iter_rows']['manifest']
+                assert set(fact['prepared']['sinks']) == {'take_all'}
+                manifest = fact['prepared']['sinks']['take_all']['manifest']
                 assert manifest['total_rows'] == manifest['total_bytes'] == 0
                 assert manifest['final'] is False
                 ref = fact['prepared']['state']['dataflow-cut-v3']

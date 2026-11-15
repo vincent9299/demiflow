@@ -615,17 +615,30 @@ def test_u035():
 # ---------------------------------------------------------------------------
 # U036 take_all
 # ---------------------------------------------------------------------------
-def test_u036():
+def test_u036(monkeypatch):
     _bind()
-    RECORD.results["iter_rows"] = [{"x": 1}, {"x": 2}]
+    RECORD.results["take_all"] = [{"x": 1}, {"x": 2}]
     assert _ds([{"x": 1}, {"x": 2}]).take_all() == [{"x": 1}, {"x": 2}]
-    assert RECORD.request_kinds() == ["iter_rows"]
-    # limit reads at most one extra row, then fails closed on overflow.
+    assert RECORD.request_kinds() == ["take_all"]
+    assert RECORD.last_request().arguments == {"limit": None}
+    # The unified terminal owns bounded collection and the overflow probe.
+    # This gate proves forwarding; real overflow and exact-limit capacity are
+    # exercised by test_runtime_v3_terminal_collection with actual workers.
     RECORD.reset()
-    RECORD.results["take"] = [{"x": 1}, {"x": 2}, {"x": 3}]
+    RECORD.results["take_all"] = [{"x": 1}, {"x": 2}]
+    assert _ds([{"x": 1}, {"x": 2}]).take_all(limit=2) == [{"x": 1}, {"x": 2}]
+    assert RECORD.request_kinds() == ["take_all"]
+    assert RECORD.last_request().arguments == {"limit": 2}
+    from demiflow.execution import dataflow_api
+    overflow = ValueError("Dataset contains more than the take_all limit of 2 rows")
+    def reject(request):
+        assert request.kind == "take_all"
+        assert request.arguments == {"limit": 2}
+        raise overflow
+    monkeypatch.setattr(dataflow_api, "run_dataset_action", reject)
     with pytest.raises(ValueError, match="more than the take_all limit"):
         _ds([{"x": 1}, {"x": 2}, {"x": 3}]).take_all(limit=2)
-    assert RECORD.last_request().arguments == {"limit": 3}
+    assert RECORD.last_request().arguments == {"limit": 2}
     with pytest.raises(ValueError, match="take_all limit must be non-negative"):
         _ds().take_all(limit=-1)
 
