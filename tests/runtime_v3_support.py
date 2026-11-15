@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 import types
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
@@ -363,9 +364,16 @@ class _ExecuteActionRecorder:
             return self
         recorder = self
 
-        def wrapped(request: Any, *args: Any, **kwargs: Any) -> Any:
-            handle = recorder._original(request, *args, **kwargs)
+        def observe(observation_id: str, request: Any, *args: Any, **kwargs: Any) -> Any:
+            # Only nested observer wrappers share this ID. A real Dataset call
+            # made inside the production facade still enters wrapped() afresh.
+            # No context/global token can conflate two independent invocations.
+            delegate = getattr(recorder._original, "_runtime_v3_observe", None)
+            handle = (delegate(observation_id, request, *args, **kwargs) if delegate is not None
+                      else recorder._original(request, *args, **kwargs))
             entry: dict[str, Any] = {
+                "observation_id": observation_id,
+                "observer_pid": os.getpid(),
                 "provider": getattr(request, "provider", None),
                 "terminal_kind": getattr(request, "kind", None),
                 "action_id": getattr(getattr(request, "action", None), "action_id", None),
@@ -374,6 +382,10 @@ class _ExecuteActionRecorder:
             recorder.calls.append(entry)
             return handle
 
+        def wrapped(request: Any, *args: Any, **kwargs: Any) -> Any:
+            return observe(uuid.uuid4().hex, request, *args, **kwargs)
+
+        wrapped._runtime_v3_observe = observe
         aliases = [importlib.import_module(name) for name in
                    ("demiflow.execution.dataflow_api", "demiflow.execution.dataflow_stream")]
         self._module.execute_action = wrapped
@@ -388,6 +400,31 @@ class _ExecuteActionRecorder:
             self._module.execute_action = self._original
         for module, original in self._aliases:
             module.execute_action = original
+
+
+def _merge_execution_observations(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge observations of one invocation, never equal business identities.
+
+    Historical child receipts without an observation ID remain separate: their
+    equality is not proof that the same physical invocation was observed twice.
+    """
+    merged: list[dict[str, Any]] = []
+    known: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        for entry in group:
+            observation_id = entry.get("observation_id")
+            if observation_id is None:
+                merged.append(entry)
+                continue
+            if not isinstance(observation_id, str) or not observation_id:
+                raise RuntimeV3Error("INVALID_CONTRACT", "Invalid execution observation ID")
+            if observation_id in known:
+                if entry != known[observation_id]:
+                    raise RuntimeV3Error("INVALID_CONTRACT", "Conflicting execution observation facts")
+                continue
+            known[observation_id] = entry
+            merged.append(entry)
+    return merged
 
 
 def _extract_plan_id(handle: Any, request: Any) -> Any:
@@ -518,7 +555,10 @@ class RuntimeV3Fixture:
         evidence["scenario"] = scenario
         evidence["fault"] = fault
         evidence["ray_data_import_attempts"] = list(blocker.attempts) + evidence.pop('child_ray_data_import_attempts', [])
-        evidence["execute_action_calls"] = list(recorder.calls) + evidence.pop('child_execute_action_calls', [])
+        outer_calls = list(recorder.calls)
+        child_calls = evidence.pop('child_execute_action_calls', [])
+        evidence["execute_action_observations"] = {"outer": outer_calls, "case_or_child": child_calls}
+        evidence["execute_action_calls"] = _merge_execution_observations(outer_calls, child_calls)
         evidence["provider"] = self.provider
         evidence["module_paths"] = assert_tree_binding()
         self._save_evidence(scenario if fault is None else scenario + '-' + fault, evidence)
