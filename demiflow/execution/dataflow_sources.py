@@ -95,7 +95,14 @@ def _source_facts(source: SourcePlan) -> dict[str, Any]:
     if isinstance(source, LanceSource):
         return {"kind": "LanceSource", "query": source.query.to_dict()}
     if isinstance(source, MaterializedSource):
-        return {"kind": "MaterializedSource", "row_count": source.row_count,
+        # Arrow/pandas/NumPy constructors carry a bounded handle, but their
+        # optional SourcePlan row-count hint may be absent. Absence is not EOF.
+        count = source.row_count
+        if count is None:
+            count = getattr(source.handle, 'row_count', None)
+        if type(count) is not int or count < 0:
+            raise DataflowError('INVALID_CONTRACT', 'Materialized source needs a finite row count')
+        return {"kind": "MaterializedSource", "row_count": count,
                 "handle_digest": (_json_digest(source.handle.recovery_reference)
                                   if getattr(source.handle, "recovery_reference", None) is not None
                                   else _content_digest(source.handle))}
@@ -274,7 +281,9 @@ def plan_source_splits(
     if kind in ("items", "materialized"):
         count = snapshot.immutable_identity.get("count")
         if count is None:
-            count = snapshot.immutable_identity.get("row_count") or 0
+            count = snapshot.immutable_identity.get("row_count")
+        if type(count) is not int or count < 0:
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Sealed materialized source has no finite row count')
         splits = []
         for index, (start, end) in enumerate(_partition_ranges(int(count), target_partitions)):
             splits.append(_split(source_id, {"partition": index, "start": start, "end": end},

@@ -82,9 +82,22 @@ class InputMaterializedHandle:
             blocks, block, total = [], [], 0
             for row in self._iter_rows():
                 try:
-                    total += check_size(row, self._max_bytes)
+                    if self._format == 'numpy':
+                        # The existing typed record codec preserves primitive
+                        # NumPy scalar/array dtype and shape. Do not convert to
+                        # Python/list values merely to appease the JSON checker.
+                        # A row view can retain its backing buffer; input plus
+                        # copy were admitted above, and this counts each row
+                        # conservatively again for the identity frontier.
+                        item = row['data']
+                        total += (sys.getsizeof(row) + sys.getsizeof('data')
+                                  + sys.getsizeof(item) + int(item.nbytes))
+                    else:
+                        total += check_size(row, self._max_bytes)
                 except RuntimeContractError as exc:
-                    raise DataflowError("BUDGET_EXCEEDED", "literal identity row exceeds budget") from exc
+                    code = ('INVALID_CONTRACT' if str(exc).startswith('Unsupported runtime value type:')
+                            else 'BUDGET_EXCEEDED')
+                    raise DataflowError(code, 'literal identity row refused: ' + str(exc)) from exc
                 if total > self._max_bytes:
                     raise DataflowError("BUDGET_EXCEEDED", "literal identity exceeds resident budget")
                 block.append(row)
@@ -133,7 +146,7 @@ class InputMaterializedHandle:
                         yield row
         elif fmt == "numpy":
             for array in value:
-                for item in array:
+                for item in (array[()],) if array.ndim == 0 else array:
                     yield {"data": item}
         elif fmt == "pandas":
             for frame in value:
@@ -173,6 +186,11 @@ def _normalize(value: object, format: str) -> Any:
         for array in values:
             if not isinstance(array, np.ndarray):
                 raise DataflowError("INVALID_CONTRACT", "from_numpy requires NumPy arrays")
+            from .contracts.array_values import validate_array
+            try:
+                validate_array(array)
+            except ValueError as exc:
+                raise DataflowError('INVALID_CONTRACT', str(exc)) from exc
             arrays.append(array)
         return arrays
     if format == "pandas":
