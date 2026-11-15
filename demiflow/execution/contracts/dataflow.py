@@ -78,7 +78,7 @@ _POLL_STATUSES = frozenset({"record", "pending", "eoi"})
 _ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
 _REPLY_STATUSES = frozenset({"ok", "error", "pending"})
 _SCOPE_CONDITIONS = frozenset({"input_eoi", "terminal_limit", "queue_drain_declared"})
-_QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch", "producer"})
+_QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch", "producer", "native_search"})
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _QUEUE_STATUSES = frozenset({"record", "pending", "eoi", "confirmed", "unknown"})
 _JOURNAL_OPS = frozenset({
@@ -1564,7 +1564,7 @@ class ActionProgram:
 class QueueBinding:
     action_id: str
     source_id: str | None
-    mode: Literal["sink", "explicit", "raw_fetch", "producer"]
+    mode: Literal["sink", "explicit", "raw_fetch", "producer", "native_search"]
     contract_digest: str
     generation: str | None
     pool: str | None

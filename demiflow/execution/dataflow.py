@@ -353,6 +353,11 @@ class DataflowExecution:
             self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure(self._request.source, self._request.plan, self._request.sink, graph=graph)
             self._services.journal_service.bind_queue(self._acquisition)
+        if any(node.kernel.configuration.get('native_operation') == 'search' for node in graph.nodes):
+            if self._acquisition is None:
+                self._acquisition = NativeAcquisitionService(self._action, services=self._services)
+            self._acquisition.configure_searches(self._request.source, self._request.plan, graph)
+            self._services.journal_service.bind_queue(self._acquisition)
         self._prepared = True
         return sealed
 

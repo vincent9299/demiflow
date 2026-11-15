@@ -274,15 +274,14 @@ class Dataset:
         """Concatenate datasets lazily, retaining this Dataset's execution context.
 
         The unified engine uses native read tasks on either host; does not
-        materialize rows. Upstream transforms run under their original contexts.
+        materialize rows. The terminal's executor hosts the whole unified graph;
+        upstream operator declarations and fixed source identities are retained.
         No schema coercion.
         """
         from .records import UnionDatasource
         if not all(isinstance(ds,Dataset) for ds in others):raise TypeError('union requires Datasets')
         from ..execution.local_kernel import UnionSource, PlanInput
         datasets = (self, *others)
-        if any(ds._executor is not self._executor for ds in datasets):
-            raise ValueError('parallel union inputs must belong to the same local_execution context')
         inputs = []
         for ds in datasets:
             if isinstance(ds._source, UnionSource) and not ds._plan.operations:

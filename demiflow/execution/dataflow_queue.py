@@ -13,6 +13,7 @@ import queue as _queue
 import threading
 import time
 from collections import OrderedDict
+from dataclasses import asdict
 from typing import Mapping, Union
 
 from ..data.plan import AsyncMapOp, LogicalPlan
@@ -82,7 +83,10 @@ class _Claim:
         self.finalized = False
 
 
-class NativeAcquisitionService:
+from .dataflow_search import NativeSearchOperations
+
+
+class NativeAcquisitionService(NativeSearchOperations):
     """Sole driver binding of the native QueueDatasource/RawFetch (OBJECT-OWNERS).
 
     Lifecycle: configure -> start -> poll/acquire/finalize -> finish/close.
@@ -102,6 +106,7 @@ class NativeAcquisitionService:
         self._services = services
         self._state = 'constructed'
         self._lock = threading.Lock()
+        self._io_condition = threading.Condition(self._lock)
         self._source: QueueDatasource | None = None
         self._fetch: RawFetch | None = None
         self._sink: QueueResultSink | None = None
@@ -243,10 +248,13 @@ class NativeAcquisitionService:
         bound queue and task commits before issuing another claim or request.
         Ordinary sources, raw fetch and partial Dataset commits cannot use it.
         """
-        if self._source is None:
-            return False
         journal = self._action.context.journal
         if journal.execution_commits(self.action_id):
+            return False
+        if self._mode == 'native_search':
+            return bool(self._action.context.resuming and
+                        self._prior_search_binding == asdict(self._binding))
+        if self._source is None:
             return False
         binding = journal.source_binding(self.action_id + '-queue')
         return bool(binding and binding.get('consumer_contract') == identity(self._contract)
@@ -283,7 +291,11 @@ class NativeAcquisitionService:
         try:
             if self._source is not None:
                 await self._source.astart()
-            await self._fetch.astart()
+            if self._fetch is not None:
+                await self._fetch.astart()
+            runtime = getattr(self, '_search_runtime', None)
+            if runtime is not None:
+                await runtime.start()
         finally:
             _ACTION.reset(token)
 
@@ -335,7 +347,7 @@ class NativeAcquisitionService:
         claim = _Claim(delivery, occurrence, lease, delivery_ref, row_ref)
         with self._lock:
             if len(self._claims) >= self._max_inflight:
-                raise DataflowError('BUDGET_EXCEEDED', 'native claim table is full', retryable=True)
+                raise DataflowError('BUDGET_EXCEEDED', 'native claim table is full')
             self._claims[delivery.task_id] = claim
         return QueueReply(command.operation_id, 'record', delivery_ref, row_ref, None, 0)
 
@@ -455,6 +467,8 @@ class NativeAcquisitionService:
     # -- Q007 finish ----------------------------------------------------
     def finish(self) -> Mapping[str, Json]:
         self._check_started()
+        if self._mode == 'native_search':
+            return {'resources': self.search_metrics()}
         timeout_s = self._services.bounds.timeout_ms / 1000
         if self._source is not None:
             if not self._drained.wait(timeout_s):
@@ -508,6 +522,12 @@ class NativeAcquisitionService:
         errors: list[BaseException] = []
         if self._loop is None:
             return errors
+        runtime = getattr(self, '_search_runtime', None)
+        if runtime is not None and runtime.task is not None:
+            try:
+                self._run_io(runtime.close(), timeout_s=self._services.bounds.timeout_ms / 1000)
+            except BaseException as exc:
+                errors.append(exc)
         if self._fetch is not None:
             try:
                 self._run_io(self._fetch.aclose(), timeout_s=self._services.bounds.timeout_ms / 1000)
@@ -648,14 +668,22 @@ class NativeAcquisitionService:
                           command.row_ref, fact_ref, 0)
 
     def _admit_io(self) -> None:
-        with self._lock:
-            if self._inflight >= self._io_concurrency:
-                raise DataflowError('BUDGET_EXCEEDED', 'native IO inflight is full', retryable=True)
+        deadline = time.monotonic() + self._services.bounds.timeout_ms / 1000
+        with self._io_condition:
+            while self._inflight >= self._io_concurrency:
+                if self._closed.is_set():
+                    raise DataflowError('CANCELLED', 'native IO admission was cancelled')
+                self._action.context.check_stop()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DataflowError('DEADLINE_EXCEEDED', 'native IO admission timed out')
+                self._io_condition.wait(min(.05, remaining))
             self._inflight += 1
 
     def _release_io(self) -> None:
-        with self._lock:
+        with self._io_condition:
             self._inflight -= 1
+            self._io_condition.notify_all()
 
     def _raise_failure(self) -> None:
         with self._lock:
@@ -683,7 +711,7 @@ class NativeAcquisitionService:
             event = self._pending.get(op_id)
             if event is None:
                 if len(self._pending) >= self._max_pending:
-                    raise DataflowError('BUDGET_EXCEEDED', 'queue operation table is full', retryable=True)
+                    raise DataflowError('CAPACITY_PENDING', 'queue operation table is full', retryable=True)
                 event = threading.Event()
                 self._pending[op_id] = event
                 owner = True

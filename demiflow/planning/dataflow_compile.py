@@ -357,10 +357,10 @@ def compile_kernel_spec(
     if native_declaration is not None and native_declaration.target is ProducerCall:
         configuration['native_operation'] = 'producer'
         state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
-    from ..execution.dataflow_producer import ProducerSearchCall
-    if native_declaration is not None and native_declaration.target is ProducerSearchCall:
-        configuration['native_operation'] = 'producer_search'
-        configuration['native_index'] = native_declaration.constructor_args[0]
+    from ..execution.dataflow_search import NativeSearchCall
+    if native_declaration is not None and native_declaration.target is NativeSearchCall:
+        configuration['native_operation'] = 'search'
+        configuration['native_key'] = native_declaration.constructor_args[0]
         state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
     stream_options = getattr(operation, 'stream_options', None)
     if stream_options is not None:

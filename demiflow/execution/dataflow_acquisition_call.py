@@ -51,7 +51,7 @@ class AcquisitionCall:
             raw = json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
             return services.store.put(iter([raw]), max_bytes=maximum, media_type='application/json')
         record_id = scope.occurrence
-        if self.binding.mode == 'raw_fetch':
+        if self.binding.mode in ('raw_fetch', 'native_search'):
             delivery = put({'occurrence': record_id}, services.bounds.max_control_bytes)
         else:
             delivery = scope.delivery

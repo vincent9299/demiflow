@@ -50,9 +50,14 @@ def native_model_declaration(operation):
     target = getattr(getattr(operation, 'callable', None), 'target', None)
     actor = getattr(target, '__self__', target)
     from ..collect.operators import SearchWeb
-    if type(actor) is SearchWeb and actor.queue_producer is not None:
-        from .dataflow_producer import ProducerSearchCall
-        return CallableSpec.create(ProducerSearchCall, fn_constructor_args=(actor.queue_node_id,))
+    if type(actor) is SearchWeb:
+        from ..collect.search_contract import search_facts
+        from .dataflow_search import NativeSearchCall
+        from .recovery_contract import identity
+        search_facts(actor)
+        if actor.io is not None or actor._session_lease is not None:
+            raise ValueError('Native search requires an unstarted actor declaration')
+        return CallableSpec.create(NativeSearchCall, fn_constructor_args=(identity(actor.recovery_identity()),))
     from .queue_producer import QueueProducer, producer_facts
     if type(actor) is QueueProducer:
         from .dataflow_producer import ProducerCall

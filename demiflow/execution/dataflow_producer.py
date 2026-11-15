@@ -26,17 +26,6 @@ class ProducerCall(AcquisitionCall):
             raise DataflowError('FENCED', 'Enqueue worker is not bound to a producer')
 
 
-class ProducerSearchCall(AcquisitionCall):
-    def __init__(self, native_index):
-        super().__init__('search')
-        self.native_index = native_index
-
-    def bind(self, services, occurrence_id):
-        self.services = services
-        self.binding = QueueBinding(**dict(services.journal.read_configuration()['queue_binding']))
-        if self.binding.mode != 'producer':
-            raise DataflowError('FENCED', 'Search worker is not bound to a producer')
-        self.search_occurrence = occurrence_id
 
 
 class NativeProducerService(NativeAcquisitionService):
@@ -63,14 +52,6 @@ class NativeProducerService(NativeAcquisitionService):
         self._source_eoi = False
         self._restore_image = None
         self._rows = None
-        self._searches = {}
-        from .dataflow_search_runtime import SearchRuntime
-        self._search_runtime = SearchRuntime(self._action, self._services.bounds.max_nodes)
-        for node in graph.nodes:
-            if node.kernel.configuration.get('native_operation') == 'producer_search':
-                index = int(node.kernel.configuration['native_index'])
-                actor = plan.operations[index].callable.target
-                self._searches[node.occurrence_id] = getattr(actor, '__self__', actor)
         self._state = 'configured'
         return self._binding
 
@@ -91,7 +72,6 @@ class NativeProducerService(NativeAcquisitionService):
 
     def start(self):
         super().start()  # native astart reconciles native pending publish receipts first
-        self._run_io(self._search_runtime.start(), timeout_s=self._services.bounds.timeout_ms / 1000)
         if self._action.context.resuming:
             cursors = self._restore_image.source_vector if self._restore_image is not None else ()
             if len(cursors) > 1:
@@ -171,45 +151,8 @@ class NativeProducerService(NativeAcquisitionService):
             self._release_io()
         return result
 
-    def _confirmed(self, command, result, proofs):
-        ref = self._put_json(result, media_type='application/json', max_bytes=self._services.bounds.max_row_bytes)
-        if not proofs or any(proof is None or proof['status'] != 'acked' for proof in proofs):
-            raise DataflowError('UNKNOWN_EFFECT', 'Native producer publication has no confirmed receipt')
-        # Keep native receipt identities and data, without copying message bodies
-        # from the native intents into the control-plane response.
-        proofs = [{key: proof[key] for key in ('commit_id', 'action_id', 'status', 'receipts')}
-                  for proof in proofs]
-        fact = self._put_json({'commits': proofs}, media_type='application/json',
-                              max_bytes=self._services.bounds.max_control_bytes)
-        return QueueReply(command.operation_id, 'confirmed', command.delivery_ref, ref, fact, 0)
 
-    def search(self, command, *, lease):
-        self._check_started()
-        self._check_lease(lease)
-        self._validate_command(command, 'search', require_refs=True)
-        self._validate_binding(command.binding)
-        if (command.node_id not in self._searches or command.node_id not in
-                self._worker_occurrences.get((lease.allocation_id, lease.boot_id), ())):
-            raise DataflowError('FENCED', 'Worker does not own this native search occurrence')
-        return self._run_operation(command, lambda: self._search_row(command))
 
-    def _search_row(self, command):
-        actor = self._searches[command.node_id]
-        descriptor = self._read_json(command.delivery_ref, max_bytes=self._services.bounds.max_control_bytes)
-        if self._unit is None or descriptor != self._unit:
-            raise DataflowError('FENCED', 'Search does not belong to the active source unit')
-        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
-        self._admit_io()
-        try:
-            result = self._run_io(self._search_runtime.call(actor, command, row),
-                                  timeout_s=self._services.bounds.timeout_ms / 1000)
-        finally:
-            self._release_io()
-        def facts():
-            action = actor._action(RowScope(command.record_id))
-            return action.context.journal.execution_commits(action.action_id)
-        proofs = self._run_io(actor.io.run(facts), timeout_s=self._services.bounds.timeout_ms / 1000)
-        return self._confirmed(command, result, proofs)
 
     def before_cut(self):
         if self._unit is not None:
@@ -223,15 +166,8 @@ class NativeProducerService(NativeAcquisitionService):
         return {'source_position': self._fetch.position, 'eos': True}
 
     def close(self):
-        if self._state == 'closed':
-            return
         try:
-            runtime = getattr(self, '_search_runtime', None)
-            if runtime is not None and runtime.task is not None:
-                self._run_io(runtime.close(), timeout_s=self._services.bounds.timeout_ms / 1000)
+            super().close()
         finally:
-            try:
-                super().close()
-            finally:
-                if getattr(self, '_rows', None) is not None:
-                    self._rows.close()
+            if getattr(self, '_rows', None) is not None:
+                self._rows.close()

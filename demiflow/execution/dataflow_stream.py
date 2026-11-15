@@ -69,6 +69,8 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             if status.state in ('succeeded', 'failed', 'cancelled'):
                 break
         result = handle.result()
+        if execution._acquisition is not None:
+            stats.metrics['resources'] = execution._acquisition.search_metrics()
         # The committed terminal receipt supplies the final count, including
         # an earlier attempt's prefix; no counter is inferred from the plan.
         stats.stage('committed_output')['emitted'] = result.rows or 0

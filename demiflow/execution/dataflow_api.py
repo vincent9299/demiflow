@@ -167,7 +167,10 @@ def record_execution_metadata(request, execution):
                    'plan_id': execution._physical.plan_id}
     native = getattr(execution, '_native_summary', None)
     if native is not None:
-        diagnostics['queue'] = dict(native)
+        if execution._acquisition.binding.mode == 'native_search':
+            diagnostics.update(native)
+        else:
+            diagnostics['queue'] = dict(native)
     executor._run_ref = request.action.context.ref
     executor._last_metadata = ExecutionMetadata(source_name=type(request.source).__name__,
         stages=stages, rows_output=execution._confirmed_rows, diagnostics=diagnostics,

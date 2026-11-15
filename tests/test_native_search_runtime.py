@@ -289,16 +289,17 @@ def test_public_dataset_entry_and_schema(server, engines, tmp_path):
                    search=SearchConfig(engines=engines, host_interval_s=0,
                        workers=1,max_bytes=65536,max_results=8))
     assert not tmp_path.joinpath('cache.sqlite').exists()
-    rows = []
-    stats = (data.from_items([{'id': 'row', 'requests': [
+    dataset = (data.from_items([{'id': 'row', 'requests': [
         {'request_id': 'a', 'query': 'tree', 'language': 'zh', 'bindings': ['opaque']},
         {'request_id': 'b', 'query': 'tree', 'language': 'en', 'bindings': ['opaque']}]}])
-        .search_web(requests='requests', output='found', session=s, request_concurrency=2, concurrency=2, queue_depth=2)
-        .map(lambda row: rows.append(row) or row).run_stream())
+        .search_web(requests='requests', output='found', session=s, request_concurrency=2, concurrency=2, queue_depth=2))
+    # Managed workers do not mutate the driver's captured Python containers.
+    # Inspect the actual committed public result and observed native metrics.
+    rows = dataset.take_all()
     assert len(rows) == 1 and len(rows[0]['found']) == 2
     assert all(r['status'] == 'ok' for r in rows[0]['found'])
     assert pa.array(rows[0]['found'], type=SEARCH_RESULT)[0].as_py()['engine_receipts']
-    metrics = stats.metrics['resources']['WebSession:0']
+    metrics = dataset.execution_metadata().diagnostics['resources']['WebSession:0']
     assert metrics['search_requests'] == 4 and metrics['search_queries'] == 2
     assert metrics['search_http_requests'] == 4
     assert s.native is None  # Dataset owns cleanup
