@@ -1088,6 +1088,16 @@ class DataflowExecution:
                     self._retire_phase(image)
             elif all_workers <= self._done and self._phase_index < len(self._phases) - 1:
                 self._retire_phase(image)
+            elif (all_workers <= self._done and self._checkpoint.inputs_complete()
+                  and not image.cut.final):
+                # Native calls can finish after begin froze a non-final cut.
+                # Receipt that cut unchanged, then ask the same live owners for
+                # a real final contribution before declaring the action done.
+                self._cut = None
+                self._contributions.clear()
+                self._idle.clear()
+                for endpoint in self._endpoints.values():
+                    endpoint.send_business({'kind': 'pause'})
             elif self._stopping or all_workers <= self._done:
                 self._set_result(image)
             else:
