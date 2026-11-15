@@ -183,7 +183,7 @@ def test_plain_iterator_map_early_close_keeps_source_independent(tmp_path, monke
 def test_suffix_does_not_swallow_unknown_effect_device_or_exceed_grant(tmp_path, change):
     from dataclasses import replace
     import pyarrow as pa
-    from demiflow.execution.contracts.dataflow import ActionRequest
+    from demiflow.execution.contracts.dataflow import ActionRequest, HostDescriptor
     from demiflow.execution.contracts.dataflow_codec import _thaw_json
     from demiflow.execution.dataflow_api import _CompileContext
     from demiflow.execution.run_context import RunAction
@@ -212,4 +212,7 @@ def test_suffix_does_not_swallow_unknown_effect_device_or_exceed_grant(tmp_path,
     stages=partition_stages(graph,policy=policy,bounds=bounds)
     if change=='budget': bounds=replace(bounds,max_resident_bytes=stages[0].resident_bytes)
     if change=='fusion': policy=replace(policy,fusion=False)
-    assert fuse_thread_suffix(graph,stages,policy=policy,bounds=bounds)==stages
+    hosts = (HostDescriptor(host_id='local', provider='local', runtime_revision='test',
+        store_domains=(), logical_resources={'cpu_millis': 16000, 'memory_bytes': 2**30},
+        isolation_capabilities=()),)
+    assert fuse_thread_suffix(graph,stages,policy=policy,bounds=bounds,hosts=hosts)==stages
