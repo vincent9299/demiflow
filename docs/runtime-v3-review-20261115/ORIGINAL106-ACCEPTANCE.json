@@ -1,0 +1,593 @@
+{
+  "tested_head": "2df157061a777ccb3a054db30ec0e59afef80d37",
+  "equivalent_root": "e6bdc2f",
+  "tested_tree": "38296f0cd55ffc4741e85f53d0012c28deecce9b",
+  "command": "PYTHONPATH=$PWD:$PWD/tests DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-original106-e6bdc2f /yzp/zhaozy/yangzepeng/0905/env/bin/python -B /tmp/demiflow-regression-runner.py -q tests/test_stream_map.py tests/test_local_kernel.py tests/test_stream_grouping_lookup.py --basetemp=/tmp/demiflow-regression-original106-e6bdc2f --junitxml=/tmp/demiflow-regression-original106-e6bdc2f.xml",
+  "passed": 106,
+  "failed": 0,
+  "skipped": 0,
+  "elapsed_seconds": 559.85,
+  "original100_present": true,
+  "unchanged_original_test_bytes_from": "2177a2e",
+  "test_sha256": {
+    "tests/test_stream_map.py": "c8eb33b666f28ab4cf5a351065cc158bf237d4bca8ce310560922f58dd4453bd",
+    "tests/test_local_kernel.py": "97ae538505fef2204fd92c173bb38d1c76d29b7dd8778d55bd868cfa50cb4fd1",
+    "tests/test_stream_grouping_lookup.py": "440c5da163aa0d7d1a0f5bb1b9fbe899a0746c1c03e37fd44d335cb2370e1b95"
+  },
+  "xml_sha256": "e10374408e331f06fb3551c483feffd8848ebe2098263f585461843a8aaabe35",
+  "log_sha256": "06bcdcb46810dc9bc54918814abba9436904618d71a1ca83e4e220be4dc65098",
+  "closed_failures": [
+    {
+      "nodeid": "tests.test_stream_map::test_default_map_remains_lazy_and_single_inline_stream_stage",
+      "previous": "failed",
+      "current": "passed",
+      "seconds": 7.884
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_slow_consumer_bounds_wide_rows_and_inflight_calls",
+      "previous": "failed",
+      "current": "passed",
+      "seconds": 1.818
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_prepend_rejects_configured_maps_but_accepts_plain_map",
+      "previous": "failed",
+      "current": "passed",
+      "seconds": 1.545
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_nested_relations_support_stream_options_without_eager_source_access[thread]",
+      "previous": "failed",
+      "current": "passed",
+      "seconds": 12.071
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_nested_relations_support_stream_options_without_eager_source_access[process]",
+      "previous": "failed",
+      "current": "passed",
+      "seconds": 36.519
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_narrow_chain_batch_boundaries_and_limit_match_serial",
+      "previous": "failed",
+      "current": "passed",
+      "seconds": 147.387
+    }
+  ],
+  "nodeids": [
+    {
+      "nodeid": "tests.test_stream_map::test_thread_map_only_overlaps_preserves_context_and_arguments",
+      "status": "passed",
+      "seconds": 4.65
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_thread_map_allows_async_consumer_to_release_other_workers",
+      "status": "passed",
+      "seconds": 1.659
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_default_map_remains_lazy_and_single_inline_stream_stage",
+      "status": "passed",
+      "seconds": 7.884
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_class_scope_is_lazy_recreated_per_action_and_closed[stage-1]",
+      "status": "passed",
+      "seconds": 7.481
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_class_scope_is_lazy_recreated_per_action_and_closed[worker-3]",
+      "status": "passed",
+      "seconds": 7.494
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_empty_and_filtered_inputs_do_not_construct_worker_classes",
+      "status": "passed",
+      "seconds": 2.872
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_partial_bound_inputs_and_outputs_keep_original_fields[inline]",
+      "status": "passed",
+      "seconds": 5.842
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_partial_bound_inputs_and_outputs_keep_original_fields[thread]",
+      "status": "passed",
+      "seconds": 3.719
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_explicit_catch_and_drop_preserve_metrics_and_do_not_catch_timeouts",
+      "status": "passed",
+      "seconds": 11.355
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_worker_failures_cleanup_even_partial_start[construct]",
+      "status": "passed",
+      "seconds": 1.177
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_worker_failures_cleanup_even_partial_start[start]",
+      "status": "passed",
+      "seconds": 1.236
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_worker_failures_cleanup_even_partial_start[call]",
+      "status": "passed",
+      "seconds": 1.414
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_failure_drains_sibling_thread_before_all_instance_cleanup",
+      "status": "passed",
+      "seconds": 1.487
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_stop_file_waits_for_thread_before_cleanup",
+      "status": "passed",
+      "seconds": 1.6
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_slow_consumer_bounds_wide_rows_and_inflight_calls",
+      "status": "passed",
+      "seconds": 1.818
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options0]",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options1]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options2]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options3]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options4]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options5]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options6]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options7]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options8]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options9]",
+      "status": "passed",
+      "seconds": 0.001
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options10]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options11]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_invalid_policy_is_rejected_without_running_user_code[options12]",
+      "status": "passed",
+      "seconds": 0.0
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_async_functions_and_hidden_awaitables_are_rejected",
+      "status": "passed",
+      "seconds": 9.458
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take-options0]",
+      "status": "passed",
+      "seconds": 3.816
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take-options1]",
+      "status": "passed",
+      "seconds": 3.717
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take-options2]",
+      "status": "passed",
+      "seconds": 3.804
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take-options3]",
+      "status": "passed",
+      "seconds": 3.985
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take-options4]",
+      "status": "passed",
+      "seconds": 3.848
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take-options5]",
+      "status": "passed",
+      "seconds": 3.887
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_zero-options0]",
+      "status": "passed",
+      "seconds": 2.192
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_zero-options1]",
+      "status": "passed",
+      "seconds": 2.026
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_zero-options2]",
+      "status": "passed",
+      "seconds": 2.023
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_zero-options3]",
+      "status": "passed",
+      "seconds": 2.022
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_zero-options4]",
+      "status": "passed",
+      "seconds": 2.127
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_zero-options5]",
+      "status": "passed",
+      "seconds": 2.151
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_all-options0]",
+      "status": "passed",
+      "seconds": 3.873
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_all-options1]",
+      "status": "passed",
+      "seconds": 3.808
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_all-options2]",
+      "status": "passed",
+      "seconds": 3.963
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_all-options3]",
+      "status": "passed",
+      "seconds": 3.681
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_all-options4]",
+      "status": "passed",
+      "seconds": 3.89
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[take_all-options5]",
+      "status": "passed",
+      "seconds": 3.747
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[count-options0]",
+      "status": "passed",
+      "seconds": 3.875
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[count-options1]",
+      "status": "passed",
+      "seconds": 3.924
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[count-options2]",
+      "status": "passed",
+      "seconds": 3.96
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[count-options3]",
+      "status": "passed",
+      "seconds": 3.726
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[count-options4]",
+      "status": "passed",
+      "seconds": 3.966
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[count-options5]",
+      "status": "passed",
+      "seconds": 3.949
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[write_lance-options0]",
+      "status": "passed",
+      "seconds": 3.764
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[write_lance-options1]",
+      "status": "passed",
+      "seconds": 3.953
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[write_lance-options2]",
+      "status": "passed",
+      "seconds": 3.872
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[write_lance-options3]",
+      "status": "passed",
+      "seconds": 3.925
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[write_lance-options4]",
+      "status": "passed",
+      "seconds": 3.874
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_every_explicit_option_supports_lazy_actions_without_eager_reads[write_lance-options5]",
+      "status": "passed",
+      "seconds": 3.778
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_ray_explain_accepts_stream_options_and_rejects_legacy_tuning_before_io",
+      "status": "passed",
+      "seconds": 0.01
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_prepend_rejects_configured_maps_but_accepts_plain_map",
+      "status": "passed",
+      "seconds": 1.545
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls[json]",
+      "status": "passed",
+      "seconds": 2.354
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls[lance]",
+      "status": "passed",
+      "seconds": 2.718
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_stream_native_recovery_preserves_sealed_policy_and_new_run_can_append",
+      "status": "passed",
+      "seconds": 4.338
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_nested_relations_support_stream_options_without_eager_source_access[thread]",
+      "status": "passed",
+      "seconds": 12.071
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_nested_relations_support_stream_options_without_eager_source_access[process]",
+      "status": "passed",
+      "seconds": 36.519
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_whole_graph_preflight_precedes_construction_and_source_access",
+      "status": "passed",
+      "seconds": 1.493
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_policy_metrics_and_plan_summary_keep_duplicate_nodes_distinct",
+      "status": "passed",
+      "seconds": 1.449
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_bound_worker_class_and_none_output_are_regular_field_values",
+      "status": "passed",
+      "seconds": 6.973
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_callable_instance_is_copied_per_action_and_list_results_expand",
+      "status": "passed",
+      "seconds": 12.128
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_concurrent_map_emits_fast_row_before_blocked_predecessor",
+      "status": "passed",
+      "seconds": 1.403
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_cleanup_failure_still_closes_all_workers_and_native_actors[astop]",
+      "status": "passed",
+      "seconds": 1.486
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_cleanup_failure_still_closes_all_workers_and_native_actors[aclose]",
+      "status": "passed",
+      "seconds": 1.421
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_external_cancel_drains_map_calls_before_action_cleanup",
+      "status": "passed",
+      "seconds": 1.426
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_callback_cancellation_never_returns_partial_success[1-inline]",
+      "status": "passed",
+      "seconds": 3.45
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_callback_cancellation_never_returns_partial_success[1-thread]",
+      "status": "passed",
+      "seconds": 1.24
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_callback_cancellation_never_returns_partial_success[1000-inline]",
+      "status": "passed",
+      "seconds": 3.265
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_callback_cancellation_never_returns_partial_success[1000-thread]",
+      "status": "passed",
+      "seconds": 1.266
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_native_lance_writer_failure_joins_stream_and_closes_workers[schema]",
+      "status": "passed",
+      "seconds": 2.176
+    },
+    {
+      "nodeid": "tests.test_stream_map::test_native_lance_writer_failure_joins_stream_and_closes_workers[writer]",
+      "status": "passed",
+      "seconds": 2.373
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order[thread]",
+      "status": "passed",
+      "seconds": 3.455
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order[process]",
+      "status": "passed",
+      "seconds": 8.588
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[thread-inner]",
+      "status": "passed",
+      "seconds": 2.51
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[thread-left]",
+      "status": "passed",
+      "seconds": 2.413
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[thread-semi]",
+      "status": "passed",
+      "seconds": 2.636
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[thread-anti]",
+      "status": "passed",
+      "seconds": 2.387
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[process-inner]",
+      "status": "passed",
+      "seconds": 4.586
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[process-left]",
+      "status": "passed",
+      "seconds": 5.202
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[process-semi]",
+      "status": "passed",
+      "seconds": 5.198
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_matches_legacy_canonical_semantics[process-anti]",
+      "status": "passed",
+      "seconds": 5.163
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_join_fold_fusion_retains_hidden_key_and_unfuses_after_map",
+      "status": "passed",
+      "seconds": 20.26
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_group_batches_and_initial_state_are_isolated",
+      "status": "passed",
+      "seconds": 8.934
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_narrow_chain_batch_boundaries_and_limit_match_serial",
+      "status": "passed",
+      "seconds": 147.387
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_failure_and_early_consumer_close_cleanup_owned_work[thread]",
+      "status": "passed",
+      "seconds": 2.984
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_failure_and_early_consumer_close_cleanup_owned_work[process]",
+      "status": "passed",
+      "seconds": 7.617
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_lance_fixed_version_narrow_columns_and_normal_writer",
+      "status": "passed",
+      "seconds": 5.186
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_hash_prefilter_cannot_replace_exact_keys_or_move_across_udf",
+      "status": "passed",
+      "seconds": 2.47
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_context_and_configuration_do_not_silently_change_existing_execution",
+      "status": "passed",
+      "seconds": 3.002
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_supported_shuffled_child_plan_is_lazy_and_keeps_distinct_sources",
+      "status": "passed",
+      "seconds": 2.679
+    },
+    {
+      "nodeid": "tests.test_local_kernel::test_worker_exception_cannot_publish_partial_lance_output",
+      "status": "passed",
+      "seconds": 3.806
+    },
+    {
+      "nodeid": "tests.test_stream_grouping_lookup::test_keyed_timeout_releases_downstream_before_upstream_finishes",
+      "status": "passed",
+      "seconds": 4.046
+    },
+    {
+      "nodeid": "tests.test_stream_grouping_lookup::test_keyed_pressure_flush_and_oversize_do_not_drop_rows",
+      "status": "passed",
+      "seconds": 6.973
+    },
+    {
+      "nodeid": "tests.test_stream_grouping_lookup::test_lookup_is_fixed_bounded_and_does_not_share_mutable_cached_rows",
+      "status": "passed",
+      "seconds": 10.757
+    },
+    {
+      "nodeid": "tests.test_stream_grouping_lookup::test_composite_stream_keys_preserve_same_sha_for_two_concepts",
+      "status": "passed",
+      "seconds": 4.966
+    },
+    {
+      "nodeid": "tests.test_stream_grouping_lookup::test_lookup_nested_list_schema_and_quoted_key",
+      "status": "passed",
+      "seconds": 6.64
+    },
+    {
+      "nodeid": "tests.test_stream_grouping_lookup::test_composite_nested_commit_reconciliation_does_not_resend",
+      "status": "passed",
+      "seconds": 0.014
+    }
+  ],
+  "remaining_performance": [
+    "narrow31-row pipeline two executions147.387s",
+    "40000 wide join120s pressure not accepted"
+  ]
+}
