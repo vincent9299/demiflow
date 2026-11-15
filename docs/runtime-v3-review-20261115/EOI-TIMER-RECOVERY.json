@@ -1,0 +1,18 @@
+{
+  "base": "c76147d1cfe3e390038cde6aa47e572ef72cb27a",
+  "source": {
+    "demiflow/execution/kernels/operator.py": "760b0c42ba416afe9298704e63f7e96a4f8916da97d5e72b06b2f1b90338e26b",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "b5cb2b931c63d8d2f94b79152f76a545821baeac7db5a5782712789d8b5e523b",
+    "tests/test_runtime_v3_eoi_progress.py": "8d58c6100a92fe19c91a579967bf87f2fad7478fc482e83de073af1305dc1f4c"
+  },
+  "evidence": {
+    "/tmp/demiflow-regression-eoi-timer.xml": "764a1d9ff686538daab841a14bb5316dd298305e2e79d07ef4ef5bc33612f9e7",
+    "/tmp/demiflow-regression-eoi-combo.xml": "16a68e4e1cf1a768c41ca4bc7f14604c71a1a82a3f77984fb54ef63a920f1b43",
+    "/tmp/demiflow-regression-eoi-timer-green.xml": "db894b8530e91f7b4334c0a48b42328a291cb6e9109622452ee0d7e85e154a64"
+  },
+  "passed": 42,
+  "not_closed": [
+    "finite-complete output iteration fairness",
+    "40000-row historical throughput budget"
+  ]
+}

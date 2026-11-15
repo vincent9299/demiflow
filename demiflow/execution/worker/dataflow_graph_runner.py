@@ -42,6 +42,7 @@ class WorkerGraphRunner:
         self._source_rows_since_cut = 0
         self._finished_splits = set()
         self._finished_inputs = set()
+        self._finished_ports = set()
         self._closed_inputs = set()
         self._closed_outputs = set()
         self._emitted_eoi = set()
@@ -141,6 +142,20 @@ class WorkerGraphRunner:
             self._finished = set(frontier['nodes'])
             self._finished_splits = set(frontier['splits'])
             self._finished_inputs = {tuple(x) for x in frontier['inputs']}
+            # Older workers synchronously applied port EOI before a cut could
+            # be observed. New workers retain deferred completion separately
+            # so a resumed native final batch is never invoked a second time.
+            ready_ports = {edge.edge_id for edge in self.e._graph.edges
+                if edge.consumer in self.e._node_specs and all(
+                    (edge.edge_id, p) in self._finished_inputs for p in
+                    (self._exchange[edge.edge_id].producer_partitions
+                     if edge.edge_id in self._exchange else (self.partition,)))}
+            completed_ports = frontier.get('finished_ports', sorted(ready_ports))
+            if (type(completed_ports) is not list or any(type(x) is not str for x in completed_ports)
+                    or len(completed_ports) != len(set(completed_ports))
+                    or not set(completed_ports) <= ready_ports):
+                raise DataflowError('FENCED', 'recovery completion contains an unclosed input port')
+            self._finished_ports = set(completed_ports)
             self._closed_inputs = set(frontier.get('closed_inputs', ()))
             self._closed_outputs = set(frontier.get('closed_outputs', ()))
             self._emitted_eoi = set(frontier.get('emitted_eoi', ()))
@@ -320,6 +335,8 @@ class WorkerGraphRunner:
             for occ, node in self.e._node_specs.items():
                 if node.kind == 'source' and not any(s.source_id == occ for s in self.e.assignment.source_splits):
                     self._finish_node(occ)
+        if not (self._paused and self._idle_sent):
+            processed += self._advance_input_completions()
         if time.monotonic() - self._metrics_at >= .5:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
@@ -563,18 +580,47 @@ class WorkerGraphRunner:
         if producer_partition not in producers:
             raise DataflowError('FENCED', 'EOI from an undeclared edge producer')
         self._finished_inputs.add((edge_id, producer_partition))
-        if edge.consumer in self._finished:
-            return
-        if all((edge_id, p) in self._finished_inputs for p in producers):
-            node = self.e._node_specs[edge.consumer]
-            if node.kind != 'terminal':
-                kernel = self.e._kernels[(edge.consumer, self.partition)]
-                for out in kernel.finish(edge.input_port):
-                    self._output(edge.consumer, out)
-            if all(all((e.edge_id, p) in self._finished_inputs for p in
-                       (self._exchange[e.edge_id].producer_partitions if e.edge_id in self._exchange
-                        else (self.partition,))) for e in self._incoming[edge.consumer]):
-                self._finish_node(edge.consumer)
+        # EOI is an input fact, not permission to block this runner while a
+        # callback waits for another co-resident node's timer or output.
+
+    def _advance_input_completions(self):
+        processed = 0
+        # Graph membership bounds this state. A completed node may close its
+        # local outgoing edges, so visit until no further synchronous EOI can
+        # advance; pending callbacks return to the ordinary bounded poll loop.
+        while True:
+            advanced = False
+            for occurrence, edges in self._incoming.items():
+                if occurrence not in self.e._node_specs or occurrence in self._finished:
+                    continue
+                node = self.e._node_specs[occurrence]
+                kernel = self.e._kernels[(occurrence, self.partition)] if node.kind != 'terminal' else None
+                if kernel is not None and kernel.pending_calls:
+                    continue
+                for edge in edges:
+                    if edge.edge_id in self._finished_ports:
+                        continue
+                    producers = (self._exchange[edge.edge_id].producer_partitions
+                                 if edge.edge_id in self._exchange else (self.partition,))
+                    if not all((edge.edge_id, p) in self._finished_inputs for p in producers):
+                        continue
+                    if kernel is not None:
+                        for out in kernel.finish(edge.input_port, wait_for_calls=False):
+                            self._output(occurrence, out)
+                    self._finished_ports.add(edge.edge_id)
+                    processed += 1
+                    advanced = True
+                    # A final partial batch can launch an asynchronous call.
+                    # Its output and cleanup must drain before downstream EOI.
+                    if kernel is not None and kernel.pending_calls:
+                        break
+                if (all(edge.edge_id in self._finished_ports for edge in edges)
+                        and (kernel is None or not kernel.pending_calls)):
+                    self._finish_node(occurrence)
+                    processed += 1
+                    advanced = True
+            if not advanced:
+                return processed
 
     def _finish_node(self, occurrence):
         if occurrence in self._finished:
@@ -672,6 +718,7 @@ class WorkerGraphRunner:
         frontier = document({'schema': 'demiflow.worker-frontier.v3',
             'nodes': sorted(self._finished), 'splits': sorted(self._finished_splits),
             'inputs': [list(x) for x in sorted(self._finished_inputs)],
+            'finished_ports': sorted(self._finished_ports),
             'closed_inputs': sorted(self._closed_inputs), 'closed_outputs': sorted(self._closed_outputs),
             'durable_deliveries': self._credit_payloads, 'emitted_eoi': sorted(self._emitted_eoi),
             'metrics': self._metrics, 'event_sequence': self.e._event_sequence,

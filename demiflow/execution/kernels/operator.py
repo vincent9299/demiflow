@@ -666,7 +666,7 @@ class OperatorKernel:
         yield out
 
     # -- K019 finish --------------------------------------------------------
-    def finish(self, port: str) -> Iterator[Record]:
+    def finish(self, port: str, *, wait_for_calls: bool = True) -> Iterator[Record]:
         self._require_started()
         _check_stop(self._services)
         kind = self._spec.kind
@@ -698,7 +698,12 @@ class OperatorKernel:
                 yield from self._emit(self._emit_group(key, last=True))
             self._timer_deadline = None
         if self._calls is not None:
-            yield from self._emit(self._calls.finish())
+            # The graph runner must keep polling downstream timers while an
+            # upstream invocation drains. Direct kernel callers retain the
+            # synchronous finish contract; the runner records the port EOI
+            # and finishes the node only after pending_calls becomes false.
+            outputs = self._calls.finish() if wait_for_calls else self._calls.poll(max_records=1)
+            yield from self._emit(outputs)
         if kind == 'SaveLanceOp':
             # Empty native output still publishes its declared empty table at
             # real EOI; this creates only the passive driver RPC proxy.
