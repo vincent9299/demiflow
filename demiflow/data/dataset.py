@@ -132,7 +132,7 @@ class Dataset:
 
     @_flow_api("join", datasets=("self", "other"))
     def join(self, other, *, on, right_on=None, how="inner", suffix="_right", chunk_bytes=32*1024*1024):
-        """Local equijoin. Checkpoint async inputs first; null keys do not match.
+        """Native equijoin on either host. Checkpoint async inputs first; null keys do not match.
 
         left joins preserve unmatched rows with right fields absent. semi/anti
         joins preserve left cardinality; inner/left emit all matching pairs.
@@ -141,12 +141,9 @@ class Dataset:
         order is unspecified; no final global sort is added. ``chunk_bytes`` remains accepted for
         compatibility; it does not set the native process memory budget.
         """
-        if getattr(self._executor, 'NAME', None) == 'local':
-            from ..execution.local_kernel import keyed_dataset
-            return keyed_dataset(self, 'join', on, right=other, right_on=right_on,
-                                 how=how, suffix=suffix, chunk_bytes=chunk_bytes)
-        from .local_relational import join
-        return join(self,other,on,right_on,how,suffix,chunk_bytes)
+        from ..execution.local_kernel import keyed_dataset
+        return keyed_dataset(self, 'join', on, right=other, right_on=right_on,
+                             how=how, suffix=suffix, chunk_bytes=chunk_bytes)
 
     @_flow_api('reduce', datasets=('self',), callable='reducer', version=2)
     def reduce_by_key(self, on, reducer, *, initial=None, chunk_bytes=32*1024*1024, fn_kwargs=None):
@@ -158,14 +155,11 @@ class Dataset:
         rewritten as parallel partial aggregates.
         ``fn_kwargs`` binds explicit fixed parameters to the same row reducer.
         """
-        if getattr(self._executor, 'NAME', None) == 'local':
-            from ..execution.local_kernel import keyed_dataset
-            return keyed_dataset(self, 'reduce', on, reducer=reducer, initial=initial, chunk_bytes=chunk_bytes, reducer_kwargs=fn_kwargs)
-        from .local_relational import reduce_by_key
-        return reduce_by_key(self,on,reducer,initial,chunk_bytes,fn_kwargs=fn_kwargs)
+        from ..execution.local_kernel import keyed_dataset
+        return keyed_dataset(self, 'reduce', on, reducer=reducer, initial=initial, chunk_bytes=chunk_bytes, reducer_kwargs=fn_kwargs)
 
     def exclude_keys(self, other, *, on):
-        """Exclude matching keys from a local Lance scan, retaining scan order.
+        """Exclude matching keys from a Lance scan, retaining scan order.
 
         Only keys and internal row IDs enter the managed native relation. Read
         surviving payloads from the same pinned snapshot in bounded batches.
@@ -178,8 +172,6 @@ class Dataset:
         from ..lance.model import LanceScanSpec
         from .local_relational import keys
         from ..execution.local_kernel import keyed_dataset
-        if getattr(self._executor,'NAME',None)!='local':
-            raise NotImplementedError('exclude_keys currently supports local Lance scans')
         if (not isinstance(self._source,LanceSource) or not isinstance(self._source.query,LanceScanSpec)
                 or self._plan.operations or self._source.query.projection or self._source.native_options is not None):
             raise ValueError('exclude_keys requires an untransformed read_lance scan without projection/native options')
@@ -222,11 +214,8 @@ class Dataset:
             return Dataset(self._source, self._plan.append(StreamGroupBatchesOp(**vars(operation),
                 on=keys, output=output, chunk_bytes=chunk_bytes, max_groups=max_groups, buffer_bytes=buffer_bytes)),
                 self._executor, self._stages)
-        if getattr(self._executor, 'NAME', None) == 'local':
-            from ..execution.local_kernel import keyed_dataset
-            return keyed_dataset(self, 'groups', on, max_rows=max_rows, output=output, chunk_bytes=chunk_bytes)
-        from .local_relational import group_batches
-        return group_batches(self,on,max_rows,output,chunk_bytes)
+        from ..execution.local_kernel import keyed_dataset
+        return keyed_dataset(self, 'groups', on, max_rows=max_rows, output=output, chunk_bytes=chunk_bytes)
 
     def map_cached(self, fn, *, cache_dir, version, synchronous=False, cache_when=None,
                    inputs=None, output=None, outputs=None, when=None, namespace='default',
@@ -253,6 +242,12 @@ class Dataset:
             when=when, namespace=namespace, wait_timeout_s=wait_timeout_s,
             max_input_bytes=max_input_bytes, max_result_bytes=max_result_bytes,
             max_entries=max_entries, max_cache_bytes=max_cache_bytes)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("cache",
+            configuration={"cache_dir": str(cache_dir), "version": version,
+                           "namespace": namespace, "synchronous": synchronous,
+                           "max_entries": max_entries},
+            bindings={"version": version})
         if synchronous:
             if concurrency is not None or queue_depth is not None:
                 raise ValueError('synchronous map_cached uses normal map execution policy')
@@ -267,6 +262,10 @@ class Dataset:
         never fetch/parse/register, and one input always produces one output.
         """
         from ..kv import Lookup
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("lookup",
+            configuration={"key": key, "output": output, "concurrency": concurrency},
+            bindings={"key": key})
         return self.map(Lookup(source, key, output, when), execution='thread',
                         concurrency=concurrency, queue_depth=queue_depth, label='lookup')
 
@@ -274,20 +273,15 @@ class Dataset:
     def union(self, *others):
         """Concatenate datasets lazily, retaining this Dataset's execution context.
 
-        Local implementation uses native read tasks; does not materialize rows.
-        Upstream transforms run under their original contexts. No schema coercion.
+        The unified engine uses native read tasks on either host; does not
+        materialize rows. Upstream transforms run under their original contexts.
+        No schema coercion.
         """
-        from .api import DataAPI
         from .records import UnionDatasource
-        if self._executor.__class__.__module__ != 'demiflow.execution.executors.local':
-            raise NotImplementedError('union currently supports local execution')
         if not all(isinstance(ds,Dataset) for ds in others):raise TypeError('union requires Datasets')
-        from .plan import reject_streaming_map_options
-        for dataset in (self, *others):
-            reject_streaming_map_options(dataset._plan, 'local union')
         from ..execution.local_kernel import UnionSource, PlanInput
         datasets = (self, *others)
-        if self._executor._local_kernel is not None and any(ds._executor is not self._executor for ds in datasets):
+        if any(ds._executor is not self._executor for ds in datasets):
             raise ValueError('parallel union inputs must belong to the same local_execution context')
         inputs = []
         for ds in datasets:
@@ -688,6 +682,13 @@ class Dataset:
         actor = SearchWeb(requests, output, session, when, max_candidates, request_concurrency,
                           checkpoint=checkpoint_path, checkpoint_operator=checkpoint_operator,
                           checkpoint_lease_s=checkpoint_lease_s)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("search_web",
+            configuration={"requests": requests, "output": output,
+                           "max_candidates": max_candidates,
+                           "request_concurrency": request_concurrency,
+                           "concurrency": concurrency, "label": label},
+            bindings={"requests": requests})
         return self._native_web_node(actor, SearchWebOp,
             dict(requests=requests, output=output, checkpoint=checkpoint_path,
                  checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s),
@@ -708,6 +709,11 @@ class Dataset:
         actor = ReadLocalObject(reference=reference, output=output, root=root, relocations=relocations,
             layout=layout, max_bytes=max_bytes, error_output=error_output,
             concurrency=concurrency, queue_depth=queue_depth, label=label)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("read_object",
+            configuration={"reference": reference, "output": output, "root": str(root),
+                           "layout": layout, "max_bytes": max_bytes, "label": label},
+            bindings={"reference": reference})
         return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
 
     @_flow_api('decode_document', datasets=('self',), execution='stream',
@@ -721,6 +727,11 @@ class Dataset:
         from ..collect.documents import DecodeDocument
         actor = DecodeDocument(column=column, output=output, max_bytes=max_bytes, max_blocks=max_blocks,
             error_output=error_output, concurrency=concurrency, queue_depth=queue_depth, label=label)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("decode_document",
+            configuration={"column": column, "output": output, "max_bytes": max_bytes,
+                           "max_blocks": max_blocks, "label": label},
+            bindings={"column": column})
         return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
 
     @_flow_api('encode_image', datasets=('self',), execution='stream',
@@ -737,6 +748,11 @@ class Dataset:
         actor = EncodeImage(column=column, output=output, profile=profile, max_side=max_side, quality=quality,
             max_source_pixels=max_source_pixels, max_bytes=max_bytes, memory_bytes=memory_bytes,
             timeout_s=timeout_s, error_output=error_output, concurrency=concurrency, queue_depth=queue_depth, label=label)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("encode_image",
+            configuration={"column": column, "output": output, "max_side": max_side,
+                           "quality": quality, "max_bytes": max_bytes, "label": label},
+            bindings={"column": column})
         return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
 
     @_flow_api('parse_wikitext', datasets=('self',), execution='stream',
@@ -748,6 +764,11 @@ class Dataset:
         actor = ParseWikitext(column=column, output=output, max_chars=max_chars, max_nodes=max_nodes,
             max_depth=max_depth, max_bytes=max_bytes, error_output=error_output,
             concurrency=concurrency, queue_depth=queue_depth, label=label)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("parse_wikitext",
+            configuration={"column": column, "output": output, "max_chars": max_chars,
+                           "max_nodes": max_nodes, "max_depth": max_depth, "label": label},
+            bindings={"column": column})
         return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label, execution='thread')
 
     @_flow_api('fetch',datasets=('self',),execution='stream',effects=('network','objects'),
@@ -764,6 +785,11 @@ class Dataset:
         from ..execution.raw_fetch import RawFetch
         actor = RawFetch(request=request, output=output, store=store, policy=policy,
                          concurrency=concurrency, queue_depth=queue_depth, label=label)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("fetch",
+            configuration={"request": request, "output": output,
+                           "concurrency": concurrency, "label": label},
+            bindings={"request": request})
         return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth, label=label)
 
     def register_documents(self, *, request, output, library, max_bytes=2*1024*1024,
@@ -792,6 +818,11 @@ class Dataset:
             raise ValueError('publish_pause_s requires batch_size > 1')
         if not isinstance(library, DocumentLibrary):
             raise TypeError('register_documents requires a DocumentLibrary declaration')
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("register_documents",
+            configuration={"request": request, "output": output, "batch_size": batch_size,
+                           "max_bytes": max_bytes, "concurrency": concurrency, "label": label},
+            bindings={"request": request})
         if batch_size>1:
             actor=BatchRegisterDocuments(request,output,library,when,max_bytes,max_document_bytes,
                                          prepare_workers=prepare_workers,index_cache_mb=index_cache_mb,publish_pause_s=publish_pause_s)
@@ -832,6 +863,12 @@ class Dataset:
             raise ValueError('reuse_worker_max_tasks must be 1..8192')
         actor = ReadDocuments(request,output,context,when,document_concurrency,timeout_s,max_bytes,
                               reuse_workers,reuse_worker_max_tasks)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("read_documents",
+            configuration={"request": request, "output": output,
+                           "document_concurrency": document_concurrency,
+                           "max_bytes": max_bytes, "concurrency": concurrency, "label": label},
+            bindings={"request": request})
         return self._native_web_node(actor, ReadDocumentsOp, dict(request=request,output=output), concurrency, queue_depth, label)
 
     @staticmethod
@@ -851,6 +888,10 @@ class Dataset:
         """
         from ..execution.queue_producer import QueueProducer
         actor=QueueProducer(config,producer=producer,messages=messages,queue_depth=queue_depth)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("enqueue",
+            configuration={"messages": messages, "queue_depth": queue_depth},
+            bindings={"messages": messages})
         return self.map_async(actor,concurrency=1,queue_depth=queue_depth,label='enqueue')
 
     @_flow_api('ack_queue', datasets=('self',), execution='stream', effects=('queue',),
@@ -863,6 +904,10 @@ class Dataset:
         """
         from ..execution.queue_ack import QueueAcknowledge
         actor=QueueAcknowledge(config,result=result,queue_depth=queue_depth,keep_row=keep_row)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("ack_queue",
+            configuration={"result": result, "queue_depth": queue_depth, "keep_row": keep_row},
+            bindings={"result": result})
         return self.map_async(actor,concurrency=1,queue_depth=queue_depth,label='ack_queue')
 
     def admit_rows(self, *, path, key, unique_on=(), quotas=(), output='admission', when=None,
@@ -883,6 +928,11 @@ class Dataset:
         actor = StreamAdmission(path=path, key=key, unique_on=unique_on, quotas=quotas,
             output=output, when=when, max_entries=max_entries, max_key_bytes=max_key_bytes,
             max_disk_bytes=max_disk_bytes)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("admit",
+            configuration={"path": str(path), "key": key, "output": output,
+                           "unique_on": list(unique_on), "max_entries": max_entries},
+            bindings={"key": key})
         return self.map_async(actor, concurrency=1, queue_depth=queue_depth, label='admit_'+output)
 
     def deduplicate(self, on, *, path, key, output='deduplication', when=None,
@@ -916,6 +966,11 @@ class Dataset:
         from ..execution.recovery_contract import identity
         actor = operation.callable.target.__self__
         actor._deduplicate_declaration = identity(_deduplicate_arguments(actor))
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("deduplicate",
+            configuration={"on": list(fields), "key": key, "output": output,
+                           "keep_duplicates": keep_duplicates, "max_entries": max_entries},
+            bindings={"key": key})
         result = Dataset(self._source, self._plan.append(typed), self._executor, declared._stages)
         return result if keep_duplicates else result.filter(lambda r: r[output]['status'] != 'duplicate')
 
@@ -929,6 +984,11 @@ class Dataset:
         cover returned Arrow/Python payloads, not Lance's internal allocation.
         """
         from ..execution.stream_lookup import LanceLookup
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("lookup",
+            configuration={"on": list(on) if isinstance(on, (list, tuple)) else on,
+                           "output": output, "max_matches": max_matches, "max_bytes": max_bytes},
+            bindings={"output": output})
         return self.map_async(LanceLookup(source, on, columns, output, max_matches, max_bytes),
             concurrency=1, queue_depth=1, label='lookup_'+output)
 
@@ -951,6 +1011,10 @@ class Dataset:
             raise ValueError('Invalid prepend max_row_bytes')
         node = self.map_async(lambda row: row, concurrency=1, queue_depth=1, label='prepend')
         op = node._plan.operations[-1]
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("prepend",
+            configuration={"max_rows": max_rows, "max_row_bytes": max_row_bytes},
+            bindings={})
         return Dataset(self._source, self._plan.append(StreamPrependOp(**vars(op),
             source_dataset=other, max_rows=max_rows, max_row_bytes=max_row_bytes)),
             self._executor, self._stages)
@@ -985,6 +1049,11 @@ class Dataset:
         declared = self.batch_map(actor.__call__,max_batch=max_batch,flush_interval=flush_interval,
                                   concurrency=1,queue_depth=queue_depth,label='save_'+stage)
         op = declared._plan.operations[-1]
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("save_lance",
+            configuration={"uri": uri, "stage": stage, "mode": mode,
+                           "max_batch": max_batch, "queue_depth": queue_depth},
+            bindings={"stage": stage})
         return Dataset(self._source,self._plan.append(SaveLanceOp(**vars(op),uri=actor.uri,stage=stage,key=key,output_ref=output_ref,mode=mode)),
                        self._executor,self._stages+(actor,))
 
@@ -1002,7 +1071,7 @@ class Dataset:
         source_batch_size=None,
         checkpoint=None,
     ):
-        """驱动含 map_async 或显式流式 map 策略的本地计划至完成。
+        """驱动含 map_async 或显式流式 map 策略的计划至完成。
 
         同步入口（内部自建事件循环；不要再包在 asyncio.run 里调用）。
         stop_file 出现时停止新投喂，并按 ServiceStopped 收尾已发出的原生模型请求。
@@ -1024,18 +1093,17 @@ class Dataset:
         # Before action(): payload-fact computation raises TypeError for backend_options, masking this ValueError.
         from ..execution.capabilities import validate_stream_plan
         validate_stream_plan(self._plan)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("run_stream", configuration={"action": "run_stream"}, bindings={})
         with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
             from ..execution.queue_execution import queue_source
             from ..execution.queue_producer import producer_actor
             source = checked.source
             stage_limits = None
             if queue_source(source) is None and producer_actor(checked.plan) is None:
-                from ..errors import UnsupportedExecutionOptionError
                 from ..execution.run_context import current_action
                 from ..execution.source_snapshot import freeze_source
                 from ..execution.native_plan import root_stage_limits
-                if getattr(self._executor, 'NAME', None) != 'local':
-                    raise UnsupportedExecutionOptionError('run_stream is only supported by the local executor')
                 active = current_action()
                 source = freeze_source(active, source)
                 layout, placement = self._executor._bind_plan(active, source, checked.plan,
@@ -1302,6 +1370,13 @@ class Dataset:
         validate_prompt_options(options)
         from ..operator_llm.runtime import validate_prompt_binding
         validate_prompt_binding(operation, pack)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("prompt",
+            configuration={"prompt_name": operation.prompt_name,
+                           "inputs": dict(operation.inputs), "output": operation.output,
+                           "outputs": dict(operation.outputs) if operation.outputs else None,
+                           "max_requests": operation.max_requests},
+            bindings=dict(operation.inputs))
         return Dataset(
             self._source, self._plan.append(operation), self._executor, self._stages,
         )
@@ -1333,14 +1408,14 @@ class Dataset:
         max_search_candidates bounds expanded candidates and the HNSW beam. See
         docs/vector_search.md. The node does not create or update indices.
 
-        Local streaming only: chain after map_embeddings and before downstream
-        nodes, execute with run_stream() or materialize(). Completion order may
-        differ from input order. Native calls drain before cancellation cleanup.
+        Planned by the unified engine on either host: chain after map_embeddings
+        and before downstream nodes, execute with run_stream() or materialize().
+        Completion order may differ from input order. Native calls drain before
+        cancellation cleanup.
         """
         from ..lance.search import VectorSearch, positive_int
+        from ..execution.dataflow_api import make_native_operation
         from .plan import VectorSearchOp
-        if getattr(self._executor, 'materialize_stream', None) is None:
-            raise NotImplementedError('search_vectors requires the local streaming executor')
         positive_int(concurrency, 'concurrency')
         if queue_depth is not None:
             positive_int(queue_depth, 'queue_depth')
@@ -1355,6 +1430,10 @@ class Dataset:
         from copy import deepcopy
         typed = VectorSearchOp(**vars(operation), query=query, output=output,
                                search_spec=deepcopy(actor.spec))
+        make_native_operation("search_vectors",
+            configuration={"query": query, "output": output, "search_spec": typed.search_spec,
+                           "concurrency": concurrency, "queue_depth": queue_depth, "label": label},
+            bindings={"query": query})
         return Dataset(self._source, self._plan.append(typed), self._executor,
                        declared._stages)
 
@@ -1390,14 +1469,13 @@ class Dataset:
         journals preserve exact batches; uncertain calls require explicit recovery.
 
         Execute with run_stream(), or materialize() before relational work/writers.
-        Local streaming only. See docs/embeddings.md for options and examples.
+        Planned by the unified engine on either host. See docs/embeddings.md for options and examples.
         """
         from ..embeddings.runtime import EmbeddingActor
         from ..embeddings import embedding_execution_config
         from ..inference import _resolve_request_gate
+        from ..execution.dataflow_api import make_native_operation
         from .plan import EmbeddingMapOp
-        if getattr(self._executor, 'prompt_actor', None) is None:
-            raise NotImplementedError('map_embeddings currently requires the local streaming executor')
         execution = embedding_execution_config(batch_size=batch_size, concurrency=concurrency,
             queue_depth=queue_depth, flush_interval=flush_interval, prefetch_batches=prefetch_batches,
             max_requests=max_requests, request_policy=request_policy, options=options)
@@ -1416,6 +1494,11 @@ class Dataset:
         operation = declared._plan.operations[-1]
         typed = EmbeddingMapOp(**vars(operation), model_contract=actor.model.contract(),
                                inputs=actor.inputs, output=output)
+        make_native_operation("embeddings",
+            configuration={"model_contract": typed.model_contract, "inputs": dict(typed.inputs),
+                           "output": output, "max_batch": batch_size, "concurrency": concurrency,
+                           "queue_depth": queue_depth, "label": actor.label},
+            bindings=dict(typed.inputs))
         return Dataset(self._source, self._plan.append(typed), self._executor,
                        self._stages + (actor,))
 
@@ -1617,9 +1700,8 @@ class Dataset:
         declared = self.map_prompt(prompt, config=config, inputs=inputs,
                                    output=output, outputs=outputs, options=options,
                                    max_requests=max_requests)
+        from ..execution.dataflow_api import make_native_operation
         factory = getattr(self._executor, 'prompt_actor', None)
-        if factory is None:
-            raise NotImplementedError('map_prompt_async currently requires the local streaming executor')
         if when is not None and not callable(when):raise TypeError('when must be a row predicate')
         if any(v is not None and (not isinstance(v,str) or not v) for v in (call_output,error_output)):
             raise TypeError('call_output/error_output must be nonempty column names')
@@ -1644,6 +1726,12 @@ class Dataset:
         actor._runtime.token_budget = token_budget
         actor._runtime.concurrency = concurrency
         actor.when=when;actor.call_output=call_output;actor.error_output=error_output
+        make_native_operation("prompt",
+            configuration={"prompt_name": operation.prompt_name,
+                           "inputs": dict(operation.inputs), "output": operation.output,
+                           "outputs": dict(operation.outputs) if operation.outputs else None,
+                           "concurrency": concurrency, "queue_depth": queue_depth, "label": label},
+            bindings=dict(operation.inputs))
         return self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth,
                               catch=catch, label=label)
 
@@ -1700,6 +1788,12 @@ class Dataset:
         from .plan import AgentMapOp
         operation = declared._plan.operations[-1]
         agent_op = AgentMapOp(**{**vars(operation), 'label': actor.label}, environment=environment)
+        from ..execution.dataflow_api import make_native_operation
+        make_native_operation("agent",
+            configuration={"concurrency": kwargs.get('concurrency', 1),
+                           "queue_depth": kwargs.get('queue_depth'),
+                           "label": actor.label, "runtime": environment.runtime},
+            bindings={"prompt": prompt})
         return Dataset(self._source, self._plan.append(agent_op), self._executor, declared._stages)
 
     @_flow_api("filter", datasets=("self",), callable="fn")
@@ -1824,7 +1918,7 @@ class Dataset:
         descending: bool | Sequence[bool] = False,
         boundaries: Optional[Sequence[int | float]] = None,
     ) -> "Dataset":
-        """Append a Ray-only global sort; Local execution fails closed."""
+        """Append a global sort planned by the unified engine on either host."""
         keys = _columns(key, "Dataset.sort")
         if isinstance(descending, bool):
             normalized_descending: tuple[bool, ...] = (descending,) * len(keys)
@@ -1859,7 +1953,7 @@ class Dataset:
         shuffle: bool = False, keys: Optional[Sequence[str]] = None,
         sort: bool = False,
     ) -> "Dataset":
-        """Append a Ray-only repartition transform using exactly one supported block-count argument."""
+        """Append a repartition transform using exactly one supported block-count argument."""
         if (num_blocks is None) == (target_num_rows_per_block is None):
             raise ValueError(
                 "Dataset.repartition requires exactly one of num_blocks or "
@@ -1892,7 +1986,7 @@ class Dataset:
         self, *, seed: Optional[int] = None,
         num_blocks: Optional[int] = None,
     ) -> "Dataset":
-        """Append a Ray-only global random shuffle."""
+        """Append a global random shuffle planned by the unified engine."""
         normalized_seed = _optional_seed(seed, "Dataset.random_shuffle")
         if num_blocks is not None and int(num_blocks) <= 0:
             raise ValueError("Dataset.random_shuffle num_blocks must be positive")
@@ -1908,7 +2002,7 @@ class Dataset:
     def randomize_block_order(
         self, *, seed: Optional[int] = None,
     ) -> "Dataset":
-        """Append a Ray-only randomization of block order without shuffling rows inside blocks."""
+        """Append a randomization of block order without shuffling rows inside blocks."""
         return Dataset(
             self._source,
             self._plan.append(RandomizeBlockOrderOp(
@@ -1930,15 +2024,11 @@ class Dataset:
         must not be returned from ``PipelineProgram.run``.
         """
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         with action("materialize", self._source, self._plan) as checked, observe_action("materialize", self._source, self._plan, self._executor) as observer:
-            if any(is_stream_operation(op) for op in self._plan.operations):
-                # 异步链复用本地流式执行器；缓存由 executor 管理，不把行交回业务层收集。
-                execute = getattr(self._executor, "materialize_stream", None)
-                if execute is None:
-                    raise NotImplementedError("async materialize is only supported by the local executor")
-                handle = execute(self, source=checked.source, plan=checked.plan)
-            else:
-                handle = self._executor.materialize(checked.source, checked.plan)
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="materialize", arguments={})
+            handle = run_dataset_action(request)
             checked.materialized(handle)
             known_row_count = getattr(handle, "row_count", None)
             row_count = int(known_row_count or 0)
@@ -1963,9 +2053,12 @@ class Dataset:
         if maximum < 0:
             raise ValueError("Dataset.take limit must be non-negative")
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         with action("take", self._source, self._plan, arguments={"limit": maximum}) as checked, \
                 observe_action("take", self._source, self._plan, self._executor) as observer:
-            rows = self._executor.take(checked.source, checked.plan, maximum)
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="take", arguments={"limit": maximum})
+            rows = run_dataset_action(request)
             observer.rows = len(rows)
             observer.complete(limit=maximum, early_stopped=len(rows) == maximum)
         return rows
@@ -1981,21 +2074,24 @@ class Dataset:
         every upstream operation.
         """
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         maximum = None if limit is None else int(limit)
         if maximum is not None and maximum < 0:
             raise ValueError("Dataset.take_all limit must be non-negative")
         with action("take_all", self._source, self._plan, arguments={"limit": limit}) as checked, \
                 observe_action("take_all", self._source, self._plan, self._executor) as observer:
             if maximum is None:
-                stream = self._executor.iter_rows(checked.source, checked.plan)
+                request = make_action_request(self._executor, checked.source, checked.plan,
+                                              kind="iter_rows", arguments={})
+                stream = run_dataset_action(request)
                 rows = []
                 for row in stream:
                     rows.append(row)
                     observer.progress(rows=1)
             else:
-                rows = self._executor.take(
-                    checked.source, checked.plan, maximum + 1,
-                )
+                request = make_action_request(self._executor, checked.source, checked.plan,
+                                              kind="take", arguments={"limit": maximum + 1})
+                rows = run_dataset_action(request)
                 observer.rows = len(rows)
                 if len(rows) > maximum:
                     raise ValueError(
@@ -2012,13 +2108,15 @@ class Dataset:
         if size <= 0:
             raise ValueError("Dataset.take_batch batch_size must be positive")
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         with action("take_batch", self._source, self._plan,
                     arguments={"batch_size": size, "batch_format": batch_format}) as checked, \
                 observe_action("take_batch", self._source, self._plan, self._executor) as observer:
-            batch = self._executor.take_batch(
-                checked.source, checked.plan, size,
-                batch_format=_batch_format(batch_format),
-            )
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="take_batch",
+                                          arguments={"batch_size": size,
+                                                     "batch_format": _batch_format(batch_format)})
+            batch = run_dataset_action(request)
             observer.rows = _batch_row_count(batch)
             observer.batches = 1
             observer.complete(batch_size=size, batch_format=batch_format)
@@ -2034,9 +2132,12 @@ class Dataset:
         """
         from .flow_contract import normalize_arguments
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         arguments = normalize_arguments('require_columns', 'action', dict(columns=columns, exact=exact))
         with action('require_columns', self._source, self._plan, arguments=arguments) as checked:
-            actual = self._executor.columns(checked.source, checked.plan, fetch_if_missing=True)
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="columns", arguments={"fetch_if_missing": True})
+            actual = run_dataset_action(request)
             if actual is None or len(actual) > 2048:
                 raise ValueError('Dataset columns are unknown or exceed metadata budget')
             expected = set(arguments['columns'])
@@ -2047,11 +2148,12 @@ class Dataset:
     @_flow_api('count', datasets=('self',), role='query', execution='action')
     def count(self) -> int:
         """Execute the lazy plan and count rows without returning row payloads."""
-        from .plan import reject_streaming_map_options
-        reject_streaming_map_options(self._plan, self._executor.NAME)
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         with action('count', self._source, self._plan, arguments={}) as checked, observe_action("count", self._source, self._plan, self._executor) as observer:
-            count = self._executor.count(checked.source, checked.plan)
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="count", arguments={})
+            count = run_dataset_action(request)
             checked.value(count)
             observer.rows = int(count)
             observer.complete()
@@ -2067,10 +2169,13 @@ class Dataset:
         from .flow_contract import normalize_arguments
         from .runtime_contract import check_size
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         arguments = normalize_arguments('collect_summary', 'action', dict(max_rows=max_rows, max_bytes=max_bytes))
         with action('collect_summary', self._source, self._plan, arguments=arguments) as checked:
             result, used = [], 0
-            rows = iter(self._executor.iter_rows(checked.source, checked.plan))
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="iter_rows", arguments={})
+            rows = iter(run_dataset_action(request))
             try:
                 for row in rows:
                     if len(result) >= max_rows:
@@ -2102,12 +2207,19 @@ class Dataset:
         if len(names) != len(set(names)):
             raise ValueError("Dataset.aggregate names must be unique")
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
+        from ..execution.contracts.dataflow import ActionProgram
         with action("aggregate", self._source, self._plan, arguments={"aggregates": names}) as checked, \
                 observe_action(
                     "aggregate", self._source, self._plan, self._executor,
                     aggregate_count=len(aggs),
                 ) as observer:
-            result = self._executor.aggregate(checked.source, checked.plan, tuple(aggs))
+            programs = tuple(ActionProgram(name=aggregate.name, kind="aggregate", value=aggregate)
+                             for aggregate in aggs)
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="aggregate", arguments={"names": names},
+                                          programs=programs)
+            result = run_dataset_action(request)
             observer.complete()
         return result
 
@@ -2173,11 +2285,14 @@ class Dataset:
     def iter_rows(self) -> Iterable[dict[str, Any]]:
         """Execute and consume rows incrementally without building a driver list."""
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
 
         def _scoped():
             with action("iter_rows", self._source, self._plan, arguments={}) as checked:
+                request = make_action_request(self._executor, checked.source, checked.plan,
+                                              kind="iter_rows", arguments={})
                 yield from observe_rows(
-                    "iter_rows", self._executor.iter_rows(checked.source, checked.plan),
+                    "iter_rows", run_dataset_action(request),
                     checked.source, checked.plan, self._executor,
                 )
 
@@ -2196,16 +2311,19 @@ class Dataset:
         if size is not None and size <= 0:
             raise ValueError("Dataset.iter_batches batch_size must be positive or None")
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
 
         def _scoped():
             with action("iter_batches", self._source, self._plan,
                         arguments={"batch_size": size, "batch_format": batch_format,
                                    "drop_last": drop_last}) as checked:
-                batches = self._executor.iter_batches(
-                    checked.source, checked.plan,
-                    prefetch_batches=prefetch_batches, batch_size=size,
-                    batch_format=_batch_format(batch_format), drop_last=drop_last,
-                )
+                request = make_action_request(self._executor, checked.source, checked.plan,
+                                              kind="iter_batches",
+                                              arguments={"prefetch_batches": prefetch_batches,
+                                                         "batch_size": size,
+                                                         "batch_format": _batch_format(batch_format),
+                                                         "drop_last": drop_last})
+                batches = run_dataset_action(request)
                 yield from observe_batches(
                     "iter_batches", batches, checked.source, checked.plan, self._executor,
                 )
@@ -2214,28 +2332,35 @@ class Dataset:
 
     def schema(self, fetch_if_missing: bool = True) -> Any:
         """Return the backend-native Dataset schema, fetching source metadata when requested."""
-        if not fetch_if_missing:
-            return self._executor.schema(
-                self._source, self._plan, fetch_if_missing=False
-            )
         from ..execution.checked import action
-        with action("schema", self._source, self._plan, arguments={}) as checked:
-            return self._executor.schema(
-                checked.source, checked.plan, fetch_if_missing=True
-            )
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
+        with action("schema", self._source, self._plan,
+                    arguments={"fetch_if_missing": fetch_if_missing}) as checked:
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="schema",
+                                          arguments={"fetch_if_missing": fetch_if_missing})
+            return run_dataset_action(request)
 
     def columns(self, fetch_if_missing: bool = True) -> list[str] | None:
         """Return known column names, fetching source metadata when requested."""
-        return self._executor.columns(
-            self._source, self._plan, fetch_if_missing=fetch_if_missing,
-        )
+        from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
+        with action("columns", self._source, self._plan,
+                    arguments={"fetch_if_missing": fetch_if_missing}) as checked:
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="columns",
+                                          arguments={"fetch_if_missing": fetch_if_missing})
+            return run_dataset_action(request)
 
     def size_bytes(self) -> int:
         """Execute or inspect the plan as required to return its estimated size in bytes."""
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         with action("size_bytes", self._source, self._plan, arguments={}) as checked, \
                 observe_action("size_bytes", self._source, self._plan, self._executor) as observer:
-            value = self._executor.size_bytes(checked.source, checked.plan)
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="size_bytes", arguments={})
+            value = run_dataset_action(request)
             observer.complete(size_bytes=value)
         return value
 
@@ -2252,19 +2377,23 @@ class Dataset:
     ) -> None:
         """Execute the lazy plan through a formal Datasink."""
         target = ""
+        from dataclasses import asdict
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
         from ..execution.recovery_contract import RecoveryContractError
         if not callable(getattr(datasink, 'recovery_identity', None)):
             raise RecoveryContractError('A durable Datasink needs its immutable recovery_identity')
+        native = parse_native_options(backend_options, family="sink")
+        arguments = {} if native is None else {"native_options": asdict(native)}
         with action('write_datasink', self._source, self._plan,
                     arguments={'sink': datasink.recovery_identity()}), observe_action(
             "write_datasink", self._source, self._plan, self._executor,
             sink_type=type(datasink).__name__, sink_target=target,
         ) as observer:
-            result = validate_write_result(self._executor.write_datasink(
-                self._source, self._plan, datasink,
-                native_options=parse_native_options(backend_options, family="sink"),
-            ))
+            request = make_action_request(self._executor, self._source, self._plan,
+                                          kind='write_datasink', arguments=arguments,
+                                          sink=datasink)
+            result = validate_write_result(run_dataset_action(request))
             observer.rows = int(result.written_rows or 0)
             observer.batches = int(result.blocks_written or 0)
             observer.complete(
@@ -2307,15 +2436,20 @@ class Dataset:
             on=on or (), update_columns=update_columns, when_not_matched=when_not_matched,
         )
         target = spec.uri
+        from dataclasses import asdict
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
+        from ..execution.contracts.dataflow import ActionProgram
+        native = parse_native_options(backend_options, family="sink")
+        arguments = {} if native is None else {"native_options": asdict(native)}
         with action("write_table", self._source, self._plan, spec) as checked, observe_action(
             "write_lance", self._source, self._plan, self._executor,
             sink_type="LanceWrite", sink_target=target,
         ) as observer:
-            receipt = self._executor.write_lance(
-                checked.source, checked.plan, spec,
-                native_options=parse_native_options(backend_options, family="sink"),
-            )
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind='write_lance', arguments=arguments,
+                                          programs=(ActionProgram(name='write_lance', kind='sink', value=spec),))
+            receipt = run_dataset_action(request)
             checked.receipt(receipt)
             if receipt.status == "indeterminate":
                 from ..errors import LanceWriteError
@@ -2331,7 +2465,14 @@ class Dataset:
     def _write_file(
         self, format_name: str, path: str, options: Mapping[str, Any],
     ) -> None:
+        from dataclasses import asdict
         from ..execution.checked import action
+        from ..execution.dataflow_api import make_action_request, run_dataset_action
+        options = dict(options)
+        native = options.pop("_demiflow_native_options", None)
+        arguments = {"format": format_name, "path": str(path), "options": options}
+        if native is not None:
+            arguments["native_options"] = asdict(native)
         with action("write_file", self._source, self._plan,
                     arguments={"format": format_name, "path": str(path),
                                "options": dict(options)}) as checked, \
@@ -2339,9 +2480,9 @@ class Dataset:
                     f"write_{format_name}", self._source, self._plan, self._executor,
                     sink_target=str(path),
                 ) as observer:
-            result = validate_write_result(self._executor.write_file(
-                checked.source, checked.plan, format_name, str(path), dict(options),
-            ))
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind='write_file', arguments=arguments)
+            result = validate_write_result(run_dataset_action(request))
             observer.rows = int(result.written_rows or 0)
             observer.batches = int(result.blocks_written or 0)
             observer.complete(
@@ -2389,10 +2530,11 @@ class MaterializedDataset(Dataset):
         Derived plans share this cache and cannot be executed after release.
         Releasing does not rerun inputs or affect unrelated materializations.
         """
-        release = getattr(self._executor, 'release', None)
+        handle = self._source.handle
+        release = getattr(handle, 'release', None)
         if release is None:
-            raise NotImplementedError('This executor does not support explicit cache release')
-        release(self._source)
+            raise NotImplementedError('This materialized handle does not support explicit release')
+        release()
 
     def __enter__(self):
         return self
@@ -2402,7 +2544,7 @@ class MaterializedDataset(Dataset):
 
     def num_blocks(self) -> int:
         """Return the number of pinned blocks in this current-run materialized Dataset."""
-        return self._executor.num_blocks(self._source, self._plan)
+        return int(self._source.handle.num_blocks())
 
 
 def _write_options(options, filesystem, backend_options):
