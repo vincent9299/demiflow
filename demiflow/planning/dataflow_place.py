@@ -132,7 +132,8 @@ def _replica_bounds(node, partitions: int, policy: RuntimePolicy) -> tuple[int, 
         # Stateful/effect/multi-input instances are never auto-scaled into a
         # shared pool; model initialization must not be replicated.
         return 1, 1, 1
-    ceiling = max(1, min(partitions, policy.max_replicas))
+    ceiling = max(1, min(partitions, policy.max_replicas,
+                         policy.max_active_workers or policy.max_replicas))
     return 1, ceiling, ceiling
 
 
@@ -375,6 +376,7 @@ def solve_residency(
     *,
     hosts: tuple[HostDescriptor, ...],
     bounds: Bounds,
+    max_active_workers: int | None = None,
 ) -> ResidencyPlan:
     if not stages:
         raise _error("INVALID_CONTRACT", "physical plan has no stages")
@@ -421,7 +423,11 @@ def solve_residency(
 
     simultaneous = []
     for group in ordered_components:
-        footprint = sum(stage.resident_bytes * stage.replica_target for stage in group)
+        if max_active_workers is not None and sum(len(s.partitions) for s in group) > max_active_workers:
+            raise _error("RESOURCE_INFEASIBLE", "memory-connected group exceeds active worker budget",
+                         resource="max_active_workers", max_active_workers=max_active_workers)
+        footprint = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
+                        * len(stage.partitions) for stage in group)
         if footprint > available:
             raise _error(
                 "RESOURCE_INFEASIBLE",
@@ -681,7 +687,7 @@ def _refine_source_partitions(
         replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
         refined.append(replace(
             stage,
-            partitions=_partition_ids(stage.stage_id, count),
+            partitions=_partition_ids(stage.stage_id, replica_target),
             replica_min=replica_min,
             replica_target=replica_target,
             replica_max=replica_max,
@@ -689,7 +695,7 @@ def _refine_source_partitions(
     return tuple(refined)
 
 
-def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bounds):
+def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bounds, policy):
     """Choose new-plan transport; never reinterpret an already sealed exchange.
 
     Memory connectivity is a placement preference for ordinary Dataset plans.
@@ -697,9 +703,18 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
     window. The fixed-plan solver remains strict about memory co-residency.
     """
     try:
-        return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds)
+        return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
+                                         max_active_workers=policy.max_active_workers)
     except DataflowError as original:
         if original.code != "RESOURCE_INFEASIBLE":
+            raise
+        # Temporal scheduling cannot manufacture a missing device or make one
+        # indivisible stage fit. Preserve that real admission error rather than
+        # masking it with the disk cost of an irrelevant durable fallback.
+        try:
+            solve_residency(stages, (), hosts=hosts, bounds=bounds,
+                            max_active_workers=policy.max_active_workers)
+        except DataflowError:
             raise
         eligible = (all(s.replay != "attempt_only" for s in snapshots)
                     and all(n.kernel.state != "nonrecoverable" for n in graph.nodes))
@@ -709,12 +724,15 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         if not eligible or not candidates or bounds.max_spill_bytes <= 0:
             raise _error("RESOURCE_INFEASIBLE",
                          "memory group cannot fit and its source/state cannot safely park") from original
+        reason = ("active_worker_budget" if original.context.get('resource') == 'max_active_workers'
+                  else "resident_budget")
         upgraded = tuple(replace(e, mode="durable_incremental",
                           storage_bytes=min(bounds.max_spill_bytes, e.credit_bytes * 8),
-                          reason="durable_incremental:resident_budget_requires_checkpointed_parking;" + e.reason)
+                          reason=f"durable_incremental:{reason}_requires_checkpointed_parking;" + e.reason)
                          if e in candidates else e for e in exchanges)
         upgraded = _share_exchange_storage(upgraded, bounds)
-        return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds)
+        return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds,
+                                        max_active_workers=policy.max_active_workers)
 
 
 def compile_physical_dataflow(
@@ -740,7 +758,7 @@ def compile_physical_dataflow(
     stages = select_fusion_groups(graph, stages, policy=policy)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges, residency = _select_budgeted_residency(
-        graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds)
+        graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
     capability = infer_recovery(graph, snapshots, policy=policy)
     if not capability.supported:
         raise _error(

@@ -251,6 +251,7 @@ _WIRE_TYPES = {
         ("max_replicas", _i(1)), ("fusion", _B), ("checkpoint_rows", _i(1)), ("checkpoint_interval_ms", _i(1)),
         ("fairness_quantum_bytes", _i(1)), ("control_timeout_ms", _i(1)), ("store_id", _I),
         ("required_recovery", _e(_RECOVERIES)),
+        ("max_active_workers", _oi(1)),
     )),
     "ResidencyPlan": (ResidencyPlan, (
         ("simultaneous_groups", ("strs_nested",)), ("control_reserved_bytes", _i()),
@@ -616,6 +617,8 @@ def _validate_payload(payload, type_name):
     if type_name == "Record" and "schema_ref" not in payload:
         # The optional typed-row sidecar does not rewrite legacy row frames.
         payload = dict(payload, schema_ref=None)
+    if type_name == "RuntimePolicy" and "max_active_workers" not in payload:
+        payload = dict(payload, max_active_workers=None)
     if set(payload) != expected:
         raise _err(type_name + " payload key set is not closed: " + str(sorted(set(payload) ^ expected)))
     for name, spec in fields:
@@ -764,7 +767,8 @@ def _construct_payload(payload, type_name):
     cls, fields = entry
     kwargs = {}
     for name, spec in fields:
-        value = payload.get(name) if type_name == "Record" and name == "schema_ref" else payload[name]
+        optional = (type_name, name) in {("Record", "schema_ref"), ("RuntimePolicy", "max_active_workers")}
+        value = payload.get(name) if optional else payload[name]
         kwargs[name] = _construct_field(value, spec, type_name + "." + name)
     return cls(**kwargs)
 
@@ -822,6 +826,8 @@ def _project_payload(value, type_name):
     payload = {}
     for name, spec in fields:
         if type_name == "Record" and name == "schema_ref" and value.schema_ref is None:
+            continue
+        if type_name == "RuntimePolicy" and name == "max_active_workers" and value.max_active_workers is None:
             continue
         payload[name] = _project_field(getattr(value, name), spec)
     return payload
@@ -997,6 +1003,8 @@ def _identity_project(value):
         return {
             field.name: _identity_project(getattr(value, field.name))
             for field in dataclasses.fields(value)
+            if not (isinstance(value, RuntimePolicy) and field.name == "max_active_workers"
+                    and value.max_active_workers is None)
         }
     if isinstance(value, Mapping):
         return {key: _identity_project(item) for key, item in value.items()}

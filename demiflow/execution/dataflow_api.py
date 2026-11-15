@@ -186,7 +186,17 @@ def record_execution_metadata(request, execution):
 
 # -- E016 run_dataset_action ----------------------------------------------
 def run_dataset_action(request: ActionRequest) -> object:
-    policy, bounds = resolve_runtime_policy({}, request.action.context.limits, provider=request.provider)
+    executor = getattr(request.action, '_dataflow_executor', None)
+    local = getattr(executor, '_local_kernel', None)
+    options = {}
+    workers = getattr(executor, '_workers', None)
+    if request.provider == 'local' and workers is not None:
+        options['max_active_workers'] = workers
+    if local is not None:
+        options['memory_bytes'] = local.memory_bytes
+    run = request.action.context
+    policy, bounds = resolve_runtime_policy(options, run.limits, provider=request.provider,
+                                           explicit_limits=tuple(run.explicit_limits))
     handle = execute_action(request, policy=policy, bounds=bounds)
     from .dataflow_terminals import (collect_rows, iterate_rows, iterate_batches,
                                      materialized_handle, write_result, inspect_result,

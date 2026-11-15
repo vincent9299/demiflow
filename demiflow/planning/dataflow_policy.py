@@ -43,9 +43,9 @@ _BOUNDS_DEFAULTS = {
     "max_open_files": 256,
 }
 _INT_BUDGET_OPTIONS = frozenset(_BOUNDS_DEFAULTS) | {
-    "fairness_quantum_bytes", "control_timeout_ms",
+    "fairness_quantum_bytes", "control_timeout_ms", "memory_bytes",
 }
-_SCALE_OPTIONS = frozenset({"default_partitions", "max_replicas"})
+_SCALE_OPTIONS = frozenset({"default_partitions", "max_replicas", "max_active_workers"})
 _STR_OPTIONS = {"durability": _DURABILITY, "required_recovery": _RECOVERY}
 _BOOL_OPTIONS = frozenset({"fusion"})
 _FREE_STR_OPTIONS = frozenset({"store_id"})
@@ -75,6 +75,7 @@ def resolve_runtime_policy(
     limits: Mapping[str, object],
     *,
     provider: str,
+    explicit_limits: tuple[str, ...] = (),
 ) -> tuple[RuntimePolicy, Bounds]:
     if provider not in _PROVIDERS:
         raise _reject("provider must be local or ray_core", field="provider")
@@ -92,6 +93,25 @@ def resolve_runtime_policy(
         native = execution_limits(dict(limits))
     except Exception as exc:  # RecoveryContractError; preserve semantics only.
         raise _reject(f"invalid run limits: {exc}") from exc
+
+    if "memory_bytes" in options:
+        from ..execution.payload_limits import resolve_payload_bounds
+        ceiling = dict(native)
+        native["memory_bytes"] = _tighten(options["memory_bytes"], native["memory_bytes"], "memory_bytes")
+        explicit = set(explicit_limits)
+        native.update(resolve_payload_bounds(native, {k: native[k] for k in explicit if k in native},
+                                             ceiling=ceiling))
+        # Input, output, mutable state, and control/temporary copies share the
+        # declared memory. Defaults adapt to that envelope; explicit ceilings
+        # remain explicit and may be rejected by physical placement.
+        workers = _positive_int(options.get("max_active_workers", 1), "max_active_workers")
+        window = max(1, native["memory_bytes"] // (4 * workers))
+        if "max_row_bytes" not in explicit:
+            native["max_row_bytes"] = min(native["max_row_bytes"], window)
+        if "max_batch_bytes" not in explicit:
+            native["max_batch_bytes"] = max(native["max_row_bytes"], min(native["max_batch_bytes"], window))
+        if "max_state_bytes" not in explicit:
+            native["max_state_bytes"] = min(native["max_state_bytes"], window)
 
     structural = {
         name: _tighten(options[name], default, name) if name in options else default
@@ -156,6 +176,8 @@ def resolve_runtime_policy(
         control_timeout_ms=control_timeout,
         store_id=store_id,
         required_recovery=required_recovery,
+        max_active_workers=(_tighten(options["max_active_workers"], bounds.max_partitions, "max_active_workers")
+                            if "max_active_workers" in options else None),
     )
     return policy, bounds
 

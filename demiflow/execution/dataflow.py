@@ -76,6 +76,7 @@ class DataflowExecution:
         self._services = services
         self._action = request.action
         self._policy = services.policy
+        self._active_worker_limit = self._policy.max_active_workers
         self._bounds = services.bounds
         self._store = services.store
         self._state = "preparing"
@@ -172,7 +173,7 @@ class DataflowExecution:
         operation_id = hashlib.sha256(
             ("start:" + self._physical.plan_id + ":" + stage.stage_id + ":" + partition_id + generation).encode()
         ).hexdigest()
-        resident = max(1, stage.resident_bytes)
+        resident = max(1, stage.resident_bytes, stage.profile.requests['memory_bytes'])
         return ReadyWork(stage_id=stage.stage_id, partition_id=partition_id,
                          input_refs=(), resident_bytes=resident, operation_id=operation_id)
 
@@ -182,6 +183,10 @@ class DataflowExecution:
         Summing cluster capacity cannot prove that any individual worker fits.
         Bind each partition to a host whose runtime/store were actually probed.
         """
+        if self._active_worker_limit is not None and len(pending) > self._active_worker_limit:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds active worker budget')
+        if sum(stage.profile.requests['memory_bytes'] for stage, _ in pending) > self._bounds.max_resident_bytes:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'resident group exceeds admitted memory budget')
         remaining = {h.host_id: dict(h.logical_resources) for h in self._services.hosts}
         assigned = {}
         for stage, work in sorted(pending, key=lambda pair:
@@ -348,6 +353,10 @@ class DataflowExecution:
         self._graph = graph
         self._physical = physical
         self._policy = physical.policy
+        # Historical physical plans stay byte-identical. Current caller limits
+        # may only tighten their live admission envelope, never enlarge it.
+        limits = [v for v in (self._active_worker_limit, physical.policy.max_active_workers) if v is not None]
+        self._active_worker_limit = min(limits) if limits else None
         self._sealed = sealed
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources)
         from .contracts.dataflow_codec import runtime_scope_id
@@ -381,9 +390,10 @@ class DataflowExecution:
         if self._closed or self._cancelled:
             raise DataflowError("CANCELLED", "execution is closed")
         self._check_stop()
-        budget = {"cpu_millis": self._bounds.max_nodes * 1000,
+        budget = {"cpu_millis": max(1, int(sum(h.logical_resources.get('cpu_millis', 0)
+                                             for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
-                  "max_workers": self._bounds.max_partitions}
+                  "max_workers": self._active_worker_limit or self._bounds.max_partitions}
         gpu_budget = int(sum(host.logical_resources.get('gpu', 0) for host in self._services.hosts))
         if gpu_budget:
             budget['accelerator_gpu'] = gpu_budget
@@ -447,7 +457,7 @@ class DataflowExecution:
         stages = self._stage_order()
         pending = [(stage, self._initial_work(stage, partition))
                    for stage in stages for partition in stage.partitions]
-        resident = sum(s.resident_bytes * len(s.partitions) for s in stages)
+        resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in stages)
         fits = resident + self._physical.residency.control_reserved_bytes <= self._bounds.max_resident_bytes
         if fits:
             try:
@@ -473,7 +483,7 @@ class DataflowExecution:
         # Preflight EVERY phase before business side effects.
         for phase in self._phases:
             group = [s for s in stages if s.stage_id in phase]
-            resident = sum(s.resident_bytes * len(s.partitions) for s in group)
+            resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in group)
             if resident + self._physical.residency.control_reserved_bytes > self._bounds.max_resident_bytes:
                 raise DataflowError('RESOURCE_INFEASIBLE', 'streaming-connected stage group exceeds resident capacity')
             self._place_hosts([(s, self._initial_work(s, p)) for s in group for p in s.partitions])
