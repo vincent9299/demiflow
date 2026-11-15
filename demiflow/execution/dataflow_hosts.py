@@ -512,6 +512,26 @@ class DataflowRayConnector(_RayControlConnector):
         if not _RAY_AVAILABLE:
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
         super().__init__(**kwargs)
+        self._environments = {}
+
+    def stage_environment(self, allocation_id, environment):
+        self._environments[allocation_id] = dict(environment)
+
+    def adopt(self, allocation_id, actor):
+        super().adopt(allocation_id, actor)
+        self._environments.pop(allocation_id, None)
+
+    def abort(self, allocation_id):
+        try:
+            super().abort(allocation_id)
+        finally:
+            self._environments.pop(allocation_id, None)
+
+    def close(self, allocation_id):
+        try:
+            super().close(allocation_id)
+        finally:
+            self._environments.pop(allocation_id, None)
 
     def host_class(self):
         from .worker.dataflow_host import HostedDataflowWorker
@@ -522,7 +542,11 @@ class DataflowRayConnector(_RayControlConnector):
         host_id = self.launch_spec(allocation_id)['dataflow_v3']['host_id']
         if not host_id.startswith('ray-'):
             raise DataflowError('INVALID_CONTRACT', 'Worker lacks a verified Ray host')
-        return {'scheduling_strategy': NodeAffinitySchedulingStrategy(host_id[4:], soft=False)}
+        options = {'scheduling_strategy': NodeAffinitySchedulingStrategy(host_id[4:], soft=False)}
+        environment = self._environments.get(allocation_id)
+        if environment:
+            options['runtime_env'] = {'env_vars': dict(environment)}
+        return options
 
     def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
         ray.get(self._actor(allocation_id).request_cut.remote(request),
@@ -540,6 +564,18 @@ class RayHostEndpoint(_EndpointBase):
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
         super().__init__(lease, services=services)
         self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.dataflow_host")
+
+    def prepare(self, assignment: "WorkerAssignment") -> None:
+        if self._assignment is None:
+            from .dataflow_environment import allocation_environment
+            environment = allocation_environment(assignment, store=self._services.store,
+                                                 bounds=self._services.bounds)
+            self._connector.stage_environment(self._allocation_id, environment)
+        try:
+            super().prepare(assignment)
+        except BaseException:
+            self._connector.abort(self._allocation_id)
+            raise
 
     def activate(self, assignment: "WorkerAssignment") -> None:
         from .worker.dataflow_host import make_worker_control_assignment
@@ -573,7 +609,8 @@ class RayHostEndpoint(_EndpointBase):
                 self._early_event(event)
         self._accept_final_observations(result)
         if "error" in result:
-            raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(result["error"]))
+            from .dataflow_failures import restore_failure
+            raise restore_failure(result["error"])
         if kind in ("Drain", "Quiesce", "Cancel"):
             self._cleanup_completed = True
         return result.get("receipt")

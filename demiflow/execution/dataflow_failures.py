@@ -3,6 +3,7 @@ import asyncio
 import builtins
 import traceback
 import re
+import sqlite3
 from collections.abc import Mapping
 
 from .contracts.dataflow_errors import DataflowError, DataflowRecoveryError, DataflowUnresolvedCommit, DATAFLOW_ERROR_CODES
@@ -15,6 +16,7 @@ _BUILTINS = {name: getattr(builtins, name) for name in (
     'RuntimeError', 'AssertionError', 'OSError', 'FileNotFoundError', 'PermissionError',
     'NotImplementedError', 'ZeroDivisionError')}
 _KNOWN = {cls.__module__ + '.' + cls.__qualname__: cls for cls in _BUILTINS.values()}
+_KNOWN['sqlite3.OperationalError'] = sqlite3.OperationalError
 from .queue_contract import QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit
 _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls for cls in (
     QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable)})

@@ -737,6 +737,14 @@ def test_h021(monkeypatch):
                                  store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
         services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(rayh,))
         ep = doubled_endpoint(HOSTS.RayHostEndpoint, services)
+        # This is the K3 staging-order unit, with no artifact store/real program.
+        # Credential selection is exercised through real Ray native API cases.
+        import demiflow.execution.dataflow_environment as envs
+        services.store = object()
+        selected = []
+        monkeypatch.setattr(envs, 'allocation_environment',
+            lambda assignment, **kwargs: selected.append(assignment) or {})
+        ep._connector.stage_environment = lambda allocation_id, environment: None
         ep._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g', 'scope_id': 'scope-1'}, {'sha256': oid('pin')})
         ep._open_scope = lambda *a: None
         ep._apply = lambda *a: None
@@ -749,6 +757,7 @@ def test_h021(monkeypatch):
         ep.activate(assignment)
         assert ep._activated
         assert ep._connector.handled == ['VerifyArtifactAndCapabilities', 'Restore', 'Activate', 'Assign']
+        assert selected == [assignment]
 
 
 def test_h022():
