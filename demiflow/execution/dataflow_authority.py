@@ -10,6 +10,7 @@ pins live in the same authority through apply_artifact_command.
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 import queue
 import threading
 import time
@@ -222,6 +223,11 @@ class DriverJournalService:
         self._leases = {}
         self._worker_occurrences = {}
         self._native_action_id = None
+        # Transport receipts only: the native journal remains the sole effect
+        # authority. Keep at most one control-window of small reserve replies;
+        # eviction/restart falls back to its conservative active/unknown checks.
+        self._native_reserve_replies = OrderedDict()
+        self._native_reserve_lock = threading.Lock()
         self._workers: list[threading.Thread] = []
         self._stop = threading.Event()
         for index in range(min(_MAX_SERVICE_WORKERS, max(1, bounds.max_pending_events))):
@@ -303,6 +309,11 @@ class DriverJournalService:
                     reply=ControlReply(operation_id=operation_id, status="error", payload=None,
                                        payload_ref=None, error_code="UNKNOWN_EFFECT")))
             self._inflight.clear()
+        if self._native_reserve_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            try:
+                self._native_reserve_replies.clear()
+            finally:
+                self._native_reserve_lock.release()
         if self._native is not None:
             close = getattr(self._native, "close", None)
             if callable(close):
@@ -343,6 +354,8 @@ class DriverJournalService:
 
     # -- validation + fixed dispatch (H002) ---------------------------------
     def dispatch(self, event: WorkerEvent) -> ControlReply:
+        if self._closed:
+            raise DataflowError('FENCED', 'Journal service is closed')
         _lease_matches(self._action, event)
         _payload_bytes(event, self._bounds)
         if event.kind not in _COMMAND_KINDS:
@@ -374,9 +387,12 @@ class DriverJournalService:
                          "native_fact_ref": _ref_to_json(reply.native_fact_ref), "retry_after_ms": reply.retry_after_ms}
             elif event.kind == "native_request":
                 command = _native_command(payload)
+                if command.operation_id != event.operation_id:
+                    raise DataflowError('INVALID_CONTRACT', 'Native command operation_id differs from its event')
                 if command.node_id not in self._worker_occurrences.get((lease.allocation_id, lease.boot_id), ()):
                     raise DataflowError('FENCED', 'Worker does not own the native request occurrence')
-                reply = self.native_request(command, lease=lease)
+                reply = (self._native_reserve_reply(event, command, lease=lease)
+                         if command.operation == 'reserve' else self.native_request(command, lease=lease))
                 from .contracts.dataflow_codec import _thaw_json
                 value = {"operation_id": reply.operation_id, "value": _thaw_json(reply.value), "value_ref": _ref_to_json(reply.value_ref)}
             elif event.kind == "read_action":
@@ -394,6 +410,37 @@ class DriverJournalService:
                                 payload_ref=None, error_code=exc.code)
         return ControlReply(operation_id=event.operation_id, status="ok", payload=value,
                             payload_ref=None, error_code=None)
+
+    def _native_reserve_reply(self, event, command, *, lease):
+        """Repeat a successful reserve RPC in this driver epoch, without a new lease.
+
+        Do not cache lookups (their None result can become stale), failed calls,
+        or HTTP-retry commands (each native HTTP attempt has distinct rules).
+        Full WorkerEvent equality binds the retained reply to the original
+        worker, boot, attempt, fence and payload, not only a reusable RPC id.
+        """
+        with self._native_reserve_lock:
+            if self._closed:
+                raise DataflowError('FENCED', 'Journal service is closed')
+            self._check_grant()
+            current = self._leases.get(event.allocation_id)
+            if current is None or current.boot_id != event.boot_id or current.expires_at_ms <= _now_ms():
+                raise DataflowError('FENCED', 'Native reserve has no live worker authority')
+            prior = self._native_reserve_replies.get(event.operation_id)
+            if prior is not None:
+                original, reply = prior
+                if original != event:
+                    raise DataflowError('INVALID_CONTRACT', 'Operation id reused for a different native reserve')
+                self._native_reserve_replies.move_to_end(event.operation_id)
+                return reply
+            reply = self.native_request(command, lease=lease)
+            if not self._closed:
+                self._native_reserve_replies[event.operation_id] = (event, reply)
+                while len(self._native_reserve_replies) > self._bounds.max_pending_events:
+                    self._native_reserve_replies.popitem(last=False)
+            else:
+                self._native_reserve_replies.clear()
+            return reply
 
     # -- effect state machine (H003) ----------------------------------------
     def effect(self, command: EffectCommand, *, lease: "WorkerLease | None") -> EffectReply:
