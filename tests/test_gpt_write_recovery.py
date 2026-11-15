@@ -388,7 +388,29 @@ def test_workbench_cancel_resume_golden(stopped_workbench):
     rows = [{k: v for k, v in row.items() if k != '_rowid'} for row in rows]
     acc.assert_semantics_equal(f['expected'], rows, ordering='unordered')
     commits = journal.execution_commits(aid)
-    assert len(commits) == 1 and commits[0]['status'] == 'acked'
+    assert commits and all(fact['status'] == 'acked' for fact in commits)
+    final = []
+    for fact in commits:
+        prepared = fact['prepared']['sinks']['write_lance']
+        receipt = fact['receipts']['write_lance']['data']
+        if prepared['manifest']['final']:
+            final.append(fact)
+            assert prepared['rows'] == receipt['rows'] == len(f['expected'])
+            assert prepared['native'] is not None and receipt['native_receipt']['status'] == 'committed'
+        else:
+            # A durable residency handoff may ACK empty progress; it is not a
+            # second native write and must not publish any target version.
+            assert prepared['rows'] == prepared['bytes'] == receipt['rows'] == receipt['bytes'] == 0
+            assert prepared['manifest']['partitions'] == [] and prepared['native'] is None
+            assert 'native_receipt' not in receipt
+    assert len(final) == 1 and final[0] == commits[-1]
+    native = final[0]['receipts']['write_lance']['data']['native_receipt']['data']
+    assert native['committed_version'] == 1
+    assert native['input_rows'] == native['written_rows'] == len(f['expected'])
+    table = lance.dataset(native['uri'])
+    assert [version['version'] for version in table.versions()] == [1]
+    fixed = lance.dataset(native['uri'], version=1).to_table().to_pylist()
+    acc.assert_semantics_equal(f['expected'], fixed, ordering='unordered')
     sealed = facts.read_sealed_plan(f['target'], aid)
     assert sealed['available'] and sealed['dag_id'] == f['dag_id']
     report = runs.show(root, rid, include_report=True, compact=True)['report']

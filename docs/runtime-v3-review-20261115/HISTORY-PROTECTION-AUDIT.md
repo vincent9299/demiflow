@@ -36,3 +36,5 @@
 - `/tmp/demiflow-regression-golden-r1.xml`：7 passed，85.57 秒（最终本批五项、W002、真实工作台停止/恢复）。1766 个源码输入前后摘要相同，固定 HEAD；完整记录在 `/tmp/demiflow-regression-golden-r1-evidence/verification.json`。
 
 **V029 仍未整体完成。** 已验证原历史只读、原环境续算、当前不兼容拒绝和真实 Prompt 原身份；当前 v3 的旧原生中间状态执行 adapter 未实现/未证明。其它未列出的旧载体族不因上述测试而被推定支持。正式 route 不回填常量、不缩小承诺，继续保留 NotRun；“有专项证据”与“全门完成”分别陈述。
+
+C12 明确允许必须使用原环境恢复的历史，因此“不跨 revision 续算”本身不是违反原意图，也不意味着必须新增任意旧状态转译。当前列出的 `checkpoint_manifest.v1` translator 只有描述转换能力；已查到的原 chain/graph producer 没有把这种 manifest 放进该 loader 所要求的原 ACK 可达引用。本批不声称存在已验证的当前 v3 原生历史续算适配域。正式门保留状态，是为了先明确并接入实际支持域，不为取得绿色扩写不可靠 adapter。
