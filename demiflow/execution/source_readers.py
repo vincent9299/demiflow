@@ -757,6 +757,10 @@ class QueueReader(_BaseReader):
         if self._eoi:
             return SourcePoll("eoi", None, 0)
         self._pending = ()
+        # Match _BaseReader's ordered-publication acknowledgement. The native
+        # lease remains held independently; pending/eoi must not reseal a row
+        # already handed off before this pull.
+        self._pending_record = None
         from .dataflow_queue import queue_service_request
 
         operation_id = identity([

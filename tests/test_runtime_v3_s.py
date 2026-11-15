@@ -1361,3 +1361,42 @@ def test_producer_pending_replay_preserves_identity_and_cursor(tmp_path):
     assert resumed._delivery_ref == delivery
     assert len(journal.commands) == 1
     resumed.close()
+
+
+@pytest.mark.parametrize("kind", ["queue", "producer"])
+@pytest.mark.parametrize("following", ["pending", "eoi"])
+def test_queue_next_pull_clears_published_record_but_keeps_claim(tmp_path, kind, following):
+    """A later pull confirms publication, without granting or releasing a lease."""
+    from dataclasses import replace
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+    store, plan, snap, split, services, journal = _queue_setup(tmp_path, [])
+    reader_class = sr.QueueReader
+    delivery = _delivery_ref("claim-1")
+    if kind == "producer":
+        snap = replace(snap, kind=kind, immutable_identity=thaw_record_value(snap.immutable_identity))
+        reader_class = sr.ProducerReader
+        delivery = _queue_row_ref(store, {
+            "position": 7, "next_cursor": {"offset": 8}, "occurrence": "b" * 64})
+    row_ref = _queue_row_ref(store, {"x": 9})
+    journal.replies.extend([("record", delivery, row_ref, 0), (following, None, None, 5 if following == "pending" else 0)])
+    reader = reader_class(snap, services=services)
+    reader.open(split, None)
+    assert reader.next_record().status == "record"
+    # Deliberately no snapshot between pulls: this exercises the in-memory
+    # pending Record as well as the already-serialized pending_refs path.
+    assert reader.next_record().status == following
+    cursor = reader.snapshot()
+    assert cursor.pending_refs == ()
+    assert cursor.lease_ref == delivery
+    assert cursor.next_sequence == 1 and cursor.offset["record_index"] == 1
+    if kind == "producer":
+        assert cursor.offset["producer_position"] == 8
+        assert cursor.offset["producer_cursor"] == {"offset": 8}
+    reader.close()
+    resumed = reader_class(snap, services=services)
+    resumed.open(split, cursor)
+    assert resumed.next_record().status == following
+    assert len(journal.commands) == (3 if following == "pending" else 2)
+    assert all(command.operation == "poll" for command in journal.commands)
+    assert resumed.snapshot() == cursor
+    resumed.close()
