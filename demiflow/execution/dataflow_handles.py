@@ -96,6 +96,10 @@ class RuntimeActionHandle:
         self._result: "TerminalResult | None" = None
         self._failure: BaseException | None = None
         self._cleanup_errors: list[BaseException] = []
+        self._yielded_rows = 0
+        self._yielded_bytes = 0
+        self._read_admission = None
+        self._read_count = None
 
     @property
     def request(self) -> "ActionRequest":
@@ -168,6 +172,56 @@ class RuntimeActionHandle:
             return exc
         return _error("INTERNAL_PROTOCOL", "execution failed without a business error")
 
+    def set_read_admission(self, admit, *, read_count=None):
+        """Internal consumer credit; no persistent reservation or charge."""
+        self._read_admission, self._read_count = admit, read_count
+
+    def read_buffer_reserve(self):
+        from .dataflow_replay import read_buffer_reserve
+        return read_buffer_reserve(self._bounds)
+
+    def _admit_collection(self, size, pending_rows, pending_bytes):
+        kind = getattr(self.request, 'kind', None)
+        if kind not in {'take', 'take_all', 'take_batch'}:
+            return
+        count = self._yielded_rows + pending_rows
+        arguments = self.request.arguments
+        maximum = (arguments.get('limit') if kind in {'take', 'take_all'}
+                   else arguments.get('batch_size', 20))
+        if kind == 'take_all' and maximum is not None and count >= maximum:
+            raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
+        if count >= self._bounds.max_output_rows:
+            raise _error('BUDGET_EXCEEDED', 'collected rows exceed the output row budget')
+        if (self._yielded_bytes + pending_bytes + size + self.read_buffer_reserve()
+                > self._bounds.max_resident_bytes):
+            raise _error('BUDGET_EXCEEDED', 'collected bytes exceed the driver resident budget')
+
+    def _read_records(self):
+        maximum = _PULL_CREDIT_RECORDS
+        kind = getattr(self.request, 'kind', None)
+        if kind in {'take', 'take_batch'}:
+            limit = (self.request.arguments.get('limit', 20) if kind == 'take'
+                     else self.request.arguments.get('batch_size', 20))
+            if limit is not None:
+                maximum = min(maximum, max(1, limit - self._yielded_rows))
+        if self._read_count is not None:
+            maximum = min(maximum, max(1, self._read_count()))
+        def admit(size, pending_rows, pending_bytes):
+            self._admit_collection(size, pending_rows, pending_bytes)
+            if self._read_admission is not None:
+                self._read_admission(size, pending_rows, pending_bytes)
+        read = getattr(self._subscription, 'read_admitted', None)
+        try:
+            if read is not None:
+                bounded = kind in {'take', 'take_all', 'take_batch'} or self._read_admission is not None
+                return read(max_records=maximum, deadline_ms=0, admit=admit if bounded else None)
+            return self._subscription.read(max_records=maximum, deadline_ms=0)
+        except BaseException as exc:
+            # An admission/decode error is as authoritative as a worker failure;
+            # a cancelled peer's late ACK/close error must not replace it.
+            self._failure = exc
+            raise
+
     # -- ActionHandle surface ----------------------------------------------
     def rows(self) -> Iterator["Record"]:
         self._check_open()
@@ -187,24 +241,28 @@ class RuntimeActionHandle:
                 if remaining_ms <= 0:
                     self._raise_deadline()
                 status = self._pump(min(_CONTROL_POLL_MS, remaining_ms))
-                records = self._subscription.read(
-                    max_records=_PULL_CREDIT_RECORDS, deadline_ms=0
-                )
-                for record in records:
-                    yield record
+                from collections import deque
+                records = deque(self._read_records())
+                while records:
+                    self._yielded_rows += 1
+                    self._yielded_bytes += records[0].encoded_bytes
+                    yield records.popleft()
+                del records
                 if status.state == "failed":
                     failure = self._terminal_failure()
                     self._failure = failure
                     raise failure
                 if status.state in ("succeeded", "cancelled"):
                     while True:
-                        tail = self._subscription.read(
-                            max_records=_PULL_CREDIT_RECORDS, deadline_ms=0
-                        )
+                        tail = deque(self._read_records())
                         if not tail:
+                            del tail
                             break
-                        for record in tail:
-                            yield record
+                        while tail:
+                            self._yielded_rows += 1
+                            self._yielded_bytes += tail[0].encoded_bytes
+                            yield tail.popleft()
+                        del tail
                     if status.state == "cancelled":
                         failure = _error("CANCELLED", "action cancelled while reading output")
                         self._failure = failure
@@ -328,7 +386,7 @@ class _ChunkStream:
             if index >= 0:
                 if index + 1 > max_bytes:
                     raise DataflowError("BUDGET_EXCEEDED", "stored record frame exceeds its bound")
-                data = bytes(self._buf[: index + 1])
+                data = bytes(memoryview(self._buf)[: index + 1])
                 del self._buf[: index + 1]
                 return data
             if len(self._buf) > max_bytes:

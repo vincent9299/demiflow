@@ -99,6 +99,7 @@ def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds
                 schema_receiver(record.schema_ref)
             rows.append(_record_row(record, handle))
             total_bytes = next_bytes
+            del record
             if not verify_complete and limit is not None and len(rows) >= limit:
                 if hasattr(handle._execution, "satisfy_terminal"):
                     handle._execution.satisfy_terminal()
@@ -201,6 +202,15 @@ def iterate_batches(
         batch_bytes = 0
         window_bytes = min(handle.bounds.max_batch_bytes, handle.bounds.max_resident_bytes)
         schema_ref = None
+        if hasattr(handle, 'set_read_admission'):
+            def admit_read(record_bytes, pending_rows, pending_bytes):
+                # Current business batch and the next decoded read window must
+                # coexist. The per-batch byte check below keeps its schema/tail
+                # semantics; this credit only bounds their simultaneous input.
+                if (batch_bytes + pending_bytes + record_bytes + handle.read_buffer_reserve()
+                        > handle.bounds.max_resident_bytes):
+                    raise _error('BUDGET_EXCEEDED', 'batch and prefetched input exceed driver resident budget')
+            handle.set_read_admission(admit_read, read_count=lambda: size - len(batch))
         try:
             for record in rows_iter:
                 current_ref = getattr(record, 'schema_ref', None)
@@ -215,6 +225,7 @@ def iterate_batches(
                     raise _error("BUDGET_EXCEEDED", "batch accumulation exceeds the batch byte budget")
                 batch.append(_record_row(record, handle))
                 batch_bytes = next_bytes
+                del record
                 if len(batch) >= size:
                     yield _convert_batch(batch, batch_format, handle, schema=schemas.read(schema_ref))
                     batch = []
