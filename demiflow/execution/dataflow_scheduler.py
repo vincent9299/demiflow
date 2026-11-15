@@ -202,6 +202,13 @@ class DataflowScheduler:
         self.grant_refs[allocation_id] = ref
         return ref
 
+    def _observation(self, allocation_id):
+        reader = getattr(self._resources.state, 'read_allocation', None)
+        if reader is not None:
+            return reader(self.scope_id, allocation_id)
+        return next((a for a in self._resources.get(self.scope_id)['allocations']
+                     if a['allocation_id'] == allocation_id), None)
+
     def place(self, work: ReadyWork, *, prepare=None, host_id: str | None = None) -> WorkerLease:
         """Stage the immutable launch before asking the sole allocator to spawn.
 
@@ -248,8 +255,7 @@ class DataflowScheduler:
         lease = self.leases[allocation_id]
         self._resources.reconcile_once(fence,
             time.monotonic() + self._policy.control_timeout_ms / 1000.0, 16)
-        snapshot = self._resources.get(self.scope_id)
-        observed = next((a for a in snapshot["allocations"] if a["allocation_id"] == allocation_id), None)
+        observed = self._observation(allocation_id)
         phase = observed["phase"] if observed else "absent"
         if phase != "RUNNING":
             pending = phase in ("REQUESTED", "PENDING", "STARTING", "absent")
@@ -274,7 +280,7 @@ class DataflowScheduler:
         while True:
             self._resources.reconcile_once(fence, deadline, 16)
             snapshot = self._resources.get(self.scope_id)
-            if all(a.get("cleanup") == "CONFIRMED" for a in snapshot["allocations"]):
+            if not snapshot.get("cleanup_obligations") and all(a.get("cleanup") == "CONFIRMED" for a in snapshot["allocations"]):
                 self._closed = True
                 return
             if time.monotonic() >= deadline:
@@ -311,10 +317,15 @@ class DataflowScheduler:
         deadline = time.monotonic() + deadline_ms / 1000.0
         while True:
             self._resources.reconcile_once(fence, deadline, 16)
-            snapshot = self._resources.get(self.scope_id)
-            observation = next((a for a in snapshot["allocations"] if a["allocation_id"] == allocation_id), None)
+            observation = self._observation(allocation_id)
             if observation is not None and observation.get("cleanup") == "CONFIRMED":
                 self._resident_used -= self._resident_by_allocation.pop(allocation_id, 0)
+                self._retirements.pop(allocation_id, None)
+                for operation, allocation in tuple(self._allocation_by_operation.items()):
+                    if allocation == allocation_id:
+                        del self._allocation_by_operation[operation]
+                        self._completed.discard(operation)
+                        self._receipts.pop(operation, None)
                 return True
             if time.monotonic() >= deadline:
                 return False

@@ -227,6 +227,7 @@ class DriverJournalService:
         # authority. Keep at most one control-window of small reserve replies;
         # eviction/restart falls back to its conservative active/unknown checks.
         self._native_reserve_replies = OrderedDict()
+        self._native_reserve_owners = {}
         self._native_reserve_lock = threading.Lock()
         self._workers: list[threading.Thread] = []
         self._stop = threading.Event()
@@ -242,6 +243,33 @@ class DriverJournalService:
         self._worker_occurrences[(lease.allocation_id, lease.boot_id)] = frozenset(occurrences)
         if self._native is not None and hasattr(self._native, 'register_worker'):
             self._native.register_worker(lease, occurrences)
+
+    def retire_worker(self, lease):
+        """Forget only active authority after original-provider confirmed exit."""
+        self._check_grant()
+        with self._journal._connection() as db:
+            row = db.execute("SELECT cleanup FROM resource_allocations WHERE allocation_id=?",
+                             (lease.allocation_id,)).fetchone()
+        if row is None or row[0] != 'CONFIRMED':
+            raise DataflowError('INVALID_CONTRACT', 'Worker cleanup is not confirmed')
+        owner = (lease.allocation_id, lease.boot_id)
+        with self._native_reserve_lock, self._lock:
+            old = self._leases.get(lease.allocation_id)
+            if old is None:
+                return
+            if old.boot_id != lease.boot_id:
+                raise DataflowError('FENCED', 'Cannot retire another worker boot')
+            if any((event.allocation_id, event.boot_id) == owner
+                   for event in self._pending_payloads.values()):
+                raise DataflowError('INVALID_CONTRACT', 'Worker has unfinished journal RPCs')
+            if self._native is not None and hasattr(self._native, 'retire_worker'):
+                self._native.retire_worker(lease)
+            del self._leases[lease.allocation_id]
+            self._worker_occurrences.pop(owner, None)
+            for operation, bound in tuple(self._native_reserve_owners.items()):
+                if bound == owner:
+                    self._native_reserve_owners.pop(operation, None)
+                    self._native_reserve_replies.pop(operation, None)
 
     def renew_worker(self, lease):
         self._check_grant()
@@ -312,6 +340,7 @@ class DriverJournalService:
         if self._native_reserve_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
             try:
                 self._native_reserve_replies.clear()
+                self._native_reserve_owners.clear()
             finally:
                 self._native_reserve_lock.release()
         if self._native is not None:
@@ -439,10 +468,13 @@ class DriverJournalService:
             reply = self.native_request(command, lease=lease)
             if not self._closed:
                 self._native_reserve_replies[event.operation_id] = (signature, reply)
+                self._native_reserve_owners[event.operation_id] = (event.allocation_id, event.boot_id)
                 while len(self._native_reserve_replies) > self._bounds.max_pending_events:
-                    self._native_reserve_replies.popitem(last=False)
+                    evicted, _ = self._native_reserve_replies.popitem(last=False)
+                    self._native_reserve_owners.pop(evicted, None)
             else:
                 self._native_reserve_replies.clear()
+                self._native_reserve_owners.clear()
             return reply
 
     # -- effect state machine (H003) ----------------------------------------

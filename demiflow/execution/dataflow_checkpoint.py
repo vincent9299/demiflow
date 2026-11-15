@@ -393,7 +393,9 @@ class DataflowCheckpointCoordinator:
                 states[_CUT_STATE_KEY]["residency"] = pending.residency
             outputs = {}
             for sink_id, sink in sinks.items():
-                refs = tuple(c.sinks[sink_id] for c in fresh if sink_id in c.sinks)
+                sink_contributions = (contributions if pending.residency is not None and
+                    pending.residency.get('schema') == 'demiflow.durable_residency.v1' else fresh)
+                refs = tuple(c.sinks[sink_id] for c in sink_contributions if sink_id in c.sinks)
                 manifest = combine_prepared_sinks(refs, sink_id=sink_id, services=self._driver_services())
                 outputs[sink_id] = (sink, {**manifest, "final": request.final})
             if not outputs:
@@ -486,6 +488,10 @@ class DataflowCheckpointCoordinator:
             if residency is None:
                 if set(c.participant_id for c in contributions) != set(self._participants):
                     raise DataflowError("CORRUPT_ARTIFACT", "Recovered cut participant set differs")
+            elif residency.get('schema') == 'demiflow.durable_residency.v1':
+                from .dataflow_durable_residency import validate_recovered
+                validate_recovered(self._physical, cut, contributions, residency,
+                    facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"], store=self._store)
             else:
                 from .dataflow_residency import validate_recovered_residency
                 validate_recovered_residency(self._physical, cut, contributions, residency,

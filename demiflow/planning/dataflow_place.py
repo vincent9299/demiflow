@@ -676,6 +676,33 @@ def _refine_source_partitions(
     return tuple(refined)
 
 
+def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bounds):
+    """Choose new-plan transport; never reinterpret an already sealed exchange.
+
+    Memory connectivity is a placement preference for ordinary Dataset plans.
+    If it cannot fit, checkpointable boundaries may park a bounded durable
+    window. The fixed-plan solver remains strict about memory co-residency.
+    """
+    try:
+        return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds)
+    except DataflowError as original:
+        if original.code != "RESOURCE_INFEASIBLE":
+            raise
+        eligible = (all(s.replay != "attempt_only" for s in snapshots)
+                    and all(n.kernel.state != "nonrecoverable" for n in graph.nodes))
+        owners = _partition_owner(stages)
+        candidates = [e for e in exchanges if e.mode == _MEMORY_MODE
+                      and owners[e.producer_partitions[0]].stage_id != owners[e.consumer_partitions[0]].stage_id]
+        if not eligible or not candidates or bounds.max_spill_bytes <= 0:
+            raise _error("RESOURCE_INFEASIBLE",
+                         "memory group cannot fit and its source/state cannot safely park") from original
+        upgraded = tuple(replace(e, mode="durable_incremental",
+                          storage_bytes=min(bounds.max_spill_bytes, e.credit_bytes * 8),
+                          reason="durable_incremental:resident_budget_requires_checkpointed_parking;" + e.reason)
+                         if e in candidates else e for e in exchanges)
+        return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds)
+
+
 def compile_physical_dataflow(
     graph: DataflowGraph,
     snapshots: tuple[SourceSnapshot, ...],
@@ -698,7 +725,8 @@ def compile_physical_dataflow(
     stages = _refine_source_partitions(graph, stages, splits, policy, bounds)
     stages = select_fusion_groups(graph, stages, policy=policy)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
-    residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds)
+    exchanges, residency = _select_budgeted_residency(
+        graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds)
     capability = infer_recovery(graph, snapshots, policy=policy)
     if not capability.supported:
         raise _error(

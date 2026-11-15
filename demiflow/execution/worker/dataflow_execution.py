@@ -115,7 +115,8 @@ class DataflowWorkerExecutor:
     def _next_operation_id(self, kind):
         self._event_sequence += 1
         assignment = self.assignment
-        return _operation_id(assignment.action_id, kind, self._event_sequence)
+        return _operation_id(assignment.action_id, assignment.lease.allocation_id,
+                             assignment.lease.boot_id, kind, self._event_sequence)
 
     def _event(self, kind, *, payload=None, payload_ref=None, operation_id=None):
         from ..contracts import dataflow as df

@@ -96,3 +96,6 @@ specified parked-channel cut. No durable edge is silently converted to finite,
 and timely streaming semantics are not replaced with full materialization.
 GPU placement checks alone do not prove device assignment: provider/device-pool
 assembly and actual child device visibility are a separate follow-up commit.
+
+
+2026-11-15 后续：上面的 durable/GPU 限制是该有限分期提交当时的边界；后续实现与实际证据分别见 [DURABLE-RESIDENCY.md](DURABLE-RESIDENCY.md) 和 [DEVICE-GRANTS.md](DEVICE-GRANTS.md)，不可把新切片等同于任意算子可抢占或跨物理宿主验证。

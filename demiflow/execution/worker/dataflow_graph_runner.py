@@ -43,7 +43,20 @@ class WorkerGraphRunner:
         self._finished_inputs = set()
         self._closed_inputs = set()
         self._closed_outputs = set()
+        self._emitted_eoi = set()
         self._credits = {}
+        self._credit_payloads = {}
+        self._consumed_deliveries = set()
+        physical = executor._physical
+        self._park_mode = (any(e.mode == 'durable_incremental' for e in physical.exchanges)
+            and sum(s.resident_bytes * s.replica_target for s in physical.stages)
+                + physical.residency.control_reserved_bytes > self.bounds.max_resident_bytes)
+        # Pause before reading a record that cannot be retained while the next
+        # resident group is absent. Expansion inside one invocation is separately
+        # rejected if it cannot fit the actual channel credit window.
+        windows = [min(spec.credit_rows, max(1, spec.credit_bytes // self.bounds.max_row_bytes))
+                   for spec in executor._output_specs if spec.mode == 'durable_incremental']
+        self._source_quantum = min([physical.policy.checkpoint_rows, 64, *windows]) if windows else physical.policy.checkpoint_rows
         self._terminals = {}
         self._finite = {}
         self._cut = None
@@ -107,6 +120,21 @@ class WorkerGraphRunner:
             self._finished_inputs = {tuple(x) for x in frontier['inputs']}
             self._closed_inputs = set(frontier.get('closed_inputs', ()))
             self._closed_outputs = set(frontier.get('closed_outputs', ()))
+            self._emitted_eoi = set(frontier.get('emitted_eoi', ()))
+            metrics = frontier.get('metrics', {})
+            if metrics:
+                if set(metrics) != set(self._metrics):
+                    raise DataflowError('FENCED', 'restored metric ownership differs')
+                self._metrics = metrics
+            self.e._event_sequence = max(self.e._event_sequence, frontier.get('event_sequence', 0))
+            self._consumed_deliveries = set(frontier.get('consumed_deliveries', ()))
+            self._credit_payloads = dict(frontier.get('durable_deliveries', {}))
+            leases = {lease.operation_id: lease for lease in self.e._channels.outstanding_leases()}
+            if not set(self._credit_payloads) <= set(leases):
+                raise DataflowError('CORRUPT_ARTIFACT', 'parked producer delivery lacks original credit')
+            self._credits = {key: (leases[key], None) for key in self._credit_payloads}
+            if self._credits:
+                self._paused = True  # Wait for original committed consumption ACKs.
             valid_inputs = {(edge.edge_id, p) for edge in self.e._graph.edges
                             if edge.consumer in self.e._node_specs for p in
                             (self._exchange[edge.edge_id].producer_partitions
@@ -149,16 +177,22 @@ class WorkerGraphRunner:
                 entry = self._credits.pop(command['delivery_id'], None)
                 if entry is None:
                     raise DataflowError('INVALID_CONTRACT', 'ack does not name an outstanding delivery')
+                self._credit_payloads.pop(command['delivery_id'], None)
                 lease, key = entry
                 if lease is not None:
                     self.e._channels.release(lease)
                 if key is not None:
                     self._peer.release(key)
-            elif kind == 'pause':
+            elif kind == 'park_policy':
+                self._park_mode = True
+                self._consumed_deliveries.intersection_update(command.get('retain_consumed', ()))
+                self._idle_sent = False
+            elif kind in ('pause', 'park'):
                 self._paused = True
                 self._idle_sent = False
             elif kind == 'resume':
                 self._source_rows_since_cut = 0
+                self._consumed_deliveries.clear()
                 self._paused = False
                 self._idle_sent = False
                 self._cut = None
@@ -213,6 +247,10 @@ class WorkerGraphRunner:
                         self._finish_node(occ)
                         self._close_inputs(occ)
             elif command['kind'] == 'cut':
+                # An idle event may have raced with resume. The cut itself
+                # freezes admission before waiting for actual local obligations.
+                self._paused = True
+                self._idle_sent = False
                 self._cut = command['request']
             elif command['kind'] == 'receipt':
                 self.e.accept_receipt(command['commit_id'], cut_id=command['cut_id'])
@@ -229,7 +267,7 @@ class WorkerGraphRunner:
                     source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
                     self._output(source, poll.record)
                     self._source_rows_since_cut += 1
-                    if self._source_rows_since_cut >= self.e._physical.policy.checkpoint_rows:
+                    if self._source_rows_since_cut >= self._source_quantum:
                         self._paused = True
                         self._flush_metrics()
                     processed += 1
@@ -249,7 +287,9 @@ class WorkerGraphRunner:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
         with self._condition:
-            quiet = not self._queue and not self._credits and all(k.checkpoint_ready for k in self.e._kernels.values())
+            quiet = (not self._queue and (not self._credits or self._parkable_credits())
+                     and all(k.checkpoint_ready for k in self.e._kernels.values())
+                     and (not self._park_mode or not any(k.pending_calls for k in self.e._kernels.values())))
         if done and quiet and not any(k.pending_calls for k in self.e._kernels.values()) and not self._done_sent:
             from ..dataflow_checkpoint import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
@@ -309,12 +349,14 @@ class WorkerGraphRunner:
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
                 routed_input = replace(record, inline=row, payload_ref=None, encoded_bytes=_row_bytes(row))
+            route_sequence = self.e._channels.routing.values().get(spec.channel_id, 0)
             for routed in route_record(routed_input, spec=spec, state=self.e._channels.routing):
                 from ..recovery_contract import identity
                 self._publish(routed.record, edge=edge, spec=spec, target=routed.reader_id,
-                              delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]))
+                              delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]),
+                              route_sequence=route_sequence)
 
-    def _publish(self, record, *, edge=None, spec=None, target=None, delivery=None):
+    def _publish(self, record, *, edge=None, spec=None, target=None, delivery=None, route_sequence=None):
         raw = _encode_record_document(record, max_bytes=self.bounds.max_row_bytes)
         if spec is not None and spec.mode == 'finite_sealed':
             stream, total, count = self._finite_buffer(spec)
@@ -340,6 +382,9 @@ class WorkerGraphRunner:
             except DataflowError as exc:
                 if not exc.retryable:
                     raise
+                if self._park_mode:
+                    raise DataflowError('RESOURCE_INFEASIBLE',
+                        'one operator invocation exceeds the parked durable credit window; co-resident execution required') from exc
                 if time.monotonic() >= deadline:
                     raise DataflowError('DEADLINE_EXCEEDED', 'data delivery credit deadline') from exc
                 with self._condition:
@@ -347,6 +392,8 @@ class WorkerGraphRunner:
         payload = {'delivery_id': delivery, 'producer_partition': self.partition,
                    'target_partition': target, 'edge_id': edge.edge_id if edge else None,
                    'record_id': record.record_id, 'sequence': record.sequence}
+        if spec is not None and spec.mode == 'durable_incremental':
+            payload.update(route_epoch=spec.route_epoch, route_sequence=route_sequence)
         key = None
         if spec is None or spec.mode == 'memory_incremental':
             payload['peer'] = self._peer.put(raw)
@@ -357,6 +404,8 @@ class WorkerGraphRunner:
             payload['ref'] = _artifact_json(ref)
         with self._condition:
             self._credits[delivery] = (lease, key)
+            if spec is not None and spec.mode == 'durable_incremental':
+                self._credit_payloads[delivery] = payload
         self._send('terminal' if edge is None else 'data', payload)
 
     def _receive_data(self, command):
@@ -374,7 +423,11 @@ class WorkerGraphRunner:
             raw = b''.join(self.services.store.read(ref, max_bytes=self.bounds.max_row_bytes))
         record = _decode_record_document(raw, record_id=command['record_id'], sequence=command['sequence'],
                                          max_bytes=self.bounds.max_row_bytes)
-        self._push(edge.consumer, edge.input_port, record)
+        if command['delivery_id'] not in self._consumed_deliveries:
+            self._push(edge.consumer, edge.input_port, record)
+            if len(self._consumed_deliveries) >= self.bounds.max_pending_events:
+                raise DataflowError('BUDGET_EXCEEDED', 'consumer delivery frontier exceeds bounded window')
+            self._consumed_deliveries.add(command['delivery_id'])
         self._send('ack', {'delivery_id': command['delivery_id'],
                            'producer_partition': command['producer_partition']})
 
@@ -494,6 +547,7 @@ class WorkerGraphRunner:
                     'producer_partition': self.partition, 'manifest_ref': _artifact_json(ref),
                     'last_sequence': count - 1})
             else:
+                self._emitted_eoi.add(edge.edge_id)
                 self._send('eoi', {'scope': 'edge', 'edge_id': edge.edge_id,
                                    'producer_partition': self.partition})
 
@@ -553,8 +607,11 @@ class WorkerGraphRunner:
             self._edge_eoi(spec.edge_id, member['partition_id'])
         self._send('ack', {'delivery_id': command['delivery_id'], 'producer_partition': None})
 
+    def _parkable_credits(self):
+        return self._park_mode and set(self._credits) == set(self._credit_payloads)
+
     def snapshot(self, request):
-        if self._queue or self._credits:
+        if self._queue or (self._credits and not self._parkable_credits()):
             raise DataflowError('INVALID_CONTRACT', 'cut requires drained inputs and acknowledged deliveries')
         for reader in self.e._readers.values():
             reader.acknowledge_output()
@@ -573,7 +630,10 @@ class WorkerGraphRunner:
         frontier = document({'schema': 'demiflow.worker-frontier.v3',
             'nodes': sorted(self._finished), 'splits': sorted(self._finished_splits),
             'inputs': [list(x) for x in sorted(self._finished_inputs)],
-            'closed_inputs': sorted(self._closed_inputs), 'closed_outputs': sorted(self._closed_outputs)}, self.bounds.max_state_bytes)
+            'closed_inputs': sorted(self._closed_inputs), 'closed_outputs': sorted(self._closed_outputs),
+            'durable_deliveries': self._credit_payloads, 'emitted_eoi': sorted(self._emitted_eoi),
+            'metrics': self._metrics, 'event_sequence': self.e._event_sequence,
+            'consumed_deliveries': sorted(self._consumed_deliveries)}, self.bounds.max_state_bytes)
         states[identity(['worker-frontier', self.partition])] = self.services.store.put(
             iter([frontier]), max_bytes=len(frontier), media_type='application/json')
         refs = snapshot_channels(self.e._channels, cut=request, store=self.services.store)

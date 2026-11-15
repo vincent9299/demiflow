@@ -257,7 +257,8 @@ class RunResourceState:
             workers = validated["workers"]
             if plan["scope_id"] != scope_id:
                 raise ResourceError("INVALID_SPEC", "plan scope differs", scope_id=scope_id)
-            existing = {r["allocation_id"]: r for r in self._scope_allocations(db, scope_id)}
+            existing = {r["allocation_id"]: r for r in self._scope_allocations(db, scope_id,
+                include_ids=tuple(workers) + tuple(r["allocation_id"] for r in plan["retirements"]), active_only=True)}
             budget = scope["document"]["budget"]
             ceiling = plan.get("budgets") or budget
             if plan.get("budgets"):
@@ -269,8 +270,8 @@ class RunResourceState:
                             and ceiling[key] > budget.get(key, 0):
                         raise ResourceError("INVALID_SPEC", "plan budget exceeds authorized scope ceiling", scope_id=scope_id)
             new_ids = [a for a in workers if a not in existing]
-            if len(existing) + len(new_ids) > self.max_allocations:
-                raise ResourceError("QUOTA_EXCEEDED", "scope allocation history exceeds budget", scope_id=scope_id)
+            if sum(r["cleanup"] != "CONFIRMED" for r in existing.values()) + len(new_ids) > self.max_allocations:
+                raise ResourceError("QUOTA_EXCEEDED", "active scope allocation count exceeds budget", scope_id=scope_id)
             rate = ceiling.get("max_creates_per_minute")
             if rate is not None and new_ids:
                 recent = db.execute("SELECT count(*) FROM resource_intents WHERE scope_id=? AND kind='ensure_present' "
@@ -360,10 +361,27 @@ class RunResourceState:
             self._store_receipt(db, context, "apply", payload_hash, receipt, now_ms)
         return receipt
 
-    def _scope_allocations(self, db, scope_id):
-        rows = db.execute("SELECT allocation_id FROM resource_allocations WHERE scope_id=? ORDER BY allocation_id",
-                          (scope_id,)).fetchall()
+    def _scope_allocations(self, db, scope_id, *, include_ids=(), active_only=False):
+        predicate = "scope_id=?"
+        params = [scope_id]
+        if active_only:
+            predicate += " AND (cleanup!='CONFIRMED'"
+            if include_ids:
+                predicate += " OR allocation_id IN (" + ",".join("?" for _ in include_ids) + ")"
+                params.extend(include_ids)
+            predicate += ")"
+        rows = db.execute("SELECT allocation_id FROM resource_allocations WHERE " + predicate +
+                          " ORDER BY allocation_id", params).fetchall()
         return [self._allocation_row(db, r[0]) for r in rows]
+
+    def read_allocation(self, scope_id, allocation_id):
+        """Exact original-journal observation, independent of history pagination."""
+        identifier(scope_id)
+        identifier(allocation_id)
+        with self.journal._connection() as db:
+            row = db.execute("SELECT document FROM resource_allocations WHERE scope_id=? AND allocation_id=?",
+                             (scope_id, allocation_id)).fetchone()
+        return None if row is None else json.loads(row[0])
 
     def _charged(self, db, scope_id):
         rows = db.execute("SELECT effective FROM resource_allocations WHERE scope_id=? AND cleanup!='CONFIRMED'",
@@ -406,7 +424,7 @@ class RunResourceState:
                        (revision, document(close_spec).decode(), scope_id))
             db.execute("UPDATE resource_intents SET status='superseded' WHERE scope_id=? AND kind='ensure_present' "
                        "AND status IN ('pending','claimed')", (scope_id,))
-            for row in self._scope_allocations(db, scope_id):
+            for row in self._scope_allocations(db, scope_id, active_only=True):
                 allocation_id = row["allocation_id"]
                 if row["cleanup"] == "CONFIRMED":
                     continue
@@ -542,7 +560,7 @@ class RunResourceState:
                     raise ResourceError("INVALID_SPEC", "observation entry shape is unsupported")
                 merged["observation_revision"] = revision
                 validate_observation(merged)
-                terminal = merged["phase"] in TERMINAL_HOST_PHASES
+                terminal = merged["phase"] in TERMINAL_HOST_PHASES or merged["cleanup"] == "CONFIRMED"
                 db.execute("UPDATE resource_allocations SET phase=?,cleanup=?,terminal=?,observation_revision=?,"
                            "observed_at_ms=?,document=? WHERE allocation_id=?",
                            (merged["phase"], merged["cleanup"], int(terminal), revision,
@@ -602,7 +620,7 @@ class RunResourceState:
                 "SELECT document FROM resource_allocations WHERE scope_id=? AND cleanup!='CONFIRMED' "
                 "AND (cleanup!='NONE' OR terminal=1) ORDER BY allocation_id", (scope_id,))]
             stale = [json.loads(r[0])["allocation_id"] for r in db.execute(
-                "SELECT document FROM resource_allocations WHERE scope_id=?", (scope_id,))
+                "SELECT document FROM resource_allocations WHERE scope_id=? AND cleanup!='CONFIRMED'", (scope_id,))
                 if json.loads(r[0]).get("observation") == "STALE_UNKNOWN"]
         return {"desired_revision": scope["desired_revision"], "observed_revision": scope["observed_revision"],
                 "snapshot_id": snapshot_id, "cursor": maximum, "allocations": allocations,

@@ -9,7 +9,7 @@ from .contracts.dataflow_codec import compute_participant_id
 SCHEMA = 'demiflow.finite_residency.v1'
 
 
-def finite_phases(physical):
+def finite_phases(physical, *, split_durable=False):
     stages = {s.stage_id: s for s in physical.stages}
     owners = {p: s.stage_id for s in physical.stages for p in s.partitions}
     parent = {sid: sid for sid in stages}
@@ -18,7 +18,7 @@ def finite_phases(physical):
             sid = parent[sid]
         return sid
     for edge in physical.exchanges:
-        if edge.mode != 'finite_sealed':
+        if edge.mode == 'memory_incremental' or not split_durable and edge.mode != 'finite_sealed':
             parent[find(owners[edge.producer_partitions[0]])] = find(owners[edge.consumer_partitions[0]])
     groups = {}
     for sid in stages:

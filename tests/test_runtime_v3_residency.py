@@ -93,6 +93,12 @@ def test_resume_after_committed_phase_skips_completed_workers(tmp_path, monkeypa
 
 def test_memory_connected_group_rejected_before_launch(tmp_path, monkeypatch):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.planning import dataflow_place
+    # A fixed memory contract cannot be reinterpreted; ordinary new plans may
+    # now choose durable boundaries automatically before sealing.
+    def fixed_memory(graph, snapshots, stages, exchanges, *, hosts, bounds):
+        return exchanges, dataflow_place.solve_residency(stages, exchanges, hosts=hosts, bounds=bounds)
+    monkeypatch.setattr(dataflow_place, '_select_budgeted_residency', fixed_memory)
     launched = []
     monkeypatch.setattr(DataflowExecution, '_prepare_launch', lambda *args: launched.append(args))
     with pytest.raises(DataflowError, match='resident budget|resident capacity'):

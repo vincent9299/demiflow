@@ -103,6 +103,7 @@ class NativeAcquisitionService(NativeSearchOperations):
             raise DataflowError('INVALID_CONTRACT', 'native acquisition service is driver-only')
         self._action = action
         self._worker_occurrences = {}
+        self._worker_authority_enforced = False
         self._services = services
         self._state = 'constructed'
         self._lock = threading.Lock()
@@ -140,10 +141,14 @@ class NativeAcquisitionService(NativeSearchOperations):
         return self._binding
 
     def register_worker(self, lease, occurrences):
+        self._worker_authority_enforced = True
         self._worker_occurrences[(lease.allocation_id, lease.boot_id)] = frozenset(occurrences)
 
+    def retire_worker(self, lease):
+        self._worker_occurrences.pop((lease.allocation_id, lease.boot_id), None)
+
     def _check_role(self, lease, role):
-        if not self._worker_occurrences:
+        if not self._worker_occurrences and not self._worker_authority_enforced:
             return  # Direct driver callers still require the native owning lease.
         occurrence = {'poll': self._binding.source_occurrence,
                       'acquire': self._binding.fetch_occurrence,
