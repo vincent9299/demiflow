@@ -1,233 +1,40 @@
-"""Ray Data compiler/executor for demiflow lazy plans."""
+"""Ray Core provider adapter for the unified v3 dataflow engine.
+
+Ray hosts resources and workers only (I02, YARN-like). Every public terminal
+forwards one declaration through make_action_request/run_dataset_action into the
+single DataflowExecution engine shared with Local; dataflow semantics, scheduling,
+handoff, commit and recovery all belong to that engine, never to Ray Data. No
+Ray Data dataset is created or imported here, and no live Ray cluster is probed at
+plan time: resource admission comes from the unified runtime policy.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Optional
+import hashlib
 from pathlib import Path
+from typing import Any, Iterable
 
-import ray
-
+from ...data.constraints import (
+    analyze_source_constraints, analyze_stage_work_units, stage_parallelism_caps,
+)
 from ...data.datasink import Datasink, WriteResult as DemiflowWriteResult
-from ...errors import (
-    AggregateSerializationError, AggregateStateLimitExceeded,
-    UnsupportedSourceError,
-)
-from ...data.plan import (
-    AddColumnOp, BoundCallable, BoundMapOp, DropColumnsOp, FilterOp, FlatMapOp, LimitOp,
-    LogicalPlan, MapBatchesOp, MapOp, OperatorLLMMapOp, RandomSampleOp,
-    RandomShuffleOp, RandomizeBlockOrderOp, RenameColumnsOp, RepartitionOp,
-    SelectColumnsOp, SortOp, StandardCallable,
-)
-from ...operator_llm.model import OperatorLLMUsage
-from ...operator_llm.runtime import BoundOperatorLLMMap, OperatorLLMRuntime
-from ...data.sources import DatasourceSource, LanceSource, FileSource, ItemsSource, MaterializedSource, RangeSource, SourcePlan, SqlSource
+from ...data.plan import LogicalPlan, reject_streaming_map_options
+from ...data.sources import LanceSource, MaterializedSource, SourcePlan
 from ...data.stats import ExecutionMetadata
-from .base import DatasetExecutor
+from ...errors import PhysicalPlanningError, UnsupportedSourceError
 from ...planning import BackendResourceSnapshot, ResourceBundle, plan_action
+from ...planning.dataflow_policy import resolve_runtime_policy
 from ...planning.policy import parse_platform_planning_policy
 from ...planning.traits import requires_native_ray, terminal_traits
-from ...data.constraints import (
-    analyze_source_constraints, analyze_stage_work_units,
-    stage_parallelism_caps,
-)
-import hashlib
-
-
-class _RayDatasourceAdapter:
-    """Created lazily after Ray import; adapts demiflow ReadTasks to Ray."""
-
-    def __new__(cls, datasource):
-        from ray.data.datasource import Datasource
-
-        class Adapter(Datasource):
-            def estimate_inmemory_data_size(self):
-                return datasource.estimate_inmemory_data_size()
-
-            def get_read_tasks(self, parallelism, per_task_row_limit=None, data_context=None):
-                from ray.data.block import BlockMetadata
-                from ray.data.datasource import ReadTask
-
-                tasks = datasource.get_read_tasks(
-                    parallelism,
-                    per_task_row_limit=per_task_row_limit,
-                    data_context=data_context,
-                )
-                return [
-                    ReadTask(
-                        _RayBlockReadFn(task.read_fn),
-                        BlockMetadata(
-                            num_rows=task.metadata.num_rows,
-                            size_bytes=task.metadata.size_bytes,
-                            exec_stats=None,
-                            input_files=task.metadata.input_files,
-                        ),
-                    )
-                    for task in tasks
-                ]
-
-        return Adapter()
-
-
-class _RayBlockReadFn:
-    """Normalize backend-neutral blocks to Ray-supported Arrow/Pandas blocks."""
-
-    def __init__(self, read_fn):
-        self._read_fn = read_fn
-
-    def __call__(self):
-        import pyarrow as pa
-
-        for block in self._read_fn():
-            if isinstance(block, pa.RecordBatch):
-                yield pa.Table.from_batches([block])
-                continue
-            if isinstance(block, list):
-                if not block:
-                    continue
-                if isinstance(block[0], Mapping):
-                    yield pa.Table.from_pylist(block)
-                    continue
-            if isinstance(block, Mapping):
-                yield pa.Table.from_pylist([dict(block)])
-                continue
-            yield block
-
-
-class _RayLanceDatasource:
-    def __new__(cls, query):
-        from ray.data.datasource import Datasource
-        class Adapter(Datasource):
-            def estimate_inmemory_data_size(self): return None
-            def get_read_tasks(self, parallelism, per_task_row_limit=None, data_context=None):
-                del data_context
-                from ray.data.block import BlockMetadata
-                from ray.data.datasource import ReadTask
-                from ...lance.model import LanceScanSpec
-                from ...lance.read import (
-                    constrain_lance_query, iter_lance_batches,
-                    iter_lance_partition_batches, plan_lance_scan_partitions,
-                )
-                if (
-                    isinstance(query, LanceScanSpec) and query.limit is None
-                    and per_task_row_limit is None
-                ):
-                    partitions = plan_lance_scan_partitions(
-                        query, target_partitions=parallelism,
-                    )
-                    return [
-                        ReadTask(
-                            _RayBlockReadFn(
-                                lambda partition=partition: iter_lance_partition_batches(
-                                    partition, batch_size=256,
-                                )
-                            ),
-                            BlockMetadata(
-                                num_rows=None, size_bytes=None, exec_stats=None,
-                                input_files=[],
-                            ),
-                        )
-                        for partition in partitions
-                    ]
-                constrained=constrain_lance_query(query,per_task_row_limit)
-                def read(): yield from iter_lance_batches(constrained,batch_size=256)
-                return [ReadTask(_RayBlockReadFn(read),BlockMetadata(
-                    num_rows=None,size_bytes=None,exec_stats=None,
-                    input_files=[],
-                ))]
-        return Adapter()
-
-
-class _RayDatasinkAdapter:
-    def __new__(cls, datasink: Datasink):
-        from ray.data.datasource import Datasink as RayDatasink
-
-        class Adapter(RayDatasink):
-            def on_write_start(self, schema=None):
-                datasink.on_write_start(schema)
-
-            def write(self, blocks, ctx):
-                from ...data.datasink import WriteContext
-                return datasink.write(blocks, WriteContext(task_index=ctx.task_idx))
-
-            def on_write_complete(self, _write_result):
-                # The demiflow result is finalized by RayDatasetExecutor after Ray combines tasks.
-                return None
-
-            def on_write_failed(self, error):
-                # RayDatasetExecutor owns the public lifecycle and reports failure once.
-                return None
-
-        return Adapter()
-
-
-class _RayLanceDirectWriteSink:
-    """Execute one backend-planned direct write in one Ray task."""
-
-    def __init__(self, spec) -> None:
-        self.spec = spec
-        self.receipt = None
-
-    def ray_datasink(self):
-        from ray.data.datasource import Datasink as RayDatasink
-        spec, owner = self.spec, self
-
-        class Adapter(RayDatasink):
-            @property
-            def supports_distributed_writes(self):
-                return False
-
-            def write(self, blocks, ctx):
-                del ctx
-                from ...lance.write import write_lance
-                return write_lance(spec, blocks).to_dict()
-
-            def on_write_complete(self, write_results):
-                values = getattr(write_results, "write_returns", write_results)
-                if not values and spec.schema is not None:
-                    # 空 Dataset 可能没有 worker 写入任务，由 driver 用声明的 schema 提交一次。
-                    from ...lance.write import write_lance
-                    owner.receipt = write_lance(spec, ())
-                    return
-                if len(values) != 1:
-                    raise RuntimeError("Lance direct write requires one result")
-                from ...lance.model import LanceWriteReceipt
-                owner.receipt = LanceWriteReceipt.from_dict(dict(values[0]))
-
-        return Adapter()
-
-
-class _RayLanceFragmentWriteSink:
-    """Write uncommitted fragments in Ray tasks and commit once on the driver."""
-
-    def __init__(self, prepared) -> None:
-        self.prepared = prepared
-        self.receipt = None
-
-    def ray_datasink(self):
-        from ray.data.datasource import Datasink as RayDatasink
-        prepared, owner = self.prepared, self
-
-        class Adapter(RayDatasink):
-            def write(self, blocks, ctx):
-                from ...lance.write import write_lance_fragment
-                return write_lance_fragment(
-                    prepared, task_index=ctx.task_idx, batches=blocks,
-                ).to_dict()
-
-            def on_write_complete(self, write_result):
-                from ...lance.model import _LanceFragmentReceipt
-                from ...lance.write import commit_lance_append
-                fragments = tuple(
-                    _LanceFragmentReceipt.from_dict(dict(value))
-                    for value in write_result.write_returns
-                )
-                owner.receipt = commit_lance_append(prepared, fragments)
-
-        return Adapter()
+from ..contracts.dataflow import ActionProgram
+from ..dataflow_api import make_action_request, run_dataset_action
+from ..dataflow_inputs import build_input_handle
+from .base import DatasetExecutor
 
 
 class RayDatasetExecutor(DatasetExecutor):
     NAME = "ray"
+    PROVIDER = "ray_core"
 
     def __init__(
         self, *, aggregate_state_max_bytes: int = 8 * 1024 * 1024,
@@ -235,738 +42,261 @@ class RayDatasetExecutor(DatasetExecutor):
         unified_chain: bool = False, unified_graph: bool = False,
     ) -> None:
         self._aggregate_state_max_bytes = max(1, int(aggregate_state_max_bytes))
-        self._unified_chain = bool(unified_chain)
-        self._unified_graph = bool(unified_graph)
-        self._last_native = None
         self.resource_root = Path(resource_root or ".").resolve()
-        self._prompt_coordinators = {}
         self._planning_policy = planning_policy or parse_platform_planning_policy(None)
         self._candidate_execution = candidate_execution
-        self._active_physical_plan = None
-    def _ensure_ray(self) -> None:
-        if not ray.is_initialized():
-            raise RuntimeError(
-                "RayDatasetExecutor requires an initialized Ray driver"
-            )
+        # Legacy unified switches are compatibility validation only; they never
+        # select a separate execution engine (I01/I02).
+        self._unified_chain = bool(unified_chain)
+        self._unified_graph = bool(unified_graph)
+        self._policy, self._bounds = resolve_runtime_policy(
+            {}, {}, provider=self.PROVIDER,
+        )
+        self._handles: list[Any] = []
+        self._results: list[Any] = []
+        self._closed = False
 
-    def _prompt_coordinator(self, operation):
-        if operation.node_id not in self._prompt_coordinators:
-            self._ensure_ray()
-            self._prompt_coordinators[operation.node_id] = _RayOperatorLLMCoordinatorProxy(
-                _ray_operator_llm_coordinator_class().remote(operation.max_requests)
-            )
-        return self._prompt_coordinators[operation.node_id]
+    def _execute(
+        self, source: SourcePlan, plan: LogicalPlan, kind: str,
+        arguments: dict[str, Any], *, sink: Datasink | None = None,
+        programs: tuple[ActionProgram, ...] = (),
+    ) -> Any:
+        # Single wiring seam for the modify cards: one declaration into the same
+        # DataflowExecution engine Local uses, never a Ray Data dataset.
+        request = make_action_request(
+            self, source, plan, kind=kind, arguments=arguments,
+            sink=sink, programs=programs,
+        )
+        result = run_dataset_action(request)
+        self._results.append(result)
+        if callable(getattr(result, "release", None)) or callable(getattr(result, "close", None)):
+            self._handles.append(result)
+        return result
 
     def operator_llm_usage(self) -> dict[str, int]:
-        totals = {}
-        for coordinator in self._prompt_coordinators.values():
-            for key, value in coordinator.usage().to_dict().items():
-                totals[key] = totals.get(key, 0) + value
+        totals: dict[str, int] = {}
+        for result in self._results:
+            usage = getattr(result, "operator_llm_usage", None)
+            facts = usage() if callable(usage) else getattr(result, "llm_usage", None)
+            if isinstance(facts, dict):
+                for key, value in facts.items():
+                    totals[key] = totals.get(key, 0) + int(value)
         return totals
 
     def from_items(self, items: list[Any], *, override_num_blocks: int | None = None) -> Any:
-        self._ensure_ray()
-        return ray.data.from_items(items, override_num_blocks=override_num_blocks)
+        if not isinstance(items, list):
+            raise TypeError("from_items requires a list")
+        _validate_block_hint(override_num_blocks)
+        return build_input_handle(list(items), format="items", bounds=self._bounds)
 
     def from_arrow(self, tables: Any) -> Any:
-        self._ensure_ray()
-        return ray.data.from_arrow(tables)
+        return build_input_handle(tables, format="arrow", bounds=self._bounds)
 
     def from_numpy(self, arrays: Any) -> Any:
-        self._ensure_ray()
-        return ray.data.from_numpy(arrays)
+        return build_input_handle(arrays, format="numpy", bounds=self._bounds)
 
     def from_pandas(
         self, frames: Any, *, override_num_blocks: int | None = None,
     ) -> Any:
-        self._ensure_ray()
-        return ray.data.from_pandas(
-            frames, override_num_blocks=override_num_blocks,
-        )
+        _validate_block_hint(override_num_blocks)
+        return build_input_handle(frames, format="pandas", bounds=self._bounds)
 
     def plan(
         self, source, plan, action_kind, *, terminal_category="action",
         terminal_native_options=None, source_parallelism_cap=None,
         terminal_parallelism_cap=None,
     ):
-        from ...data.plan import reject_streaming_map_options
-        reject_streaming_map_options(plan, 'Ray')
-        self._ensure_ray()
-        native=(getattr(source,"native_options",None) is not None or any(getattr(operation,"native_options",None) is not None for operation in plan.operations) or terminal_native_options is not None)
+        reject_streaming_map_options(plan, 'ray')
+        native = (
+            getattr(source, "native_options", None) is not None
+            or any(getattr(operation, "native_options", None) is not None for operation in plan.operations)
+            or terminal_native_options is not None
+        )
         if native and (self._candidate_execution is None or self._candidate_execution.mode != "native"):
             raise ValueError("Native options require Pipeline execution mode native")
         if self._candidate_execution is not None and self._candidate_execution.mode == "portable" and any(requires_native_ray(operation) for operation in plan.operations):
-            from ...errors import PhysicalPlanningError
-            raise PhysicalPlanningError("portable_operation_requires_ray_affinity",responsibility="candidate")
-        raw_nodes=[item.get("Resources",{}) for item in ray.nodes() if item.get("Alive")]
-        nodes=tuple(ResourceBundle(cpu=float(item.get("CPU",0.0)),gpu=float(item.get("GPU",0.0)),memory_bytes=int(item.get("memory",0.0)),custom_resources={key:float(value) for key,value in item.items() if key not in {"CPU","GPU","memory","object_store_memory"} and not key.startswith("node:")}) for item in raw_nodes)
-        snapshot=BackendResourceSnapshot("ray",nodes,hashlib.sha256(repr([sorted(item.items()) for item in raw_nodes]).encode()).hexdigest(),bool(nodes))
-        marker=type("Terminal",(),{})()
-        bounds=(*analyze_stage_work_units(source,plan),None)
-        if isinstance(source,LanceSource):
-            from ...lance.model import LanceScanSpec
-            leading_limit=analyze_source_constraints(plan).row_limit
-            if not isinstance(source.query,LanceScanSpec) or source.query.limit is not None or leading_limit is not None:
-                source_parallelism_cap=1
-        caps=stage_parallelism_caps(plan,source_cap=source_parallelism_cap,terminal_cap=terminal_parallelism_cap)
-        return plan_action(backend="ray",action_kind=action_kind,source=source,operations=plan.operations,terminal_node=marker,terminal_traits=terminal_traits(terminal_category),policy=self._planning_policy,snapshot=snapshot,work_units_by_stage=bounds,terminal_native_options=terminal_native_options,parallelism_caps_by_stage=caps)
-
-    def _build_source(self, source: SourcePlan):
-        self._ensure_ray()
-        if isinstance(source, MaterializedSource):
-            return source.handle
-        if isinstance(source, ItemsSource):
-            return ray.data.from_items(list(source.items))
-        if isinstance(source, RangeSource):
-            return ray.data.range(source.count, override_num_blocks=self._active_physical_plan.source.max_workers)
-        if isinstance(source, FileSource):
-            options = dict(source.options)
-            options["override_num_blocks"]=self._active_physical_plan.source.max_workers
-            options.update(_ray_resource_options(self._active_physical_plan.source.worker_resources))
-            reader_names = {
-                "parquet": "read_parquet", "json": "read_json",
-                "csv": "read_csv", "text": "read_text",
-                "binary_files": "read_binary_files", "images": "read_images",
-            }
-            reader_name = reader_names.get(source.format)
-            function = getattr(ray.data, reader_name, None) if reader_name else None
-            if function is None:
-                raise UnsupportedSourceError(f"RayDatasetExecutor does not support read_{source.format}")
-            paths: Any = source.paths[0] if len(source.paths) == 1 else list(source.paths)
-            return function(paths, **options)
-        if isinstance(source, SqlSource):
-            options = dict(source.options)
-            options["override_num_blocks"]=self._active_physical_plan.source.max_workers
-            options.update(_ray_resource_options(self._active_physical_plan.source.worker_resources))
-            return ray.data.read_sql(source.sql, source.connection_factory, **options)
-        if isinstance(source, DatasourceSource):
-            kwargs = _ray_resource_options(self._active_physical_plan.source.worker_resources)
-            kwargs["override_num_blocks"]=self._active_physical_plan.source.max_workers
-            return ray.data.read_datasource(
-                _RayDatasourceAdapter(source.datasource),
-                parallelism=self._active_physical_plan.source.initial_workers,
-                **kwargs,
-            )
+            raise PhysicalPlanningError("portable_operation_requires_ray_affinity", responsibility="candidate")
+        # Unified v3 admission (same engine as Local); no Ray Data lowering.
+        make_action_request(
+            self, source, plan, kind=action_kind,
+            arguments={"terminal_category": terminal_category},
+        )
+        # Resource snapshot describes the managed Ray Core pool from the unified
+        # policy, not a live ray.nodes() probe; liveness is the ResourceManager's.
+        pool = self._planning_policy.reusable_worker.scale(max(1, self._policy.max_replicas))
+        snapshot = BackendResourceSnapshot(
+            "ray", (pool,),
+            hashlib.sha256(
+                f"{self._policy.provider}:{self._policy.store_id}:{self._planning_policy.digest}".encode()
+            ).hexdigest(),
+            analysis_complete=True,
+        )
+        marker = type("Terminal", (), {})()
+        bounds = (*analyze_stage_work_units(source, plan), None)
         if isinstance(source, LanceSource):
-            options = _ray_resource_options(self._active_physical_plan.source.worker_resources)
-            options["override_num_blocks"]=self._active_physical_plan.source.max_workers
-            return ray.data.read_datasource(
-                _RayLanceDatasource(source.query),
-                parallelism=self._active_physical_plan.source.initial_workers, **options,
-            )
-        raise UnsupportedSourceError(f"RayDatasetExecutor does not support {type(source).__name__}")
-
-    @staticmethod
-    def _lower_stage_options(stage, operation):
-        resources=stage.worker_resources
-        options={}
-        if resources.cpu: options["num_cpus"]=resources.cpu
-        if resources.gpu: options["num_gpus"]=resources.gpu
-        if resources.memory_bytes: options["memory"]=resources.memory_bytes
-        if resources.custom_resources: options["resources"]=dict(resources.custom_resources)
-        if stage.traits.worker_model == "reusable":
-            from ray.data import ActorPoolStrategy
-            options["compute"]=ActorPoolStrategy(
-                min_size=stage.min_workers, initial_size=stage.initial_workers,
-                max_size=stage.max_workers,
-            )
-        else:
-            options["concurrency"]=stage.max_workers
-        return options
-
-    def _compile(self, source: SourcePlan, plan: LogicalPlan, *, action_kind="execute", terminal_category="action", terminal_native_options=None, physical_plan=None):
-        from ...data.plan import reject_streaming_map_options
-        reject_streaming_map_options(plan, 'Ray')
-        physical=physical_plan or self.plan(source,plan,action_kind,terminal_category=terminal_category,terminal_native_options=terminal_native_options)
-        self._active_physical_plan=physical
-        stages={stage.ordinal:stage for stage in physical.transforms}
-        ds = self._build_source(source)
-        for operation_index, operation in enumerate(plan.operations, start=1):
-            stage=stages[operation_index]
-            if stage.logical_node is not operation:
-                raise RuntimeError("PhysicalPlan stage does not match LogicalPlan operation")
-            options=self._lower_stage_options(stage,operation)
-            if isinstance(operation, BoundMapOp):
-                target = (
-                    _make_ray_bound_callable_class(operation)
-                    if stage.traits.worker_model == "reusable"
-                    else BoundCallable(operation)
-                )
-                ds = ds.map(target, **options)
-            elif isinstance(operation, OperatorLLMMapOp):
-                ds = ds.map(
-                    make_ray_operator_llm_callable_class(
-                        operation, operation.config, self._prompt_coordinator(operation),
-                    ),
-                    **options,
-                )
-            elif isinstance(operation, MapOp):
-                callable_target = operation.callable.target
-                if stage.traits.worker_model == "reusable":
-                    if not operation.callable.is_class:
-                        callable_target = _make_ray_callable_class(operation.callable)
-                    # Preserve Ray actor semantics for callable classes where no
-                    # field-binding wrapper is required.
-                    ds = ds.map(
-                        callable_target,
-                        fn_constructor_args=operation.callable.constructor_args,
-                        fn_constructor_kwargs=dict(operation.callable.constructor_kwargs),
-                        fn_args=operation.callable.call_args,
-                        fn_kwargs=dict(operation.callable.call_kwargs),
-                        **options,
-                    )
-                else:
-                    ds = ds.map(StandardCallable(operation.callable), **options)
-            elif isinstance(operation, FlatMapOp):
-                options = dict(options)
-                callable_target = operation.callable.target
-                if stage.traits.worker_model == "reusable":
-                    if not operation.callable.is_class:
-                        callable_target = _make_ray_callable_class(operation.callable)
-                    options["fn_constructor_args"] = operation.callable.constructor_args
-                    options["fn_constructor_kwargs"] = dict(
-                        operation.callable.constructor_kwargs
-                    )
-                ds = ds.flat_map(
-                    callable_target,
-                    fn_args=operation.callable.call_args,
-                    fn_kwargs=dict(operation.callable.call_kwargs),
-                    **options,
-                )
-            elif isinstance(operation, MapBatchesOp):
-                options = dict(options)
-                callable_target = operation.callable.target
-                if stage.traits.worker_model == "reusable":
-                    if not operation.callable.is_class:
-                        callable_target = _make_ray_callable_class(operation.callable)
-                    options["fn_constructor_args"] = operation.callable.constructor_args
-                    options["fn_constructor_kwargs"] = dict(
-                        operation.callable.constructor_kwargs
-                    )
-                ds = ds.map_batches(
-                    callable_target,
-                    batch_size=operation.batch_size,
-                    batch_format=operation.batch_format,
-                    zero_copy_batch=operation.zero_copy_batch,
-                    fn_args=operation.callable.call_args,
-                    fn_kwargs=dict(operation.callable.call_kwargs),
-                    **options,
-                )
-            elif isinstance(operation, FilterOp):
-                if stage.traits.worker_model == "reusable":
-                    callable_target = operation.callable.target
-                    if not operation.callable.is_class:
-                        callable_target = _make_ray_callable_class(operation.callable)
-                    ds = ds.filter(
-                        callable_target,
-                        fn_constructor_args=operation.callable.constructor_args,
-                        fn_constructor_kwargs=dict(
-                            operation.callable.constructor_kwargs
-                        ),
-                        fn_args=operation.callable.call_args,
-                        fn_kwargs=dict(operation.callable.call_kwargs),
-                        **options,
-                    )
-                else:
-                    ds = ds.filter(
-                        StandardCallable(operation.callable),
-                        **options,
-                    )
-            elif isinstance(operation, LimitOp):
-                ds = ds.limit(operation.limit)
-            elif isinstance(operation, SelectColumnsOp):
-                ds = ds.select_columns(list(operation.columns))
-            elif isinstance(operation, DropColumnsOp):
-                ds = ds.drop_columns(list(operation.columns))
-            elif isinstance(operation, RenameColumnsOp):
-                ds = ds.rename_columns(
-                    list(operation.names)
-                    if isinstance(operation.names, tuple)
-                    else dict(operation.names),
-                )
-            elif isinstance(operation, AddColumnOp):
-                callable_target = operation.callable.target
-                if stage.traits.worker_model == "reusable" and not operation.callable.is_class:
-                    callable_target = _make_ray_callable_class(operation.callable)
-                ds = ds.add_column(
-                    operation.column, callable_target,
-                    batch_format=operation.batch_format,
-                    **options,
-                )
-            elif isinstance(operation, RandomSampleOp):
-                ds = ds.random_sample(
-                    operation.fraction, seed=operation.seed,
-                )
-            elif isinstance(operation, SortOp):
-                ds = ds.sort(
-                    operation.keys[0]
-                    if len(operation.keys) == 1 else list(operation.keys),
-                    descending=(
-                        list(operation.descending)
-                        if isinstance(operation.descending, tuple)
-                        else operation.descending
-                    ),
-                    boundaries=(
-                        None if operation.boundaries is None
-                        else list(operation.boundaries)
-                    ),
-                )
-            elif isinstance(operation, RepartitionOp):
-                ds = ds.repartition(
-                    operation.num_blocks,
-                    operation.target_num_rows_per_block,
-                    shuffle=operation.shuffle,
-                    keys=(
-                        None if operation.keys is None
-                        else list(operation.keys)
-                    ),
-                    sort=operation.sort,
-                )
-            elif isinstance(operation, RandomShuffleOp):
-                ds = ds.random_shuffle(
-                    seed=operation.seed,
-                    num_blocks=operation.num_blocks,
-                )
-            elif isinstance(operation, RandomizeBlockOrderOp):
-                ds = ds.randomize_block_order(seed=operation.seed)
-            else:
-                raise TypeError(f"unknown logical operation: {type(operation).__name__}")
-        self._last_native = ds
-        return ds
-
-    def _chain_readback(self, source: SourcePlan):
-        # Unified-chain results are Local staging-block descriptors on the shared
-        # run directory (D3), not Ray Data datasets. Read them back through the
-        # neutral Local block reader; the default Ray Data path is untouched.
-        if self._unified_chain and isinstance(source, MaterializedSource):
-            from .local import LocalDatasetExecutor, _LocalMaterializedHandle
-            if isinstance(source.handle, _LocalMaterializedHandle):
-                cached = getattr(self, "_chain_local_reader", None)
-                if cached is None:
-                    cached = LocalDatasetExecutor(workers=1)
-                    self._chain_local_reader = cached
-                return cached
-        return None
+            from ...lance.model import LanceScanSpec
+            leading_limit = analyze_source_constraints(plan).row_limit
+            if not isinstance(source.query, LanceScanSpec) or source.query.limit is not None or leading_limit is not None:
+                source_parallelism_cap = 1
+        caps = stage_parallelism_caps(plan, source_cap=source_parallelism_cap, terminal_cap=terminal_parallelism_cap)
+        return plan_action(
+            backend="ray", action_kind=action_kind, source=source,
+            operations=plan.operations, terminal_node=marker,
+            terminal_traits=terminal_traits(terminal_category),
+            policy=self._planning_policy, snapshot=snapshot,
+            work_units_by_stage=bounds, terminal_native_options=terminal_native_options,
+            parallelism_caps_by_stage=caps,
+        )
 
     def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[dict[str, Any]]:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.iter_rows(source, plan)
-        return self._compile(source, plan, action_kind="iter_rows").iter_rows()
+        return self._execute(source, plan, "iter_rows", {})
 
     def iter_batches(
         self, source: SourcePlan, plan: LogicalPlan, *, prefetch_batches: int = 1,
         batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
     ) -> Iterable[Any]:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.iter_batches(source, plan, prefetch_batches=prefetch_batches,
-                batch_size=batch_size, batch_format=batch_format, drop_last=drop_last)
-        return self._compile(source, plan, action_kind="iter_batches").iter_batches(
-            prefetch_batches=prefetch_batches,
-            batch_size=batch_size,
-            batch_format=batch_format,
-            drop_last=drop_last,
-        )
+        return self._execute(source, plan, "iter_batches", {
+            "prefetch_batches": prefetch_batches, "batch_size": batch_size,
+            "batch_format": batch_format, "drop_last": drop_last,
+        })
 
     def materialize(self, source: SourcePlan, plan: LogicalPlan) -> Any:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.materialize(source, plan)
-        native = self._compile(source, plan, action_kind="materialize").materialize()
-        self._last_native = native
-        return native
+        return self._execute(source, plan, "materialize", {})
 
     def materialize_stream(self, dataset, *, source=None, plan=None):
-        # Platform-side unified-chain seam (D5): selected explicitly, the whole
-        # operator chain runs in one Ray Core actor host via execution/chain.py,
-        # never through Ray Data. The default Ray Data path is unchanged.
-        if self._unified_chain:
-            from ..chain import run_ray_chain
-            return run_ray_chain(self, dataset, source=source, plan=plan)
-        raise NotImplementedError("async materialize is only supported by the local executor")
+        selected_source = source if source is not None else dataset._source
+        selected_plan = plan if plan is not None else dataset._plan
+        return self._execute(selected_source, selected_plan, "materialize", {})
 
     def materialize_graph(self, graph_spec):
-        """Opt-in static multi-worker graph entry on Ray Core (U3/S5, D6).
-
-        Parallel to the Local ``materialize_graph`` seam; the default Ray Data path
-        is untouched. Runs the whole graph in independent Ray actor hosts; business
-        payloads flow worker->worker over Ray channel actors / ray_object plasma and
-        never transit the driver. Requires the native action context.
-        """
-        from ..graph import run_ray_graph
-        from ..run_context import current_action
-        if current_action() is None:
-            raise RuntimeError("Graph materialization requires the native action context")
-        self._ensure_ray()
-        return run_ray_graph(graph_spec)
+        # Translate the explicit fan-out declaration to the standard v3 entry; the
+        # full graph_spec->DataflowGraph lowering is the F lane seam (F012/F018).
+        source = graph_spec["source"]
+        plan = graph_spec["ancestor"]["plan"]
+        arguments: dict[str, Any] = {
+            "routing": graph_spec.get("routing", "broadcast"),
+            "exchange_mode": graph_spec.get("exchange_mode", "memory_incremental"),
+        }
+        for key in ("key_fields", "target_field"):
+            if graph_spec.get(key) is not None:
+                arguments[key] = graph_spec[key]
+        return self._execute(source, plan, "materialize", arguments)
 
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,
     ) -> list[dict[str, Any]]:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.take(source, plan, limit)
-        # Bounded collection is a native Ray Data action. Keep iterator
-        # lifecycle and early-stop cleanup inside the Ray backend.
-        return self._compile(source, plan, action_kind="take").take(limit)
+        return self._execute(source, plan, "take", {"limit": limit})
 
     def take_batch(
         self, source: SourcePlan, plan: LogicalPlan, batch_size: int,
         *, batch_format: str,
     ) -> Any:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.take_batch(source, plan, batch_size, batch_format=batch_format)
-        return self._compile(source, plan, action_kind="take_batch").take_batch(
-            batch_size, batch_format=batch_format,
-        )
+        return self._execute(source, plan, "take_batch", {
+            "batch_size": batch_size, "batch_format": batch_format,
+        })
 
     def count(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.count(source, plan)
-        return self._compile(source, plan, action_kind="count").count()
+        return self._execute(source, plan, "count", {})
 
     def aggregate(
         self, source: SourcePlan, plan: LogicalPlan,
         aggregates: tuple[Any, ...],
     ) -> Any:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.aggregate(source, plan, aggregates)
-        native = self._compile(source, plan, action_kind="aggregate")
-        for aggregate in aggregates:
-            try:
-                ray.cloudpickle.dumps(aggregate)
-            except Exception as exc:
-                raise AggregateSerializationError(
-                    f"aggregation {aggregate.name!r} is not serializable: {exc}"
-                ) from exc
-            _validate_ray_aggregate_value(
-                aggregate.initial_state(), aggregate.name,
-                self._aggregate_state_max_bytes, "state",
-            )
-        return native.aggregate(*(
-            _ray_aggregate(aggregate, self._aggregate_state_max_bytes)
+        # Aggregate callables travel as process-in program declarations (C16), not
+        # serialized arguments; the engine enforces the state budget via bounds.
+        programs = tuple(
+            ActionProgram(name=aggregate.name, kind="aggregate", value=aggregate)
             for aggregate in aggregates
-        ))
+        )
+        return self._execute(
+            source, plan, "aggregate",
+            {"names": [aggregate.name for aggregate in aggregates]},
+            programs=programs,
+        )
 
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.schema(source, plan, fetch_if_missing=fetch_if_missing)
-        return self._compile(source, plan, action_kind="schema").schema(fetch_if_missing=fetch_if_missing)
+        return self._execute(source, plan, "schema", {"fetch_if_missing": fetch_if_missing})
 
     def columns(
         self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool,
     ) -> list[str] | None:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.columns(source, plan, fetch_if_missing=fetch_if_missing)
-        return self._compile(source, plan, action_kind="columns").columns(
-            fetch_if_missing=fetch_if_missing,
-        )
+        return self._execute(source, plan, "columns", {"fetch_if_missing": fetch_if_missing})
 
     def size_bytes(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.size_bytes(source, plan)
-        return int(self._compile(source, plan, action_kind="size_bytes").size_bytes())
+        return int(self._execute(source, plan, "size_bytes", {}))
 
     def num_blocks(self, source: SourcePlan, plan: LogicalPlan) -> int:
         if not isinstance(source, MaterializedSource) or not plan.is_empty:
             raise TypeError("num_blocks is only available on MaterializedDataset")
-        local = self._chain_readback(source)
-        if local is not None:
-            return local.num_blocks(source, plan)
         return int(source.handle.num_blocks())
 
     def stats(self, source: SourcePlan, plan: LogicalPlan) -> str:
-        native = self._last_native
-        if native is None:
-            return f"Dataset({type(source).__name__}, operations={len(plan.operations)}, not executed)"
-        return native.stats()
+        for result in reversed(self._results):
+            stats = getattr(result, "stats", None)
+            if callable(stats):
+                return str(stats())
+        return f"Dataset({type(source).__name__}, operations={len(plan.operations)}, not executed)"
 
     def execution_metadata(self, source: SourcePlan, plan: LogicalPlan) -> ExecutionMetadata | None:
+        for result in reversed(self._results):
+            metadata = getattr(result, "execution_metadata", None)
+            if callable(metadata):
+                return metadata()
+            if isinstance(metadata, ExecutionMetadata):
+                return metadata
         return None
 
     def write_datasink(
         self, source: SourcePlan, plan: LogicalPlan, datasink: Datasink,
         *, native_options=None,
     ) -> DemiflowWriteResult:
-        try:
-            physical=self.plan(source,plan,"write_datasink",terminal_category="sink",terminal_native_options=native_options)
-            terminal=physical.terminal
-            options=_stage_sink_options(terminal)
-            self._active_physical_plan=physical
-            self._compile(source, plan, action_kind="write_datasink", terminal_category="sink",terminal_native_options=native_options,physical_plan=physical).write_datasink(
-                _RayDatasinkAdapter(datasink),
-                **options,
-            )
-            result = DemiflowWriteResult(
-                written_rows=None, failed_rows=None, blocks_written=None,
-                target="", metadata={"backend": self.NAME},
-            )
-            datasink.on_write_complete(result)
-            return result
-        except Exception as exc:
-            try:
-                datasink.on_write_failed(exc)
-            except Exception:
-                pass
-            raise
+        arguments: dict[str, Any] = {}
+        if native_options is not None:
+            arguments["native_options"] = native_options
+        return self._execute(source, plan, "write_datasink", arguments, sink=datasink)
 
     def write_lance(self, source, plan, spec, *, native_options=None):
-        # 覆盖和部分列 merge 由单个 writer 一次提交；显式 schema 同样集中转换。
-        if spec.expected_version is None or spec.mode != "append" or spec.schema is not None:
-            return self._write_lance_direct(
-                source, plan, spec, native_options=native_options,
-            )
-        physical=self.plan(
-            source,plan,"write_lance",terminal_category="sink",
-            terminal_native_options=native_options,
-        )
-        from ...lance.write import prepare_lance_append
-        prepared = prepare_lance_append(spec)
-        if prepared is None:
-            raise AssertionError("expected-version Lance append was not prepared")
-        adapter = _RayLanceFragmentWriteSink(prepared)
-        options=_stage_sink_options(physical.terminal)
-        self._compile(source, plan, action_kind="write_lance", terminal_category="sink",terminal_native_options=native_options,physical_plan=physical).write_datasink(adapter.ray_datasink(), **options)
-        if adapter.receipt is None:
-            raise RuntimeError("Ray Lance distributed write returned no receipt")
-        return adapter.receipt
-
-    def _write_lance_direct(
-        self, source, plan, spec, *, native_options=None,
-    ):
-        adapter = _RayLanceDirectWriteSink(spec)
-        physical=self.plan(
-            source,plan,"write_lance",terminal_category="sink",
-            terminal_native_options=native_options,terminal_parallelism_cap=1,
-        )
-        options=_stage_sink_options(physical.terminal)
-        self._compile(
-            source, plan, action_kind="write_lance", terminal_category="sink",
-            terminal_native_options=native_options, physical_plan=physical,
-        ).repartition(1).write_datasink(
-            adapter.ray_datasink(), **options,
-        )
-        if adapter.receipt is None:
-            raise RuntimeError("Ray Lance direct write returned no receipt")
-        return adapter.receipt
+        arguments: dict[str, Any] = {}
+        if native_options is not None:
+            arguments["native_options"] = native_options
+        programs = (ActionProgram(name="write_lance", kind="sink", value=spec),)
+        return self._execute(source, plan, "write_lance", arguments, programs=programs)
 
     def write_file(
         self, source: SourcePlan, plan: LogicalPlan, format_name: str,
         path: str, options: dict[str, Any],
     ) -> DemiflowWriteResult:
-        native_options=options.pop("_demiflow_native_options",None)
-        physical=self.plan(source,plan,f"write_{format_name}",terminal_category="sink",terminal_native_options=native_options)
-        native = self._compile(source, plan, action_kind=f"write_{format_name}", terminal_category="sink",terminal_native_options=native_options,physical_plan=physical)
-        method = getattr(native, f"write_{format_name}", None)
-        if method is None:
-            raise UnsupportedSourceError(f"RayDatasetExecutor does not support write_{format_name}")
-        method(path, **options, **_stage_sink_options(physical.terminal))
-        return DemiflowWriteResult(
-            written_rows=None, failed_rows=None, blocks_written=None,
-            target="", metadata={"format": format_name},
-        )
+        options = dict(options)
+        native_options = options.pop("_demiflow_native_options", None)
+        arguments: dict[str, Any] = {
+            "format": format_name, "path": path, "options": options,
+        }
+        if native_options is not None:
+            arguments["native_options"] = native_options
+        return self._execute(source, plan, "write_file", arguments)
 
     def close(self) -> None:
-        pass
+        # Release only the handles this executor owns; other runs keep their pins.
+        errors: list[BaseException] = []
+        for handle in self._handles:
+            release = getattr(handle, "release", None)
+            close = getattr(handle, "close", None)
+            try:
+                if callable(release):
+                    release()
+                elif callable(close):
+                    close()
+            except BaseException as exc:  # noqa: BLE001 - aggregate, never swallow
+                errors.append(exc)
+        self._handles.clear()
+        self._results.clear()
+        self._closed = True
+        if errors:
+            raise errors[0]
 
 
-def make_ray_operator_llm_callable_class(operation, config, coordinator):
-    class RayOperatorLLMCallable:
-        def __init__(self):
-            self._bound = BoundOperatorLLMMap(
-                operation, OperatorLLMRuntime(config, coordinator, operation.options),
-            )
-
-        def __call__(self, row):
-            return self._bound(row)
-
-    RayOperatorLLMCallable.__name__ = f"OperatorLLM{operation.prompt_name}"
-    RayOperatorLLMCallable.__qualname__ = RayOperatorLLMCallable.__name__
-    return RayOperatorLLMCallable
-
-
-def _make_ray_bound_callable_class(operation):
-    """Create the class-shaped UDF required by a validated reusable stage."""
-    class RayFieldBoundCallable:
-        def __init__(self):
-            self._runtime = BoundCallable(operation)
-
-        def __call__(self, row):
-            return self._runtime(row)
-
-    RayFieldBoundCallable.__name__ = f"Bound{operation.callable.name}"
-    RayFieldBoundCallable.__qualname__ = RayFieldBoundCallable.__name__
-    return RayFieldBoundCallable
-
-
-def _make_ray_callable_class(spec):
-    """Class-shape a function only for an explicit reusable PhysicalStage."""
-    class RayReusableCallable:
-        def __init__(self):
-            self._target = spec.target
-
-        def __call__(self, value, *args, **kwargs):
-            return self._target(value, *args, **kwargs)
-
-    RayReusableCallable.__name__ = f"Reusable{spec.name}"
-    RayReusableCallable.__qualname__ = RayReusableCallable.__name__
-    return RayReusableCallable
-
-
-class _RayOperatorLLMCoordinatorProxy:
-    def __init__(self, actor) -> None:
-        self._actor = actor
-
-    def attempted(self):
-        return ray.get(self._actor.attempted.remote())
-
-    def reserve(self):
-        return ray.get(self._actor.reserve.remote())
-
-    def started(self, value):
-        return ray.get(self._actor.started.remote(value))
-
-    def completed(self, value, response):
-        return ray.get(self._actor.completed.remote(value, response))
-
-    def failed(self, value, response=None):
-        return ray.get(self._actor.failed.remote(value, response))
-
-    def usage(self):
-        return OperatorLLMUsage(**ray.get(self._actor.usage.remote()))
-
-
-def _ray_operator_llm_coordinator_class():
-    import uuid
-
-    @ray.remote(num_cpus=0)
-    class RayOperatorLLMCoordinator:
-        def __init__(self, max_requests=None):
-            self.max_requests = max_requests
-            self.values = {
-                "calls_attempted": 0,
-                "requests_reserved": 0,
-                "requests_started": 0,
-                "requests_completed": 0,
-                "requests_failed": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-            }
-            self.reservations = set()
-
-        def attempted(self):
-            self.values["calls_attempted"] += 1
-
-        def reserve(self):
-            from ...operator_llm.errors import PromptBudgetExceededError
-            if self.max_requests is not None and self.values['requests_reserved'] >= self.max_requests:
-                raise PromptBudgetExceededError('Operator LLM request budget exhausted')
-            value = "operator-llm-" + uuid.uuid4().hex
-            self.reservations.add(value)
-            self.values["requests_reserved"] += 1
-            return value
-
-        def started(self, value):
-            self._require(value)
-            self.values["requests_started"] += 1
-
-        def completed(self, value, response):
-            self._finish(value, "requests_completed", response)
-
-        def failed(self, value, response=None):
-            self._finish(value, "requests_failed", response)
-
-        def _finish(self, value, field, response):
-            self._require(value)
-            self.reservations.remove(value)
-            self.values[field] += 1
-            if response and response.usage:
-                self.values["input_tokens"] += response.usage.input_tokens
-                self.values["output_tokens"] += response.usage.output_tokens
-
-        def usage(self):
-            return dict(self.values)
-
-        def _require(self, value):
-            if value not in self.reservations:
-                raise RuntimeError("unknown Operator LLM reservation")
-
-    return RayOperatorLLMCoordinator
-
-
-def _ray_aggregate(aggregate, state_max_bytes):
-    """Lower one backend-neutral aggregate through Ray's public V2 contract."""
-    from ray.data.aggregate import AggregateFnV2 as RayAggregateFnV2
-
-    class RayAggregateAdapter(RayAggregateFnV2):
-        def __init__(self):
-            self._demiflow = aggregate
-            super().__init__(
-                aggregate.name,
-                aggregate.create_zero,
-                on=aggregate.get_target_column(),
-                ignore_nulls=aggregate.ignore_nulls,
-            )
-
-        def aggregate_block(self, block):
-            from ...data.aggregate import normalize_block
-            value = self._demiflow.aggregate_block(normalize_block(block))
-            _validate_ray_aggregate_value(
-                value, self._demiflow.name, state_max_bytes, "state",
-            )
-            return value
-
-        def combine(self, current_accumulator, new):
-            value = self._demiflow.combine(current_accumulator, new)
-            _validate_ray_aggregate_value(
-                value, self._demiflow.name, state_max_bytes, "state",
-            )
-            return value
-
-        def finalize(self, accumulator):
-            value = self._demiflow.finalize(accumulator)
-            _validate_ray_aggregate_value(
-                value, self._demiflow.name, state_max_bytes, "result",
-            )
-            return value
-
-    RayAggregateAdapter.__name__ = f"Ray{type(aggregate).__name__}"
-    RayAggregateAdapter.__qualname__ = RayAggregateAdapter.__name__
-    return RayAggregateAdapter()
-
-
-def _validate_ray_aggregate_value(value, name, limit, kind):
-    try:
-        raw = ray.cloudpickle.dumps(value)
-    except Exception as exc:
-        raise AggregateSerializationError(
-            f"{kind} for aggregation {name!r} is not serializable: {exc}"
-        ) from exc
-    if len(raw) > limit:
-        raise AggregateStateLimitExceeded(
-            f"{kind} for aggregation {name!r} exceeds {limit} bytes"
-        )
-
-def _stage_sink_options(stage):
-    resources=stage.worker_resources
-    remote={}
-    if resources.cpu: remote["num_cpus"]=resources.cpu
-    if resources.gpu: remote["num_gpus"]=resources.gpu
-    if resources.memory_bytes: remote["memory"]=resources.memory_bytes
-    if resources.custom_resources: remote["resources"]=dict(resources.custom_resources)
-    return {"concurrency":stage.max_workers,"ray_remote_args":remote}
-
-def _ray_resource_options(resources):
-    options={}
-    if resources.cpu: options["num_cpus"]=resources.cpu
-    if resources.gpu: options["num_gpus"]=resources.gpu
-    if resources.memory_bytes: options["memory"]=resources.memory_bytes
-    if resources.custom_resources: options["ray_remote_args"]={"resources":dict(resources.custom_resources)}
-    return options
+def _validate_block_hint(override_num_blocks: int | None) -> None:
+    if override_num_blocks is None:
+        return
+    if not isinstance(override_num_blocks, int) or isinstance(override_num_blocks, bool) or override_num_blocks < 1:
+        raise ValueError("override_num_blocks must be a positive integer or None")
