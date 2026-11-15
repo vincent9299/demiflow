@@ -33,7 +33,7 @@ _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown
 _ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "begin_staging", "prepare_staging", "grow_staging", "settle_staging", "release_staging"})
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
-                         "references", "media_references", "bind_membership", "stage_image", "offline_lookup", "stream_lance"})
+                         "references", "media_references", "bind_membership", "stage_image", "offline_lookup", "stream_lance", "batch_membership"})
 _COMMAND_KINDS = frozenset({"effect", "reserve", "artifact", "queue", "native_request",
                             "read_action", "read_configuration", "restrict_recovery", "check_grant"})
 _EFFECT_STATES = ("absent", "reserved", "sent", "confirmed", "unknown", "unsent")
@@ -560,6 +560,9 @@ class DriverJournalService:
         request = self._native_request(command)
         if request.request_key != command.request_key:
             raise DataflowError("INVALID_CONTRACT", "native request_key does not match the request")
+        if command.operation == 'batch_membership':
+            from .dataflow_batch_membership import request as batch_membership
+            return batch_membership(self, command, request)
         if command.operation == 'stream_lance':
             service = getattr(self, '_stream_lance', None)
             if service is None:

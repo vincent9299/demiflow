@@ -387,6 +387,8 @@ class DataflowExecution:
                 self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure_searches(self._request.source, self._request.plan, graph)
             self._services.journal_service.bind_queue(self._acquisition)
+        from .dataflow_batch_membership import bind_contracts
+        bind_contracts(self._services.journal_service, graph, physical)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
             from .dataflow_stream_lance import NativeStreamLanceService

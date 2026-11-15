@@ -115,7 +115,9 @@ def declaration(operation, actor):
     value = {name:getattr(actor,name) for name in ('uri','stage','output_ref','mode',
         'max_rows','max_row_bytes','max_key_bytes','max_index_bytes')}
     value['key'] = list(actor.key) if isinstance(actor.key,tuple) else [actor.key]
-    value['schema'] = actor.schema.serialize().to_pybytes().hex()
+    from .record_schema import encode_schema
+    from .dataflow_api import _PREFLIGHT_BOUNDS
+    value['schema'] = encode_schema(actor.schema,bounds=_PREFLIGHT_BOUNDS).hex()
     value['max_batch'] = operation.max_batch
     return value
 
@@ -210,8 +212,10 @@ class _NativeWriter(StreamLanceWriter):
         import lance
         from .lance_predicate import scalar_equal
         from .stream_grouping import row_size
+        input_bytes=sum(row_size(row,min(self.max_row_bytes,self.bounds.max_row_bytes)) for row in rows)
+        if input_bytes>self.bounds.max_batch_bytes:
+            raise DataflowError('BUDGET_EXCEEDED','Stream writer retained rows exceed native batch budget')
         projected=[{key:rows[index].get(key) for key in self.schema.names} for index in selected]
-        for row in projected:row_size(row,self.max_row_bytes)
         keys=[tuple(row[k] for k in self.key) for row in projected]
         digests=[self.key_digest(key) for key in keys]
         known=[self._contains(digest) for digest in digests]
@@ -231,8 +235,8 @@ class _NativeWriter(StreamLanceWriter):
             else:fresh.append(row);additions.append(digest);indices.append(input_index)
         if self.rows+len(fresh)>self.max_rows:raise ValueError('stream snapshot exceeds max_rows')
         table=pa.Table.from_pylist(fresh,schema=self.schema)
-        if table.nbytes>self.bounds.max_batch_bytes:
-            raise DataflowError('BUDGET_EXCEEDED','Stream write batch exceeds native batch budget')
+        if input_bytes+table.get_total_buffer_size()>self.bounds.max_batch_bytes:
+            raise DataflowError('BUDGET_EXCEEDED','Stream writer Python rows and Arrow coexistence exceed native batch budget')
         self._remember(additions)  # Reserve derived index capacity before publication.
         return table,indices
 
@@ -315,12 +319,31 @@ class NativeStreamLanceService:
             self.run.journal.bind_source(self.run.fence,self.action.action_id+'-stream-lance',
                 {'schema':SCHEMA,'nodes':sorted(self.writers)})
 
-    def _scopes(self):
+    def _scopes(self,node):
+        # The original table remains the authority. Its expression index orders
+        # bounded pages without materializing every saved request in Python.
         with self.run.journal._connection() as db:
-            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_commit_scopes'").fetchone():return []
-            return [(key,json.loads(value)) for key,value in db.execute(
-                'SELECT scope_id,declaration FROM runtime_commit_scopes WHERE parent_action_id=?',
-                (self.action.action_id,)) if json.loads(value).get('schema')==SCHEMA]
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_commit_scopes'").fetchone():return
+        ordinal="CAST(json_extract(declaration,'$.request.ordinal') AS INTEGER)"
+        owner="json_extract(declaration,'$.node_id')"
+        with self.run.journal.execution_guard(self.run.fence) as db:
+            db.execute('CREATE INDEX IF NOT EXISTS runtime_stream_lance_order ON runtime_commit_scopes '
+                       '(parent_action_id,'+owner+','+ordinal+',scope_id)')
+        previous=(-1,'');count=0
+        while True:
+            with self.run.journal._connection() as db:
+                row=db.execute('SELECT scope_id,declaration,'+ordinal+' FROM runtime_commit_scopes '
+                    'WHERE parent_action_id=? AND '+owner+"=? AND json_extract(declaration,'$.schema')=? "
+                    'AND ('+ordinal+'>? OR ('+ordinal+'=? AND scope_id>?)) '
+                    'ORDER BY '+ordinal+',scope_id LIMIT 1',
+                    (self.action.action_id,node,SCHEMA,previous[0],previous[0],previous[1])).fetchone()
+            if row is None:return
+            key,raw,current=row;count+=1
+            if (type(current) is not int or current<0 or count>self.run.limits['max_commits']
+                    or len(raw.encode())>min(65536,self.bounds.max_control_bytes)):
+                raise DataflowError('CORRUPT_ARTIFACT','Native stream scope exceeds bounded recovery contract')
+            previous=(current,key)
+            yield key,json.loads(raw)
 
     def _scope(self, key):
         with self.run.journal._connection() as db:
@@ -337,13 +360,10 @@ class NativeStreamLanceService:
     def start(self):
         if self.started:return
         self.started=True
-        scopes=self._scopes()
         for node,writer in self.writers.items():
             writer.start(node)
-            owned=sorted(((key,d) for key,d in scopes if d['node_id']==node),
-                         key=lambda item:(item[1]['request']['ordinal'],item[1]['request']['finish']))
             latest=None
-            for key,decl in owned:
+            for key,decl in self._scopes(node):
                 coordinator,sink=self._coordinator(key,decl)
                 facts=coordinator.recover({'lance':sink})
                 for fact in facts:

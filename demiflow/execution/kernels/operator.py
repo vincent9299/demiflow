@@ -232,6 +232,9 @@ class OperatorKernel:
         }
         self._port_order = tuple(port.name for port in spec.inputs)
         self._batch: list[Record] = []
+        self._batch_deadline = None
+        self._batch_ordinal = 0
+        self._batch_membership = None
         self._max_batch = int(spec.configuration.get("batch_size") or spec.configuration.get("max_batch") or spec.configuration.get("default_batch_size") or 256)
         self._groups: dict[str, list[dict[str, Any]]] = {}
         self._group_base: dict[str, dict[str, Any]] = {}
@@ -290,6 +293,9 @@ class OperatorKernel:
                 if self._concurrency > 1:
                     from .concurrent_calls import ConcurrentCalls
                     self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop)
+            from ..dataflow_batch_membership import KINDS, NativeBatchMembership
+            if self._spec.kind in KINDS:
+                self._batch_membership = NativeBatchMembership(self._services,self._occurrence,self._partition_id)
             if self._image is not None:
                 self._apply_image(self._image)
             self._started = True
@@ -387,6 +393,12 @@ class OperatorKernel:
         return not self.pending_calls or self.can_snapshot_pending
 
     def poll(self):
+        if self._batch and self._batch_deadline is not None and self._services.clock_ms() >= self._batch_deadline:
+            expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
+            if expected is None:
+                batch, self._batch = tuple(self._batch), []
+                self._batch_deadline = None
+                yield from self._invoke_batch(batch)
         if self._calls is not None:
             yield from self._emit(self._calls.poll(max_records=1))
 
@@ -499,19 +511,35 @@ class OperatorKernel:
         return record
 
     def _push_batch(self, record: Record) -> Iterator[Record]:
+        expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
         if self._batch and (self._batch[0].schema_ref != record.schema_ref
                             or self._batch[0].block_partition != record.block_partition):
+            if expected is not None:
+                raise _err('INCOMPATIBLE_HISTORY', 'Native replay batch schema or block changed')
             batch, self._batch = tuple(self._batch), []
+            self._batch_deadline = None
             yield from self._invoke_batch(batch)
+            expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
+        if expected is not None:
+            from ..dataflow_batch_membership import member
+            index=len(self._batch)
+            if index >= len(expected) or member(record,self._services.bounds) != expected[index]:
+                raise _err('INCOMPATIBLE_HISTORY','Native replay batch changed original record membership or payload')
         if sum(r.encoded_bytes for r in self._batch) + record.encoded_bytes > self._services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "declared business batch exceeds max_batch_bytes")
+        if not self._batch:
+            interval=self._spec.configuration.get('flush_interval')
+            self._batch_deadline=(self._services.clock_ms()+max(1,int(float(interval)*1000))) if interval else None
         self._batch.append(record)
-        if len(self._batch) >= self._max_batch:
-            batch = tuple(self._batch)
-            self._batch = []
+        if len(self._batch) >= (len(expected) if expected is not None else self._max_batch):
+            batch, self._batch = tuple(self._batch), []
+            self._batch_deadline = None
             yield from self._invoke_batch(batch)
 
     def _invoke_batch(self, batch):
+        if self._batch_membership is not None:
+            self._batch_membership.bind(self._batch_ordinal,batch)
+        self._batch_ordinal += 1
         if self._calls is None:
             yield from self._emit(preserve_block(invoke_batch(self._spec, batch,
                 instance=self._slot_instance(0), services=self._services, schemas=self._schemas), batch[0].block_partition))
@@ -595,6 +623,7 @@ class OperatorKernel:
             if self._batch:
                 batch = tuple(self._batch)
                 self._batch = []
+                self._batch_deadline = None
                 yield from self._invoke_batch(batch)
         elif kind in _STREAM_GROUP_KINDS:
             for key in list(self._groups):
@@ -684,6 +713,9 @@ class OperatorKernel:
             "state": None if completed_task else (worker_states[0] if worker_states else self._snapshot_state()),
             "ports": {name: port.snapshot() for name, port in self._ports.items()},
             "batch": list(self._batch),
+            "batch_ordinal": self._batch_ordinal,
+            "batch_remaining_ms": (max(0,self._batch_deadline-self._services.clock_ms())
+                if self._batch_deadline is not None else None),
             "groups": {key: list(value) for key, value in self._groups.items()},
             "group_base": {key: dict(value) for key, value in self._group_base.items()},
             "timer_deadline": self._timer_deadline,
@@ -791,6 +823,17 @@ class OperatorKernel:
             if name in self._ports:
                 self._ports[name].restore(snap)
         self._batch = list(image["batch"])
+        self._batch_ordinal = image.get('batch_ordinal',image.get('call_ordinal',0))
+        if type(self._batch_ordinal) is not int or self._batch_ordinal < 0:
+            raise _err('CORRUPT_ARTIFACT','Invalid native batch cursor')
+        remaining=image.get('batch_remaining_ms')
+        interval=self._spec.configuration.get('flush_interval')
+        maximum=max(1,int(float(interval)*1000)) if interval else None
+        if self._batch and maximum is not None and remaining is None:
+            raise _err('INCOMPATIBLE_HISTORY','Pending timed batch has no original relative timer evidence')
+        if remaining is not None and (type(remaining) is not int or maximum is None or not 0<=remaining<=maximum):
+            raise _err('CORRUPT_ARTIFACT','Invalid relative batch timer')
+        self._batch_deadline=(self._services.clock_ms()+remaining) if remaining is not None else None
         self._groups = {key: list(value) for key, value in image["groups"].items()}
         self._group_base = {key: dict(value) for key, value in image["group_base"].items()}
         self._timer_deadline = image["timer_deadline"]

@@ -219,3 +219,13 @@ def test_cancel_preserves_only_acknowledged_microbatches_and_releases_writer_loc
     assert any(f['status']=='acked' for f in facts)
     assert not any(decl['request']['finish'] for _,decl in scopes(run))
     with run_lock(target.with_suffix('.stream-writer')):pass
+
+
+def test_native_arrow_conversion_rejects_coexisting_copies_before_overwrite(tmp_path):
+    schema=pa.schema([('id',pa.string()),('value',pa.large_string())]);target=tmp_path/'bounded.lance'
+    lance.write_dataset(pa.Table.from_pylist([{'id':'old','value':'preserved'}],schema=schema),str(target),mode='create')
+    with pytest.raises(Exception,match='coexistence'):
+        with RunContext.start(tmp_path/'run',limits={'max_row_bytes':12288,'max_batch_bytes':16384}),data.local_execution():
+            data.from_items([{'id':'a','value':'x'*10000}]).save_lance(target,schema=schema,key='id',stage='out',max_batch=1).run_stream()
+    assert lance.dataset(str(target)).version==1
+    assert lance.dataset(str(target)).to_table().to_pylist()==[{'id':'old','value':'preserved'}]
