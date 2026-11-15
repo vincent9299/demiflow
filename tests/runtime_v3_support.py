@@ -797,7 +797,11 @@ def _s_no_ray_data(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 def _s_api_matrix(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
     from runtime_v3_api_scenarios import api_matrix
-    evidence = api_matrix(fx, fault)
+    if fx.provider == 'ray_core':
+        from runtime_v3_ray_matrix_process import run_ray_api_matrix
+        evidence = run_ray_api_matrix(fx, fault)
+    else:
+        evidence = api_matrix(fx, fault)
     assert evidence['api_count'] == 98 and len(evidence['api']) == 98
     assert not evidence['failed'], {key: value['failed'] for key, value in evidence['failed'].items()}
     if evidence['not_run']:
