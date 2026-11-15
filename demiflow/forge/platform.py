@@ -21,7 +21,7 @@ from .schema import ForgeError
 
 PUBLIC_MODULES = (
     "demiflow", "demiflow.data", "demiflow.operator_llm", "demiflow.agent",
-    "demiflow.inference", "demiflow.services", "demiflow.objects",
+    "demiflow.inference", "demiflow.services", "demiflow.objects", "demiflow.embeddings",
     "demiflow.collect.raw_contract", "demiflow.secrets", "demiflow.queue",
 )
 LIMITS = {
@@ -130,8 +130,19 @@ def _signature(value, kind, maximum):
         if p.default is not p.empty:
             from ..data.callable_contract import default_value
 
-            item["default"] = _literal(p.default)
-            item["default_value"] = default_value(p.default)
+            declared_default = p.default
+            semantics = vars(value).get('__demiflow_flow__') if kind == 'class' else None
+            if type(semantics) is dict and semantics.get('role') == 'value':
+                # Builtin container factories of explicitly declared platform
+                # values are passive defaults. Never invoke a custom factory.
+                import dataclasses
+                declared_fields = vars(value).get('__dataclass_fields__')
+                declared = declared_fields.get(p.name) if type(declared_fields) is dict else None
+                if (type(declared) is dataclasses.Field and p.default is dataclasses._HAS_DEFAULT_FACTORY
+                        and any(declared.default_factory is factory for factory in (dict, list, tuple))):
+                    declared_default = {} if declared.default_factory is dict else [] if declared.default_factory is list else ()
+            item["default"] = _literal(declared_default)
+            item["default_value"] = default_value(declared_default)
             label += " = " + item["default"]
         parts.append(label)
         if positional_only and p.name == positional_only[-1]:

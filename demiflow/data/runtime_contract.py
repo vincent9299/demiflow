@@ -89,6 +89,8 @@ def check_value(value, expected, label, depth=0):
                 check_value(child, expected['value'], label + '.value', depth + 1)
         return
     if kind in {'list', 'tuple'} and type(value) is (list if kind == 'list' else tuple):
+        if 'length' in expected and len(value) != expected['length']:
+            raise RuntimeContractError(label + ': sequence length differs from native declaration')
         for child in value:
             check_value(child, expected['item'], label + '[]', depth + 1)
         return

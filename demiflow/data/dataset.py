@@ -15,6 +15,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from .flow_contract import flow_api as _flow_api
 from . import flow_grouping as _flow_grouping
+from ..embeddings import authoring as _embedding_authoring
 from ..operator_llm.flow_contract import normalize_prompt as _normalize_prompt, prompt_resources as _prompt_resources, analyze_prompt as _analyze_prompt
 from ..lance.flow_contract import normalize_lookup as _normalize_lookup, lookup_resources as _lookup_resources, analyze_lookup as _analyze_lookup
 from ..lance.flow_contract import normalize_save as _normalize_save, analyze_save as _analyze_save
@@ -1426,6 +1427,9 @@ class Dataset:
         return Dataset(self._source, self._plan.append(typed), self._executor,
                        declared._stages)
 
+    @_flow_api("embeddings", datasets=("self",), effects=("network",), execution="stream",
+               normalize=_embedding_authoring.normalize_embedding,
+               analyze=_embedding_authoring.analyze_embedding)
     def map_embeddings(
         self, *, model, inputs, output='embedding', batch_size=16,
         concurrency=1, queue_depth=None, flush_interval=None, prefetch_batches=0,

@@ -1,0 +1,47 @@
+{
+  "base_head": "96c6d4bd049d50b644d0deb02bd7114b845aa931",
+  "branch": "engine/gpt-v3-artifact-recovery-20261115",
+  "inputs": {
+    "demiflow/data/dataset.py": "aaa1ddb622eca5fc73f0d5f32fa75ad07c28153cce05a15dd2fbe917109e055e",
+    "demiflow/data/flow_contract.py": "22522af4222ff360134200c571dd9f6312a5f552ba138bb8a4f7e2950d807e3f",
+    "demiflow/data/runtime_contract.py": "6ec202693d9654e5dcf06353fd15e22bb627a52e0cf9e668d6dba05899ff8cbc",
+    "demiflow/embeddings/authoring.py": "3dfdb3fe66ebfd007baba1b57ba6709b6ec3c1a4bed72e1b03e89816ae3a7df1",
+    "demiflow/embeddings/model.py": "51da3e50cf8eb221163cc2676d3f00c3acfb60a24573ae3b5edd694c97a0b35d",
+    "demiflow/execution/dataflow_failures.py": "da1e35eebcbd8f3f309b5bd1dfe2fde97d2255cc700eb99e37eed97ac0095258",
+    "demiflow/execution/kernels/async_instance.py": "f60fe6708bf7de96d484373ac2dfee53fa3f8a7e2aedc7ed95a5e35c574b3630",
+    "demiflow/execution/kernels/operator.py": "8537f634fbc1a9e10b2a861014cfafbc65a4b647caecd1c2456edf59b1d3a041",
+    "demiflow/forge/flow_check.py": "afd627446d42fb96fdeec70d3732140dad7ec0e764779738eaba42c2f907f62e",
+    "demiflow/forge/platform.py": "df9754d8bafff64faa682ea1cfde741b55bd954b783aaab56cb77b2a5a589e89",
+    "demiflow/planning/dataflow_compile.py": "5d6c5fbfe8d4bed0cbc4fe856492123dc257126883bc84e03b7a70329ebeb4ab",
+    "tests/test_runtime_v3_checked_call_boundary.py": "29d79ad089cfab07d253642bd40dedb5336eb923d2e7b3f32a73b5869d69c2e3",
+    "tests/test_runtime_v3_forge_embeddings.py": "a3fc4bcba3d4cdd54423219102061941648ca036b6519e67c0db50022172db14",
+    "tests/test_workbench_logical_browser.py": "c56c05b7dbde6c9843984d4a63a7528a9d7d6d522d2e85e15121cbe76f170da3"
+  },
+  "reports": {
+    "/tmp/demiflow-check-call-r2.xml": "389fbd5f5780e3be7d4572af2fabce7c7a46b0a1761a3b1520c6978fa860dba6",
+    "/tmp/demiflow-checked-regression.xml": "91a2363c7388e8d6947cb98ec62d915e44fa949d8c84cf7587b1f1a1fcf8f2ad",
+    "/tmp/demiflow-browser-final.xml": "c69ba93ba7137da441bcd8a20a89db2359f7dd4dcc6073762c832df547fa0016",
+    "/tmp/demiflow-browser-r2.xml": "bcc13b792295900a75f79aeaa5e61b8d952b7769cb204d63e8b282915c84136c",
+    "/tmp/demiflow-ray-v3.xml": "e484ddaea1d095835eefeca6b48868d269cb0b128c2b287a29a3e8d34c4c9e4c"
+  },
+  "frozen": {
+    "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+    "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+    "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+    "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+    "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+    "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+    "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+  },
+  "pending_separate_ui_patch": [
+    "tests/test_workbench_logical_browser.py"
+  ],
+  "complete_product": false,
+  "not_run": [
+    "multi_host",
+    "GPU",
+    "complete_latest_Ray_matrix",
+    "product_image_document_embeddings"
+  ],
+  "runtime_validation": "actual sync/await/batch inputs and outputs; native response then bad vector rejected"
+}

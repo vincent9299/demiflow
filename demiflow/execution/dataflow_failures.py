@@ -24,6 +24,8 @@ _UNRESOLVED_TYPE = DataflowUnresolvedCommit.__module__ + '.' + DataflowUnresolve
 _BUDGET_TYPE = ExecutionBudgetExceeded.__module__ + '.' + ExecutionBudgetExceeded.__qualname__
 _KNOWN[RecoveryContractError.__module__ + '.' + RecoveryContractError.__qualname__] = RecoveryContractError
 _KNOWN[UnresolvedCommit.__module__ + '.' + UnresolvedCommit.__qualname__] = UnresolvedCommit
+from ..data.runtime_contract import RuntimeContractError
+_KNOWN[RuntimeContractError.__module__ + "." + RuntimeContractError.__qualname__] = RuntimeContractError
 from ..operator_llm.errors import PromptBudgetExceededError
 _KNOWN[PromptBudgetExceededError.__module__ + '.' + PromptBudgetExceededError.__qualname__] = PromptBudgetExceededError
 

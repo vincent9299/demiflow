@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from urllib.parse import urlsplit
+from ..data.flow_contract import flow_api
+from .authoring import normalize_model, analyze_model
 
 
 def canonical(value):
@@ -10,6 +12,7 @@ def canonical(value):
                       separators=(',', ':'), allow_nan=False)
 
 
+@flow_api("embedding_model", role="value", normalize=normalize_model, analyze=analyze_model)
 @dataclass(frozen=True)
 class EmbeddingModel:
     """An immutable revision and its /v1/embeddings protocol.

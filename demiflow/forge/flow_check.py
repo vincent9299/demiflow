@@ -613,6 +613,9 @@ class FlowChecker:
             if name not in callable_ports and name != 'catch' and self._has_callback(value):
                 self.fail('OP-02', 'Callback is not a declared native callable port: ' + name, node, module)
         inputs = []
+        if kind == 'embeddings' and not (isinstance(values.get('model'), DeclaredValue)
+                and values['model'].type == scalar('embedding_model')):
+            self.fail('FL-06', 'Embedding model must come from the native EmbeddingModel value', node, module)
         # Value provenance is established by this interpreter, never by accepting
         # a user-written JSON marker or a caller-supplied action identity.
         if kind == 'require' and not (type(values.get('condition')) is bool or

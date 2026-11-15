@@ -751,7 +751,10 @@ class _Capture:
                     raise _error('BUDGET_EXCEEDED', 'logical block count exceeds max_partitions')
             callable_spec = getattr(operation, "callable", None)
             from ..execution.dataflow_model_factory import native_model_declaration
-            callable_spec = native_model_declaration(operation) or callable_spec
+            native_declaration = native_model_declaration(operation)
+            if native_declaration is not None:
+                callable_spec = replace(native_declaration,
+                    runtime_contract=getattr(callable_spec, 'runtime_contract', None))
             if isinstance(operation, NativeOperation):
                 callable_spec = operation.factory
             from ..execution.kernels.task_scope import TASK_KINDS, function_has_state

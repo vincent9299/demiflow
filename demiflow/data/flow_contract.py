@@ -414,6 +414,8 @@ def compatible(source, target):
         return compatible(source["item"], target["item"])
     if source["kind"] != target["kind"]:
         return False
+    if "length" in target and source.get("length") != target["length"]:
+        return False
     if source["kind"] == "record":
         for name, expected in target["fields"].items():
             actual = source["fields"].get(name)

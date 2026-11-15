@@ -71,6 +71,9 @@ class AsyncInstance:
         self._owner_task = None
         self._owner_release = None
         self._lifecycle_failure = None
+        self.validation = None
+        self.validation_args = ()
+        self.validation_kwargs = {}
 
     def __getattr__(self, name):
         return getattr(self.target, name)
@@ -172,12 +175,15 @@ class AsyncInstance:
         self.check_lifecycle()
         if self._stopping.is_set():
             raise DataflowError("CANCELLED", "operator is stopping")
+        if self.validation is not None:
+            self.validation.inputs((value, *self.validation_args), self.validation_kwargs)
         result = self.target(value)
         if not self.await_calls and inspect.isawaitable(result):
             if inspect.iscoroutine(result):
                 result.close()
             raise TypeError('map synchronous callable returned an awaitable; use map_async')
-        return self.resolve(result)
+        result = self.resolve(result)
+        return self.validation.output(result) if self.validation is not None else result
 
     def request_stop(self):
         """Interrupt async calls before waiting for invocation threads to drain."""

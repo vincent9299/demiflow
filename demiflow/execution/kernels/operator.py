@@ -370,6 +370,22 @@ class OperatorKernel:
         self._instances[slot] = instance
         if slot == 0:
             self._instance = instance
+        # Field-bound calls already validate at their original keyword boundary.
+        # Other checked contracts belong to this call, not the actor state owner.
+        if self._spec.kind != 'BoundMapOp':
+            from ...data.plan import CallableSpec
+            from ...data.runtime_contract import validator
+            key = self._spec.configuration.get('program')
+            if key is None and self._spec.implementation_ref is not None:
+                key = self._spec.implementation_ref.key
+            program = declaration if declaration is not None else self._services.programs[key].value
+            if isinstance(program, CallableSpec) and program.runtime_contract is not None:
+                target = instance.target
+                if type(target) is _BoundCallable:
+                    instance.validation_args = target._args
+                    instance.validation_kwargs = target._kwargs
+                    target = target._instance
+                instance.validation = validator(target, program.runtime_contract)
         _run_astart(instance)
         if self._spec.state != 'none':
             from ..operator_policy import classify_operator_state
