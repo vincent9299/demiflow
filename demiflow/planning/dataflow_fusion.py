@@ -56,6 +56,11 @@ def fuse_single_worker_pipeline(graph, stages, *, policy, bounds):
               or len(kernel.inputs) != 1 or kernel.inputs[0].requirement != 'incremental'
               or kernel.configuration.get('concurrency', 1) != 1):
             return stages
+        if kernel.configuration.get('flush_interval'):
+            # A blocking source pull shares this business thread. Keeping a
+            # timer-driven operator here would delay its flush until the next
+            # source row/EOI, violating the declared incremental deadline.
+            return stages
     resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in members)
     control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
     if resident > bounds.max_resident_bytes - control:

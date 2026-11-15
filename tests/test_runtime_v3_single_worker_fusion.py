@@ -10,6 +10,26 @@ def pipeline():
     return data.from_items([{'n': n} for n in range(300)]).map(lambda row: {'n': row['n'] + 1})
 
 
+def test_timer_operator_cannot_share_a_blocking_source_business_thread():
+    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.contracts.dataflow import ActionRequest
+    from demiflow.execution.run_context import RunAction
+    from demiflow.planning.dataflow_compile import lower_action
+    from demiflow.planning.dataflow_fusion import fuse_single_worker_pipeline
+    from demiflow.planning.dataflow_place import partition_stages
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    dataset = data.range(2).batch_map(lambda rows: rows, max_batch=2, flush_interval=.01)
+    action = RunAction(_CompileContext(), 'timer-compile', {})
+    request = ActionRequest(kind='take_all', source=dataset._source, plan=dataset._plan,
+        arguments={}, sink=None, programs=(), provider='local', action=action)
+    policy, bounds = resolve_runtime_policy({'max_active_workers': 1}, {}, provider='local')
+    graph = lower_action(request, bounds=bounds).graph
+    stages = partition_stages(graph, policy=policy, bounds=bounds)
+    assert len(stages) == 3
+    assert any(node.kernel.configuration.get('flush_interval') for node in graph.nodes)
+    assert fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds) == stages
+
+
 def test_one_worker_crosses_credit_windows_without_process_restarts(tmp_path, monkeypatch):
     plans, observations, allocations = [], [], []
     prepare, finish, allocate = DataflowExecution.prepare, DataflowExecution._set_result, DataflowExecution._prepare_launch
