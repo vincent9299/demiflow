@@ -363,6 +363,12 @@ def verify_source_snapshot(snapshot: SourceSnapshot, *, store: Any, bounds: Boun
     if not isinstance(snapshot.immutable_identity, Mapping):
         raise DataflowError("INVALID_CONTRACT", "snapshot immutable_identity must be a mapping")
     kind = _canonical_kind(snapshot.kind)
+    if kind == 'producer':
+        from dataclasses import replace
+        from .contracts.dataflow_codec import _thaw_json
+        original = replace(snapshot, kind=snapshot.immutable_identity['original_kind'],
+                           immutable_identity=_thaw_json(snapshot.immutable_identity['original_identity']))
+        return verify_source_snapshot(original, store=store, bounds=bounds)
     if kind not in ("items", "range", "file", "sql", "lance",
                     "materialized", "iterable", "datasource", "queue_history", "queue"):
         raise DataflowError("INVALID_CONTRACT", f"unknown source kind: {kind}")

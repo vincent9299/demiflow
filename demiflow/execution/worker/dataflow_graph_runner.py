@@ -60,6 +60,7 @@ class WorkerGraphRunner:
         self._peer = PeerBuffers(bounds=self.bounds, host=host)
         self._queue_finalizer = None
         self._terminal_rows = 0
+        self._producer_expansion = {}
         self._terminal_bytes = 0
         self._terminal_columns = None
         self._terminal_file = tempfile.TemporaryFile()
@@ -265,6 +266,17 @@ class WorkerGraphRunner:
         self._metrics_at = time.monotonic()
 
     def _output(self, occurrence, record):
+        if record.source_position.get('queue_delivery_kind') == 'producer':
+            unit = record.source_position['producer_unit']
+            old_unit, count, size = self._producer_expansion.get(occurrence, (unit, 0, 0))
+            if old_unit != unit:
+                count, size = 0, 0
+            count += 1
+            size += record.encoded_bytes
+            if count > 1024 or size > 16 * 1024 ** 2:
+                from ..recovery_contract import RecoveryContractError
+                raise RecoveryContractError('Producer input expansion exceeds 1024 records or 16 MiB at a stage')
+            self._producer_expansion[occurrence] = (unit, count, size)
         self._metrics[occurrence]['rows_output'] += 1
         self._dirty_metrics.add(occurrence)
         for edge in self._outgoing.get(occurrence, ()):

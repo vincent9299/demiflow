@@ -185,7 +185,15 @@ def test_hash_verification_does_not_block_lease_renewal_or_other_claim(channel, 
         assert renewed.wait(12), 'long verification blocked the independent lease I/O pool'
 
     monkeypatch.setattr(QueueChannel, 'renew', renew)
-    monkeypatch.setattr(QueueResultSink, 'verify_acquisition', verify)
+    # The fault is driver-owned. Install it after the immutable worker program
+    # has been sealed, so this probe does not change the program's code pin.
+    from demiflow.execution.dataflow import DataflowExecution
+    start = DataflowExecution.start
+    def activate(self):
+        self.prepare()
+        monkeypatch.setattr(QueueResultSink, 'verify_acquisition', verify)
+        return start(self)
+    monkeypatch.setattr(DataflowExecution, 'start', activate)
     with origin_server() as (url, calls):
         seed(channel, tmp_path, url)
         consume(channel, tmp_path/'objects')

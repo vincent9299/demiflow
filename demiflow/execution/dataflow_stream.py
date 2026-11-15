@@ -78,6 +78,9 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
         raise
     finally:
         observe()
+        if handle is not None:
+            from .dataflow_api import record_execution_metadata
+            record_execution_metadata(request, handle._execution)
         for cleanup in ((lambda: callbacks.resolve(on_drain(stats), closing=True)) if on_drain else None,
                         handle.close if handle is not None else None, callbacks.close):
             if cleanup is None:

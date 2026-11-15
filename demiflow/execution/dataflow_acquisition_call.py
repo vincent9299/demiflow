@@ -60,9 +60,13 @@ class AcquisitionCall:
         request = row
         row_ref = put(request, services.bounds.max_row_bytes)
         command = QueueCommand(identity([self.binding.action_id, record_id, self.operation]),
-            self.operation, self.binding, record_id, delivery, row_ref)
+            self.operation, self.binding, record_id, delivery, row_ref,
+            node_id=getattr(self, 'search_occurrence', None))
         reply = queue_service_request(command, services=services)
         if reply.status != 'confirmed' or reply.row_ref is None or reply.native_fact_ref is None:
+            if self.binding.mode in ('sink', 'explicit'):
+                from .queue_contract import QueueIncomplete
+                raise QueueIncomplete('Native task acquisition/settlement remains unconfirmed')
             raise DataflowError('UNKNOWN_EFFECT', 'Native acquisition/settlement was not confirmed')
         result = json.loads(b''.join(services.store.read(reply.row_ref,
             max_bytes=services.bounds.max_row_bytes)))

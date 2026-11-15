@@ -224,7 +224,11 @@ def _invoke_scoped(instance, value, records, spec):
     from .concurrent_calls import INVOCATION_SCOPE
     explicit = INVOCATION_SCOPE.get()
     scope = getattr(instance, 'native_scope', None)
-    if explicit is not None:
+    if len(records) == 1 and records[0].source_position.get('queue_delivery_kind') == 'producer':
+        # Native producer progress survives into a new RunContext. A run-local
+        # call ordinal would replay the previous unit's receipt after seeking.
+        occurrence = _hash_id(['producer-call-v3', records[0].record_id, _occurrence(spec)])
+    elif explicit is not None:
         occurrence = explicit
     elif scope is not None:
         # Source record identity is deliberately preserved by union. Native
@@ -305,7 +309,8 @@ def invoke_unary(
             if not (admitted & names):
                 raise
             return
-        if position.get('queue_delivery_ref') and not isinstance(result, Mapping):
+        if (position.get('queue_delivery_ref') and position.get('queue_delivery_kind') != 'producer'
+                and not isinstance(result, Mapping)):
             from ..recovery_contract import RecoveryContractError
             raise RecoveryContractError('Task map must preserve exactly one row')
         if result is None:

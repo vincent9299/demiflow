@@ -49,6 +49,15 @@ def native_model_declaration(operation):
         return CallableSpec.create(PromptFactory, fn_constructor_args=(replace(operation, node_id=None), {}))
     target = getattr(getattr(operation, 'callable', None), 'target', None)
     actor = getattr(target, '__self__', target)
+    from ..collect.operators import SearchWeb
+    if type(actor) is SearchWeb and actor.queue_producer is not None:
+        from .dataflow_producer import ProducerSearchCall
+        return CallableSpec.create(ProducerSearchCall, fn_constructor_args=(actor.queue_node_id,))
+    from .queue_producer import QueueProducer, producer_facts
+    if type(actor) is QueueProducer:
+        from .dataflow_producer import ProducerCall
+        producer_facts(actor)
+        return CallableSpec.create(ProducerCall)
     from .raw_fetch import RawFetch, raw_fetch_facts
     from .queue_ack import QueueAcknowledge, ack_facts
     if type(actor) in (RawFetch, QueueAcknowledge):

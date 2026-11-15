@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown", "release_unsent"})
 _ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
-_QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status"})
+_QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
                          "references", "media_references", "bind_membership"})
 _COMMAND_KINDS = frozenset({"effect", "reserve", "artifact", "queue", "native_request",
@@ -514,7 +514,7 @@ def _queue_command(payload) -> QueueCommand:
     return QueueCommand(operation_id=payload["operation_id"], operation=payload["operation"],
                         binding=QueueBinding(**binding), record_id=payload.get("record_id"),
                         delivery_ref=_ref_from_json(payload.get("delivery_ref")),
-                        row_ref=_ref_from_json(payload.get("row_ref")))
+                        row_ref=_ref_from_json(payload.get("row_ref")), node_id=payload.get('node_id'))
 
 
 def _native_command(payload) -> NativeJournalCommand:
@@ -702,7 +702,8 @@ class WorkerJournalClient:
         from dataclasses import asdict
         payload = {"operation_id": command.operation_id, "operation": command.operation,
                    "binding": asdict(command.binding), "record_id": command.record_id,
-                   "delivery_ref": _ref_to_json(command.delivery_ref), "row_ref": _ref_to_json(command.row_ref)}
+                   "delivery_ref": _ref_to_json(command.delivery_ref), "row_ref": _ref_to_json(command.row_ref),
+                   "node_id": command.node_id}
         value = self._request("queue", command.operation_id, payload)
         return QueueReply(operation_id=value["operation_id"], status=value["status"],
                           delivery_ref=_ref_from_json(value.get("delivery_ref")),

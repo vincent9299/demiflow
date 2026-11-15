@@ -737,9 +737,9 @@ def queue_service_request(command: QueueCommand, *, services: RuntimeServices) -
         raise DataflowError('INVALID_CONTRACT', 'queue request requires worker RuntimeServices')
     if not isinstance(command, QueueCommand):
         raise DataflowError('INVALID_CONTRACT', 'queue request requires a QueueCommand')
-    if command.operation not in {'poll', 'acquire', 'finalize', 'status'}:
+    if command.operation not in {'poll', 'acquire', 'finalize', 'status', 'search'}:
         raise DataflowError('INVALID_CONTRACT', 'unknown queue operation')
-    if command.operation in {'acquire', 'finalize'}:
+    if command.operation in {'acquire', 'finalize', 'search'}:
         if command.delivery_ref is None or command.row_ref is None:
             raise DataflowError('INVALID_CONTRACT', 'acquire/finalize require delivery_ref and row_ref')
     elif command.row_ref is not None or command.delivery_ref is not None:

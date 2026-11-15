@@ -98,6 +98,7 @@ _SOURCES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("iterable", _READERS + "IteratorReader", ("segment", "record")),
     ("datasource", _READERS + "TaskReader", ("segment", "record")),
     ("queue", _READERS + "QueueReader", ("claim_ref", "record_index")),
+    ("producer", _READERS + "ProducerReader", ("producer_position", "producer_cursor")),
     ("queue_history", _READERS + "HistoryReader", ("claim_ref", "record_index")),
     ("join", _RELATIONAL + "join_partitions", ()),
     ("reduce", _RELATIONAL + "reduce_partition", ()),

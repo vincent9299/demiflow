@@ -785,6 +785,30 @@ class QueueReader(_BaseReader):
         raise DataflowError("INTERNAL_PROTOCOL", "QueueReader uses its own poll loop")
 
 
+class ProducerReader(QueueReader):
+    """Fixed native source enumeration; transformations run in graph workers."""
+
+    def _setup(self, split):
+        super()._setup(split)
+        self._offset.setdefault('record_index', self._record_index)
+
+    def next_record(self):
+        from dataclasses import replace
+        import json
+        poll = super().next_record()
+        if poll.status != 'record':
+            return poll
+        descriptor = json.loads(b''.join(self._services.store.read(self._delivery_ref,
+            max_bytes=self._services.bounds.max_control_bytes)))
+        self._offset.update(producer_position=descriptor['position'] + 1,
+                            producer_cursor=descriptor['next_cursor'])
+        position = thaw_record_value(poll.record.source_position)
+        position.update(queue_delivery_kind='producer', producer_unit=descriptor['position'])
+        record = replace(poll.record, record_id=descriptor['occurrence'], source_position=position)
+        self._pending_record = record
+        return SourcePoll('record', record, 0)
+
+
 class HistoryReader(_BaseReader):
     """Fixed historical queue/legacy/document receipts, read-only; no claim or fetch."""
 

@@ -247,6 +247,20 @@ class DataflowExecution:
         self._check_stop()
         normalize_native_options(self._request.arguments.get("native_options"),
                                  operation_kind=self._request.kind)
+        from .queue_producer import producer_actor
+        from .dataflow_producer import NativeProducerService
+        producer = producer_actor(self._request.plan)
+        if producer is not None:
+            if self._request.kind != 'run_stream':
+                raise DataflowError('INVALID_CONTRACT', 'enqueue requires its source-unit run_stream terminal')
+            if self._policy.default_partitions != 1:
+                raise DataflowError('UNSUPPORTED_CAPABILITY', 'Native producer has one ordered source owner')
+            from dataclasses import replace
+            self._policy = replace(self._policy, checkpoint_rows=1)
+            self._acquisition = NativeProducerService(self._action, services=self._services)
+            # Resolve native source/search ownership before staging passive
+            # worker declarations. No actor is started by configure.
+            producer[1].configure(self._action, self._request.source, self._request.plan)
         existing = self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")
         if self._action.context.resuming and existing is not None:
             from .dataflow_seal import load_dataflow, load_sealed_dataflow, verify_dataflow_program
@@ -265,6 +279,8 @@ class DataflowExecution:
             compiled = lower_action(self._request, bounds=self._bounds)
             graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,
                                             bounds=self._bounds)
+            if producer is not None:
+                self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
             snapshots, splits = [], []
             for declaration in compiled.declarations:
                 if declaration.source_spec is None:
@@ -272,9 +288,13 @@ class DataflowExecution:
                 snapshot = snapshot_source(declaration.source_spec, action=self._action,
                                            store=self._store, bounds=self._bounds,
                                            source_id=declaration.occurrence_id)
+                if producer is not None:
+                    snapshot, source_splits = self._acquisition.source_layout(snapshot)
+                else:
+                    source_splits = plan_source_splits(snapshot, declaration.source_spec,
+                        target_partitions=self._policy.default_partitions, bounds=self._bounds)
                 snapshots.append(snapshot)
-                splits.extend(plan_source_splits(snapshot, declaration.source_spec,
-                              target_partitions=self._policy.default_partitions, bounds=self._bounds))
+                splits.extend(source_splits)
             constants_ref = resolve_execution_constants(graph, action=self._action, store=self._store)
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
@@ -318,6 +338,10 @@ class DataflowExecution:
         from .contracts.dataflow_codec import runtime_scope_id
         self._scheduler.scope_id = runtime_scope_id(physical.plan_id, self._attempt())
         self._checkpoint = DataflowCheckpointCoordinator(self._action, physical, store=self._store)
+        if producer is not None:
+            if self._acquisition._state == 'constructed':
+                self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
+            self._services.journal_service.bind_queue(self._acquisition)
         from .queue_execution import queue_source
         from .raw_fetch import RawFetch
         from ..data.plan import AsyncMapOp
@@ -408,6 +432,7 @@ class DataflowExecution:
                         'Worker admission deadline exceeded before business activation', retryable=True)
                 time.sleep(min(.01, max(0, deadline - time.monotonic())))
         if self._acquisition is not None:
+            self._acquisition._restore_image = self._restore_image
             self._acquisition.start()
         for lease, stage in ready:
             self._activate(lease, stage)
@@ -662,8 +687,11 @@ class DataflowExecution:
             for endpoint in self._endpoints.values():
                 endpoint.request_cut(self._cut)
         if self._cut is not None and set(self._cut.participants) <= self._contributions.keys():
+            from .dataflow_producer import NativeProducerService
+            if isinstance(self._acquisition, NativeProducerService):
+                self._acquisition.before_cut()
             if self._cut.final and self._acquisition is not None:
-                self._acquisition.finish()
+                self._native_summary = self._acquisition.finish()
             image = self._checkpoint.commit(self._cut.cut_id, sinks=self._sinks)
             self._restore_image = image
             self._last_checkpoint_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()

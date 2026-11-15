@@ -149,8 +149,29 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
         # Reuse the caller's run; bind admission exactly once, never nest a run.
         with run.action(declaration) as created:
             action = created
+    action._dataflow_executor = executor
     return ActionRequest(kind=kind, source=source, plan=plan, arguments=args, sink=sink,
                          programs=tuple(programs), provider=provider, action=action)
+
+
+def record_execution_metadata(request, execution):
+    """Project observed progress and committed results into the existing API."""
+    executor = getattr(request.action, '_dataflow_executor', None)
+    if executor is None:
+        return
+    from ..data.stats import ExecutionMetadata, StageStats
+    stages = tuple(StageStats(name=occ + ':' + partition,
+        rows_input=values['rows_input'], rows_output=values['rows_output'])
+        for (occ, partition), values in execution._node_metrics.items())
+    diagnostics = {'state': execution._state, 'dag_id': execution._graph.dag_id,
+                   'plan_id': execution._physical.plan_id}
+    native = getattr(execution, '_native_summary', None)
+    if native is not None:
+        diagnostics['queue'] = dict(native)
+    executor._run_ref = request.action.context.ref
+    executor._last_metadata = ExecutionMetadata(source_name=type(request.source).__name__,
+        stages=stages, rows_output=execution._confirmed_rows, diagnostics=diagnostics,
+        run_ref=request.action.context.ref)
 
 
 # -- E016 run_dataset_action ----------------------------------------------
@@ -161,13 +182,18 @@ def run_dataset_action(request: ActionRequest) -> object:
                                      materialized_handle, write_result, inspect_result,
                                      _convert_batch)
     arguments = request.arguments
+    def observed(iterator):
+        try:
+            yield from iterator
+        finally:
+            record_execution_metadata(request, handle._execution)
     # Streaming adapters retain the action handle until exhaustion or close.
     if request.kind == "iter_rows":
-        return iterate_rows(handle)
+        return observed(iterate_rows(handle))
     if request.kind == "iter_batches":
-        return iterate_batches(handle, batch_size=arguments.get("batch_size"),
+        return observed(iterate_batches(handle, batch_size=arguments.get("batch_size"),
                                batch_format=arguments.get("batch_format", "default"),
-                               drop_last=arguments.get("drop_last", False))
+                               drop_last=arguments.get("drop_last", False)))
     try:
         if request.kind == "take":
             return collect_rows(handle, limit=arguments.get("limit", 20), bounds=bounds)
@@ -196,7 +222,10 @@ def run_dataset_action(request: ActionRequest) -> object:
             return inspect_result(handle, kind=request.kind)
         return result
     finally:
-        handle.close()
+        try:
+            record_execution_metadata(request, handle._execution)
+        finally:
+            handle.close()
 
 
 class _CompileContext:

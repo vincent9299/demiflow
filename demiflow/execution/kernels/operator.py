@@ -271,7 +271,8 @@ class OperatorKernel:
             from ..dataflow_models import bind_model_services
             instance = bind_model_services(instance, self._spec, services=self._services)
         from ..dataflow_acquisition_call import AcquisitionCall
-        if type(instance) is AcquisitionCall:
+        from ..dataflow_producer import ProducerCall, ProducerSearchCall
+        if type(instance) in (AcquisitionCall, ProducerCall, ProducerSearchCall):
             instance.bind(self._services, self._occurrence)
         from ...data.result_cache import CacheCall
         if isinstance(instance, CacheCall):

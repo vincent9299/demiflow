@@ -78,8 +78,8 @@ _POLL_STATUSES = frozenset({"record", "pending", "eoi"})
 _ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
 _REPLY_STATUSES = frozenset({"ok", "error", "pending"})
 _SCOPE_CONDITIONS = frozenset({"input_eoi", "terminal_limit", "queue_drain_declared"})
-_QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch"})
-_QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status"})
+_QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch", "producer"})
+_QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _QUEUE_STATUSES = frozenset({"record", "pending", "eoi", "confirmed", "unknown"})
 _JOURNAL_OPS = frozenset({
     "lookup", "reserve", "reserve_http_retry", "response", "failed",
@@ -1564,7 +1564,7 @@ class ActionProgram:
 class QueueBinding:
     action_id: str
     source_id: str | None
-    mode: Literal["sink", "explicit", "raw_fetch"]
+    mode: Literal["sink", "explicit", "raw_fetch", "producer"]
     contract_digest: str
     generation: str | None
     pool: str | None
@@ -1590,11 +1590,12 @@ class QueueBinding:
 @dataclass(frozen=True)
 class QueueCommand:
     operation_id: str
-    operation: Literal["poll", "acquire", "finalize", "status"]
+    operation: Literal["poll", "acquire", "finalize", "status", "search"]
     binding: QueueBinding
     record_id: str | None
     delivery_ref: ArtifactRef | None
     row_ref: ArtifactRef | None
+    node_id: str | None = None
 
     def __post_init__(self):
         _sha256(self.operation_id, "QueueCommand.operation_id")
@@ -1605,7 +1606,11 @@ class QueueCommand:
             _sha256(self.record_id, "QueueCommand.record_id")
         _opt_ref(self.delivery_ref, "QueueCommand.delivery_ref")
         _opt_ref(self.row_ref, "QueueCommand.row_ref")
-        if self.operation in ("acquire", "finalize"):
+        if self.node_id is not None:
+            _sha256(self.node_id, "QueueCommand.node_id")
+        if (self.operation == 'search') != (self.node_id is not None):
+            raise _err('Only native search requires an explicit owning occurrence')
+        if self.operation in ("acquire", "finalize", "search"):
             if self.row_ref is None:
                 raise _err("QueueCommand." + self.operation + " requires row_ref")
         else:

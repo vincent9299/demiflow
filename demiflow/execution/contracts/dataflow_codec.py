@@ -113,8 +113,8 @@ _POLL_STATUSES = frozenset({"record", "pending", "eoi"})
 _ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
 _REPLY_STATUSES = frozenset({"ok", "error", "pending"})
 _SCOPE_CONDITIONS = frozenset({"input_eoi", "terminal_limit", "queue_drain_declared"})
-_QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch"})
-_QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status"})
+_QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch", "producer"})
+_QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _QUEUE_STATUSES = frozenset({"record", "pending", "eoi", "confirmed", "unknown"})
 _JOURNAL_OPS = frozenset({
     "lookup", "reserve", "reserve_http_retry", "response", "failed",
@@ -394,7 +394,7 @@ _WIRE_TYPES = {
     )),
     "QueueCommand": (QueueCommand, (
         ("operation_id", _S), ("operation", _e(_QUEUE_OPS)), ("binding", _dto("QueueBinding")),
-        ("record_id", _OS), ("delivery_ref", _OR), ("row_ref", _OR),
+        ("record_id", _OS), ("delivery_ref", _OR), ("row_ref", _OR), ("node_id", _OS),
     )),
     "QueueReply": (QueueReply, (
         ("operation_id", _S), ("status", _e(_QUEUE_STATUSES)), ("delivery_ref", _OR),
@@ -670,7 +670,9 @@ def _cross_journalreply(p):
 
 
 def _cross_queuecommand(p):
-    if p["operation"] in ("acquire", "finalize"):
+    if (p['operation'] == 'search') != (p['node_id'] is not None):
+        raise _err('Only native search requires an explicit owning occurrence')
+    if p["operation"] in ("acquire", "finalize", "search"):
         if p["row_ref"] is None:
             raise _err("QueueCommand." + p["operation"] + " requires row_ref")
     else:

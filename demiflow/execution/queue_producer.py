@@ -296,9 +296,11 @@ class QueueProducer:
                 position=SourcePosition(self.producer.source.source_id,self.position))
             self.window_commits += 1
         self.chunk += 1
+        self.last_commit_id = fact['commit_id']
         return fact['receipts']['publish']['data']
 
     async def __call__(self,row):
+        self.last_call_commits = []
         if type(row) is not dict or 'queue_publish' in row:
             raise RecoveryContractError('enqueue requires a record with unused queue_publish output')
         scope = current_row_scope()
@@ -322,6 +324,7 @@ class QueueProducer:
         for index,chunk in enumerate(chunks):
             occurrence=identity([scope.occurrence,'chunk',index])
             receipt=await self.io.run(self._publish,occurrence,chunk)
+            self.last_call_commits.append(self.last_commit_id)
             for name in result:result[name]+=receipt[name]
         return {**row,'queue_publish':result}
 
