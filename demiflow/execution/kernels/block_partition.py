@@ -6,7 +6,7 @@ produce N logical blocks without claiming N concurrent resource allocations.
 from ..dataflow_records import clone_record
 import hashlib
 
-from ..contracts.dataflow import BlockPartition
+from ..contracts.dataflow import BlockPartition, Record
 from .dataflow import _err, _occurrence, _materialize_row, _group_key
 
 
@@ -49,7 +49,11 @@ def partition_records(records, *, spec, rows, services):
 
 def preserve_block(records, block):
     for record in records:
-        yield clone_record(record, block_partition=block)
+        # A Record is already immutable and validated. Keeping an unchanged
+        # sidecar needs no second DTO/provenance traversal per emitted row.
+        yield (record if type(record) is Record and (record.block_partition is block
+               or type(block) is BlockPartition and record.block_partition == block)
+               else clone_record(record, block_partition=block))
 
 
 def block_identity(record):

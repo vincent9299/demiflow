@@ -67,8 +67,15 @@ class _Spool:
             raise _err('BUDGET_EXCEEDED', 'Join input and encoding exceed the admitted resident window')
         hashed = int.from_bytes(hashlib.sha256(key).digest()[:8], 'big')
         header = _HEADER.pack(_NONE, hashed, len(key), len(document), record.sequence)
+        record_id = record.record_id.encode('ascii')
+        frame_size = len(header) + len(record_id) + len(key) + len(document)
+        # Coalesce only within the existing simultaneous row/encoding window.
+        # Large indivisible rows retain the original piecewise write path.
+        if frame_size + len(document) + len(key) + record.encoded_bytes <= self.row_window:
+            offset = self.file.append(b''.join((header, record_id, key, document)))
+            return offset, hashed
         offset = self.file.append(header)
-        self.file.append(record.record_id.encode('ascii'))
+        self.file.append(record_id)
         self.file.append(key)
         self.file.append(document)
         return offset, hashed
@@ -93,8 +100,15 @@ class _Spool:
 
     def record(self, offset, header):
         start = offset + _HEADER.size
-        record_id = self.file.read_at(start, _ID_BYTES).decode('ascii')
-        raw = self.file.read_at(start + _ID_BYTES + header[2], header[3])
+        span = _ID_BYTES + header[2] + header[3]
+        if span + header[3] <= self.row_window:
+            frame = self.file.read_at(start, span)
+            record_id = frame[:_ID_BYTES].decode('ascii')
+            raw = frame[_ID_BYTES + header[2]:]
+            del frame  # The coalesced buffer must not coexist with decoding.
+        else:
+            record_id = self.file.read_at(start, _ID_BYTES).decode('ascii')
+            raw = self.file.read_at(start + _ID_BYTES + header[2], header[3])
         return _decode_record_document(raw, record_id=record_id, sequence=header[4],
             max_bytes=self.document_limit)
 
