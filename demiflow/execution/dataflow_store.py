@@ -10,13 +10,13 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
-import tempfile
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 from .contracts.dataflow import ArtifactRef, ArtifactCommand
 from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import identifier, identity
+from .recovery_contract import identifier, identity, RecoveryContractError
 
 if TYPE_CHECKING:
     from .contracts.dataflow import ArtifactAuthorityPort, Bounds
@@ -31,6 +31,10 @@ def _no_symlink(path: Path) -> None:
     for item in (path, *path.parents):
         if item.is_symlink():
             raise DataflowError("INVALID_CONTRACT", "artifact root contains a symlink: " + str(item))
+
+
+def _create_staging(path):
+    return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
 
 
 def _sync_directory(path):
@@ -97,14 +101,25 @@ class RunArtifactStore:
             raise DataflowError("INVALID_CONTRACT", "media_type must be a nonempty string")
         operation_id = self._staging_operation()
         reserved = min(max_bytes, 64 * 1024)
-        self._journal.reserve(operation_id, {ARTIFACT_STAGING_BUDGET: reserved})
+        from .dataflow_staging import StagingLease, staging_paths
+        owner, pending = staging_paths(self._root, self.store_id, operation_id)
+        lease = StagingLease.create(owner)
         staging = None
+        begun = settled = prepared = False
         digest = hashlib.sha256()
         size = 0
         published = False
         try:
-            descriptor, staging_name = tempfile.mkstemp(prefix='.pending-' + operation_id + '-', dir=self._staging)
-            staging = Path(staging_name)
+            try:
+                self._journal.artifact(ArtifactCommand(operation_id, 'begin_staging', None, self.store_id, reserved))
+            except RecoveryContractError:
+                # A native transaction rejection is a definite non-admission.
+                # Transport/unknown failures retain the inode for reconciliation.
+                lease.remove()
+                raise
+            begun = True
+            descriptor = _create_staging(pending)
+            staging = pending
             with os.fdopen(descriptor, "wb") as stream:
                 for chunk in chunks:
                     if type(chunk) is not bytes:
@@ -126,42 +141,52 @@ class RunArtifactStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             hex_digest = digest.hexdigest()
+            ref = ArtifactRef(digest=hex_digest, size_bytes=size, store_id=self.store_id,
+                              key=hex_digest, media_type=media_type)
+            prepared = True  # An unknown prepare/publication reply must keep its charge.
+            self._journal.artifact(ArtifactCommand(identity([operation_id, 'prepare']),
+                'prepare_staging', ref, operation_id, size))
             target = self._objects / hex_digest
             _no_symlink(target)
             if target.exists():
                 if target.is_symlink():
                     raise DataflowError("INVALID_CONTRACT", "artifact target is a symlink")
-                if target.stat().st_size != size or _file_digest(target) != hex_digest:
+                if target.stat().st_size != size or _file_digest(target, max_bytes=size) != hex_digest:
                     raise DataflowError("INVALID_CONTRACT", "content digest collision on publish")
             else:
                 try:
                     os.link(staging, target)
                 except FileExistsError:
-                    if target.stat().st_size != size or _file_digest(target) != hex_digest:
+                    if target.stat().st_size != size or _file_digest(target, max_bytes=size) != hex_digest:
                         raise DataflowError("INVALID_CONTRACT", "content digest collision on publish")
             published = True
             _sync_directory(self._objects)
-            ref = ArtifactRef(digest=hex_digest, size_bytes=size, store_id=self.store_id,
-                              key=hex_digest, media_type=media_type)
             # A deduplicated temporary still occupies a separate inode until
             # unlink. Release that physical ownership before refunding budget.
             staging.unlink()
             _sync_directory(self._staging)
             self._journal.artifact(ArtifactCommand(identity([operation_id, 'settle']),
                 'settle_staging', ref, operation_id, size))
+            settled = True
             return ref
         finally:
-            if staging is not None:
-                staging.unlink(missing_ok=True)
-                _sync_directory(self._staging)
-            if not published:
-                try:
-                    self._journal.artifact(ArtifactCommand(identity([operation_id, 'release']),
-                        'release_staging', None, operation_id, 0))
-                except BaseException:
-                    # Keep conservative accounting if the authority is unknown;
-                    # never hide the original write/iterator failure.
-                    pass
+            try:
+                if staging is not None:
+                    staging.unlink(missing_ok=True)
+                    _sync_directory(self._staging)
+                if begun and not published and not prepared:
+                    try:
+                        self._journal.artifact(ArtifactCommand(identity([operation_id, 'release']),
+                            'release_staging', None, operation_id, 0))
+                        settled = True
+                    except BaseException:
+                        # Unknown authority retains its original charge and lease
+                        # inode evidence for a later driver reconciliation.
+                        pass
+                if settled:
+                    lease.remove()
+            finally:
+                lease.close()
 
     def read(self, ref: ArtifactRef, *, max_bytes: int) -> Iterator[bytes]:
         if type(max_bytes) is not int or max_bytes <= 0:
@@ -206,7 +231,7 @@ class RunArtifactStore:
             raise DataflowError("UNKNOWN_EFFECT", "artifact cannot be inspected: " + type(exc).__name__)
         if stat.st_size != ref.size_bytes:
             raise DataflowError("INVALID_CONTRACT", "artifact size differs from its reference")
-        if _file_digest(path) != ref.digest:
+        if _file_digest(path, max_bytes=ref.size_bytes) != ref.digest:
             raise DataflowError("INVALID_CONTRACT", "artifact bytes do not match its reference")
         return True
 
@@ -236,12 +261,21 @@ def _pin_identity(ref: ArtifactRef, owner: str) -> str:
     return identity({"digest": ref.digest, "store_id": ref.store_id, "key": ref.key, "owner": owner})
 
 
-def _file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as stream:
-        while True:
-            chunk = stream.read(_MAX_CHUNK_BYTES)
-            if not chunk:
-                break
-            digest.update(chunk)
+def _file_digest(path: Path, *, max_bytes: int) -> str:
+    digest, total = hashlib.sha256(), 0
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise DataflowError('INVALID_CONTRACT', 'Artifact object is not a regular file')
+        with os.fdopen(fd, 'rb', closefd=False) as stream:
+            while True:
+                chunk = stream.read(min(_MAX_CHUNK_BYTES, max_bytes - total + 1))
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise DataflowError('INVALID_CONTRACT', 'Artifact grew beyond its reference')
+                digest.update(chunk)
+    finally:
+        os.close(fd)
     return digest.hexdigest()

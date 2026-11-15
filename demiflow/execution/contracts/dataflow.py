@@ -75,7 +75,7 @@ _EVENT_KINDS = frozenset({
 _COMPLETIONS = frozenset({"source_exhausted", "terminal_satisfied", "cancelled", "incomplete"})
 _PRODUCER_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
 _POLL_STATUSES = frozenset({"record", "pending", "eoi"})
-_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
+_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "begin_staging", "prepare_staging", "grow_staging", "settle_staging", "release_staging"})
 _REPLY_STATUSES = frozenset({"ok", "error", "pending"})
 _SCOPE_CONDITIONS = frozenset({"input_eoi", "terminal_limit", "queue_drain_declared"})
 _QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch", "producer", "native_search"})
@@ -1392,8 +1392,16 @@ class ScheduleChoice:
 
 @dataclass(frozen=True)
 class ArtifactCommand:
+    """Artifact control only; business bytes remain in immutable objects.
+
+    begin_staging: operation_id=reservation, owner=store_id, ref=None,
+    size_bytes=initial admission; the writer already holds its physical lease.
+    prepare_staging: owner=reservation, ref=exact future published object,
+    size_bytes=ref.size_bytes; durable intent must precede any hardlink.
+    grow/settle/release retain owner=reservation and existing idempotency rules.
+    """
     operation_id: str
-    kind: Literal["pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"]
+    kind: Literal["pin", "unpin", "inspect", "reserve_staging", "begin_staging", "prepare_staging", "grow_staging", "settle_staging", "release_staging"]
     ref: ArtifactRef | None
     owner: str
     size_bytes: int

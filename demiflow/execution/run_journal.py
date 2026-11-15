@@ -199,6 +199,8 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), attempt INTEGER NOT NULL, fence TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_actions (action_id TEXT PRIMARY KEY, declaration TEXT NOT NULL, snapshot TEXT, result TEXT);
           CREATE TABLE IF NOT EXISTS runtime_effects (action_id TEXT NOT NULL, effect_id TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(action_id,effect_id));
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_recovery (singleton INTEGER PRIMARY KEY CHECK(singleton=1), cursor TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_staging (reservation_id TEXT PRIMARY KEY, store_id TEXT NOT NULL, device INTEGER NOT NULL, inode INTEGER NOT NULL, initial_bytes INTEGER NOT NULL, publication TEXT);
           CREATE TABLE IF NOT EXISTS runtime_dataflow_objects (store_id TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY(store_id,digest));
           CREATE TABLE IF NOT EXISTS runtime_dataflow_settlements (reservation_id TEXT PRIMARY KEY, store_id TEXT, digest TEXT, bytes INTEGER NOT NULL, charged INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_artifacts (path TEXT PRIMARY KEY, commit_id TEXT, protected INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0);
@@ -1033,6 +1035,75 @@ class RunJournal:
             raise RecoveryContractError('Durable receipt changed')
         db.execute('INSERT OR IGNORE INTO runtime_receipts VALUES (?,?,?)', (commit_id, sink_id, raw))
 
+    def begin_dataflow_staging(self, fence, reservation_id, store_id, inode, size, *, ceiling):
+        """Atomically bind byte admission to an already locked physical owner."""
+        from .recovery_contract import identifier, RecoveryContractError
+        identifier(reservation_id)
+        identifier(store_id)
+        if (type(inode) is not tuple or len(inode) != 2
+                or any(type(v) is not int or not 0 <= v < 2**63 for v in inode)
+                or type(size) is not int or size <= 0):
+            raise RecoveryContractError('Invalid staging owner or size')
+        with self.execution_guard(fence) as db:
+            old = db.execute('SELECT store_id,device,inode,initial_bytes FROM runtime_dataflow_staging WHERE reservation_id=?', (reservation_id,)).fetchone()
+            expected = (store_id, *inode, size)
+            if old is not None:
+                if old != expected:
+                    raise RecoveryContractError('Staging ownership changed')
+                return size
+            if db.execute("SELECT 1 FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?", (reservation_id,)).fetchone():
+                raise RecoveryContractError('Cannot attach new ownership to a legacy reservation')
+            self.reserve_budgets_in_transaction(db, reservation_id, {'artifact_staging_bytes': (size, ceiling)})
+            db.execute('INSERT INTO runtime_dataflow_staging VALUES (?,?,?,?,?,NULL)', (reservation_id, *expected))
+            return size
+
+    def prepare_dataflow_staging(self, fence, reservation_id, ref):
+        """Record the exact future object before the worker may publish it."""
+        from dataclasses import asdict
+        from .recovery_contract import document, RecoveryContractError
+        raw = document(asdict(ref)).decode()
+        with self.execution_guard(fence) as db:
+            row = db.execute('SELECT store_id,publication FROM runtime_dataflow_staging WHERE reservation_id=?', (reservation_id,)).fetchone()
+            amount = db.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?", (reservation_id,)).fetchone()
+            if row is None or row[0] != ref.store_id or amount is None or ref.size_bytes > amount[0]:
+                raise RecoveryContractError('Publication lacks its original staging admission')
+            if row[1] is not None and row[1] != raw:
+                raise RecoveryContractError('Staging publication changed')
+            if db.execute('SELECT 1 FROM runtime_dataflow_settlements WHERE reservation_id=?', (reservation_id,)).fetchone():
+                raise RecoveryContractError('Settled staging cannot prepare publication')
+            db.execute('UPDATE runtime_dataflow_staging SET publication=? WHERE reservation_id=?', (raw, reservation_id))
+
+    def dataflow_staging_owner(self, fence, reservation_id):
+        from .recovery_contract import identifier
+        identifier(reservation_id)
+        with self.execution_guard(fence) as db:
+            row = db.execute('SELECT s.store_id,s.device,s.inode,s.publication,d.reservation_id IS NOT NULL FROM runtime_dataflow_staging s LEFT JOIN runtime_dataflow_settlements d ON d.reservation_id=s.reservation_id WHERE s.reservation_id=?', (reservation_id,)).fetchone()
+        return (row[0], row[1], row[2], json.loads(row[3]) if row[3] else None, bool(row[4])) if row else None
+
+    def dataflow_recovery_cursor(self, fence, *, value=None):
+        # Bounded recovery rotates through unknown/live owners instead of forever
+        # starving later reservations behind the first page. This is scan progress,
+        # never ownership or completion evidence.
+        from .recovery_contract import identifier
+        if value:
+            identifier(value)
+        with self.execution_guard(fence) as db:
+            if value is not None:
+                db.execute('INSERT OR REPLACE INTO runtime_dataflow_recovery VALUES (1,?)', (value,))
+                return value
+            row = db.execute('SELECT cursor FROM runtime_dataflow_recovery WHERE singleton=1').fetchone()
+            return row[0] if row else ''
+
+    def pending_dataflow_staging(self, fence, *, after='', limit=128):
+        from .recovery_contract import identifier
+        if after:
+            identifier(after)
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError('Invalid staging page size')
+        with self.execution_guard(fence) as db:
+            rows = db.execute('SELECT s.reservation_id,s.store_id,s.device,s.inode,s.publication FROM runtime_dataflow_staging s LEFT JOIN runtime_dataflow_settlements d ON d.reservation_id=s.reservation_id WHERE d.reservation_id IS NULL AND s.reservation_id>? ORDER BY s.reservation_id LIMIT ?', (after, limit)).fetchall()
+        return [(r, s, d, i, json.loads(p) if p else None) for r, s, d, i, p in rows]
+
     def grow_dataflow_staging(self, fence, reservation_id, size, *, ceiling):
         """Admit an increase before writing, in the same fenced byte ledger.
 
@@ -1077,6 +1148,11 @@ class RunJournal:
                 if old[:3] != (store_id, digest, size):
                     raise RecoveryContractError('Artifact settlement changed')
                 return old[3]
+            owner = db.execute('SELECT publication FROM runtime_dataflow_staging WHERE reservation_id=?', (reservation_id,)).fetchone()
+            if owner is not None and ref is not None:
+                from dataclasses import asdict
+                if owner[0] is None or json.loads(owner[0]) != asdict(ref):
+                    raise RecoveryContractError('Artifact settlement differs from publication intent')
             reservation = db.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?",
                                      (reservation_id,)).fetchone()
             if reservation is None or size > reservation[0]:

@@ -61,7 +61,7 @@ def test_failed_iterator_and_creation_release_only_owned_staging(tmp_path, monke
         with monkeypatch.context() as patch:
             def full(*args, **kwargs):
                 raise OSError('disk full')
-            patch.setattr(module.tempfile, 'mkstemp', full)
+            patch.setattr(module, '_create_staging', full)
             with pytest.raises(OSError, match='disk full'):
                 store.put(iter([b'x']), max_bytes=1024, media_type='application/octet-stream')
         assert consumed(run) == 0

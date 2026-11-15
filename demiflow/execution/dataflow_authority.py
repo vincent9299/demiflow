@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from .run_context import RunAction
 
 _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown", "release_unsent"})
-_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
+_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "begin_staging", "prepare_staging", "grow_staging", "settle_staging", "release_staging"})
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
                          "references", "media_references", "bind_membership", "stage_image"})
@@ -95,6 +95,23 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
     identifier(command.owner)
     journal = action.context.journal
     fence = action.context.fence
+    if command.kind == 'begin_staging':
+        # operation_id is the reservation; owner is its store_id. The physical
+        # lease must already be held before either ownership or quota is recorded.
+        if command.ref is not None or command.size_bytes <= 0:
+            raise DataflowError('INVALID_CONTRACT', 'Begin requires a positive size without a ref')
+        from .dataflow_staging import staging_paths, inspect_held_owner
+        owner, _ = staging_paths(action.context.directory / '.dataflow-store', command.owner, command.operation_id)
+        inode = inspect_held_owner(owner)
+        charged = journal.begin_dataflow_staging(fence, command.operation_id, command.owner,
+            inode, command.size_bytes, ceiling=bounds.max_spill_bytes)
+        return ArtifactReply(command.operation_id, None, charged)
+    if command.kind == 'prepare_staging':
+        # owner is the original reservation; ref is the exact upcoming object.
+        if command.ref is None or command.size_bytes != command.ref.size_bytes:
+            raise DataflowError('INVALID_CONTRACT', 'Prepare requires its exact publication ref')
+        journal.prepare_dataflow_staging(fence, command.owner, command.ref)
+        return ArtifactReply(command.operation_id, None, command.size_bytes)
     if command.kind == 'grow_staging':
         if command.ref is not None or command.size_bytes <= 0:
             raise DataflowError('INVALID_CONTRACT', 'Growth requires a positive staging size without a ref')
@@ -103,11 +120,27 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
         return ArtifactReply(operation_id=command.operation_id, present=None, charged_bytes=charged)
     if command.kind in {'settle_staging', 'release_staging'}:
         ref = command.ref
+        owned = journal.dataflow_staging_owner(fence, command.owner)
+        if owned is not None:
+            from .dataflow_staging import staging_paths
+            from .dataflow_store import _no_symlink
+            _, pending = staging_paths(action.context.directory / '.dataflow-store', owned[0], command.owner)
+            _no_symlink(pending)
+            if pending.exists():
+                raise DataflowError('INVALID_CONTRACT', 'Settlement requires deletion of owned staging files')
+            if command.kind == 'release_staging' and owned[3] is not None and not owned[4]:
+                from .contracts.dataflow import ArtifactRef
+                from .dataflow_store import RunArtifactStore
+                proposed = ArtifactRef(**owned[3])
+                store = RunArtifactStore(root=action.context.directory / '.dataflow-store',
+                    store_id=proposed.store_id, journal=None, bounds=bounds, readonly=True)
+                if store.inspect(proposed):
+                    raise DataflowError('INVALID_CONTRACT', 'Published staging requires artifact settlement')
         if command.kind == 'release_staging' and ref is not None:
             raise DataflowError('INVALID_CONTRACT', 'Release cannot carry an artifact')
         if command.kind == 'release_staging':
             root = action.context.directory / '.dataflow-store'
-            if command.size_bytes != 0 or next(root.glob('*/staging/.pending-' + command.owner + '-*'), None) is not None:
+            if command.size_bytes != 0 or (owned is None and next(root.glob('*/staging/.pending-' + command.owner + '-*'), None) is not None):
                 raise DataflowError('INVALID_CONTRACT', 'Release requires deletion of owned staging files')
         if command.kind == 'settle_staging':
             if ref is None:
@@ -151,6 +184,8 @@ class DriverArtifactPort:
     def __init__(self, action: "RunAction", *, bounds: "Bounds"):
         self._action = action
         self._bounds = bounds
+        from .dataflow_staging import recover_staging
+        self.recovery = recover_staging(action, bounds=bounds)
 
     def reserve(self, operation_id: str, amounts: Mapping[str, int]) -> None:
         from .dataflow_store import ARTIFACT_STAGING_BUDGET
