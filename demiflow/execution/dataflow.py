@@ -143,6 +143,8 @@ class DataflowExecution:
         self._peak_active_workers = 0
         self._report_keys = {}
         self._last_checkpoint_rows = 0
+        self._last_checkpoint_outputs = 0
+        self._checkpoint_deliveries = 0
         self._checkpoint_at = time.monotonic()
 
     @property
@@ -730,8 +732,15 @@ class DataflowExecution:
                 self._handle_event(event)
         source_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
                           if occ in self._graph.sources)
-        if (source_rows > self._last_checkpoint_rows and set(self._endpoints) - self._done
-                and (source_rows - self._last_checkpoint_rows >= self._policy.checkpoint_rows
+        output_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
+                          if occ not in self._graph.sources)
+        progress = max(source_rows - self._last_checkpoint_rows,
+                       output_rows - self._last_checkpoint_outputs, self._checkpoint_deliveries)
+        # A finite input may already be completely committed while its join or
+        # sort still emits many rows. Actual output/ACK progress must also drive
+        # the original checkpoint policy; source-only progress stalls that cut.
+        if (progress > 0 and set(self._endpoints) - self._done
+                and (progress >= self._policy.checkpoint_rows
                      or (time.monotonic() - self._checkpoint_at) * 1000 >= self._policy.checkpoint_interval_ms)):
             self.request_checkpoint()
         self._advance_cut()
@@ -948,6 +957,7 @@ class DataflowExecution:
 
     def _ack(self, delivery):
         producer, _ = self._deliveries.pop(delivery)
+        self._checkpoint_deliveries += 1
         if self._durable_residency is not None and self._durable_residency.actual_ack(delivery):
             if producer is not None:
                 producer.send_business({"kind": "ack", "delivery_id": delivery})
@@ -1013,6 +1023,9 @@ class DataflowExecution:
             self._restore_image = image
             self._last_checkpoint_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
                                              if occ in self._graph.sources)
+            self._last_checkpoint_outputs = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
+                                                if occ not in self._graph.sources)
+            self._checkpoint_deliveries = 0
             self._checkpoint_at = time.monotonic()
             for endpoint in self._endpoints.values():
                 endpoint.send_business({"kind": "receipt", "cut_id": self._cut.cut_id,
