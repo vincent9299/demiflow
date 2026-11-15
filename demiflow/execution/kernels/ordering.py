@@ -78,6 +78,8 @@ def _float_token(value: float) -> bytes:
 
 
 def _value_token(value: Any) -> bytes:
+    if value is None:
+        return b"\x00"
     if isinstance(value, bool):
         return b"\x01" + (b"\x01" if value else b"\x00")
     if isinstance(value, int):
@@ -118,7 +120,11 @@ def _field_token(value: Any, descending: bool) -> tuple[int, bytes]:
 def _provenance(record: Record) -> tuple[bytes, int, str]:
     # Source offsets are numbers, not JSON text (2 must precede 10). The same
     # closed typed token order handles nested expansion/source coordinates.
-    return (_value_token(thaw_record_value(record.source_position)), record.sequence, record.record_id)
+    position = thaw_record_value(record.source_position)
+    # Callback task boundaries are execution metadata, not source order.
+    # A filtered/expanded task must not move rows relative to source offsets.
+    position.pop('dataflow_task', None)
+    return (_value_token(position), record.sequence, record.record_id)
 
 
 def _descending_flags(spec: KernelSpec, count: int) -> tuple[bool, ...]:

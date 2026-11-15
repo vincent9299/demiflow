@@ -1,0 +1,68 @@
+"""One explicitly requested worker can run a bounded pure linear pipeline.
+
+Logical occurrences and their observations remain intact. This only chooses
+physical co-location in the existing GraphRunner; it creates no executor or
+recovery authority. Resource grants cover the sum of all live kernel windows.
+"""
+from dataclasses import replace
+
+from ..resources.contracts import ResourceProfile
+
+_SOURCES = frozenset({'items', 'range', 'file', 'lance', 'materialized', 'iterable', 'literal_empty'})
+_TERMINALS = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches',
+    'count', 'columns', 'schema', 'size_bytes', 'materialize', 'collect_summary'})
+
+
+def fuse_single_worker_pipeline(graph, stages, *, policy, bounds):
+    if not policy.fusion or policy.max_active_workers != 1:
+        return stages
+    if len(graph.sources) != 1 or len(graph.terminals) != 1 or len(stages) < 2:
+        return stages
+    nodes = {node.occurrence_id: node for node in graph.nodes}
+    owners = {occ: stage for stage in stages for occ in stage.occurrences}
+    inputs, outputs = {}, {}
+    for edge in graph.edges:
+        inputs.setdefault(edge.consumer, []).append(edge)
+        outputs.setdefault(edge.producer, []).append(edge)
+    chain, current = [], graph.sources[0]
+    while current not in chain:
+        chain.append(current)
+        if current == graph.terminals[0]:
+            break
+        edges = outputs.get(current, ())
+        if len(edges) != 1 or len(inputs.get(edges[0].consumer, ())) != 1:
+            return stages
+        current = edges[0].consumer
+    if len(chain) != len(nodes) or chain[-1] != graph.terminals[0]:
+        return stages
+    members = [owners[occ] for occ in chain]
+    for index, (occ, stage) in enumerate(zip(chain, members)):
+        node, kernel = nodes[occ], nodes[occ].kernel
+        if len(stage.occurrences) != 1 or len(stage.partitions) != 1:
+            return stages
+        if kernel.state != 'none' or kernel.effect != 'pure':
+            return stages
+        if stage.profile.limits or stage.profile.requirements:
+            return stages
+        if set(stage.profile.requests) - {'cpu_millis', 'memory_bytes'}:
+            return stages
+        if index == 0:
+            if node.kind != 'source' or kernel.kind not in _SOURCES:
+                return stages
+        elif index == len(chain) - 1:
+            if node.kind != 'terminal' or kernel.kind not in _TERMINALS:
+                return stages
+        elif (node.kind != 'transform' or kernel.resource_role != 'cpu' or not kernel.mergeable
+              or len(kernel.inputs) != 1 or kernel.inputs[0].requirement != 'incremental'
+              or kernel.configuration.get('concurrency', 1) != 1):
+            return stages
+    resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in members)
+    control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+    if resident > bounds.max_resident_bytes - control:
+        return stages
+    requests = {'cpu_millis': max(s.profile.requests['cpu_millis'] for s in members),
+                'memory_bytes': resident}
+    refs = tuple(dict.fromkeys(ref for s in members for ref in s.kernel_refs))
+    return (replace(members[0], occurrences=tuple(chain), profile=ResourceProfile(requests=requests),
+        replica_min=1, replica_target=1, replica_max=1, resident_bytes=resident,
+        output_bytes=sum(s.output_bytes for s in members), state_bytes=0, kernel_refs=refs),)

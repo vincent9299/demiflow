@@ -207,8 +207,15 @@ class DataflowExecution:
 
     def _assignment(self, lease: WorkerLease, stage) -> WorkerAssignment:
         partitions = set(stage.partitions)
-        inputs = tuple(x for x in self._physical.exchanges if partitions.intersection(x.consumer_partitions))
-        outputs = tuple(x for x in self._physical.exchanges if partitions.intersection(x.producer_partitions))
+        # A fused stage calls its internal logical edges directly. Transport
+        # ports are only the stage boundary; registering an internal edge as
+        # both input and output otherwise opens its channel twice.
+        inputs = tuple(x for x in self._physical.exchanges
+                       if partitions.intersection(x.consumer_partitions)
+                       and not partitions.intersection(x.producer_partitions))
+        outputs = tuple(x for x in self._physical.exchanges
+                        if partitions.intersection(x.producer_partitions)
+                        and not partitions.intersection(x.consumer_partitions))
         restore_refs = ()
         if self._restore_image is not None:
             restore_refs = tuple(ref for contribution in self._restore_image.contributions
