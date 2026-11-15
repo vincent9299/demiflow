@@ -20,9 +20,9 @@ from .recovery_contract import RecoveryContractError
 class ExecutionBudgetExceeded(RecoveryContractError):
     """A valid reservation exceeded its named durable ceiling."""
 
-    def __init__(self, budget):
+    def __init__(self, budget, message=None):
         self.budget = budget
-        super().__init__('Execution budget exhausted: ' + budget)
+        super().__init__(message or 'Execution budget exhausted: ' + budget)
 
 OBSERVATION_BYTES = 8192
 OBSERVATION_TOTAL_BYTES = 8 * 1024**2
@@ -1155,7 +1155,7 @@ class RunJournal:
                 raise RecoveryContractError('Unknown staging reservation or changed ceiling')
             delta = max(0, size - old[0])
             if budget[0] + delta > ceiling:
-                raise RecoveryContractError('Execution budget exhausted: artifact_staging_bytes')
+                raise ExecutionBudgetExceeded('artifact_staging_bytes')
             db.execute("UPDATE runtime_budgets SET consumed=consumed+? WHERE name='artifact_staging_bytes'", (delta,))
             db.execute("UPDATE runtime_reservations SET amount=amount+? WHERE name='artifact_staging_bytes' AND reservation_id=?",
                        (delta, reservation_id))
@@ -1365,7 +1365,7 @@ class RunJournal:
             total += dataflow[0]
             limit = min(limit, dataflow[1])
         if total > limit:
-            raise RecoveryContractError('Runtime storage exceeds scratch admission budget')
+            raise ExecutionBudgetExceeded('max_scratch_bytes', 'Runtime storage exceeds scratch admission budget')
         return total
 
     def storage_usage(self):

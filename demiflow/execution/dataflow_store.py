@@ -135,9 +135,9 @@ class RunArtifactStore:
                     if size > reserved:
                         # Admission precedes every write beyond the owned extent.
                         # Do not reserve an entire source/spill ceiling up front.
-                        self._journal.artifact(ArtifactCommand(identity([operation_id, 'grow', size]),
-                            'grow_staging', None, operation_id, size))
-                        reserved = size
+                        from .dataflow_staging_growth import grow_staging
+                        reserved = grow_staging(self._journal, operation_id,
+                            reserved=reserved, required=size, maximum=max_bytes)
                     view = memoryview(chunk)
                     for offset in range(0, len(view), _MAX_CHUNK_BYTES):
                         part = view[offset:offset + _MAX_CHUNK_BYTES]

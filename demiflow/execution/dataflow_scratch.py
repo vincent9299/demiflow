@@ -76,10 +76,9 @@ class KernelScratch:
         if end > self.maximum:
             raise DataflowError('BUDGET_EXCEEDED', 'Kernel scratch exceeds max_spill_bytes')
         if end > self.reserved:
-            extent = min(self.maximum, ((end + 65535) // 65536) * 65536)
-            self.store._journal.artifact(ArtifactCommand(identity([self.operation, 'grow', extent]),
-                'grow_staging', None, self.operation, extent))
-            self.reserved = extent
+            from .dataflow_staging_growth import grow_staging
+            self.reserved = grow_staging(self.store._journal, self.operation,
+                reserved=self.reserved, required=end, maximum=self.maximum)
         view = memoryview(raw)
         written = 0
         while written < len(view):
