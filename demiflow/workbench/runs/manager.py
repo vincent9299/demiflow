@@ -823,6 +823,15 @@ def resume(root, run_id, *, expected, expected_attempt, authority=None):
     from demiflow.workbench.worker import operation
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, "run_submit")
+    # Same-engine resume admission with a concrete reason before any business start.
+    # History is read-only: this never rewrites source nor creates a replacement
+    # successful run; per-action compatibility is enforced by the recovery path.
+    from demiflow.execution.recovery_identity import platform_identity
+    binding = RunJournal(directory(root, run_id)).recovery_identity()
+    if binding is None:
+        raise ForgeError('该运行没有统一恢复契约，不能恢复历史；请新建运行。', code='conflict')
+    if binding.get('platform_revision') != platform_identity():
+        raise ForgeError('引擎实现已变更，恢复需要原引擎版本；不能重写源或创建替代成功运行。', code='conflict')
     from demiflow.workbench.runs.domain import preparation_lock
     with preparation_lock() as lease:
         prepared = operation('run_resume', root, run_id=run_id, expected=expected, expected_attempt=expected_attempt,_pass_fds=(lease,), _authority=authority.bootstrap())

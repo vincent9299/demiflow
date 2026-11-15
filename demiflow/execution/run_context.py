@@ -94,6 +94,22 @@ class RunContext:
     def resume(cls, reference, *, entry_identity=None, limits=None):
         if not isinstance(reference, RunRef):
             raise TypeError("Resume requires the original platform RunRef")
+        # Unified history admission before any business start: the run must carry a
+        # unified recovery contract produced by this same engine revision. The
+        # original RunRef is preserved; per-action code/source/state/sink/cursor
+        # compatibility is enforced by the recovery path (load_execution_version /
+        # validate_resume_compatibility), never by rewriting source or fabricating a
+        # replacement successful run.
+        from .recovery_identity import platform_identity
+        journal = RunJournal(reference.directory)
+        binding = journal.recovery_identity()
+        if binding is None:
+            raise RecoveryContractError("Run has no unified recovery contract; cannot resume history")
+        if binding.get("platform_revision") != platform_identity():
+            raise RecoveryContractError(
+                "Platform implementation changed; resume requires the original engine revision")
+        if binding.get("run_id") != reference.run_id:
+            raise RecoveryContractError("RunRef identity does not match its directory")
         context = cls(reference.directory, entry_identity=entry_identity, limits=limits, resume=True)
         context.expected_run_id = reference.run_id
         return context
