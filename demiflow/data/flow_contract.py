@@ -31,6 +31,7 @@ KINDS = {
     "collect_summary",
     "from_items",
     "require_columns",
+    "sort", "repartition", "shuffle", "block_order", "sample",
 }
 
 
@@ -198,6 +199,9 @@ def normalize_stream_parameters(arguments, *, batch=False, effective=True):
 def normalize_arguments(kind, execution, arguments):
     """Pure native normalization; managed resource admission is separate."""
     result = dict(arguments)
+    if kind in {'sort', 'repartition', 'shuffle', 'block_order', 'sample'}:
+        from .flow_ordering import normalize_ordering
+        return normalize_ordering(kind, result)
     if kind == 'require_columns':
         names = result['columns']
         if (type(names) not in (list, tuple) or not 1 <= len(names) <= 2048
@@ -278,6 +282,9 @@ def analyze_fields(kind, execution, arguments, *, inputs, callables, resources):
     if kind not in KINDS:
         raise ValueError("No native analyzer for this contract")
     schema = inputs[0] if inputs else {}
+    if kind in {'sort', 'repartition', 'shuffle', 'block_order', 'sample'}:
+        from .flow_ordering import analyze_ordering
+        return analyze_ordering(kind, arguments, inputs=inputs)
     if kind == 'require_columns':
         names = set(arguments['columns'])
         if not names <= schema.keys() or arguments['exact'] and names != schema.keys():
@@ -338,7 +345,7 @@ def analyze_fields(kind, execution, arguments, *, inputs, callables, resources):
                         else "zero_or_one_per_group" if kind == 'reduce' else "zero_or_one" if kind in {"filter", "limit"} else "one"),
         "order": "unspecified" if stream or kind in {"join", "union", "reduce"} else "preserved",
         "driver": "stream" if stream else "pull",
-        "input_driver": "pull" if kind in {'join', 'union', 'reduce'} else 'stream' if kind == 'run_stream' else 'either',
+        "input_driver": 'stream' if kind == 'run_stream' else 'either',
         "callable_form": "awaitable" if callables and callables[0].get("async") else "sync" if callables else None,
         "placement": arguments.get("execution") or "inline",
         "scope": arguments.get("callable_scope") or "stage" if callables else None,

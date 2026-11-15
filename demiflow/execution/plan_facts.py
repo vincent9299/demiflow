@@ -92,6 +92,8 @@ def operation_capability(operation):
         ops.LimitOp: "limit", ops.SelectColumnsOp: "project", ops.DropColumnsOp: "drop",
         ops.RenameColumnsOp: "rename", ops.AddColumnOp: "add_column",
         ops.RandomSampleOp: "sample", ops.OperatorLLMMapOp: "model_map",
+        ops.SortOp: "sort", ops.RepartitionOp: "repartition",
+        ops.RandomShuffleOp: "shuffle", ops.RandomizeBlockOrderOp: "block_order",
     }
     kind = kinds.get(type(operation))
     # Native specializations have their own domain facts, while sharing the
@@ -186,6 +188,19 @@ def operation_facts(operation):
         arguments.update(column=operation.column, batch_format=operation.batch_format)
     elif kind == "sample":
         arguments.update(fraction=operation.fraction, seed=operation.seed)
+    elif kind == "sort":
+        arguments.update(key=list(operation.keys), descending=list(operation.descending),
+                         boundaries=list(operation.boundaries) if operation.boundaries is not None else None)
+    elif kind == "repartition":
+        arguments.update(num_blocks=operation.num_blocks,
+                         target_num_rows_per_block=operation.target_num_rows_per_block,
+                         shuffle=operation.shuffle,
+                         keys=list(operation.keys) if operation.keys is not None else None,
+                         sort=operation.sort)
+    elif kind == "shuffle":
+        arguments.update(seed=operation.seed, num_blocks=operation.num_blocks)
+    elif kind == "block_order":
+        arguments.update(seed=operation.seed)
     elif kind == "model_map":
         arguments.update(prompt_name=operation.prompt_name, inputs=dict(operation.inputs),
                          output=operation.output,

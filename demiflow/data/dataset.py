@@ -1884,6 +1884,7 @@ class Dataset:
         )
         return Dataset(self._source, self._plan.append(operation), self._executor)
 
+    @_flow_api("sample", datasets=("self",))
     def random_sample(
         self, fraction: float, *, seed: Optional[int] = None,
     ) -> "Dataset":
@@ -1900,6 +1901,7 @@ class Dataset:
             self._executor,
         )
 
+    @_flow_api("sort", datasets=("self",))
     def sort(
         self, key: str | Sequence[str],
         descending: bool | Sequence[bool] = False,
@@ -1934,6 +1936,7 @@ class Dataset:
             self._executor,
         )
 
+    @_flow_api("repartition", datasets=("self",))
     def repartition(
         self, num_blocks: Optional[int] = None,
         target_num_rows_per_block: Optional[int] = None, *,
@@ -1969,6 +1972,7 @@ class Dataset:
             self._executor,
         )
 
+    @_flow_api("shuffle", datasets=("self",))
     def random_shuffle(
         self, *, seed: Optional[int] = None,
         num_blocks: Optional[int] = None,
@@ -1986,6 +1990,7 @@ class Dataset:
             self._executor,
         )
 
+    @_flow_api("block_order", datasets=("self",))
     def randomize_block_order(
         self, *, seed: Optional[int] = None,
     ) -> "Dataset":

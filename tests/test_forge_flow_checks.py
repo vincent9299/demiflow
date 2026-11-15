@@ -79,7 +79,8 @@ def test_complete_example_and_variants(composition):
 
 @pytest.mark.parametrize('tail,category', [
     ('.run_stream()', 'unsupported'),
-    ('.repartition(2)', 'unknown'),
+    ('.unknown_transform()', 'unknown'),
+    ('.repartition(2)', 'invalid'),  # Supported transform still needs a terminal action.
     ('.limit(-1)', 'invalid'),
     (".write_lance(target['uri'], mode='append', return_receipt=True)", 'denied'),
 ])
@@ -535,8 +536,9 @@ def run():
     assert good["status"] == "checked", good["diagnostics"]
     assert any("drop_and_count_declared_errors" in n["effects"] for n in good["nodes"])
     assert good["coverage"]["resource_runtime"] == "not_run"
+    direct = simple_flow(tmp_path, catalog, flow.replace(".materialize()", ""), operator)
+    assert direct["status"] == "checked", direct["diagnostics"]
     for old, new, rule in [
-        (".materialize()", "", "FL-08"),
         ("concurrency=1", "concurrency=0", "OP-07"),
         ("catch=(ValueError,)", "catch=(BaseException,)", "FL-01"),
     ]:

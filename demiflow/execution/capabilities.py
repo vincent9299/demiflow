@@ -43,23 +43,36 @@ def require_action(kind, arguments=None):
 
 
 def check_call(fact, *, backend="local", driver="pull"):
+    """Project checked vocabulary onto the sole unified operator registry.
+
+    ``driver`` remains a historical report label, never a second executor gate.
+    Workspace effect permissions and actual native parameter checks stay with
+    their existing semantic/resource contracts.
+    """
+    from ..planning.dataflow_registry import operator_registry
+    aliases = {
+        'map': 'MapOp', 'async_map': 'AsyncMapOp', 'batch_map': 'BatchMapOp',
+        'flat_map': 'FlatMapOp', 'filter': 'FilterOp', 'project': 'SelectColumnsOp',
+        'drop': 'DropColumnsOp', 'rename': 'RenameColumnsOp', 'limit': 'LimitOp',
+        'map_batches': 'MapBatchesOp', 'add_column': 'AddColumnOp',
+        'sample': 'RandomSampleOp', 'model_map': 'OperatorLLMMapOp',
+        'sort': 'SortOp', 'repartition': 'RepartitionOp',
+        'shuffle': 'RandomShuffleOp', 'block_order': 'RandomizeBlockOrderOp',
+    }
+    kind = fact['kind']
+    registry = operator_registry()
+    native_kind = aliases.get(kind, kind)
     reason = None
-    kind = fact["kind"]
-    if backend != "local":
-        reason = "Backend has no checked capability contract"
-    elif driver == "stream":
-        if kind not in {"map", "async_map", "batch_map", "flat_map", "filter", "project", "drop", "rename"}:
-            reason = "streaming does not support this operation; materialize the synchronous prefix first"
-        elif fact.get("native_options"):
-            reason = "streaming does not support backend_options"
-    elif driver != "pull":
-        reason = "Unknown native driver"
-    elif kind in {"async_map", "batch_map"} or fact.get("stream_options"):
-        reason = "Stream operations require a streaming action or materialize"
-    elif kind not in {"map", "filter", "flat_map", "map_batches", "limit", "project", "drop", "rename", "add_column", "sample", "model_map"}:
-        reason = "Operation has no pull backend capability contract"
-    return {"version": VERSION, "backend": backend, "driver": driver,
-            "supported": reason is None, "reason": reason}
+    if backend != 'local':
+        reason = 'Backend has no checked capability contract'
+    elif driver not in {'pull', 'stream'}:
+        reason = 'Unknown native driver'
+    elif native_kind not in registry:
+        reason = 'Operation has no unified compiler capability contract'
+    elif fact.get('native_options'):
+        reason = 'Managed backend_options require an explicit resource declaration'
+    return {'version': VERSION, 'backend': backend, 'driver': driver,
+            'supported': reason is None, 'reason': reason}
 
 
 def check_composition(facts, *, backend="local", driver=None):
