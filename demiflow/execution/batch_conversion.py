@@ -18,7 +18,8 @@ def _error(message):
 def _builtin_storage(dtype):
     """Known native storage layouts; never invoke a user extension hook."""
     import pyarrow as pa
-    known = tuple(getattr(pa, name) for name in ('JsonType', 'UuidType', 'Bool8Type')
+    known = tuple(getattr(pa, name) for name in (
+        'JsonType', 'UuidType', 'Bool8Type', 'FixedShapeTensorType', 'OpaqueType')
                   if hasattr(pa, name))
     return dtype.storage_type if type(dtype) in known else None
 
@@ -87,7 +88,7 @@ class _Admission:
         if isinstance(dtype, pa.BaseExtensionType):
             storage = _builtin_storage(dtype)
             if storage is not None:
-                # Keep native JSON/UUID/Bool8 declarations, including empty
+                # Keep known native storage declarations, including empty
                 # and null-only typed columns, on the real constructor.
                 self.arrow(column, storage, depth + 1)
                 return

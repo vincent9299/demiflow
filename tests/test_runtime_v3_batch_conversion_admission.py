@@ -293,7 +293,9 @@ def test_public_standard_layout_schema_and_pandas(tmp_path, provider, dtype, val
         pd.testing.assert_frame_equal(batches[0], table.to_pandas())
 
 
-@pytest.mark.parametrize('dtype', [pa.uuid(), pa.bool8()], ids=['uuid', 'bool8'])
+@pytest.mark.parametrize('dtype', [pa.uuid(), pa.bool8(),
+    pa.fixed_shape_tensor(pa.float32(), [2, 2]), pa.opaque(pa.int32(), 'native', 'fixture')],
+    ids=['uuid', 'bool8', 'fixed-tensor', 'opaque'])
 @pytest.mark.parametrize('rows', [[], [{'value': None}]], ids=['empty', 'null'])
 def test_public_builtin_nullable_extension_preserves_schema(tmp_path, provider, dtype, rows):
     schema = pa.schema([pa.field('value', dtype, nullable=True)],
