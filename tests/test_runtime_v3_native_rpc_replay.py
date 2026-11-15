@@ -83,13 +83,15 @@ def altered(original, **changes):
 
 def test_native_reserve_retry_is_same_receipt_and_single_charge(tmp_path):
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):
-        request = event(run, store)
+        request = altered(event(run, store), options={'marker': True, 'sign': -0.0})
         with ThreadPoolExecutor(max_workers=2) as pool:
             first, retry = list(pool.map(authority.dispatch, (request, request)))
         assert first == retry and first.status == 'ok' and first.payload['value'] is True
         assert charged(run) == (1, 1)
         changed = authority.dispatch(altered(request, options={'other': True}))
         assert changed.status == 'error' and changed.error_code == 'INVALID_CONTRACT'
+        for options in ({'marker': 1, 'sign': -0.0}, {'marker': True, 'sign': 0.0}):
+            assert authority.dispatch(altered(request, options=options)).error_code == 'INVALID_CONTRACT'
         assert charged(run) == (1, 1)
         different_id = altered(request, operation_id=identity(['different-rpc']))
         with pytest.raises(UncertainPromptCall, match='active writer'):

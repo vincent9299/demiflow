@@ -416,9 +416,12 @@ class DriverJournalService:
 
         Do not cache lookups (their None result can become stale), failed calls,
         or HTTP-retry commands (each native HTTP attempt has distinct rules).
-        Full WorkerEvent equality binds the retained reply to the original
+        The canonical wire digest binds the retained reply to the original
         worker, boot, attempt, fence and payload, not only a reusable RPC id.
         """
+        import hashlib
+        from .contracts.dataflow_codec import encode_wire
+        signature = hashlib.sha256(encode_wire(event, type_name='WorkerEvent', bounds=self._bounds)).hexdigest()
         with self._native_reserve_lock:
             if self._closed:
                 raise DataflowError('FENCED', 'Journal service is closed')
@@ -429,13 +432,13 @@ class DriverJournalService:
             prior = self._native_reserve_replies.get(event.operation_id)
             if prior is not None:
                 original, reply = prior
-                if original != event:
+                if original != signature:
                     raise DataflowError('INVALID_CONTRACT', 'Operation id reused for a different native reserve')
                 self._native_reserve_replies.move_to_end(event.operation_id)
                 return reply
             reply = self.native_request(command, lease=lease)
             if not self._closed:
-                self._native_reserve_replies[event.operation_id] = (event, reply)
+                self._native_reserve_replies[event.operation_id] = (signature, reply)
                 while len(self._native_reserve_replies) > self._bounds.max_pending_events:
                     self._native_reserve_replies.popitem(last=False)
             else:
