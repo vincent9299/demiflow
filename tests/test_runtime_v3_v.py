@@ -112,7 +112,7 @@ def test_v002():
         # A scenario whose owning lane has not delivered is recorded not_run
         # with lane attribution — never a skip counted as pass.
         with pytest.raises(NotRunError) as exc:
-            fx.run("api_matrix")  # this harness is explicitly still incomplete
+            fx.run("performance")  # no measured representative performance baseline yet
         assert exc.value.code == "NOT_RUN"
         assert fx.not_run_records, "not_run must be recorded in the ledger"
         record = fx.not_run_records[-1]

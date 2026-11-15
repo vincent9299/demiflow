@@ -374,11 +374,13 @@ class _ExecuteActionRecorder:
             recorder.calls.append(entry)
             return handle
 
-        api = importlib.import_module("demiflow.execution.dataflow_api")
+        aliases = [importlib.import_module(name) for name in
+                   ("demiflow.execution.dataflow_api", "demiflow.execution.dataflow_stream")]
         self._module.execute_action = wrapped
-        if getattr(api, "execute_action", None) is self._original:
-            self._aliases.append((api, self._original))
-            api.execute_action = wrapped
+        for api in aliases:
+            if getattr(api, "execute_action", None) is self._original:
+                self._aliases.append((api, self._original))
+                api.execute_action = wrapped
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -504,7 +506,7 @@ class RuntimeV3Fixture:
         from demiflow.execution.run_context import RunContext
         executor = LocalDatasetExecutor() if self.provider == "local" else RayDatasetExecutor()
         from contextlib import nullcontext
-        self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal'}
+        self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix'}
         scope = nullcontext() if self_managed else RunContext.start(self.journal_dir / scenario)
         try:
             with scope, _use_executor(executor):
@@ -754,9 +756,18 @@ def _s_no_ray_data(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 
 def _s_api_matrix(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": '98 entries need real positive/negative behavior cases; caught exceptions and surface_present are not evidence'}
-    fx._record_not_run('api_matrix', detail)
-    raise NotRunError('api_matrix', detail)
+    from runtime_v3_api_scenarios import api_matrix
+    evidence = api_matrix(fx, fault)
+    assert evidence['api_count'] == 98 and len(evidence['api']) == 98
+    assert not evidence['failed'], {key: value['failed'] for key, value in evidence['failed'].items()}
+    if evidence['not_run']:
+        detail = {'unverified_api': evidence['not_run'], 'executed': evidence['executed']}
+        fx._record_not_run('api_matrix', detail)
+        raise NotRunError('api_matrix', detail)
+    assert evidence['complete'] and len(evidence['tested']) == 98
+    assert set(evidence['executed']) == set(evidence['tested']) == set(evidence['api'])
+    assert evidence['cases'] and all(case['status'] == 'passed' for case in evidence['cases'])
+    return evidence
 
 
 def _api_positive_and_negative(data: Any, symbol: str, fx: RuntimeV3Fixture) -> str:
