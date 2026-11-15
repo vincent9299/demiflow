@@ -110,10 +110,14 @@ class LocalResourceProvider:
         return validate_observation(value)
 
     def _release_devices(self, allocation_id, evidence_ref):
-        if self._device_pool is not None and self._device_pool.reservation_view(allocation_id) is not None:
+        prior = self._device_pool.reservation_view(allocation_id) if self._device_pool is not None else None
+        if prior is not None and prior['state'] != 'RELEASED':
             self._device_pool.release(allocation_id, {
                 "confirmed": True, "identity": None, "evidence_ref": evidence_ref,
             })
+
+    def resolve_evidence(self, scope_id, allocation_id, reference):
+        return self.unit.resolve_evidence(scope_id, allocation_id, reference)
 
     def _device_placement(self, allocation_id):
         if self._device_pool is None:
@@ -240,7 +244,7 @@ class LocalResourceProvider:
         self.pool.bind_identity(allocation_id, identity)
         return self._observation(scope_id, allocation_id, "RUNNING", "FRESH",
                                  identity=identity, effective=effective,
-                                 evidence_ref=spawned["directory"] + "/process.json",
+                                 evidence_ref=self.unit.evidence_ref(scope_id, allocation_id, 'process.json'),
                                  placement=self._device_placement(allocation_id))
 
     def inspect(self, scope_id, page_token):
@@ -294,7 +298,8 @@ class LocalResourceProvider:
             # A capacity-pending request may never have reserved anything.
             # Unit absence proves no host existed; only an existing unbound
             # reservation needs release. A bound record still fails closed.
-            if self.pool.reservation_view(allocation_id) is not None:
+            prior = self.pool.reservation_view(allocation_id)
+            if prior is not None and prior['state'] != 'RELEASED':
                 self.pool.release(allocation_id, {
                     "confirmed": True, "identity": None,
                     "evidence_ref": "never-spawned:" + allocation_id,
@@ -306,7 +311,9 @@ class LocalResourceProvider:
         evidence = self.unit.stop(scope_id, allocation_id, terminate_deadline_ms=terminate_deadline_ms,
                                   process=process)
         if evidence["confirmed"]:
-            self.pool.release(allocation_id, evidence)
+            prior = self.pool.reservation_view(allocation_id)
+            if prior is None or prior['state'] != 'RELEASED':
+                self.pool.release(allocation_id, evidence)
             self._release_devices(allocation_id, evidence["evidence_ref"])
             self._spawned.pop(allocation_id, None)
             self._close_confirmed_control(allocation_id)

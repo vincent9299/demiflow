@@ -118,6 +118,14 @@ class ManagedProcessUnit:
         identifier(allocation_id)
         return self.root / scope_id / allocation_id
 
+    def evidence_ref(self, scope_id, allocation_id, record):
+        from .evidence import evidence_reference
+        return evidence_reference(self.root, scope_id, allocation_id, record)
+
+    def resolve_evidence(self, scope_id, allocation_id, reference):
+        from .evidence import resolve_evidence
+        return resolve_evidence(self.root, scope_id, allocation_id, reference)
+
     def _read_record(self, path):
         try:
             with open(path, "rb") as stream:
@@ -225,20 +233,20 @@ class ManagedProcessUnit:
         record = self._read_record(directory / "process.json")
         if record is None:
             return {"phase": "REQUESTED", "observation": "FRESH", "identity": None,
-                    "evidence_ref": str(directory / "identity.json")}
+                    "evidence_ref": self.evidence_ref(scope_id, allocation_id, 'identity.json')}
         identity = record["identity"]
         pid, start = identity["pid"], identity["start"]
         live = _live(pid, start)
         stopped = unit_stopped(directory / "unit.lock", identity["unit"])
         if live and not stopped:
             return {"phase": "RUNNING", "observation": "FRESH", "identity": identity,
-                    "evidence_ref": str(directory / "process.json")}
+                    "evidence_ref": self.evidence_ref(scope_id, allocation_id, 'process.json')}
         if not live and stopped:
             return {"phase": "TERMINATED", "observation": "FRESH", "identity": identity,
-                    "evidence_ref": str(directory / "process.json")}
+                    "evidence_ref": self.evidence_ref(scope_id, allocation_id, 'process.json')}
         # PID reused, lock busy, or unreadable proc: unknown is not terminal.
         return {"phase": "RUNNING", "observation": "STALE_UNKNOWN", "identity": identity,
-                "evidence_ref": str(directory / "process.json")}
+                "evidence_ref": self.evidence_ref(scope_id, allocation_id, 'process.json')}
 
     def stop(self, scope_id, allocation_id, *, terminate_deadline_ms, process=None):
         directory = self.directory(scope_id, allocation_id)
@@ -278,9 +286,14 @@ class ManagedProcessUnit:
             "descendants_empty": descendants_empty,
             "checked_ms": int(time.time() * 1000),
         }
-        _save(directory / "cleanup.json", evidence)
+        prior = self._read_record(directory / 'cleanup.json')
+        # Re-observe physical exit above, but keep a confirmed terminal proof
+        # immutable. The same reference must survive retries and historical reads.
+        if not (prior is not None and all(prior.get(key) is True
+                for key in ('unit_stopped', 'birth_identity_gone', 'descendants_empty'))):
+            _save(directory / "cleanup.json", evidence)
         return {
             "confirmed": confirmed,
-            "evidence_ref": str(directory / "cleanup.json"),
+            "evidence_ref": self.evidence_ref(scope_id, allocation_id, 'cleanup.json'),
             "identity": identity,
         }

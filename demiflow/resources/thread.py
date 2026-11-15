@@ -22,6 +22,14 @@ class ThreadResourceProvider(LocalResourceProvider):
         identifier(scope); identifier(allocation)
         return self.root / scope / allocation / 'thread.json'
 
+    def _evidence(self, scope, allocation):
+        from .evidence import evidence_reference
+        return evidence_reference(self.root, scope, allocation, 'thread.json')
+
+    def resolve_evidence(self, scope, allocation, reference):
+        from .evidence import resolve_evidence
+        return resolve_evidence(self.root, scope, allocation, reference)
+
     def _read(self, scope, allocation):
         import json
         path = self._path(scope, allocation)
@@ -49,7 +57,7 @@ class ThreadResourceProvider(LocalResourceProvider):
         else:
             phase, freshness = 'RUNNING', 'STALE_UNKNOWN'
         result = self._observation(scope, allocation, phase, freshness, identity=identity,
-            effective=record['effective'], evidence_ref=str(self._path(scope, allocation)),
+            effective=record['effective'], evidence_ref=self._evidence(scope, allocation),
             cleanup=record.get('cleanup', 'NONE'))
         result['boot_id'] = record['boot_id']
         return result
@@ -102,7 +110,7 @@ class ThreadResourceProvider(LocalResourceProvider):
             record = self._read(scope_id, name)
             observations.append(self._view(record) if record is not None else
                 self._observation(scope_id, name, 'REQUESTED', 'FRESH',
-                                  evidence_ref=str(self._path(scope_id, name))))
+                                  evidence_ref=self._evidence(scope_id, name)))
         return {'allocations': observations,
                 'next_page_token': page[-1] if len(names) > 64 else None,
                 'sampled_at_ms': _now_ms()}
@@ -123,13 +131,16 @@ class ThreadResourceProvider(LocalResourceProvider):
                 confirmed = unit.shutdown(timeout_ms=terminate_deadline_ms)
             elif birth_start(identity['pid']) != identity['start']:
                 confirmed = True  # The actual hosting process no longer exists.
-        evidence = str(self._path(scope, allocation)) + ':confirmed-thread-exit'
         if confirmed:
-            if self.pool.reservation_view(allocation) is not None:
-                self.pool.release(allocation, {'confirmed': True, 'identity': identity, 'evidence_ref': evidence})
-            if record is not None:
+            if record is not None and record.get('cleanup') != 'CONFIRMED':
                 _save(self._path(scope, allocation), {**record, 'cleanup': 'CONFIRMED'})
+            # Freeze the real terminal proof before referencing it. Later
+            # cleanup calls reuse it without timestamps or phase rewrites.
+            evidence = self._evidence(scope, allocation)
+            reservation = self.pool.reservation_view(allocation)
+            if reservation is not None and reservation['state'] != 'RELEASED':
+                self.pool.release(allocation, {'confirmed': True, 'identity': identity, 'evidence_ref': evidence})
             self._control.retire(allocation)
         return {'allocation_id': allocation, 'cleanup': 'CONFIRMED' if confirmed else 'UNCONFIRMED',
-                'evidence_ref': evidence if confirmed else str(self._path(scope, allocation)),
+                'evidence_ref': evidence if confirmed else self._evidence(scope, allocation),
                 'observed_at_ms': _now_ms()}
