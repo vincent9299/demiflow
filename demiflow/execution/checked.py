@@ -35,7 +35,7 @@ def _equal(actual, expected, label):
 
 
 class CheckedExecution:
-    def __init__(self, *, nodes, edges, actions, operators, source_root, limits, record, check_stop, observe=None, resource_root=None, work_root=None, report_digest=None):
+    def __init__(self, *, nodes, edges, actions, operators, source_root, limits, record, check_stop, observe=None, resource_root=None, work_root=None, report_digest=None, targets=None):
         self.nodes = {n['id']: n for n in nodes}
         self.parents = {n['id']: [] for n in nodes}
         for edge in sorted(edges, key=lambda e: e['port']):
@@ -47,6 +47,7 @@ class CheckedExecution:
         self.work_root = Path(work_root).resolve() if work_root is not None else self.resource_root / 'work' if self.resource_root is not None else None
         self._limits, self.record, self.check_stop = limits, record, check_stop
         self.report_digest = report_digest
+        self.targets = targets
         self.position, self.handles = 0, {}
         self.active = None
         self.operation_id = None
@@ -428,6 +429,41 @@ class CheckedExecution:
             self.record(matches[0]['id'], 'stage_commit', {'reference': ref, 'checkpoint_node': origin,
                         'revision': checkpoint.state['revision'], 'schema_identity': facts['outputs'][stage]['schema_identity']})
 
+    def native_save_policy(self, execution, node, writer):
+        """Resolve a native writer through the sealed bridge to its target grant."""
+        from .dataflow_stage_facts import stage_binding
+        _, binding = stage_binding(execution._action.context.journal,
+            execution._action.context.directory, execution._action.action_id, node, self.report_digest)
+        declared = self.nodes.get(binding['report_node_id'])
+        if (declared is None or declared['kind'] != 'save_lance'
+                or declared['parameters']['uri'] != writer.uri
+                or declared['parameters']['stage'] != writer.stage
+                or declared['parameters']['mode'] != writer.mode):
+            raise RuntimeContractError('Native stream writer differs from its checked report node')
+        if type(self.targets) is not dict or writer.uri not in self.targets:
+            raise RuntimeContractError('Native stream writer has no sealed output grant')
+        policy = dict(self.targets[writer.uri])
+        if (writer.mode != 'overwrite' or policy.get('mode') not in {'create', 'overwrite'}
+                or policy.get('mode') == 'create' and policy.get('expected_version') is not None
+                or policy.get('mode') == 'overwrite' and type(policy.get('expected_version')) is not int):
+            raise RuntimeContractError('Native stream writer requires create or fixed-baseline overwrite permission')
+        return policy
+
+    def native_stage_commit(self, execution, scope_id, commit_id):
+        """Project only the original ACK; never turn UI events into commit authority."""
+        from .dataflow_stage_facts import native_stage_commit
+        run = execution._action.context
+        fact = native_stage_commit(run.journal, run.directory, scope_id=scope_id,
+            commit_id=commit_id, report_digest=self.report_digest)
+        if fact is None:
+            return
+        node = self.nodes.get(fact['report_node_id'])
+        if (node is None or node['kind'] != 'save_lance'
+                or node['parameters']['uri'] != fact['reference']['uri']
+                or node['normalized_parameters']['schema']['identity'] != fact['schema_identity']):
+            raise RuntimeContractError('Native stage receipt differs from its checked output')
+        self.record(node['id'], 'stage_commit', fact)
+
     def dependency_identity(self, identity):
         """Bind a completed write to its actual fixed sources and native values."""
         from .values import resolve
@@ -514,7 +550,15 @@ class CheckedExecution:
         _equal(kind, node['kind'], identity + '.action')
         if arguments is not None:
             from .values import resolve
-            _equal(arguments, resolve(node['normalized_parameters'], self.values), identity + '.arguments')
+            expected_arguments = resolve(node['normalized_parameters'], self.values)
+            if kind == 'run_stream':
+                # The native action records executable parameters; unused
+                # optional callback/retired-resource defaults are declaration
+                # facts only. Never discard a non-null declared value.
+                expected_arguments = {key: value for key, value in expected_arguments.items()
+                    if not (key in {'on_progress', 'on_drain', 'cancellation', 'queue_factory', 'checkpoint'}
+                            and value is None and key not in arguments)}
+            _equal(arguments, expected_arguments, identity + '.arguments')
         parents = self.parents[identity]
         if not parents:
             if source is not None or plan is not None:

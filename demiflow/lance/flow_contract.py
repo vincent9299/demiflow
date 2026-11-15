@@ -60,8 +60,8 @@ def normalize_save(arguments):
     values['key'] = [key] if isinstance(key, str) else list(key)
     if not values['key'] or len(values['key']) > 32 or len(set(values['key'])) != len(values['key']) or set(values['key']) - set(schema.names):
         raise ValueError('Save keys must be unique fields in the declared schema')
-    if values['mode'] != 'append':
-        raise ValueError('Managed stream save requires checkpoint-owned append')
+    if values['mode'] not in {'append', 'overwrite'}:
+        raise ValueError('Managed stream save requires append or overwrite')
     if type(values['stage']) is not str or not values['stage'].isidentifier() or len(values['stage']) > 64:
         raise ValueError('Invalid save stage identity')
     for name, maximum in [('max_batch', 128), ('queue_depth', 128), ('max_rows', 100_000_000),

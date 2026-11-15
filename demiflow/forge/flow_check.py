@@ -715,8 +715,17 @@ class FlowChecker:
             declared = values['schema']
             if not isinstance(declared, DeclaredValue) or declared.type != scalar('schema'):
                 self.fail('FL-06', 'Stream sink requires a native schema declaration', node, module)
-            if values['uri'] not in self.checkpoint_targets or values['uri'] in self.writes or values['mode'] != 'append':
-                self.fail('FL-09', 'Stream sink must uniquely write a declared checkpoint target', node, module)
+            uri = values['uri']
+            grant = self.targets.get(uri) if isinstance(self.targets, dict) else None
+            legacy = uri in self.checkpoint_targets and values['mode'] == 'append'
+            native = (grant is not None and values['mode'] == 'overwrite'
+                      and (grant == {'mode': 'create', 'expected_version': None}
+                           or grant.get('mode') == 'overwrite'
+                           and type(grant.get('expected_version')) is int and grant['expected_version'] > 0))
+            overlap = any(t['uri'] == uri for t in self.tables.values())
+            if (uri in self.writes or not (legacy or native)
+                    or overlap and (grant is None or grant.get('mode') != 'overwrite')):
+                self.fail('FL-09', 'Stream sink requires one declared create or fixed-baseline overwrite target', node, module)
             resources['schema_fields'] = arrow_fields(build_schema(declared.value['schema_declaration']))
             self.writes.add(values['uri'])
         if kind == 'run_stream':
@@ -741,8 +750,10 @@ class FlowChecker:
                     pending.extend(self.parent_index[child])
             expected = {k: {name: v[name] for name in ('uri', 'schema_identity')}
                         for k, v in resources.get('checkpoint', {}).get('outputs', {}).items()}
-            if sinks != expected:
+            if 'checkpoint' in resources and sinks != expected:
                 self.fail('FL-09', 'Stream sinks must match the exact declared checkpoint stages and schemas', node, module)
+            if 'checkpoint' not in resources and any(v['uri'] in self.checkpoint_targets for v in sinks.values()):
+                self.fail('FL-09', 'Legacy checkpoint targets require their original checkpoint owner', node, module)
         if kind == 'from_items':
             items = values['items']
             if not isinstance(items, RuntimeValue) and (type(items) is not list or not 1 <= len(items) <= 128):

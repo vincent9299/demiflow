@@ -170,7 +170,7 @@ class _NativeWriter(StreamLanceWriter):
         try: return inspect_lance(self.uri,None,None).resolved_version
         except LanceResourceNotFound: return None
 
-    def start(self, node, *, latest=None):
+    def start(self, node, *, latest=None, policy=None):
         from .artifacts import run_lock
         self._target_lock = run_lock(Path(self.uri).with_suffix('.stream-writer'))
         self._target_lock.__enter__()
@@ -179,10 +179,15 @@ class _NativeWriter(StreamLanceWriter):
         baseline = run.journal.source_binding(key)
         if baseline is None:
             baseline = {'uri':self.uri,'version':self.head()}
+            if policy is not None and baseline['version'] != policy['expected_version']:
+                raise DataflowError('INVALID_CONTRACT','Stream target differs from sealed create/overwrite CAS permission')
             run.journal.bind_source(run.fence,key,baseline)
+        if policy is not None and baseline['version'] != policy['expected_version']:
+            raise DataflowError('INCOMPATIBLE_HISTORY','Stream target original baseline differs from sealed permission')
         if baseline['uri'] != self.uri:
             raise DataflowError('INCOMPATIBLE_HISTORY','Stream target binding differs')
         self.baseline = baseline['version']
+        self.permission_mode = policy['mode'] if policy is not None else None
         self.version = latest if latest is not None else self.baseline if self.mode == 'append' else None
         self._open_index()
 
@@ -294,6 +299,9 @@ class _BatchSink:
 class NativeStreamLanceService:
     def __init__(self, execution):
         self.ex=execution;self.action=execution._action;self.run=self.action.context
+        self._last_acked = {}
+        self._acked_ordinals = {}
+        self._published = {}
         self.store=execution._store;self.bounds=execution._bounds
         self.writers={};self.partitions={};self.lock=threading.RLock();self.failed=False;self.started=False
         from .dataflow_seal import load_sealed_dataflow,verify_dataflow_program
@@ -361,13 +369,16 @@ class NativeStreamLanceService:
         if self.started:return
         self.started=True
         for node,writer in self.writers.items():
-            writer.start(node)
+            checked = getattr(self.ex, '_checked', None)
+            policy = checked.native_save_policy(self.ex, node, writer) if checked is not None else None
+            writer.start(node, policy=policy)
             latest=None
             for key,decl in self._scopes(node):
                 coordinator,sink=self._coordinator(key,decl)
                 facts=coordinator.recover({'lance':sink})
                 for fact in facts:
                     if fact['status']!='acked':continue
+                    self._remember_ack(node, key, fact['commit_id'], decl['request']['ordinal'])
                     reference=fact['receipts']['lance']['data']['reference']
                     if reference is not None:latest=reference['version'];writer.confirmed=True
                     if decl['request']['finish']:writer.finished=True
@@ -427,7 +438,8 @@ class NativeStreamLanceService:
                 from .recovery_identity import describe
                 from ..lance.schema import schema_identity
                 if publish:
-                    mode='overwrite' if writer.version is None and writer.mode=='overwrite' else 'append'
+                    mode=('create' if writer.version is None and writer.permission_mode=='create' else
+                          'overwrite' if writer.version is None and writer.mode=='overwrite' else 'append')
                     spec=LanceWriteSpec(uri=writer.uri,mode=mode,schema=writer.schema,
                         expected_version=writer.baseline if writer.version is None else writer.version)
                 else:spec=None
@@ -439,6 +451,8 @@ class NativeStreamLanceService:
             if table is None:
                 facts=coordinator.recover({'lance':sink})
                 if facts and facts[-1]['status']=='acked':
+                    self._remember_ack(command.node_id, operation, facts[-1]['commit_id'], request['ordinal'])
+                    if request['finish']:self._publish(command.node_id)
                     return NativeJournalReply(command.operation_id,{'status':'acked',
                         'reference':facts[-1]['receipts']['lance']['data']['reference']},None)
                 # A pending intent never published; reconstruct ONLY its original
@@ -454,11 +468,30 @@ class NativeStreamLanceService:
             except BaseException:
                 self.failed=True
                 raise
+            self._remember_ack(command.node_id, operation, fact['commit_id'], request['ordinal'])
+            if request['finish']:self._publish(command.node_id)
             reference=fact['receipts']['lance']['data']['reference']
             if reference is not None:writer.version=reference['version'];writer.confirmed=True
             if request['finish']:writer.finished=True
             else:writer.last_ordinal=request['ordinal'];writer.rows+=table.num_rows
             return NativeJournalReply(command.operation_id,{'status':'acked','reference':reference},None)
+
+    def _remember_ack(self, node, scope, commit, ordinal):
+        # A resumed worker may request its earlier already-confirmed batches.
+        # Such replay must not regress the result projected from native history.
+        if ordinal >= self._acked_ordinals.get(node, -1):
+            self._acked_ordinals[node] = ordinal
+            self._last_acked[node] = (scope, commit)
+
+    def _publish(self, node):
+        # Product action facts are immutable per attempt. Emit once at real EOI
+        # or stopped cleanup; the original per-microbatch ACKs remain queryable
+        # in runtime_commit_scopes throughout execution.
+        checked = getattr(self.ex, '_checked', None)
+        latest = self._last_acked.get(node)
+        if checked is not None and latest is not None and self._published.get(node) != latest:
+            checked.native_stage_commit(self.ex, *latest)
+            self._published[node] = latest
 
     @property
     def outputs(self):
@@ -467,7 +500,9 @@ class NativeStreamLanceService:
     def close(self):
         with self.lock:
             first=None
-            for writer in self.writers.values():
+            for node, writer in self.writers.items():
+                try:self._publish(node)
+                except BaseException as exc:first=first or exc
                 try:writer.close()
                 except BaseException as exc:first=first or exc
             if first is not None:raise first

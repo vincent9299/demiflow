@@ -94,14 +94,15 @@ def execute(root, run_id, attempt=None):
             checked_extra['report_digest'] = manifest['report_digest']
         context = CheckedExecution(nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
             operators=report['operators'], source_root=source, resource_root=target, work_root=work, limits=limits,
-            record=record, check_stop=check_stop, observe=run.observe_nodes, **checked_extra)
+            record=record, check_stop=check_stop, observe=run.observe_nodes,
+            targets=report['binding']['targets'], **checked_extra)
         native = dict(memory_bytes=limits['memory_bytes'], max_rss_bytes=limits['max_rss_bytes'] // 2,
             max_scratch_bytes=limits['max_scratch_bytes'], max_row_bytes=limits['max_row_bytes'],
             batch_rows=limits['batch_rows'], threads=2, partitions=1,
             timeout_s=min(3600, limits['timeout_s']), admission_timeout_s=limits['admission_timeout_s'])
-        # One native worker thread: the enclosing driver is already isolated.
+        # Use the unified bounded host default; the manifest still owns all resource ceilings.
         with RunContext.attach(run, entry_identity=manifest.get('source_digest'),
-                limits=manifest['limits'], check_stop=check_stop), local_execution(workers=1, worker_mode='thread', partitions=1,
+                limits=manifest['limits'], check_stop=check_stop), local_execution(worker_mode='thread', partitions=1,
                 batch_rows=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
                 temp_directory=str(work), native_resources=native) as session:
             session._executor.resource_root = source

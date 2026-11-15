@@ -382,6 +382,10 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         raise ForgeError('Every declared output must have one checked write action')
     for output in output_specs.values():
         output['action_id'] = actual_outputs[output['uri']]
+        sink = by_id[output['action_id']]
+        if sink['kind'] == 'save_lance' and output['mode'] != 'checkpoint':
+            output.update(publication='native_stage_v3', stage=sink['parameters']['stage'],
+                          schema_identity=sink['normalized_parameters']['schema']['identity'])
         if output['mode'] == 'checkpoint':
             sink = by_id[output['action_id']]
             owners = [n for n in report['nodes'] if n['kind'] == 'open_checkpoint'
@@ -783,7 +787,21 @@ def validate_output_targets(value):
     for output in details['outputs']:
         ws.no_symlinks(Path(output['uri']))
         receipt, commit = output['receipt'], output['commit']
+        if output.get('publication') == 'native_stage_v3':
+            from .native_stages import admit_prepared
+            manifest = value['manifest']
+            target = directory(manifest['root'], manifest['run_id'])
+            owned = admit_prepared(target, RunJournal(target), manifest, output)
+            if owned is not None:
+                if inspect_lance(output['uri']).resolved_version != owned['version']:
+                    raise ForgeError('Owned native stage head changed outside its original publication')
+                continue  # Admission only; original coordinator still owns ACK/recovery.
         if output['status'] == 'committed':
+            if output.get('publication') == 'native_stage_v3':
+                from .native_stages import verify
+                manifest = value['manifest']
+                target = directory(manifest['root'], manifest['run_id'])
+                verify(target, RunJournal(target), output, commit, report_digest=manifest['report_digest'])
             version = commit['reference']['version'] if commit else receipt['committed_version']
             if inspect_lance(output['uri']).resolved_version != version:
                 raise ForgeError('Owned output head changed outside this run')
@@ -957,7 +975,13 @@ def result_table(root, run_id, name, *, attempt=None):
     from demiflow.lance.refs import DatasetRef
     ref = DatasetRef.from_dict(item['result']['ref'])
     receipt = item['receipt']
-    if item.get('mode') == 'checkpoint':
+    if item.get('publication') == 'native_stage_v3':
+        from .native_stages import verify
+        target = directory(root, run_id)
+        original = verify(target, RunJournal(target), item, item['commit'],
+                          report_digest=show(root, run_id, attempt=attempt)['report_digest'])
+        verified = original == {'uri': item['uri'], 'version': ref.lance_version}
+    elif item.get('mode') == 'checkpoint':
         commit = item['commit']
         verified = (commit is not None and commit['checkpoint_node'] == item['checkpoint_node']
                     and commit['schema_identity'] == item['schema_identity']
@@ -1004,19 +1028,27 @@ def register_results(root, run_id, *, recover=False, attempt=None):
     run = RunJournal(target, attempt=value['state'].get('attempt'))
     errors = []  # Recovery belongs to native RunJournal commits, never UI events.
     if recover:
+        from .native_stages import recover as recover_stages
+        try:
+            recover_stages(target, run, value['manifest'])
+        except Exception as exc:
+            errors.append('native stages: ' + str(exc)[:512])
         _, value = _load(root, run_id, attempt=attempt)
     details = _describe(run_id, value)
     for output in details['outputs']:
-        if output['result'] and (output.get('mode') != 'checkpoint' or output['commit'] is not None
+        if output['result'] and (output.get('mode') != 'checkpoint' and output.get('publication') != 'native_stage_v3' or output['commit'] is not None
                 and output['result']['ref']['lance_version'] == output['commit']['reference']['version']):
             continue
         try:
-            if output.get('mode') == 'checkpoint':
+            if output.get('mode') == 'checkpoint' or output.get('publication') == 'native_stage_v3':
                 commit = output['commit']
                 if commit is None:
                     continue
                 reference = commit['reference']
-                if (commit['checkpoint_node'] != output['checkpoint_node'] or reference['uri'] != output['uri']
+                if output.get('publication') == 'native_stage_v3':
+                    from .native_stages import verify
+                    reference = verify(target, run, output, commit, report_digest=value['manifest']['report_digest'])
+                elif (commit['checkpoint_node'] != output['checkpoint_node'] or reference['uri'] != output['uri']
                         or commit['schema_identity'] != output['schema_identity']):
                     raise ForgeError('Stage commit identity differs from its declared owner')
                 actual = operation('metadata', output['uri'], version=reference['version'])

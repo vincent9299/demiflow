@@ -368,6 +368,13 @@ def compile_kernel_spec(
         configuration['native_operation'] = 'search'
         configuration['native_key'] = native_declaration.constructor_args[0]
         state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
+    from ..execution.dataflow_stream_lance import StreamLanceFactory
+    if (native_declaration is not None and native_declaration.target is StreamLanceFactory
+            and native_declaration.constructor_args[1] is None):
+        # This is the verified passive RPC factory, not the original driver
+        # writer object. Its state hooks and original child-commit scopes own
+        # recovery. A user predicate with unproven state is not upgraded here.
+        state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
     stream_options = getattr(operation, 'stream_options', None)
     if stream_options is not None:
         configuration.update(streaming_map=True, concurrency=stream_options.concurrency,
