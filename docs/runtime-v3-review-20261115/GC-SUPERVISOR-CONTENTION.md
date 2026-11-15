@@ -4,7 +4,7 @@
 
 原栈为 `workbench.runs.worker.supervise → record_usage → RunJournal._transaction → shared_access → ObjectLease`。共享锁使用不等待的 `LOCK_SH | LOCK_NB`，与工作进程正常的可选 GC 独占锁竞争时立即抛出 `FENCED: Published objects are being reconciled`。这不是工作台图绘制失败，也不是实际业务回执未提交。原失败现场保存在 `/tmp/demiflow-regression-final3-evidence/browser-failed-run/`，整次四节点验收保持原来的 **3 passed / 1 failed**。
 
-修复只为原 journal 的共享对象租约增加最多 5 秒的有界等待，发生在获取数据库连接和开始事务之前，与原 SQLite 竞争等待上限一致。GC 的独占获取仍不等待；工件读写默认行为未放宽。等待后重新校验原锁 inode、发生等待时的协议 header，并继续执行原 attempt 校验。超出等待预算在事务开始前返回 CAPACITY_PENDING；原 inode/header/attempt 不匹配仍拒绝。没有新增持久账本、扩运行时限或绕过原 GC 根证明。
+修复只为原 journal 的共享对象租约增加独立的、最多 5 秒的有界等待，发生在只读协议查询退出之后、获取写连接和开始事务之前。原 SQLite 写连接的 1 秒等待设置和运行时限均未更改。GC 的独占获取仍不等待；工件读写默认行为未放宽。等待后重新校验原锁 inode、发生等待时的协议 header，并继续执行原 attempt 校验。超出等待预算在事务开始前返回 CAPACITY_PENDING；原 inode/header/attempt 不匹配仍拒绝。没有新增持久账本或绕过原 GC 根证明。
 
 验收：
 

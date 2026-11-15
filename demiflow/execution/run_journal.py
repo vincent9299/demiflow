@@ -270,9 +270,9 @@ class RunJournal:
         from .dataflow_object_lease import shared_access
         protocol = self.dataflow_gc_protocol() if self.path.exists() else None
         # GC is optional maintenance, not loss of this supervisor's attempt.
-        # Wait before taking any DB connection/transaction; the original inode
-        # and the attempt below are still checked after acquisition. The finite
-        # wait matches SQLite's existing 5 s contention budget, not run time.
+        # Wait before taking the writer connection/transaction; the original
+        # inode and the attempt below are still checked after acquisition. This
+        # separate, finite 5 s lease window changes neither SQLite nor run limits.
         with shared_access(self.directory / '.dataflow-store', protocol[:2] if protocol else None,
                            require_protocol=bool(protocol and protocol[2]), wait_ms=5000), self._connection(write=True) as db:
             with db:
