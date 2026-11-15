@@ -236,7 +236,12 @@ class CheckedExecution:
         identity = node['id']
         facts = operation_facts(op)
         _equal(facts['kind'], node['capability_fact']['kind'], identity + '.kind')
-        _equal(facts.get('native'), node['analysis'].get('native'), identity + '.native')
+        native = facts.get('native')
+        if type(op) is ops.StreamPrependOp:
+            # The second actual Dataset was recursively checked in plan(); its
+            # engine semantic hash is never independently rebuilt from the AST.
+            native = {**native, 'arguments': {k:v for k,v in native['arguments'].items() if k!='source'}}
+        _equal(native, node['analysis'].get('native'), identity + '.native')
         expected = node['analysis'].get('stream_arguments', node['normalized_parameters'])
         for name, value in facts['arguments'].items():
             if name == 'catch':
@@ -299,7 +304,15 @@ class CheckedExecution:
         for op in reversed(plan.operations):
             node = self.nodes[identity]
             parents = self.parents[identity]
-            if len(parents) != 1:
+            if type(op) is ops.StreamPrependOp:
+                if len(parents) != 2:
+                    raise RuntimeContractError('Prepend requires main and finite prefix ports')
+                other = op.source_dataset
+                prefix_source, prefix_plan = self.plan(other._source,other._plan,parents[1],depth+1)
+                from ..data.dataset import Dataset
+                prefix = Dataset(prefix_source,prefix_plan,other._executor,other._stages)
+                op = replace(op,source_dataset=prefix)
+            elif len(parents) != 1:
                 raise RuntimeContractError('Unary native plan has invalid ports')
             changed.append(self._operation(op, node))
             identity = parents[0]
@@ -337,6 +350,14 @@ class CheckedExecution:
                 self.source_bindings[id(source)] = observation
             return source, plan
         if type(source) is KeyedSource:
+            if source.kind == 'groups':
+                if len(parents)!=1 or source.right is not None:
+                    raise RuntimeContractError('Invalid grouping input')
+                child,prefix=self.plan(source.left.source,source.left.plan,parents[0],depth+1)
+                source=replace(source,left=replace(source.left,source=child,plan=prefix))
+                if observation is not None:
+                    self.source_bindings[id(source)]=observation
+                return source,plan
             if source.kind == 'reduce':
                 if len(parents) != 1 or source.right is not None:
                     raise RuntimeContractError('Invalid reducer input')

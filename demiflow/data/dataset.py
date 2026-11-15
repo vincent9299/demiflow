@@ -14,6 +14,7 @@ from ..operator_llm.parser import load_prompt_pack
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from .flow_contract import flow_api as _flow_api
+from . import flow_grouping as _flow_grouping
 from ..operator_llm.flow_contract import normalize_prompt as _normalize_prompt, prompt_resources as _prompt_resources, analyze_prompt as _analyze_prompt
 from ..lance.flow_contract import normalize_lookup as _normalize_lookup, lookup_resources as _lookup_resources, analyze_lookup as _analyze_lookup
 from ..lance.flow_contract import normalize_save as _normalize_save, analyze_save as _analyze_save
@@ -180,6 +181,8 @@ class Dataset:
             raise ValueError('exclude_keys requires distinct nonempty key names excluding _rowid')
         return keyed_dataset(self,'exclude_keys',fields,right=other.select_columns(fields),how='anti')
 
+    @_flow_api('group_batches', datasets=('self',),
+               normalize=_flow_grouping.normalize_grouping, analyze=_flow_grouping.analyze_grouping)
     def group_batches(self, on, *, max_rows=32, output="items", chunk_bytes=32*1024*1024,
                       flush_interval=None, max_groups=64, buffer_bytes=64*1024**2):
         """Group rows, optionally using timed streaming microbatches.
@@ -991,6 +994,8 @@ class Dataset:
         return self.map_async(LanceLookup(source, on, columns, output, max_matches, max_bytes),
             concurrency=1, queue_depth=1, label='lookup_'+output)
 
+    @_flow_api('prepend', datasets=('self','other'), execution='stream',
+               normalize=_flow_grouping.normalize_prepend, analyze=_flow_grouping.analyze_prepend)
     def prepend(self, other, *, max_rows, max_row_bytes=1024**2):
         """Inject a finite synchronous Dataset into this point of a live stream.
 

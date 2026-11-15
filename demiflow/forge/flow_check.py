@@ -663,6 +663,8 @@ class FlowChecker:
                 if not isinstance(ds, DatasetPort):
                     self.fail("FL-04", f"{port} requires a Dataset", node, module)
                 inputs.append(ds)
+        if kind == 'prepend' and (len(inputs)!=2 or inputs[1].stream):
+            self.fail('FL-08','Prepend prefix must be a finite synchronous Dataset without actors',node,module)
         stream = sem["execution"] == "stream" or any(ds.stream for ds in inputs)
         if values.get("backend_options") is not None:
             self.fail(
@@ -1176,6 +1178,7 @@ class FlowChecker:
             raise
         except (ValueError, TypeError, KeyError) as exc:
             self.fail("FL-06", str(exc), node, module)
+        stream = stream or analysis['driver']=='stream'
         from ..execution.capabilities import check_composition, check_call
 
         capability_fact = {

@@ -270,6 +270,8 @@ class OperatorKernel:
         self._groups: dict[str, list[dict[str, Any]]] = {}
         self._group_base: dict[str, dict[str, Any]] = {}
         self._timer_deadline: int | None = None
+        self._group_bytes = {}
+        self._group_buffer_bytes = 0
         self._emitted = 0
         self._skip = 0
         self.aggregate_state: AggregateState | None = None
@@ -436,6 +438,8 @@ class OperatorKernel:
                 batch, self._batch = tuple(self._batch), []
                 self._batch_deadline = None
                 yield from self._invoke_batch(batch)
+        if self._spec.kind in _STREAM_GROUP_KINDS:
+            yield from self._emit(self._flush_expired_groups())
         if self._calls is not None:
             yield from self._emit(self._calls.poll(max_records=1))
 
@@ -518,7 +522,7 @@ class OperatorKernel:
         elif kind in _BATCH_INSTANCE_KINDS:
             yield from self._push_batch(record)
         elif kind in _STREAM_GROUP_KINDS:
-            yield from self._push_stream_group(record)
+            yield from self._emit(self._push_stream_group(record))
         elif kind == "RepartitionOp":
             yield from self._emit(iter((record,)))
         else:
@@ -585,29 +589,51 @@ class OperatorKernel:
             yield from self._emit(self._calls.submit(lambda slot: preserve_block(invoke_batch(self._spec, batch,
                 instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), batch[0].block_partition), scope=self._call_scope, input=batch))
 
+    def _group_limits(self):
+        # Retained groups occupy the original batch/state grants; one emitted
+        # row and its encoding use the original row grant. No extra allocator.
+        bounds=self._services.bounds
+        buffer=min(int(_cfg(self._spec,'buffer_bytes')),bounds.max_batch_bytes,
+                   max(1,bounds.max_state_bytes//2))
+        chunk=min(int(_cfg(self._spec,'chunk_bytes')),buffer)
+        return chunk,buffer
+
+    def _group_row_bytes(self,row):
+        from ..stream_grouping import row_size
+        chunk,_=self._group_limits()
+        return row_size(row,chunk)
+
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
         from .dataflow import _group_key, _materialize_row
-
-        on = tuple(_cfg(self._spec, "on"))
-        max_batch = int(self._spec.configuration.get("max_batch", self._max_batch))
-        row = _materialize_row(record, self._services)
-        key = _group_key(row, on)
+        on=tuple(_cfg(self._spec,'on'))
+        max_batch=int(self._spec.configuration.get('max_batch',self._max_batch))
+        row=dict(_materialize_row(record,self._services))
+        key=_group_key(row,on)
+        size=self._group_row_bytes(row)
+        chunk,buffer=self._group_limits()
+        if key in self._groups and self._group_bytes[key]+size>chunk:
+            yield from self._emit_group(key,last=False)
+        while self._groups and self._group_buffer_bytes+size>buffer:
+            yield from self._flush_oldest_group()
         if key not in self._groups:
-            max_groups = int(self._spec.configuration.get("max_groups", 0))
-            if max_groups > 0 and len(self._groups) >= max_groups:
+            max_groups=int(_cfg(self._spec,'max_groups'))
+            if len(self._groups)>=max_groups:
                 yield from self._flush_oldest_group()
-            self._groups[key] = []
-            self._group_base[key] = {field: row[field] for field in on}
-        self._groups[key].append(dict(row))
+            self._groups[key]=[]
+            self._group_bytes[key]=0
+            self._group_base[key]={field:row[field] for field in on}
+        self._groups[key].append(row)
+        self._group_bytes[key]+=size
+        self._group_buffer_bytes+=size
         self._reset_timer()
-        if len(self._groups[key]) >= max_batch:
-            yield from self._emit_group(key, last=False)
+        if len(self._groups[key])>=max_batch:
+            yield from self._emit_group(key,last=False)
         yield from self._flush_expired_groups()
 
     def _reset_timer(self) -> None:
         interval = self._spec.configuration.get("flush_interval")
-        if interval is not None:
-            self._timer_deadline = self._services.clock_ms() + int(float(interval) * 1000)
+        if interval is not None and self._timer_deadline is None:
+            self._timer_deadline = self._services.clock_ms() + max(1,int(float(interval) * 1000))
 
     def _flush_expired_groups(self) -> Iterator[Record]:
         if self._timer_deadline is None:
@@ -626,13 +652,17 @@ class OperatorKernel:
 
         batch = self._groups.pop(key, [])
         base = self._group_base.pop(key, {})
+        self._group_buffer_bytes -= self._group_bytes.pop(key,0)
+        if not self._groups:
+            self._timer_deadline = None
         if not batch:
             return
         output = self._spec.configuration.get("output", "items")
-        row = {**base, output: batch, "group_index": 0, "group_last": last}
+        # An online microbatch cannot assert a final complete group.
+        row = {**base, output: batch}
         record_id = _hash_id(["dataflow-record-v3", self._occurrence, "stream-group", self._emitted])
         out = _output_record(record_id, {"group_key": key}, row, self._emitted, self._services)
-        _OutputBudget(self._spec, self._services).charge(out)
+        _OutputBudget(self._spec, self._services, streaming=True).charge(out)
         yield out
 
     # -- K019 finish --------------------------------------------------------
@@ -772,6 +802,10 @@ class OperatorKernel:
             "inflight_calls": self._calls.snapshot() if self._calls is not None else [],
             "aggregate_state": self.aggregate_state,
         }
+        if self._spec.kind in _STREAM_GROUP_KINDS:
+            image['group_remaining_ms']=(max(0,self._timer_deadline-self._services.clock_ms())
+                if self._timer_deadline is not None else None)
+            image['timer_deadline']=None  # Process monotonic time is not portable history.
         if self._task_rows:
             image['task'] = {'batch_rows': self._task_rows, 'input_frontier': self._task_frontier,
                              'ordinal': self._task_ordinal, 'origin': self._task_origin}
@@ -887,6 +921,22 @@ class OperatorKernel:
         self._groups = {key: list(value) for key, value in image["groups"].items()}
         self._group_base = {key: dict(value) for key, value in image["group_base"].items()}
         self._timer_deadline = image["timer_deadline"]
+        if self._spec.kind in _STREAM_GROUP_KINDS:
+            remaining=image.get('group_remaining_ms')
+            maximum=max(1,int(float(_cfg(self._spec,'flush_interval'))*1000))
+            if self._groups and remaining is None:
+                raise _err('INCOMPATIBLE_HISTORY','Pending stream groups have no portable timer evidence')
+            if remaining is not None and (type(remaining) is not int or not self._groups or not 0<=remaining<=maximum):
+                raise _err('CORRUPT_ARTIFACT','Invalid relative stream group timer')
+            if set(self._groups)!=set(self._group_base):
+                raise _err('CORRUPT_ARTIFACT','Stream group base differs from pending groups')
+            self._timer_deadline=self._services.clock_ms()+remaining if remaining is not None else None
+            self._group_bytes={key:sum(self._group_row_bytes(row) for row in rows) for key,rows in self._groups.items()}
+            self._group_buffer_bytes=sum(self._group_bytes.values())
+            chunk,buffer=self._group_limits()
+            if (self._group_buffer_bytes>buffer or any(v>chunk for v in self._group_bytes.values())
+                    or len(self._groups)>int(_cfg(self._spec,'max_groups'))):
+                raise _err('CORRUPT_ARTIFACT','Recovered stream groups exceed original buffer grants')
         self._emitted = int(image["output_cursor"])
         if not self._worker_scope and (image["state"] is not None or image.get('call_ordinal', 0)):
             self._slot_instance(0)

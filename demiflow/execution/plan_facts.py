@@ -67,6 +67,9 @@ def source_facts(source):
         arguments = {name: getattr(source, name) for name in ('how', 'suffix', 'chunk_bytes')}
         arguments.update(on=list(source.on), right_on=list(source.right_on))
         return {'kind': 'join', 'arguments': arguments, 'inputs': 2}
+    if type(source) is KeyedSource and source.kind == 'groups':
+        return {'kind':'group_batches','arguments':dict(on=list(source.on),max_rows=source.max_rows,
+                output=source.output,chunk_bytes=source.chunk_bytes),'inputs':1}
     if type(source) is KeyedSource and source.kind == 'reduce':
         return {'kind': 'reduce', 'arguments': {'on': list(source.on), 'initial': source.initial,
                 'chunk_bytes': source.chunk_bytes, 'fn_kwargs': dict(source.reducer_kwargs or {})}, 'inputs': 1}
