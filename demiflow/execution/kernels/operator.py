@@ -40,6 +40,7 @@ from .dataflow import (
     _check_stop,
     _err,
     _hash_id,
+    _input_row_bytes,
     _MODEL_KINDS,
     _occurrence,
     _ORDERING_KINDS,
@@ -58,8 +59,9 @@ _BATCH_INSTANCE_KINDS = _BATCH_KINDS | {"embedding", "EmbeddingMapOp", "Register
 
 
 def _segment_rows(services: RuntimeServices) -> int:
-    bounds = services.bounds
-    return min(8192, max(1, bounds.max_batch_bytes // max(1, bounds.max_row_bytes)))
+    # A maximum-sized row is not a prediction of each row's actual size.
+    # The port independently admits encoded bytes before growing the segment.
+    return 8192
 
 
 def _resolve_instance(spec: KernelSpec, services: RuntimeServices, *, declaration=None) -> Any:
@@ -150,6 +152,11 @@ class _SpoolPort:
         self._segment_rows = segment_rows
         self._refs: list[ArtifactRef] = []
         self._pending: list[Record] = []
+        self._empty_bytes = len(state_codec.dumps([], max_bytes=services.bounds.max_batch_bytes))
+        self._pending_bytes = self._empty_bytes
+        # Retained records coexist with their encoded segment during a flush.
+        self._segment_bytes = min(services.bounds.max_batch_bytes,
+            (services.bounds.max_batch_bytes + services.bounds.max_row_bytes) // 2)
         self._eoi = False
         self._count = 0
         self._bytes = 0
@@ -161,9 +168,17 @@ class _SpoolPort:
     def push(self, record: Record) -> None:
         if self._eoi:
             raise _err("INVALID_CONTRACT", "push after port EOI", port=self.name)
+        if _input_row_bytes(record) > self._services.bounds.max_row_bytes:
+            raise _err("BUDGET_EXCEEDED", "input spool row exceeds max_row_bytes", port=self.name)
+        single = len(state_codec.dumps([record], max_bytes=self._services.bounds.max_batch_bytes))
+        contribution = single - self._empty_bytes
+        projected = self._pending_bytes + contribution + bool(self._pending)
+        if self._pending and (projected > self._segment_bytes or len(self._pending) >= self._segment_rows):
+            self._flush()
+        self._pending_bytes += contribution + bool(self._pending)
         self._pending.append(record)
         self._count += 1
-        if len(self._pending) >= self._segment_rows:
+        if len(self._pending) >= self._segment_rows or self._pending_bytes >= self._segment_bytes:
             self._flush()
 
     def _flush(self) -> None:
@@ -176,6 +191,7 @@ class _SpoolPort:
         self._refs.append(ref)
         self._bytes += len(raw)
         self._pending = []
+        self._pending_bytes = self._empty_bytes
 
     def finish(self) -> None:
         self._flush()
@@ -192,8 +208,12 @@ class _SpoolPort:
             self._services.store.release(ref, owner=_SPOOL_OWNER)
         self._refs = []
         self._pending = []
+        self._pending_bytes = self._empty_bytes
 
     def snapshot(self) -> dict[str, Any]:
+        # Persist each bounded pending segment, keeping the recovery image a
+        # small set of original artifact references even with multiple ports.
+        self._flush()
         return {
             "refs": list(self._refs), "pending": list(self._pending),
             "eoi": self._eoi, "count": self._count, "bytes": self._bytes,
@@ -202,6 +222,15 @@ class _SpoolPort:
     def restore(self, snap: Mapping[str, Any]) -> None:
         self._refs = list(snap["refs"])
         self._pending = list(snap["pending"])
+        # Old images may contain in-memory pending records. Retain that format
+        # and derive byte admission from the actual restored data, never a new
+        # claimed counter or a row-size estimate.
+        if len(self._pending) > self._segment_rows:
+            raise _err("BUDGET_EXCEEDED", "restored spool exceeds segment row bound")
+        if any(_input_row_bytes(record) > self._services.bounds.max_row_bytes for record in self._pending):
+            raise _err("BUDGET_EXCEEDED", "restored spool row exceeds max_row_bytes")
+        self._pending_bytes = len(state_codec.dumps(self._pending,
+            max_bytes=self._services.bounds.max_batch_bytes))
         self._eoi = bool(snap["eoi"])
         self._count = int(snap["count"])
         self._bytes = int(snap["bytes"])
@@ -638,7 +667,10 @@ class OperatorKernel:
         if self._calls is not None:
             yield from self._emit(self._calls.finish())
         if kind == 'SaveLanceOp':
-            self._instance.finish(self._instance.native_call_ordinal)
+            # Empty native output still publishes its declared empty table at
+            # real EOI; this creates only the passive driver RPC proxy.
+            instance = self._slot_instance(0)
+            instance.finish(instance.native_call_ordinal)
 
     def _finish_complete(self) -> Iterator[Record]:
         kind = self._spec.kind

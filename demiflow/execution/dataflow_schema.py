@@ -63,6 +63,17 @@ def literal_schema(source, *, bounds):
     return schema
 
 
+def stream_lance_output_schema(schema, output_ref):
+    """A native publication passes input fields through and may add a receipt."""
+    if schema is None or output_ref is None:
+        return schema
+    if output_ref in schema.names:
+        raise ValueError('output_ref would overwrite an input field')
+    import pyarrow as pa
+    return schema.append(pa.field(output_ref,
+        pa.struct([pa.field('uri', pa.string()), pa.field('version', pa.int64())]), nullable=True))
+
+
 def terminal_schema(graph, physical, *, terminal, bounds):
     """Interpret immutable type metadata; never invoke a source or user function."""
     if len(graph.nodes) > bounds.max_nodes or len(graph.edges) > bounds.max_edges:
@@ -101,6 +112,9 @@ def terminal_schema(graph, physical, *, terminal, bounds):
             kind, cfg = node.kernel.kind, node.kernel.configuration
             if node.kind == 'terminal' or kind in preserved:
                 schema = base
+            elif base is not None and kind == 'SaveLanceOp':
+                schema = stream_lance_output_schema(base, cfg.get('output_ref'))
+                metadata_bytes += len(encode_schema(schema, bounds=bounds))
             elif base is not None and kind in ('SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp'):
                 if kind == 'SelectColumnsOp':
                     fields = [base.field(name) for name in cfg['columns']]

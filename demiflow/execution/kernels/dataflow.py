@@ -521,6 +521,8 @@ def invoke_batch(
             out_rows = [{**row, column: value} for row, value in zip(rows, values)]
         else:
             if kind == "SaveLanceOp":
+                from ..dataflow_schema import stream_lance_output_schema
+                output_schema(stream_lance_output_schema(schema, cfg.get("output_ref")))
                 instance.bind_records(tuple(record.record_id for record in records), instance.native_call_ordinal)
             result = _invoke_scoped(instance, rows, records, spec)
             out_rows = _batch_to_rows(result, "rows")
