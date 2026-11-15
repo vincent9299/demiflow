@@ -1,0 +1,31 @@
+{
+  "head_before_commit": "147e1d8b8ee6d3e458e5ecddc2ac67e8eb71d3dc",
+  "source_sha256": {
+    "demiflow/data/dataset.py": "c2003399e036cb7df5413358ee41da88be5f24c6223329bb06357a636b48fdfa",
+    "demiflow/data/native_options.py": "bb32fabda8106ba478f4b56adb7e24237d9b9c74badd4be9ee7a68d79785122b",
+    "demiflow/execution/capabilities.py": "22d87a51dcb6ec7bc7cc74d9e7b35ba254ef805c60cf174aa3199c6251ab67a2",
+    "demiflow/execution/dataflow_api.py": "73d3c88e4f9f2f99edf46ed2621707e8d61f74ea86bf98dfd5a83b8808d6dc81",
+    "tests/test_runtime_v3_stream_resources_lifetime.py": "0be356e0e999fdfcdf454b0aa048bd3a1c589b2fa849470a1d84c5c663ab797a",
+    "tests/test_runtime_v3_stream_composition.py": "2f163c8a564068857600ed49f8859a61eee5f752251c04f4d06f5a9f6d96e9e9"
+  },
+  "tests": [
+    {
+      "xml": "/tmp/demiflow-regression-native-stream-r1.xml",
+      "sha256": "cf419368effcb51d6605265fb0d3adbf9761f5583838fd59b359c62bcfbd57d1",
+      "passed": 8,
+      "deselected": 3
+    },
+    {
+      "xml": "/tmp/demiflow-regression-native-stream-ray.xml",
+      "sha256": "a8a96b813d01cbbbb5e370d61f8074179aa0bab68fdc887a371bd4935bcc20b6",
+      "passed": 1,
+      "deselected": 1
+    }
+  ],
+  "notes": [
+    "Local8 includes original local context assertion in dirty test_local_kernel.py; migration committed separately.",
+    "Ray Core real private cluster, no Ray Data import, finally shutdown.",
+    "Control process import tree asserted by /tmp/demiflow-regression-runner.py.",
+    "Known CPU claims reach actual allocator observation; no real CUDA success is claimed."
+  ]
+}

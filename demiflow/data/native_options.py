@@ -13,6 +13,20 @@ class NativeOptions:
     max_workers: int|None = None
     worker_resources: Mapping[str,Any] = None
 
+def validate_stream_native_options(value: NativeOptions | None) -> None:
+    """Resource claims share the unified compiler; Ray Data pools do not.
+
+    This gate checks only the old execution-pool surface. The compiler owns
+    resource translation and feasibility, including CPU, memory and devices.
+    """
+    if value is None:
+        return
+    if not isinstance(value, NativeOptions):
+        raise TypeError("backend_options requires validated NativeOptions")
+    if value.compute_kind or any(item is not None for item in
+            (value.min_workers, value.initial_workers, value.max_workers)):
+        raise ValueError("stream backend_options Ray Data compute/worker ranges are unsupported")
+
 def parse_native_options(value:Mapping[str,Any]|None,*,family:str)->NativeOptions|None:
     if value is None:return None
     if not isinstance(value,Mapping) or set(value)!={"ray"} or not isinstance(value["ray"],Mapping): raise ValueError("backend_options requires only a ray mapping")

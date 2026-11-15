@@ -177,7 +177,7 @@ def validate_stream_plan(plan, *, source=None):
         expand_relational_inputs, expand_operation_inputs)
     from ..planning.dataflow_policy import resolve_runtime_policy
     from .contracts.dataflow_errors import DataflowError
-    from ..errors import UnsupportedExecutionOptionError
+    from ..data.native_options import validate_stream_native_options
 
     _, bounds = resolve_runtime_policy({}, {}, provider='local')
     pending, seen = [(source, plan, ())], set()
@@ -196,10 +196,7 @@ def validate_stream_plan(plan, *, source=None):
         children = list(expand_relational_inputs(current_source, path=path, bounds=bounds))
         for operation in current_plan.operations:
             streaming |= ops.is_stream_operation(operation)
-            if getattr(operation, 'native_options', None) is not None:
-                # Existing mixed backend_options rejection remains fail-closed;
-                # legacy Ray Data tuning cannot silently become a worker policy.
-                raise UnsupportedExecutionOptionError('streaming does not support backend_options')
+            validate_stream_native_options(getattr(operation, 'native_options', None))
             if isinstance(operation, (ops.MapOp, ops.BoundMapOp)) and operation.stream_options is not None:
                 operation.stream_options.validate_callable(operation.callable)
             compile_kernel_spec(operation, program_ref=None, bounds=bounds)

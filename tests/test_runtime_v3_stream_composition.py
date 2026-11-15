@@ -64,7 +64,7 @@ def test_stream_preflight_rejects_unknown_engine_kernel_and_options_before_busin
         plain.map(Actor).run_stream()
     invalid_options = plain.map(Actor, backend_options={'ray': {'compute': {'kind': 'task_pool', 'size': 2}}})
     invalid_nested = mapped.join(invalid_options, on='k')
-    with pytest.raises(UnsupportedExecutionOptionError, match='backend_options'):
+    with pytest.raises(ValueError, match='backend_options'):
         invalid_nested.run_stream()
     assert events(path) == []
 

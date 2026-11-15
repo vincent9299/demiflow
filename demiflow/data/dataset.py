@@ -407,8 +407,8 @@ class Dataset:
         if any(value is not None for value in values.values()):
             stream_options = MapStreamOptions(**{key: value for key, value in values.items() if value is not None})
             stream_options.validate_callable(spec)
-            if native_options is not None:
-                raise ValueError('map streaming options cannot be combined with backend_options')
+            from .native_options import validate_stream_native_options
+            validate_stream_native_options(native_options)
         if inputs is None:
             if output is not None or outputs is not None:
                 raise TypeError("Dataset.map output(s) require inputs")

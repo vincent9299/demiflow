@@ -32,10 +32,7 @@
       "xml_sha256": "e2a0d594e7572591a3f7907196a1dd3a7c6ea6eed8a9f999d80fb0fcf6c48358"
     }
   ],
-  "not_run": [
-    "test_wide_join_hydrates_after_key_only_join_under_small_pool[1]",
-    "test_wide_join_hydrates_after_key_only_join_under_small_pool[2]"
-  ],
+  "not_run": [],
   "historical_mapping": {
     "test_opaque_join_uses_large_offsets_and_preserves_values": "test_opaque_join_uses_bounded_key_index_and_preserves_values: no Arrow/DataFusion boundary now exists at join; preserve all opaque payload types and directly inspect actual native key/offset index. Actual large_binary sink schema remains asserted in 9.75MB test.",
     "other_cases": "same nodeid, same row dimensions, positive result/count/order assertions preserved; private query JSON paths replaced by actual worker/store and sealed policy observations"
@@ -52,5 +49,28 @@
       2
     ]
   },
-  "pending_note": "Do not run 40k cases until actual-byte SpoolPort is integrated. Limits are now passed through public native_resources, not a retired dataset_session monkeypatch. No claim of performance acceptance."
+  "pending_note": "Both original40k cases executed after actual-byte spool integration; genuine120s throughput failure while first source unfinished, join not reached. No expanded budget or weakened count; parent owns performance repair.",
+  "pressure_run": {
+    "head": "147e1d8",
+    "xml": "/tmp/demiflow-regression-large-pressure-r1.xml",
+    "xml_sha256": "80d504d8a52068b7cbd628f715e697fda457a1ff994a8a76e030c8facb0d76d0",
+    "failed": 2,
+    "seconds": 244.59,
+    "error": "DEADLINE_EXCEEDED at original 120 seconds",
+    "partitions2_run": "/tmp/demiflow-runs/7ddf5a8cbe32488286cea4e000c89946",
+    "last_cut": {
+      "sequence": 51,
+      "status": "acked",
+      "source_next_sequence": 22190,
+      "source_eoi": false,
+      "completed_stages": [],
+      "finite_seals": {},
+      "sink_total_rows": 0
+    },
+    "store": {
+      "files": 418,
+      "bytes": 250831061,
+      "largest_segment_bytes": 4991506
+    }
+  }
 }

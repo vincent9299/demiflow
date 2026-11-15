@@ -132,6 +132,15 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
     provider = _PROVIDER.get(getattr(executor, "NAME", ""))
     if provider is None:
         raise DataflowError("INVALID_CONTRACT", "unsupported executor provider")
+    if getattr(executor, '_local_kernel_closed', False) or getattr(executor, '_closed', False):
+        from ..data.sources import MaterializedSource
+        from .dataflow_handles import StoredMaterializedHandle
+        # Published immutable materializations own their original pins and may
+        # outlive the context which computed them. Lazy source declarations do
+        # not acquire that independent lifetime by retaining an old executor.
+        if type(source) is not MaterializedSource or type(source.handle) is not StoredMaterializedHandle:
+            raise RuntimeError('Dataset execution context is closed')
+        source.handle._check_open()
     if type(kind) is not str or kind not in _ACTION_KINDS:
         raise DataflowError("INVALID_CONTRACT", "unknown action kind: " + str(kind))
     args = _json_mapping(arguments, "arguments")
