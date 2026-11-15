@@ -130,7 +130,7 @@ class FakePort:
         self.reserves.append((op, dict(amounts)))
 
     def artifact(self, cmd):
-        k = (cmd.ref.digest, cmd.owner)
+        k = (cmd.ref.digest, cmd.owner) if cmd.ref is not None else None
         if cmd.kind == 'pin':
             self.pins[k] = cmd.operation_id
         elif cmd.kind == 'unpin':
@@ -149,7 +149,7 @@ def driver_env(name):
         action = RunAction(ctx, 'action-1', {'kind': 'test'})
         ctx.journal.bind_execution_action(ctx.fence, 'action-1', {'kind': 'test'})
         port = AUTH.DriverArtifactPort(action, bounds=BIG)
-        store = RunArtifactStore(root=tmp / 'store', store_id='store-1', journal=port, bounds=BIG)
+        store = RunArtifactStore(root=ctx.directory / '.dataflow-store', store_id='store-1', journal=port, bounds=BIG)
         svc = AUTH.DriverJournalService(action, store=store, bounds=BIG)
         try:
             yield NS(tmp=tmp, ctx=ctx, action=action, store=store, port=port, svc=svc)
