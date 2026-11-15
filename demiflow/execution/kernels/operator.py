@@ -478,11 +478,11 @@ class OperatorKernel:
         # The first narrow operator numbers logical INPUT batches. Filters and
         # expansions forward that provenance, so later callbacks do not regroup
         # survivors or multiply the task count by the number of emitted rows.
-        from dataclasses import replace
-        from ..contracts.dataflow import thaw_record_value
+        from ..dataflow_records import clone_record
+        from ..contracts.dataflow_codec import _thaw_json
         if self._task_origin:
             ordinal = self._task_frontier // self._task_rows
-            record = replace(record, source_position={**thaw_record_value(record.source_position),
+            record = clone_record(record, source_position={**_thaw_json(record.source_position),
                 'dataflow_task': {'group': self._task_group, 'ordinal': ordinal}})
         else:
             position = record.source_position.get('dataflow_task')

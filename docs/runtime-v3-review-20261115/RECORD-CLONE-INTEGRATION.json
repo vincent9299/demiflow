@@ -1,0 +1,53 @@
+{
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+  "head_before": "f607595a844f987d298dc61c6e0a44cdacd7fde4",
+  "inputs": {
+    "demiflow/execution/dataflow_records.py": "68e13348fd7f6ad84e61d74fa33cd417040cb8532e580cc0ebbb6c2e6d0fcce8",
+    "demiflow/execution/dataflow_models.py": "8f4ba1564fc3fb2d0581e1e2bbd56f6ee66d5784e5bfceca92caee6ca73291ba",
+    "demiflow/execution/kernels/block_partition.py": "d744215f6fb4fbb6de45d3786734478637ac4b94d74fcc27f72e4d673a6a4e1e",
+    "demiflow/execution/kernels/dataflow.py": "370e252d1c2dc6eaa165e483f861631b4323f08db2eba84d1d959fdd6bffb393",
+    "demiflow/execution/kernels/lance_keys.py": "38b0956236c82d0cf0d3cacb6f2c736ae8a63ef05471b02df6fee26afccceacb",
+    "demiflow/execution/kernels/operator.py": "932f47bd6dc79a0de1b6193a67a37fbe1ec02607a1e172523e636c7de32785fb",
+    "demiflow/execution/source_readers.py": "a9629282c31afa7660fee7e42a748a57b933de6a7d9e00af4dce43a864793b7c",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "7ef8c9568f31c9bc3bf9cef1f925c2810ea4e1044e640e87406750fa550b72ef",
+    "demiflow/execution/contracts/dataflow.py": "53632c6f466fb9b7fe6a41d9001243a1e347aca4d2a40780157d485313dbcae4",
+    "demiflow/execution/contracts/dataflow_codec.py": "74031e6db4a8cca4ab205649ab5cc6d13e6c0a66ca5d9dfc45b914f7831d11ac",
+    "tests/test_runtime_v3_record_clone.py": "c6e19c9337b8806f8692692e945a49d12dca9b5f1da7f16486b53fa1e62893ea"
+  },
+  "final": {
+    "path": "/tmp/demiflow-regression-clone-final.xml",
+    "sha256": "94c5cb5fb386cdf68a15b440aa044552ab4f5e9e27176649f6cef87f90e0a2e7",
+    "passed": 8,
+    "skipped": 0,
+    "failed": []
+  },
+  "combination": {
+    "path": "/tmp/demiflow-regression-clone-r1.xml",
+    "sha256": "148c2144e0d12bc7deb4bfd1f163c50795f1f9f0585cb2b6096b5ccbe15aefdb",
+    "passed": 32,
+    "skipped": 1,
+    "failed": [
+      {
+        "nodeid": "tests/test_runtime_v3_task_scope.py::test_public_task_batch_rebuilds_every_callable_shape[class]",
+        "message": "assert [3, 1, 2, 3, 1, 1] == [3, 3, 1]\n  \n  At index 1 diff: 1 != 3\n  Left contains 3 more items, first extra item: 3\n  Use -v to get more diff"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_task_scope.py::test_actual_driver_resume_preserves_partial_task_and_committed_prefix[class]",
+        "message": "demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: resident group exceeds active worker budget"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_task_scope.py::test_actual_driver_resume_preserves_partial_task_and_committed_prefix[closure]",
+        "message": "demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: resident group exceeds active worker budget"
+      }
+    ]
+  },
+  "combination_remaining": "All 3 failures are task fixture assumptions after max_active_workers became effective: physical resource reconstruction counts and correct RESOURCE_INFEASIBLE on memory cohort 3 -> workers 2; no remaining Record clone failures. Ray absent is explicitly skipped.",
+  "command": "DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-clone-final PYTHONPATH=\"$PWD:$PWD/tests\" /yzp/zhaozy/yangzepeng/0905/env/bin/python -B /tmp/demiflow-regression-runner.py -q tests/test_runtime_v3_record_clone.py --basetemp=/tmp/demiflow-regression-clone-final --junitxml=/tmp/demiflow-regression-clone-final.xml",
+  "import_assertion": "Path(demiflow.__file__).resolve().is_relative_to(Path.cwd())",
+  "not_claimed": [
+    "Ray verification",
+    "Metadata observation lane (patch isolated separately)",
+    "Three old task-test resource assumptions are not yet migrated in this commit",
+    "Whole historical suites green"
+  ]
+}

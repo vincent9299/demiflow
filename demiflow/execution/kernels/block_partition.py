@@ -3,7 +3,7 @@
 This is output layout, not a second scheduler. A single admitted kernel may
 produce N logical blocks without claiming N concurrent resource allocations.
 """
-from dataclasses import replace
+from ..dataflow_records import clone_record
 import hashlib
 
 from ..contracts.dataflow import BlockPartition
@@ -44,12 +44,12 @@ def partition_records(records, *, spec, rows, services):
             prefix = (size + 1) * remainder
             index = (ordinal // (size + 1) if ordinal < prefix
                      else remainder + (ordinal - prefix) // size)
-        yield replace(record, block_partition=BlockPartition(occurrence, index, count))
+        yield clone_record(record, block_partition=BlockPartition(occurrence, index, count))
 
 
 def preserve_block(records, block):
     for record in records:
-        yield replace(record, block_partition=block)
+        yield clone_record(record, block_partition=block)
 
 
 def block_identity(record):
@@ -86,4 +86,4 @@ def shuffled_block_layout(records, *, spec, services):
 def reordered_records(records, *, layout, spec):
     occurrence = _occurrence(spec)
     for record in records:
-        yield replace(record, block_partition=BlockPartition(occurrence, layout[block_identity(record)], len(layout)))
+        yield clone_record(record, block_partition=BlockPartition(occurrence, layout[block_identity(record)], len(layout)))

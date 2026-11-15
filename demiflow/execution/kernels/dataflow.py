@@ -163,12 +163,13 @@ def _output_record(
     *, schema_ref=None,
 ) -> Record:
     from ..exchange.dataflow_bridge import _encode_payload
+    from ..contracts.dataflow_codec import _thaw_json
     data = _encode_payload(row, max_bytes=services.bounds.max_row_bytes)
     if len(data) > services.bounds.max_row_bytes:
         raise _err("BUDGET_EXCEEDED", "output row exceeds max_row_bytes", size=len(data))
     return Record(
         record_id=record_id,
-        source_position=thaw_record_value(source_position),
+        source_position=_thaw_json(source_position),
         payload_ref=None,
         inline=dict(row),
         encoded_bytes=len(data),

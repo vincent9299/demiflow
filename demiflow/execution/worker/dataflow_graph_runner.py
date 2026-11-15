@@ -370,10 +370,10 @@ class WorkerGraphRunner:
             spec = self._exchange[edge.edge_id]
             routed_input = record
             if spec.routing in ('hash', 'target') and record.inline is None:
-                from dataclasses import replace
+                from ..dataflow_records import clone_record
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
-                routed_input = replace(record, inline=row, payload_ref=None,
+                routed_input = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             route_sequence = self.e._channels.routing.values().get(spec.channel_id, 0)
             for routed in route_record(routed_input, spec=spec, state=self.e._channels.routing):
@@ -464,10 +464,10 @@ class WorkerGraphRunner:
         self._dirty_metrics.add(occ)
         if self.e._node_specs[occ].kind == 'terminal':
             if record.inline is None:
-                from dataclasses import replace
+                from ..dataflow_records import clone_record
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
-                record = replace(record, inline=row, payload_ref=None,
+                record = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._terminal_spec.kind == 'write_datasink':
                 from ..contracts.dataflow import thaw_record_value
@@ -476,7 +476,7 @@ class WorkerGraphRunner:
                 if binding and binding['mode'] == 'sink':
                     from ..dataflow_acquisition_call import AcquisitionCall
                     from ..row_scope import RowScope, set_row_scope
-                    from dataclasses import replace
+                    from ..dataflow_records import clone_record
                     from ..kernels.dataflow import _row_bytes
                     if self._queue_finalizer is None:
                         self._queue_finalizer = AcquisitionCall('finalize')
@@ -487,7 +487,7 @@ class WorkerGraphRunner:
                         row = self._queue_finalizer(thaw_record_value(record.inline))
                     finally:
                         set_row_scope(None)
-                    record = replace(record, inline=row, payload_ref=None,
+                    record = clone_record(record, inline=row, payload_ref=None,
                         encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._limit is not None and self._terminal_rows >= self._limit:
                 return

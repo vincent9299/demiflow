@@ -1,5 +1,6 @@
 """Key-only anti join, scan-order reconstruction, then pinned payload hydration."""
 from dataclasses import replace
+from ..dataflow_records import clone_record
 
 from ..contracts.dataflow import thaw_record_value
 from ..contracts.dataflow_errors import DataflowError
@@ -66,7 +67,7 @@ def exclude_keys(left, right, *, spec, services):
         for original, row in hydrate(pending):
             out = _output_record(_hash_id([spec.configuration['occurrence_id'],original.record_id]),
                                  original.source_position, row, sequence, services)
-            out = replace(out, schema_ref=schema_ref)
+            out = clone_record(out, schema_ref=schema_ref)
             budget.charge(out); sequence += 1
             yield out
         pending = []
@@ -74,6 +75,6 @@ def exclude_keys(left, right, *, spec, services):
         for original, row in hydrate(pending):
             out = _output_record(_hash_id([spec.configuration['occurrence_id'],original.record_id]),
                                  original.source_position, row, sequence, services)
-            out = replace(out, schema_ref=schema_ref)
+            out = clone_record(out, schema_ref=schema_ref)
             budget.charge(out); sequence += 1
             yield out

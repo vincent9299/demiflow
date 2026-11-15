@@ -867,7 +867,8 @@ class ProducerReader(QueueReader):
         self._offset.setdefault('record_index', self._record_index)
 
     def next_record(self):
-        from dataclasses import replace
+        from .dataflow_records import clone_record
+        from .contracts.dataflow_codec import _thaw_json
         import json
         replaying = bool(self._replay_pending)
         poll = super().next_record()
@@ -879,9 +880,9 @@ class ProducerReader(QueueReader):
             max_bytes=self._services.bounds.max_control_bytes)))
         self._offset.update(producer_position=descriptor['position'] + 1,
                             producer_cursor=descriptor['next_cursor'])
-        position = thaw_record_value(poll.record.source_position)
+        position = _thaw_json(poll.record.source_position)
         position.update(queue_delivery_kind='producer', producer_unit=descriptor['position'])
-        record = replace(poll.record, record_id=descriptor['occurrence'], source_position=position)
+        record = clone_record(poll.record, record_id=descriptor['occurrence'], source_position=position)
         self._pending_record = record
         return SourcePoll('record', record, 0)
 

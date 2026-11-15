@@ -289,8 +289,8 @@ class _CachedMapKernel:
         # inline carries the exact result object; the size hint must not force a
         # JSON round-trip that would corrupt a bytes payload.
         size = len(result) if isinstance(result, bytes) else len(canonical(result).encode('utf-8'))
-        yield Record(record_id=record.record_id, source_position=record.source_position,
-                     payload_ref=None, inline=result, encoded_bytes=size, sequence=record.sequence)
+        from .dataflow_records import clone_record
+        yield clone_record(record, payload_ref=None, inline=result, encoded_bytes=size, schema_ref=None)
 
     def finish(self, port: str):
         return iter(())
