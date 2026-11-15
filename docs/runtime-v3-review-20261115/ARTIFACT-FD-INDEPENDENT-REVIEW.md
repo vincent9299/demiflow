@@ -1,6 +1,8 @@
-# Independent artifact FD review: final sort consumption still blocked
+# Independent artifact FD review and closure
 
-Candidate `4c33cb125e0f4aec2e07c284ab65b610c5f1aa77`; isolated integrated test HEAD `845a135`. No production source was changed by this review. **The basic FD correction passed the independent selection, but final sort output is not yet composable under a viable small budget.** The owner is fixing that separately; this report preserves the exact prior failure and successful control arm.
+**Final scoped verdict: both independently reproduced FD composition gaps are closed by `27cf14f4447bf87f62f45e6b046abf075268fc1a`; the final independent selection passed 11 tests.** Whole-process RLIMIT and wide-data throughput remain outside this verdict. No production source was changed by this review.
+
+Initial candidate `4c33cb125e0f4aec2e07c284ab65b610c5f1aa77` was independently tested at `845a135`. The initial basic FD correction passed, but final output consumption failed under a viable small budget. The historical evidence below is preserved unchanged; follow-up closure is recorded at the end.
 
 ## Passed scope
 
@@ -33,3 +35,15 @@ Reproductions:
 - `/tmp/demiflow-gc-independent/test_gc_generation.py`
 
 The paired JSON embeds those exact sources, input and XML hashes, all selected cases, and descriptor observations for both sort arms. All seven protected files remain original. The main checkout and shared environment were untouched. No full API/Ray matrix or wide performance claim is made by this review; parent coordination owns those runs.
+
+## Follow-up closure
+
+`40c7c18` made final merges retain the original downstream `PUT_FILES` window. At integrated `5cb8a03`, the exact original external two-arm counterexample and real typed/low-budget cases passed **10 tests / 12.79 s** (`/tmp/demiflow-fd-sort-review-fixed.xml`).
+
+A second independent counterexample found the next precise seam: a high-budget store view and an active eleven-file view shared the same root and two writer FDs, but sorting calculated fan-in only from its own larger bounds. Five input runs failed opening readers; the test-only two-way control succeeded under the identical active eleven-file limit. `/tmp/demiflow-fd-sort-shared.xml` records **1 failed / 1 passed**, 3.44 s. This did not bypass the hard cap; it rejected work that could fit with a correct fan-in.
+
+`27cf14f` gives `available_file_slots`, `require_file_slots` and actual acquisition one common lock-protected minimum-live-limit calculation. Sorting consumes that effective remaining window, then reserves its output headroom. The returned value is explicitly a planning snapshot, not a replacement grant; actual opens retain atomic admission.
+
+Final integrated HEAD `4663920`: **11 passed / 13.43 s**, `/tmp/demiflow-fd-final-independent.xml`. Both original external red/control scripts pass unchanged. The same selection covers shared-view positive and before-read negative arms, original low-budget read/put/scratch refusal, native owner/view lifetime, failed-open cleanup, anti-bypass and actual concurrent read admission. The final source remained fixed. Exact final input hashes, commands, cases and both earlier follow-up reports are added to the paired JSON.
+
+No original budget, assertion, typed payload, ordering or provenance requirement was weakened. The main checkout and shared environments remain unchanged. The parent separately owns the actual 40k throughput regressions and final frozen-candidate API matrices; this FD closure does not declare those passed.
