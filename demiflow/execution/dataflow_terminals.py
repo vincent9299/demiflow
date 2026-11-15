@@ -21,7 +21,6 @@ import pickle
 import uuid
 from typing import TYPE_CHECKING, Iterator
 
-from demiflow.data.runtime_contract import check_size
 from demiflow.execution.dataflow_handles import (
     RuntimeActionHandle,
     StoredMaterializedHandle,
@@ -146,17 +145,13 @@ def iterate_rows(handle: "ActionHandle") -> "Iterator[Row]":
 
 
 def _convert_batch(rows: "list[Row]", batch_format: str, handle: "ActionHandle", *, schema=None):
-    bounds = handle.bounds
-    total = 0
-    for row in rows:
-        total += check_size(row, bounds.max_row_bytes)
-    if total > bounds.max_batch_bytes:
-        raise _error("BUDGET_EXCEEDED", "batch conversion exceeds the batch byte budget")
+    from .batch_conversion import admit_batch_conversion
+    total, maximum = admit_batch_conversion(rows, batch_format, schema=schema, bounds=handle.bounds)
     if batch_format == "pyarrow":
         import pyarrow as pa
 
         result = pa.Table.from_pylist(rows, schema=schema)
-        if total + result.nbytes > bounds.max_batch_bytes:
+        if total + result.get_total_buffer_size() > maximum:
             raise _error('BUDGET_EXCEEDED', 'Arrow batch conversion coexistence exceeds byte budget')
         return result
     if batch_format == "pandas":
@@ -167,14 +162,17 @@ def _convert_batch(rows: "list[Row]", batch_format: str, handle: "ActionHandle",
         else:
             import pyarrow as pa
             result = pa.Table.from_pylist(rows, schema=schema).to_pandas()
-        if total + int(result.memory_usage(deep=True).sum()) > bounds.max_batch_bytes:
+        if total + int(result.memory_usage(deep=True).sum()) > maximum:
             raise _error('BUDGET_EXCEEDED', 'Pandas batch conversion coexistence exceeds byte budget')
         return result
     if batch_format in ("default", "numpy"):
         import numpy as np
 
         columns = list(rows[0].keys()) if rows else []
-        return {name: np.asarray([row[name] for row in rows]) for name in columns}
+        result = {name: np.asarray([row[name] for row in rows]) for name in columns}
+        if total + sum(value.nbytes for value in result.values()) > maximum:
+            raise _error('BUDGET_EXCEEDED', 'NumPy batch conversion coexistence exceeds byte budget')
+        return result
     if batch_format == "list":
         return rows
     raise _error("INVALID_CONTRACT", "unsupported batch format", context={"batch_format": batch_format})
