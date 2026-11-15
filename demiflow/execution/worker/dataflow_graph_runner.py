@@ -228,6 +228,9 @@ class WorkerGraphRunner:
 
     def _run(self):
         try:
+            import os
+            self._send('ready', {'worker_process_id': os.getpid(),
+                                 'runner_thread_id': threading.get_native_id()})
             while not self.e._cancel_event.is_set():
                 step = self.step(max_records=1, deadline_ms=50)
                 if not step.processed:

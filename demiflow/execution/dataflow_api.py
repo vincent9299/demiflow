@@ -155,18 +155,49 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
 
 
 def record_execution_metadata(request, execution):
-    """Project observed progress and committed results into the existing API."""
+    """Project only observed workers/counters and confirmed completion facts."""
     executor = getattr(request.action, '_dataflow_executor', None)
     if executor is None:
         return
     from .dataflow_usage import publish_prompt_usage
     publish_prompt_usage(executor, execution)
     from ..data.stats import ExecutionMetadata, StageStats
-    stages = tuple(StageStats(name=occ + ':' + partition,
-        rows_input=values['rows_input'], rows_output=values['rows_output'])
-        for (occ, partition), values in execution._node_metrics.items())
-    diagnostics = {'state': execution._state, 'dag_id': execution._graph.dag_id,
-                   'plan_id': execution._physical.plan_id}
+    graph, physical = execution._graph, execution._physical
+    kinds = {node.occurrence_id: node.kernel.kind for node in graph.nodes} if graph is not None else {}
+    observations = [{'name': kinds[occ], 'occurrence_id': occ, 'partition_id': partition,
+                     'rows_input': values['rows_input'], 'rows_output': values['rows_output']}
+                    for (occ, partition), values in execution._node_metrics.items() if occ in kinds]
+    stages = tuple(StageStats(name=item['occurrence_id'] + ':' + item['partition_id'],
+        rows_input=item['rows_input'], rows_output=item['rows_output']) for item in observations)
+    workers = list(getattr(execution, '_observed_workers', {}).values())
+    failure = getattr(execution, '_failure', None)
+    if failure is not None:
+        import asyncio
+        status = 'cancelled' if isinstance(failure, asyncio.CancelledError) else 'failed'
+    elif execution._state == 'succeeded':
+        result = execution._terminal_result
+        status = 'closed_early' if result is not None and result.completion == 'terminal_satisfied' else 'complete'
+    else:
+        status = execution._state
+    diagnostics = {'state': execution._state, 'status': status, 'engine': 'dataflow_v3',
+        'dag_id': graph.dag_id if graph is not None else None,
+        'plan_id': physical.plan_id if physical is not None else None,
+        'stages': observations, 'workers': workers,
+        'workers_used': [(item['worker_process_id'], item['runner_thread_id']) for item in workers],
+        'observed_worker_count': getattr(execution, '_observed_worker_count', len(workers)),
+        'worker_details_truncated': getattr(execution, '_observed_worker_count', len(workers)) > len(workers),
+        'peak_active_workers': getattr(execution, '_peak_active_workers', 0),
+        'action_id': request.action.action_id}
+    if failure is not None:
+        diagnostics['failure_type'] = type(failure).__module__ + '.' + type(failure).__qualname__
+    if physical is not None:
+        diagnostics['admitted_bounds'] = {'max_row_bytes': physical.bounds.max_row_bytes,
+            'max_batch_bytes': physical.bounds.max_batch_bytes,
+            'max_resident_bytes': physical.bounds.max_resident_bytes,
+            'max_spill_bytes': physical.bounds.max_spill_bytes,
+            'max_output_rows': physical.bounds.max_output_rows,
+            'timeout_ms': physical.bounds.timeout_ms,
+            'max_active_workers': physical.policy.max_active_workers}
     native = getattr(execution, '_native_summary', None)
     if native is not None:
         if execution._acquisition.binding.mode == 'native_search':
@@ -178,10 +209,7 @@ def record_execution_metadata(request, execution):
         stages=stages, rows_output=execution._confirmed_rows, diagnostics=diagnostics,
         run_ref=request.action.context.ref)
     if hasattr(executor, '_local_kernel_stats'):
-        executor._local_kernel_stats = {**diagnostics,
-            'status': 'complete' if execution._state == 'succeeded' else execution._state,
-            'rows_output': execution._confirmed_rows,
-            'engine': 'dataflow_v3', 'action_id': request.action.action_id}
+        executor._local_kernel_stats = {**diagnostics, 'rows_output': execution._confirmed_rows}
 
 
 def resolve_action_runtime(request: ActionRequest):

@@ -59,10 +59,17 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
         execution.start()
         return open_terminal(request, execution=execution)
     except BaseException as failure:
+        execution._failure = failure
+        execution._state = 'failed'
         try:
             execution.close()
         except Exception as cleanup:
             failure.add_note("Execution cleanup also failed: " + str(cleanup))
+        try:
+            from .dataflow_api import record_execution_metadata
+            record_execution_metadata(request, execution)
+        except Exception as observation:
+            failure.add_note('Execution metadata also failed: ' + str(observation))
         raise
 
 
@@ -126,6 +133,12 @@ class DataflowExecution:
         self._checkpoint_requested = False
         self._replay = None
         self._node_metrics = {}
+        self._observed_workers = {}
+        self._current_worker_observations = {}
+        self._observed_worker_count = 0
+        self._worker_detail_bytes = 0
+        self._active_worker_allocations = set()
+        self._peak_active_workers = 0
         self._report_keys = {}
         self._last_checkpoint_rows = 0
         self._checkpoint_at = time.monotonic()
@@ -261,6 +274,11 @@ class DataflowExecution:
     def _activate(self, lease: WorkerLease, stage) -> None:
         endpoint = self._endpoints[lease.allocation_id]
         endpoint.activate(self._assignment(lease, stage))
+        # A successful activation receipt means the original leased worker is
+        # resident. EOI is not an exit; only confirmed retirement removes it.
+        self._active_worker_allocations.add(lease.allocation_id)
+        self._peak_active_workers = max(self._peak_active_workers,
+                                        len(self._active_worker_allocations))
         self._lease_by_operation[self._operation_for_lease(lease)] = lease
         for partition in lease.partition_ids:
             self._by_partition[partition] = endpoint
@@ -611,6 +629,8 @@ class DataflowExecution:
         else:
             self._completed_stages.update(self._phases[self._phase_index])
             self._phase_index += 1
+        self._active_worker_allocations.difference_update(self._endpoints)
+        self._current_worker_observations.clear()
         self._endpoints.clear()
         self._by_partition.clear()
         self._lease_by_operation.clear()
@@ -710,6 +730,29 @@ class DataflowExecution:
         payload = thaw_record_value(event.payload) if event.payload is not None else {}
         endpoint = self._endpoints[event.allocation_id]
         lease = self._scheduler.leases[event.allocation_id]
+        if event.kind == 'ready':
+            if set(payload) != {'worker_process_id', 'runner_thread_id'} or any(
+                    type(value) is not int or not 0 < value < 2**63 for value in payload.values()):
+                raise DataflowError('INVALID_CONTRACT', 'worker identity observation must contain positive PID/TID')
+            identity = {**payload, 'allocation_id': event.allocation_id,
+                        'boot_id': event.boot_id, 'stage_id': lease.stage_id,
+                        'partition_ids': list(lease.partition_ids)}
+            previous = self._current_worker_observations.get(event.allocation_id)
+            if previous is not None:
+                if previous != identity:
+                    raise DataflowError('FENCED', 'worker identity changed within the same allocation')
+                return
+            self._current_worker_observations[event.allocation_id] = identity
+            self._observed_worker_count += 1
+            # Durable phase rotation can create arbitrarily many boots. Keep an
+            # exact count, but retain identity details within the control budget.
+            import json
+            detail_bytes = len(json.dumps(identity, separators=(',', ':')).encode('utf-8'))
+            if (len(self._observed_workers) < self._bounds.max_partitions and
+                    self._worker_detail_bytes + detail_bytes <= self._bounds.max_control_bytes):
+                self._observed_workers[event.allocation_id] = identity
+                self._worker_detail_bytes += detail_bytes
+            return
         if event.kind == "failure":
             from .dataflow_failures import restore_failure
             self._failure = restore_failure(payload)
@@ -1057,6 +1100,8 @@ class DataflowExecution:
         if getattr(self, '_stream_lance', None) is not None:
             self._stream_lance.close()
         self._endpoints.clear()
+        self._active_worker_allocations.clear()
+        self._current_worker_observations.clear()
         if cleanup_error is not None:
             raise cleanup_error
 

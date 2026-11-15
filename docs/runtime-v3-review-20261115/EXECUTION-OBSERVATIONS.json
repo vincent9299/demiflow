@@ -1,0 +1,55 @@
+{
+  "base_head": "f207df38f13c15c893c73a7f83dab0a5c44f4a36",
+  "scope": [
+    "demiflow/execution/dataflow.py",
+    "demiflow/execution/dataflow_api.py",
+    "demiflow/execution/dataflow_hosts.py",
+    "demiflow/execution/worker/dataflow_graph_runner.py",
+    "tests/test_runtime_v3_task_scope.py",
+    "tests/test_runtime_v3_execution_observations.py"
+  ],
+  "source_sha256": {
+    "demiflow/execution/dataflow.py": "18cbd28b412cff72532a3e3151b415867b566110e36e90cbc1a064ca48d4f402",
+    "demiflow/execution/dataflow_api.py": "198f57a3ea1bb1ad6bdd15fbc3085107dd8a4c6730facd96c19f6bc15db51942",
+    "demiflow/execution/dataflow_hosts.py": "b271306b734fea44f7d44402293e475d0aaf17df8d7f8683f33343c159ddee65",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "1e4df94e5e8c6ad8743345da91b8c53aaf4848afb3dfcedba991b2c1fd19badb",
+    "tests/test_runtime_v3_task_scope.py": "87a56e59a1af97b4959399cfffa1d33f7fd482b3647f4fc4ad26c7339af23f8b",
+    "tests/test_runtime_v3_execution_observations.py": "325b9abf453fb5236634d94b5ebe245310b8d0e527cb82833cd497432dbdb0d2"
+  },
+  "validation": [
+    {
+      "xml": "/tmp/demiflow-regression-observed-r4.xml",
+      "tests": 5,
+      "passed": 5,
+      "seconds": 17.3,
+      "command": "PYTHONPATH=\"$PWD:$PWD/tests\" DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-observed-r4 /yzp/zhaozy/yangzepeng/0905/env/bin/python -B /tmp/demiflow-regression-runner.py -q tests/test_runtime_v3_execution_observations.py --basetemp=/tmp/demiflow-regression-observed-r4 --junitxml=/tmp/demiflow-regression-observed-r4.xml",
+      "xml_sha256": "cec2bf300bbbe805a4ed88f8e29baec158159192b2a406f86bfca524ff4f2924"
+    },
+    {
+      "xml": "/tmp/demiflow-regression-observed-r3.xml",
+      "tests": 9,
+      "passed": 9,
+      "seconds": 103.41,
+      "scope": "4 observation tests before peak/count bounding refinement + 3 public task forms + 2 partial-cut recovery tests",
+      "note": "task test bytes unchanged since this run; observation changes revalidated by r4, not a claim of 14 distinct tests",
+      "xml_sha256": "6487d18f20d467d88fef122daac60c644e27f0c984be7bdcbfdb6ce3902c82e4"
+    }
+  ],
+  "not_verified": [
+    "Thread provider identities on sibling not-yet-integrated candidate",
+    "stream catch/drop counters",
+    "queue actual peaks",
+    "stage processing latency",
+    "stage policy summaries",
+    "large-payload public native_resources mapping in root"
+  ],
+  "protected_unchanged": [
+    "demiflow/execution/raw_fetch.py",
+    "demiflow/execution/queue_execution.py",
+    "demiflow/execution/queue_sinks.py",
+    "demiflow/execution/queue_source.py",
+    "demiflow/planning/dag.py",
+    "demiflow/execution/contracts/exchange.py",
+    "demiflow/resources/contracts.py"
+  ]
+}

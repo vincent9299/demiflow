@@ -48,8 +48,22 @@ def test_public_task_batch_rebuilds_every_callable_shape(tmp_path, form):
     observed = events(path)[before:]
     assert [item['row'] for item in observed if item['event'] == 'call'] == list(range(7))
     if form == 'class':
-        assert [item['count'] for item in observed if item['event'] == 'close'] == [3, 3, 1]
-        assert sum(item['event'] == 'construct' for item in observed) == 3
+        # Two live-worker slots can park this three-stage pipeline. Resource
+        # reconstruction is allowed; committed business prefixes never replay.
+        owners = {}
+        for item in observed:
+            active = owners.get(item['pid'], False)
+            if item['event'] == 'construct':
+                assert not active
+                owners[item['pid']] = True
+            elif item['event'] == 'close':
+                assert active
+                owners[item['pid']] = False
+            else:
+                assert active and item['count'] == item['row'] % 3 + 1
+        assert not any(owners.values())
+        assert sum(item['event'] == 'construct' for item in observed) == sum(
+            item['event'] == 'close' for item in observed) >= 3
     if form == 'method':
         assert callback.__self__.count == 0
 
@@ -190,9 +204,22 @@ def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_pa
     before = events(path)
     committed_calls = [event for event in before if event['event'] == 'call' and event['row'] < cut['frontier']]
     assert [event['row'] for event in committed_calls] == list(range(cut['frontier']))
-    with RunContext.resume(ref) as resumed, data.local_execution(workers=2, batch_rows=999):
-        # Recovery uses the already sealed batch size, not current placement or
-        # today's executor default. It never calls the committed task prefix.
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.run_journal import RunJournal
+    journal = RunJournal(ref.directory)
+    commits_before = journal.execution_commits('action-1')
+    started = time.monotonic()
+    with pytest.raises(DataflowError, match='active worker budget'):
+        with RunContext.resume(ref), data.local_execution(workers=2, batch_rows=999):
+            # This seal has a 3-worker memory cohort. A tighter live envelope
+            # cannot silently replace its exchanges or start a partial cohort.
+            build().take_all()
+    assert time.monotonic() - started < 30
+    assert events(path) == before
+    assert journal.execution_commits('action-1') == commits_before
+    with RunContext.resume(ref) as resumed, data.local_execution(workers=4, batch_rows=999):
+        # Feasible resources still use the original sealed batch size, never
+        # today's executor default or a replay of the committed task prefix.
         rows = build().take_all()
         assert [row['within_task'] for row in rows] == [i % 5 + 1 for i in range(23)]
         assert any(fact['commit_id'] == cut['commit'] for fact in resumed.journal.execution_commits('action-1'))
