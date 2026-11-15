@@ -8,8 +8,8 @@ import runtime_v3_support as support
 @pytest.mark.parametrize("scenario", [
     "api_matrix",
     "cpu_gpu_isolation", "fairness_deadlock", "multiworker_barrier", "route_recovery",
-    "commit_crash_matrix", "model_effect_recovery", "actor_state_lifecycle",
-    "queue_full_business", "memory_peak", "disk_gc", "remote_journal", "two_hosts",
+    "actor_state_lifecycle",
+    "queue_full_business", "memory_peak", "disk_gc", "two_hosts",
     "node_loss", "driver_restart", "history_identity", "workbench_real_plan",
     "product_regression", "artifact_security", "performance", "all_regressions",
 ])

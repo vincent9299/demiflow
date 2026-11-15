@@ -503,8 +503,11 @@ class RuntimeV3Fixture:
         from demiflow.execution.executors.ray import RayDatasetExecutor
         from demiflow.execution.run_context import RunContext
         executor = LocalDatasetExecutor() if self.provider == "local" else RayDatasetExecutor()
+        from contextlib import nullcontext
+        self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal'}
+        scope = nullcontext() if self_managed else RunContext.start(self.journal_dir / scenario)
         try:
-            with RunContext.start(self.journal_dir / scenario), _use_executor(executor):
+            with scope, _use_executor(executor):
                 with _RayDataBlocker() as blocker, _ExecuteActionRecorder() as recorder:
                     evidence = func(self, fault)
         finally:
@@ -512,11 +515,11 @@ class RuntimeV3Fixture:
         evidence = dict(evidence)
         evidence["scenario"] = scenario
         evidence["fault"] = fault
-        evidence["ray_data_import_attempts"] = list(blocker.attempts)
-        evidence["execute_action_calls"] = list(recorder.calls)
+        evidence["ray_data_import_attempts"] = list(blocker.attempts) + evidence.pop('child_ray_data_import_attempts', [])
+        evidence["execute_action_calls"] = list(recorder.calls) + evidence.pop('child_execute_action_calls', [])
         evidence["provider"] = self.provider
-        evidence["module_paths"] = self.module_paths
-        self._save_evidence(scenario, evidence)
+        evidence["module_paths"] = assert_tree_binding()
+        self._save_evidence(scenario if fault is None else scenario + '-' + fault, evidence)
         return evidence
 
     def _save_evidence(self, name: str, evidence: Mapping[str, Any]) -> Path:
@@ -1071,15 +1074,13 @@ def _s_route_recovery(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]
 
 
 def _s_commit_crash_matrix(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'child must reach a native commit boundary; killing a sleeping marker process proves no recovery'}
-    fx._record_not_run('commit_crash_matrix', detail)
-    raise NotRunError('commit_crash_matrix', detail)
+    from runtime_v3_recovery_scenarios import commit_crash_matrix
+    return commit_crash_matrix(fx, fault)
 
 
 def _s_model_effect_recovery(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must use real Prompt/Embedding/Agent actors and local external transport with fault injection'}
-    fx._record_not_run('model_effect_recovery', detail)
-    raise NotRunError('model_effect_recovery', detail)
+    from runtime_v3_recovery_scenarios import model_effect_recovery
+    return model_effect_recovery(fx, fault)
 
 
 def _s_actor_state_lifecycle(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
@@ -1122,9 +1123,8 @@ def _s_disk_gc(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 
 def _s_remote_journal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must prohibit worker SQLite access and exercise cross-process journal requests'}
-    fx._record_not_run('remote_journal', detail)
-    raise NotRunError('remote_journal', detail)
+    from runtime_v3_recovery_scenarios import remote_journal
+    return remote_journal(fx, fault)
 
 
 def _s_two_hosts(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:

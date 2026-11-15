@@ -20,7 +20,7 @@ import runtime_v3_support as s
 
 # Scenarios whose real work is not an in-process Dataset action (identity
 # formula, repository collection, subprocess re-verification, process crash).
-_NON_PIPELINE = {"history_identity", "all_regressions", "cache_materialize", "commit_crash_matrix"}
+_NON_PIPELINE = {"history_identity", "all_regressions", "cache_materialize"}
 
 
 def _run_unified(fx, scenario, *, fault=None):
