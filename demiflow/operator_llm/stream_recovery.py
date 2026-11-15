@@ -169,7 +169,17 @@ class RunPromptJournal(_SQLiteJournalShard):
             if item.payload.budget is None:
                 raise RecoveryContractError('Native request has no execution budget reservation')
             reservation, charges = item.payload.budget
-            self.run.journal.reserve_budgets_in_transaction(db, reservation, charges)
+            from ..execution.run_journal import ExecutionBudgetExceeded
+            try:
+                self.run.journal.reserve_budgets_in_transaction(db, reservation, charges)
+            except ExecutionBudgetExceeded as error:
+                if error.budget != 'requests' and not error.budget.startswith('requests-'):
+                    raise
+                # The same finite model quota applies to first execution and
+                # replay. Other contract/fence/control-storage failures remain
+                # fatal, and the enclosing savepoint rolls back this intent.
+                from .errors import PromptBudgetExceededError
+                raise PromptBudgetExceededError('Operator LLM request budget exhausted') from error
             db.execute("UPDATE journal_state SET value=? WHERE name='native_response_reserved'", (str(reserved + bound),))
         else:
             key, column, _ = item.payload

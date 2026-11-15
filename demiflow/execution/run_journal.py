@@ -14,6 +14,15 @@ from contextlib import contextmanager, ExitStack
 
 from .artifacts import run_lock, encoded
 from ..errors import ExecutionConflict
+from .recovery_contract import RecoveryContractError
+
+
+class ExecutionBudgetExceeded(RecoveryContractError):
+    """A valid reservation exceeded its named durable ceiling."""
+
+    def __init__(self, budget):
+        self.budget = budget
+        super().__init__('Execution budget exhausted: ' + budget)
 
 OBSERVATION_BYTES = 8192
 OBSERVATION_TOTAL_BYTES = 8 * 1024**2
@@ -1264,7 +1273,7 @@ class RunJournal:
                 continue
             consumed = (budget[0] if budget else 0) + amount
             if consumed > ceiling:
-                raise RecoveryContractError('Execution budget exhausted: ' + name)
+                raise ExecutionBudgetExceeded(name)
             pending[name] = (consumed, ceiling, amount)
             totals[name] = consumed
         count = db.execute('SELECT items FROM runtime_reservation_count WHERE singleton=1').fetchone()[0]

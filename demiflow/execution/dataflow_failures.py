@@ -17,6 +17,8 @@ _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls for cls in (
 _RECOVERY_TYPE = DataflowRecoveryError.__module__ + '.' + DataflowRecoveryError.__qualname__
 _KNOWN[RecoveryContractError.__module__ + '.' + RecoveryContractError.__qualname__] = RecoveryContractError
 _KNOWN[UnresolvedCommit.__module__ + '.' + UnresolvedCommit.__qualname__] = UnresolvedCommit
+from ..operator_llm.errors import PromptBudgetExceededError
+_KNOWN[PromptBudgetExceededError.__module__ + '.' + PromptBudgetExceededError.__qualname__] = PromptBudgetExceededError
 
 
 def failure_payload(exc):
