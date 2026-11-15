@@ -1,5 +1,7 @@
 # 继续实施记录：真实 Dataset 主链路
 
+后续原生 Prompt/Embedding、真实 Ray 模型加排序组合与效果事务进展见 [NATIVE-PROGRESS.md](NATIVE-PROGRESS.md)。下文保留本阶段证据与当时待办；两者都不是最终全部验收。
+
 本记录替代旧 REVIEW.md 中“公开 Dataset 仍完全不能运行”的当前状态判断；不撤回它记录的基线缺陷，也不宣布所有问题关闭。工作仍在 `engine/gpt-runtime-v3-review-20261115` 隔离分支进行，主仓保持 `e40a6dd3dd756aba423dca4c7d995ada0a4bff65` 与原 11 处文档改动，未 push、未合入、未调整生产服务。
 
 两大 root 不变：产品应让用户看懂、配置、运行真实 pipeline，并分析、比较、评测数据；平台应提供正确、稳定、高性能、通用且架构清楚的统一数据流引擎。局部测试数不折算为完成百分比。

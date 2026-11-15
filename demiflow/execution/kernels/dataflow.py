@@ -218,6 +218,27 @@ def _batch_values(result: Any) -> list[Any]:
     return list(result)
 
 
+def _invoke_scoped(instance, value, records, spec):
+    from ..row_scope import RowScope, current_row_scope, set_row_scope
+    previous = current_row_scope()
+    scope = getattr(instance, 'native_scope', None)
+    if scope is not None:
+        # Source record identity is deliberately preserved by union. Native
+        # effects need the invocation occurrence, including its multiplicity;
+        # this cursor is checkpointed with the owning kernel, never inferred
+        # from output count (an invocation can emit zero or many rows).
+        occurrence = _hash_id(['dataflow-call-v3', *scope, instance.native_call_ordinal])
+        instance.native_call_ordinal += 1
+    else:
+        occurrence = _hash_id(['dataflow-call-v3', _occurrence(spec),
+                               [record.record_id for record in records]])
+    set_row_scope(RowScope(occurrence))
+    try:
+        return instance(value)
+    finally:
+        set_row_scope(previous)
+
+
 def invoke_unary(
     spec: KernelSpec,
     record: Record,
@@ -265,7 +286,7 @@ def invoke_unary(
                   "prompt", "agent", "fetch", "document", "VectorSearchOp", "SearchWebOp",
                   "RegisterDocumentsOp", "ReadDocumentsOp"):
         try:
-            result = instance(row)
+            result = _invoke_scoped(instance, row, (record,), spec)
         except Exception as exc:
             admitted = set(cfg.get("catch", ()))
             names = {cls.__module__ + "." + cls.__qualname__ for cls in type(exc).__mro__}
@@ -404,7 +425,7 @@ def invoke_batch(
             )
         result = instance(batch)
         out_rows = _batch_to_rows(result, batch_format)
-    elif kind in ("BatchMapOp", "AddColumnOp"):
+    elif kind in ("BatchMapOp", "AddColumnOp", "embedding", "EmbeddingMapOp"):
         if input_bytes > services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "batch exceeds max_batch_bytes", bytes=input_bytes)
         if kind == "AddColumnOp":
@@ -418,7 +439,7 @@ def invoke_batch(
             column = _cfg(spec, "column")
             out_rows = [{**row, column: value} for row, value in zip(rows, values)]
         else:
-            result = instance(rows)
+            result = _invoke_scoped(instance, rows, records, spec)
             out_rows = [dict(row) for row in result]
     else:
         raise _err("INVALID_CONTRACT", "kind is not a batch kernel", kind=kind)
@@ -461,6 +482,7 @@ _BATCH_KINDS = frozenset(
 )
 _MODEL_KINDS = frozenset(
     {
+        "prompt", "embedding", "agent", "fetch", "document",
         "OperatorLLMMapOp", "AsyncMapOp", "AgentMapOp", "DeduplicateOp",
         "EmbeddingMapOp", "VectorSearchOp", "SearchWebOp", "RegisterDocumentsOp",
         "RegisterDocumentsBatchOp", "ReadDocumentsOp", "SaveLanceOp", "StreamPrependOp",

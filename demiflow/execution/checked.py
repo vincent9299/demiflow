@@ -641,7 +641,8 @@ def action(kind, source, plan, spec=None, *, arguments=None):
         return
     from .payload_limits import payload_scope
     with execution_scope() as run, payload_scope(run, plan,
-            owner_limits=owner._limits if owner is not None else None, arguments=arguments,source=source), checks as value:
+            owner_limits=owner._limits if owner is not None else None, arguments=arguments,source=source,
+            physical_dataflow=True), checks as value:
         if value.plan is not None:
             from .queue_producer import producer_actor, validate_source
             producer = producer_actor(value.plan)

@@ -163,6 +163,14 @@ def _operation_semantic_facts(operation: LogicalOp) -> Mapping[str, Any]:
             "factory": _callable_code_identity(operation.factory),
         }
     if is_dataclass(operation):
+        from ..execution.plan_facts import operation_facts
+        from ..execution.recovery_identity import operation_identity
+        try:
+            fact = operation_facts(operation)
+        except (RuntimeError, ValueError, TypeError):
+            fact = {}
+        if fact.get('native') is not None or type(operation).__name__ == 'OperatorLLMMapOp':
+            return operation_identity(operation)
         return {
             "type": type(operation).__module__ + "." + type(operation).__qualname__,
             "fields": {
@@ -297,6 +305,16 @@ def compile_kernel_spec(
     definition = registry.get(kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator kind is not registered: " + kind)
+    from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory
+    native_declaration = native_model_declaration(operation)
+    if native_declaration is not None and native_declaration.target is PromptFactory:
+        from ..execution.dataflow_models import build_model_factory
+        native_op, settings = native_declaration.constructor_args
+        model = build_model_factory(native_op, program_ref=program_ref, bounds=bounds)
+        configuration = _plain(model.configuration)
+        configuration.update(concurrency=settings.get('concurrency', 1),
+                             catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
+        return replace(model, configuration=configuration)
     if definition.compiler_symbol == _MODEL_COMPILER:
         from ..execution.dataflow_models import build_model_factory
         return build_model_factory(operation, program_ref=program_ref, bounds=bounds)
@@ -639,6 +657,8 @@ class _Capture:
             kernel = compile_kernel_spec(operation, program_ref=None, bounds=self.bounds)
             semantic = _operation_semantic_facts(operation)
             callable_spec = getattr(operation, "callable", None)
+            from ..execution.dataflow_model_factory import native_model_declaration
+            callable_spec = native_model_declaration(operation) or callable_spec
             if isinstance(operation, NativeOperation):
                 callable_spec = operation.factory
             code_identity = (

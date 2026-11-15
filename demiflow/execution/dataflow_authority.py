@@ -4,17 +4,13 @@ H056-H057, H066-H075; C07/C09/C10/C16).
 The driver service only validates identity/allowlist/byte budgets and calls the
 original journal/effect implementations through fixed handlers; it never exposes
 a generic SQL/method proxy. The worker client is a bounded typed RPC port that
-never opens the driver database. Durable effect facts use the original
-file-atomic ledger pattern (no second database); pins live in the original
-RunJournal through apply_artifact_command.
+never opens the driver database. Durable effect facts and their budgets share one fenced RunJournal transaction;
+pins live in the same authority through apply_artifact_command.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import queue
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -61,42 +57,6 @@ def _ref_to_json(ref):
         return None
     return {"digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
             "key": ref.key, "media_type": ref.media_type}
-
-
-def _save_atomic(path: Path, value) -> None:
-    raw = document(value)
-    descriptor, name = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(name, path)
-    finally:
-        Path(name).unlink(missing_ok=True)
-
-
-class _EffectLedger:
-    """Durable per-effect facts using the original file-atomic ledger pattern."""
-
-    def __init__(self, root: Path):
-        self._root = root
-        self._root.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
-
-    def _path(self, effect_id: str) -> Path:
-        return self._root / (effect_id + ".json")
-
-    def read(self, effect_id: str):
-        path = self._path(effect_id)
-        try:
-            with open(path, "rb") as stream:
-                return json.loads(stream.read())
-        except FileNotFoundError:
-            return None
-
-    def write(self, effect_id: str, record) -> None:
-        _save_atomic(self._path(effect_id), record)
 
 
 def _lease_matches(action: "RunAction", event: WorkerEvent) -> None:
@@ -191,7 +151,6 @@ class DriverJournalService:
         self._bounds = bounds
         self._journal = action.context.journal
         self._fence = action.context.fence
-        self._effects = _EffectLedger(action.context.directory / ".dataflow-effects")
         self._queue: queue.Queue = queue.Queue(maxsize=max(1, bounds.max_pending_events))
         self._inflight: dict[str, WorkerEvent] = {}
         self._completed: list[CompletedControl] = []
@@ -329,7 +288,8 @@ class DriverJournalService:
                          "native_fact_ref": _ref_to_json(reply.native_fact_ref), "retry_after_ms": reply.retry_after_ms}
             elif event.kind == "native_request":
                 reply = self.native_request(_native_command(payload), lease=None)
-                value = {"operation_id": reply.operation_id, "value": reply.value, "value_ref": _ref_to_json(reply.value_ref)}
+                from .contracts.dataflow_codec import _thaw_json
+                value = {"operation_id": reply.operation_id, "value": _thaw_json(reply.value), "value_ref": _ref_to_json(reply.value_ref)}
             elif event.kind == "read_action":
                 value = self._read_action(payload.get("action_id"))
             elif event.kind == "read_configuration":
@@ -351,53 +311,26 @@ class DriverJournalService:
         identifier(command.effect_id)
         identifier(command.actor_id)
         identifier(command.request_digest)
-        with self._effects._lock:
-            record = self._effects.read(command.effect_id)
-            if record is not None and record["request_digest"] != command.request_digest:
-                raise DataflowError("INVALID_CONTRACT", "effect_id reused with a different request_digest")
-            state = record["state"] if record is not None else "absent"
-            if command.kind == "lookup":
-                return EffectReply(operation_id=command.operation_id, status=state,
-                                   result_ref=_ref_from_json(record.get("result_ref")) if record else None,
-                                   receipt_ref=_ref_from_json(record.get("receipt_ref")) if record else None)
-            if command.kind == "reserve":
-                if state not in ("absent", "reserved"):
-                    raise DataflowError("INVALID_CONTRACT", "effect already past reservation")
-                if state == "absent":
-                    charges = {name: (amount, self._bounds.max_resident_bytes)
-                               for name, amount in command.budget.items()}
-                    if charges:
-                        self._journal.reserve_budgets(self._fence, command.operation_id, charges)
-                    record = {"state": "reserved", "request_digest": command.request_digest,
-                              "actor_id": command.actor_id, "result_ref": None, "receipt_ref": None}
-                    self._effects.write(command.effect_id, record)
-                return EffectReply(operation_id=command.operation_id, status="reserved", result_ref=None, receipt_ref=None)
-            if command.kind == "mark_sent":
-                if state != "reserved":
-                    raise DataflowError("INVALID_CONTRACT", "mark_sent requires a reserved effect")
-                record = dict(record, state="sent")
-                self._effects.write(command.effect_id, record)
-                return EffectReply(operation_id=command.operation_id, status="sent", result_ref=None, receipt_ref=None)
-            if command.kind == "confirm":
-                if state != "sent":
-                    raise DataflowError("INVALID_CONTRACT", "confirm requires a sent effect")
-                if command.payload_ref is None:
-                    raise DataflowError("INVALID_CONTRACT", "confirm needs a recoverable result ref")
-                record = dict(record, state="confirmed", result_ref=_ref_to_json(command.payload_ref))
-                self._effects.write(command.effect_id, record)
-                return EffectReply(operation_id=command.operation_id, status="confirmed",
-                                   result_ref=command.payload_ref, receipt_ref=None)
-            if command.kind == "unknown":
-                if state != "sent":
-                    raise DataflowError("INVALID_CONTRACT", "unknown requires a sent effect")
-                record = dict(record, state="unknown")
-                self._effects.write(command.effect_id, record)
-                return EffectReply(operation_id=command.operation_id, status="unknown", result_ref=None, receipt_ref=None)
-            if state != "reserved":
-                raise DataflowError("INVALID_CONTRACT", "release_unsent requires a reserved effect")
-            record = dict(record, state="unsent")
-            self._effects.write(command.effect_id, record)
-            return EffectReply(operation_id=command.operation_id, status="unsent", result_ref=None, receipt_ref=None)
+        legacy = self._action.context.directory / ".dataflow-effects" / (command.effect_id + ".json")
+        if legacy.exists():
+            raise DataflowError("INCOMPATIBLE_HISTORY", "Legacy file effect requires explicit reconciliation; replay is forbidden")
+        ceilings = self._budget_ceilings(command.budget)
+        if command.kind == "confirm" and (command.payload_ref is None or not self._store.inspect(command.payload_ref)):
+            raise DataflowError("CORRUPT_ARTIFACT", "Effect result is not durably readable")
+        record = self._journal.transition_effect(self._fence, self._action.action_id, command, ceilings=ceilings)
+        return EffectReply(operation_id=command.operation_id, status=record['state'],
+                           result_ref=_ref_from_json(record.get('result_ref')),
+                           receipt_ref=_ref_from_json(record.get('receipt_ref')))
+
+    def _budget_ceilings(self, names):
+        from .dataflow_store import ARTIFACT_STAGING_BUDGET
+        declared = {ARTIFACT_STAGING_BUDGET: self._bounds.max_spill_bytes,
+                    'requests': self._action.context.limits['max_requests'],
+                    'output_rows': self._bounds.max_output_rows}
+        unknown = set(names) - declared.keys()
+        if unknown:
+            raise DataflowError('INVALID_CONTRACT', 'Undeclared budget components: ' + ','.join(sorted(unknown)))
+        return {name: declared[name] for name in names}
 
     # -- budget admission (H004) --------------------------------------------
     def reserve(self, operation_id: str, amounts: Mapping[str, int], *, lease: "WorkerLease | None") -> None:
@@ -405,13 +338,12 @@ class DriverJournalService:
         if not isinstance(amounts, Mapping) or not 1 <= len(amounts) <= 4:
             raise DataflowError("INVALID_CONTRACT", "bounded budget component set required")
         charges = {}
+        ceilings = self._budget_ceilings(amounts)
         for name, amount in amounts.items():
             identifier(name)
             if type(amount) is not int or amount <= 0:
                 raise DataflowError("INVALID_CONTRACT", "budget amount must be a positive int")
-            from .dataflow_store import ARTIFACT_STAGING_BUDGET
-            ceiling = self._bounds.max_spill_bytes if name == ARTIFACT_STAGING_BUDGET else self._bounds.max_resident_bytes
-            charges[name] = (amount, ceiling)
+            charges[name] = (amount, ceilings[name])
         self._journal.reserve_budgets(self._fence, operation_id, charges)
 
     # -- artifact (H036) ----------------------------------------------------
@@ -449,7 +381,18 @@ class DriverJournalService:
         if self._native is not None and hasattr(self._native, "native_journal"):
             return self._native.native_journal
         from ..operator_llm.stream_recovery import RunPromptJournal
-        return RunPromptJournal(self._action.context)
+        run = self._action.context
+        with self._lock:
+            journal = getattr(run, '_native_prompt_journal', None)
+            if journal is None:
+                journal = RunPromptJournal(run)
+                try:
+                    journal.check_recovery()
+                except BaseException:
+                    journal.close()
+                    raise
+                run._native_prompt_journal = journal
+            return journal
 
     def _native_request(self, command: NativeJournalCommand):
         from ..operator_llm.journal import RequestRecord
@@ -466,7 +409,8 @@ class DriverJournalService:
         record = self._action.record
         if record is None:
             raise DataflowError("UNKNOWN_EFFECT", "action declaration is unavailable")
-        return {"action_id": action_id, "declaration": record["declaration"]}
+        return {"action_id": action_id, "declaration": record["declaration"],
+                "limits": dict(self._action.context.limits)}
 
     def _read_configuration(self):
         identity_doc = self._journal.recovery_identity()
@@ -524,7 +468,11 @@ def _native_reserve_context(command):
 
 
 def _native_lookup(service, journal, command, request):
-    value = journal.lookup(request)
+    if command.options.get('with_references', False):
+        response, references = journal.lookup_with_references(request)
+        value = None if response is None else {'response': response, 'references': references}
+    else:
+        value = journal.lookup(request)
     return NativeJournalReply(operation_id=command.operation_id, value=value, value_ref=None)
 
 
@@ -532,18 +480,24 @@ def _native_reserve(service, journal, command, request):
     from ..operator_llm.stream_recovery import CALL_RESERVATION
     token = _native_reserve_context(command)
     try:
-        journal.reserve(request)
+        reserved = journal.reserve(request)
     finally:
         if token is not None:
             CALL_RESERVATION.reset(token)
-    return NativeJournalReply(operation_id=command.operation_id, value=None, value_ref=None)
+    return NativeJournalReply(operation_id=command.operation_id, value=bool(reserved), value_ref=None)
 
 
 def _native_reserve_http_retry(service, journal, command, request):
     options = command.options
-    journal.reserve_http_retry(request, expected_attempt=options["expected_attempt"],
-                               expected_status=options["expected_status"], max_attempts=options["max_attempts"])
-    return NativeJournalReply(operation_id=command.operation_id, value=None, value_ref=None)
+    from ..operator_llm.stream_recovery import CALL_RESERVATION
+    token = _native_reserve_context(command)
+    try:
+        reserved = journal.reserve_http_retry(request, expected_attempt=options["expected_attempt"],
+                                   expected_status=options["expected_status"], max_attempts=options["max_attempts"])
+    finally:
+        if token is not None:
+            CALL_RESERVATION.reset(token)
+    return NativeJournalReply(operation_id=command.operation_id, value=bool(reserved), value_ref=None)
 
 
 def _native_response(service, journal, command, request):
@@ -559,7 +513,14 @@ def _native_failed(service, journal, command, request):
         raise DataflowError("INVALID_CONTRACT", "failed needs a value ref")
     raw = b"".join(service._store.read(command.value_ref, max_bytes=service._bounds.max_control_bytes))
     error = json.loads(raw)
-    journal.failed(request, error, error.get("elapsed", 0))
+    if (not isinstance(error, dict) or type(error.get('type')) is not str
+            or len(error['type']) > 128 or type(error.get('detail')) is not str):
+        raise DataflowError('INVALID_CONTRACT', 'Malformed native failure record')
+    # Reconstruct only a data-bearing exception, never import worker-supplied code.
+    failure = type(error['type'], (Exception,), {})(error['detail'])
+    if 'call' in error:
+        failure.call = error['call']
+    journal.failed(request, failure, error.get("elapsed_s", 0))
     return NativeJournalReply(operation_id=command.operation_id, value=None, value_ref=None)
 
 
@@ -577,10 +538,11 @@ def _native_media_references(service, journal, command, request):
 
 
 def _native_bind_membership(service, journal, command, request):
-    binding = command.options.get("binding")
-    if type(binding) is not dict:
-        raise DataflowError("INVALID_CONTRACT", "bind_membership needs a binding")
-    service._journal.bind_source(service._fence, command.action_id, binding)
+    key = identity(['embedding-request-membership', request['native_occurrence']])
+    if (command.options.get('membership_key') != key
+            or command.options.get('request_key') != command.request_key):
+        raise DataflowError("INVALID_CONTRACT", "bind_membership differs from the native request")
+    service._journal.bind_source(service._fence, key, {'request_key': command.request_key})
     return NativeJournalReply(operation_id=command.operation_id, value=None, value_ref=None)
 
 
@@ -678,12 +640,13 @@ class WorkerJournalClient:
                           retry_after_ms=value.get("retry_after_ms", 0))
 
     def native_request(self, command: NativeJournalCommand) -> NativeJournalReply:
+        from .contracts.dataflow_codec import _thaw_json
         payload = {"operation_id": command.operation_id, "operation": command.operation,
                    "action_id": command.action_id, "node_id": command.node_id, "request_key": command.request_key,
                    "request_ref": _ref_to_json(command.request_ref), "value_ref": _ref_to_json(command.value_ref),
-                   "reservation": command.reservation, "options": dict(command.options)}
+                   "reservation": _thaw_json(command.reservation), "options": _thaw_json(command.options)}
         value = self._request("native_request", command.operation_id, payload)
-        return NativeJournalReply(operation_id=value["operation_id"], value=value.get("value"),
+        return NativeJournalReply(operation_id=value["operation_id"], value=_thaw_json(value.get("value")),
                                   value_ref=_ref_from_json(value.get("value_ref")))
 
     def read_action(self, action_id: str) -> Mapping[str, object]:

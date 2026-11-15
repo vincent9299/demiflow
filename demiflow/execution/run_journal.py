@@ -198,6 +198,7 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), document TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), attempt INTEGER NOT NULL, fence TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_actions (action_id TEXT PRIMARY KEY, declaration TEXT NOT NULL, snapshot TEXT, result TEXT);
+          CREATE TABLE IF NOT EXISTS runtime_effects (action_id TEXT NOT NULL, effect_id TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(action_id,effect_id));
           CREATE TABLE IF NOT EXISTS runtime_artifacts (path TEXT PRIMARY KEY, commit_id TEXT, protected INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0);
           CREATE TABLE IF NOT EXISTS runtime_object_roots (root_id TEXT PRIMARY KEY, logical_root TEXT UNIQUE NOT NULL, physical_root TEXT NOT NULL, run_id TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_sources (action_id TEXT PRIMARY KEY, document TEXT NOT NULL);
@@ -1029,6 +1030,59 @@ class RunJournal:
         if old is not None and old[0] != raw:
             raise RecoveryContractError('Durable receipt changed')
         db.execute('INSERT OR IGNORE INTO runtime_receipts VALUES (?,?,?)', (commit_id, sink_id, raw))
+
+    def transition_effect(self, fence, action_id, command, *, ceilings):
+        """Native generic effect intent and budget share one fenced transaction.
+
+        A reserved record proves no send yet; a sent/unknown record never grants
+        another send. Lost replies may repeat the same transition idempotently.
+        """
+        from .contracts.dataflow_errors import DataflowError
+        from .recovery_contract import document, identifier, identity
+        from dataclasses import asdict
+        for value in (action_id, command.effect_id, command.actor_id, command.request_digest):
+            identifier(value)
+        with self.execution_guard(fence) as db:
+            row = db.execute('SELECT document FROM runtime_effects WHERE action_id=? AND effect_id=?',
+                             (action_id, command.effect_id)).fetchone()
+            record = json.loads(row[0]) if row else None
+            if record and (record['request_digest'] != command.request_digest or record['actor_id'] != command.actor_id):
+                raise DataflowError('INVALID_CONTRACT', 'Effect identity reused for a different actor/request')
+            state = record['state'] if record else 'absent'
+            if command.kind == 'lookup':
+                return record or {'state': 'absent'}
+            if command.kind == 'reserve':
+                if state == 'absent':
+                    if db.execute('SELECT count(*) FROM runtime_effects').fetchone()[0] >= 100000:
+                        raise DataflowError('BUDGET_EXCEEDED', 'Native effect record count exceeds budget')
+                    charges = {name: (amount, ceilings[name]) for name, amount in command.budget.items()}
+                    if charges:
+                        reservation = identity(['native-effect', action_id, command.effect_id])
+                        self.reserve_budgets_in_transaction(db, reservation, charges)
+                    record = {'state': 'reserved', 'actor_id': command.actor_id,
+                              'request_digest': command.request_digest,
+                              'budget': dict(command.budget), 'result_ref': None, 'receipt_ref': None}
+                elif state != 'reserved' or record.get('budget') != dict(command.budget):
+                    raise DataflowError('INVALID_CONTRACT', 'Effect cannot acquire a new reservation')
+            else:
+                transitions = {'mark_sent': ('reserved', 'sent'), 'confirm': ('sent', 'confirmed'),
+                               'unknown': ('sent', 'unknown'), 'release_unsent': ('reserved', 'unsent')}
+                if command.kind not in transitions:
+                    raise DataflowError('INVALID_CONTRACT', 'Unknown native effect transition')
+                before, after = transitions[command.kind]
+                if state not in (before, after):
+                    raise DataflowError('UNKNOWN_EFFECT', 'Effect state does not permit this transition')
+                record = dict(record, state=after)
+                if command.kind == 'confirm':
+                    if command.payload_ref is None:
+                        raise DataflowError('INVALID_CONTRACT', 'Confirm requires a durable result reference')
+                    result_ref = asdict(command.payload_ref)
+                    if state == after and record['result_ref'] != result_ref:
+                        raise DataflowError('INVALID_CONTRACT', 'Confirmed effect result changed')
+                    record['result_ref'] = result_ref
+            db.execute('INSERT OR REPLACE INTO runtime_effects VALUES (?,?,?)',
+                       (action_id, command.effect_id, document(record).decode()))
+            return record
 
     def reserve_budget(self, fence, name, reservation_id, amount, ceiling):
         """Cumulative admission. Unknown consumed work is never refunded."""

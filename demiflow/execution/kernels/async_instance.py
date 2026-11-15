@@ -17,6 +17,8 @@ class AsyncInstance:
         self.timeout = timeout or services.bounds.timeout_ms / 1000
         self.loop = None
         self.thread = None
+        self.native_scope = None
+        self.native_call_ordinal = 0
 
     def __getattr__(self, name):
         return getattr(self.target, name)

@@ -1686,7 +1686,9 @@ class Dataset:
                                    output=output, outputs=outputs, options=options,
                                    max_requests=max_requests)
         from ..execution.dataflow_api import make_native_operation
-        factory = getattr(self._executor, 'prompt_actor', None)
+        # This is a passive declaration on either host. The unified compiler
+        # seals its factory; the worker constructs the execution-owned actor.
+        from ..operator_llm.runtime import PromptActor, InProcessOperatorLLMCoordinator
         if when is not None and not callable(when):raise TypeError('when must be a row predicate')
         if any(v is not None and (not isinstance(v,str) or not v) for v in (call_output,error_output)):
             raise TypeError('call_output/error_output must be nonempty column names')
@@ -1696,7 +1698,8 @@ class Dataset:
         operation = declared._plan.operations[-1]
         if token_budget is not None and callable(getattr(token_budget,'validate_model',None)):
             token_budget.validate_model(operation.config.prompt_definitions[operation.prompt_name].model.name)
-        actor = factory(operation) if service is None else factory(operation, service=service)
+        actor = PromptActor(operation, operation.config,
+            InProcessOperatorLLMCoordinator(operation.max_requests), operation.options, service=service)
         if not any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
             from ..operator_llm.http_options import validate_http_options
             validate_http_options({**(options or {}),

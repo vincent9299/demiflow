@@ -53,7 +53,7 @@ IMAGE_VERSION = "demiflow-kernel-image-v3"
 IMAGE_MEDIA_TYPE = "application/x-demiflow-kernel-image-v3"
 _SPOOL_OWNER = "kernel-spool"
 _INSTANCE_KINDS = frozenset({"MapOp", "FlatMapOp", "BoundMapOp", "FilterOp", "AddColumnOp"}) | _BATCH_KINDS | _MODEL_KINDS
-_BATCH_INSTANCE_KINDS = _BATCH_KINDS | {"EmbeddingMapOp", "RegisterDocumentsBatchOp", "SaveLanceOp"}
+_BATCH_INSTANCE_KINDS = _BATCH_KINDS | {"embedding", "EmbeddingMapOp", "RegisterDocumentsBatchOp", "SaveLanceOp"}
 
 
 def _segment_rows(services: RuntimeServices) -> int:
@@ -247,8 +247,13 @@ class OperatorKernel:
         self._validate_profile()
         try:
             if self._spec.kind in _INSTANCE_KINDS:
-                self._instance = AsyncInstance(_resolve_instance(self._spec, self._services),
+                instance = _resolve_instance(self._spec, self._services)
+                if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
+                    from ..dataflow_models import bind_model_services
+                    instance = bind_model_services(instance, self._spec, services=self._services)
+                self._instance = AsyncInstance(instance,
                                                self._services, timeout=self._spec.configuration.get("hard_timeout"))
+                self._instance.native_scope = (self._occurrence, self._partition_id)
                 _run_astart(self._instance)
             if self._image is not None:
                 self._apply_image(self._image)
@@ -441,6 +446,7 @@ class OperatorKernel:
             "group_base": {key: dict(value) for key, value in self._group_base.items()},
             "timer_deadline": self._timer_deadline,
             "output_cursor": self._emitted,
+            "call_ordinal": self._instance.native_call_ordinal if isinstance(self._instance, AsyncInstance) else 0,
             "aggregate_state": self.aggregate_state,
         }
         raw = state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes)
@@ -515,6 +521,11 @@ class OperatorKernel:
         self._group_base = {key: dict(value) for key, value in image["group_base"].items()}
         self._timer_deadline = image["timer_deadline"]
         self._emitted = int(image["output_cursor"])
+        if isinstance(self._instance, AsyncInstance):
+            ordinal = image.get('call_ordinal', 0)
+            if type(ordinal) is not int or ordinal < 0:
+                raise _err('CORRUPT_ARTIFACT', 'Invalid native invocation cursor')
+            self._instance.native_call_ordinal = ordinal
         self._skip = 0  # input cursors already resume after the committed prefix
         self.aggregate_state = image["aggregate_state"]
         self._restore_state(image["state"])

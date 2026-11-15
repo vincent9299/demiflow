@@ -105,13 +105,13 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
                   'response_format': prompt.response_format, 'model': _prompt_model_json(prompt.model),
                   'content_hash': operation.config.content_hash}
         kind, state, effect = 'prompt', 'none', 'journaled'
-        ports = _input_ports(operation.inputs)
+        ports = _input_ports(('main',))
     elif isinstance(operation, EmbeddingMapOp):
         config = {'inputs': _json_config(operation.inputs), 'output': operation.output,
                   'max_batch': operation.max_batch, 'flush_interval': operation.flush_interval,
                   'concurrency': operation.concurrency, 'model_contract': _json_config(operation.model_contract)}
         kind, state, effect, role = 'embedding', 'none', 'journaled', 'remote_api'
-        ports = _input_ports(operation.inputs)
+        ports = _input_ports(('main',))
     elif isinstance(operation, AgentMapOp):
         environment = operation.environment
         runtime_kind = getattr(environment, 'runtime', 'demiflow') if environment is not None else 'demiflow'
@@ -313,7 +313,7 @@ def bind_cached_map(spec: KernelSpec, *, services: RuntimeServices) -> Kernel:
 
 def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, services: RuntimeServices) -> CallableInstance:
     from demiflow.execution import dataflow_model_journal as journal
-    node_id = spec.configuration['node_id']
+    node_id = spec.configuration.get('occurrence_id', spec.configuration.get('node_id'))
     kind = spec.kind
     if kind == 'prompt':
         if spec.configuration.get('response_format') == 'image':
