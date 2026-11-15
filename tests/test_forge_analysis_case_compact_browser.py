@@ -49,6 +49,7 @@ def test_same_project_shell_compact_context_and_real_media_answer_cas_history(br
             principal='fixture-reader';features=dict(case_media=True,annotation_media_basis=True)
             def __init__(self,server,config):self.server=server
             def ceiling(self):return dict(analysis_write=True,case_annotate=True,analysis_execute=False)
+            def execution_profile(self):return None # Metadata-only double has no admitted runtime.
             def assert_ready(self):return True
             def close(self):pass
             def cancel_output(self,key):pass

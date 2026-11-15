@@ -56,6 +56,7 @@ def representative_case(browser,tmp_path,monkeypatch):
             features={}
             def __init__(self,server,config):self.server=server
             def ceiling(self):return dict(analysis_execute=False,analysis_write=True,case_annotate=True)
+            def execution_profile(self):return None # Metadata-only double has no admitted runtime.
             def assert_ready(self):return True
             def close(self):pass
             def cancel_output(self,key):pass
