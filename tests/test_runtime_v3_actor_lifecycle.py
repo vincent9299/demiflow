@@ -38,14 +38,20 @@ class PlainActor:
         return {"n": row["n"] + plus}
 
 
+class SyncActor(PlainActor):
+    def __call__(self, row, plus=0):
+        emit(self.path, "call")
+        return {"n": row["n"] + plus}
+
+
 @pytest.mark.parametrize("form", ["instance", "method", "partial", "class", "args"])
 def test_public_plain_actor_owner_is_the_lifecycle_owner(tmp_path, form):
     path = tmp_path / "events"
-    actor = PlainActor(path)
+    actor = (SyncActor if form in {"class", "args"} else PlainActor)(path)
     with data.local_execution():
         ds = data.from_items([{"n": 1}, {"n": 2}])
         if form == "class":
-            ds = ds.map(PlainActor, fn_constructor_args=[str(path)])
+            ds = ds.map(SyncActor, fn_constructor_args=[str(path)])
         elif form == "args":
             ds = ds.map(actor.__call__, fn_kwargs={"plus": 0})
         else:

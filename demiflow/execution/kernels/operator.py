@@ -74,10 +74,10 @@ def _resolve_instance(spec: KernelSpec, services: RuntimeServices) -> Any:
     declaration = program.value
     if isinstance(declaration, CallableSpec):
         if spec.kind == "BoundMapOp":
-            from demiflow.data.plan import BoundMapOp
+            from demiflow.data.plan import BoundMapOp, MapStreamOptions
             op = BoundMapOp(callable=declaration, inputs=dict(spec.configuration["inputs"]),
                             output=spec.configuration.get("output"),
-                            outputs=spec.configuration.get("outputs"))
+                            outputs=spec.configuration.get("outputs"), stream_options=MapStreamOptions())
             return _FieldCallable(op)
         instance = declaration.instantiate()
         if declaration.call_args or declaration.call_kwargs:
@@ -254,9 +254,20 @@ class OperatorKernel:
         self._validate_profile()
         try:
             if self._spec.kind in _INSTANCE_KINDS:
-                for slot in range(self._concurrency if self._worker_scope else 1):
-                    self._create_instance(slot)
-                self._instance = self._instances[0]
+                count = self._concurrency if self._worker_scope else 1
+                self._instances = [None] * count
+                key = self._spec.configuration.get('program')
+                if key is None and self._spec.implementation_ref is not None:
+                    key = self._spec.implementation_ref.key
+                program = self._services.programs.get(key)
+                from ...data.plan import CallableSpec
+                factory = (program is not None and isinstance(program.value, CallableSpec)
+                           and program.value.is_class)
+                # Existing instances own lifecycle even for empty input. Class
+                # declarations acquire resources only for an invoked/restored slot.
+                if not factory:
+                    for slot in range(count):
+                        self._create_instance(slot)
                 if self._concurrency > 1:
                     from .concurrent_calls import ConcurrentCalls
                     self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop)
@@ -287,9 +298,12 @@ class OperatorKernel:
                 bind(instance.fn, services=self._services, node_id=self._occurrence)
         instance = AsyncInstance(instance, self._services,
                                  owner=self._state_owner(instance),
-                                 timeout=self._spec.configuration.get('hard_timeout'))
+                                 timeout=self._spec.configuration.get('hard_timeout'),
+                                 await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'})
         instance.native_scope = (self._occurrence, self._partition_id) + ((slot,) if self._worker_scope else ())
-        self._instances.append(instance)
+        self._instances[slot] = instance
+        if slot == 0:
+            self._instance = instance
         _run_astart(instance)
         if self._spec.state != 'none':
             from ..operator_policy import classify_operator_state
@@ -303,7 +317,10 @@ class OperatorKernel:
                 self._services.journal.restrict_recovery(self._occurrence)
 
     def _slot_instance(self, slot):
-        return self._instances[slot] if self._worker_scope else self._instance
+        slot = slot if self._worker_scope else 0
+        if self._instances[slot] is None:
+            self._create_instance(slot)
+        return self._instances[slot]
 
     def _call_scope(self, slot):
         instance = self._slot_instance(slot)
@@ -322,6 +339,8 @@ class OperatorKernel:
         if self._spec.kind not in {'prompt', 'embedding'} or not self._instances:
             return False
         for instance in self._instances:
+            if instance is None:
+                continue
             owner = self._state_owner(instance)
             recovery = getattr(owner, '_native_recovery', None)
             if recovery is None:
@@ -352,13 +371,16 @@ class OperatorKernel:
         # Startup restoration may already have launched native invocations.
         # Their threads must finish before partial actor startup is unwound.
         for instance in self._instances:
-            instance.request_stop()
+            if instance is not None:
+                instance.request_stop()
         if self._calls is not None:
             try:
                 self._calls.close(timeout=min(30, self._services.bounds.timeout_ms / 1000))
             except BaseException:
                 return  # Provider cleanup owns a worker that failed to drain.
         for instance in self._instances:
+            if instance is None:
+                continue
             try:
                 _close_instance(instance)
             except BaseException:
@@ -383,7 +405,7 @@ class OperatorKernel:
             return
         if kind in _UNARY_KINDS or (kind in _MODEL_KINDS and kind not in _BATCH_INSTANCE_KINDS):
             if self._calls is None:
-                yield from self._emit(invoke_unary(self._spec, record, instance=self._instance, services=self._services, schemas=self._schemas))
+                yield from self._emit(invoke_unary(self._spec, record, instance=self._slot_instance(0) if kind in _INSTANCE_KINDS else self._instance, services=self._services, schemas=self._schemas))
             else:
                 yield from self._emit(self._calls.submit(lambda slot: invoke_unary(self._spec, record,
                     instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), scope=self._call_scope, input=record))
@@ -410,7 +432,7 @@ class OperatorKernel:
 
     def _invoke_batch(self, batch):
         if self._calls is None:
-            yield from self._emit(invoke_batch(self._spec, batch, instance=self._instance, services=self._services, schemas=self._schemas))
+            yield from self._emit(invoke_batch(self._spec, batch, instance=self._slot_instance(0), services=self._services, schemas=self._schemas))
         else:
             yield from self._emit(self._calls.submit(lambda slot: invoke_batch(self._spec, batch,
                 instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), scope=self._call_scope, input=batch))
@@ -536,7 +558,7 @@ class OperatorKernel:
         self._require_started()
         if not self.checkpoint_ready:
             raise _err('INVALID_CONTRACT', 'Checkpoint requires drained non-native invocations')
-        worker_states = [self._snapshot_state(instance) for instance in self._instances] if self._worker_scope else None
+        worker_states = [self._snapshot_state(instance) if instance is not None else None for instance in self._instances] if self._worker_scope else None
         image = {
             "schema_version": IMAGE_VERSION,
             "kind": self._spec.kind,
@@ -552,7 +574,7 @@ class OperatorKernel:
             "output_cursor": self._emitted,
             "call_ordinal": self._instance.native_call_ordinal if isinstance(self._instance, AsyncInstance) else 0,
             "worker_states": worker_states,
-            "worker_calls": [instance.native_call_ordinal for instance in self._instances] if self._worker_scope else None,
+            "worker_calls": [instance.native_call_ordinal if instance is not None else 0 for instance in self._instances] if self._worker_scope else None,
             "call_slots": list(self._calls.slots) if self._calls is not None else None,
             "inflight_calls": self._calls.snapshot() if self._calls is not None else [],
             "aggregate_state": self.aggregate_state,
@@ -634,6 +656,8 @@ class OperatorKernel:
         self._group_base = {key: dict(value) for key, value in image["group_base"].items()}
         self._timer_deadline = image["timer_deadline"]
         self._emitted = int(image["output_cursor"])
+        if not self._worker_scope and (image["state"] is not None or image.get('call_ordinal', 0)):
+            self._slot_instance(0)
         if isinstance(self._instance, AsyncInstance):
             ordinal = image.get('call_ordinal', 0)
             if type(ordinal) is not int or ordinal < 0:
@@ -647,11 +671,13 @@ class OperatorKernel:
             states, calls = image.get('worker_states'), image.get('worker_calls')
             if not isinstance(states, list) or not isinstance(calls, list) or len(states) != len(self._instances) or len(calls) != len(states):
                 raise _err('INCOMPATIBLE_HISTORY', 'Worker callable slots differ from checkpoint')
-            for instance, state, ordinal in zip(self._instances, states, calls):
-                self._restore_state(state, instance)
+            for slot, (state, ordinal) in enumerate(zip(states, calls)):
                 if type(ordinal) is not int or ordinal < 0:
                     raise _err('CORRUPT_ARTIFACT', 'Invalid worker invocation cursor')
-                instance.native_call_ordinal = ordinal
+                if state is not None or ordinal or self._instances[slot] is not None:
+                    instance = self._slot_instance(slot)
+                    self._restore_state(state, instance)
+                    instance.native_call_ordinal = ordinal
 
         inflight = image.get('inflight_calls', [])
         if inflight and not self.can_snapshot_pending:
@@ -690,12 +716,15 @@ class OperatorKernel:
         if self._closed:
             return
         for instance in self._instances:
-            instance.request_stop()
+            if instance is not None:
+                instance.request_stop()
         if self._calls is not None:
             self._calls.close(timeout=min(30, self._services.bounds.timeout_ms / 1000))
         self._closed = True
         first_error: BaseException | None = None
         for instance in self._instances:
+            if instance is None:
+                continue
             try:
                 _close_instance(instance)
             except BaseException as exc:

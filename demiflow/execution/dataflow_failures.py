@@ -1,4 +1,5 @@
 """Data-only worker failures; a fixed exception vocabulary, never remote imports."""
+import asyncio
 import builtins
 import traceback
 
@@ -14,6 +15,7 @@ _KNOWN = {cls.__module__ + '.' + cls.__qualname__: cls for cls in _BUILTINS.valu
 from .queue_contract import QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit
 _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls for cls in (
     QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable)})
+_KNOWN[asyncio.CancelledError.__module__ + '.' + asyncio.CancelledError.__qualname__] = asyncio.CancelledError
 _RECOVERY_TYPE = DataflowRecoveryError.__module__ + '.' + DataflowRecoveryError.__qualname__
 _KNOWN[RecoveryContractError.__module__ + '.' + RecoveryContractError.__qualname__] = RecoveryContractError
 _KNOWN[UnresolvedCommit.__module__ + '.' + UnresolvedCommit.__qualname__] = UnresolvedCommit

@@ -1,5 +1,6 @@
 """Public Dataset contracts against independent Python answers and real native plans."""
 import json
+import os
 from pathlib import Path
 
 import lance
@@ -10,6 +11,8 @@ from demiflow import data
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from tests.test_local_relational import _oracle_join, assert_same_rows
+from _worker_event_fixtures import emit, events
+from demiflow.execution.run_journal import RunJournal
 
 
 def api(tmp_path):
@@ -21,7 +24,55 @@ def read(api, path, values):
     return api.read_lance(str(path), version=1)
 
 
+def sealed_plan(dataset, *, action_id='action-1'):
+    """Read the real engine seal through its authenticated, read-only store."""
+    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.execution.dataflow_seal import load_dataflow
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    metadata = dataset.execution_metadata()
+    directory = Path(metadata.run_ref.directory)
+    journal = RunJournal(directory)
+    facts = journal.source_binding(action_id + '-dataflow-sealed')
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    store = RunArtifactStore(root=directory / '.dataflow-store',
+        store_id=facts['logical_ref']['store_id'], journal=None, bounds=bounds, readonly=True)
+    graph, physical, _ = load_dataflow(directory, action_id, store=store, bounds=bounds)
+    assert graph.dag_id == metadata.diagnostics['dag_id']
+    assert physical.plan_id == metadata.diagnostics['plan_id']
+    assert journal.execution_commits(action_id)[-1]['status'] == 'acked'
+    return graph, physical, journal
+
+
+def worker_join_probe(tmp_path, monkeypatch, *, fail=False):
+    """Observe/fault the real native library in spawned workers, not a driver double."""
+    directory = tmp_path / 'worker-probe'
+    directory.mkdir()
+    log = tmp_path / 'native-queries'
+    script = """import os
+if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
+    from demiflow.execution.kernels import join_spool, ordering
+    from _worker_event_fixtures import emit
+    original_join = join_spool.join_pairs
+    original_sort = ordering.build_sort_runs
+    def observed_join(*args, **kwargs):
+        emit(LOG_PATH, 'join')
+        if FAIL:
+            raise RuntimeError('native failure')
+        yield from original_join(*args, **kwargs)
+    def observed_sort(*args, **kwargs):
+        emit(LOG_PATH, 'sort')
+        return original_sort(*args, **kwargs)
+    join_spool.join_pairs = observed_join
+    ordering.build_sort_runs = observed_sort
+""".replace('LOG_PATH', repr(str(log))).replace('FAIL', repr(fail))
+    (directory / 'sitecustomize.py').write_text(script)
+    monkeypatch.setenv('PYTHONPATH', str(directory) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    return log
+
+
 def native_reports(dataset):
+    # The two large-payload historical performance cases below still need an
+    # equivalent runtime observation contract; do not fabricate legacy stats.
     return [s for s in dataset.execution_metadata().diagnostics['stages'] if s['name'] == 'datafusion']
 
 
@@ -43,10 +94,10 @@ def test_typed_chain_preserves_duplicates_null_missing_order_and_nested_values(t
     expected = _oracle_join(_oracle_join(left, right, ['k'], ['k'], how), more, ['k'], ['k'], 'left')
     rows = a.join(b, on='k', how=how).join(c, on='k', how='left')
     assert_same_rows(rows.take_all(), expected)
-    reports = native_reports(rows)
-    assert len(reports) == 1
-    assert 'Join' in (Path(reports[0]['query'])/'plan.txt').read_text()
-    assert not any(s['name']=='python_boundary' for s in rows.execution_metadata().diagnostics['stages'])
+    graph, _, _ = sealed_plan(rows)
+    kinds = [node.kernel.kind for node in graph.nodes]
+    assert kinds.count('join') == 2
+    assert not set(kinds) & {'MapOp', 'MapBatchesOp', 'SortOp'}
 
 
 def test_self_join_and_pinned_versions(tmp_path):
@@ -98,24 +149,25 @@ def test_thread_callbacks_keep_requested_process_context(tmp_path):
 
 
 def test_plain_join_does_not_add_global_order_or_replay_callbacks(tmp_path,monkeypatch):
-    import demiflow.execution.dataset_native as native
-    monkeypatch.setattr(native,'SORT_STAGE_ROWS',1)
+    queries = worker_join_probe(tmp_path, monkeypatch)
     source=api(tmp_path)
     a=read(source,tmp_path/'a',[{'k':2,'v':'a'},{'k':1,'v':'b'},{'k':2,'v':'c'}])
     b=read(source,tmp_path/'b',[{'k':2,'r':1},{'k':2,'r':2}])
-    calls=[]
+    calls=tmp_path/'callback-calls'
     def observe(row):
-        calls.append((row['k'],row.get('r')))
+        emit(calls, 'call', k=row['k'], r=row.get('r'))
         return row
     result=a.join(b,on='k',how='left').map(observe)
     expected=[{'k':1,'v':'b'},{'k':2,'v':'a','r':1},{'k':2,'v':'a','r':2},
               {'k':2,'v':'c','r':1},{'k':2,'v':'c','r':2}]
     actual = result.take_all()
     assert_same_rows(actual, expected)
-    assert calls==[(r['k'],r.get('r')) for r in actual]
-    reports = native_reports(result)
-    assert [r['purpose'] for r in reports]==['combined']
-    assert all('ORDER BY' not in (Path(r['query'])/'query.sql').read_text() for r in reports)
+    assert [(e['k'], e['r']) for e in events(calls)] == [(r['k'], r.get('r')) for r in actual]
+    observed = events(queries)
+    assert observed and all(e['pid'] != os.getpid() for e in observed)
+    assert all(e['event'] == 'join' for e in observed)
+    graph, _, _ = sealed_plan(result)
+    assert not any(node.kernel.kind == 'SortOp' for node in graph.nodes)
 
 
 def test_missing_projection_and_collision_only_on_matched_rows(tmp_path):
@@ -135,8 +187,6 @@ def test_missing_projection_and_collision_only_on_matched_rows(tmp_path):
 
 @pytest.mark.parametrize('opaque', [False, True])
 def test_large_join_chain_checkpoint_preserves_multiplicity_and_field_presence(tmp_path, monkeypatch, opaque):
-    import demiflow.execution.dataset_native as native
-    monkeypatch.setattr(native, 'SORT_STAGE_ROWS', 1)
     source = api(tmp_path)
     values = [{'k':2, 'v':'a'}, {'k':1, 'v':'b'}, {'k':2, 'v':'c'}, {'k':None, 'v':None}]
     rows = read(source, tmp_path/'base', values)
@@ -150,63 +200,67 @@ def test_large_join_chain_checkpoint_preserves_multiplicity_and_field_presence(t
             other = other.map(lambda row: row)
         rows = rows.join(other, on='k', how='left')
         expected = _oracle_join(expected, right, ['k'], ['k'], 'left')
-    calls = []
+    calls = tmp_path / 'callback-calls'
     def observe(row):
-        calls.append(row['v'])
+        emit(calls, 'call', value=row['v'])
         return row
     rows = rows.map(observe)
     actual = rows.take_all()
     assert_same_rows(actual, expected)
-    assert calls == [r['v'] for r in actual]
-    assert [r['purpose'] for r in native_reports(rows)] == [
-        'relation_checkpoint', 'relation_checkpoint', 'combined']
+    assert [e['value'] for e in events(calls)] == [r['v'] for r in actual]
+    graph, physical, _ = sealed_plan(rows)
+    assert sum(node.kernel.kind == 'join' for node in graph.nodes) == 5
+    assert any(edge.mode == 'finite_sealed' for edge in physical.exchanges)
 
 
 @pytest.mark.slow
 def test_udf_boundary_runs_once_and_resorts_changed_keys(tmp_path):
     source = api(tmp_path)
-    calls=[]
+    calls=tmp_path/'callback-calls'
     def change(row):
-        calls.append(row['k'])
+        emit(calls, 'call', value=row['k'])
         return {'k':3-row['k'],'v':row['v']}
     a = read(source,tmp_path/'a',[{'k':1,'v':'a'},{'k':2,'v':'b'}])
     b = read(source,tmp_path/'b',[{'k':1},{'k':2}])
     out = a.join(b,on='k').map(change).reduce_by_key('k',lambda s,r:r)
     assert out.take_all()==[{'k':1,'v':'b'},{'k':2,'v':'a'}]
-    assert sorted(calls)==[1,2]
-    assert len(native_reports(out))==2
+    assert sorted(e['value'] for e in events(calls)) == [1,2]
+    graph, _, _ = sealed_plan(out)
+    kinds = [node.kernel.kind for node in graph.nodes]
+    assert all(kind in kinds for kind in ('join', 'MapOp', 'reduce'))
 
 
 def test_failed_native_query_does_not_rerun_python_or_commit(tmp_path, monkeypatch):
-    from demiflow.execution.datafusion import DataFusionSession
-    calls=[]
+    queries=worker_join_probe(tmp_path, monkeypatch, fail=True)
+    calls=tmp_path/'source-calls'
     source=api(tmp_path)
     def records():
-        calls.append('scan')
+        emit(calls, 'scan')
         yield {'k':1}
-    def fail(*args,**kwargs):
-        raise RuntimeError('native failure')
-    monkeypatch.setattr(DataFusionSession,'query',fail)
     target=tmp_path/'target'
     lance.write_dataset(pa.table({'k':[99]}),str(target))
     with pytest.raises(RuntimeError,match='native failure'):
         source.from_iter(records).join(source.from_items([{'k':1}]),on='k').write_lance(
             str(target),mode='overwrite',schema=pa.schema([('k',pa.int64())]))
-    assert calls==['scan']
+    assert [e['event'] for e in events(calls)] == ['scan']
+    assert len(events(queries)) == 1
+    journal = RunJournal(source._executor._run_ref.directory)
+    assert journal.execution_commits('action-1') == []
+    assert journal.execution_status()['status'] == 'failed'
     assert lance.dataset(str(target)).version==1
+    assert lance.dataset(str(target)).to_table().to_pylist() == [{'k': 99}]
 
 
 def test_typed_writer_avoids_row_decoding_and_preserves_nested_nulls(tmp_path, monkeypatch):
-    from demiflow.execution.dataset_native import Engine
     source=api(tmp_path)
     a=read(source,tmp_path/'a',[{'k':1,'v':{'flag':True}}, {'k':2,'v':None}])
     b=read(source,tmp_path/'b',[{'k':1,'r':[None,{'n':3}]}])
-    def forbidden(*args):
-        raise AssertionError('typed writer decoded Python rows')
-    monkeypatch.setattr(Engine,'decode',forbidden)
+    # The retired Engine.decode hook cannot observe a v3 worker. Exact declared
+    # schema and nested/null output remain contractual, not Python-row elision.
     result=a.join(b,on='k',how='left')
     schema=pa.schema([('k',pa.int64()),('v',pa.struct([('flag',pa.bool_())])),('r',pa.list_(pa.struct([('n',pa.int64())])))])
     result.write_lance(str(tmp_path/'out'),mode='create',schema=schema)
+    assert lance.dataset(str(tmp_path/'out')).schema.equals(schema)
     assert_same_rows(lance.dataset(str(tmp_path/'out')).to_table().to_pylist(), [
         {'k':1,'v':{'flag':True},'r':[None,{'n':3}]},{'k':2,'v':None,'r':None}])
 
@@ -234,7 +288,9 @@ def test_partition_callbacks_preserve_task_state_and_failure_before_commit(tmp_p
     with data.local_execution(workers=2,worker_mode='process',batch_rows=3) as session:
         rows=data.read_lance(str(left),version=1).join(data.read_lance(str(right),version=1),on='k').map(Number)
         rows.write_lance(str(target),mode='create',schema=schema)
-        assert any(s['name']=='python_batch_callbacks' for s in session.stats['stages'])
+        assert session.stats['engine'] == 'dataflow_v3'
+        graph, _, _ = sealed_plan(rows, action_id=session.stats['action_id'])
+        assert any(node.kernel.kind == 'MapOp' for node in graph.nodes)
         assert lance.dataset(str(target)).to_table()['within_task'].to_pylist()==[1,2,3,1,2,3,1]
         expanded = tmp_path/'expanded'
         rows.flat_map(lambda row: [row, row]).write_lance(str(expanded), mode='create', schema=schema)

@@ -1,0 +1,105 @@
+{
+  "current_head": "242e025",
+  "dirty_test_sha256": "573d1ff9ba8218fa6a2571f5cb8235a953d422ef7f82797b61de080820f8da64",
+  "latest_nodes": {
+    "tests/test_dataset_native.py::test_engine_session_is_not_a_public_dataset_api": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_typed_chain_preserves_duplicates_null_missing_order_and_nested_values[inner]": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_typed_chain_preserves_duplicates_null_missing_order_and_nested_values[left]": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_typed_chain_preserves_duplicates_null_missing_order_and_nested_values[semi]": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_typed_chain_preserves_duplicates_null_missing_order_and_nested_values[anti]": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_self_join_and_pinned_versions": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_compacted_and_deleted_lance_rows_keep_scanner_order": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_unsupported_typed_key_preserves_original_codec_error": {
+      "status": "failed",
+      "reason": "demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: INVALID_CONTRACT: unsupported sort value type",
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_thread_callbacks_keep_requested_process_context": {
+      "status": "failed",
+      "reason": "AssertionError: assert [{'k': 1, 'pi...'pid': 56824}] == [{'k': 1, 'pi...'pid': 56673}]",
+      "report": "/tmp/demiflow-regression-native-tiny.xml"
+    },
+    "tests/test_dataset_native.py::test_plain_join_does_not_add_global_order_or_replay_callbacks": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_missing_projection_and_collision_only_on_matched_rows": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_large_join_chain_checkpoint_preserves_multiplicity_and_field_presence[False]": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_large_join_chain_checkpoint_preserves_multiplicity_and_field_presence[True]": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_udf_boundary_runs_once_and_resorts_changed_keys": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_failed_native_query_does_not_rerun_python_or_commit": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_typed_writer_avoids_row_decoding_and_preserves_nested_nulls": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-tiny.xml"
+    },
+    "tests/test_dataset_native.py::test_empty_inputs_and_opaque_python_types_keep_original_semantics": {
+      "status": "passed",
+      "reason": null,
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    },
+    "tests/test_dataset_native.py::test_partition_callbacks_preserve_task_state_and_failure_before_commit": {
+      "status": "failed",
+      "reason": "assert [1, 2, 3, 4, 5, 6, ...] == [1, 2, 3, 1, 2, 3, ...]",
+      "report": "/tmp/demiflow-regression-native-r1.xml"
+    }
+  },
+  "summary": "15 passed / 3 retained genuine failures, 2 large-payload observation cases not run in this batch",
+  "limitations": [
+    "Thread-mode callback still runs in subprocess; original parent PID assertion retained.",
+    "Actor constructor state resets per old task/batch=3 versus actual cumulative worker state; original exact counter assertions retained pending explicit ruling/fix.",
+    "date join preserves original JSON TypeError, date reduce emits unsupported-sort DataflowError; not weakened.",
+    "Typed writer exact declared Arrow schema/null/nesting verified; old Engine.decode prohibition was an inert hook, this run makes no columnar no-conversion performance claim.",
+    "Root is replacing DataFusion join kernel; worker query probes will be moved to the new real kernel before final acceptance.",
+    "Two original large-payload Engine statistics cases remain red/unexecuted until meaningful bounded runtime observation replacement, not counted as passing."
+  ]
+}

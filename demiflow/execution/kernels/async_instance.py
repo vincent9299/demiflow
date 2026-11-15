@@ -10,6 +10,12 @@ import time
 from ..contracts.dataflow_errors import DataflowError
 
 
+class _CancelledCall:
+    """Carry callback cancellation across Future without losing its cause."""
+    def __init__(self, error):
+        self.error = error
+
+
 class _AsyncWorkPool(concurrent.futures.ThreadPoolExecutor):
     """Keep the real futures that cancelling asyncio.to_thread cannot stop."""
     def __init__(self):
@@ -40,10 +46,11 @@ class _AsyncWorkPool(concurrent.futures.ThreadPoolExecutor):
 
 
 class AsyncInstance:
-    def __init__(self, target, services, *, timeout=None, owner=None):
+    def __init__(self, target, services, *, timeout=None, owner=None, await_calls=True):
         self.target = target
         self.owner = target if owner is None else owner
         self.services = services
+        self.await_calls = await_calls
         self.timeout = timeout or services.bounds.timeout_ms / 1000
         self.loop = None
         self.thread = None
@@ -83,6 +90,11 @@ class AsyncInstance:
                         value.close()
                     raise DataflowError("CANCELLED", "operator is stopping")
                 return await value
+            except asyncio.CancelledError as exc:
+                # asyncio's Future bridge otherwise replaces this with an empty
+                # concurrent.futures.CancelledError. Cancellation stays local,
+                # data-only failure transport later preserves the known type.
+                return _CancelledCall(exc)
             finally:
                 self._tasks.discard(task)
         future = asyncio.run_coroutine_threadsafe(wait(), self.loop)
@@ -97,10 +109,14 @@ class AsyncInstance:
                 if remaining <= 0:
                     raise DataflowError("DEADLINE_EXCEEDED", "operator call exceeded its deadline")
                 try:
-                    return future.result(timeout=min(.05, remaining))
+                    result = future.result(timeout=min(.05, remaining))
                 except concurrent.futures.TimeoutError:
-                    if future.done():
-                        return future.result()
+                    if not future.done():
+                        continue
+                    result = future.result()
+                if isinstance(result, _CancelledCall):
+                    raise result.error
+                return result
         except BaseException:
             future.cancel()
             raise
@@ -119,7 +135,12 @@ class AsyncInstance:
     def __call__(self, value):
         if self._stopping.is_set():
             raise DataflowError("CANCELLED", "operator is stopping")
-        return self.resolve(self.target(value))
+        result = self.target(value)
+        if not self.await_calls and inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise TypeError('map synchronous callable returned an awaitable; use map_async')
+        return self.resolve(result)
 
     def request_stop(self):
         """Interrupt async calls before waiting for invocation threads to drain."""
