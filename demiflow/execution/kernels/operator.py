@@ -312,6 +312,25 @@ class OperatorKernel:
     def pending_calls(self):
         return self._calls is not None and self._calls.pending
 
+    @property
+    def can_snapshot_pending(self):
+        # The native journal owns request effects for these row-local actors.
+        # Arbitrary mutable UDFs/agents still drain before a state snapshot.
+        if self._spec.kind not in {'prompt', 'embedding'} or not self._instances:
+            return False
+        for instance in self._instances:
+            owner = self._state_owner(instance)
+            recovery = getattr(owner, '_native_recovery', None)
+            if recovery is None:
+                recovery = getattr(getattr(owner, '_runtime', None), 'native_recovery', None)
+            if recovery is None or not recovery.row_local:
+                return False
+        return True
+
+    @property
+    def checkpoint_ready(self):
+        return not self.pending_calls or self.can_snapshot_pending
+
     def poll(self):
         if self._calls is not None:
             yield from self._emit(self._calls.poll(max_records=1))
@@ -355,7 +374,7 @@ class OperatorKernel:
                 yield from self._emit(invoke_unary(self._spec, record, instance=self._instance, services=self._services))
             else:
                 yield from self._emit(self._calls.submit(lambda slot: invoke_unary(self._spec, record,
-                    instance=self._slot_instance(slot), services=self._services), scope=self._call_scope))
+                    instance=self._slot_instance(slot), services=self._services), scope=self._call_scope, input=record))
         elif kind in _BATCH_INSTANCE_KINDS:
             yield from self._push_batch(record)
         elif kind in _STREAM_GROUP_KINDS:
@@ -379,7 +398,7 @@ class OperatorKernel:
             yield from self._emit(invoke_batch(self._spec, batch, instance=self._instance, services=self._services))
         else:
             yield from self._emit(self._calls.submit(lambda slot: invoke_batch(self._spec, batch,
-                instance=self._slot_instance(slot), services=self._services), scope=self._call_scope))
+                instance=self._slot_instance(slot), services=self._services), scope=self._call_scope, input=batch))
 
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
         from .dataflow import _group_key, _materialize_row
@@ -500,8 +519,8 @@ class OperatorKernel:
     # -- K020 snapshot ------------------------------------------------------
     def snapshot(self) -> ArtifactRef | None:
         self._require_started()
-        if self.pending_calls:
-            raise _err('INVALID_CONTRACT', 'Checkpoint requires drained kernel invocations')
+        if not self.checkpoint_ready:
+            raise _err('INVALID_CONTRACT', 'Checkpoint requires drained non-native invocations')
         worker_states = [self._snapshot_state(instance) for instance in self._instances] if self._worker_scope else None
         image = {
             "schema_version": IMAGE_VERSION,
@@ -520,6 +539,7 @@ class OperatorKernel:
             "worker_states": worker_states,
             "worker_calls": [instance.native_call_ordinal for instance in self._instances] if self._worker_scope else None,
             "call_slots": list(self._calls.slots) if self._calls is not None else None,
+            "inflight_calls": self._calls.snapshot() if self._calls is not None else [],
             "aggregate_state": self.aggregate_state,
         }
         raw = state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes)
@@ -602,12 +622,6 @@ class OperatorKernel:
                 raise _err('CORRUPT_ARTIFACT', 'Invalid native invocation cursor')
             self._instance.native_call_ordinal = ordinal
         self._skip = 0  # input cursors already resume after the committed prefix
-        if self._calls is not None:
-            from collections import deque
-            slots = image.get('call_slots')
-            if not isinstance(slots, list) or sorted(slots) != list(range(self._concurrency)):
-                raise _err('INCOMPATIBLE_HISTORY', 'Invocation slot order differs from checkpoint')
-            self._calls.slots = deque(slots)
         self.aggregate_state = image["aggregate_state"]
         if not self._worker_scope:
             self._restore_state(image["state"])
@@ -620,6 +634,18 @@ class OperatorKernel:
                 if type(ordinal) is not int or ordinal < 0:
                     raise _err('CORRUPT_ARTIFACT', 'Invalid worker invocation cursor')
                 instance.native_call_ordinal = ordinal
+
+        inflight = image.get('inflight_calls', [])
+        if inflight and not self.can_snapshot_pending:
+            raise _err('INCOMPATIBLE_HISTORY', 'Pending calls need row-local native recovery')
+        if self._calls is not None:
+            def compute(slot, input):
+                instance = self._slot_instance(slot)
+                invoke = invoke_batch if type(input) is tuple else invoke_unary
+                return invoke(self._spec, input, instance=instance, services=self._services)
+            self._calls.restore(inflight, slots=image.get('call_slots'), compute=compute)
+        elif inflight:
+            raise _err('INCOMPATIBLE_HISTORY', 'Pending calls have no invocation slots')
 
     def _restore_state(self, state: Any, instance=None) -> None:
         if state is None:

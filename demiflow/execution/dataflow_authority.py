@@ -580,8 +580,10 @@ def _native_response(service, journal, command, request):
     if command.value_ref is None:
         raise DataflowError("INVALID_CONTRACT", "response needs a value ref")
     raw = b"".join(service._store.read(command.value_ref, max_bytes=service._bounds.max_control_bytes))
-    journal.response(request, json.loads(raw))
-    return NativeJournalReply(operation_id=command.operation_id, value=None, value_ref=None)
+    references = journal.response(request, json.loads(raw))
+    # The native client needs the same request/response references on first
+    # execution and replay. Dropping them changes call metadata and Arrow schema.
+    return NativeJournalReply(operation_id=command.operation_id, value=references, value_ref=None)
 
 
 def _native_failed(service, journal, command, request):

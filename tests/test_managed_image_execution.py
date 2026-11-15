@@ -403,52 +403,104 @@ def test_terminal_batch_byte_budget_checked_before_arrow_allocation(tmp_path,mon
     assert calls==[]
 
 
+class DelayedNativePromptFactory:
+    """A sealed worker fault: delay completion after the real native response."""
+    def __new__(cls, operation, settings):
+        import asyncio
+        import os
+        from pathlib import Path
+        from demiflow.execution.dataflow_model_factory import PromptFactory
+        # Workers import the actual platform factory; the driver's compiler
+        # binding below only substitutes this test declaration in the seal.
+        actor = PromptFactory(operation, settings)
+        original = actor._runtime.call_with_trace
+        root = Path(operation.options['object_store'])
+        async def delayed(name, values):
+            result = await original(name, values)
+            if os.getenv('DEMIFLOW_TEST_PENDING_NATIVE') == '1':
+                root.mkdir(parents=True, exist_ok=True)
+                if values['instruction'] == 'paint 7':
+                    (root / 'fast-known').write_text('response confirmed')
+                if values['instruction'] == 'paint 0':
+                    (root / 'slow-known').write_text('response confirmed')
+                    for _ in range(2000):
+                        if (root / 'release-slow').exists():
+                            break
+                        await asyncio.sleep(.01)
+                    else:
+                        raise RuntimeError('fast native slot made no progress across checkpoints')
+            return result
+        actor._runtime.call_with_trace = delayed
+        return actor
+
+
 def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_path, fixture_http, monkeypatch):
-    import asyncio
-    import threading
     import demiflow.execution.commit as protocol
-    from demiflow.operator_llm.runtime import PromptActor
+    import demiflow.execution.dataflow_model_factory as factories
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.state_artifacts import StateArtifacts
-    reached = threading.Event()
-    original = PromptActor.__call__
-    async def delayed(actor, row):
-        result = await original(actor, row)
-        if os.getenv('NATIVE_SLOW_COMPLETION') == '1':
-            if row['id'] == 7:
-                reached.set()
-            if row['id'] == 0:
-                for _ in range(500):
-                    if reached.is_set():
-                        break
-                    await asyncio.sleep(.01)
-                else:
-                    raise RuntimeError('native free slot could not cross barrier')
-        return result
-    monkeypatch.setattr(PromptActor, '__call__', delayed)
-    monkeypatch.setenv('NATIVE_SLOW_COMPLETION', '1')
+    from demiflow.execution.sealed_plans import _v3_read_store
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
+    monkeypatch.setattr(factories, 'PromptFactory', DelayedNativePromptFactory)
+    monkeypatch.setenv('DEMIFLOW_TEST_PENDING_NATIVE', '1')
+    release = tmp_path / 'assets' / 'release-slow'
+    cuts = []
     def fail(name, commit_id):
         fact = RunJournal(tmp_path/'run').execution_commit(commit_id)
-        if name == 'after_acked' and fact['sequence'] == 1 and fact['intent']['sinks'] == ['output']:
-            assert reached.wait(5), 'source stopped at suppressed trigger or slow worker'
-            raise RuntimeError('controlled published checkpoint failure')
+        if name == 'after_acked' and fact['intent']['sinks'] == ['materialize']:
+            cuts.append(fact)
     monkeypatch.setattr(protocol, 'fault_point', fail)
+    from demiflow.execution.dataflow import DataflowExecution
+    pump = DataflowExecution.pump
+    def stop_after_known_response(execution, **kwargs):
+        status = pump(execution, **kwargs)
+        if (tmp_path/'assets'/'fast-known').exists() and len(cuts) >= 2:
+            with RunJournal(tmp_path/'run')._connection() as db:
+                known, unknown = db.execute(
+                    'SELECT count(response_json), count(*) - count(response_json) FROM calls').fetchone()
+            if known >= 8 and unknown == 0:
+                # Stop while the worker still awaits a confirmed RPC receipt.
+                # A received HTTP body alone must never authorize regeneration.
+                assert (tmp_path/'assets'/'slow-known').exists()
+                release.write_text('release')
+                raise RuntimeError('controlled published checkpoint failure')
+        return status
+    monkeypatch.setattr(DataflowExecution, 'pump', stop_after_known_response)
     limits = {**run_limits(), 'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}
-    with pytest.raises(RuntimeError, match='controlled published checkpoint failure'):
-        with RunContext.start(tmp_path/'run', limits=limits) as run:
-            reference = run.ref
-            native_dataset(tmp_path/'assets', fixture_http, 12, concurrency=2).materialize()
-    first = RunJournal(tmp_path/'run').execution_commits('action-1')[0]
-    pending = json.loads((tmp_path/'run'/first['prepared']['state']['node-0-inflight']['path']).read_text())
-    assert pending['data']['rows'] >= 1
-    monkeypatch.delenv('NATIVE_SLOW_COMPLETION')
+    try:
+        with pytest.raises(RuntimeError, match='controlled published checkpoint failure'):
+            with RunContext.start(tmp_path/'run', limits=limits) as run:
+                reference = run.ref
+                native_dataset(tmp_path/'assets', fixture_http, 12, concurrency=2).materialize()
+    finally:
+        release.parent.mkdir(parents=True, exist_ok=True)
+        release.write_text('release')
+    assert len(cuts) >= 2, 'the fast slot must progress through multiple real checkpoints'
+    first = cuts[0]
+    carrier = StateArtifacts(run).read(first['prepared']['state']['dataflow-cut-v3'])
+    assert not carrier['cut']['final']
+    marker = run.journal.source_binding('action-1-dataflow-sealed')
+    store, bounds = _v3_read_store(run.directory, store_id=marker['physical_ref']['store_id'])
+    pending = []
+    for contribution in carrier['contributions']:
+        for value in contribution['operator_states'].values():
+            ref = ArtifactRef(**value)
+            if ref.media_type == IMAGE_MEDIA_TYPE:
+                image = state_codec.loads(b''.join(store.read(ref, max_bytes=bounds.max_state_bytes)),
+                                          max_bytes=bounds.max_state_bytes)
+                pending.extend(image['inflight_calls'])
+    assert len(pending) >= 1
+    assert all(item['input'] is not None and len(item['scope']) == 64 for item in pending)
+    monkeypatch.delenv('DEMIFLOW_TEST_PENDING_NATIVE')
     monkeypatch.setattr(protocol, 'fault_point', lambda *args: None)
+    monkeypatch.setattr(DataflowExecution, 'pump', pump)
     with RunContext.resume(reference):
         rows = native_dataset(tmp_path/'assets', fixture_http, 12, concurrency=2).materialize().take_all()
     assert sorted(row['id'] for row in rows) == list(range(12))
+    assert all(row.get('error') is None for row in rows), [(r['id'], r.get('error')) for r in rows]
     assert len(fixture_http['requests']) == 12
-    # Confirmed prefix rows and journal-replayed rows must infer the same
-    # nested image/call schema when a later sink splits them across batches.
     import pyarrow as pa
     schemas = [pa.Table.from_pylist([row]).schema for row in rows]
     assert all(schema == schemas[0] for schema in schemas)

@@ -694,7 +694,7 @@ class DataflowExecution:
         if (self._cut is None and all_workers and not self._deliveries
                 and all_workers <= self._idle and (self._stopping or self._checkpoint_requested or all_workers <= self._done)):
             self._source_exhausted = self._checkpoint._sources_exhausted()
-            self._cut = self._checkpoint.begin(final=self._checkpoint.inputs_complete())
+            self._cut = self._checkpoint.begin(final=all_workers <= self._done and self._checkpoint.inputs_complete())
             for endpoint in self._endpoints.values():
                 endpoint.request_cut(self._cut)
         if self._cut is not None and set(self._cut.participants) <= self._contributions.keys():
@@ -704,8 +704,8 @@ class DataflowExecution:
             if self._cut.final and self._acquisition is not None:
                 self._native_summary = self._acquisition.finish()
             image = self._checkpoint.commit(self._cut.cut_id, sinks=self._sinks)
-            for owner in getattr(self._action, 'object_sinks', {}).values():
-                owner.reset()
+            # ObjectSink.prepare already transfers exactly its generation.
+            # Calls finishing during publication append to the next generation.
             self._restore_image = image
             self._last_checkpoint_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
                                              if occ in self._graph.sources)
