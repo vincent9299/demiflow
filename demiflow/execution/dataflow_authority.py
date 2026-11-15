@@ -32,7 +32,7 @@ _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown
 _ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "begin_staging", "prepare_staging", "grow_staging", "settle_staging", "release_staging"})
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
-                         "references", "media_references", "bind_membership", "stage_image"})
+                         "references", "media_references", "bind_membership", "stage_image", "offline_lookup"})
 _COMMAND_KINDS = frozenset({"effect", "reserve", "artifact", "queue", "native_request",
                             "read_action", "read_configuration", "restrict_recovery", "check_grant"})
 _EFFECT_STATES = ("absent", "reserved", "sent", "confirmed", "unknown", "unsent")
@@ -463,10 +463,13 @@ class DriverJournalService:
         identifier(command.node_id)
         if command.action_id != self._action.action_id:
             raise DataflowError("FENCED", "native command belongs to another action")
-        journal = self._native_journal()
         request = self._native_request(command)
         if request.request_key != command.request_key:
             raise DataflowError("INVALID_CONTRACT", "native request_key does not match the request")
+        if command.operation == 'offline_lookup':
+            from .dataflow_offline import offline_lookup
+            return offline_lookup(self, command, request)
+        journal = self._native_journal()
         self._journal.bind_source(self._fence, self._action.action_id + '-native-model-journal',
                                   {'schema': 'demiflow.native_model_journal.v1',
                                    'action_id': self._action.action_id})

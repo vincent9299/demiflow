@@ -271,9 +271,14 @@ class WorkerGraphRunner:
         return WorkerStep(processed=processed, blocked=not bool(processed), end_of_input=done, events=())
 
     def _flush_metrics(self):
+        from ..dataflow_usage import worker_prompt_usage
         for occ in sorted(self._dirty_metrics):
-            self._send('progress', {'occurrence_id': occ, 'partition_id': self.partition,
-                                   'metrics': dict(self._metrics[occ])})
+            usage = worker_prompt_usage(self.e._kernels.get((occ, self.partition)))
+            payload = {'occurrence_id': occ, 'partition_id': self.partition,
+                       'metrics': dict(self._metrics[occ])}
+            if usage is not None:
+                payload['prompt_usage'] = usage
+            self._send('progress', payload)
         self._dirty_metrics.clear()
         self._metrics_at = time.monotonic()
 

@@ -176,12 +176,8 @@ class LocalDatasetExecutor(DatasetExecutor):
                            self._prompt_coordinator(operation), operation.options, service=service)
 
     def operator_llm_usage(self) -> dict[str, int]:
-        # Read hosted usage facts only; never recompute or impose a common budget.
-        totals = {}
-        for coordinator in self._prompt_coordinators.values():
-            for key, value in coordinator.usage().to_dict().items():
-                totals[key] = totals.get(key, 0) + value
-        return totals
+        from ..dataflow_usage import executor_prompt_usage
+        return executor_prompt_usage(self)
 
     def plan(
         self, source, plan, action_kind, *, terminal_category="action",

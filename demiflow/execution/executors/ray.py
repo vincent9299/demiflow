@@ -51,12 +51,8 @@ class RayDatasetExecutor(DatasetExecutor):
         self._closed = False
 
     def operator_llm_usage(self) -> dict[str, int]:
-        # Read hosted usage facts only; never recompute or impose a common budget.
-        totals: dict[str, int] = {}
-        for coordinator in self._prompt_coordinators.values():
-            for key, value in coordinator.usage().to_dict().items():
-                totals[key] = totals.get(key, 0) + value
-        return totals
+        from ..dataflow_usage import executor_prompt_usage
+        return executor_prompt_usage(self)
 
     def from_items(self, items: list[Any], *, override_num_blocks: int | None = None) -> Any:
         if not isinstance(items, list):

@@ -841,12 +841,14 @@ def create_async_operator_llm_client(model: PromptModel, options=None, max_reque
         return CodexExecPromptClient(model, options, max_requests)
     if options and 'offline_store' in options:
         if native_journal is not None:
-            raise ValueError('Offline store declares its own journal capability; native_journal is not accepted')
+            from ..execution.dataflow_offline import RemoteOfflinePromptClient
+            return RemoteOfflinePromptClient(model, options, native_journal)
         from .sqlite_offline import SQLiteOfflinePromptClient
         return SQLiteOfflinePromptClient(model, options)
     if options and 'offline_dir' in options:
         if native_journal is not None:
-            raise ValueError('Offline dir declares its own journal capability; native_journal is not accepted')
+            from ..execution.dataflow_offline import RemoteOfflinePromptClient
+            return RemoteOfflinePromptClient(model, options, native_journal)
         from .offline import OfflinePromptClient
         return OfflinePromptClient(model, options)
     return AsyncOperatorLLMClient(model,options,max_requests, native_journal=native_journal)

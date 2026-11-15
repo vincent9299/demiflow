@@ -61,9 +61,12 @@ def restore(value):
 
 
 def materialize(request, options):
+    return materialize_record(request_record(request), options)
+
+
+def materialize_record(record, options):
     journal = SQLitePromptJournal(**options)
     try:
-        record = request_record(request)
         key = record['request_sha256']
         stored = canonical(externalize(record, journal.path.with_suffix('.inputs')))
         with journal._lock:
@@ -116,17 +119,33 @@ class SQLiteOfflinePromptClient:
         self.journal = SQLitePromptJournal(**self.options)
 
     def lookup(self, request):
-        record, ref = materialize(request, self.options)
+        return self.lookup_record(request_record(request))
+
+    def lookup_record(self, record, *, max_bytes=None):
+        record, ref = materialize_record(record, self.options)
         key = record['request_sha256']
         trace = {'mode': 'offline', 'request_ref': ref.to_dict(), 'request_sha256': key,
                  'request_id': key, 'journal_path': str(self.journal.path),
-                 'model': request.model, 'provider_called': False, 'reused': True}
-        response = self.journal.read(key)
+                 'model': record['model'], 'provider_called': False, 'reused': True}
+        if max_bytes is None:
+            response = self.journal.read(key)
+        else:
+            # Bound the SQL value before transferring it into Python. A single
+            # statement keeps the size check and response in the same snapshot.
+            with self.journal._lock:
+                row = self.journal._connect().execute(
+                    'SELECT length(CAST(response_json AS BLOB)), '
+                    'CASE WHEN length(CAST(response_json AS BLOB))<=? '
+                    'THEN response_json END FROM calls WHERE request_key=?',
+                    (max_bytes, key)).fetchone()
+            if row and row[0] is not None and row[0] > max_bytes:
+                raise ValueError('Offline response exceeds the admitted byte budget')
+            response = json.loads(row[1]) if row and row[1] is not None else None
         if response is None:
             error = PromptResponsePending('Waiting for a bound offline response: ' + key)
             error.call = {**trace, 'reused': False}
             raise error
-        if response.get('request_sha256') != key or response.get('model') != request.model:
+        if response.get('request_sha256') != key or response.get('model') != record['model']:
             raise ValueError('Offline response belongs to another request or model')
         trace.update(response_ref=PromptRecordRef(str(self.journal.path), key, 'response').to_dict(),
                      response_sha256=request_key(response), offline_metadata=response.get('metadata', {}))

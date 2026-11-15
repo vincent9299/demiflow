@@ -33,12 +33,11 @@ prompts:
 
 
 def evaluate(ctx, tmp_path, images=()):
-    rows = []
-    (ctx.from_items([{'task': 'original context', 'images': list(images)}])
+    rows = (ctx.from_items([{'task': 'original context', 'images': list(images)}])
         .map_prompt_async('author', config=parse_prompt_pack(PACK), options={'offline_dir':str(tmp_path)}, max_requests=0, inputs=['task', 'images'],
                           output='answer', call_output='call', error_output='error')
         .map(lambda row: {**row, 'applied': True})
-        .map_async(lambda row: rows.append(row) or row).run_stream())
+        .map_async(lambda row: row).take_all())
     assert rows[0]['applied']
     return rows[0]
 
@@ -113,13 +112,15 @@ def test_sync_map_after_async_preserves_arguments_and_failure_boundary(tmp_path)
     data = DataAPI()
     def add(row, increment, *, suffix):
         return {'value': row['value'] + increment, 'label': suffix}
-    actual = (data.from_items([{'value': 2}]).map_async(lambda row: row)
+    target = tmp_path / 'ok.lance'
+    (data.from_items([{'value': 2}]).map_async(lambda row: row)
         .map(add, fn_args=[3], fn_kwargs={'suffix': 'mapped'})
-        .checkpoint(tmp_path / 'ok.jsonl', version='1').take_all())
+        .write_lance(str(target)))
+    actual = data.read_lance(str(target)).take_all()
     assert actual == [{'value': 5, 'label': 'mapped'}]
     def fail(row):
         raise ValueError('business validation failed')
     with pytest.raises(ValueError, match='business validation failed'):
         (data.from_items([{'value': 2}]).map_async(lambda row: row).map(fail)
-         .checkpoint(tmp_path / 'failed.jsonl', version='1'))
-    assert not (tmp_path / 'failed.jsonl').exists()
+         .write_lance(str(tmp_path / 'failed.lance')))
+    assert not (tmp_path / 'failed.lance').exists()

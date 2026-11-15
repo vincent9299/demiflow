@@ -227,6 +227,11 @@ class RemotePromptRecovery(NativePromptRecovery):
         self.copy_inputs = predicate is not None
 
     def bind_client(self, client):
+        from .dataflow_offline import RemoteOfflinePromptClient
+        if isinstance(client, RemoteOfflinePromptClient):
+            if client.journal is not self.journal:
+                raise RecoveryContractError('Offline input port differs from the bound node')
+            return  # External input lookup has no provider send/reservation.
         journal = getattr(client, 'journal', None)
         if journal is self.journal:
             # M025 pre-injected this remote journal so the constructor's

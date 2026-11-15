@@ -159,6 +159,8 @@ def record_execution_metadata(request, execution):
     executor = getattr(request.action, '_dataflow_executor', None)
     if executor is None:
         return
+    from .dataflow_usage import publish_prompt_usage
+    publish_prompt_usage(executor, execution)
     from ..data.stats import ExecutionMetadata, StageStats
     stages = tuple(StageStats(name=occ + ':' + partition,
         rows_input=values['rows_input'], rows_output=values['rows_output'])

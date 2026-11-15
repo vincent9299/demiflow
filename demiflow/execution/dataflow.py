@@ -649,6 +649,8 @@ class DataflowExecution:
             if any(metrics[k] < old[k] for k in metrics):
                 raise DataflowError("FENCED", "node counters moved backwards within a worker boot")
             self._node_metrics[(occ, partition)] = metrics
+            from .dataflow_usage import observe_prompt_usage
+            observe_prompt_usage(self, event, payload)
             key = self._report_keys.get(occ)
             if key is not None:
                 self._checked.progress(key, **{k: metrics[k] - old[k] for k in metrics})

@@ -32,7 +32,10 @@ def request_record(request):
 
 
 def materialize(request, directory):
-    record = request_record(request)
+    return materialize_record(request_record(request), directory)
+
+
+def materialize_record(record, directory):
     root = Path(directory)
     key = record['request_sha256']
     path = root / 'requests' / f'{key}.json'
@@ -59,19 +62,26 @@ class OfflinePromptClient:
         self.model, self.directory = model, Path(options['offline_dir'])
 
     def lookup(self, request):
-        record, path, response_path = materialize(request, self.directory)
+        return self.lookup_record(request_record(request))
+
+    def lookup_record(self, record, *, max_bytes=None):
+        record, path, response_path = materialize_record(record, self.directory)
         trace = {'mode': 'offline', 'request_path': str(path), 'response_path': str(response_path),
-                 'request_sha256': record['request_sha256'], 'model': request.model,
+                 'request_sha256': record['request_sha256'], 'model': record['model'],
                  'provider_called': False, 'reused': True}
         if not response_path.exists():
             error = PromptResponsePending('Waiting for a bound offline response: ' + str(path))
             error.call = {**trace, 'reused': False}
             raise error
-        result = json.loads(response_path.read_text())
-        if result.get('request_sha256') != record['request_sha256'] or result.get('model') != request.model:
+        with response_path.open('rb') as stream:
+            raw = stream.read() if max_bytes is None else stream.read(max_bytes + 1)
+        if max_bytes is not None and len(raw) > max_bytes:
+            raise ValueError('Offline response exceeds the admitted byte budget')
+        result = json.loads(raw)
+        if result.get('request_sha256') != record['request_sha256'] or result.get('model') != record['model']:
             raise ValueError('Offline response belongs to another request or model')
         trace['offline_metadata'] = result.get('metadata', {})
-        trace['response_sha256'] = hashlib.sha256(response_path.read_bytes()).hexdigest()
+        trace['response_sha256'] = hashlib.sha256(raw).hexdigest()
         return OperatorLLMResponse(result['content'], metadata=trace)
 
     async def execute(self, request):
