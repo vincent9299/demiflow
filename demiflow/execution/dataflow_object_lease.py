@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import stat
 import threading
+import time
 
 from .contracts.dataflow_errors import DataflowError
 
@@ -74,18 +75,37 @@ def inode(path, fd):
 
 
 class ObjectLease:
-    def __init__(self, root, *, create=False, exclusive=False, expected=None, on_close=None):
+    def __init__(self, root, *, create=False, exclusive=False, expected=None, on_close=None,
+                 wait_ms=0):
         from .dataflow_store import _no_symlink, _sync_directory
-        self.path = Path(root) / NAME
         self.fd = None
         self._on_close = on_close
+        if type(wait_ms) is not int or not 0 <= wait_ms <= 5000 or (exclusive and wait_ms):
+            raise ValueError('Only shared object leases may wait, for at most 5000 ms')
+        self.path = Path(root) / NAME
+        self.waited = False
         _no_symlink(self.path)
         flags = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC
         if create:
             flags |= os.O_CREAT | os.O_EXCL
         fd = os.open(self.path, flags, 0o600)
         try:
-            fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+            deadline = None
+            while True:
+                try:
+                    fcntl.flock(fd, (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if not wait_ms:
+                        raise
+                    self.waited = True
+                    now = time.monotonic()
+                    if deadline is None:
+                        deadline = now + wait_ms / 1000
+                    remaining = deadline - now
+                    if remaining <= 0:
+                        raise
+                    time.sleep(min(.005, remaining))
             self.identity = inode(self.path, fd)
             if expected is not None and self.identity != tuple(expected):
                 raise DataflowError('FENCED', 'Published object lease differs from original journal')
@@ -111,7 +131,7 @@ class ObjectLease:
 
 
 @contextmanager
-def shared_access(root, expected=None, *, require_protocol=False):
+def shared_access(root, expected=None, *, require_protocol=False, wait_ms=0):
     root = Path(root)
     if exclusive_here(root):
         yield
@@ -123,7 +143,7 @@ def shared_access(root, expected=None, *, require_protocol=False):
         raise DataflowError('FENCED', 'Published object protocol differs from original identity')
     expected = expected if expected is not None else physical
     try:
-        lease = ObjectLease(root, expected=expected)
+        lease = ObjectLease(root, expected=expected, wait_ms=wait_ms)
     except FileNotFoundError:
         if expected is not None:
             raise DataflowError('FENCED', 'Registered published object lease is missing')
@@ -131,8 +151,13 @@ def shared_access(root, expected=None, *, require_protocol=False):
         yield
         return
     except BlockingIOError as exc:
+        if wait_ms:
+            raise DataflowError('CAPACITY_PENDING',
+                'Published object maintenance exceeded the journal wait budget', retryable=True) from exc
         raise DataflowError('FENCED', 'Published objects are being reconciled') from exc
     try:
+        if lease.waited and protocol_identity(root) != physical:
+            raise DataflowError('FENCED', 'Published object protocol changed while waiting')
         yield
     finally:
         lease.close()
