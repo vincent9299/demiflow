@@ -68,7 +68,10 @@ def test_finite_join_memory_transport_does_not_accumulate_per_row_history(tmp_pa
     original = dataflow_api.resolve_runtime_policy
     def bounded(*args,**kwargs):
         policy,bounds = original(*args,**kwargs)
-        return policy,replace(bounds,max_pending_events=64)
+        # Exercise a real cross-worker memory channel even when the compiler
+        # can co-locate this finite result with its terminal. Keep the existing
+        # channel bound and every original multiplicity/frontier assertion.
+        return replace(policy,fusion=False),replace(bounds,max_pending_events=64)
     monkeypatch.setattr(dataflow_api,'resolve_runtime_policy',bounded)
     with RunContext.start(tmp_path/'run',limits={'checkpoint_rows':512,
             'checkpoint_interval_ms':60000,'timeout_s':60}) as run,data.local_execution(workers=4):
