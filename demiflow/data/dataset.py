@@ -1050,7 +1050,7 @@ class Dataset:
         op = declared._plan.operations[-1]
         from ..execution.dataflow_api import make_native_operation
         make_native_operation("save_lance",
-            configuration={"uri": uri, "stage": stage, "mode": mode,
+            configuration={"uri": actor.uri, "stage": stage, "mode": mode,
                            "max_batch": max_batch, "queue_depth": queue_depth},
             bindings={"stage": stage})
         return Dataset(self._source,self._plan.append(SaveLanceOp(**vars(op),uri=actor.uri,stage=stage,key=key,output_ref=output_ref,mode=mode)),
