@@ -46,7 +46,7 @@ def exclude_keys(left, right, *, spec, services):
     runs = build_sort_runs(ids(), spec=ordering, services=services)
     ordered = merge_sort_runs(runs, spec=ordering, services=services)
     batch_rows = max(1, min(256, services.bounds.max_batch_bytes // services.bounds.max_row_bytes))
-    pending, sequence, budget = [], 0, _OutputBudget(spec, services)
+    pending, sequence, budget = [], 0, _OutputBudget(spec, services, streaming=True)
     def hydrate(batch):
         services.check_stop()
         table = dataset._take_rows([int(r.source_position['row_id']) for r in batch], columns=list(columns))

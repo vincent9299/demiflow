@@ -36,3 +36,11 @@ def test_exclude_empty_left_and_right_keep_public_semantics(tmp_path):
         empty=data.from_arrow(pa.Table.from_pylist([],schema=pa.schema([('k',pa.string())])))
         assert data.read_lance(uri,version=1).exclude_keys(empty,on='k').take_all()==[{'k':'b','v':2},{'k':'a','v':1}]
         assert data.read_lance(uri,version=1,filter='v < 0').exclude_keys(data.from_items([{'k':'a'}]),on='k').take_all()==[]
+
+
+def test_exclude_stream_total_may_exceed_individual_row_bound(tmp_path):
+    rows=[{'k':str(i),'payload':'x'*40000} for i in range(3)]
+    uri=str(tmp_path/'wide.lance')
+    lance.write_dataset(pa.Table.from_pylist(rows),uri,mode='create')
+    with RunContext.start(tmp_path/'run',limits={'max_row_bytes':65536,'max_batch_bytes':262144}),data.local_execution():
+        assert data.read_lance(uri).exclude_keys(data.from_items([{'k':'absent'}]),on='k').take_all()==rows
