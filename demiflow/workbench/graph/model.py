@@ -215,6 +215,11 @@ def _join_sealed_observations(root, run_id, attempt, logical_view):
         if entry.get('status') != 'sealed' or not bridge or not bridge.get('available'):
             continue
         action_id = entry['action_id']
+        # A v3 entry already carries the build_plan_view per-occurrence projection
+        # (observed/not_observed, never inferred). Keep it as the plan-level authority
+        # so the attempt-scoped bridge join below never replaces or re-derives it.
+        if entry.get('version') == 'v3' and 'node_observations' in entry:
+            entry['plan_node_observations'] = entry['node_observations']
         try:
             page = run_view.observations(root, run_id, attempt=attempt, action_id=action_id, limit=64)
             if page.get('availability') == 'unsupported':
@@ -286,6 +291,11 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         if basis_kind == 'run':
             from demiflow.workbench.runs import facts
             logical_view = facts.overlay_sealed(root, run_id, logical_view, report_digest=report['digest'])
+            # Surface which sealed projection versions are present (v3 standard
+            # plan-view vs historical v1/v2) without re-deriving any v3 field as v1.
+            logical_view['sealed_versions'] = sorted({
+                e.get('version', 'v1') for e in logical_view.get('actions', [])
+                if e.get('binding_level') == 'sealed'})
             _join_sealed_observations(root, run_id, attempt, logical_view)
     binding = dict(workspace_id=key, basis_kind=basis_kind, basis_digest=digest, entry=entry,
                    params=params, run_id=run_id, attempt=attempt)
@@ -433,6 +443,7 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
                 raise ForgeError('Parameters changed while reading node configuration',code='conflict')
         return dict(binding=current,nodes=[node],sources=observed['sources'],parameters=parameters)
     key = ws.workspace_id(root, control)
+    sealed_code_pin_ref = None
     if binding['basis_kind'] == 'report':
         report = ws.load_report(root, binding['basis_digest'])
         digest = report['digest']
@@ -445,6 +456,17 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
         digest = value['manifest']['digest']
         if logical_node_id is not None:
             node_id = _resolve_bridge_node(target, report, logical_node_id, occurrence_id)
+        # Surface the original v3 sealed code identity (never current source) so the
+        # provenance view binds the executed program; v3 fields are read, not recomputed.
+        from demiflow.workbench.runs import facts
+        sealed_code_pin_ref = None
+        for action_id in report.get('actions', []):
+            if type(action_id) is not str:
+                continue
+            sealed = facts.read_sealed_plan(target, action_id)
+            if sealed.get('available') and sealed.get('version') == 'v3':
+                sealed_code_pin_ref = sealed['plan_view'].get('code_pin_ref')
+                break
     evidence = report.get('binding', {})
     observed = dict(workspace_id=key, basis_kind=binding['basis_kind'], basis_digest=digest,
                     entry=report.get('entry', evidence.get('entry')), params=evidence.get('parameter_path'),
@@ -455,5 +477,6 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
         raise ForgeError('Node is outside this graph', code='not_found')
     from demiflow.workbench.graph.parameters import public_model
     return dict(binding=observed, nodes=[node], sources=evidence.get('sources', {}),
+                sealed_code_pin_ref=sealed_code_pin_ref,
                 parameters=public_model(root, control, observed['entry'], observed['params'], [node],
                                         readonly=True, sealed=evidence.get('parameters', {})))

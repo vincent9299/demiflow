@@ -102,6 +102,20 @@ def read_sealed_plan(target, action_id):
     try:
         from demiflow.execution.run_journal import RunJournal
         journal = RunJournal(target)
+        v3_marker = journal.source_binding(action_id + '-dataflow-sealed')
+        if v3_marker is not None:
+            # v3 native seal: read the original artifacts (no recompile) and project
+            # them through the single plan-view authority. History stays read-only.
+            from demiflow.execution.sealed_plans import load_sealed_plan
+            from demiflow.execution.dataflow_history import build_plan_view
+            bundle = load_sealed_plan(target, action_id)
+            view = build_plan_view(bundle['graph'], bundle['sealed'], bundle['physical'],
+                                   observations=())
+            return dict(available=True, version='v3', action_id=action_id,
+                        dag_id=bundle['graph'].dag_id, plan_id=bundle['physical'].plan_id,
+                        sealed_at=v3_marker.get('sealed_at') if type(v3_marker) is dict else None,
+                        plan_view=view,
+                        recovery_restriction=journal.source_binding(action_id + '-state-recovery-restriction'))
         facts = journal.source_binding(action_id + '-sealed-plan')
         if facts is None:
             return _unavailable(action_id, NO_FACTS, NO_FACTS_DETAIL)
@@ -230,23 +244,39 @@ def join_node_observations(bridge, observations, *, action_id, attempt):
     rows = observations.get('observations')
     if type(rows) is not list:
         raise ForgeError('Observation page rows are invalid', code='invalid_request')
+    # Composite key is action/attempt/occurrence/plan: rows are matched by report
+    # node identity + occurrence + plan, never merged by function name. A row from
+    # a different plan than the page is not joined (old pages without plan_id keep
+    # the previous occurrence-only behaviour).
+    page_plan = observations.get('plan_id')
     index = {}
     for row in rows:
         if type(row) is not dict or row.get('action_id') != action_id:
             continue
-        key = (row.get('node_id'), row.get('occurrence'))
+        row_plan = row.get('plan_id', page_plan)
+        if page_plan is not None and row_plan != page_plan:
+            continue
+        key = (row.get('node_id'), row.get('occurrence'), row_plan)
         if key not in index:
             index[key] = row
     joined = []
     for entry in bridge['entries']:
-        key = (entry.get('report_node_id'), entry.get('report_occurrence'))
+        key = (entry.get('report_node_id'), entry.get('report_occurrence'), page_plan)
         row = index.get(key)
         joined.append(dict(entry, observation=row, availability='observed' if row is not None else 'not_in_page'))
     return tuple(joined)
 
 
 def _physical_summary(physical):
-    """Compact C-space execution facts that join executed logical nodes directly."""
+    """Compact C-space execution facts that join executed logical nodes directly.
+
+    A v3 physical view (projected by ``build_plan_view``) already carries the real
+    stage profile/partition counts, exchange mode/routing/reason and recovery
+    limitations; it is passed through unchanged so nothing is re-derived or
+    inferred. The v1/v2 layout below is preserved for historical runs.
+    """
+    if 'worker_groups' not in physical and 'exchanges' in physical:
+        return physical
     role_by_stage = {}
     for group in physical['worker_groups']:
         for stage_ref in group['stage_refs']:
@@ -283,11 +313,21 @@ def _bridge_node_map(entries):
 
 
 def _sealed_entry(result, *, bridge=None):
-    entry = dict(action_id=result['action_id'], status='sealed', binding_level='sealed',
-                 dag=result['logical_dag'], node_map={}, plan_id=result['plan_id'],
-                 sealed_at=result['sealed_at'],
-                 artifact_manifest_ref=result['artifact_manifest_ref'],
-                 physical=_physical_summary(result['physical_plan']))
+    if result.get('version') == 'v3':
+        view = result['plan_view']
+        entry = dict(action_id=result['action_id'], status='sealed', binding_level='sealed',
+                     version='v3', dag=view['dag'], node_map=dict(view.get('node_map') or {}),
+                     plan_id=result['plan_id'], sealed_at=result.get('sealed_at'),
+                     physical=_physical_summary(view['physical']),
+                     node_observations=view['node_observations'],
+                     identity_bridge_ref=view.get('identity_bridge_ref'),
+                     code_pin_ref=view.get('code_pin_ref'))
+    else:
+        entry = dict(action_id=result['action_id'], status='sealed', binding_level='sealed',
+                     dag=result['logical_dag'], node_map={}, plan_id=result['plan_id'],
+                     sealed_at=result['sealed_at'],
+                     artifact_manifest_ref=result['artifact_manifest_ref'],
+                     physical=_physical_summary(result['physical_plan']))
     if result.get('recovery_restriction') is not None:
         entry['recovery_restriction'] = result['recovery_restriction']
     if bridge is not None and bridge.get('available'):

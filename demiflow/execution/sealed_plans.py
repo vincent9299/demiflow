@@ -111,12 +111,50 @@ def _validate_f1(facts, journal, action_id):
              "invalid_contract", "sealed_at must be an int or string")
 
 
+def _v3_read_store(directory):
+    """Single adjustable v3 read point (W007/W008).
+
+    Builds the run-rooted artifact store and read bounds used to load a v3 sealed
+    dataflow. D012's exact carrier layout and the H store authority are wired here
+    once they land; the imports are the real engine paths (no fallback). The store
+    domain is the fixed run-relative ``run`` label shared with the history reader.
+    """
+    from .dataflow_store import RunArtifactStore
+    from .contracts.dataflow import Bounds
+    bounds = Bounds(max_nodes=4096, max_edges=8192, max_partitions=4096, max_depth=128,
+                    max_control_bytes=MAX_SEALED_PLAN_BYTES, max_row_bytes=1024 * 1024,
+                    max_batch_bytes=MAX_SEALED_PLAN_BYTES, max_resident_bytes=MAX_SEALED_PLAN_BYTES,
+                    max_spill_bytes=MAX_SEALED_PLAN_BYTES, max_state_bytes=MAX_SEALED_PLAN_BYTES,
+                    max_pending_events=4096, max_open_files=256, max_output_rows=1024 * 1024,
+                    timeout_ms=60000)
+    store = RunArtifactStore(root=Path(directory), store_id="run",
+                             journal=RunJournal(directory), bounds=bounds)
+    return store, bounds
+
+
+def _load_sealed_v3(directory, action_id, marker):
+    """v3 branch: read and fully validate the original artifacts via load_dataflow."""
+    from .dataflow_seal import load_dataflow
+    store, bounds = _v3_read_store(directory)
+    graph, physical, sealed = load_dataflow(Path(directory), action_id, store=store, bounds=bounds)
+    return {"version": "v3", "facts": marker, "graph": graph,
+            "physical": physical, "sealed": sealed}
+
+
 def load_sealed_plan(directory, action_id) -> dict:
-    """Read the original F1 sealed plan; readable even without execution bindings."""
+    """Read the original F1 sealed plan; readable even without execution bindings.
+
+    An explicit v3 branch delegates to ``load_dataflow`` when the action carries a
+    v3 native seal marker; the v1/v2 F1 path below is preserved byte-for-byte (its
+    validation and original digests are never recomputed).
+    """
     _check_action_id(action_id)
     journal = RunJournal(directory)
     if not journal.path.is_file():
         raise PlanContractError("missing_plan", "run journal is absent")
+    v3_marker = journal.source_binding(action_id + "-dataflow-sealed")
+    if v3_marker is not None:
+        return _load_sealed_v3(directory, action_id, v3_marker)
     facts = journal.source_binding(action_id + _SEALED_PLAN_KEY)
     if facts is None:
         raise PlanContractError("missing_plan", "action has no sealed plan facts")
@@ -144,9 +182,33 @@ def load_sealed_plan(directory, action_id) -> dict:
     return {"facts": facts, "logical_dag": logical_dag, "physical_plan": physical_plan}
 
 
+def _load_bindings_v3(directory, action_id, sealed_plan):
+    """v3 single layout: the sealed identity bridge bound to the same graph/plan.
+
+    Reads only the v3 bridge carrier; v2 driver placement / worker groups are not
+    part of this layout and are rejected rather than misread as worker facts.
+    """
+    from .dataflow_history import _store_read_json, _ref_json
+    graph, physical, sealed = sealed_plan["graph"], sealed_plan["physical"], sealed_plan["sealed"]
+    store, _ = _v3_read_store(directory)
+    ref = sealed.identity_bridge_ref
+    doc = _store_read_json(store, ref, max_bytes=MAX_BINDINGS_BYTES)
+    _require(doc.get("action_id") == action_id,
+             "identity_mismatch", "v3 bindings action_id differs from the sealed plan")
+    _require(doc.get("dag_id") == graph.dag_id,
+             "identity_mismatch", "v3 bindings dag_id differs from the sealed graph")
+    _require(doc.get("plan_id") == physical.plan_id,
+             "identity_mismatch", "v3 bindings plan_id differs from the sealed plan")
+    _require("worker_groups" not in doc and "driver" not in doc,
+             "unsupported_layout", "v3 bindings must not carry v2 driver/worker placement")
+    return {"ref": _ref_json(ref), "document": doc, "version": "v3"}
+
+
 def load_execution_bindings(directory, action_id, *, sealed_plan) -> dict:
     """Read execution bindings and bind them to the same sealed run/action/dag/plan."""
     _check_action_id(action_id)
+    if type(sealed_plan) is dict and sealed_plan.get("version") == "v3":
+        return _load_bindings_v3(directory, action_id, sealed_plan)
     _require(type(sealed_plan) is dict and set(sealed_plan) == {"facts", "logical_dag", "physical_plan"},
              "invalid_contract", "sealed_plan must be the {facts, logical_dag, physical_plan} bundle")
     facts = sealed_plan["facts"]
