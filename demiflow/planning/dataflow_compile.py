@@ -256,8 +256,12 @@ def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none
     # Reserve the same working set used by physical residency, not a fixed
     # per-stage 64 MiB allowance multiplied by pipeline length.
     working_set = bounds.max_batch_bytes + bounds.max_row_bytes
+    options = getattr(operation, 'stream_options', None)
+    concurrency = getattr(options, 'concurrency', getattr(operation, 'concurrency', 1))
+    working_set *= concurrency
     if state != "none":
-        working_set += bounds.max_state_bytes
+        owners = concurrency if getattr(options, "callable_scope", None) == "worker" else 1
+        working_set += bounds.max_state_bytes * owners
     requests = {"cpu_millis": 1000, "memory_bytes": working_set}
     native = getattr(operation, "native_options", None) if operation is not None else None
     resources = getattr(native, "worker_resources", None) or {}
@@ -314,7 +318,9 @@ def compile_kernel_spec(
         configuration = _plain(model.configuration)
         configuration.update(concurrency=settings.get('concurrency', 1),
                              catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
-        return replace(model, configuration=configuration)
+        return replace(model, configuration=configuration,
+            profile=ResourceProfile(requests={**model.profile.requests, "memory_bytes":
+                configuration["concurrency"] * (bounds.max_batch_bytes + bounds.max_row_bytes)}))
     if definition.compiler_symbol == _MODEL_COMPILER:
         from ..execution.dataflow_models import build_model_factory
         return build_model_factory(operation, program_ref=program_ref, bounds=bounds)
@@ -342,6 +348,12 @@ def compile_kernel_spec(
         for field in fields(operation)
         if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
     }
+    stream_options = getattr(operation, 'stream_options', None)
+    if stream_options is not None:
+        configuration.update(concurrency=stream_options.concurrency,
+            callable_scope=stream_options.callable_scope, execution=stream_options.execution,
+            queue_depth=stream_options.queue_depth,
+            catch=[c.__module__ + '.' + c.__qualname__ for c in stream_options.catch])
     inputs = tuple(_input_port(name, kind) for name in definition.inputs)
     profile = _default_profile(operation, bounds=bounds, state=state)
     if profile.requests.get("accelerators"):

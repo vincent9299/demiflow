@@ -34,7 +34,7 @@ _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
                          "references", "media_references", "bind_membership"})
 _COMMAND_KINDS = frozenset({"effect", "reserve", "artifact", "queue", "native_request",
-                            "read_action", "read_configuration", "check_grant"})
+                            "read_action", "read_configuration", "restrict_recovery", "check_grant"})
 _EFFECT_STATES = ("absent", "reserved", "sent", "confirmed", "unknown", "unsent")
 _MAX_SERVICE_WORKERS = 4
 
@@ -312,6 +312,8 @@ class DriverJournalService:
                 value = {"operation_id": reply.operation_id, "value": _thaw_json(reply.value), "value_ref": _ref_to_json(reply.value_ref)}
             elif event.kind == "read_action":
                 value = self._read_action(payload.get("action_id"))
+            elif event.kind == "restrict_recovery":
+                value = self._restrict_recovery(payload.get("occurrence_id"))
             elif event.kind == "read_configuration":
                 value = self._read_configuration()
             else:
@@ -431,6 +433,17 @@ class DriverJournalService:
             raise DataflowError("UNKNOWN_EFFECT", "action declaration is unavailable")
         return {"action_id": action_id, "declaration": record["declaration"],
                 "limits": dict(self._action.context.limits)}
+
+    def _restrict_recovery(self, occurrence_id):
+        identifier(occurrence_id)
+        # The worker can only tighten the bound action's recovery guarantee.
+        # Persist before business calls, including crashes before the first cut.
+        fact = {'schema': 'demiflow.state_recovery_restriction.v1',
+                'recovery': 'attempt_only',
+                'reason': 'Actor runtime resources require snapshot_state/restore_state for resume'}
+        self._journal.bind_source(self._fence,
+            self._action.action_id + '-state-recovery-restriction', fact)
+        return {'occurrence_id': occurrence_id, 'recovery': 'attempt_only'}
 
     def _read_configuration(self):
         identity_doc = self._journal.recovery_identity()
@@ -672,6 +685,11 @@ class WorkerJournalClient:
     def read_action(self, action_id: str) -> Mapping[str, object]:
         identifier(action_id)
         return self._request("read_action", identity(["read-action-v3", action_id]), {"action_id": action_id})
+
+    def restrict_recovery(self, occurrence_id: str) -> None:
+        identifier(occurrence_id)
+        self._request('restrict_recovery', identity(['restrict-recovery-v3',
+            self._lease.boot_id, occurrence_id]), {'occurrence_id': occurrence_id})
 
     def read_configuration(self) -> Mapping[str, object]:
         return self._request("read_configuration", identity(["read-configuration-v3", self._lease.boot_id]), {})

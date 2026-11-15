@@ -184,6 +184,10 @@ class WorkerGraphRunner:
         if max_records <= 0 or deadline_ms <= 0:
             raise DataflowError('INVALID_CONTRACT', 'step budgets must be positive')
         processed = 0
+        for (occurrence, _), kernel in self.e._kernels.items():
+            for record in kernel.poll():
+                self._output(occurrence, record)
+                processed += 1
         with self._condition:
             command = self._queue.popleft() if self._queue else None
         if command:
@@ -232,7 +236,7 @@ class WorkerGraphRunner:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
         with self._condition:
-            quiet = not self._queue and not self._credits
+            quiet = not self._queue and not self._credits and not any(k.pending_calls for k in self.e._kernels.values())
         if done and quiet and not self._done_sent:
             from ..dataflow_checkpoint import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())

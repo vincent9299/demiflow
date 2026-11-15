@@ -345,11 +345,12 @@ class DataflowExecution:
                 for occ, ref in contribution.operator_states.items():
                     if occ not in transforms or ref is None:
                         continue
-                    state = state_codec.loads(b"".join(self._store.read(ref,
-                        max_bytes=self._bounds.max_state_bytes)), max_bytes=self._bounds.max_state_bytes).get("state")
-                    if state and state.get("mode") == "nonrecoverable":
-                        raise DataflowError("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"],
-                                            context={"occurrence_id": occ})
+                    image = state_codec.loads(b"".join(self._store.read(ref,
+                        max_bytes=self._bounds.max_state_bytes)), max_bytes=self._bounds.max_state_bytes)
+                    for state in [image.get('state'), *(image.get('worker_states') or [])]:
+                        if state and state.get("mode") == "nonrecoverable":
+                            raise DataflowError("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"],
+                                                context={"occurrence_id": occ})
         if self._acquisition is not None:
             self._acquisition.start()
         # Consumers and control reserve capacity before producers; a partial
@@ -411,7 +412,7 @@ class DataflowExecution:
         for event in events:
             self._validate_event(event)
             if event.kind in ("effect", "artifact", "reserve", "read_action", "read_configuration",
-                              "check_grant", "queue", "native_request"):
+                              "check_grant", "restrict_recovery", "queue", "native_request"):
                 self._services.journal_service.submit(event)
             else:
                 self._handle_event(event)

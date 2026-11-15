@@ -81,8 +81,10 @@ def _input_ports(names):
                  for name in names)
 
 
-def _model_profile(resource_role):
-    requests = {'cpu_millis': 100, 'memory_bytes': 64 * 1024**2}
+def _model_profile(resource_role, bounds, concurrency, state):
+    requests = {'cpu_millis': 100, 'memory_bytes':
+        concurrency * (bounds.max_batch_bytes + bounds.max_row_bytes) +
+        (bounds.max_state_bytes if state != "none" else 0)}
     if resource_role == 'gpu':
         requests['accelerators'] = [{'type': 'gpu', 'count': 1}]
     return ResourceProfile(requests=requests)
@@ -141,7 +143,7 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
     node_id = getattr(operation, 'node_id', None) or identity(['model-node', kind, config])
     config['node_id'] = node_id
     return KernelSpec(kind=kind, implementation_ref=program_ref, configuration=config, inputs=ports,
-                      state=state, effect=effect, resource_role=role, profile=_model_profile(role),
+                      state=state, effect=effect, resource_role=role, profile=_model_profile(role, bounds, config.get("concurrency", 1), state),
                       output_bound_bytes=bounds.max_row_bytes, mergeable=False)
 
 

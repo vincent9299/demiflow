@@ -33,11 +33,15 @@ prompts:
 
 @pytest.fixture
 def native_server(monkeypatch):
-    requests = []
+    class Requests(list):
+        barrier = None
+    requests = Requests()
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             requests.append(request)
+            if requests.barrier is not None:
+                requests.barrier.wait(timeout=5)
             if '__drop_response__' in json.dumps(request):
                 # Provider accepted the request, but no complete response can be
                 # confirmed. An attempt must never turn this into a cache miss.
@@ -191,3 +195,14 @@ def test_shared_union_preserves_native_invocation_multiplicity(tmp_path, native_
         assert len(native_server) == 2
         with run.journal._connection() as db:
             assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 2
+
+
+def test_native_prompt_requests_overlap_with_one_budget_authority(tmp_path, native_server):
+    native_server.barrier = threading.Barrier(3)
+    with RunContext.start(tmp_path / 'concurrent', limits={'max_requests': 6}) as run, data.local_execution():
+        rows = data.from_items([{'item': str(i)} for i in range(6)]).map_prompt_async(
+            'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'item'},
+            output='answer', max_requests=6, concurrency=3).take_all()
+        assert len(rows) == 6 and [r['item'] for r in rows] == [str(i) for i in range(6)]
+        assert run.journal.budget_consumed('requests') == 6
+    assert len(native_server) == 6

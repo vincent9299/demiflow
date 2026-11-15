@@ -17,6 +17,7 @@ class AsyncInstance:
         self.timeout = timeout or services.bounds.timeout_ms / 1000
         self.loop = None
         self.thread = None
+        self._loop_lock = threading.Lock()
         self.native_scope = None
         self.native_call_ordinal = 0
 
@@ -27,10 +28,12 @@ class AsyncInstance:
         if not inspect.isawaitable(value):
             return value
         if self.loop is None:
-            self.loop = asyncio.new_event_loop()
-            self.thread = threading.Thread(target=self.loop.run_forever,
-                                           name="demiflow-operator-loop", daemon=True)
-            self.thread.start()
+            with self._loop_lock:
+                if self.loop is None:
+                    self.loop = asyncio.new_event_loop()
+                    self.thread = threading.Thread(target=self.loop.run_forever,
+                                                   name="demiflow-operator-loop", daemon=True)
+                    self.thread.start()
         async def wait():
             return await value
         future = asyncio.run_coroutine_threadsafe(wait(), self.loop)

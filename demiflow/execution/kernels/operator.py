@@ -237,6 +237,11 @@ class OperatorKernel:
         self._skip = 0
         self.aggregate_state: AggregateState | None = None
         self._spool_owner_refs: list[ArtifactRef] = []
+        self._instances = []
+        self._calls = None
+        self._concurrency = int(spec.configuration.get('concurrency') or 1)
+        self._worker_scope = spec.configuration.get('callable_scope') == 'worker'
+        self.recovery_restriction = None
 
     # -- K017 start ---------------------------------------------------------
     def start(self) -> None:
@@ -247,20 +252,56 @@ class OperatorKernel:
         self._validate_profile()
         try:
             if self._spec.kind in _INSTANCE_KINDS:
-                instance = _resolve_instance(self._spec, self._services)
-                if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-                    from ..dataflow_models import bind_model_services
-                    instance = bind_model_services(instance, self._spec, services=self._services)
-                self._instance = AsyncInstance(instance,
-                                               self._services, timeout=self._spec.configuration.get("hard_timeout"))
-                self._instance.native_scope = (self._occurrence, self._partition_id)
-                _run_astart(self._instance)
+                for slot in range(self._concurrency if self._worker_scope else 1):
+                    self._create_instance(slot)
+                self._instance = self._instances[0]
+                if self._concurrency > 1:
+                    from .concurrent_calls import ConcurrentCalls
+                    self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop)
             if self._image is not None:
                 self._apply_image(self._image)
             self._started = True
         except BaseException:
             self._cleanup_on_failure()
             raise
+
+    def _create_instance(self, slot):
+        instance = _resolve_instance(self._spec, self._services)
+        if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
+            from ..dataflow_models import bind_model_services
+            instance = bind_model_services(instance, self._spec, services=self._services)
+        instance = AsyncInstance(instance, self._services,
+                                 timeout=self._spec.configuration.get('hard_timeout'))
+        instance.native_scope = (self._occurrence, self._partition_id) + ((slot,) if self._worker_scope else ())
+        self._instances.append(instance)
+        _run_astart(instance)
+        if self._spec.state != 'none':
+            from ..operator_policy import classify_operator_state
+            owner = self._state_owner(instance)
+            policy = classify_operator_state(owner, phase='instance')
+            concurrency = 1 if self._worker_scope else self._concurrency
+            if policy.mode == 'auto_json' and vars(owner) and concurrency != 1:
+                raise _err('INVALID_CONTRACT', 'auto_json state requires concurrency 1; declare snapshot_state/restore_state for higher concurrency')
+            if policy.mode == 'unsupported':
+                self.recovery_restriction = policy.reason
+                self._services.journal.restrict_recovery(self._occurrence)
+
+    def _slot_instance(self, slot):
+        return self._instances[slot] if self._worker_scope else self._instance
+
+    def _call_scope(self, slot):
+        instance = self._slot_instance(slot)
+        result = _hash_id(['dataflow-call-v3', *instance.native_scope, instance.native_call_ordinal])
+        instance.native_call_ordinal += 1
+        return result
+
+    @property
+    def pending_calls(self):
+        return self._calls is not None and self._calls.pending
+
+    def poll(self):
+        if self._calls is not None:
+            yield from self._emit(self._calls.poll(max_records=1))
 
     def _validate_profile(self) -> None:
         profile = self._spec.profile
@@ -273,10 +314,12 @@ class OperatorKernel:
             raise _err("RESOURCE_INFEASIBLE", "gpu role requires a gpu resource request")
 
     def _cleanup_on_failure(self) -> None:
-        try:
-            _close_instance(self._instance)
-        except BaseException:
-            pass
+        for instance in self._instances:
+            try:
+                _close_instance(instance)
+            except BaseException:
+                pass
+        self._instances.clear()
         self._instance = None
         for port in self._ports.values():
             try:
@@ -295,7 +338,11 @@ class OperatorKernel:
         if kind == "LimitOp" and self._emitted >= self._spec.configuration["limit"]:
             return
         if kind in _UNARY_KINDS or (kind in _MODEL_KINDS and kind not in _BATCH_INSTANCE_KINDS):
-            yield from self._emit(invoke_unary(self._spec, record, instance=self._instance, services=self._services))
+            if self._calls is None:
+                yield from self._emit(invoke_unary(self._spec, record, instance=self._instance, services=self._services))
+            else:
+                yield from self._emit(self._calls.submit(lambda slot: invoke_unary(self._spec, record,
+                    instance=self._slot_instance(slot), services=self._services), scope=self._call_scope))
         elif kind in _BATCH_INSTANCE_KINDS:
             yield from self._push_batch(record)
         elif kind in _STREAM_GROUP_KINDS:
@@ -312,7 +359,14 @@ class OperatorKernel:
         if len(self._batch) >= self._max_batch:
             batch = tuple(self._batch)
             self._batch = []
+            yield from self._invoke_batch(batch)
+
+    def _invoke_batch(self, batch):
+        if self._calls is None:
             yield from self._emit(invoke_batch(self._spec, batch, instance=self._instance, services=self._services))
+        else:
+            yield from self._emit(self._calls.submit(lambda slot: invoke_batch(self._spec, batch,
+                instance=self._slot_instance(slot), services=self._services), scope=self._call_scope))
 
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
         from .dataflow import _group_key, _materialize_row
@@ -379,11 +433,13 @@ class OperatorKernel:
             if self._batch:
                 batch = tuple(self._batch)
                 self._batch = []
-                yield from self._emit(invoke_batch(self._spec, batch, instance=self._instance, services=self._services))
+                yield from self._invoke_batch(batch)
         elif kind in _STREAM_GROUP_KINDS:
             for key in list(self._groups):
                 yield from self._emit(self._emit_group(key, last=True))
             self._timer_deadline = None
+        if self._calls is not None:
+            yield from self._emit(self._calls.finish())
 
     def _finish_complete(self) -> Iterator[Record]:
         kind = self._spec.kind
@@ -431,15 +487,18 @@ class OperatorKernel:
     # -- K020 snapshot ------------------------------------------------------
     def snapshot(self) -> ArtifactRef | None:
         self._require_started()
+        if self.pending_calls:
+            raise _err('INVALID_CONTRACT', 'Checkpoint requires drained kernel invocations')
         if self._spec.state == "nonrecoverable":
             raise _err("UNKNOWN_EFFECT", "nonrecoverable kernel cannot snapshot state")
+        worker_states = [self._snapshot_state(instance) for instance in self._instances] if self._worker_scope else None
         image = {
             "schema_version": IMAGE_VERSION,
             "kind": self._spec.kind,
             "occurrence_id": self._occurrence,
             "partition_id": self._partition_id,
             "config_digest": _hash_id([_canonical(self._spec.configuration)]),
-            "state": self._snapshot_state(),
+            "state": worker_states[0] if worker_states else self._snapshot_state(),
             "ports": {name: port.snapshot() for name, port in self._ports.items()},
             "batch": list(self._batch),
             "groups": {key: list(value) for key, value in self._groups.items()},
@@ -447,6 +506,9 @@ class OperatorKernel:
             "timer_deadline": self._timer_deadline,
             "output_cursor": self._emitted,
             "call_ordinal": self._instance.native_call_ordinal if isinstance(self._instance, AsyncInstance) else 0,
+            "worker_states": worker_states,
+            "worker_calls": [instance.native_call_ordinal for instance in self._instances] if self._worker_scope else None,
+            "call_slots": list(self._calls.slots) if self._calls is not None else None,
             "aggregate_state": self.aggregate_state,
         }
         raw = state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes)
@@ -455,10 +517,11 @@ class OperatorKernel:
             raise _err("BUDGET_EXCEEDED", "kernel recovery image exceeds max_state_bytes")
         return self._services.store.put(iter([raw]), max_bytes=len(raw), media_type=IMAGE_MEDIA_TYPE)
 
-    def _state_owner(self):
+    def _state_owner(self, instance=None):
         import functools
         import inspect
-        owner = self._instance.target if isinstance(self._instance, AsyncInstance) else self._instance
+        instance = instance if instance is not None else self._instance
+        owner = instance.target if isinstance(instance, AsyncInstance) else instance
         while isinstance(owner, (_BoundCallable, _FieldCallable, functools.partial)):
             if isinstance(owner, _BoundCallable):
                 owner = owner._instance
@@ -468,19 +531,20 @@ class OperatorKernel:
                 owner = owner.func
         return owner.__self__ if inspect.ismethod(owner) else owner
 
-    def _snapshot_state(self) -> Any:
-        if self._instance is None or self._spec.state == "none":
+    def _snapshot_state(self, instance=None) -> Any:
+        instance = instance if instance is not None else self._instance
+        if instance is None or self._spec.state == "none":
             return None
-        owner = self._state_owner()
+        owner = self._state_owner(instance)
         from ..operator_policy import classify_operator_state, snapshot_auto_state
         policy = classify_operator_state(owner, phase="instance")
         snapshot = getattr(owner, "__demiflow_snapshot__", None)
         if snapshot is not None:
-            return {"mode": "adapter", "value": self._instance.resolve(snapshot())}
+            return {"mode": "adapter", "value": instance.resolve(snapshot())}
         if policy.mode == "function":
             return None
         if policy.mode == "hooks":
-            return {"mode": "hooks", "value": self._instance.resolve(owner.snapshot_state())}
+            return {"mode": "hooks", "value": instance.resolve(owner.snapshot_state())}
         if policy.mode == "auto_json":
             return {"mode": "plain_json", "value": snapshot_auto_state(
                 owner, max_bytes=self._services.bounds.max_state_bytes)}
@@ -527,14 +591,31 @@ class OperatorKernel:
                 raise _err('CORRUPT_ARTIFACT', 'Invalid native invocation cursor')
             self._instance.native_call_ordinal = ordinal
         self._skip = 0  # input cursors already resume after the committed prefix
+        if self._calls is not None:
+            from collections import deque
+            slots = image.get('call_slots')
+            if not isinstance(slots, list) or sorted(slots) != list(range(self._concurrency)):
+                raise _err('INCOMPATIBLE_HISTORY', 'Invocation slot order differs from checkpoint')
+            self._calls.slots = deque(slots)
         self.aggregate_state = image["aggregate_state"]
-        self._restore_state(image["state"])
+        if not self._worker_scope:
+            self._restore_state(image["state"])
+        if self._worker_scope:
+            states, calls = image.get('worker_states'), image.get('worker_calls')
+            if not isinstance(states, list) or not isinstance(calls, list) or len(states) != len(self._instances) or len(calls) != len(states):
+                raise _err('INCOMPATIBLE_HISTORY', 'Worker callable slots differ from checkpoint')
+            for instance, state, ordinal in zip(self._instances, states, calls):
+                self._restore_state(state, instance)
+                if type(ordinal) is not int or ordinal < 0:
+                    raise _err('CORRUPT_ARTIFACT', 'Invalid worker invocation cursor')
+                instance.native_call_ordinal = ordinal
 
-    def _restore_state(self, state: Any) -> None:
+    def _restore_state(self, state: Any, instance=None) -> None:
         if state is None:
             return
         mode = state["mode"]
-        owner = self._state_owner()
+        instance = instance if instance is not None else self._instance
+        owner = self._state_owner(instance)
         if mode == "nonrecoverable":
             raise _err("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"])
         if mode == "plain_json":
@@ -545,7 +626,7 @@ class OperatorKernel:
             restore = getattr(owner, name, None)
             if restore is None:
                 raise _err("INCOMPATIBLE_HISTORY", "actor restore adapter is absent")
-            self._instance.resolve(restore(state["value"]))
+            instance.resolve(restore(state["value"]))
         else:
             raise _err("INCOMPATIBLE_HISTORY", "unknown actor state image mode")
 
@@ -554,11 +635,15 @@ class OperatorKernel:
         if self._closed:
             return
         self._closed = True
+        if self._calls is not None:
+            self._calls.close(timeout=min(30, self._services.bounds.timeout_ms / 1000))
         first_error: BaseException | None = None
-        try:
-            _close_instance(self._instance)
-        except BaseException as exc:
-            first_error = exc
+        for instance in self._instances:
+            try:
+                _close_instance(instance)
+            except BaseException as exc:
+                first_error = first_error or exc
+        self._instances.clear()
         self._instance = None
         for port in self._ports.values():
             try:

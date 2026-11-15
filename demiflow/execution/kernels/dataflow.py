@@ -221,8 +221,12 @@ def _batch_values(result: Any) -> list[Any]:
 def _invoke_scoped(instance, value, records, spec):
     from ..row_scope import RowScope, current_row_scope, set_row_scope
     previous = current_row_scope()
+    from .concurrent_calls import INVOCATION_SCOPE
+    explicit = INVOCATION_SCOPE.get()
     scope = getattr(instance, 'native_scope', None)
-    if scope is not None:
+    if explicit is not None:
+        occurrence = explicit
+    elif scope is not None:
         # Source record identity is deliberately preserved by union. Native
         # effects need the invocation occurrence, including its multiplicity;
         # this cursor is checkpointed with the owning kernel, never inferred

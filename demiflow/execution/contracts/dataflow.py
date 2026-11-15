@@ -70,7 +70,7 @@ _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown
 _EFFECT_STATUSES = frozenset({"absent", "reserved", "sent", "confirmed", "unknown", "unsent"})
 _EVENT_KINDS = frozenset({
     "ready", "progress", "cut", "effect", "artifact", "reserve", "read_action",
-    "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal",
+    "read_configuration", "restrict_recovery", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal",
 })
 _COMPLETIONS = frozenset({"source_exhausted", "terminal_satisfied", "cancelled", "incomplete"})
 _PRODUCER_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
@@ -1000,7 +1000,7 @@ class EffectReply:
 @dataclass(frozen=True)
 class WorkerEvent:
     schema: Literal["demiflow.dataflow_event.v3"]
-    kind: Literal["ready", "progress", "cut", "effect", "artifact", "reserve", "read_action", "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal"]
+    kind: Literal["ready", "progress", "cut", "effect", "artifact", "reserve", "read_action", "read_configuration", "restrict_recovery", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal"]
     operation_id: str
     run_id: str
     attempt: int
@@ -1728,6 +1728,7 @@ class WorkerJournalPort(Protocol):
     def artifact(self, command: ArtifactCommand) -> ArtifactReply: ...
     def reserve(self, operation_id: str, amounts: Mapping[str, int]) -> None: ...
     def read_action(self, action_id: str) -> Mapping[str, Json]: ...
+    def restrict_recovery(self, occurrence_id: str) -> None: ...
     def read_configuration(self) -> Mapping[str, Json]: ...
     def check_grant(self) -> None: ...
 
