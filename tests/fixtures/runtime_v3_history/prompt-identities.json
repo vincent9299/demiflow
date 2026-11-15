@@ -1,0 +1,27 @@
+{
+  "schema": "demiflow.test.history_prompt_golden.v1",
+  "original_commit": "b4dd41722130be3898a8a98057541d843777906e",
+  "generation": "Actual original parse_prompt_pack / operation_facts / plan_identity / plan_code_pin under archived Git package; no HTTP calls. Values independently reproduced before fixture creation.",
+  "prompt_sha256": "c0197086933192c7f28a11f4ad822f5bd90393425c0aa549ef866c1e47a1f0f1",
+  "prompt": "\nschema_version: demiflow_prompt_pack_v2\nprompts:\n  enrich:\n    version: v1\n    model:\n      name: mock-model\n      transport: openai_compatible\n      base_url: http://127.0.0.1:1/v1\n      api_key_env: TEST_PROMPT_KEY\n    schema_retries: 0\n    response_schema:\n      type: object\n      additionalProperties: false\n      required: [result]\n      properties:\n        result: {type: string}\n    template: |\n      {{ payload | json }}\n",
+  "identities": {
+    "1024": {
+      "native_id": "eb9238145fdef7fe3fe05a41ac2c72ac8fb87b403e08efd4431b42e6102ae070",
+      "operation_id": "dffc4334f953e896598be3757f62be76306042ec0fcf7d300b2587078dd0117f",
+      "action_id": "5e1202e31a4e8903f099ea81de9bf5906512986d6bf587b117a5c5a6cd9b0aac",
+      "code_operations_id": "e51810934cfc6ba85ad3603aaa2fec11cc7b139bf4219b032999883965b71acd"
+    },
+    "1025": {
+      "native_id": "ffcfa0b4dc7a1dfdc6a1729f5f607c799155a6ac50d4deb4d23d0d60720fbdf0",
+      "operation_id": "c501a270c8d5f7a0371c18f4cfb3f46165231c342304130c20a631fbd0baddae",
+      "action_id": "9aa2b4405cecc709c6caf80dfffda4465f5753552dd2d4ba139c1dfb6f3f8737",
+      "code_operations_id": "448b7075535ebadf8756333c38c44f53ae095e0c6a995d7ce745b527680fad6b"
+    },
+    "1500": {
+      "native_id": "e05ec67f117b39f8611ce985baf0a2de17d6b838ee76a2b001f3951a25297ba1",
+      "operation_id": "4f2651467846087fb202a12fe118ff6b325e4d47c26b765985a88f4b47bdff1b",
+      "action_id": "b7a06c56cd1d784b90950d66fb6a951f385f42963faedaf5517ad5038f967726",
+      "code_operations_id": "e233fe6db033153b87b1fc5223c7bac79fe3dd21970f71524267454977709d6f"
+    }
+  }
+}

@@ -504,7 +504,8 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
         code_ok = False
         reasons.append("original code pin unreadable: " + exc.code)
     if not code_ok:
-        reasons.append("original code pin is missing; cannot resume without the executed program")
+        reasons.append("original code pin is missing or cannot be verified as a content-addressed "
+                       "program; cannot resume without the executed program")
     # Read the original plan to recover its declared recovery guarantee and domains.
     plan = None
     try:
@@ -532,16 +533,24 @@ def validate_resume_compatibility(binding: HistoricalBinding, *, current_runtime
                     reasons.append("original platform code differs from the current runtime")
             except DataflowError as exc:
                 reasons.append("original platform code pin unreadable: " + exc.code)
-            if binding.restore_image is None:
-                reasons.append("historical binding has no journal-proven recovery image")
         else:
             recovery = _v1_recovery(plan)
             domain = plan.get("read_domain")
             if type(domain) is str:
                 domains = [domain]
+            # F1's definition_ref is a semantic business-code identity paired
+            # with an archived source location, not a v3 platform/code pin.
+            # Reading that archive (or translating a K6 description) does not
+            # prove that this runtime can execute the original native plan.
+            # Preserve the original references and require the original engine
+            # until a listed runtime adapter supplies that evidence.
+            reasons.append("native sealed-plan history has no verified current-runtime adapter; "
+                           "resume requires the original engine environment")
         if recovery not in ("checkpoint", "final_commit", "delivery_only", "attempt_only"):
             reasons.append("unknown historical recovery guarantee: " + repr(recovery))
             recovery = "attempt_only"
+    if binding.restore_image is None:
+        reasons.append("historical binding has no journal-proven recovery image")
     if recovery == "attempt_only":
         reasons.append("attempt_only recovery has no resumable guarantee; unfinished work cannot continue")
     if recovery == "delivery_only":
