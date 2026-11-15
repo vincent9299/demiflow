@@ -1,0 +1,692 @@
+"""Pure structural capture and semantic compilation of a v3 dataflow action.
+
+The compiler traverses real SourcePlan/PlanInput/LogicalPlan objects and registers
+a complete multi-port DAG. It never executes a source, UDF, actor constructor,
+network call or model. Shared prefixes are aliased by construction reference
+within a single traversal; two independent calls are never merged because they
+share a function. Identity formulas follow IDENTITY.md and the canonical encoder
+is reused from recovery_contract; dag_id is computed once by C004.
+"""
+from __future__ import annotations
+
+from dataclasses import fields, is_dataclass
+from types import MappingProxyType
+from typing import Any, Mapping
+
+from ..data import plan as ops
+from ..data.dataflow_operation import NativeOperation
+from ..data.plan import CallableSpec, LogicalOp, LogicalPlan
+from ..data.sources import (
+    DatasourceSource,
+    FileSource,
+    ItemsSource,
+    IterableSource,
+    LanceSource,
+    MaterializedSource,
+    RangeSource,
+    SourcePlan,
+    SqlSource,
+)
+from ..execution.contracts.dataflow import (
+    ActionProgram,
+    ActionRequest,
+    ArtifactRef,
+    Bounds,
+    CompiledDataflow,
+    DataflowGraph,
+    GraphEdge,
+    GraphNode,
+    InputPort,
+    KernelSpec,
+    PlanInputBinding,
+    ProgramDeclaration,
+)
+from ..execution.contracts.dataflow_codec import compute_graph_digest
+from ..execution.contracts.dataflow_errors import DataflowError
+from ..execution.local_kernel import KeyedSource, PlanInput, UnionSource
+from ..execution.recovery_contract import identity
+from ..execution.recovery_identity import describe
+from ..resources.contracts import ResourceProfile
+from .dataflow_registry import operator_registry, source_registry, terminal_registry
+
+_SCHEMA = "demiflow.dataflow_graph.v3"
+_NON_SEMANTIC_FIELDS = frozenset({"runtime_contract", "label", "node_id", "source_dataset"})
+_MODEL_COMPILER = "demiflow.execution.dataflow_models:build_model_factory"
+
+# kind -> (state, effect, resource_role, mergeable). Traits are declarations; the
+# physical planner refines resources. Unknown UDF state is never claimed pure.
+_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
+    "MapOp": ("none", "pure", "cpu", True),
+    "FlatMapOp": ("none", "pure", "cpu", True),
+    "MapBatchesOp": ("auto_json", "pure", "cpu", False),
+    "BoundMapOp": ("none", "pure", "cpu", True),
+    "OperatorLLMMapOp": ("adapter", "journaled", "remote_api", False),
+    "FilterOp": ("none", "pure", "cpu", True),
+    "AsyncMapOp": ("none", "pure", "cpu", False),
+    "DeduplicateOp": ("adapter", "journaled", "cpu", False),
+    "AgentMapOp": ("adapter", "journaled", "remote_api", False),
+    "BatchMapOp": ("auto_json", "pure", "cpu", False),
+    "EmbeddingMapOp": ("adapter", "journaled", "remote_api", False),
+    "StreamGroupBatchesOp": ("auto_json", "pure", "cpu", False),
+    "StreamPrependOp": ("none", "pure", "cpu", False),
+    "LimitOp": ("none", "pure", "cpu", True),
+    "SelectColumnsOp": ("none", "pure", "cpu", True),
+    "DropColumnsOp": ("none", "pure", "cpu", True),
+    "RenameColumnsOp": ("none", "pure", "cpu", True),
+    "AddColumnOp": ("none", "pure", "cpu", True),
+    "RandomSampleOp": ("none", "pure", "cpu", True),
+    "SortOp": ("none", "pure", "cpu", False),
+    "RepartitionOp": ("none", "pure", "cpu", False),
+    "RandomShuffleOp": ("none", "pure", "cpu", False),
+    "RandomizeBlockOrderOp": ("none", "pure", "cpu", False),
+    "VectorSearchOp": ("adapter", "journaled", "io", False),
+    "SearchWebOp": ("adapter", "journaled", "remote_api", False),
+    "RegisterDocumentsOp": ("adapter", "journaled", "io", False),
+    "RegisterDocumentsBatchOp": ("adapter", "journaled", "io", False),
+    "ReadDocumentsOp": ("adapter", "journaled", "io", False),
+    "SaveLanceOp": ("adapter", "journaled", "io", False),
+})
+_NATIVE_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
+    "prompt": ("adapter", "journaled", "remote_api", False),
+    "embedding": ("adapter", "journaled", "remote_api", False),
+    "agent": ("adapter", "journaled", "remote_api", False),
+    "raw_fetch": ("adapter", "journaled", "io", False),
+    "queue_produce": ("adapter", "journaled", "io", False),
+    "queue_ack": ("adapter", "journaled", "io", False),
+    "lance_lookup": ("adapter", "journaled", "io", False),
+    "search_vectors": ("adapter", "journaled", "io", False),
+    "search_web": ("adapter", "journaled", "remote_api", False),
+    "deduplicate": ("adapter", "journaled", "cpu", False),
+    "group_batches": ("auto_json", "pure", "cpu", False),
+    "stream_prepend": ("none", "pure", "cpu", False),
+    "save_lance": ("adapter", "journaled", "io", False),
+    "register_documents": ("adapter", "journaled", "io", False),
+    "register_documents_batch": ("adapter", "journaled", "io", False),
+    "read_documents": ("adapter", "journaled", "io", False),
+    "pack_prompt_inputs": ("none", "pure", "cpu", True),
+    "read_local_object": ("none", "pure", "io", True),
+    "decode_document": ("none", "pure", "cpu", True),
+    "encode_image": ("none", "pure", "cpu", True),
+    "parse_wikitext": ("none", "pure", "cpu", True),
+})
+_ORDERING_KINDS = frozenset({"SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp"})
+_FINITE_COMPLETE_KINDS = frozenset({
+    "SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp",
+    "OperatorLLMMapOp", "EmbeddingMapOp", "AgentMapOp",
+})
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(v) for v in value)
+    return value
+
+
+def _plain(value: Any) -> Any:
+    """Deep-convert frozen declarations back to plain Json for identity hashing."""
+    if isinstance(value, Mapping):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
+def _error(code: str, message: str, **context: Any) -> DataflowError:
+    return DataflowError(code, message, context=context)
+
+
+def _hash(value: Any) -> str:
+    try:
+        return identity(value)
+    except Exception as exc:  # canonical encoder budget/strict-Json failure
+        raise _error("BUDGET_EXCEEDED", "identity projection exceeds budget: " + str(exc)) from exc
+
+
+def _callable_code_identity(spec: CallableSpec) -> Mapping[str, Any]:
+    return {
+        "target": describe(spec.target),
+        "constructor_args": describe(spec.constructor_args),
+        "constructor_kwargs": describe(dict(spec.constructor_kwargs)),
+        "call_args": describe(spec.call_args),
+        "call_kwargs": describe(dict(spec.call_kwargs)),
+    }
+
+
+def _operation_semantic_facts(operation: LogicalOp) -> Mapping[str, Any]:
+    if isinstance(operation, NativeOperation):
+        return {
+            "native_kind": operation.kind,
+            "configuration": _plain(operation.configuration),
+            "bindings": _plain(operation.bindings),
+            "factory": _callable_code_identity(operation.factory),
+        }
+    if is_dataclass(operation):
+        return {
+            "type": type(operation).__module__ + "." + type(operation).__qualname__,
+            "fields": {
+                f.name: describe(getattr(operation, f.name))
+                for f in fields(operation) if f.name not in _NON_SEMANTIC_FIELDS
+            },
+        }
+    raise _error("INVALID_CONTRACT", "operation is not a declared logical op")
+
+
+def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
+    """Structural source identity; never reads file contents or executes a source."""
+    if isinstance(source, ItemsSource):
+        return {"kind": "items", "rows": len(source.items),
+                "items": describe(source.items)}
+    if isinstance(source, RangeSource):
+        return {"kind": "range", "count": source.count}
+    if isinstance(source, FileSource):
+        return {"kind": "file", "format": source.format,
+                "paths": list(source.paths), "options": dict(source.options)}
+    if isinstance(source, SqlSource):
+        return {"kind": "sql", "sql": source.sql,
+                "options": dict(source.options),
+                "connection_factory": describe(source.connection_factory)}
+    if isinstance(source, LanceSource):
+        return {"kind": "lance", "query": describe(source.query)}
+    if isinstance(source, MaterializedSource):
+        ref = getattr(source.handle, "recovery_reference", None)
+        return {"kind": "materialized", "row_count": source.row_count,
+                "reference": describe(ref) if ref is not None else None}
+    if isinstance(source, IterableSource):
+        return {"kind": "iterable", "factory": describe(source.factory)}
+    if isinstance(source, DatasourceSource):
+        return {"kind": "datasource",
+                "datasource": describe(type(source.datasource))}
+    if isinstance(source, KeyedSource):
+        return {"kind": "keyed", "op": source.kind,
+                "on": list(source.on), "right_on": list(source.right_on),
+                "how": source.how, "suffix": source.suffix,
+                "chunk_bytes": source.chunk_bytes, "max_rows": source.max_rows,
+                "output": source.output}
+    if isinstance(source, UnionSource):
+        return {"kind": "union", "inputs": len(source.inputs)}
+    if type(source).__name__ == "_LiteralEmptySource":
+        return {"kind": "literal_empty"}
+    raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
+
+
+def _source_kind(source: SourcePlan) -> str:
+    if isinstance(source, KeyedSource):
+        return source.kind
+    if isinstance(source, UnionSource):
+        return "union"
+    if isinstance(source, ItemsSource):
+        return "items"
+    if isinstance(source, RangeSource):
+        return "range"
+    if isinstance(source, FileSource):
+        return "file"
+    if isinstance(source, SqlSource):
+        return "sql"
+    if isinstance(source, LanceSource):
+        return "lance"
+    if isinstance(source, MaterializedSource):
+        return "materialized"
+    if isinstance(source, IterableSource):
+        return "iterable"
+    if isinstance(source, DatasourceSource):
+        from ..execution.queue_source import QueueDatasource
+        from ..execution.queue_history import QueueHistoryDatasource
+        if type(source.datasource) is QueueDatasource:
+            return "queue"
+        if type(source.datasource) is QueueHistoryDatasource:
+            return "queue_history"
+        return "datasource"
+    if type(source).__name__ == "_LiteralEmptySource":
+        return "literal_empty"
+    raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
+
+
+def _default_profile(operation: LogicalOp | None) -> ResourceProfile:
+    requests = {"cpu_millis": 1000, "memory_bytes": 64 * 1024 * 1024}
+    native = getattr(operation, "native_options", None) if operation is not None else None
+    resources = getattr(native, "worker_resources", None) or {}
+    if isinstance(resources, Mapping):
+        if "memory" in resources and type(resources["memory"]) is int:
+            requests["memory_bytes"] = max(1, resources["memory"])
+    return ResourceProfile(requests=requests)
+
+
+def _input_port(name: str, kind: str) -> InputPort:
+    finite = kind in _FINITE_COMPLETE_KINDS or name in {"left", "right", "prefix"}
+    ordering = "global" if kind in _ORDERING_KINDS else "none"
+    return InputPort(
+        name=name,
+        requirement="finite_complete" if finite else "incremental",
+        ordering=ordering,
+        schema_ref=None,
+    )
+
+
+def compile_kernel_spec(
+    operation: LogicalOp, *, program_ref: ArtifactRef | None, bounds: Bounds
+) -> KernelSpec:
+    """Translate a real operation into a KernelSpec without instantiating it."""
+    registry = operator_registry()
+    if isinstance(operation, NativeOperation):
+        kind = operation.kind
+    else:
+        kind = type(operation).__name__
+    definition = registry.get(kind)
+    if definition is None:
+        raise _error("UNSUPPORTED_CAPABILITY", "operator kind is not registered: " + kind)
+    if definition.compiler_symbol == _MODEL_COMPILER:
+        from ..execution.dataflow_models import build_model_factory
+        return build_model_factory(operation, program_ref=program_ref, bounds=bounds)
+    traits = (_NATIVE_TRAITS if isinstance(operation, NativeOperation) else _TRAITS).get(kind)
+    if traits is None:
+        raise _error("UNSUPPORTED_CAPABILITY", "operator traits are not registered: " + kind)
+    state, effect, role, mergeable = traits
+    configuration = _freeze(_operation_semantic_facts(operation))
+    inputs = tuple(_input_port(name, kind) for name in definition.inputs)
+    return KernelSpec(
+        kind=kind,
+        implementation_ref=program_ref,
+        configuration=configuration,
+        inputs=inputs,
+        state=state,
+        effect=effect,
+        resource_role=role,
+        profile=_default_profile(operation),
+        output_bound_bytes=bounds.max_row_bytes,
+        mergeable=mergeable,
+    )
+
+
+def expand_relational_inputs(
+    source: SourcePlan, *, path: tuple[str, ...], bounds: Bounds
+) -> tuple[PlanInputBinding, ...]:
+    """Expand KeyedSource left/right and UnionSource ordinal ports."""
+    if len(path) > bounds.max_depth:
+        raise _error("BUDGET_EXCEEDED", "relational input path exceeds depth budget")
+    if isinstance(source, KeyedSource):
+        if source.kind == "join":
+            if source.right is None:
+                raise _error("INVALID_CONTRACT", "join requires a right input")
+            bindings = (
+                PlanInputBinding("left", source.left.source, source.left.plan, path + ("left",)),
+                PlanInputBinding("right", source.right.source, source.right.plan, path + ("right",)),
+            )
+        elif source.kind in {"reduce", "groups"}:
+            if source.right is not None:
+                raise _error("INVALID_CONTRACT", source.kind + " takes a single input")
+            bindings = (
+                PlanInputBinding("left", source.left.source, source.left.plan, path + ("left",)),
+            )
+        else:
+            raise _error("INVALID_CONTRACT", "unknown keyed source kind: " + source.kind)
+        return bindings
+    if isinstance(source, UnionSource):
+        if len(source.inputs) > bounds.max_partitions:
+            raise _error("BUDGET_EXCEEDED", "union input count exceeds partition budget")
+        return tuple(
+            PlanInputBinding(str(i), item.source, item.plan, path + (str(i),))
+            for i, item in enumerate(source.inputs)
+        )
+    return ()
+
+
+def expand_operation_inputs(
+    operation: LogicalOp, *, path: tuple[str, ...], bounds: Bounds
+) -> tuple[PlanInputBinding, ...]:
+    """Capture extra Dataset inputs (StreamPrependOp prefix) as explicit ports."""
+    if len(path) > bounds.max_depth:
+        raise _error("BUDGET_EXCEEDED", "operation input path exceeds depth budget")
+    if isinstance(operation, ops.StreamPrependOp):
+        dataset = operation.source_dataset
+        if dataset is None:
+            return ()
+        source = getattr(dataset, "_source", None)
+        plan = getattr(dataset, "_plan", None)
+        if not isinstance(source, SourcePlan) or not isinstance(plan, LogicalPlan):
+            raise _error("INVALID_CONTRACT", "prepend source must be a real Dataset")
+        return (PlanInputBinding("prefix", source, plan, path + ("prefix",)),)
+    return ()
+
+
+def bind_occurrences(
+    nodes: tuple[GraphNode, ...], edges: tuple[GraphEdge, ...], *, action_id: str
+) -> tuple[GraphNode, ...]:
+    """Assign stable preorder occurrence identities and decimal shared tokens."""
+    positions = {node.occurrence_id for node in nodes}
+    for edge in edges:
+        if edge.producer not in positions or edge.consumer not in positions:
+            raise _error("INVALID_CONTRACT", "edge references an unknown occurrence")
+    bound = []
+    for index, node in enumerate(nodes):
+        occurrence_id = _hash(["dataflow-occurrence-v3", action_id, index])
+        bound.append(GraphNode(
+            occurrence_id=occurrence_id,
+            semantic_id=node.semantic_id,
+            kind=node.kind,
+            kernel=node.kernel,
+            program_ref=node.program_ref,
+            shared_token=str(index),
+        ))
+    return tuple(bound)
+
+
+def validate_graph(graph: DataflowGraph, *, bounds: Bounds) -> None:
+    """Validate DAG structure, ports, reachability and recomputable identity."""
+    if graph.schema != _SCHEMA:
+        raise _error("INVALID_CONTRACT", "unexpected graph schema")
+    if len(graph.nodes) > bounds.max_nodes:
+        raise _error("BUDGET_EXCEEDED", "graph exceeds node budget")
+    if len(graph.edges) > bounds.max_edges:
+        raise _error("BUDGET_EXCEEDED", "graph exceeds edge budget")
+    if not graph.sources:
+        raise _error("INVALID_CONTRACT", "graph has no source")
+    if not graph.terminals:
+        raise _error("INVALID_CONTRACT", "graph has no terminal")
+    by_id: dict[str, GraphNode] = {}
+    for node in graph.nodes:
+        if node.occurrence_id in by_id:
+            raise _error("INVALID_CONTRACT", "duplicate occurrence: " + node.occurrence_id)
+        by_id[node.occurrence_id] = node
+    if set(graph.sources) - by_id.keys() or set(graph.terminals) - by_id.keys():
+        raise _error("INVALID_CONTRACT", "source/terminal references an unknown node")
+    for node in graph.nodes:
+        if node.kind == "source" and node.occurrence_id not in graph.sources:
+            raise _error("INVALID_CONTRACT", "source node not declared as a source")
+    incoming: dict[str, list[GraphEdge]] = {nid: [] for nid in by_id}
+    outgoing: dict[str, list[GraphEdge]] = {nid: [] for nid in by_id}
+    seen_edges: set[tuple[str, str, str, str]] = set()
+    for edge in graph.edges:
+        if edge.producer not in by_id or edge.consumer not in by_id:
+            raise _error("INVALID_CONTRACT", "dangling edge endpoint")
+        key = (edge.producer, edge.output_port, edge.consumer, edge.input_port)
+        if key in seen_edges:
+            raise _error("INVALID_CONTRACT", "duplicate edge")
+        seen_edges.add(key)
+        expected = _hash(["dataflow-edge-v3", edge.producer, edge.output_port,
+                          edge.consumer, edge.input_port])
+        if edge.edge_id != expected:
+            raise _error("INVALID_CONTRACT", "edge identity is not recomputable")
+        incoming[edge.consumer].append(edge)
+        outgoing[edge.producer].append(edge)
+    for node in graph.nodes:
+        ports = {port.name for port in node.kernel.inputs}
+        used = [edge.input_port for edge in incoming[node.occurrence_id]]
+        if len(used) != len(set(used)):
+            raise _error("INVALID_CONTRACT", "input port connected more than once")
+        if set(used) - ports:
+            raise _error("INVALID_CONTRACT", "edge targets an undeclared input port")
+        if node.kind != "source" and len(used) != len(ports):
+            raise _error("INVALID_CONTRACT", "node has an unconnected input port")
+    # Acyclicity and depth via Kahn topological order, checked at the frontier.
+    indegree = {nid: len(incoming[nid]) for nid in by_id}
+    ready = [nid for nid, degree in indegree.items() if degree == 0]
+    depth = {nid: 0 for nid in by_id}
+    visited = 0
+    while ready:
+        nid = ready.pop()
+        visited += 1
+        if depth[nid] > bounds.max_depth:
+            raise _error("BUDGET_EXCEEDED", "graph exceeds depth budget")
+        for edge in outgoing[nid]:
+            child = edge.consumer
+            depth[child] = max(depth[child], depth[nid] + 1)
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                ready.append(child)
+    if visited != len(by_id):
+        raise _error("INVALID_CONTRACT", "graph contains a cycle")
+    for terminal in graph.terminals:
+        if not _reachable(terminal, graph.sources, incoming):
+            raise _error("INVALID_CONTRACT", "terminal is not reachable from a source")
+    if compute_graph_digest(graph) != graph.dag_id:
+        raise _error("INVALID_CONTRACT", "graph digest is not recomputable")
+
+
+def _reachable(terminal: str, sources: tuple[str, ...], incoming: Mapping[str, list[GraphEdge]]) -> bool:
+    source_set = set(sources)
+    seen: set[str] = set()
+    pending = [terminal]
+    while pending:
+        nid = pending.pop()
+        if nid in seen:
+            continue
+        seen.add(nid)
+        if nid in source_set:
+            return True
+        pending.extend(edge.producer for edge in incoming[nid])
+    return False
+
+
+class _LiteralEmptySource(SourcePlan):
+    """Explicit zero-read source for take(0); never reads the real source."""
+
+    def __repr__(self) -> str:
+        return "_LiteralEmptySource()"
+
+
+class _Capture:
+    """One bounded preorder traversal building node/edge drafts and declarations."""
+
+    def __init__(self, request: ActionRequest, bounds: Bounds) -> None:
+        self.request = request
+        self.bounds = bounds
+        self.nodes: list[GraphNode] = []
+        self.edges: list[tuple[int, str, int, str]] = []
+        self.declarations: list[tuple[int, ProgramDeclaration]] = []
+        self.alias_source: dict[int, int] = {}
+        self.alias_op: dict[tuple[int, int], int] = {}
+        self.visiting: set[int] = set()
+
+    def _check_node_budget(self) -> None:
+        if len(self.nodes) >= self.bounds.max_nodes:
+            raise _error("BUDGET_EXCEEDED", "capture exceeds node budget")
+
+    def _check_edge_budget(self) -> None:
+        if len(self.edges) >= self.bounds.max_edges:
+            raise _error("BUDGET_EXCEEDED", "capture exceeds edge budget")
+
+    def _add_node(self, kind: str, kernel: KernelSpec, semantic: Mapping[str, Any],
+                  arguments: Mapping[str, Any], code_identity: Mapping[str, Any],
+                  program_ref: ArtifactRef | None) -> int:
+        self._check_node_budget()
+        index = len(self.nodes)
+        self.nodes.append(GraphNode(
+            occurrence_id=str(index),
+            semantic_id=_hash(["dataflow-semantic-v3", semantic, arguments, code_identity]),
+            kind=kind,
+            kernel=kernel,
+            program_ref=program_ref,
+            shared_token=str(index),
+        ))
+        return index
+
+    def _add_edge(self, producer: int, output_port: str, consumer: int, input_port: str) -> None:
+        self._check_edge_budget()
+        self.edges.append((producer, output_port, consumer, input_port))
+
+    def capture_source(self, source: SourcePlan, path: tuple[str, ...]) -> int:
+        if len(path) > self.bounds.max_depth:
+            raise _error("BUDGET_EXCEEDED", "source path exceeds depth budget")
+        key = id(source)
+        if key in self.alias_source:
+            return self.alias_source[key]
+        if key in self.visiting:
+            raise _error("INVALID_CONTRACT", "cyclic source reference detected before reading")
+        self.visiting.add(key)
+        try:
+            if isinstance(source, (KeyedSource, UnionSource)):
+                index = self._capture_relational(source, path)
+            else:
+                index = self._capture_leaf(source, path)
+            self.alias_source[key] = index
+            return index
+        finally:
+            self.visiting.discard(key)
+
+    def _capture_leaf(self, source: SourcePlan, path: tuple[str, ...]) -> int:
+        kind = _source_kind(source)
+        if source_registry().get(kind) is None and kind != "literal_empty":
+            raise _error("UNSUPPORTED_CAPABILITY", "source kind is not registered: " + kind)
+        semantic = _source_semantic_facts(source)
+        kernel = KernelSpec(
+            kind=kind, implementation_ref=None, configuration=_freeze(semantic), inputs=(),
+            state="none", effect="pure", resource_role="io",
+            profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
+            mergeable=False,
+        )
+        index = self._add_node("source", kernel, semantic, {}, {"source_kind": kind}, None)
+        self.declarations.append((index, ProgramDeclaration(
+            occurrence_id=str(index), callable_spec=None, source_spec=source,
+            action_program=None, code_identity=_freeze({"source_kind": kind}),
+        )))
+        return index
+
+    def _capture_relational(self, source: SourcePlan, path: tuple[str, ...]) -> int:
+        bindings = expand_relational_inputs(source, path=path, bounds=self.bounds)
+        kind = _source_kind(source)
+        child_indices = []
+        for binding in bindings:
+            child = self.capture_chain(binding.source, binding.plan, binding.path)
+            child_indices.append((child, binding.port))
+        semantic = _source_semantic_facts(source)
+        inputs = tuple(_input_port(port, kind) for _, port in child_indices)
+        kernel = KernelSpec(
+            kind=kind, implementation_ref=None, configuration=_freeze(semantic), inputs=inputs,
+            state="none", effect="pure", resource_role="cpu",
+            profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
+            mergeable=False,
+        )
+        index = self._add_node("relational", kernel, semantic, {}, {}, None)
+        for child, port in child_indices:
+            self._add_edge(child, "main", index, port)
+        return index
+
+    def capture_chain(self, source: SourcePlan, plan: LogicalPlan, path: tuple[str, ...]) -> int:
+        if len(path) > self.bounds.max_depth:
+            raise _error("BUDGET_EXCEEDED", "plan path exceeds depth budget")
+        root = id(source)
+        index = self.capture_source(source, path)
+        for operation in plan.operations:
+            op_key = (root, id(operation))
+            if op_key in self.alias_op:
+                index = self.alias_op[op_key]
+                continue
+            kernel = compile_kernel_spec(operation, program_ref=None, bounds=self.bounds)
+            semantic = _operation_semantic_facts(operation)
+            callable_spec = getattr(operation, "callable", None)
+            if isinstance(operation, NativeOperation):
+                callable_spec = operation.factory
+            code_identity = (
+                _callable_code_identity(callable_spec)
+                if isinstance(callable_spec, CallableSpec) else {}
+            )
+            new_index = self._add_node("transform", kernel, semantic, {}, code_identity, None)
+            self._add_edge(index, "main", new_index, "main")
+            if isinstance(callable_spec, CallableSpec):
+                self.declarations.append((new_index, ProgramDeclaration(
+                    occurrence_id=str(new_index), callable_spec=callable_spec,
+                    source_spec=None, action_program=None,
+                    code_identity=_freeze(_callable_code_identity(callable_spec)),
+                )))
+            for binding in expand_operation_inputs(operation, path=path, bounds=self.bounds):
+                child = self.capture_chain(binding.source, binding.plan, binding.path)
+                self._add_edge(child, "main", new_index, binding.port)
+            self.alias_op[op_key] = new_index
+            index = new_index
+        return index
+
+    def capture_terminal(self, producer: int) -> int:
+        request = self.request
+        definition = terminal_registry().get(request.kind)
+        if definition is None:
+            raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
+        semantic = {"kind": request.kind, "arguments": dict(request.arguments)}
+        kernel = KernelSpec(
+            kind=request.kind, implementation_ref=None, configuration=_freeze(semantic),
+            inputs=(_input_port("main", request.kind),),
+            state="none", effect="pure", resource_role="cpu",
+            profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
+            mergeable=False,
+        )
+        index = self._add_node("terminal", kernel, semantic, dict(request.arguments), {}, None)
+        self._add_edge(producer, "main", index, "main")
+        programs = list(request.programs)
+        if request.sink is not None:
+            programs.append(ActionProgram(name="sink", kind="sink", value=request.sink))
+        for program in programs:
+            self.declarations.append((index, ProgramDeclaration(
+                occurrence_id=str(index), callable_spec=None, source_spec=None,
+                action_program=program,
+                code_identity=_freeze({"program_kind": program.kind, "name": program.name}),
+            )))
+        return index
+
+
+def _lower_request(request: ActionRequest) -> ActionRequest:
+    """take(0) becomes an explicit literal_empty zero-read plan."""
+    if request.kind == "take" and request.arguments.get("limit") == 0:
+        return ActionRequest(
+            kind=request.kind, source=_LiteralEmptySource(), plan=LogicalPlan(),
+            arguments=request.arguments, sink=request.sink, programs=request.programs,
+            provider=request.provider, action=request.action,
+        )
+    return request
+
+
+def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
+    """Capture the real source/plan/PlanInput topology into a v3 graph."""
+    if terminal_registry().get(request.kind) is None:
+        raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
+    request = _lower_request(request)
+    capture = _Capture(request, bounds)
+    producer = capture.capture_chain(request.source, request.plan, ())
+    terminal = capture.capture_terminal(producer)
+    draft_nodes = tuple(capture.nodes)
+    draft_edges = tuple(
+        GraphEdge(edge_id="", producer=str(p), output_port=op, consumer=str(c), input_port=ip)
+        for p, op, c, ip in capture.edges
+    )
+    bound_nodes = bind_occurrences(draft_nodes, draft_edges, action_id=request.action.action_id)
+    token_to_id = {str(i): node.occurrence_id for i, node in enumerate(bound_nodes)}
+    edges = tuple(
+        GraphEdge(
+            edge_id=_hash(["dataflow-edge-v3", token_to_id[e.producer], e.output_port,
+                           token_to_id[e.consumer], e.input_port]),
+            producer=token_to_id[e.producer], output_port=e.output_port,
+            consumer=token_to_id[e.consumer], input_port=e.input_port,
+        )
+        for e in draft_edges
+    )
+    declarations = tuple(
+        ProgramDeclaration(
+            occurrence_id=token_to_id[decl.occurrence_id],
+            callable_spec=decl.callable_spec, source_spec=decl.source_spec,
+            action_program=decl.action_program, code_identity=decl.code_identity,
+        )
+        for _, decl in capture.declarations
+    )
+    sources = tuple(node.occurrence_id for node in bound_nodes if node.kind == "source")
+    terminals = (bound_nodes[terminal].occurrence_id,)
+    graph = DataflowGraph(
+        schema=_SCHEMA, action_id=request.action.action_id, dag_id="",
+        nodes=bound_nodes, edges=edges, terminals=terminals, sources=sources,
+    )
+    graph = DataflowGraph(
+        schema=graph.schema, action_id=graph.action_id,
+        dag_id=compute_graph_digest(graph), nodes=graph.nodes, edges=graph.edges,
+        terminals=graph.terminals, sources=graph.sources,
+    )
+    validate_graph(graph, bounds=bounds)
+    return CompiledDataflow(graph=graph, declarations=declarations)
+
+
+def lower_action(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
+    """Compile terminal collect/statistics/write semantics into the graph."""
+    definition = terminal_registry().get(request.kind)
+    if definition is None:
+        raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
+    if request.kind in {"write_datasink", "write_lance", "write_file"} and request.sink is None:
+        raise _error("INVALID_CONTRACT", "write terminal requires a registered sink declaration")
+    return capture_graph(request, bounds=bounds)
