@@ -360,6 +360,9 @@ class WorkerGraphRunner:
                 observed = kernel.observations.snapshot()
                 if observed['count']:
                     payload['callback_observations'] = observed
+                handoff = kernel.observations.output_handoff()
+                if handoff['peak']:
+                    payload['output_handoff'] = handoff
             self._send('progress', payload)
         self._dirty_metrics.clear()
         self._metrics_at = time.monotonic()

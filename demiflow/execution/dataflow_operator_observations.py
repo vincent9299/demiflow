@@ -31,6 +31,24 @@ class CallbackObservations:
     def __init__(self):
         self._lock = Lock()
         self._value = empty()
+        self._handoff = {'capacity': 1, 'current': 0, 'peak': 0,
+                         'encoded_bytes': 0, 'peak_encoded_bytes': 0}
+
+    def hold_output(self, encoded_bytes):
+        with self._lock:
+            value = self._handoff
+            if value['current']:
+                raise DataflowError('INTERNAL_PROTOCOL', 'a kernel output handoff is already occupied')
+            value.update(current=1, peak=1, encoded_bytes=encoded_bytes,
+                         peak_encoded_bytes=max(value['peak_encoded_bytes'], encoded_bytes))
+
+    def release_output(self):
+        with self._lock:
+            self._handoff.update(current=0, encoded_bytes=0)
+
+    def output_handoff(self):
+        with self._lock:
+            return dict(self._handoff)
 
     def observe(self, duration_ns, miss=None):
         with self._lock:
@@ -54,6 +72,24 @@ class CallbackObservations:
 
 
 def observe_operator(execution, event, payload):
+    handoff = payload.get('output_handoff')
+    if handoff is not None:
+        fields = {'capacity', 'current', 'peak', 'encoded_bytes', 'peak_encoded_bytes'}
+        if (type(handoff) is not dict or set(handoff) != fields
+                or any(type(v) is not int or v < 0 for v in handoff.values())
+                or not 0 <= handoff['current'] <= handoff['peak'] <= handoff['capacity'] == 1
+                or handoff['encoded_bytes'] > handoff['peak_encoded_bytes']
+                or not handoff['current'] and handoff['encoded_bytes']):
+            raise DataflowError('INVALID_CONTRACT', 'invalid kernel output handoff observation')
+        slots = getattr(execution, '_operator_handoffs', None)
+        if slots is None:
+            execution._operator_handoffs = slots = {}
+        key = (payload['occurrence_id'], payload['partition_id'])
+        previous = slots.get(key)
+        if previous is not None and previous[0] == event.boot_id and any(
+                handoff[k] < previous[1][k] for k in ('peak', 'peak_encoded_bytes')):
+            raise DataflowError('FENCED', 'kernel output handoff peak moved backwards')
+        slots[key] = (event.boot_id, dict(handoff))
     value = payload.get('callback_observations')
     if value is None:
         return
@@ -127,6 +163,15 @@ def stream_observations(execution, stats):
     stats.miss = misses
     stats.stage_policies = policies
     stats.metrics['stage_policies'] = policies
+    # The compatibility collection names the ACTUAL mechanism. A synchronous
+    # generator handoff is one held output, not a retired asyncio input queue.
+    # Peaks are measured in this attempt and do not claim full process memory
+    # or concurrent invocation/transport buffer coverage.
+    stats.metrics['queues'] = [{'stage': labels.get(occurrence, occurrence),
+        'occurrence_id': occurrence, 'partition_id': partition,
+        'kind': 'synchronous_output_handoff', 'scope': 'attempt', **value}
+        for (occurrence, partition), (_, value)
+        in getattr(execution, '_operator_handoffs', {}).items()]
     stats.metrics['stage_processing_latency'] = {name: {
         'count': v['count'], 'total_s': v['total_ns'] / 1e9,
         'min_s': v['min_ns'] / 1e9, 'max_s': v['max_ns'] / 1e9,

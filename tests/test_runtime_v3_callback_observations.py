@@ -77,3 +77,18 @@ def test_callback_fact_validation_and_new_boot_replace_committed_prefix():
     assert execution._operator_observations[('o','p')][1]['count'] == 1
     with pytest.raises(DataflowError, match='invalid'):
         emit('new', {**smaller.snapshot(), 'count':True})
+
+
+def test_actual_output_handoff_is_bounded_and_identified_as_observation(tmp_path):
+    with RunContext.start(tmp_path/'run'):
+        stats = flow().run_stream()
+    queues = [q for q in stats.metrics['queues'] if q['stage'] == 'prepare']
+    assert queues and all(q['kind'] == 'synchronous_output_handoff' and q['scope'] == 'attempt'
+                         and q['capacity'] == q['peak'] == 1 and q['current'] == 0
+                         and q['encoded_bytes'] == 0 and q['peak_encoded_bytes'] > 0 for q in queues)
+    facts = CallbackObservations()
+    facts.hold_output(37)
+    assert facts.output_handoff()['encoded_bytes'] == facts.output_handoff()['peak_encoded_bytes'] == 37
+    facts.release_output()
+    assert facts.output_handoff()['current'] == facts.output_handoff()['encoded_bytes'] == 0
+    assert facts.output_handoff()['peak_encoded_bytes'] == 37

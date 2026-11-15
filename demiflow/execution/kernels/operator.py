@@ -736,7 +736,11 @@ class OperatorKernel:
                 self._skip -= 1
                 continue
             self._emitted += 1
-            yield record
+            self.observations.hold_output(record.encoded_bytes)
+            try:
+                yield record
+            finally:
+                self.observations.release_output()
 
     # -- K020 snapshot ------------------------------------------------------
     def snapshot(self) -> ArtifactRef | None:
