@@ -45,7 +45,8 @@ def _wire_digest(value: object, type_name: str, bounds: "Bounds") -> str:
 
 
 class ControlMailbox:
-    def __init__(self, *, bounds: "Bounds", check_stop: Callable[[], None]):
+    def __init__(self, *, bounds: "Bounds", check_stop: Callable[[], None],
+                 on_outbox: Callable[[], None] | None = None):
         self._bounds = bounds
         self._check_stop = check_stop
         self._outbox: deque = deque()
@@ -53,6 +54,7 @@ class ControlMailbox:
         self._condition = threading.Condition()
         self._closed = False
         self._max = bounds.max_pending_events
+        self._on_outbox = on_outbox
 
     def request(self, event: "WorkerEvent", *, deadline_ms: int) -> "ControlReply":
         self._check_stop()
@@ -78,7 +80,10 @@ class ControlMailbox:
                     raise DataflowError("BUDGET_EXCEEDED", "control mailbox pending ceiling reached")
                 waiter = _Waiter(event.operation_id, digest)
                 self._pending[event.operation_id] = waiter
+                was_empty = not self._outbox
                 self._outbox.append(event)
+                if was_empty and self._on_outbox is not None:
+                    self._on_outbox()
                 owned = True
             try:
                 while not waiter.done:
@@ -108,7 +113,10 @@ class ControlMailbox:
                 self._condition.wait(min(.05, remaining))
             if self._closed:
                 raise DataflowError("CANCELLED", "control mailbox closed")
+            was_empty = not self._outbox
             self._outbox.append(event)
+            if was_empty and self._on_outbox is not None:
+                self._on_outbox()
             self._condition.notify_all()
 
     def drain(self, *, max_events: int) -> tuple["WorkerEvent", ...]:

@@ -78,6 +78,7 @@ def _run_v3_worker(launch_spec, sock):
     """
     import queue
     import select
+    import socket
     from ..contracts.dataflow import Bounds
     from ..contracts.dataflow_codec import encode_wire, decode_wire
     from ..contracts.dataflow_errors import DataflowError
@@ -89,6 +90,21 @@ def _run_v3_worker(launch_spec, sock):
     bounds = Bounds(**config["bounds"])
     stop = threading.Event()
     send_lock = threading.Lock()
+    # The business thread can need a journal RPC just after its preceding
+    # reply. Wake the single socket reader instead of adding a polling tick
+    # to every fenced disk allocation. This carries no payload or authority.
+    wake_reader, wake_writer = socket.socketpair()
+    wake_reader.setblocking(False)
+    wake_writer.setblocking(False)
+
+    def wake_outbox():
+        try:
+            wake_writer.send(b'\0')
+        except BlockingIOError:
+            pass  # A wake is already pending in the bounded kernel buffer.
+        except OSError:
+            if not stop.is_set():
+                raise
 
     def check_stop():
         if stop.is_set():
@@ -98,7 +114,7 @@ def _run_v3_worker(launch_spec, sock):
         with send_lock:
             send_message(sock, frame)
 
-    mailbox = ControlMailbox(bounds=bounds, check_stop=check_stop)
+    mailbox = ControlMailbox(bounds=bounds, check_stop=check_stop, on_outbox=wake_outbox)
     mailbox.check_stop = check_stop
     # The initial store only reads the authenticated grant; RuntimeServices
     # replaces it with the worker journal port before any write is admitted.
@@ -144,6 +160,7 @@ def _run_v3_worker(launch_spec, sock):
                     commands.task_done()
         finally:
             stop.set()
+            wake_outbox()
 
     runtime.register()
     command_thread = threading.Thread(target=serve_commands, name="dataflow-commands", daemon=True)
@@ -153,7 +170,14 @@ def _run_v3_worker(launch_spec, sock):
             for event in mailbox.drain(max_events=bounds.max_pending_events):
                 frame = json.loads(encode_wire(event, type_name="WorkerEvent", bounds=bounds))
                 send({"type": "worker_event", "event": frame["payload"]})
-            if not select.select([sock], [], [], 0.01)[0]:
+            ready = select.select([sock, wake_reader], [], [], 0.05)[0]
+            if wake_reader in ready:
+                try:
+                    while wake_reader.recv(4096):
+                        pass
+                except BlockingIOError:
+                    pass
+            if sock not in ready:
                 continue
             message = recv_message(sock)
             if message is None:
@@ -169,10 +193,14 @@ def _run_v3_worker(launch_spec, sock):
     finally:
         stop.set()
         mailbox.close()
-        command_thread.join(timeout=bounds.timeout_ms / 1000)
-        if not command_thread.is_alive():
-            runtime.close()
-        sock.close()
+        try:
+            command_thread.join(timeout=bounds.timeout_ms / 1000)
+            if not command_thread.is_alive():
+                runtime.close()
+        finally:
+            wake_reader.close()
+            wake_writer.close()
+            sock.close()
     return runtime
 
 
