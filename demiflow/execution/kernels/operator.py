@@ -227,7 +227,7 @@ class OperatorKernel:
         self._ports: dict[str, _SpoolPort] = {
             port.name: _SpoolPort(port.name, services, self._segment_rows)
             for port in spec.inputs
-            if port.requirement == "finite_complete" or spec.kind == "union"
+            if port.requirement == "finite_complete" or spec.kind in ("union", "StreamPrependOp")
         }
         self._port_order = tuple(port.name for port in spec.inputs)
         self._batch: list[Record] = []
@@ -398,6 +398,25 @@ class OperatorKernel:
         self._require_started()
         _check_stop(self._services)
         kind = self._spec.kind
+        if kind == 'StreamPrependOp':
+            if port == 'prefix':
+                if self._ports[port]._count >= self._spec.configuration['max_rows']:
+                    raise _err('BUDGET_EXCEEDED', 'prepend exceeds max_rows')
+                if record.encoded_bytes > self._spec.configuration['max_row_bytes']:
+                    raise _err('BUDGET_EXCEEDED', 'prepend exceeds max_row_bytes')
+                self._ports[port].push(record)
+                return
+            if port != 'main':
+                raise _err('INVALID_CONTRACT', 'prepend has only prefix and main inputs')
+            if not self._ports['prefix'].eoi:
+                # Shared source branches must progress to the prefix's EOI.
+                # Persist in the existing bounded port before returning an ACK;
+                # its original snapshot restores this exact un-emitted prefix.
+                self._ports['main'].push(record)
+                self._ports['main']._flush()
+                return
+            yield from self._emit(iter((record,)))
+            return
         if port in self._ports:
             self._ports[port].push(record)
             return iter(())
@@ -492,6 +511,17 @@ class OperatorKernel:
         self._require_started()
         _check_stop(self._services)
         kind = self._spec.kind
+        if kind == 'StreamPrependOp':
+            if port == 'prefix':
+                if self._ports[port].eoi:
+                    return
+                self._ports[port].finish()
+                yield from self._emit(self._ports[port].records())
+                yield from self._emit(self._ports['main'].records())
+                self._ports['main'].release()
+            elif port == 'main':
+                self._ports['main'].finish()
+            return
         if port in self._ports:
             self._ports[port].finish()
             if not all(p.eoi for p in self._ports.values()):

@@ -478,7 +478,10 @@ class DataflowExecution:
             self._phases = self._durable_residency.groups
             self._phase_index = self._durable_residency.active_index
         else:
-            self._phases = ((tuple(s.stage_id for s in stages),) if fits and prior is None
+            # A prepend cannot consume its live input until its finite prefix
+            # has reached EOI. Admit that prefix's existing finite phase first.
+            needs_prefix = any(n.kernel.kind == 'StreamPrependOp' for n in self._graph.nodes)
+            self._phases = ((tuple(s.stage_id for s in stages),) if fits and prior is None and not needs_prefix
                             else finite_phases(self._physical))
         # Preflight EVERY phase before business side effects.
         for phase in self._phases:
