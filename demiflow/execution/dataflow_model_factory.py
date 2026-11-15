@@ -49,6 +49,31 @@ def native_model_declaration(operation):
         return CallableSpec.create(PromptFactory, fn_constructor_args=(replace(operation, node_id=None), {}))
     target = getattr(getattr(operation, 'callable', None), 'target', None)
     actor = getattr(target, '__self__', target)
+    from .stream_lookup import LanceLookup
+    from ..lance.search import VectorSearch
+    if type(actor) is LanceLookup:
+        from ..lance.flow_contract import lookup_facts
+        from .contracts.dataflow_errors import DataflowError
+        declaration = lookup_facts(actor)['arguments']
+        if getattr(target, '__func__', None) is not LanceLookup.__call__:
+            raise DataflowError('INVALID_CONTRACT', 'Lookup must bind the native lookup callable')
+        if actor.table is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Lookup requires an unstarted fixed-version declaration')
+        # LRU entries and table handles are reconstructible resources. Reuse the
+        # existing CallableSpec wire/code-pin contract; instantiate only in worker.
+        return CallableSpec.create(LanceLookup, fn_constructor_kwargs=declaration)
+    if type(actor) is VectorSearch:
+        from ..data.plan import VectorSearchOp
+        from .plan_facts import operation_facts
+        from .contracts.dataflow_errors import DataflowError
+        if type(operation) is not VectorSearchOp:
+            raise DataflowError('INVALID_CONTRACT', 'Vector search requires its typed declaration')
+        operation_facts(operation)  # Exact native actor, bound method and spec agree.
+        if (actor._dataset is not None or actor._vector_type is not None or actor._version is not None
+                or actor._queries or actor._hits):
+            raise DataflowError('INVALID_CONTRACT', 'Vector search requires an unstarted declaration')
+        return CallableSpec.create(VectorSearch, fn_constructor_kwargs={
+            **actor.spec, 'query': actor.query, 'output': actor.output, 'label': actor.label})
     from ..collect.operators import SearchWeb
     if type(actor) is SearchWeb:
         from ..collect.search_contract import search_facts

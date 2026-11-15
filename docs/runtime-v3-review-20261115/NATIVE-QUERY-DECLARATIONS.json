@@ -1,0 +1,26 @@
+{
+  "head_before": "c20a876611b4edca076a5df1dd606cf601933263",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+  "fix": "Verified native Lance query declarations use existing CallableSpec class factories; live actor caches/locks are not sealed.",
+  "production_changed": [
+    "demiflow/execution/dataflow_model_factory.py"
+  ],
+  "admission": "No new production change required: d51dd0f owner lifecycle already starts StreamAdmission. Real worker admission/deduplicate reservations and exact reused receipts verified.",
+  "baseline": "/tmp/demiflow-regression-native-api-red2.xml: lookup OrderedDict and vector identity-depth refusal; admission only overly strict new reason expectation, corrected to original reused receipt contract.",
+  "verification": {
+    "command": "DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-native-api-r2 PYTHONPATH=$PWD:$PWD/tests /yzp/zhaozy/yangzepeng/0905/env/bin/python -B /tmp/demiflow-regression-runner.py -q tests/test_runtime_v3_native_lookup_admission.py tests/test_runtime_v3_actor_lifecycle.py --basetemp=/tmp/demiflow-regression-native-api-r2 --junitxml=/tmp/demiflow-regression-native-api-r2.xml",
+    "passed": 21,
+    "seconds": 39.92,
+    "report_sha256": "9ce2e05facba150be3c358f457e05c4a813fdf6169fba7650824fcae7c89faf5"
+  },
+  "inputs": {
+    "demiflow/execution/dataflow_model_factory.py": "af7c712f69c214178aa380a3fd08e814a10215b054104776583cf3c95bd2d564",
+    "tests/test_runtime_v3_native_lookup_admission.py": "6fceae1f2ff91d5086825f4c45f24aa6c661b0a5513abade491a9c66ec9601c1",
+    "tests/test_runtime_v3_actor_lifecycle.py": "2b0605a0f2bf926ec725ab9685a2415ae8fc4c11adbf07af3d0fd4a6985b1416"
+  },
+  "not_claimed": [
+    "All historical stream_map migrations",
+    "Ray native query execution",
+    "Admission in-flight same RunRef recovery"
+  ]
+}
