@@ -14,7 +14,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from ..artifacts import read
@@ -67,6 +69,79 @@ def _manifest_loader(directory):
     return load
 
 
+class _SocketControlTransport:
+    """Local v3 control transport over the inherited socketpair (C07).
+
+    Business-thread request/wait; the driver drains events and delivers replies.
+    Frames reuse the bounded length-prefixed JSON document channel.
+    """
+
+    def __init__(self, sock, *, send_lock, bounds):
+        self._sock = sock
+        self._send_lock = send_lock
+        self._bounds = bounds
+
+    def request(self, event, *, deadline_ms):
+        from ..contracts.dataflow import ControlReply
+        from ..contracts.dataflow_errors import DataflowError
+        frame = {"type": "worker_event", "event": asdict(event), "deadline_ms": deadline_ms}
+        with self._send_lock:
+            send_message(self._sock, frame)
+            reply = recv_message(self._sock)
+        if reply is None:
+            raise DataflowError("FENCED", "control channel closed before reply")
+        return ControlReply(operation_id=reply["operation_id"], status=reply["status"],
+                            payload=reply.get("payload"), payload_ref=None,
+                            error_code=reply.get("error_code"))
+
+
+def _run_v3_worker(launch_spec, sock):
+    """Assemble the unified v3 worker; verify artifact/code pin before business."""
+    from ..contracts.dataflow_errors import DataflowError
+    from .runtime import WorkerRuntime
+    send_lock = threading.Lock()
+
+    def send(frame):
+        with send_lock:
+            send_message(sock, frame)
+
+    v3 = launch_spec["dataflow_v3"]
+    bounds = v3.get("bounds")
+    transport = _SocketControlTransport(sock, send_lock=send_lock, bounds=bounds)
+    v3 = dict(v3)
+    v3["transport"] = transport
+    launch_spec = dict(launch_spec)
+    launch_spec["dataflow_v3"] = v3
+    runtime = WorkerRuntime(
+        launch_spec, control=send,
+        manifest_loader=_manifest_loader(launch_spec["directory"]))
+    runtime.register()
+    try:
+        while True:
+            message = recv_message(sock)
+            if message is None:
+                break
+            if message.get("type") == "control_reply":
+                continue
+            if "kind" not in message:
+                continue
+            operation_id = message["operation_id"]
+            try:
+                receipt = runtime.handle(message, now_ms=int(time.time() * 1000))
+                send({"response_to": operation_id, "receipt": receipt})
+            except ProtocolError as exc:
+                send({"response_to": operation_id, "error": exc.to_dict()})
+            kind = message["kind"]
+            if kind == "Restore":
+                runtime.ready(message["payload"]["assignment_ref"])
+            if kind in ("Drain", "Quiesce", "Cancel"):
+                break
+    finally:
+        runtime.close()
+        sock.close()
+    return runtime
+
+
 def run_worker(launch_spec, sock):
     import threading
 
@@ -74,6 +149,8 @@ def run_worker(launch_spec, sock):
     from .execution import WorkerChainExecutor
     from .queue_transform import QueueTransformExecutor, TRANSFORM_REQUEST_SCHEMA
     from .runtime import WorkerRuntime
+    if "dataflow_v3" in launch_spec:
+        return _run_v3_worker(launch_spec, sock)
     send_lock = threading.Lock()
 
     def send(frame):
@@ -125,6 +202,22 @@ def run_worker(launch_spec, sock):
     return runtime
 
 
+def _validate_v3_launch(launch_spec):
+    """Fail before business on a wrong entrypoint or malformed code pin (B019)."""
+    from ..contracts.dataflow_errors import DataflowError
+    v3 = launch_spec.get("dataflow_v3")
+    if not isinstance(v3, dict):
+        raise DataflowError("INVALID_CONTRACT", "v3 launch payload is missing")
+    if v3.get("entrypoint") != "dataflow_worker_v3":
+        raise DataflowError("INVALID_CONTRACT", "unsupported v3 worker entrypoint",
+                            context={"entrypoint": str(v3.get("entrypoint"))})
+    pin = v3.get("code_pin")
+    if not isinstance(pin, str) or len(pin) != 64:
+        raise DataflowError("CODE_MISMATCH", "v3 code pin must be a 64-hex digest")
+    if "assignment" not in v3:
+        raise DataflowError("INVALID_CONTRACT", "v3 assignment artifact is missing")
+
+
 def main():
     launch_path = os.environ[LAUNCH_ENV]
     control_fd = int(os.environ[CONTROL_FD_ENV])
@@ -133,6 +226,8 @@ def main():
         raise RecoveryContractError("Worker launch spec exceeds byte budget")
     launch_spec = json.loads(raw)
     Path(launch_path).unlink(missing_ok=True)
+    if "dataflow_v3" in launch_spec:
+        _validate_v3_launch(launch_spec)
     run_worker(launch_spec, socket.socket(fileno=control_fd))
 
 
