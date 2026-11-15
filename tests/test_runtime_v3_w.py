@@ -1505,6 +1505,132 @@ def test_u3_unique_action_resolution(tmp_path, monkeypatch):
     assert exc.value.code == "not_found"
 
 
+# --- U2 real producer (view.observations) + consumer gate integration -------
+
+def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",)):
+    """Build a real run journal (manifest + native observations) and optional v3 seal.
+
+    The real view.observations producer reads this run.sqlite. The sealed bundle
+    uses the C14 cross-lane dataflow_seal double only because the real D module is
+    absent in this isolated tree; the marker, journal and readers are real.
+    """
+    from demiflow.workbench.runs import manager
+    from demiflow.forge.platform import content_digest
+    run_id = "r" + "1" * 24
+    root = tmp_path
+    (Path(root) / "workspace.json").write_text('{"id": "ws-u2"}')
+    target = manager.directory(root, run_id)
+    target.mkdir(parents=True, exist_ok=True)
+    journal = RunJournal(target)
+    journal.initialize(dict(run_id=run_id, root=str(Path(root).absolute()),
+                            digest=content_digest(dict(run_id=run_id)), object_locations=[]), attempts=True)
+    fence = "f" + "1" * 32
+    journal.claim_execution(dict(run_id=run_id, platform_revision=platform_identity(),
+                                 limits=dict(max_control_bytes=8 * 1024 ** 2, max_commits=1024,
+                                             admission_timeout_s=30)), fence)
+    journal.reserve_nodes([(action_id, node, 0) for node in nodes])
+    journal.observe_nodes([dict(action_id=action_id, node_id=node, occurrence=0,
+                                document=dict(sequence=1, state="succeeded", rows_output=3)) for node in nodes])
+    plan = None
+    if v3:
+        graph, occs = make_graph(action_id)
+        physical = make_physical(graph)
+        marker = v3_marker(run_id, action_id, dag_id=graph.dag_id, plan_id=physical.plan_id)
+        journal.bind_source(fence, action_id + "-dataflow-sealed", marker)
+        _register_seal(target, action_id, graph, physical, make_sealed())
+        plan = (graph, physical, occs)
+    return root, run_id, target, journal, fence, plan
+
+
+def _u2_entry(graph, physical, bridge):
+    view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
+    return {"action_id": "a0", "status": "sealed", "version": "v3", "dag": view["dag"],
+            "plan_id": physical.plan_id, "physical": view["physical"],
+            "node_observations": view["node_observations"],
+            "identity_bridge": {"available": True, "bridge": bridge}}, view
+
+
+def test_u2_producer_page_scope_verified(tmp_path):
+    from demiflow.workbench.runs import view as run_view
+    from demiflow.workbench.runs import facts
+    from demiflow.workbench.graph import model
+    root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=True)
+    graph, physical, occs = plan
+    # REAL producer: page and rows carry the sealed v3 plan identity verbatim.
+    page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
+    assert page["availability"] == "available"
+    assert page["plan_id"] == physical.plan_id and page["dag_id"] == graph.dag_id
+    assert page["plan_revision"] == physical.plan_revision
+    assert len(page["observations"]) == 1
+    row = page["observations"][0]
+    assert row["plan_id"] == physical.plan_id and row["dag_id"] == graph.dag_id
+    assert row["plan_revision"] == physical.plan_revision
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+         "occurrence_id": occs[0], "mode": "execute"}]}
+    # REAL consumer: exact-match scope verification promotes the observation.
+    joined = facts.join_node_observations(bridge, page, action_id="a0", attempt=1,
+                                          plan_id=physical.plan_id, dag_id=graph.dag_id,
+                                          plan_revision=physical.plan_revision)
+    assert joined[0]["availability"] == "observed" and joined[0]["occurrence_id"] == occs[0]
+    # REAL model wrapper over the REAL producer (no monkeypatch): credentialed promotion.
+    entry, view = _u2_entry(graph, physical, bridge)
+    model._join_sealed_observations(root, run_id, 1, {"actions": [entry]})
+    obs = entry["node_observations"]
+    assert obs["available"] is True and obs["entries"][0]["availability"] == "observed"
+    assert obs["action_id"] == "a0" and obs["dag_id"] == graph.dag_id
+    assert obs["plan_id"] == physical.plan_id and obs["plan_revision"] == physical.plan_revision
+    assert entry["plan_node_observations"] is view["node_observations"]
+
+
+def test_u2_producer_scopeless_degrades(tmp_path):
+    from demiflow.workbench.runs import view as run_view
+    from demiflow.workbench.runs import facts
+    from demiflow.workbench.graph import model
+    from demiflow.forge.schema import ForgeError
+    # Real run whose action has NO v3 seal -> real producer emits no plan scope.
+    root, run_id, target, journal, fence, _ = _real_obs_run(tmp_path, v3=False)
+    page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
+    assert page["availability"] == "available"
+    assert "plan_id" not in page and "dag_id" not in page and "plan_revision" not in page
+    assert all("plan_id" not in r for r in page["observations"])
+    graph, occs = make_graph("a0")
+    physical = make_physical(graph)
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+         "occurrence_id": occs[0], "mode": "execute"}]}
+    # A v3 scope cannot be verified against a scope-less page -> conflict, never promoted.
+    with pytest.raises(ForgeError) as exc:
+        facts.join_node_observations(bridge, page, action_id="a0", attempt=1, plan_id=physical.plan_id)
+    assert exc.value.code == "conflict"
+    entry, view = _u2_entry(graph, physical, bridge)
+    model._join_sealed_observations(root, run_id, 1, {"actions": [entry]})
+    obs = entry["node_observations"]
+    assert obs["available"] is False and obs["reason"] == "observation_plan_scope_unverified"
+    assert obs["plan_id"] == physical.plan_id and obs["dag_id"] == graph.dag_id
+    assert entry["plan_node_observations"] is view["node_observations"]
+
+
+def test_u2_producer_missing_row_not_in_page(tmp_path):
+    from demiflow.workbench.runs import view as run_view
+    from demiflow.workbench.runs import facts
+    # Real v3 run observes n0 only; the bridge also references an absent report node.
+    root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=True, nodes=("n0",))
+    graph, physical, occs = plan
+    page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+         "occurrence_id": occs[0], "mode": "execute"},
+        {"report_node_id": "n1", "report_occurrence": 0, "logical_node_id": "map",
+         "occurrence_id": sha("occ-n1"), "mode": "execute"}]}
+    joined = facts.join_node_observations(bridge, page, action_id="a0", attempt=1,
+                                          plan_id=physical.plan_id, dag_id=graph.dag_id,
+                                          plan_revision=physical.plan_revision)
+    assert joined[0]["availability"] == "observed"
+    # A restricted page missing the item is not_in_page, never "never ran".
+    assert joined[1]["availability"] == "not_in_page" and joined[1]["observation"] is None
+
+
 # --- W018-W021 workbench JS -------------------------------------------------
 # The real JS symbol bodies are extracted verbatim from the worktree source and
 # executed under node against a marked DOM/host TEST DOUBLE (no browser). This
