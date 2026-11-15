@@ -61,7 +61,7 @@ def _segment_rows(services: RuntimeServices) -> int:
     return min(8192, max(1, bounds.max_batch_bytes // max(1, bounds.max_row_bytes)))
 
 
-def _resolve_instance(spec: KernelSpec, services: RuntimeServices) -> Any:
+def _resolve_instance(spec: KernelSpec, services: RuntimeServices, *, declaration=None) -> Any:
     key = spec.configuration.get("program")
     if key is None and spec.implementation_ref is not None:
         key = spec.implementation_ref.key
@@ -71,7 +71,7 @@ def _resolve_instance(spec: KernelSpec, services: RuntimeServices) -> Any:
     if program is None or program.kind not in ("callable", "native"):
         raise _err("INVALID_CONTRACT", "callable program not staged", program=str(key))
     from demiflow.data.plan import CallableSpec
-    declaration = program.value
+    declaration = program.value if declaration is None else declaration
     if isinstance(declaration, CallableSpec):
         if spec.kind == "BoundMapOp":
             from demiflow.data.plan import BoundMapOp, MapStreamOptions
@@ -244,6 +244,17 @@ class OperatorKernel:
         self._concurrency = int(spec.configuration.get('concurrency') or 1)
         self._worker_scope = spec.configuration.get('callable_scope') == 'worker'
         self.recovery_restriction = None
+        self._task_rows = spec.configuration.get('task_batch_rows')
+        if self._task_rows is not None and (type(self._task_rows) is not int or self._task_rows < 1
+                or spec.configuration.get('streaming_map') or self._concurrency != 1):
+            raise _err('INVALID_CONTRACT', 'invalid logical callback task policy')
+        self._task_frontier = 0
+        self._task_ordinal = None
+        self._task_group = spec.configuration.get('task_group', self._occurrence)
+        self._task_origin = spec.configuration.get('task_origin', True)
+        if type(self._task_origin) is not bool:
+            raise _err('INVALID_CONTRACT', 'invalid logical task origin')
+        self._task_declaration = None
 
     # -- K017 start ---------------------------------------------------------
     def start(self) -> None:
@@ -265,7 +276,14 @@ class OperatorKernel:
                            and program.value.is_class)
                 # Existing instances own lifecycle even for empty input. Class
                 # declarations acquire resources only for an invoked/restored slot.
-                if not factory:
+                if self._task_rows:
+                    # LoadedProgram is the sealed declaration, never an active
+                    # instance. Retain only its existing reference, not a second
+                    # resident serialized copy of the whole program.
+                    self._task_declaration = program.value
+                # A restored task constructs only if its snapshot has a live
+                # partial batch. Completed task boundaries do not rerun hooks.
+                if not factory and not (self._task_rows and self._image is not None):
                     for slot in range(count):
                         self._create_instance(slot)
                 if self._concurrency > 1:
@@ -279,7 +297,14 @@ class OperatorKernel:
             raise
 
     def _create_instance(self, slot):
-        instance = _resolve_instance(self._spec, self._services)
+        declaration = None
+        if self._task_declaration is not None:
+            import cloudpickle
+            raw = cloudpickle.dumps(self._task_declaration)
+            if len(raw) > self._services.bounds.max_state_bytes:
+                raise _err('BUDGET_EXCEEDED', 'task declaration exceeds max_state_bytes')
+            declaration = cloudpickle.loads(raw)
+        instance = _resolve_instance(self._spec, self._services, declaration=declaration)
         if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
             from ..dataflow_models import bind_model_services
             instance = bind_model_services(instance, self._spec, services=self._services)
@@ -310,6 +335,12 @@ class OperatorKernel:
             from ..operator_policy import classify_operator_state
             owner = self._state_owner(instance)
             policy = classify_operator_state(owner, phase='instance')
+            if self._task_rows and policy.mode == 'function':
+                from .task_scope import snapshot_function
+                state = snapshot_function(owner, max_bytes=self._services.bounds.max_state_bytes)
+                if state['mode'] == 'nonrecoverable':
+                    self.recovery_restriction = state['reason']
+                    self._services.journal.restrict_recovery(self._occurrence)
             concurrency = 1 if self._worker_scope else self._concurrency
             if policy.mode == 'auto_json' and vars(owner) and concurrency != 1:
                 raise _err('INVALID_CONTRACT', 'auto_json state requires concurrency 1; declare snapshot_state/restore_state for higher concurrency')
@@ -424,6 +455,8 @@ class OperatorKernel:
         if kind == "LimitOp" and self._emitted >= self._spec.configuration["limit"]:
             return
         if kind in _UNARY_KINDS or (kind in _MODEL_KINDS and kind not in _BATCH_INSTANCE_KINDS):
+            if self._task_rows:
+                record = self._task_record(record)
             if self._calls is None:
                 yield from self._emit(invoke_unary(self._spec, record, instance=self._slot_instance(0) if kind in _INSTANCE_KINDS else self._instance, services=self._services, schemas=self._schemas))
             else:
@@ -437,6 +470,30 @@ class OperatorKernel:
             yield from self._emit(iter((record,)))
         else:
             raise _err("INVALID_CONTRACT", "kind does not accept incremental push", kind=kind)
+
+    def _task_record(self, record):
+        # The first narrow operator numbers logical INPUT batches. Filters and
+        # expansions forward that provenance, so later callbacks do not regroup
+        # survivors or multiply the task count by the number of emitted rows.
+        from dataclasses import replace
+        from ..contracts.dataflow import thaw_record_value
+        if self._task_origin:
+            ordinal = self._task_frontier // self._task_rows
+            record = replace(record, source_position={**thaw_record_value(record.source_position),
+                'dataflow_task': {'group': self._task_group, 'ordinal': ordinal}})
+        else:
+            position = record.source_position.get('dataflow_task')
+            ordinal = position.get('ordinal') if isinstance(position, Mapping) else None
+            if not isinstance(position, Mapping) or set(position) != {'group', 'ordinal'} or position.get('group') != self._task_group or type(ordinal) is not int or ordinal < 0:
+                raise _err('INVALID_CONTRACT', 'logical task provenance is absent or invalid')
+        if self._task_ordinal is not None and ordinal < self._task_ordinal:
+            raise _err('INVALID_CONTRACT', 'logical callback tasks arrived out of order')
+        if self._task_ordinal is not None and ordinal != self._task_ordinal:
+            _close_instance(self._instance)
+            self._instances[0] = self._instance = None
+        self._task_ordinal = ordinal
+        self._task_frontier += 1
+        return record
 
     def _push_batch(self, record: Record) -> Iterator[Record]:
         if self._batch and self._batch[0].schema_ref != record.schema_ref:
@@ -592,13 +649,14 @@ class OperatorKernel:
         if not self.checkpoint_ready:
             raise _err('INVALID_CONTRACT', 'Checkpoint requires drained non-native invocations')
         worker_states = [self._snapshot_state(instance) if instance is not None else None for instance in self._instances] if self._worker_scope else None
+        completed_task = bool(self._task_rows and self._task_origin and self._task_frontier and self._task_frontier % self._task_rows == 0)
         image = {
             "schema_version": IMAGE_VERSION,
             "kind": self._spec.kind,
             "occurrence_id": self._occurrence,
             "partition_id": self._partition_id,
             "config_digest": _hash_id([_canonical(self._spec.configuration)]),
-            "state": worker_states[0] if worker_states else self._snapshot_state(),
+            "state": None if completed_task else (worker_states[0] if worker_states else self._snapshot_state()),
             "ports": {name: port.snapshot() for name, port in self._ports.items()},
             "batch": list(self._batch),
             "groups": {key: list(value) for key, value in self._groups.items()},
@@ -612,6 +670,9 @@ class OperatorKernel:
             "inflight_calls": self._calls.snapshot() if self._calls is not None else [],
             "aggregate_state": self.aggregate_state,
         }
+        if self._task_rows:
+            image['task'] = {'batch_rows': self._task_rows, 'input_frontier': self._task_frontier,
+                             'ordinal': self._task_ordinal, 'origin': self._task_origin}
         raw = state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes)
         limit = self._services.bounds.max_state_bytes
         if limit > 0 and len(raw) > limit:
@@ -646,6 +707,12 @@ class OperatorKernel:
         if snapshot is not None:
             return {"mode": "adapter", "value": instance.resolve(snapshot())}
         if policy.mode == "function":
+            if self._task_rows:
+                from .task_scope import snapshot_function
+                state = snapshot_function(owner, max_bytes=self._services.bounds.max_state_bytes)
+                if state['mode'] == 'nonrecoverable':
+                    self._services.journal.restrict_recovery(self._occurrence)
+                return state
             return None
         if policy.mode == "hooks":
             return {"mode": "hooks", "value": instance.resolve(owner.snapshot_state())}
@@ -681,6 +748,20 @@ class OperatorKernel:
             self._apply_image(image)
 
     def _apply_image(self, image: Mapping[str, Any]) -> None:
+        if self._task_rows:
+            task = image.get('task')
+            if not isinstance(task, Mapping) or set(task) != {'batch_rows', 'input_frontier', 'ordinal', 'origin'}:
+                raise _err('INCOMPATIBLE_HISTORY', 'logical task frontier is absent')
+            frontier = task['input_frontier']
+            ordinal = task['ordinal']
+            if (type(frontier) is not int or frontier < 0 or type(task['batch_rows']) is not int or task['batch_rows'] != self._task_rows
+                    or type(task['origin']) is not bool or task['origin'] != self._task_origin
+                    or (frontier == 0 and ordinal is not None)
+                    or (frontier > 0 and (type(ordinal) is not int or ordinal < 0))
+                    or (self._task_origin and frontier > 0 and ordinal != (frontier - 1) // self._task_rows)):
+                raise _err('CORRUPT_ARTIFACT', 'invalid logical task frontier')
+            self._task_frontier = frontier
+            self._task_ordinal = ordinal
         for name, snap in image["ports"].items():
             if name in self._ports:
                 self._ports[name].restore(snap)
@@ -735,6 +816,9 @@ class OperatorKernel:
         if mode == "plain_json":
             from ..operator_policy import restore_auto_state
             restore_auto_state(owner, state["value"], max_bytes=self._services.bounds.max_state_bytes)
+        elif mode == 'task_function' and self._task_rows:
+            from .task_scope import restore_function
+            restore_function(owner, state, max_bytes=self._services.bounds.max_state_bytes)
         elif mode in ("adapter", "hooks", "auto_json"):
             name = "restore_state" if mode == "hooks" else "__demiflow_restore__"
             restore = getattr(owner, name, None)

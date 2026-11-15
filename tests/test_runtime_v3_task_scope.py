@@ -1,0 +1,239 @@
+"""Ordinary callback tasks are logical batches, independent of physical placement."""
+import time
+
+import pytest
+
+from demiflow import data
+from demiflow.execution.run_context import RunContext
+from _worker_event_fixtures import emit, events
+
+
+class Number:
+    def __init__(self, path=None):
+        self.count = 0
+        self.path = path
+        if path:
+            emit(path, 'construct')
+    def __call__(self, row):
+        self.count += 1
+        if self.path:
+            emit(self.path, 'call', row=row['i'], count=self.count)
+        return {**row, 'within_task': self.count}
+    def close(self):
+        if self.path:
+            emit(self.path, 'close', count=self.count)
+
+
+def closure(path=None):
+    state = [0]
+    def number(row):
+        state[0] += 1
+        if path:
+            emit(path, 'call', row=row['i'], count=state[0])
+        return {**row, 'within_task': state[0]}
+    return number
+
+
+@pytest.mark.parametrize('form', ['class', 'closure', 'method'])
+def test_public_task_batch_rebuilds_every_callable_shape(tmp_path, form):
+    path = str(tmp_path / 'calls')
+    callback = {'class': Number, 'closure': closure(path), 'method': Number(path).__call__}[form]
+    # Initial driver instance construction is not a worker invocation.
+    before = len(events(path))
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution(workers=2, batch_rows=3):
+        options = {'fn_constructor_args': [path]} if form == 'class' else {}
+        actual = data.from_items([{'i': i} for i in range(7)]).map(callback, **options).take_all()
+        assert [row['within_task'] for row in actual] == [1, 2, 3, 1, 2, 3, 1]
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    observed = events(path)[before:]
+    assert [item['row'] for item in observed if item['event'] == 'call'] == list(range(7))
+    if form == 'class':
+        assert [item['count'] for item in observed if item['event'] == 'close'] == [3, 3, 1]
+        assert sum(item['event'] == 'construct' for item in observed) == 3
+    if form == 'method':
+        assert callback.__self__.count == 0
+
+
+@pytest.mark.parametrize('scope', ['stage', 'worker'])
+def test_explicit_streaming_scope_does_not_become_task_scope(scope):
+    with data.local_execution(batch_rows=3):
+        result = data.from_items([{'i': i} for i in range(7)]).map(Number,
+            execution='thread', callable_scope=scope, concurrency=1).take_all()
+    assert [row['within_task'] for row in result] == list(range(1, 8))
+
+
+@pytest.mark.parametrize('form', ['class', 'closure', 'method'])
+@pytest.mark.parametrize('prefix', [2, 3])
+def test_original_kernel_image_restores_partial_task_or_next_boundary(form, prefix):
+    # A store-boundary component test: real DTO/kernel/state codec, no fake
+    # worker/journal claim. The public driver recovery is tested separately.
+    from test_runtime_v3_k import services, spec, program, InputPort, rec, rows_of
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    callback = {'class': Number, 'closure': closure(), 'method': Number().__call__}[form]
+    svc = services(programs={'fn': program(CallableSpec.create(callback))})
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3},
+        inputs=[InputPort('input', 'incremental')], state='adapter')
+    first = OperatorKernel(policy, services=svc, partition_id='p0')
+    first.start()
+    result = []
+    for i in range(prefix):
+        result.extend(rows_of(first.push('input', rec({'i': i}, sequence=i))))
+    image = first.snapshot()
+    first.close()
+    second = OperatorKernel(policy, services=svc, partition_id='p0')
+    second.restore(image)
+    second.start()
+    if prefix == 3:
+        assert second._instance is None
+    for i in range(prefix, 7):
+        result.extend(rows_of(second.push('input', rec({'i': i}, sequence=i))))
+    second.close()
+    assert [row['within_task'] for row in result] == [1, 2, 3, 1, 2, 3, 1]
+
+
+def test_task_state_rejects_aliases_mutable_globals_and_invalid_frontier():
+    from demiflow.execution.kernels.task_scope import snapshot_function
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    shared = []
+    state = [shared, shared]
+    def aliased(row):
+        state[0].append(1)
+        return row
+    assert snapshot_function(aliased, max_bytes=4096)['mode'] == 'nonrecoverable'
+    namespace = {'counter': []}
+    exec('def external(row):\n counter.append(1)\n return row', namespace)
+    assert snapshot_function(namespace['external'], max_bytes=4096)['mode'] == 'nonrecoverable'
+    from test_runtime_v3_k import services, spec, program, InputPort
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel, IMAGE_MEDIA_TYPE
+    from demiflow.execution.kernels import state_codec
+    svc = services(programs={'fn': program(CallableSpec.create(Number))})
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3},
+        inputs=[InputPort('input', 'incremental')], state='auto_json')
+    before = OperatorKernel(policy, services=svc, partition_id='p0')
+    before.start()
+    ref = before.snapshot()
+    raw = b''.join(svc.store.read(ref, max_bytes=ref.size_bytes))
+    image = state_codec.loads(raw, max_bytes=svc.bounds.max_state_bytes)
+    before.close()
+    image['task']['input_frontier'] = -1
+    raw = state_codec.dumps(image, max_bytes=svc.bounds.max_state_bytes)
+    broken = svc.store.put(iter([raw]), max_bytes=len(raw), media_type=IMAGE_MEDIA_TYPE)
+    after = OperatorKernel(policy, services=svc, partition_id='p0')
+    after.restore(broken)
+    with pytest.raises(DataflowError, match='task frontier'):
+        after.start()
+
+
+def test_filtered_and_expanded_chains_keep_original_task_boundaries():
+    with data.local_execution(batch_rows=3):
+        source = data.from_items([{'i': i} for i in range(7)])
+        filtered = source.filter(lambda row: row['i'] % 2 == 0).select_columns(['i']).map(Number)
+        assert [row['within_task'] for row in filtered.take_all()] == [1, 2, 1, 1]
+        expanded = source.flat_map(lambda row: [row, row]).rename_columns({'i': 'value'}).map(
+            lambda row: {'i': row['value']}).map(Number)
+        assert [row['within_task'] for row in expanded.take_all()] == [1,2,3,4,5,6,1,2,3,4,5,6,1,2]
+        # Limit deliberately ends the old task group and creates a new batch.
+        limited = source.filter(lambda row: row['i'] % 2 == 0).limit(4).map(Number)
+        assert [row['within_task'] for row in limited.take_all()] == [1, 2, 3, 1]
+
+
+@pytest.mark.parametrize('form', ['class', 'closure'])
+def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_path, monkeypatch, form):
+    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.kernels import state_codec
+    class Interrupted(Exception):
+        pass
+    path = str(tmp_path / 'calls')
+    class SlowNumber(Number):
+        def __call__(self, row):
+            time.sleep(.02)
+            return super().__call__(row)
+    if form == 'closure':
+        state = [0]
+        def callback(row):
+            time.sleep(.02)
+            state[0] += 1
+            emit(path, 'call', row=row['i'], count=state[0])
+            return {**row, 'within_task': state[0]}
+        options = {}
+    else:
+        callback = SlowNumber
+        options = {'fn_constructor_args': [path]}
+    def build():
+        return data.from_items([{'i': i} for i in range(23)]).map(callback, **options)
+    original = DataflowCheckpointCoordinator.commit
+    cut = {}
+    def interrupt(coordinator, cut_id, *, sinks):
+        image = original(coordinator, cut_id, sinks=sinks)
+        if not image.cut.final and not cut:
+            for contribution in image.contributions:
+                for ref in contribution.operator_states.values():
+                    if ref.media_type != 'application/x-demiflow-kernel-image-v3':
+                        continue
+                    raw = b''.join(coordinator._store.read(ref, max_bytes=ref.size_bytes))
+                    state = state_codec.loads(raw, max_bytes=coordinator._physical.bounds.max_state_bytes)
+                    task = state.get('task')
+                    if task and task['input_frontier'] % 5 and task['input_frontier'] > 0:
+                        cut.update(frontier=task['input_frontier'], commit=image.commit_id)
+                        raise Interrupted('after native ACK')
+        return image
+    with monkeypatch.context() as patch:
+        patch.setattr(DataflowCheckpointCoordinator, 'commit', interrupt)
+        with pytest.raises(Interrupted, match='native ACK'):
+            with RunContext.start(tmp_path / 'run', limits={'checkpoint_rows': 1,
+                    'checkpoint_interval_ms': 1, 'checkpoint_unconfirmed_rows': 2}) as run, data.local_execution(workers=4, batch_rows=5):
+                ref = run.ref
+                build().take_all()
+    assert 0 < cut['frontier'] < 23
+    before = events(path)
+    committed_calls = [event for event in before if event['event'] == 'call' and event['row'] < cut['frontier']]
+    assert [event['row'] for event in committed_calls] == list(range(cut['frontier']))
+    with RunContext.resume(ref) as resumed, data.local_execution(workers=2, batch_rows=999):
+        # Recovery uses the already sealed batch size, not current placement or
+        # today's executor default. It never calls the committed task prefix.
+        rows = build().take_all()
+        assert [row['within_task'] for row in rows] == [i % 5 + 1 for i in range(23)]
+        assert any(fact['commit_id'] == cut['commit'] for fact in resumed.journal.execution_commits('action-1'))
+    after = [event for event in events(path) if event['event'] == 'call' and event['row'] < cut['frontier']]
+    assert after == committed_calls
+
+
+def test_task_function_state_budget_and_rebound_dependency_fail_closed():
+    from demiflow.execution.kernels.task_scope import snapshot_function, restore_function
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    value = b'initial'
+    def replace_bytes(row):
+        nonlocal value
+        value += b'next'
+        return row
+    assert snapshot_function(replace_bytes, max_bytes=4096)['mode'] == 'nonrecoverable'
+    function = closure()
+    image = snapshot_function(function, max_bytes=4096)
+    image['value']['cell:state'] = ['x' * 5000]
+    with pytest.raises(DataflowError, match='state'):
+        restore_function(function, image, max_bytes=4096)
+    assert function({'i': 0})['within_task'] == 1
+
+
+def test_task_provenance_is_separate_and_cannot_be_forged_at_a_follower():
+    from test_runtime_v3_k import services, spec, program, InputPort, rec
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    svc = services(programs={'fn': program(CallableSpec.create(Number))})
+    policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3, 'task_group': 'group-1', 'task_origin': False},
+        inputs=[InputPort('input', 'incremental')], state='auto_json')
+    follower = OperatorKernel(policy, services=svc, partition_id='p0')
+    follower.start()
+    for position in [{'index': 8}, {'index': 8, 'dataflow_task': {'group': 'wrong', 'ordinal': 0}},
+                     {'index': 8, 'dataflow_task': {'group': 'group-1', 'ordinal': -1}}]:
+        with pytest.raises(DataflowError, match='provenance'):
+            list(follower.push('input', rec({'i': 0}, position=position)))
+    record = list(follower.push('input', rec({'i': 0}, sequence=8,
+        position={'index': 8, 'source': 'original', 'dataflow_task': {'group': 'group-1', 'ordinal': 2}})))[0]
+    assert record.source_position['index'] == 8 and record.source_position['source'] == 'original'
+    with pytest.raises(DataflowError, match='out of order'):
+        list(follower.push('input', rec({'i': 1}, position={'dataflow_task': {'group': 'group-1', 'ordinal': 1}})))
+    follower.close()

@@ -168,7 +168,7 @@ def _output_record(
         raise _err("BUDGET_EXCEEDED", "output row exceeds max_row_bytes", size=len(data))
     return Record(
         record_id=record_id,
-        source_position=dict(source_position),
+        source_position=thaw_record_value(source_position),
         payload_ref=None,
         inline=dict(row),
         encoded_bytes=len(data),

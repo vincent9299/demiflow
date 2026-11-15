@@ -11,3 +11,8 @@ Evidence from the existing source and public documentation:
 5. The unchanged public `test_partition_callbacks_preserve_task_state_and_failure_before_commit` previously produced `[1,2,3,4,5,6,7]` on the new engine and remains a real regression. Its class/closure/bound-method expectations and failure-not-published checks were not weakened.
 
 The parent confirmed restoration of logical task boundaries for ordinary map. The pending implementation must use sealed logical task size/ordinal and checkpointed input frontier; it must not reset by accidental worker, residency phase, or attempt. Explicit streaming stage/worker scope remains its own declaration. Constructor effects and unrecoverable live objects need an explicit recovery boundary; this review does not claim arbitrary user-side effects are made exactly-once by snapshotting Python fields.
+
+
+## Implementation follow-up
+
+The task-scope implementation is now delivered with 94 passing combined checks. See `LOGICAL-TASK-STATE.md` and its byte-bound JSON for actual class/closure/bound-method execution, shared narrow-chain input task boundaries, and same-RunRef partial-task recovery. The historical diagnosis above is retained as evidence of the original regression, not a claim that it remains open. Parent integration still owns the concurrent ordering/task-provenance merge boundary.

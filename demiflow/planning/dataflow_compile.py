@@ -736,6 +736,26 @@ class _Capture:
             callable_spec = native_model_declaration(operation) or callable_spec
             if isinstance(operation, NativeOperation):
                 callable_spec = operation.factory
+            from ..execution.kernels.task_scope import TASK_KINDS, function_has_state
+            if kernel.kind in TASK_KINDS and not kernel.configuration.get('streaming_map'):
+                executor = getattr(self.request.action, '_dataflow_executor', None)
+                local = getattr(executor, '_local_kernel', None)
+                task_rows = getattr(local, 'batch_rows', None) or 8192
+                state = kernel.state
+                if isinstance(callable_spec, CallableSpec) and function_has_state(callable_spec.target):
+                    state = 'adapter'
+                group = self.nodes[index].kernel.configuration.get('task_group')
+                origin = group is None
+                if origin:
+                    group = _hash(['dataflow-task-group-v3', self.request.action.action_id, len(self.nodes)])
+                kernel = replace(kernel, configuration={**_plain(kernel.configuration),
+                    'task_batch_rows': int(task_rows), 'task_group': group, 'task_origin': origin}, state=state,
+                    mergeable=kernel.mergeable and state == 'none',
+                    profile=_default_profile(operation, bounds=self.bounds, state=state))
+            elif kernel.kind in {'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'RandomSampleOp'}:
+                group = self.nodes[index].kernel.configuration.get('task_group')
+                if group is not None:
+                    kernel = replace(kernel, configuration={**_plain(kernel.configuration), 'task_group': group})
             code_identity = (
                 _callable_code_identity(callable_spec)
                 if isinstance(callable_spec, CallableSpec) else {}

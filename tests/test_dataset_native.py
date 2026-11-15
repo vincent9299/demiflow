@@ -309,7 +309,10 @@ def test_partition_callbacks_preserve_task_state_and_failure_before_commit(tmp_p
             if row['k']==4:
                 raise ValueError('callback failed once')
             return row
-        with pytest.raises(ValueError,match='callback failed once'):
+    # A failed action leaves the run failed. Let its exception cross the run
+    # boundary; swallowing it would (correctly) trip unconfirmed-history safety.
+    with pytest.raises(ValueError,match='callback failed once'):
+        with data.local_execution(workers=2,worker_mode='process',batch_rows=3):
             rows.map(fail).write_lance(str(target),mode='overwrite',schema=schema)
     assert lance.dataset(str(target)).version==1
 
