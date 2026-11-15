@@ -281,6 +281,7 @@ class OperatorKernel:
         self._group_buffer_bytes = 0
         self._emitted = 0
         self._skip = 0
+        self._finish_cursor = None
         self.aggregate_state: AggregateState | None = None
         self._spool_owner_refs: list[ArtifactRef] = []
         self._instances = []
@@ -445,7 +446,20 @@ class OperatorKernel:
         return True
 
     @property
+    def cooperative_finish(self):
+        return bool(self._ports) and self._spec.kind != 'StreamPrependOp'
+
+    @property
+    def finish_replayable(self):
+        # Structural finite kernels are deterministic from the original sealed
+        # inputs. A user reducer may mutate hidden state; do not manufacture a
+        # replay promise for its active Python fold iterator.
+        return self.cooperative_finish and self._spec.kind != 'reduce'
+
+    @property
     def checkpoint_ready(self):
+        if self._finish_cursor is not None and not self.finish_replayable:
+            return False
         for instance in self._instances:
             if instance is not None:
                 instance.check_lifecycle()
@@ -708,7 +722,14 @@ class OperatorKernel:
             self._ports[port].finish()
             if not all(p.eoi for p in self._ports.values()):
                 return iter(())
+            if self._finish_cursor is None:
+                self._finish_cursor = {'port': port, 'emitted': 0}
+            elif self._finish_cursor['port'] != port:
+                raise _err('INCOMPATIBLE_HISTORY', 'finite finish resumed on a different input port')
             yield from self._finish_complete()
+            if self._skip:
+                raise _err('INCOMPATIBLE_HISTORY', 'finite replay ended before the committed output frontier')
+            self._finish_cursor = None
             return
         if kind in _BATCH_INSTANCE_KINDS:
             if self._batch:
@@ -794,6 +815,8 @@ class OperatorKernel:
                 self._skip -= 1
                 continue
             self._emitted += 1
+            if self._finish_cursor is not None:
+                self._finish_cursor['emitted'] += 1
             self.observations.hold_output(record.encoded_bytes)
             try:
                 yield record
@@ -830,6 +853,8 @@ class OperatorKernel:
             "inflight_calls": self._calls.snapshot() if self._calls is not None else [],
             "aggregate_state": self.aggregate_state,
         }
+        if self._finish_cursor is not None:
+            image['finish_cursor'] = dict(self._finish_cursor)
         if self._spec.kind in _STREAM_GROUP_KINDS:
             image['group_remaining_ms']=(max(0,self._timer_deadline-self._services.clock_ms())
                 if self._timer_deadline is not None else None)
@@ -973,7 +998,17 @@ class OperatorKernel:
             if type(ordinal) is not int or ordinal < 0:
                 raise _err('CORRUPT_ARTIFACT', 'Invalid native invocation cursor')
             self._instance.native_call_ordinal = ordinal
-        self._skip = 0  # input cursors already resume after the committed prefix
+        self._skip = 0  # incremental inputs resume after the committed prefix
+        self._finish_cursor = None
+        cursor = image.get('finish_cursor')
+        if cursor is not None:
+            if (not self.finish_replayable or type(cursor) is not dict
+                    or set(cursor) != {'port', 'emitted'} or cursor['port'] not in self._ports
+                    or type(cursor['emitted']) is not int or not 0 <= cursor['emitted'] <= self._emitted
+                    or not all(port.eoi for port in self._ports.values())):
+                raise _err('INCOMPATIBLE_HISTORY', 'invalid finite output recovery frontier')
+            self._finish_cursor = dict(cursor)
+            self._skip = cursor['emitted']
         self.aggregate_state = image["aggregate_state"]
         if not self._worker_scope:
             self._restore_state(image["state"])

@@ -43,12 +43,14 @@ class WorkerGraphRunner:
         self._finished_splits = set()
         self._finished_inputs = set()
         self._finished_ports = set()
+        self._active_finishes = {}
         self._closed_inputs = set()
         self._closed_outputs = set()
         self._emitted_eoi = set()
         self._credits = {}
         self._credit_payloads = {}
         self._consumed_deliveries = set()
+        self._memory_frontiers = {}
         physical = executor._physical
         self._park_mode = (any(e.mode == 'durable_incremental' for e in physical.exchanges)
             and sum(s.resident_bytes * s.replica_target for s in physical.stages)
@@ -158,6 +160,20 @@ class WorkerGraphRunner:
             self._finished_ports = set(completed_ports)
             self._closed_inputs = set(frontier.get('closed_inputs', ()))
             self._closed_outputs = set(frontier.get('closed_outputs', ()))
+            for (occurrence, _), kernel in self.e._kernels.items():
+                cursor = kernel._finish_cursor
+                if cursor is None:
+                    continue
+                # Consumer satisfaction may close a finite iterator before its
+                # suffix is emitted. The original closed-output frontier is the
+                # proof to discard that suffix, including after a partial cut.
+                pruned = (occurrence in self._finished and self._outgoing.get(occurrence)
+                          and all(edge.edge_id in self._closed_outputs
+                                  for edge in self._outgoing[occurrence]))
+                if not pruned and (occurrence in self._finished or any(
+                        edge.edge_id in self._finished_ports for edge in self._incoming.get(occurrence, ())
+                        if edge.input_port == cursor['port'])):
+                    raise DataflowError('FENCED', 'active finite output frontier was already completed')
             self._emitted_eoi = set(frontier.get('emitted_eoi', ()))
             metrics = frontier.get('metrics', {})
             if metrics:
@@ -166,6 +182,17 @@ class WorkerGraphRunner:
                 self._metrics = metrics
             self.e._event_sequence = max(self.e._event_sequence, frontier.get('event_sequence', 0))
             self._consumed_deliveries = set(frontier.get('consumed_deliveries', ()))
+            memory = frontier.get('memory_frontiers', {})
+            if type(memory) is not dict:
+                raise DataflowError('FENCED', 'invalid memory input frontier')
+            for edge_id, values in memory.items():
+                spec = self._exchange.get(edge_id)
+                if (spec is None or spec.mode != 'memory_incremental'
+                        or self.partition not in spec.consumer_partitions or type(values) is not dict
+                        or not set(values) <= set(spec.producer_partitions)
+                        or any(type(seq) is not int or seq < 0 for seq in values.values())):
+                    raise DataflowError('FENCED', 'memory input frontier differs from assigned channel')
+                self._memory_frontiers[edge_id] = dict(values)
             self._credit_payloads = dict(frontier.get('durable_deliveries', {}))
             leases = {lease.operation_id: lease for lease in self.e._channels.outstanding_leases()}
             if not set(self._credit_payloads) <= set(leases):
@@ -336,7 +363,7 @@ class WorkerGraphRunner:
                 if node.kind == 'source' and not any(s.source_id == occ for s in self.e.assignment.source_splits):
                     self._finish_node(occ)
         if not (self._paused and self._idle_sent):
-            processed += self._advance_input_completions()
+            processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
@@ -454,7 +481,7 @@ class WorkerGraphRunner:
         payload = {'delivery_id': delivery, 'producer_partition': self.partition,
                    'target_partition': target, 'edge_id': edge.edge_id if edge else None,
                    'record_id': record.record_id, 'sequence': record.sequence}
-        if spec is not None and spec.mode == 'durable_incremental':
+        if spec is not None:
             payload.update(route_epoch=spec.route_epoch, route_sequence=route_sequence)
         key = None
         if spec is None or spec.mode == 'memory_incremental':
@@ -478,6 +505,18 @@ class WorkerGraphRunner:
                 or command['producer_partition'] not in spec.producer_partitions
                 or self.partition not in spec.consumer_partitions):
             raise DataflowError('FENCED', 'delivery is outside assigned physical edge')
+        memory = spec.mode == 'memory_incremental'
+        if memory:
+            sequence = command.get('route_sequence')
+            if (type(sequence) is not int or sequence < 0
+                    or type(command.get('route_epoch')) is not int or command['route_epoch'] != spec.route_epoch):
+                raise DataflowError('FENCED', 'memory delivery lacks its original routing frontier')
+            previous = self._memory_frontiers.get(edge_id, {}).get(command['producer_partition'], -1)
+            if sequence <= previous:
+                # A memory channel is ordered and has no replay owner. Reject
+                # duplicate/reordered transport before re-reading a released
+                # peer buffer or executing the business callback a second time.
+                raise DataflowError('INVALID_CONTRACT', 'duplicate or reordered memory delivery')
         if 'peer' in command:
             raw = read_peer(command['peer'], bounds=self.bounds)
         else:
@@ -485,11 +524,14 @@ class WorkerGraphRunner:
             raw = b''.join(self.services.store.read(ref, max_bytes=self.bounds.max_row_bytes))
         record = _decode_record_document(raw, record_id=command['record_id'], sequence=command['sequence'],
                                          max_bytes=self.bounds.max_row_bytes)
-        if command['delivery_id'] not in self._consumed_deliveries:
+        if memory or command['delivery_id'] not in self._consumed_deliveries:
             self._push(edge.consumer, edge.input_port, record)
-            if len(self._consumed_deliveries) >= self.bounds.max_pending_events:
-                raise DataflowError('BUDGET_EXCEEDED', 'consumer delivery frontier exceeds bounded window')
-            self._consumed_deliveries.add(command['delivery_id'])
+            if memory:
+                self._memory_frontiers.setdefault(edge_id, {})[command['producer_partition']] = sequence
+            else:
+                if len(self._consumed_deliveries) >= self.bounds.max_pending_events:
+                    raise DataflowError('BUDGET_EXCEEDED', 'consumer delivery frontier exceeds bounded window')
+                self._consumed_deliveries.add(command['delivery_id'])
         self._send('ack', {'delivery_id': command['delivery_id'],
                            'producer_partition': command['producer_partition']})
 
@@ -583,8 +625,10 @@ class WorkerGraphRunner:
         # EOI is an input fact, not permission to block this runner while a
         # callback waits for another co-resident node's timer or output.
 
-    def _advance_input_completions(self):
+    def _advance_input_completions(self, *, max_records, deadline_ms):
         processed = 0
+        outputs = 0
+        deadline = time.monotonic() + deadline_ms / 1000
         # Graph membership bounds this state. A completed node may close its
         # local outgoing edges, so visit until no further synchronous EOI can
         # advance; pending callbacks return to the ordinary bounded poll loop.
@@ -604,7 +648,26 @@ class WorkerGraphRunner:
                                  if edge.edge_id in self._exchange else (self.partition,))
                     if not all((edge.edge_id, p) in self._finished_inputs for p in producers):
                         continue
-                    if kernel is not None:
+                    if kernel is not None and kernel.cooperative_finish:
+                        if self._paused and kernel.finish_replayable:
+                            continue
+                        iterator = self._active_finishes.get(edge.edge_id)
+                        if iterator is None:
+                            iterator = iter(kernel.finish(edge.input_port, wait_for_calls=False))
+                            self._active_finishes[edge.edge_id] = iterator
+                        try:
+                            out = next(iterator)
+                        except StopIteration:
+                            self._active_finishes.pop(edge.edge_id)
+                        else:
+                            self._output(occurrence, out)
+                            processed += 1
+                            outputs += 1
+                            advanced = True
+                            if outputs >= max_records or time.monotonic() >= deadline:
+                                return processed
+                            continue
+                    elif kernel is not None:
                         for out in kernel.finish(edge.input_port, wait_for_calls=False):
                             self._output(occurrence, out)
                     self._finished_ports.add(edge.edge_id)
@@ -722,7 +785,8 @@ class WorkerGraphRunner:
             'closed_inputs': sorted(self._closed_inputs), 'closed_outputs': sorted(self._closed_outputs),
             'durable_deliveries': self._credit_payloads, 'emitted_eoi': sorted(self._emitted_eoi),
             'metrics': self._metrics, 'event_sequence': self.e._event_sequence,
-            'consumed_deliveries': sorted(self._consumed_deliveries)}, self.bounds.max_state_bytes)
+            'consumed_deliveries': sorted(self._consumed_deliveries),
+            'memory_frontiers': self._memory_frontiers}, self.bounds.max_state_bytes)
         states[identity(['worker-frontier', self.partition])] = self.services.store.put(
             iter([frontier]), max_bytes=len(frontier), media_type='application/json')
         refs = snapshot_channels(self.e._channels, cut=request, store=self.services.store)
@@ -759,6 +823,9 @@ class WorkerGraphRunner:
             self._thread.join(timeout=self.bounds.timeout_ms / 1000)
             if self._thread.is_alive():
                 raise DataflowError('DEADLINE_EXCEEDED', 'Business thread still owns its scratch buffers')
+        for iterator in self._active_finishes.values():
+            iterator.close()
+        self._active_finishes.clear()
         self._peer.close()
         self._terminal_blocks.close()
         for stream in self._finite.values():
