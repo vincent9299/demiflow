@@ -32,7 +32,10 @@ def base(tmp_path_factory):
 
 
 @pytest.fixture
-def root(base, tmp_path):
+def root(base, tmp_path, monkeypatch):
+    # A temporary workspace must not join the machine's production deployment
+    # domain or its fixed workspace allowlist/resource admission ledger.
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))
     target = tmp_path / 'workspace'
     shutil.copytree(base, target)
     return target

@@ -1,0 +1,789 @@
+{
+  "format": "demiflow-regression-product-evidence-v1",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+  "head": "0a206457a810807e0bd31d849df8d9f6a3df176e",
+  "dirty_tests": true,
+  "batches": [
+    {
+      "name": "product",
+      "head": "712c61b",
+      "junit": "/tmp/demiflow-regression-product.xml",
+      "junit_sha256": "58f80268050e2abf34527d0ef7bc9048e5be8c12de833bcbe48d5ce96cfc716e",
+      "log": "/tmp/demiflow-regression-product.log",
+      "log_sha256": "1f7d395062bfba2e5adff9d47a7d6df8dff2086a5de49b69a226cc21679edb85",
+      "tests": 69,
+      "passed": 58,
+      "failed": 11,
+      "skipped": 0
+    },
+    {
+      "name": "runs2",
+      "head": "712c61b",
+      "junit": "/tmp/demiflow-regression-runs2.xml",
+      "junit_sha256": "9e5845adbb5c2d9c7fd2612e7b1804a6a525e6cf9533358c5e956501c57052ec",
+      "log": "/tmp/demiflow-regression-runs2.log",
+      "log_sha256": "24f071243d49ad066e74155a38ae337f2ef3ff65b6e1b6d7a2e01e9441e21080",
+      "tests": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "media",
+      "head": "712c61b",
+      "junit": "/tmp/demiflow-regression-media.xml",
+      "junit_sha256": "687f258c0146b95b51e1fcfeda5b24c28a1acd7420e919f510ae88d8ba115cfc",
+      "log": "/tmp/demiflow-regression-media.log",
+      "log_sha256": "a225e2784fce9ef6996c89b33be8546b091617f37215f30abbadecdffb431254",
+      "tests": 44,
+      "passed": 41,
+      "failed": 3,
+      "skipped": 0
+    },
+    {
+      "name": "product-final",
+      "head": "6198c33+test-fixture-diff",
+      "junit": "/tmp/demiflow-regression-product-final.xml",
+      "junit_sha256": "9d7b1bb6512280f00b2950707cc9129ff656c8adb5d271df61b6d4c1038821b4",
+      "log": "/tmp/demiflow-regression-product-final.log",
+      "log_sha256": "48531e915bbab89328b1ece6981c39ae6681add4f1a6d2fb19ae56658a375545",
+      "tests": 26,
+      "passed": 24,
+      "failed": 2,
+      "skipped": 0
+    },
+    {
+      "name": "browser-final",
+      "head": "0a20645+test-fixture-diff",
+      "junit": "/tmp/demiflow-regression-browser-final.xml",
+      "junit_sha256": "9db555abee70f62aa24a34c8b070cdddcadc644f344407b35babf67511102c15",
+      "log": "/tmp/demiflow-regression-browser-final.log",
+      "log_sha256": "0d29521ac7d7a08a3cbc6fd890da24f04f434dcd4d245162902f5a5c7f7584a8",
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "latest_product_nodeids": {
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_success": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_missing": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_triple_mismatch": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_action_mismatch": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_invalid_arguments": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_invalid_document[<lambda>-identity_bridge_invalid0]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_invalid_document[<lambda>-identity_bridge_invalid1]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_invalid_document[<lambda>-identity_bridge_invalid2]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_invalid_document[<lambda>-identity_bridge_invalid3]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_invalid_document[<lambda>-identity_bridge_invalid4]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_corrupt_carrier": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_read_identity_bridge_oversize": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_join_observed_and_not_in_page": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_join_empty_page_is_not_in_page_not_absence": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_join_attempt_scope_conflict": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_join_action_scope_conflict": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_join_rejects_wrong_bridge_action": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_join_rejects_bad_format": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_bridge_node_map_unambiguous": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_bridge_node_map_omits_multi_instance": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_sealed_entry_with_bridge_populates_node_map": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_sealed_entry_without_bridge_is_honest": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_overlay_sealed_with_report_digest_binds_bridge": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_overlay_sealed_without_report_digest_keeps_bridge_missing": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_resolve_bridge_node_unique": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_resolve_bridge_node_multi_instance_requires_occurrence": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_resolve_bridge_node_unbridged_not_found": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_f10_sealed_at_is_epoch_milliseconds": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_workbench_execution_binding.py::test_sealed_at_stored_as_integer_milliseconds": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_execution_notebook.py::test_only_explicit_graph_cells_execute": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_execution_notebook.py::test_code_fingerprint_ignores_source_location_but_includes_nested_logic": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_execution_notebook.py::test_spawn_uses_explicit_working_directory_without_changing_parent_env": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_runs.py::test_real_ab_receipts_case_comparison_and_fixed_continuation": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_prepare_does_not_execute_and_rejects_changed_basis": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_run_log_rotation_preserves_tail_and_reports_expired_cursor": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_seal_tamper_and_exact_create_conflict": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_unrelated_source_change_and_start_retry": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_native_materialize_union_columns_and_independent_outputs": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_runs.py::test_partial_commit_and_empty_output_failure": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_output_budget_is_failure_not_truncated_success": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_cancel_and_timeout_own_run_only": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_create_reconciliation_uses_marker_and_preserves_fixed_version": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_wrong_marker_never_promoted_and_registration_recovery": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_actual_return_contract_cannot_rely_on_annotation[bad-expected0]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_actual_return_contract_cannot_rely_on_annotation[1-expected1]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_actual_return_contract_cannot_rely_on_annotation[value2-expected2]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_actual_return_contract_cannot_rely_on_annotation[None-expected3]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_runs.py::test_journal_cas_immutable_events_and_readonly": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-runs2.xml",
+      "batch": "runs2"
+    },
+    "tests/test_forge_historical_source.py::test_source33_authorization_reads_original_source_identity_only": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_case_read.py::test_case_read_has_native_budget_fixed_mount_and_no_kernel_owner_dependency": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_case_read.py::test_case_and_generation_native_slot_are_mutually_exclusive": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_case_read.py::test_case_owner_rejects_changed_query_object_project_and_generation_borrow": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_case_read.py::test_case_entry_refuses_before_native_import_or_reader": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_case_read.py::test_case_error_reply_keeps_original_identity_without_host_path": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_fixed_reads.py::test_exited_worker_does_not_lose_queued_end_before_cleanup_or_readopt_generation": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_fixed_reads.py::test_owner_clear_failure_after_retirement_holds_return_without_accessing_retired_lease": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_fixed_reads.py::test_incomplete_read_does_not_acknowledge_end_or_release_owner": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_fixed_reads.py::test_consumer_cancel_fences_owned_job_and_cleans_before_releasing_slot": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_fixed_reads.py::test_original_output_range_accepts_integer_http_status_and_retires_before_bytes": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_kernel_contract.py::test_python_source_is_exact_and_sql_is_a_literal_helper_call_with_stable_request": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_kernel_contract.py::test_old_generation_altered_source_and_bad_result_names_refuse": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_kernel_contract.py::test_named_sql_notebook_export_import_preserves_language_and_binding_name": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_kernel_contract.py::test_provisioner_refuses_before_popen_when_outer_sandbox_missing": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_kernel_contract.py::test_kernel_entrypoint_refuses_before_connecting_or_launching_manager": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_kernel_contract.py::test_output_entry_without_trusted_context_keeps_original_oci_guard": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_presentations.py::test_trusted_output_registration_enables_exact_annotation_origin_and_history": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_presentations.py::test_changed_definition_source_or_forged_witness_cannot_claim_notebook_origin": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_presentations.py::test_only_broker_registered_prior_cell_handles_enter_the_exact_output_witness": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_analysis_presentations.py::test_dependency_distinct_handle_limit_is_checked_before_admission": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product.xml",
+      "batch": "product"
+    },
+    "tests/test_forge_outputs_media.py::test_registered_witness_keeps_old_execution_generation_and_rejects_foreign_or_changed_binding": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_output_provenance_mismatch_never_relabels_original_and_pages_are_bounded": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_mime_alternatives_and_embedded_image_do_not_echo_base64_or_execute_unknown": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_fixed_output_path_integrity_and_no_symlink_following": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_range_semantics[bytes=0-0-expected0]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_range_semantics[bytes=-10-expected1]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_range_semantics[bytes=90--expected2]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_range_semantics[bytes=90-999-expected3]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_range_semantics[None-expected4]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[bytes=0-1,4-8]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[bytes=2097152-]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[bytes=1-0]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[bytes=-0]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[bytes=0-1048576]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[bytes=+1-2]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[bytes=0-\\xb2]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_ranges_reject_multi_oversized_bad_and_unsatisfiable[items=0-1]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_native_open_range_is_served_as_bounded_declared_chunk": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_real_image_and_wav_decoders_check_metadata_and_explicit_failures": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_authorized_media_rechecks_project_binding_bytes_and_revocation": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_null_and_media_metadata_are_not_guessed": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_fixed_output_worker_returns_small_page_and_exact_original_chunk": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_existing_client_table_mime_and_case_definition_witness_remain_separate_from_saved_views": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_json_int64_source_is_exact_instead_of_rounding_through_browser_number": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_message_and_dialogue_mimes_reuse_typed_validation_and_degrade_honestly": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_embedded_wav_mime_uses_real_decoder_and_missing_video_probe_is_explicit": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_real_static_image_decoders_for_closed_non_png_mimes[image/jpeg-JPEG]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_real_static_image_decoders_for_closed_non_png_mimes[image/webp-WEBP]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_real_static_image_decoders_for_closed_non_png_mimes[image/gif-GIF]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_outputs_media.py::test_animated_image_is_explicitly_unavailable_instead_of_unbounded_decoding": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_notebook_history.py::test_reopened_notebook_discovers_old_generation_without_execution_or_relabeling": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_notebook_history.py::test_history_does_not_cross_project_or_revoked_membership": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_browser.py::test_three_regions_view_definition_changes_and_annotation_history_are_separate": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_case_browser.py::test_lost_annotation_response_reconciles_original_receipt_after_remount": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_browser.py::test_storage_denial_keeps_answer_and_refuses_dispatch_without_durable_identity": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_ready_descriptors_use_shared_png_wav_renderer_and_release_on_case_format_leave": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_explicit_capture_permissions_original_receipt_and_independent_text_save": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_missing_root_keeps_raw_values_and_late_lookup_capture_never_rebinds": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_answer_basis_freezes_on_first_edit_and_capability_blocks_only_media_drafts": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_media_basis_save_receipt_history_clear_revert_preserve_exact_consumer_evidence": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_late_capture_keeps_dirty_empty_basis_until_explicit_adoption": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_storage_denial_no_capture_and_malformed_ready_is_never_rendered": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_case_media_browser.py::test_inexact_media_receipt_preserves_draft_then_original_receipt_recovers": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-media.xml",
+      "batch": "media"
+    },
+    "tests/test_forge_analysis_media_shell_browser.py::test_actual_shell_field_capture_preview_annotation_history_and_narrow_layout": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-browser-final.xml",
+      "batch": "browser-final"
+    },
+    "tests/test_workbench_execution_binding_browser.py::test_real_run_sealed_graph_f10_and_honest_bridge": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-browser-final.xml",
+      "batch": "browser-final"
+    },
+    "tests/test_workbench_execution_binding_browser.py::test_real_run_data_graph_source_and_params_still_load": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_outputs_jupyter.py::test_real_private_jupyter_mime_output_projects_to_same_typed_renderer_contract": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_local_notebook_source_survives_project_navigation_without_execution[None]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_local_notebook_source_survives_project_navigation_without_execution[QuotaExceededError]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_local_notebook_source_survives_project_navigation_without_execution[SecurityError]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_source_import_keeps_old_draft_distinct_and_narrow_layout_fits": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_denied_storage_preserves_invalid_source_across_new_import_and_dispose[QuotaExceededError]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_denied_storage_preserves_invalid_source_across_new_import_and_dispose[SecurityError]": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_full_bounded_draft_capacity_blocks_departure_without_overwriting_editor": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_browser.py::test_quota_failure_project_switch_keeps_original_project_source": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_records.py::test_notebook_picker_names_come_from_current_saved_revision_without_rewriting_history": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_records.py::test_notebook_response_loss_cas_and_history_survive_controller_crash": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_records.py::test_permission_revoked_before_commit_rolls_back_document_and_receipt": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_records.py::test_saved_views_and_annotations_are_independent_definition_history_is_immutable": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_records.py::test_annotation_batch_cas_is_atomic_and_revert_appends_history": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_records.py::test_backup_preserves_receipts_and_unknown_schema_is_not_modified": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_sessions.py::test_generation_environment_and_scoped_cleanup_survive_restart_without_relabeling_history": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_sessions.py::test_environment_is_part_of_start_receipt_and_trusted_capabilities_cannot_claim_isolation": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_sessions.py::test_queue_receipts_source_binding_and_at_most_once_dispatch": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_sessions.py::test_uncertain_execution_survives_restart_and_holds_slot_until_cleanup": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    },
+    "tests/test_forge_analysis_sessions.py::test_revocation_rolls_back_dispatch_and_no_uncommitted_output_is_success": {
+      "status": "passed",
+      "evidence": "/tmp/demiflow-regression-product-final.xml",
+      "batch": "product-final"
+    }
+  },
+  "unique_product_tests": 135,
+  "all_latest_passed": true,
+  "current_input_sha256": {
+    "demiflow/execution/dataflow_seal.py": "8c5d96a7ad706ee5bfed351beadf571105f2eb319a70d6cd4b1604eb8c3daed1",
+    "demiflow/execution/source_readers.py": "574138f39dc2f553fa913b25dc46407edc497738981026467792f3ae66e5716c",
+    "demiflow/workbench/runs/facts.py": "eab6cf194ad59009c01d6467eb4df98c7d71ff34f9a88ea179c61b7167624fc3",
+    "demiflow/workbench/web/workbench.js": "478b6c3358c4127a19461b41ae2dd14539cee9d34b268bcd774db794f162bc73",
+    "tests/test_execution_notebook.py": "3f6747e7bc0652384803f184f299b245cf70b74272081a4177d960208b81e254",
+    "tests/test_forge_analysis_browser.py": "731d91a4ee661a4710e00d331221c39904a77a2c1de11cdace6f7829c3751fb3",
+    "tests/test_forge_analysis_case_browser.py": "65bba7550700e41d892da6fd037fedc22d14cd430d60e1f23c2df758c48449db",
+    "tests/test_forge_analysis_case_media_browser.py": "9794fb12d602f19d3fc36a9efc697ff01820b9684052d47c9be81edcde27114b",
+    "tests/test_forge_analysis_case_read.py": "6fc4d31bc3f3de522b1c670786cbb5b938aad45e1c5306e2ff449dda5c54f363",
+    "tests/test_forge_analysis_fixed_reads.py": "62178f27388c23417a452affee6a84e6f4d724d5b3f75b7994f758145e6214c3",
+    "tests/test_forge_analysis_kernel_contract.py": "28a321560bf45dec4e190d6f3abd86ec610aaa27415dde17d1580353aac74316",
+    "tests/test_forge_analysis_media_shell_browser.py": "fe8ee888a800daa7f8df0adfdd72f0539aca2d5254ca289831f24fbc4269c00a",
+    "tests/test_forge_analysis_notebook_history.py": "2604dc4b4db2131f2f8a4333c1aea8015c3d77d110f8e97cb7b614a5a39d7639",
+    "tests/test_forge_analysis_presentations.py": "3967771bef63c93b26c3ea215e164286fd236843f07b200c26ae45919284078f",
+    "tests/test_forge_analysis_records.py": "7b80a48c59a3f9ec88254a117094978b70dcac91d097d3f370b36adca5c16ccc",
+    "tests/test_forge_analysis_sessions.py": "bb7c4052c9af082c2de411cd3e0732da0d43f2aa18be87dedee64454348a1b48",
+    "tests/test_forge_historical_source.py": "cbffee2dd4edc7634e9bc877e001a9632bca01cd710ada5181e7b0d5a61fec73",
+    "tests/test_forge_outputs_jupyter.py": "612468c537f828cf549e51abac61e78991acf4bb5d5fa0e1bf16a31b9166bc03",
+    "tests/test_forge_outputs_media.py": "ed20cb2d8627f9d67652f5aaee3c10018f19e324e23fede12036218219d9f2b0",
+    "tests/test_forge_runs.py": "8c32c5c0a7472abd021e30e55732481968b16d0698868d8ba534dc379ed160fa",
+    "tests/test_runtime_v3_seal_metadata.py": "175d8aa887d9d86c0d6dcf29271a2391238d86cf6250479fa5e9e4c6755ca24b",
+    "tests/test_workbench_execution_binding.py": "417caa0a10dab1c4e486b82e29394f717de74a646c5c3b599801136e85faf989",
+    "tests/test_workbench_execution_binding_browser.py": "ac941979d45af0a02dbcd95ea8365fd56183ea2fafa309ac962467de6bb51c61"
+  },
+  "frozen_unchanged_against": "49b666f",
+  "frozen_paths": [
+    "demiflow/execution/raw_fetch.py",
+    "demiflow/execution/queue_execution.py",
+    "demiflow/execution/queue_sinks.py",
+    "demiflow/execution/queue_source.py",
+    "demiflow/planning/dag.py",
+    "demiflow/execution/contracts/exchange.py",
+    "demiflow/resources/contracts.py"
+  ],
+  "limitations": [
+    "135 distinct product nodeids were verified in staged runs, not one all-at-final-HEAD invocation.",
+    "Only final browser and seal-metadata runs bind to the current production commit; earlier runs are retained as diagnostic and targeted regression evidence.",
+    "Case media shell has explicit Runtime/WebService doubles; real Chromium/HTTP/SQLite/PNG worker are used.",
+    "Private Jupyter MIME test is not a deployed OCI/Notebook isolation proof.",
+    "No production service, business database, model, or multi-host Ray cluster was used."
+  ]
+}

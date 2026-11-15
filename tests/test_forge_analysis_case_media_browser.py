@@ -252,6 +252,7 @@ def test_media_basis_save_receipt_history_clear_revert_preserve_exact_consumer_e
         page.get_by_role('button', name='核对 Case 原请求', exact=True).click()
         expect(page.get_by_role('button', name='核对 Case 原请求', exact=True)).to_have_count(0)
         assert draft(page)['answers'][0]['media_basis']==before and not draft(page)['answers'][0]['dirty']
+        page.get_by_text('标注历史与恢复', exact=True).click()
         page.get_by_role('button', name='清除已保存答案', exact=True).click()
         expect(page.get_by_label('标注 结果是否符合预期', exact=True)).to_have_value('')
         assert draft(page)['answers'][0]['media_basis']==before

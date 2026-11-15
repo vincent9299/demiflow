@@ -19,6 +19,7 @@ import pytest
 from playwright.sync_api import expect
 
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench.runs import facts
 from test_forge_workspace import demo, isolated
 from test_forge_markdown_reading import browser
 from test_forge_public_api import service
@@ -69,16 +70,24 @@ def test_real_run_sealed_graph_f10_and_honest_bridge(isolated, browser):
         expect(page.locator('.wb-run-bar')).to_be_visible()
         expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('成功')
         run_id = page.evaluate('ForgeView.decodeView(location.hash)')['run_id']
-        assert runs.show(isolated, run_id)['outputs'][0]['result']['ref']['row_count'] == 2
+        result = runs.show(isolated, run_id)
+        assert result['outputs'][0]['result']['ref']['row_count'] == 2
+        sealed = facts.read_sealed_plan(runs.directory(isolated, run_id), result['outputs'][0]['action_id'])
+        assert sealed['available'] and sealed['version'] == 'v3'
+        assert type(sealed['sealed_at']) is int
         expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
         shot(page, 'd-real-run-sealed-graph')
 
         # Logical projection of the executed sealed plan.
         page.get_by_role('button', name='运行封存计划（E2）', exact=True).click()
-        expect(page.locator('.wb-logical-bar')).to_contain_text('结构校验通过')
+        expect(page.locator('.wb-logical-bar')).to_contain_text('封存计划结构')
         expect(page.locator('.wb-logical-bar')).to_contain_text('已绑定本次执行计划')
+        expect(page.locator('.wb-logical-bar')).to_contain_text('dag_id ' + sealed['dag_id'][:16])
+        expect(page.locator('.wb-logical-bar')).to_contain_text('plan_id ' + sealed['plan_id'][:16])
         # F10: sealed_at is epoch milliseconds rendered as a real ISO instant.
-        expect(page.locator('.wb-logical-bar')).to_contain_text('sealed_at 2026-')
+        from datetime import datetime, timezone
+        sealed_iso = datetime.fromtimestamp(sealed['sealed_at'] / 1000, tz=timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+        expect(page.locator('.wb-logical-bar')).to_contain_text('sealed_at ' + sealed_iso)
         expect(page.locator('.wb-logical-bar')).not_to_contain_text('Invalid Date')
         expect(page.locator('.wb-logical-bar')).not_to_contain_text('sealed_at 未提供')
         shot(page, 'd-logical-sealed-bar-f10')

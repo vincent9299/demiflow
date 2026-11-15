@@ -71,6 +71,7 @@ def test_actual_shell_field_capture_preview_annotation_history_and_narrow_layout
             features=dict(case_media=True,annotation_media_basis=True)
             def __init__(self,server,config):self.server=server
             def ceiling(self):return dict(analysis_write=True,case_annotate=True,analysis_execute=False)
+            def execution_profile(self):return None  # fixture has no kernel backend
             def assert_ready(self):return True
             def close(self):pass
             def cancel_output(self,key):pass  # explicit synchronous fixture, not stop proof
@@ -206,7 +207,8 @@ def test_actual_shell_field_capture_preview_annotation_history_and_narrow_layout
                 reference=dict(v=2,workspace=project,kind='tables',view_id=different_view['id'],revision=1)
                 link=page.evaluate('value=>ForgeView.encodeView(value)',reference)
                 page.goto(app.origin+'/'+link);page.reload()
-                expect(page.locator('.case-ui-presentation')).to_contain_text(different_view['id'],timeout=65000)
+                assert page.evaluate('ForgeView.decodeView(location.hash)') == reference
+                expect(page.locator('.case-ui-presentation')).to_contain_text('收到已保存的 Case 视图',timeout=65000)
                 expect(page.locator('.case-ui-presentation')).to_contain_text('v1')
                 assert len(sample_reads)==before_samples
                 page.get_by_role('button',name='采用已保存视图',exact=True).click()
