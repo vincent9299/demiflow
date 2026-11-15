@@ -125,6 +125,7 @@ class DataflowExecution:
         self._satisfied_consumers = {}
         self._terminal_stop_sources = {}
         self._terminal_queue = deque()
+        self._terminal_subscription_closed = False
         self._terminal_seen = 0
         self._idle = set()
         self._done = set()
@@ -896,10 +897,17 @@ class DataflowExecution:
                 if not any(n in self._graph.terminals for st in self._physical.stages
                            if st.stage_id == lease.stage_id for n in st.occurrences):
                     raise DataflowError("FENCED", "non-terminal allocation emitted a terminal record")
-                if len(self._terminal_queue) >= self._bounds.max_pending_events:
+                if (not self._terminal_subscription_closed
+                        and len(self._terminal_queue) >= self._bounds.max_pending_events):
                     raise DataflowError("BUDGET_EXCEEDED", "terminal subscription credit exceeded")
                 self._deliveries[delivery] = (endpoint, None)
-                self._terminal_queue.append(payload)
+                if self._terminal_subscription_closed:
+                    # The worker already spooled this real output. A consumer
+                    # closing its view releases transport ownership, including
+                    # envelopes arriving after close, before the original cut.
+                    self._ack(delivery)
+                else:
+                    self._terminal_queue.append(payload)
                 self._terminal_seen += 1
                 if self._limit is not None and self._terminal_seen >= self._limit:
                     self.satisfy_terminal()
@@ -1354,6 +1362,7 @@ class _OutputSubscription:
         if self.closed:
             return
         self.closed = True
+        self.execution._terminal_subscription_closed = True
         replay, self.execution._replay = self.execution._replay, None
         if replay is not None:
             replay.close()

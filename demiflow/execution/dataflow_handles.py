@@ -283,6 +283,10 @@ class RuntimeActionHandle:
                     if (isinstance(sys.exc_info()[1], GeneratorExit)
                             and self._failure is None and not self._closed):
                         self._execution.satisfy_terminal()
+                        # A cut cannot complete while unread terminal envelopes
+                        # retain producer credit. Close also retires later real
+                        # envelopes through the execution's original ACK path.
+                        self._release_subscription()
                         self.result()
                 finally:
                     self._cleanup()
