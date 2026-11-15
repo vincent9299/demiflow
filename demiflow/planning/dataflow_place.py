@@ -796,7 +796,7 @@ def compile_physical_dataflow(
     from .dataflow_thread_fusion import fuse_thread_suffix
     stages = fuse_thread_suffix(graph, stages, policy=policy, bounds=bounds)
     from .dataflow_finite_fusion import fuse_finite_suffix
-    stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds)
+    stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = select_fusion_groups(graph, stages, policy=policy)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges, residency = _select_budgeted_residency(

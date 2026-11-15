@@ -13,7 +13,7 @@ _TERMINALS = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_bat
     'count', 'columns', 'schema', 'size_bytes', 'materialize', 'collect_summary'})
 
 
-def fuse_finite_suffix(graph, stages, *, policy, bounds):
+def fuse_finite_suffix(graph, stages, *, policy, bounds, hosts):
     if not policy.fusion:
         return stages
     nodes = {node.occurrence_id: node for node in graph.nodes}
@@ -60,10 +60,19 @@ def fuse_finite_suffix(graph, stages, *, policy, bounds):
         control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
         if resident > bounds.max_resident_bytes - control:
             continue
+        cpu = sum(stage.profile.requests['cpu_millis'] for stage in members)
+        # Fusion is optional: cluster-wide capacity does not prove that this
+        # one worker fits any actual host. Keep the original independently
+        # placeable stages if no verified host can hold the combined grant.
+        if not any(cpu <= host.logical_resources.get('cpu_millis',
+                       host.logical_resources.get('cpu', 0) * 1000)
+                   and resident <= host.logical_resources.get('memory_bytes', 0)
+                   for host in hosts):
+            continue
         first = members[0]
         replacements[first.stage_id] = replace(first, occurrences=tuple(selected),
             profile=ResourceProfile(requests={
-                'cpu_millis': sum(stage.profile.requests['cpu_millis'] for stage in members),
+                'cpu_millis': cpu,
                 'memory_bytes': resident}),
             resident_bytes=resident, output_bytes=sum(stage.output_bytes for stage in members),
             state_bytes=sum(stage.state_bytes for stage in members),
