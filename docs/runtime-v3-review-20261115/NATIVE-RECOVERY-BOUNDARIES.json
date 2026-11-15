@@ -1,0 +1,47 @@
+{
+  "tested_head": "aea7bacc0e3e735376a074739aab2710bdec26b9",
+  "production_parent": "559f74ef5d7655f67b04ffd482e8b7a6a72c7a87",
+  "scope": "tests-only recovery seam evidence; original full matrix red retained",
+  "fixture_modified_before_final_run": "tests/test_runtime_v3_fetch_graph.py",
+  "digests": {
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/tests/test_runtime_v3_fetch_graph.py": "9ce515ce7e48cd832c5f88738e07dd96257901981c10ded414875983be82c9de",
+    "/tmp/test_demiflow_queue_idle_validation.py": "27baf1071fce176aff91c98b7e5680680c796bffea979f71034a9163f810f222",
+    "/tmp/demiflow-regression-idle-real.xml": "1b5c0f8d56ad1ac2a4fcabb653b76472f8b49be1328f8a957f63d5dc371574f6",
+    "/tmp/demiflow-regression-idle-real.log": "ec1765130754553546b77568ceb11264502965e193d15d3678e1fede8040d3c6",
+    "/tmp/demiflow-regression-idle-crash.xml": "07952380aa424bfc5a1aca632bc50d10660ccb9ba480f6e67d5c9c3dca5bf5c1",
+    "/tmp/demiflow-regression-idle-crash.log": "e245aad7209a01618b91a0948ca56233b6b296d6ff83e27ce97e544fea56f16a",
+    "/tmp/demiflow-regression-fetch-boundaries.xml": "ef64759d7397c06baed2ecd35af3232eb2e01bd11dda67c7f8c13b1a664f6c57",
+    "/tmp/demiflow-regression-fetch-boundaries.log": "29529379931437919e6dd527d17290418e212dd7e7346b463709e9247d2071ea",
+    "/tmp/demiflow-regression-fetch-seams.xml": "b3b8c2b486a0c4f703a8b32ae1bd3a41e05ef2153bb82476021f3b6b0e4a51cb",
+    "/tmp/demiflow-regression-fetch-seams.log": "872b0c5efed36647f7009d620fb783e8f31200253deec85f91b10f483687db5d",
+    "/tmp/demiflow-regression-final2-api-evidence/SUMMARY.json": "c4b9ee7f1b66c0d7b7a1a8b0fd5fcde9efbca9e53629e8fd288e7fa9f45b1c70"
+  },
+  "commands": [
+    "PYTHONPATH=$PWD:$PWD/tests DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-idle-real /yzp/zhaozy/yangzepeng/0905/env/bin/python -B /tmp/demiflow-regression-runner.py -q /tmp/test_demiflow_queue_idle_validation.py tests/test_runtime_v3_producer_execution.py tests/test_runtime_v3_fetch_graph.py::test_nested_fetch_recovers_original_native_receipt_before_first_cut --basetemp=/tmp/demiflow-regression-idle-real --junitxml=/tmp/demiflow-regression-idle-real.xml",
+    "PYTHONPATH=$PWD:$PWD/tests DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-idle-crash /yzp/zhaozy/yangzepeng/0905/env/bin/python -B /tmp/demiflow-regression-runner.py -q tests/test_queue_v2_crash.py -k 'sqlite and True and final_checkpoint' --basetemp=/tmp/demiflow-regression-idle-crash --junitxml=/tmp/demiflow-regression-idle-crash.xml",
+    "PYTHONPATH=$PWD:$PWD/tests DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-fetch-seams /yzp/zhaozy/yangzepeng/0905/env/bin/python -B /tmp/demiflow-regression-runner.py -q tests/test_runtime_v3_fetch_graph.py::test_fetch_recovers_original_native_receipt_across_dataset_cut --basetemp=/tmp/demiflow-regression-fetch-seams --junitxml=/tmp/demiflow-regression-fetch-seams.xml"
+  ],
+  "results": {
+    "original_targeted_group": {
+      "passed": 4,
+      "failed": 1,
+      "skipped": 2,
+      "seconds": 69.58
+    },
+    "consumer_sigkill": {
+      "passed": 1,
+      "deselected": 15,
+      "seconds": 18.06
+    },
+    "final_fetch_seams": {
+      "passed": 2,
+      "seconds": 36.96
+    }
+  },
+  "not_claimed": [
+    "PostgreSQL (no task-private DSN)",
+    "full 98 API matrix after idle repair",
+    "Ray acceptance by this lane",
+    "zero descriptor leakage"
+  ]
+}
