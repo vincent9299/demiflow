@@ -1,0 +1,509 @@
+{
+  "base_head": "3d91ba3b42e491e821fc238f22ce782094af8b67",
+  "root_source_base": "7c6d5b7",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+  "source_sha256": {
+    "demiflow/execution/exchange/dataflow_bridge.py": "03ad90bb8c44a2e433dab1fb72e09747cc0c187f7bd81e787ced3b8aae637657",
+    "demiflow/execution/exchange/dataflow_channels.py": "b43378d9101cabc628eeb94cfb7c06557127aec9b196e6414d9f9cfa6d238704",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "d5eda3cafda5bfa33b23116adb258a1a8ac87666a033a033679c27f898628e23",
+    "tests/test_runtime_v3_route_document.py": "a032ceb73fdf5b102c338f39c0ea6e5ee0fc621970b83122eba255ecdc374799",
+    "tests/runtime_v3_route_document_benchmark.py": "4ece0919053d9a17b3e1cfb4e247d4c3d52a8ccf586f428ab13e06a48ac2dcbc"
+  },
+  "tests": {
+    "xml": "/tmp/demiflow-regression-route-final.xml",
+    "sha256": "1f6a4bf376acc6b3733140cdb545f8803580b594aec587a7c0c2072145462d83",
+    "passed": 57,
+    "seconds": 19.36,
+    "cases": [
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[False-forward]",
+        "seconds": 0.023,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[False-hash]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[False-rebalance]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[False-broadcast]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[False-target]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[True-forward]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[True-hash]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[True-rebalance]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[True-broadcast]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_route_matches_original_wire_identity_and_resumed_ordinal[True-target]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_payload_window_and_full_document_row_budget_are_independent[memory_incremental]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_payload_window_and_full_document_row_budget_are_independent[durable_incremental]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_payload_window_and_full_document_row_budget_are_independent[finite_sealed]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed[parents]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed[schema]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed[low_size]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed[high_size]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed[missing_key]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed[foreign_target]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed[bad_forward]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_external_payload_keeps_original_reference_channel_window_and_document_bytes",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_joint_path_encodes_entire_payload_once_even_for_broadcast",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_real_worker_uses_validated_document_without_changing_results_or_ack",
+        "seconds": 4.183,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_all_routes_validate_parent_metadata_before_encoding_or_ordinal[forward]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_all_routes_validate_parent_metadata_before_encoding_or_ordinal[hash]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_all_routes_validate_parent_metadata_before_encoding_or_ordinal[rebalance]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_all_routes_validate_parent_metadata_before_encoding_or_ordinal[broadcast]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_route_document.py::test_all_routes_validate_parent_metadata_before_encoding_or_ordinal[target]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[None]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[True]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[False]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[0]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[1]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-1]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[115792089237316195423570985008687907853269984665640564039457584007913129639936]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-115792089237316195423570985008687907853269984665640564039457584007913129639936]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-0.0]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[0.0]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[nan]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[inf]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-inf]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[\\u4e2d\\u6587\\xe9\\n\\x00\"\\U0001f600]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[value14]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[value15]",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_exact_integer_fast_path_does_not_call_subclass_string_overrides",
+        "seconds": 0.0,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-False-False]",
+        "seconds": 0.003,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-False-True]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-True-False]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-True-True]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-False-False]",
+        "seconds": 0.003,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-False-True]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-True-False]",
+        "seconds": 0.002,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-True-True]",
+        "seconds": 0.001,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_codec_encoder.py::test_shared_encoder_has_no_cross_thread_traversal_or_value_cache",
+        "seconds": 0.015,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_x.py::test_x004",
+        "seconds": 0.036,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_finite_finish.py::test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity",
+        "seconds": 7.363,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_runtime_v3_durable_residency.py::test_parked_limit_propagates_real_input_satisfaction",
+        "seconds": 7.072,
+        "outcome": "passed"
+      }
+    ]
+  },
+  "microbenchmark": {
+    "base_head": "3d91ba3b42e491e821fc238f22ce782094af8b67",
+    "comparison": "same current canonical encoder; original two-step route then per-reader publish versus joint one-encode path",
+    "cache": "none; both paths receive same immutable input and fresh sequential routing ordinals",
+    "results": [
+      {
+        "case": "narrow_forward",
+        "iterations": 10000,
+        "samples": {
+          "old": [
+            {
+              "wall": 0.6828369498252869,
+              "cpu": 0.682810779
+            },
+            {
+              "wall": 0.6804845407605171,
+              "cpu": 0.6804747930000001
+            },
+            {
+              "wall": 0.6858362182974815,
+              "cpu": 0.685832274
+            }
+          ],
+          "new": [
+            {
+              "wall": 0.5555664747953415,
+              "cpu": 0.5555517219999999
+            },
+            {
+              "wall": 0.5560896582901478,
+              "cpu": 0.5560893989999998
+            },
+            {
+              "wall": 0.5797915309667587,
+              "cpu": 0.5797915729999996
+            }
+          ]
+        },
+        "median_seconds": {
+          "old": {
+            "wall": 0.6828369498252869,
+            "cpu": 0.682810779
+          },
+          "new": {
+            "wall": 0.5560896582901478,
+            "cpu": 0.5560893989999998
+          }
+        },
+        "cpu_speedup": 1.2278795104310203,
+        "wall_speedup": 1.22792600014332,
+        "wire_sha256": "aba35fd130290f105b3656a20be33807a7b760ac72f580d2f0349b21b5bac728",
+        "bytes": 150
+      },
+      {
+        "case": "narrow_broadcast",
+        "iterations": 10000,
+        "samples": {
+          "old": [
+            {
+              "wall": 1.3071226179599762,
+              "cpu": 1.3069157780000005
+            },
+            {
+              "wall": 1.3156432211399078,
+              "cpu": 1.3156208289999993
+            },
+            {
+              "wall": 1.2761697135865688,
+              "cpu": 1.2761251859999998
+            }
+          ],
+          "new": [
+            {
+              "wall": 0.7996372357010841,
+              "cpu": 0.7996361080000005
+            },
+            {
+              "wall": 0.7970462962985039,
+              "cpu": 0.796945762
+            },
+            {
+              "wall": 0.781110554933548,
+              "cpu": 0.7811018099999991
+            }
+          ]
+        },
+        "median_seconds": {
+          "old": {
+            "wall": 1.3071226179599762,
+            "cpu": 1.3069157780000005
+          },
+          "new": {
+            "wall": 0.7970462962985039,
+            "cpu": 0.796945762
+          }
+        },
+        "cpu_speedup": 1.6399055498082948,
+        "wall_speedup": 1.639958210746697,
+        "wire_sha256": "aba35fd130290f105b3656a20be33807a7b760ac72f580d2f0349b21b5bac728",
+        "bytes": 150
+      },
+      {
+        "case": "wide_8k_forward",
+        "iterations": 2000,
+        "samples": {
+          "old": [
+            {
+              "wall": 0.2840769365429878,
+              "cpu": 0.28407661299999987
+            },
+            {
+              "wall": 0.2916564457118511,
+              "cpu": 0.2916423730000002
+            },
+            {
+              "wall": 0.2875930182635784,
+              "cpu": 0.2875927530000002
+            }
+          ],
+          "new": [
+            {
+              "wall": 0.1855817399919033,
+              "cpu": 0.18558217800000065
+            },
+            {
+              "wall": 0.18722395971417427,
+              "cpu": 0.1872242479999997
+            },
+            {
+              "wall": 0.18489515781402588,
+              "cpu": 0.1848953239999993
+            }
+          ]
+        },
+        "median_seconds": {
+          "old": {
+            "wall": 0.2875930182635784,
+            "cpu": 0.2875927530000002
+          },
+          "new": {
+            "wall": 0.1855817399919033,
+            "cpu": 0.18558217800000065
+          }
+        },
+        "cpu_speedup": 1.5496787250767108,
+        "wall_speedup": 1.5496838119748513,
+        "wire_sha256": "4ea912d6d15b37bd44b6de077fcf26d5f188f0db585134b0abc6c6453a680755",
+        "bytes": 16533
+      },
+      {
+        "case": "wide_8k_broadcast",
+        "iterations": 2000,
+        "samples": {
+          "old": [
+            {
+              "wall": 0.5613480359315872,
+              "cpu": 0.561292740999999
+            },
+            {
+              "wall": 0.5499553680419922,
+              "cpu": 0.5499423879999998
+            },
+            {
+              "wall": 0.5494990162551403,
+              "cpu": 0.5494985279999991
+            }
+          ],
+          "new": [
+            {
+              "wall": 0.22602691128849983,
+              "cpu": 0.22600617099999987
+            },
+            {
+              "wall": 0.2278060019016266,
+              "cpu": 0.22776413699999942
+            },
+            {
+              "wall": 0.22746507823467255,
+              "cpu": 0.2274193190000009
+            }
+          ]
+        },
+        "median_seconds": {
+          "old": {
+            "wall": 0.5499553680419922,
+            "cpu": 0.5499423879999998
+          },
+          "new": {
+            "wall": 0.22746507823467255,
+            "cpu": 0.2274193190000009
+          }
+        },
+        "cpu_speedup": 2.4181867680291385,
+        "wall_speedup": 2.417757364383692,
+        "wire_sha256": "4ea912d6d15b37bd44b6de077fcf26d5f188f0db585134b0abc6c6453a680755",
+        "bytes": 16533
+      }
+    ]
+  },
+  "benchmark_sha256": "30e56823ef6dee502900f27290aa3d581886f1b2c07c76ba33d9393845e3fa50",
+  "limits_changed": false,
+  "wire_changed": false,
+  "production_payload_cache": false,
+  "large_40000_row_pressure_not_run_in_this_lane": true
+}

@@ -374,13 +374,14 @@ def _validate_record(record):
     return record
 
 
-def _encode_record_document(record, *, max_bytes):
+def _encode_record_document(record, *, max_bytes, payload_max_bytes=None):
     """Self-contained transfer document: provenance sidecar + exactly one payload."""
     if record.inline is not None:
-        _validate_tree(record.inline, max_bytes=max_bytes)
+        payload_limit = max_bytes if payload_max_bytes is None else min(max_bytes, payload_max_bytes)
+        _validate_tree(record.inline, max_bytes=payload_limit)
         payload = _encode_value(record.inline)
         payload_raw = _codec_dumps(payload)
-        if len(payload_raw) > max_bytes:
+        if len(payload_raw) > payload_limit:
             _fail("BUDGET_EXCEEDED", "encoded record exceeds the row byte budget")
         if record.encoded_bytes != len(payload_raw):
             _fail("INVALID_CONTRACT", "record encoded_bytes misreports the inline payload size")

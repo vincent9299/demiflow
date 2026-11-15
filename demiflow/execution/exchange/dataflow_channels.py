@@ -184,6 +184,37 @@ def route_record(record, *, spec, state):
     before routing. K4 control envelopes remain a separate explicit bridge;
     routing never embeds business bytes in a discarded control document.
     """
+    ordinal, window = _route_context(record, spec=spec, state=state)
+    if record.inline is not None:
+        payload_raw = _encode_payload(record.inline, max_bytes=window)
+        if len(payload_raw) != record.encoded_bytes:
+            _fail("INVALID_CONTRACT", "record encoded_bytes misreports the inline payload size")
+    elif record.encoded_bytes > window:
+        _fail("BUDGET_EXCEEDED", "record exceeds the channel byte window")
+    # Routing validates the actual typed data record above. It must not copy
+    # business payload into a legacy control envelope just to discard it: v3
+    # sends bounded data bytes and small authenticated control locators. The
+    # explicit frozen K4 bridge still validates its own inline/ref callers.
+    return _routed_records(record, spec=spec, ordinal=ordinal, window=window)
+
+
+def _route_record_document(record, *, spec, state, bounds):
+    """One authenticated payload encoding for routing and worker publication.
+
+    The payload channel window and the full document row bound are distinct.
+    Returned bytes belong only to this invocation and can be shared by its
+    broadcast readers; there is no payload cache or alternate routing state.
+    """
+    if not isinstance(bounds, Bounds):
+        _fail("INVALID_CONTRACT", "bounds must be a Bounds declaration")
+    ordinal, window = _route_context(record, spec=spec, state=state)
+    if record.payload_ref is not None and record.encoded_bytes > window:
+        _fail("BUDGET_EXCEEDED", "record exceeds the channel byte window")
+    raw = _encode_record_document(record, max_bytes=bounds.max_row_bytes, payload_max_bytes=window)
+    return _routed_records(record, spec=spec, ordinal=ordinal, window=window), raw
+
+
+def _route_context(record, *, spec, state):
     _validate_record(record)
     if not isinstance(spec, ExchangeSpec):
         _fail("INVALID_CONTRACT", "spec must be an ExchangeSpec")
@@ -198,16 +229,10 @@ def route_record(record, *, spec, state):
     _nonneg_int(spec.route_epoch, "route_epoch")
     ordinal = state.next_ordinal(spec.channel_id)
     window = spec.storage_bytes if spec.mode == "finite_sealed" else spec.credit_bytes
-    if record.inline is not None:
-        payload_raw = _encode_payload(record.inline, max_bytes=window)
-        if len(payload_raw) != record.encoded_bytes:
-            _fail("INVALID_CONTRACT", "record encoded_bytes misreports the inline payload size")
-    elif record.encoded_bytes > window:
-        _fail("BUDGET_EXCEEDED", "record exceeds the channel byte window")
-    # Routing validates the actual typed data record above. It must not copy
-    # business payload into a legacy control envelope just to discard it: v3
-    # sends bounded data bytes and small authenticated control locators. The
-    # explicit frozen K4 bridge still validates its own inline/ref callers.
+    return ordinal, window
+
+
+def _routed_records(record, *, spec, ordinal, window):
     targets = _route_targets(record, spec=spec, ordinal=ordinal, window=window)
     return tuple(RoutedRecord(reader_id=target,
                               delivery_id=identity(["dataflow-delivery-v3", record.record_id,

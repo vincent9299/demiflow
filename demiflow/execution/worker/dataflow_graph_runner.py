@@ -17,7 +17,7 @@ from dataclasses import asdict
 from ..contracts.dataflow import ArtifactRef, CutContribution, WorkerStep
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_record_document, _decode_record_document
-from ..exchange.dataflow_channels import reserve_credit, route_record, snapshot_channels
+from ..exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
 from ..exchange.dataflow_transport import PeerBuffers, read_peer
 from ..dataflow_sinks import _artifact_json, _encode_record, RECORDS_MEDIA, MANIFEST_MEDIA
 from ..recovery_contract import document
@@ -446,14 +446,22 @@ class WorkerGraphRunner:
                 routed_input = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             route_sequence = self.e._channels.routing.values().get(spec.channel_id, 0)
-            for routed in route_record(routed_input, spec=spec, state=self.e._channels.routing):
+            routes, raw = _route_record_document(routed_input, spec=spec,
+                state=self.e._channels.routing, bounds=self.bounds)
+            for routed in routes:
                 from ..recovery_contract import identity
                 self._publish(routed.record, edge=edge, spec=spec, target=routed.reader_id,
                               delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]),
-                              route_sequence=route_sequence)
+                              route_sequence=route_sequence, validated_raw=raw)
 
-    def _publish(self, record, *, edge=None, spec=None, target=None, delivery=None, route_sequence=None):
-        raw = _encode_record_document(record, max_bytes=self.bounds.max_row_bytes)
+    def _publish(self, record, *, edge=None, spec=None, target=None, delivery=None,
+                 route_sequence=None, validated_raw=None):
+        # Only the joint route/encode call above supplies validated_raw. Default
+        # terminal publication keeps its original encoding and validation path.
+        raw = (_encode_record_document(record, max_bytes=self.bounds.max_row_bytes)
+               if validated_raw is None else validated_raw)
+        if type(raw) is not bytes or len(raw) > self.bounds.max_row_bytes:
+            raise DataflowError('INVALID_CONTRACT', 'invalid prevalidated record document')
         if spec is not None and spec.mode == 'finite_sealed':
             stream = self._finite_buffer(spec)
             line = document({'record_id': record.record_id, 'sequence': record.sequence,
