@@ -94,6 +94,23 @@ class KernelScratch:
         self.write_at(start, raw)
         return start
 
+    def close_local(self):
+        """Close physical ownership after control shutdown; driver reconciles.
+
+        No refund is claimed here. The original journal row and owner inode stay
+        available for the driver's bounded lease-proven reconciliation.
+        """
+        try:
+            if self.fd is not None:
+                os.close(self.fd)
+                self.fd = None
+            self.path.unlink(missing_ok=True)
+            _sync_directory(self.path.parent)
+        finally:
+            if self.lease is not None:
+                self.lease.close()
+                self.lease = None
+
     def __exit__(self, kind, value, traceback):
         try:
             if self.fd is not None:
@@ -109,4 +126,92 @@ class KernelScratch:
             if self.lease is not None:
                 self.lease.close()
                 self.lease = None
+
+
+class ScratchStream:
+    """Lazy bounded file interface for worker finite/terminal buffers.
+
+    Construction performs no control RPC (worker load may precede its service
+    loop). Reads and writes use one admitted extent; close leaves reconciliation
+    to the driver because the worker control mailbox may already be cancelled.
+    """
+    def __init__(self, store, *, max_bytes, max_io_bytes):
+        self._store, self._maximum, self._io = store, max_bytes, max_io_bytes
+        self._file = None
+        self._position = 0
+        self.closed = False
+
+    def _check(self):
+        if self.closed:
+            raise ValueError('Scratch stream is closed')
+
+    def tell(self):
+        self._check()
+        return self._position
+
+    def seek(self, offset, whence=0):
+        self._check()
+        if type(offset) is not int or whence not in (0, 1, 2):
+            raise ValueError('Invalid scratch seek')
+        size = self._file.size if self._file is not None else 0
+        position = offset + (self._position if whence == 1 else size if whence == 2 else 0)
+        if not 0 <= position <= size:
+            raise ValueError('Scratch seek cannot create holes')
+        self._position = position
+        return position
+
+    def write(self, raw):
+        self._check()
+        if type(raw) is not bytes:
+            raise TypeError('Scratch stream writes require bytes')
+        if len(raw) > self._io or self._position + len(raw) > self._maximum:
+            raise DataflowError('BUDGET_EXCEEDED', 'Scratch stream exceeds admitted extent or I/O window')
+        if not raw:
+            return 0
+        if self._file is None:
+            file = self._store.scratch(max_bytes=self._maximum, max_io_bytes=self._io)
+            file.__enter__()
+            self._file = file
+        self._file.write_at(self._position, raw)
+        self._position += len(raw)
+        return len(raw)
+
+    def read(self, count=-1):
+        self._check()
+        remaining = (self._file.size if self._file is not None else 0) - self._position
+        count = remaining if count is None or count < 0 else min(count, remaining)
+        if count > self._io:
+            raise DataflowError('BUDGET_EXCEEDED', 'Scratch read exceeds admitted I/O window')
+        if not count:
+            return b''
+        raw = self._file.read_at(self._position, count)
+        self._position += count
+        return raw
+
+    def readline(self, limit=-1):
+        self._check()
+        limit = self._io if limit is None or limit < 0 else min(limit, self._io)
+        parts, total = [], 0
+        while total < limit:
+            raw = self.read(min(65536, limit - total))
+            if not raw:
+                break
+            end = raw.find(b'\n')
+            if end >= 0:
+                self._position -= len(raw) - end - 1
+                parts.append(raw[:end + 1])
+                break
+            parts.append(raw)
+            total += len(raw)
+        return b''.join(parts)
+
+    def flush(self):
+        self._check()
+
+    def close(self):
+        if self.closed:
+            return
+        if self._file is not None:
+            self._file.close_local()
+        self.closed = True
 

@@ -76,7 +76,10 @@ class WorkerGraphRunner:
         self._producer_expansion = {}
         self._terminal_bytes = 0
         self._terminal_columns = None
-        self._terminal_file = tempfile.TemporaryFile()
+        from ..dataflow_scratch import ScratchStream
+        self._terminal_file = ScratchStream(self.services.store,
+            max_bytes=self.bounds.max_spill_bytes,
+            max_io_bytes=self.bounds.max_row_bytes + self.bounds.max_control_bytes)
         self._terminal_spec = next((n.kernel for n in executor._node_specs.values()
                                     if n.kind == 'terminal'), None)
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
@@ -553,9 +556,11 @@ class WorkerGraphRunner:
 
     def _finite_buffer(self, spec):
         if spec.channel_id not in self._finite:
-            if len(self._finite) + 2 >= self.bounds.max_open_files:
+            if (len(self._finite) + 2) * 2 >= self.bounds.max_open_files:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite spool exceeds open file budget')
-            stream = tempfile.TemporaryFile()
+            from ..dataflow_scratch import ScratchStream
+            stream = ScratchStream(self.services.store, max_bytes=spec.storage_bytes,
+                max_io_bytes=self.bounds.max_row_bytes + self.bounds.max_control_bytes)
             self._finite[spec.channel_id] = (stream, 0, 0)
         return self._finite[spec.channel_id]
 
@@ -676,6 +681,8 @@ class WorkerGraphRunner:
         self.wake()
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout=self.bounds.timeout_ms / 1000)
+            if self._thread.is_alive():
+                raise DataflowError('DEADLINE_EXCEEDED', 'Business thread still owns its scratch buffers')
         self._peer.close()
         self._terminal_file.close()
         for stream, _, _ in self._finite.values():

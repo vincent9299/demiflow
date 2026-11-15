@@ -548,6 +548,8 @@ class DataflowExecution:
             self._scheduler.drain(stage_id, deadline_ms=self._policy.control_timeout_ms)
         for endpoint in self._endpoints.values():
             self._services.journal_service.retire_worker(endpoint._assignment.lease)
+        from .dataflow_staging import recover_staging
+        recover_staging(self._request.action, bounds=self._bounds)
         if self._durable_residency is not None:
             self._durable_residency.committed(image, set(self._endpoints) <= self._done)
             self._phase_index = self._durable_residency.active_index
@@ -983,6 +985,11 @@ class DataflowExecution:
         if self._channels is not None:
             close_channels(self._channels, reason="execution_close", deadline_ms=deadline_ms)
             self._channels = None
+        try:
+            from .dataflow_staging import recover_staging
+            recover_staging(self._request.action, bounds=self._bounds)
+        except Exception as exc:
+            cleanup_error = cleanup_error or exc
         if self._acquisition is not None:
             self._acquisition.close()
         if self._checkpoint is not None:

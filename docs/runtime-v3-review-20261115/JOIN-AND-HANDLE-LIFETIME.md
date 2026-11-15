@@ -52,7 +52,18 @@ under a 16 MiB run grant, handle release after scope exit, preservation of anoth
 owner and native commits, rejection of a wrong pin and retry after unknown reply.
 Earlier 146-test relational composition gate is `/tmp/demiflow-relational-r3.xml`.
 
+Worker terminal and finite producer buffers now use the same admitted scratch
+stream. Construction is lazy, so a worker cannot deadlock boot by requesting
+staging before its driver service loop starts. Each stream closes its physical
+file before relinquishing the lease. The original driver reconciles after phase
+retirement and physical cleanup; unknown live owners remain charged. A business
+thread that did not stop cannot have its scratch closed under it.
+
+`/tmp/demiflow-worker-scratch-r1.xml`: 50 passed, 1 Ray skip, 1 test-fixture failure
+(the fixture assumed a zero budget row existed before the first reservation).
+The corrected no-reservation assertion passed in
+`/tmp/demiflow-worker-scratch-r2.xml` (1 passed, 1.66 s). This batch includes real
+durable parking and crash recovery, file commits, actor lifetime and image reads.
+
 This delivery does not assert full API, performance, multi-host Ray, or complete
-product acceptance. Worker terminal/finite temporary spools still need to consume
-the same physical staging budget; that identified follow-up is not disguised as
-already solved by the join scratch implementation.
+product acceptance. The Ray skip is not counted as a passing backend test.

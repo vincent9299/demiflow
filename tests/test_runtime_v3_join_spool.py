@@ -61,6 +61,29 @@ with _open(Path(sys.argv[1])) as run:
             raise PreparationOnly()
 
 
+def test_worker_stream_is_lazy_and_refunds_only_with_original_lease_proof(tmp_path):
+    from demiflow.execution.dataflow_scratch import ScratchStream
+    from demiflow.execution.dataflow_staging import recover_staging
+    with pytest.raises(PreparationOnly), RunContext.start(tmp_path / 'run') as run:
+        store, port, bounds = _store(run, ceiling=200000)
+        stream = ScratchStream(store, max_bytes=100000, max_io_bytes=80000)
+        assert stream._file is None and stream.read(1) == b''
+        assert not run.journal.pending_dataflow_staging(run.fence, after='', limit=1)
+        stream.write(b'first\nsecond\n')
+        stream.seek(0)
+        assert stream.readline(100) == b'first\n'
+        assert stream.read(2) == b'se'
+        stream.seek(0, 2)
+        assert stream.tell() == 13
+        assert recover_staging(port._action, bounds=bounds)['unknown'] == 1
+        charged = consumed(run)
+        stream.close()
+        assert consumed(run) == charged > 0
+        assert recover_staging(port._action, bounds=bounds)['reconciled'] == 1
+        assert consumed(run) == 0
+        raise PreparationOnly()
+
+
 def test_repartition_moves_only_references_and_preserves_wide_rows(monkeypatch):
     from test_runtime_v3_k import rec, services, Bounds
     from demiflow.execution.kernels.join_spool import join_pairs, _Spool
