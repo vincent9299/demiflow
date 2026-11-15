@@ -271,6 +271,18 @@ class LocalResourceProvider:
         next_token = page[-1] if len(page) == PAGE_SIZE and start + PAGE_SIZE < len(names) else None
         return {"allocations": allocations, "next_page_token": next_token, "sampled_at_ms": _now_ms()}
 
+    def _close_confirmed_control(self, allocation_id):
+        if self._control is None:
+            return
+        try:
+            self._control.close(allocation_id)
+        except Exception:
+            # The physical exit proof and original business error remain true
+            # even if closing a driver-side descriptor fails independently.
+            import logging
+            logging.getLogger(__name__).warning('Confirmed Local unit control socket close failed: %s',
+                allocation_id, exc_info=True)
+
     def ensure_absent(self, exact_identity, terminate_deadline_ms):
         scope_id = exact_identity["scope_id"]
         allocation_id = exact_identity["allocation_id"]
@@ -288,6 +300,7 @@ class LocalResourceProvider:
                     "evidence_ref": "never-spawned:" + allocation_id,
                 })
             self._release_devices(allocation_id, "never-spawned:" + allocation_id)
+            self._close_confirmed_control(allocation_id)
             return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
                     "evidence_ref": "never-spawned:" + allocation_id, "observed_at_ms": _now_ms()}
         evidence = self.unit.stop(scope_id, allocation_id, terminate_deadline_ms=terminate_deadline_ms,
@@ -296,6 +309,7 @@ class LocalResourceProvider:
             self.pool.release(allocation_id, evidence)
             self._release_devices(allocation_id, evidence["evidence_ref"])
             self._spawned.pop(allocation_id, None)
+            self._close_confirmed_control(allocation_id)
             return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
                     "evidence_ref": evidence["evidence_ref"], "observed_at_ms": _now_ms()}
         return {"allocation_id": allocation_id, "cleanup": "UNCONFIRMED",
