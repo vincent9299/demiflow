@@ -143,7 +143,7 @@ class DataflowExecution:
         self._peak_active_workers = 0
         self._report_keys = {}
         self._last_checkpoint_rows = 0
-        self._last_checkpoint_outputs = 0
+        self._last_checkpoint_outputs: dict[str, int] = {}
         self._checkpoint_deliveries = 0
         self._checkpoint_at = time.monotonic()
 
@@ -739,12 +739,7 @@ class DataflowExecution:
                 self._services.journal_service.submit(event)
             else:
                 self._handle_event(event)
-        source_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
-                          if occ in self._graph.sources)
-        output_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
-                          if occ not in self._graph.sources)
-        progress = max(source_rows - self._last_checkpoint_rows,
-                       output_rows - self._last_checkpoint_outputs, self._checkpoint_deliveries)
+        progress = self._checkpoint_progress()
         # A finite input may already be completely committed while its join or
         # sort still emits many rows. Actual output/ACK progress must also drive
         # the original checkpoint policy; source-only progress stalls that cut.
@@ -767,6 +762,37 @@ class DataflowExecution:
                 time.sleep(pause)
         return ExecutionStatus(state=self._state, pending_events=self._pending_events,
                                confirmed_rows=self._confirmed_rows)
+
+    def _checkpoint_frontiers(self):
+        """Aggregate partitions of each original logical occurrence, not depth."""
+        sources = set(self._graph.sources)
+        source_rows, outputs = 0, {}
+        # Observations are checked against the sealed assignments before entry.
+        # Thus this map has at most bounds.max_nodes entries, independent of the
+        # number of records, cuts, boots or physical partitions.
+        for (occurrence, _), metrics in self._node_metrics.items():
+            if occurrence in sources:
+                source_rows += metrics['rows_output']
+            else:
+                outputs[occurrence] = outputs.get(occurrence, 0) + metrics['rows_output']
+        return source_rows, outputs
+
+    def _checkpoint_progress(self):
+        source_rows, outputs = self._checkpoint_frontiers()
+        progress = max(source_rows - self._last_checkpoint_rows,
+                       self._checkpoint_deliveries,
+                       max((rows - self._last_checkpoint_outputs.get(occurrence, 0)
+                            for occurrence, rows in outputs.items()), default=0))
+        # A newly active stage must be compared with its own ACKed frontier:
+        # taking a global maximum before subtraction hides it behind old stages.
+        # Normal observations already reject backwards counters. If an internal
+        # restoration/reset nevertheless regresses a frontier, request a cut
+        # conservatively instead of waiting for it to catch up to the old value.
+        if (source_rows < self._last_checkpoint_rows or any(
+                outputs.get(occurrence, 0) < rows
+                for occurrence, rows in self._last_checkpoint_outputs.items())):
+            progress = max(progress, self._policy.checkpoint_rows)
+        return progress
 
     def _renew_workers(self):
         """Extend only a live grant belonging to this still-fenced driver.
@@ -1040,10 +1066,7 @@ class DataflowExecution:
             # ObjectSink.prepare already transfers exactly its generation.
             # Calls finishing during publication append to the next generation.
             self._restore_image = image
-            self._last_checkpoint_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
-                                             if occ in self._graph.sources)
-            self._last_checkpoint_outputs = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
-                                                if occ not in self._graph.sources)
+            self._last_checkpoint_rows, self._last_checkpoint_outputs = self._checkpoint_frontiers()
             self._checkpoint_deliveries = 0
             self._checkpoint_at = time.monotonic()
             for endpoint in self._endpoints.values():

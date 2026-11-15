@@ -1,0 +1,212 @@
+{
+  "schema": "demiflow.checkpoint_frontier_review.v1",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115",
+  "head": "11ad827ebe10a151538e3ea7d4ef7752422b0bdf",
+  "source_dirty": true,
+  "production_changed": [
+    "demiflow/execution/dataflow.py"
+  ],
+  "input_sha256": {
+    "demiflow/execution/dataflow.py": "e3e1d2242d357a673e3bc7b95cc79109902633d0707ce9ba0c9d30431f7a009b",
+    "tests/test_runtime_v3_checkpoint_progress.py": "5387a60580c57c36a72d0cda49a67da272884c60417ccb2a09684ba74b45a919",
+    "tests/test_runtime_v3_finite_finish.py": "d52d9b7e35322e2682cef6e6caa6dd7c26218d9cbe11be603ba410d51d17d9ed",
+    "tests/test_local_kernel.py": "97ae538505fef2204fd92c173bb38d1c76d29b7dd8778d55bd868cfa50cb4fd1",
+    "demiflow/execution/stream_barrier.py": "ea225ebd7267ce8d336cc987ff5f7008a8859b8b7580d0a5f71aedc8e58f97e4",
+    "docs/unified-runtime-v3-20261114/CONTRACTS.md": "f2f08c535adaf110985f8718b02e0c053595e1d1fc83c47110fd1bccf5eb2891"
+  },
+  "frozen_against": "49b666f",
+  "frozen_unchanged": [
+    "demiflow/execution/raw_fetch.py",
+    "demiflow/execution/queue_execution.py",
+    "demiflow/execution/queue_sinks.py",
+    "demiflow/execution/queue_source.py",
+    "demiflow/planning/dag.py",
+    "demiflow/execution/contracts/exchange.py",
+    "demiflow/resources/contracts.py"
+  ],
+  "runs": [
+    {
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml",
+      "sha256": "e8880cf1cf0bd4557c86b3d3b36401532210f81e944888b9c8e2f37678348235",
+      "cases": [
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_identity_chain_does_not_divide_row_threshold_by_graph_depth",
+          "status": "passed",
+          "seconds": 0.003
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_later_stage_is_not_hidden_by_a_large_previously_acked_stage",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_all_partitions_of_one_logical_occurrence_count_together",
+          "status": "passed",
+          "seconds": 0.002
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_counter_regression_conservatively_requests_a_cut[output]",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_counter_regression_conservatively_requests_a_cut[missing_output]",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_counter_regression_conservatively_requests_a_cut[source]",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_original_source_ack_and_timer_triggers_remain[source_partitions]",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_original_source_ack_and_timer_triggers_remain[delivery_acks]",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_original_source_ack_and_timer_triggers_remain[timer]",
+          "status": "passed",
+          "seconds": 0.001
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_only_successful_commit_ack_advances_all_frontiers",
+          "status": "passed",
+          "seconds": 0.002
+        },
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_finite_join_after_source_eoi_naturally_checkpoints_and_resumes",
+          "status": "failed",
+          "seconds": 3.979
+        },
+        {
+          "node": "tests.test_runtime_v3_finite_finish::test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity",
+          "status": "passed",
+          "seconds": 7.012
+        },
+        {
+          "node": "tests.test_local_kernel::test_narrow_chain_batch_boundaries_and_limit_match_serial",
+          "status": "passed",
+          "seconds": 5.531
+        }
+      ]
+    },
+    {
+      "xml": "/tmp/demiflow-checkpoint-frontiers-r2.xml",
+      "sha256": "92db324ed882e42453c4969d0b157d348c9e5035f7a2b432ae398b17641e9933",
+      "cases": [
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_finite_join_after_source_eoi_naturally_checkpoints_and_resumes",
+          "status": "failed",
+          "seconds": 6.762
+        }
+      ]
+    },
+    {
+      "xml": "/tmp/demiflow-checkpoint-frontiers-r3.xml",
+      "sha256": "8cc24315aab89305d9cc622558ee06424437674251c566d7c78fcaa48d11b8d7",
+      "cases": [
+        {
+          "node": "tests.test_runtime_v3_checkpoint_progress::test_finite_join_after_source_eoi_naturally_checkpoints_and_resumes",
+          "status": "passed",
+          "seconds": 13.152
+        }
+      ]
+    }
+  ],
+  "latest_effective_results": [
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_identity_chain_does_not_divide_row_threshold_by_graph_depth",
+      "status": "passed",
+      "seconds": 0.003,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_later_stage_is_not_hidden_by_a_large_previously_acked_stage",
+      "status": "passed",
+      "seconds": 0.001,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_all_partitions_of_one_logical_occurrence_count_together",
+      "status": "passed",
+      "seconds": 0.002,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_counter_regression_conservatively_requests_a_cut[output]",
+      "status": "passed",
+      "seconds": 0.001,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_counter_regression_conservatively_requests_a_cut[missing_output]",
+      "status": "passed",
+      "seconds": 0.001,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_counter_regression_conservatively_requests_a_cut[source]",
+      "status": "passed",
+      "seconds": 0.001,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_original_source_ack_and_timer_triggers_remain[source_partitions]",
+      "status": "passed",
+      "seconds": 0.001,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_original_source_ack_and_timer_triggers_remain[delivery_acks]",
+      "status": "passed",
+      "seconds": 0.001,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_original_source_ack_and_timer_triggers_remain[timer]",
+      "status": "passed",
+      "seconds": 0.001,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_only_successful_commit_ack_advances_all_frontiers",
+      "status": "passed",
+      "seconds": 0.002,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_checkpoint_progress::test_finite_join_after_source_eoi_naturally_checkpoints_and_resumes",
+      "status": "passed",
+      "seconds": 13.152,
+      "xml": "/tmp/demiflow-checkpoint-frontiers-r3.xml"
+    },
+    {
+      "node": "tests.test_runtime_v3_finite_finish::test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity",
+      "status": "passed",
+      "seconds": 7.012,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    },
+    {
+      "node": "tests.test_local_kernel::test_narrow_chain_batch_boundaries_and_limit_match_serial",
+      "status": "passed",
+      "seconds": 5.531,
+      "xml": "/tmp/demiflow-checkpoint-frontiers.xml"
+    }
+  ],
+  "latest_effective_counts": {
+    "passed": 13,
+    "failed": 0,
+    "skipped": 0
+  },
+  "not_run": [
+    "40k pressure at final integrated HEAD",
+    "multi-host/Ray-specific repeat",
+    "full API matrix"
+  ]
+}
