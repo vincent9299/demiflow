@@ -150,7 +150,9 @@ class _Admission:
         if any(test(dtype) for test in (pa.types.is_string, pa.types.is_large_string,
                                        pa.types.is_binary, pa.types.is_large_binary)):
             width = 8 if pa.types.is_large_string(dtype) or pa.types.is_large_binary(dtype) else 4
-            self.buffer(((max(32, n) if n else 0) + 1) * width)
+            # BinaryBuilder reserves offsets for the actual input length;
+            # primitive builders' minimum of 32 values does not apply here.
+            self.buffer((n + 1) * width)
             size = capacity = peak = 0
             for value in column.values():
                 self.visit(depth)
