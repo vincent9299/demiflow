@@ -126,8 +126,14 @@ class RunContext:
     @classmethod
     def attach(cls, journal, *, entry_identity=None, limits=None, check_stop=None):
         """Adopt a supervisor's existing run/attempt; do not invent another run."""
-        return cls(journal.directory, journal=journal, entry_identity=entry_identity,
-                   limits=limits, check_stop=check_stop)
+        state = journal.execution_status()
+        resuming = state is not None and state['attempt'] > 1
+        context = cls(journal.directory, journal=journal, entry_identity=entry_identity,
+                      limits=limits, check_stop=check_stop, resume=resuming)
+        if resuming:
+            binding = journal.recovery_identity()
+            context.expected_run_id = binding['run_id'] if binding is not None else None
+        return context
 
     def __enter__(self):
         if current_run() is not None:
@@ -335,6 +341,9 @@ class RunContext:
         view = self.journal.execution_view(detail='summary', action_ids=[action_id])
         intent = next((event['value'] for event in view['events']
                        if event['kind'] == 'intent'), None)
+        if intent is None and self.attempt > 1:
+            history = self.journal.action_history([action_id], before_attempt=self.attempt, kinds=['intent'])
+            intent = history[-1]['value'] if history else None
         expected = create_target_absent_binding(self.ref.run_id, action_id, declaration, intent)
         # This cross-attempt fact grants replay admission, not permission to
         # overwrite. LanceSink.prepare must recheck absence at the actual write.
@@ -401,6 +410,7 @@ class RunAction:
     def __init__(self, context, action_id, declaration):
         self.context, self.action_id, self.declaration = context, action_id, declaration
         self.semantic_id = identity(declaration)
+        self.replaying = False
 
     @property
     def record(self):

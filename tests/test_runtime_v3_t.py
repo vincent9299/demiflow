@@ -223,6 +223,9 @@ class FakeExecution:
         self.request = request
         self._cancelled = False
         self.cancel_calls = []
+        self.satisfy_calls = 0
+        self.finish_calls = 0
+        self._satisfied = False
         self.close_calls = 0
         self.pump_calls = 0
         self.subscriptions = []
@@ -236,6 +239,8 @@ class FakeExecution:
         self.pump_calls += 1
         if self._cancelled:
             state = "cancelled"
+        elif self._satisfied:
+            state = 'succeeded'
         elif self.request.arguments.get("limit") == 0:
             state = self._terminal_state
         elif self._infinite:
@@ -246,7 +251,12 @@ class FakeExecution:
             state = self._terminal_state
         return ExecutionStatus(state=state, pending_events=0, confirmed_rows=self._index)
 
+    def satisfy_terminal(self):
+        self.satisfy_calls += 1
+        self._satisfied = True
+
     def finish(self):
+        self.finish_calls += 1
         if self._failure is not None:
             raise self._failure
         if self._result is not None:
@@ -405,7 +415,8 @@ def test_t002():
     h2 = open_handle(ex2)
     got = terminals.collect_rows(h2, limit=2, bounds=make_bounds())
     assert len(got) == 2
-    assert ex2.cancel_calls  # reached limit -> close cancels remaining producers
+    assert ex2.satisfy_calls == 1 and ex2.finish_calls == 1
+    assert not ex2.cancel_calls
 
     # take_all over the resident byte budget fails outright (no truncated success)
     big = [{"id": i, "blob": "x" * 200} for i in range(4)]
@@ -414,6 +425,7 @@ def test_t002():
     with pytest.raises(DataflowError) as ei:
         terminals.collect_rows(hb, limit=None, bounds=make_bounds(max_resident_bytes=50))
     assert ei.value.code == "BUDGET_EXCEEDED"
+    assert exb.cancel_calls and exb.satisfy_calls == 0 and exb.finish_calls == 0
 
     exl = make_execution(records=[make_record(i) for i in range(3)])
     hl = open_handle(exl)
@@ -426,7 +438,8 @@ def test_t002():
     hinf = open_handle(exinf)
     got_inf = terminals.collect_rows(hinf, limit=3, bounds=make_bounds())
     assert len(got_inf) == 3
-    assert exinf.cancel_calls
+    assert exinf.satisfy_calls == 1 and exinf.finish_calls == 1
+    assert not exinf.cancel_calls
     assert exinf.subscriptions[0].closed
 
 
@@ -441,13 +454,14 @@ def test_t003():
     handle = open_handle(ex)
     assert list(terminals.iterate_rows(handle)) == [{"id": 0}, {"id": 9, "tag": "ref"}]
 
-    # next once then close cancels producers and cleans up without GC
+    # Normal consumer close stops upstream and seals its bounded prefix before cleanup.
     ex2 = make_execution(records=[make_record(i) for i in range(5)])
     h2 = open_handle(ex2)
     it = terminals.iterate_rows(h2)
     next(it)
     it.close()
-    assert ex2.cancel_calls
+    assert ex2.satisfy_calls == 1 and ex2.finish_calls == 1
+    assert not ex2.cancel_calls
     assert ex2.subscriptions[0].closed
     assert ex2.close_calls >= 1
 

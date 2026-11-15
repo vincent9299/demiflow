@@ -90,8 +90,9 @@ class RunArtifactStore:
             raise DataflowError("FENCED", "historical artifact store is read-only")
         if type(max_bytes) is not int or max_bytes <= 0:
             raise DataflowError("INVALID_CONTRACT", "max_bytes must be a positive int")
-        if max_bytes > self._bounds.max_spill_bytes:
-            raise DataflowError("BUDGET_EXCEEDED", "artifact exceeds the staging ceiling")
+        # A caller's upper bound is not a request to allocate that entire
+        # amount. Enforce both ceilings on actual bytes before each write.
+        max_bytes = min(max_bytes, self._bounds.max_spill_bytes)
         if type(media_type) is not str or not media_type:
             raise DataflowError("INVALID_CONTRACT", "media_type must be a nonempty string")
         operation_id = self._staging_operation()

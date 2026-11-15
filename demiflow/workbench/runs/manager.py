@@ -1291,6 +1291,9 @@ def _native_execution_receipt(journal, action_id):
     if action is None:
         return None
     facts = journal.execution_commits(action_id)
+    if facts and facts[-1]['intent']['sinks'] == ['write_lance']:
+        from demiflow.execution.dataflow_sinks import inspect_native_write_receipt
+        return inspect_native_write_receipt(journal, action_id)
     if not facts or facts[-1]['prepared'] is None or facts[-1]['intent']['sinks'] != ['lance']:
         return None
     fact = facts[-1]

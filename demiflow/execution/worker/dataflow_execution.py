@@ -178,7 +178,8 @@ class DataflowWorkerExecutor:
                 if physical.plan_revision != assignment.plan_revision:
                     raise _dataflow_error("FENCED", "loaded plan_revision differs from assignment")
                 programs = self._services.programs
-                if set(programs) != set(pin["programs"]):
+                owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
+                if set(programs) != set(pin["programs"]).intersection(owned):
                     raise _dataflow_error("CODE_MISMATCH", "verified program membership differs")
                 self._prepare_factories(assignment, graph, physical)
             except BaseException:

@@ -249,6 +249,21 @@ class ReadDocuments:
         self.pool = None
         self.resources = [self] if reuse_workers else []
 
+    def recovery_identity(self):
+        if self.pool is not None:
+            raise ValueError('Document reading requires an unstarted actor declaration')
+        from ..execution.recovery_identity import describe
+        return {key: describe(getattr(self, key)) for key in (
+            'request', 'output', 'context', 'when', 'document_concurrency',
+            'timeout_s', 'max_bytes', 'reuse_workers', 'reuse_worker_max_tasks')}
+
+    def snapshot_state(self):
+        return {}  # The isolated reader pool carries no semantic row state.
+
+    def restore_state(self, state):
+        if state != {}:
+            raise ValueError('Document reader has no mutable semantic state')
+
     async def astart(self):
         if self.reuse_workers:
             from functools import partial

@@ -31,9 +31,7 @@ def api_call(document=None, **overrides):
 
 
 def collect(stream):
-    rows = []
-    stream.map(lambda row: rows.append(row) or row).run_stream()
-    return rows
+    return stream.take_all()
 
 
 def configured_agent(pack, environment, options=None, max_requests=1000):

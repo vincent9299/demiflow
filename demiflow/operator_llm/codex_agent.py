@@ -602,6 +602,9 @@ async def call_in_codex_environment(runtime, prompt_name, values, resources, dec
                               runtime.coordinator.max_requests)
     current = {**values, STATE: client.state()} if STATE in prompt.template.arguments else values
     try:
+        recovery = getattr(runtime, 'native_recovery', None)
+        if recovery is not None:
+            recovery.bind_codex_client(client)
         result, trace = await runtime.call_with_trace(prompt_name, current,
             prompt_override=prompt, input_budget=client.budget, client_override=client)
         return result, trace

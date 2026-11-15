@@ -1440,14 +1440,22 @@ def test_m022():
     codex_actor, _, _ = make_prompt_actor()
     codex_actor.environment = OperatorEnvironment(runtime='codex', operators=())
     journal.bind_agent_adapter(codex_actor, services=services, node_id='node-codex')
-    assert codex_actor._runtime.native_recovery is None
+    from demiflow.execution.dataflow_model_journal import RemoteCodexRecovery
+    assert isinstance(codex_actor._runtime.native_recovery, RemoteCodexRecovery)
+    assert codex_actor._runtime.native_recovery.row_local is False
     coordinator = codex_actor._runtime.coordinator
-    assert coordinator._native_group_journal is False
-    # codex budget flows through the bounded port (reserve RPC), not a group journal
-    reservation = coordinator.reserve()
-    assert port.reserve_calls and port.reserve_calls[-1][0] == reservation
-    assert CALL_RESERVATION.get() is None  # codex does not stage a group reservation
-    coordinator.failed(reservation)
+    assert coordinator._native_group_journal is True
+    token = CALL_RESERVATION.set(None)
+    try:
+        reservation = coordinator.reserve()
+        staged, charges = CALL_RESERVATION.get()
+        assert staged == reservation
+        assert charges['requests'] == (1, services.journal.limits['max_requests'])
+        assert any(k.startswith('requests-') for k in charges)
+        assert not port.reserve_calls  # intent and both ceilings commit atomically through reserve
+        coordinator.failed(reservation)
+    finally:
+        CALL_RESERVATION.reset(token)
 
 
 # --- M023 bind_media_adapter ------------------------------------------------
@@ -1456,7 +1464,11 @@ def test_m023():
     actor, operation, pack = make_prompt_actor(options={'object_store': 'images'})
     journal.bind_media_adapter(actor, services=services, node_id='node-media')
     assert isinstance(actor._runtime.native_recovery, RemotePromptRecovery)
-    assert actor._runtime.artifact_store is services.store
+    from demiflow.execution.dataflow_images import RemoteImageStore
+    assert isinstance(actor._runtime.artifact_store, RemoteImageStore)
+    assert actor._runtime.artifact_store.store is services.store
+    assert actor._runtime.artifact_store.journal is actor._runtime.native_recovery.journal
+    assert actor._runtime.artifact_store.maximum > 0
     assert actor._runtime.coordinator._native_group_journal is True
     assert actor._runtime.coordinator._artifact_request_budget == 'image-requests-' + identity('action-1')
     # missing object participant refuses to start

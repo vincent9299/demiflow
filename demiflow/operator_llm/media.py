@@ -341,6 +341,9 @@ def response_location(body, configuration, options):
 
 
 def store_image(raw, options, *, store=None):
+    from ..execution.dataflow_images import RemoteImageStore
+    if isinstance(store, RemoteImageStore):
+        return store.store_image(raw)
     if store is not None:
         # These bytes have already arrived. A cooperative stop must not discard
         # their only recovery evidence while local decoding/storage completes.

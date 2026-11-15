@@ -23,7 +23,8 @@ _JOURNAL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 
 
 async def _journal_io(fn, *args):
-    future = asyncio.get_running_loop().run_in_executor(_JOURNAL_EXECUTOR, fn, *args)
+    from contextvars import copy_context
+    future = asyncio.get_running_loop().run_in_executor(_JOURNAL_EXECUTOR, copy_context().run, fn, *args)
     try:
         return await asyncio.shield(future)
     except asyncio.CancelledError:

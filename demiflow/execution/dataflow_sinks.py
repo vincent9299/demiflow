@@ -404,6 +404,32 @@ def make_native_terminal_sink(spec, *, request, services):
         if not isinstance(declaration, LanceWriteSpec):
             raise DataflowError('INVALID_CONTRACT', 'write_lance requires its sealed LanceWriteSpec')
         native = LanceSink(services.action, declaration)
+        if declaration.mode == 'create':
+            from ..lance.storage import inspect_lance
+            from ..errors import LanceResourceNotFound, LanceWriteConflict
+            action = services.action
+            # Before any model call, retain the same absent-target admission
+            # fact used by workbench recovery. Actual prepare still checks CAS.
+            if not action.replaying:
+                try:
+                    inspect_lance(declaration.uri, None, declaration.storage_options)
+                except LanceResourceNotFound:
+                    from .run_context import create_target_absent_binding
+                    view = action.context.journal.execution_view(detail='summary', action_ids=[action.action_id])
+                    intent = next((e['value'] for e in view['events'] if e['kind'] == 'intent'), None)
+                    if intent is None and action.record['declaration']['kind'] == 'write_table':
+                        from .recovery_contract import identity
+                        intent = {'kind': 'write_table', 'spec': declaration.to_dict(),
+                                  'request_hash': declaration.content_hash,
+                                  'operation_id': identity([action.context.ref.run_id, action.action_id, 1])}
+                        action.context.journal.action_event(action.action_id, 'intent', intent)
+                    binding = create_target_absent_binding(action.context.ref.run_id,
+                        action.action_id, action.record['declaration'], intent)
+                    if binding is not None:
+                        action.context.journal.bind_source(action.context.fence,
+                            action.action_id + '-create-target-absent', binding)
+                else:
+                    raise LanceWriteConflict('Create target already exists')
     elif request.kind == 'write_datasink':
         native = request.sink
         from .queue_sinks import QueueResultSink
@@ -418,3 +444,43 @@ def make_native_terminal_sink(spec, *, request, services):
         raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')
     return NativeTerminalSink(native=native, sink_id=request.kind, store=services.store,
         action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))
+
+
+def inspect_native_write_receipt(journal, action_id):
+    """Project a v3 native publication without starting code or changing history."""
+    from types import SimpleNamespace
+    from .commit import CommitCoordinator
+    from .lance_sink import LanceSink, spec_from_identity
+    from .sealed_plans import _v3_read_store
+    from .dataflow_seal import load_dataflow
+    binding = journal.recovery_identity()
+    action = journal.execution_action(action_id)
+    facts = journal.execution_commits(action_id)
+    if binding is None or action is None or not facts:
+        return None
+    fact = facts[-1]
+    if fact['prepared'] is None or fact['intent']['sinks'] != ['write_lance']:
+        return None
+    seal = journal.source_binding(action_id + '-dataflow-sealed')
+    if seal is None:
+        return None
+    store, bounds = _v3_read_store(journal.directory, store_id=seal['physical_ref']['store_id'])
+    graph, physical, _ = load_dataflow(journal.directory, action_id, store=store, bounds=bounds)
+    context = SimpleNamespace(directory=journal.directory, limits=binding['limits'],
+        journal=journal, ref=SimpleNamespace(run_id=binding['run_id']),
+        attempt=journal.execution_status()['attempt'], fence='observation-only')
+    native_action = RunAction(context, action_id, action['declaration'])
+    native = LanceSink(native_action, spec_from_identity(action['declaration']['sink']))
+    sink = NativeTerminalSink(native=native, sink_id='write_lance', store=store,
+        action=native_action, bounds=physical.bounds, configuration={})
+    prepared = fact['prepared']['sinks']['write_lance']
+    composite = type(prepared) is dict and {'objects', 'rows'} <= set(prepared)
+    if composite:
+        from .object_sink import ObjectRowsSink
+        sink = ObjectRowsSink.for_inspection(native_action, sink, prepared)
+    receipt = sink.inspect(prepared, CommitCoordinator(native_action)._context(fact['commit_id']))
+    if receipt is None:
+        return None
+    data = receipt['data']['rows'] if composite else receipt['data']
+    native_receipt = data.get('native_receipt')
+    return native_receipt['data'] if native_receipt is not None else None

@@ -124,7 +124,7 @@ def _program_value(declaration: ProgramDeclaration):
     raise DataflowError("INVALID_CONTRACT", "ProgramDeclaration has no program body")
 
 
-def _code_identity_from_value(kind: str, value):
+def _base_code_identity_from_value(kind: str, value):
     """Recompute the historical code-pin from an actually-loaded program value."""
     try:
         if kind == "callable":
@@ -159,6 +159,12 @@ def _code_identity_from_value(kind: str, value):
     raise DataflowError("INVALID_CONTRACT", "Unknown program kind: " + str(kind))
 
 
+def _code_identity_from_value(kind, value):
+    from .dataflow_code import business_sources, source_identity
+    return {**_base_code_identity_from_value(kind, value),
+            'imports': source_identity(business_sources(kind, value))}
+
+
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds) -> ArtifactRef:
     import cloudpickle
     kind = _program_kind(declaration)
@@ -176,6 +182,8 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     manifest = {"schema": PROGRAM_SCHEMA, "occurrence_id": declaration.occurrence_id,
                 "kind": kind, "code_identity": code_identity,
                 "payload_ref": _artifact_json(payload_ref)}
+    from .dataflow_code import business_sources, stage_sources
+    manifest['business_sources'] = stage_sources(business_sources(kind, value), store=store)
     raw = document(manifest, bounds.max_control_bytes)
     return store.put(iter([raw]), max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
 
@@ -217,7 +225,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
 
 
 # -- D016 -----------------------------------------------------------------
-def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bounds) -> LoadedProgram:
+def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bounds, cache=None) -> LoadedProgram:
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict or manifest.get("schema") != PROGRAM_SCHEMA:
         raise DataflowError("INVALID_CONTRACT", "Unsupported program artifact schema")
@@ -225,6 +233,10 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     code_identity = manifest["code_identity"]
     if identity(code_identity) != identity(expected_pin):
         raise DataflowError("INVALID_CONTRACT", "Program code pin differs from the sealed expectation")
+    if cache is not None:
+        from .dataflow_code import mount_sources
+        mount_sources(manifest.get('business_sources', {}), code_identity.get('imports', {}),
+                      store=store, cache=cache)
     payload_ref = _artifact_from_json(manifest["payload_ref"])
     payload = _read_bytes(store, payload_ref, max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
     import cloudpickle

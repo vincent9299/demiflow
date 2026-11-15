@@ -272,29 +272,27 @@ class RemoteEmbeddingRecovery(NativeEmbeddingRecovery):
         self.journal._rpc(command)
 
 
-class _RemoteBudgetJournal:
-    """Narrow budget port: reserve_budgets via the worker journal reserve RPC."""
+class RemoteCodexRecovery(RemotePromptRecovery):
+    """Bind the original Codex session protocol to the same request journal."""
 
-    def __init__(self, port: WorkerJournalPort) -> None:
-        self._port = port
+    def bind_codex_client(self, client):
+        if client.journal is not None:
+            raise RecoveryContractError('Native Codex recovery cannot use a private journal')
+        client.journal = _BorrowedJournal(self.journal)
+        prepare = client.prepare
 
-    def reserve_budgets(self, fence, reservation, charges):
-        amounts = {name: amount for name, (amount, _ceiling) in charges.items()}
-        self._port.reserve(reservation, amounts)
+        def scoped(request):
+            from .row_scope import current_row_scope
+            scope = current_row_scope()
+            if scope is None:
+                raise RecoveryContractError('Codex session lost its source occurrence')
+            result = prepare(request)
+            client.source = RequestRecord({**client.source,
+                'native_response_bytes': self.journal.max_record_bytes,
+                'native_occurrence': identity([self.action.action_id, self.node_id, scope.occurrence])})
+            return result
 
-
-class _BudgetContext:
-    """Process-in budget context for non-group (Codex) coordination.
-
-    Adapts the frozen read-only view plus the bounded budget port; it is not a
-    frozen DTO extension and exposes no directory/journal.path/publication_guard.
-    """
-
-    def __init__(self, action: NativeActionView, port: WorkerJournalPort) -> None:
-        self.limits = action.context.limits
-        self.fence = action.context.fence
-        self.check_stop = action.context.check_stop
-        self.journal = _RemoteBudgetJournal(port)
+        client.prepare = scoped
 
 
 def make_native_action_view(services: RuntimeServices, *, node_id: str) -> NativeActionView:
@@ -351,11 +349,13 @@ def bind_agent_adapter(actor, *, services: RuntimeServices, node_id: str) -> Non
     runtime_kind = getattr(environment, 'runtime', 'demiflow') if environment is not None else 'demiflow'
     coordinator = actor._runtime.coordinator
     if runtime_kind == 'codex':
-        # Codex keeps its real session recovery level: unknown agent requests are
-        # never auto-replayed as success. Budget flows through the bounded port.
-        coordinator.bind_execution(_BudgetContext(action, services.journal), node_id)
-        coordinator._native_group_journal = False
-        actor._runtime.native_recovery = None
+        # Reserve session budget and intent atomically, with both run and node
+        # ceilings. An incomplete session remains unknown and cannot restart.
+        recovery = RemoteCodexRecovery(actor, action, node_id, services=services)
+        recovery.row_local = False
+        coordinator.bind_execution(action.context, node_id)
+        coordinator._native_group_journal = True
+        actor._runtime.native_recovery = recovery
         return
     # demiflow runtime: model subcalls reuse the native journal and the same run
     # quota via the original dynamic tool executor; no per-row Dataset/toolloop.
@@ -378,7 +378,8 @@ def bind_media_adapter(actor, *, services: RuntimeServices, node_id: str) -> Non
     # The worker holds only the reachable store handle; the driver native object
     # participant owns registration/retention. Original ObjectRef/effect identity
     # is unchanged.
-    actor._runtime.artifact_store = services.store
+    from .dataflow_images import RemoteImageStore
+    actor._runtime.artifact_store = RemoteImageStore(recovery.journal, services.store, options)
     coordinator = actor._runtime.coordinator
     coordinator.bind_execution(action.context, node_id)
     coordinator._native_group_journal = True

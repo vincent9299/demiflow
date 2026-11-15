@@ -113,6 +113,10 @@ def iterate_rows(handle: "ActionHandle") -> "Iterator[Row]":
         try:
             for record in records:
                 yield _record_row(record, handle)
+        except GeneratorExit:
+            # records.close() commits the bounded delivered prefix. Do not
+            # cancel the execution before that native drain can run.
+            raise
         except BaseException:
             handle._cleanup()
             raise

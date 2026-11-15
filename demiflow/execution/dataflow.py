@@ -138,6 +138,7 @@ class DataflowExecution:
         self._idle.clear()
         for endpoint in self._endpoints.values():
             endpoint.send_business({"kind": "pause"})
+            endpoint.send_business({"kind": "satisfy"})
 
     # -- helpers ----------------------------------------------------------
     def _fence(self) -> str:
@@ -262,7 +263,7 @@ class DataflowExecution:
             # worker declarations. No actor is started by configure.
             producer[1].configure(self._action, self._request.source, self._request.plan)
         existing = self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")
-        if self._action.context.resuming and existing is not None:
+        if self._action.replaying and existing is not None:
             from .dataflow_seal import load_dataflow, load_sealed_dataflow, verify_dataflow_program
             from .recovery_identity import platform_identity
             graph, physical, sealed = load_dataflow(self._action.context.directory,
@@ -330,6 +331,8 @@ class DataflowExecution:
                         request=self._request, services=self._services)
                 else:
                     self._sinks[node.kernel.kind] = make_sink_adapter(node.kernel, services=self._services)
+        from .dataflow_images import bind_image_sinks
+        bind_image_sinks(graph, services=self._services, sinks=self._sinks)
         self._graph = graph
         self._physical = physical
         self._policy = physical.policy
@@ -377,10 +380,13 @@ class DataflowExecution:
             self._scheduler.scope_id, self._run_id(), {"provider": self._policy.provider},
             self._fence(), budget))
         self._scope_open = True
+        if self._action.replaying and self._action.context.journal.source_binding(
+                self._action.action_id + '-native-model-journal') is not None:
+            self._services.journal_service._native_journal().check_recovery()
         queue_owned_recovery = (self._acquisition is not None and
             self._acquisition.can_recover_without_dataflow_cut())
         self._restore_image = (self._checkpoint.recover(sinks=self._sinks)
-            if self._action.context.resuming and not queue_owned_recovery else None)
+            if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
             pub = self._publication(self._restore_image)
             self._terminal_seen = pub["manifest"]["total_rows"]
@@ -698,6 +704,8 @@ class DataflowExecution:
             if self._cut.final and self._acquisition is not None:
                 self._native_summary = self._acquisition.finish()
             image = self._checkpoint.commit(self._cut.cut_id, sinks=self._sinks)
+            for owner in getattr(self._action, 'object_sinks', {}).values():
+                owner.reset()
             self._restore_image = image
             self._last_checkpoint_rows = sum(m['rows_output'] for (occ, _), m in self._node_metrics.items()
                                              if occ in self._graph.sources)
@@ -737,7 +745,10 @@ class DataflowExecution:
         if self._request.kind in ("write_lance", "write_datasink"):
             from ..data.datasink import WriteResult
             fact = self._action.context.journal.execution_commit(image.commit_id)
-            receipt = fact["receipts"][self._request.kind]["data"].get("native_receipt")
+            receipt_data = fact["receipts"][self._request.kind]["data"]
+            if getattr(self._action, "object_sinks", None):
+                receipt_data = receipt_data["rows"]
+            receipt = receipt_data.get("native_receipt")
             write = WriteResult(written_rows=rows, blocks_written=len(publication["manifest"]["partitions"]),
                                 metadata={"native_receipt": receipt, "queue_settled": self._acquisition is not None and self._acquisition.binding.mode == "sink"})
         self._terminal_result = TerminalResult(kind=self._request.kind, rows=rows,

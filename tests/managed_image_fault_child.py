@@ -20,7 +20,7 @@ if window=='after_provider_before_artifact':
 elif window=='after_staging_before_prepared':
     def kill(name,commit_id):
         fact=RunJournal(root/'run').execution_commit(commit_id)
-        if name=='after_prepare_before_record' and fact['intent']['sinks']==['output']:os._exit(73)
+        if name=='after_prepare_before_record' and fact['intent']['sinks']==['materialize']:os._exit(73)
     protocol.fault_point=kill
 elif window=='objects_committed_before_rows':
     objects.fault_point=lambda name,commit_id:os._exit(73) if name==window else None
@@ -32,7 +32,7 @@ elif window=='object_publication_before_return':
 elif window=='after_acked':
     def kill(name,commit_id):
         fact=RunJournal(root/'run').execution_commit(commit_id)
-        if name=='after_acked' and fact['intent']['sinks']==['output']:os._exit(73)
+        if name=='after_acked' and fact['intent']['sinks']==['materialize']:os._exit(73)
     protocol.fault_point=kill
 with scope:
     result=data.from_items([{'instruction':'paint'}]).map_prompt_async('generate',config=str(root/'pack.json'),

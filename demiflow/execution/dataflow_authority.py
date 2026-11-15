@@ -32,7 +32,7 @@ _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown
 _ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "grow_staging", "settle_staging", "release_staging"})
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
-                         "references", "media_references", "bind_membership"})
+                         "references", "media_references", "bind_membership", "stage_image"})
 _COMMAND_KINDS = frozenset({"effect", "reserve", "artifact", "queue", "native_request",
                             "read_action", "read_configuration", "restrict_recovery", "check_grant"})
 _EFFECT_STATES = ("absent", "reserved", "sent", "confirmed", "unknown", "unsent")
@@ -185,6 +185,7 @@ class DriverJournalService:
         self._closed = False
         self._native = None
         self._leases = {}
+        self._worker_occurrences = {}
         self._native_action_id = None
         self._workers: list[threading.Thread] = []
         self._stop = threading.Event()
@@ -197,6 +198,7 @@ class DriverJournalService:
         if len(self._leases) >= self._bounds.max_partitions and lease.allocation_id not in self._leases:
             raise DataflowError('BUDGET_EXCEEDED', 'Worker authority table exceeds bound')
         self._leases[lease.allocation_id] = lease
+        self._worker_occurrences[(lease.allocation_id, lease.boot_id)] = frozenset(occurrences)
         if self._native is not None and hasattr(self._native, 'register_worker'):
             self._native.register_worker(lease, occurrences)
 
@@ -336,7 +338,10 @@ class DriverJournalService:
                          "delivery_ref": _ref_to_json(reply.delivery_ref), "row_ref": _ref_to_json(reply.row_ref),
                          "native_fact_ref": _ref_to_json(reply.native_fact_ref), "retry_after_ms": reply.retry_after_ms}
             elif event.kind == "native_request":
-                reply = self.native_request(_native_command(payload), lease=None)
+                command = _native_command(payload)
+                if command.node_id not in self._worker_occurrences.get((lease.allocation_id, lease.boot_id), ()):
+                    raise DataflowError('FENCED', 'Worker does not own the native request occurrence')
+                reply = self.native_request(command, lease=lease)
                 from .contracts.dataflow_codec import _thaw_json
                 value = {"operation_id": reply.operation_id, "value": _thaw_json(reply.value), "value_ref": _ref_to_json(reply.value_ref)}
             elif event.kind == "read_action":
@@ -427,6 +432,9 @@ class DriverJournalService:
         request = self._native_request(command)
         if request.request_key != command.request_key:
             raise DataflowError("INVALID_CONTRACT", "native request_key does not match the request")
+        self._journal.bind_source(self._fence, self._action.action_id + '-native-model-journal',
+                                  {'schema': 'demiflow.native_model_journal.v1',
+                                   'action_id': self._action.action_id})
         return _NATIVE_HANDLERS[command.operation](self, journal, command, request)
 
     def _native_journal(self):
@@ -444,6 +452,7 @@ class DriverJournalService:
                     journal.close()
                     raise
                 run._native_prompt_journal = journal
+            journal.stores.update(getattr(self._action, 'object_sinks', {}))
             return journal
 
     def _native_request(self, command: NativeJournalCommand):
@@ -613,6 +622,11 @@ def _native_bind_membership(service, journal, command, request):
     return NativeJournalReply(operation_id=command.operation_id, value=None, value_ref=None)
 
 
+def _native_stage_image(service, journal, command, request):
+    from .dataflow_images import stage_image
+    return stage_image(service, journal, command, request)
+
+
 _NATIVE_HANDLERS = {
     "lookup": _native_lookup,
     "reserve": _native_reserve,
@@ -622,6 +636,7 @@ _NATIVE_HANDLERS = {
     "references": _native_references,
     "media_references": _native_media_references,
     "bind_membership": _native_bind_membership,
+    "stage_image": _native_stage_image,
 }
 
 

@@ -165,7 +165,10 @@ class WorkerGraphRunner:
             else:
                 if len(self._queue) >= self.bounds.max_pending_events:
                     raise DataflowError('BUDGET_EXCEEDED', 'worker input queue exceeds credit')
-                self._queue.append(command)
+                if kind in ('close_output', 'satisfy'):
+                    self._queue.appendleft(command)
+                else:
+                    self._queue.append(command)
                 self._idle_sent = False
             self._condition.notify_all()
 
@@ -200,6 +203,11 @@ class WorkerGraphRunner:
                 self._edge_eoi(command['edge_id'], command['producer_partition'])
             elif command['kind'] == 'close_output':
                 self._close_output(command['edge_id'])
+            elif command['kind'] == 'satisfy':
+                for occ, node in self.e._node_specs.items():
+                    if node.kind == 'terminal':
+                        self._finish_node(occ)
+                        self._close_inputs(occ)
             elif command['kind'] == 'cut':
                 self._cut = command['request']
             elif command['kind'] == 'receipt':
@@ -404,6 +412,9 @@ class WorkerGraphRunner:
                 self._terminal_columns = sorted(record.inline)
             if self._terminal_spec.kind in ('take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches'):
                 self._publish(record)
+            if self._limit is not None and self._terminal_rows >= self._limit:
+                self._finish_node(occ)
+                self._close_inputs(occ)
             return
         kernel = self.e._kernels[(occ, self.partition)]
         for out in kernel.push(port, record):

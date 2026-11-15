@@ -215,7 +215,17 @@ class RuntimeActionHandle:
                     self._finished = True
                 self._release_subscription()
             elif not self._finished:
-                self._cleanup()
+                # A consumer's normal early close is a bounded terminal demand,
+                # not a failed run. Seal the delivered prefix and all already
+                # confirmed native effects before releasing worker ownership.
+                import sys
+                try:
+                    if (isinstance(sys.exc_info()[1], GeneratorExit)
+                            and self._failure is None and not self._closed):
+                        self._execution.satisfy_terminal()
+                        self.result()
+                finally:
+                    self._cleanup()
 
     def result(self) -> "TerminalResult":
         self._check_open()

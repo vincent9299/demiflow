@@ -140,7 +140,7 @@ def _read_constants(ref: "ArtifactRef", *, store: RunArtifactStore, bounds: Boun
     return value
 
 
-def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds) -> dict[str, LoadedProgram]:
+def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds, cache=None) -> dict[str, LoadedProgram]:
     graph, physical, pin = load_sealed_dataflow(assignment.sealed,
         action_id=assignment.action_id, store=store, bounds=bounds)
     if physical.plan_id != assignment.plan_id:
@@ -151,12 +151,13 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
     if pin.get("platform_revision") != platform_identity():
         raise DataflowError("CODE_MISMATCH", "Worker platform code differs from the sealed revision")
     programs: dict[str, LoadedProgram] = {}
+    owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
     for node in graph.nodes:
-        if node.program_ref is None:
+        if node.occurrence_id not in owned or node.program_ref is None:
             continue
         programs[node.occurrence_id] = verify_dataflow_program(
             node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
-            store=store, bounds=bounds)
+            store=store, bounds=bounds, cache=cache)
     return programs
 
 
@@ -165,7 +166,7 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
     if not isinstance(assignment, WorkerAssignment):
         raise DataflowError("INVALID_CONTRACT", "assignment must be a WorkerAssignment")
     bounds = assignment.bounds
-    cache = Path(cache)
+    cache = Path(cache) / assignment.lease.allocation_id
     journal = WorkerJournalClient(transport=transport, lease=assignment.lease, bounds=bounds)
     journal.check_grant()
     shared_store = transport.store
@@ -175,7 +176,7 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
     if store_id != shared_store.store_id:
         raise DataflowError("INVALID_CONTRACT", "assignment artifacts belong to another store domain")
     store = RunArtifactStore(root=shared_store.root, store_id=store_id, journal=journal, bounds=bounds)
-    programs = _load_programs(assignment, store=store, bounds=bounds)
+    programs = _load_programs(assignment, store=store, bounds=bounds, cache=cache)
     constants = _read_constants(assignment.sealed.constants_ref, store=store, bounds=bounds)
     def check_stop():
         transport.check_stop()

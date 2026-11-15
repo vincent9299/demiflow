@@ -66,7 +66,15 @@ def _build_v3_executor(config, *, control):
         owned_cache = tempfile.mkdtemp(prefix="demiflow-worker-cache-")
         cache_value = owned_cache
     cache = Path(cache_value)
-    services = make_runtime_services(assignment, transport=transport, cache=cache)
+    # Every assignment owns its private code cache, including a configured
+    # run-local parent. No worker removes another worker's files.
+    owned_cache = Path(owned_cache) if owned_cache is not None else cache / assignment.lease.allocation_id
+    try:
+        services = make_runtime_services(assignment, transport=transport, cache=cache)
+    except BaseException:
+        import shutil
+        shutil.rmtree(owned_cache, ignore_errors=True)
+        raise
     mailbox = config.get("mailbox")
     if mailbox is None:
         from ..dataflow_hosts import ControlMailbox

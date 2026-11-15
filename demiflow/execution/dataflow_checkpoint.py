@@ -384,7 +384,8 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("INVALID_CONTRACT", str(exc)) from exc
             confirmed = {}
             for sink_id in sinks:
-                prepared_sink = fact["prepared"]["sinks"].get(sink_id)
+                from .dataflow_images import row_preparation
+                prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
             image = RecoveryImage(commit_id=fact["commit_id"], cut=request,
@@ -407,7 +408,7 @@ class DataflowCheckpointCoordinator:
                               clock_ms=lambda: 0)
 
     # -- D005 -------------------------------------------------------------
-    def recover(self, *, sinks) -> RecoveryImage:
+    def recover(self, *, sinks) -> RecoveryImage | None:
         from .dataflow_sinks import ack_source_claims
         with self._lock:
             self._check_open()
@@ -420,6 +421,18 @@ class DataflowCheckpointCoordinator:
             sealed = journal.source_binding(self._action.action_id + "-dataflow-sealed")
             if not v3_facts:
                 if sealed is not None:
+                    pending_only = bool(facts) and all(f['status'] == 'pending'
+                        and _CUT_STATE_KEY in f['intent']['states'] for f in facts)
+                    native = journal.source_binding(self._action.action_id + '-native-model-journal')
+                    admitted_create = (not facts and self._action.context._create_target_was_absent(
+                        self._action.action_id, self._action.declaration))
+                    if pending_only or admitted_create or (not facts and native == {
+                            'schema': 'demiflow.native_model_journal.v1',
+                            'action_id': self._action.action_id}):
+                        # No row publication was permitted. Recompute the initial
+                        # cut from sealed source positions, reusing confirmed
+                        # native responses; unknown requests are checked first.
+                        return None
                     # A v3 action with no journal proof: files alone are not authority.
                     raise DataflowError("INCOMPATIBLE_HISTORY",
                                         "No committed cut with journal proof; cannot recover from files alone")
@@ -453,7 +466,8 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("SOURCE_CHANGED", "Recovered source vector disagrees with contributions")
             confirmed = {}
             for sink_id in sinks:
-                prepared_sink = fact["prepared"]["sinks"].get(sink_id)
+                from .dataflow_images import row_preparation
+                prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
             image = RecoveryImage(commit_id=fact["commit_id"], cut=cut,

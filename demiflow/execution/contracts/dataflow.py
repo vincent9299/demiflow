@@ -83,7 +83,7 @@ _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _QUEUE_STATUSES = frozenset({"record", "pending", "eoi", "confirmed", "unknown"})
 _JOURNAL_OPS = frozenset({
     "lookup", "reserve", "reserve_http_retry", "response", "failed",
-    "references", "media_references", "bind_membership",
+    "references", "media_references", "bind_membership", "stage_image",
 })
 _PROGRAM_KINDS = frozenset({"source", "callable", "aggregate", "sink", "native"})
 _ACTION_PROGRAM_KINDS = frozenset({"aggregate", "sink"})
@@ -1459,7 +1459,7 @@ class CompletedControl:
 @dataclass(frozen=True)
 class NativeJournalCommand:
     operation_id: str
-    operation: Literal["lookup", "reserve", "reserve_http_retry", "response", "failed", "references", "media_references", "bind_membership"]
+    operation: Literal["lookup", "reserve", "reserve_http_retry", "response", "failed", "references", "media_references", "bind_membership", "stage_image"]
     action_id: str
     node_id: str
     request_key: str
