@@ -286,6 +286,39 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     return LoadedProgram(kind=kind, value=value, digest=identity(code_identity))
 
 
+def verify_completed_live_program(ref, *, expected_pin, declaration, store, bounds):
+    """Check code/source bytes without loading a retired attempt-local value.
+
+    This grants no executable program. The caller must independently recover an
+    original final ACKed cut before using it to read an already published result.
+    Current declarations are inspected, never instantiated or invoked.
+    """
+    from .dataflow_code import MAX_SOURCES, MAX_SOURCE_BYTES, SOURCE_MEDIA
+    from .dataflow_thread_programs import marker
+    manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
+    if type(manifest) is not dict:
+        raise DataflowError('CORRUPT_ARTIFACT', 'completed live program manifest must be an object')
+    code = manifest.get('code_identity')
+    if (manifest.get('schema') != PROGRAM_SCHEMA or 'payload_ref' in manifest
+            or declaration is None or manifest.get('occurrence_id') != declaration.occurrence_id
+            or manifest.get('thread_attempt') != marker(declaration.occurrence_id, code)
+            or identity(code) != identity(expected_pin)):
+        raise DataflowError('CORRUPT_ARTIFACT', 'completed live program differs from its sealed code pin')
+    kind = _program_kind(declaration)
+    if (kind != manifest.get('kind') or identity(_code_identity_from_value(kind, _program_value(declaration)))
+            != identity(code)):
+        raise DataflowError('CODE_MISMATCH', 'completed live program code differs from the sealed pin')
+    sources, imports = manifest.get('business_sources', {}), code.get('imports', {})
+    if (type(sources) is not dict or set(sources) != set(imports) or len(sources) > MAX_SOURCES
+            or sum(fact['bytes'] for fact in imports.values()) > MAX_SOURCE_BYTES):
+        raise DataflowError('CORRUPT_ARTIFACT', 'completed live program source membership differs')
+    for name, fact in imports.items():
+        source = _artifact_from_json(sources[name])
+        if source.digest != fact['sha256'] or source.size_bytes != fact['bytes']:
+            raise DataflowError('CODE_MISMATCH', 'completed live source differs from the sealed pin')
+        _read_bytes(store, source, max_bytes=MAX_SOURCE_BYTES, media_type=SOURCE_MEDIA)
+
+
 # -- D014 -----------------------------------------------------------------
 def build_dataflow_identity_bridge(graph: DataflowGraph, *, report_digest: str, bindings):
     if not isinstance(graph, DataflowGraph):

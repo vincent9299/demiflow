@@ -325,6 +325,16 @@ def plan_exchanges(
             mode = "durable_incremental"
         else:
             mode = _MEMORY_MODE
+        edge_credit_rows = credit_rows
+        if mode != 'finite_sealed' and producer_stage.stage_id != consumer_stage.stage_id:
+            # Plain tasks declare their input batch size. Bound live transport
+            # prefetch by it so early-close need not drain a generic 64/256-row
+            # window first. Finite scopes still spool their complete input;
+            # task boundaries and historical sealed admission remain unchanged.
+            task_rows = [nodes[occ].kernel.configuration['task_batch_rows']
+                         for occ in consumer_stage.occurrences
+                         if nodes[occ].kernel.configuration.get('task_batch_rows')]
+            edge_credit_rows = min([credit_rows, *task_rows])
         routing, keys = _routing(consumer_node, edge.input_port)
         if routing == "forward" and producer_stage.partitions != consumer_stage.partitions:
             routing = "rebalance"
@@ -340,7 +350,7 @@ def plan_exchanges(
             keys=keys,
             scope_id=scope_id,
             route_epoch=0,
-            credit_rows=credit_rows,
+            credit_rows=edge_credit_rows,
             credit_bytes=credit_bytes,
             storage_bytes=storage_bytes,
             read_domain=policy.store_id,

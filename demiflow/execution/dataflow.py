@@ -101,6 +101,7 @@ class DataflowExecution:
         self._lease_by_operation: dict[str, WorkerLease] = {}
         self._sinks = {}
         self._restore_image: RecoveryImage | None = None
+        self._verified_completed_image: RecoveryImage | None = None
         self._channels = None
         self._cut: CutRequest | None = None
         self._contributions: dict[str, CutContribution] = {}
@@ -313,6 +314,7 @@ class DataflowExecution:
             # worker declarations. No actor is started by configure.
             producer[1].configure(self._action, self._request.source, self._request.plan)
         existing = self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")
+        completed_live_nodes = []
         if self._action.replaying and existing is not None:
             from .dataflow_seal import load_dataflow, load_sealed_dataflow, verify_dataflow_program
             from .recovery_identity import platform_identity
@@ -326,6 +328,9 @@ class DataflowExecution:
                 raise DataflowError("CODE_MISMATCH", "recovery requires the sealed runtime revision")
             for node in graph.nodes:
                 if node.program_ref is not None:
+                    if node.kernel.configuration.get('thread_attempt'):
+                        completed_live_nodes.append(node)
+                        continue
                     verify_dataflow_program(node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
                                             store=self._store, bounds=self._bounds)
         else:
@@ -412,6 +417,23 @@ class DataflowExecution:
         from .contracts.dataflow_codec import runtime_scope_id
         self._scheduler.scope_id = runtime_scope_id(physical.plan_id, self._attempt())
         self._checkpoint = DataflowCheckpointCoordinator(self._action, physical, store=self._store)
+        if completed_live_nodes:
+            # A final result belongs to the original journal, not the released
+            # live registry. Authenticate that result through the SAME native
+            # coordinator before admitting a code-only check. No non-final
+            # live program is resumed and no replacement actor is constructed.
+            image = self._checkpoint.recover(sinks=self._sinks)
+            if image is None or not image.cut.final:
+                raise DataflowError('INCOMPATIBLE_HISTORY',
+                                    'attempt-only live program has no final ACKed result')
+            from .dataflow_seal import verify_completed_live_program
+            current_declarations = lower_action(self._request, bounds=self._bounds).declarations
+            declarations = {d.occurrence_id: d for d in current_declarations}
+            for node in completed_live_nodes:
+                verify_completed_live_program(node.program_ref,
+                    expected_pin=pin['programs'][node.occurrence_id],
+                    declaration=declarations.get(node.occurrence_id), store=self._store, bounds=self._bounds)
+            self._verified_completed_image = image
         if producer is not None:
             if self._acquisition._state == 'constructed':
                 self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
@@ -466,7 +488,7 @@ class DataflowExecution:
         if self._stream_lance is not None:
             self._stream_lance.start()
             queue_owned_recovery = queue_owned_recovery or self._stream_lance.can_recover_without_cut()
-        self._restore_image = (self._checkpoint.recover(sinks=self._sinks)
+        self._restore_image = self._verified_completed_image or (self._checkpoint.recover(sinks=self._sinks)
             if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
             from .dataflow_operator_observations import restore_operator_observations
