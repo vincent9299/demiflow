@@ -15,6 +15,10 @@ from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
 from test_agentmap_async import resource, collect, configured_agent
 from test_map_prompt_async import PACK
+from _agent_runtime_fixtures import collect_before_commit, resume_collect, call_metrics, collect_actor_component
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.run_journal import RunJournal
+from demiflow.operator_llm.journal import UncertainPromptCall
 
 
 @pytest.fixture
@@ -180,16 +184,33 @@ time.sleep(20) # Client must stop this process, including on successful completi
 
 
 def stream(app_server, resource, tmp_path, *, rows=None, environment=None, settings=None, limit=2,
-           timeout=20, concurrency=1, journal=True, **kwargs):
+           timeout=20, concurrency=1, journal=False, **kwargs):
     # Reading starts isolated Python workers. Allow startup on a shared runner;
     # timeout/budget tests below supply their own deliberately small deadline.
     binary, _ = app_server
     options = {'codex_agent': {'bin': str(binary), **(settings or {})}, 'timeout_s': timeout}
-    storage = {'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}} if journal else {}
+    assert journal is False, 'Dataset uses the single run-owned journal'
+    storage = {}
     return data.from_items(rows if rows is not None else [{'item': 'question', 'resources': {'D1': resource}}]).agentmap_async(
         'enrich', config=configured_agent(PACK, environment or OperatorEnvironment(resources='resources', runtime='codex'), options),
         inputs={'payload': 'item'}, output='answer',
         call_output='call', error_output='error', concurrency=concurrency, options=storage, max_requests=limit, **kwargs)
+
+
+def client_component(app_server, tmp_path, *, settings=None, environment=None, journal=True):
+    """Real client boundary for cancellation/local I/O injection; no Dataset claim."""
+    from demiflow.operator_llm.codex_agent import CodexAgentClient
+    from demiflow.operator_llm.model import OperatorLLMRequest, TextPart
+    definition = parse_prompt_pack(PACK).prompt_definitions['enrich']
+    declaration = environment or OperatorEnvironment(runtime='codex', operators=())
+    request = OperatorLLMRequest('enrich', 'v1', 'mock-model', (TextPart('task'),),
+                                response_schema=definition.response_schema)
+    options = {'codex_agent': {'bin': str(app_server[0]), **(settings or {})}, 'timeout_s': 4}
+    if journal:
+        options['sqlite_journal'] = {'path': str(tmp_path / 'calls.sqlite')}
+    client = CodexAgentClient(options, declaration.bind({}), definition, {}, 1)
+    client.prepare(request)
+    return client, request
 
 
 def events(app_server):
@@ -205,22 +226,16 @@ def assert_stopped(app_server):
 
 
 def test_read_callback_same_native_operator_and_replay(app_server, resource, tmp_path, monkeypatch):
-    import demiflow.collect.reading as module
-    native = module.read_documents
-    calls = []
-    async def tracked(request, **kwargs):
-        calls.append(request)
-        return await native(request, **kwargs)
-    monkeypatch.setattr(module, 'read_documents', tracked)
-    for replay in (False, True):
-        ds = stream(app_server, resource, tmp_path, limit=0 if replay else 1)
-        row = collect(ds)[0]
+    ds = stream(app_server, resource, tmp_path, limit=1)
+    first, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    for replay, rows in ((False, first), (True, resume_collect(ds, ref))):
+        row, = rows
         assert 'error' not in row, row.get('error')
         assert row['answer'] == 'done' and row['call']['reused'] is replay
         assert row['call']['budget_unit'] == 'codex_session'
         assert len(row['call']['environment']['observations']) == 1
-        assert ds._stages[-1].call_metrics.summary()['input_tokens'] == (0 if replay else 12)
-    assert len(calls) == 2 # Replay revalidates documents without a model session.
+        assert call_metrics(row)['input_tokens'] == (0 if replay else 12)
+    assert RunJournal(ref.directory).budget_consumed('requests') == 1
     assert len([e for e in events(app_server) if e.get('received', {}).get('method') == 'turn/start']) == 1
     assert_stopped(app_server)
 
@@ -254,10 +269,6 @@ def test_protocol_order_zero_calls_and_native_search(app_server, resource, tmp_p
 
 
 def test_native_tools_without_callback_state_or_resource_column(app_server, resource, tmp_path, monkeypatch):
-    import demiflow.collect.reading as module
-    async def forbidden(*args, **kwargs):
-        pytest.fail('Native tools must not call a demiflow operator')
-    monkeypatch.setattr(module, 'read_documents', forbidden)
     document = tmp_path / 'native.txt'
     document.write_text('Read with native file tools.')
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'native')
@@ -267,10 +278,12 @@ def test_native_tools_without_callback_state_or_resource_column(app_server, reso
     environment = OperatorEnvironment.from_yaml(policy)
     original = parse_prompt_pack(PACK).prompt_definitions['enrich']
     assert environment.prompt(original).template is original.template
-    for replay in (False, True):
-        row = collect(stream(app_server, resource, tmp_path,
-            rows=[{'item': str(document)}], environment=environment,
-            settings={'web_search': 'live', 'shell_tool': True}, limit=0 if replay else 1))[0]
+    ds = stream(app_server, resource, tmp_path,
+        rows=[{'item': str(document)}], environment=environment,
+        settings={'web_search': 'live', 'shell_tool': True}, limit=1)
+    first, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    for replay, rows in ((False, first), (True, resume_collect(ds, ref))):
+        row, = rows
         assert row.get('answer') == document.read_text(), row.get('error')
         assert row['call']['environment']['observations'] == []
         assert row['call']['native_searches'] == 1 and row['call']['reused'] is replay
@@ -324,13 +337,20 @@ def test_message_cap_accepts_only_positive_integer_or_null(value):
 def test_bounds_stop_process_and_retain_uncertain_journal(app_server, resource, tmp_path, monkeypatch,
                                                          mode, settings, env_options, timeout):
     monkeypatch.setenv('DF_TEST_CODEX_MODE', mode)
-    row = collect(stream(app_server, resource, tmp_path, settings=settings, timeout=timeout,
-        environment=OperatorEnvironment(resources='resources', runtime='codex', **env_options)))[0]
+    ds = stream(app_server, resource, tmp_path, settings=settings, timeout=timeout,
+        environment=OperatorEnvironment(resources='resources', runtime='codex', **env_options))
+    rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    row, = rows
     assert 'error' in row and 'answer' not in row
     assert row['error']['type'] in ('PromptBudgetExceededError', 'TimeoutError'), row['error']
-    journal = SQLitePromptJournal(tmp_path / 'calls.sqlite')
-    assert journal.stats()['uncertain'] == 1
-    journal.close()
+    journal = RunJournal(ref.directory)
+    with journal._connection() as db:
+        assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NULL').fetchone()[0] == 1
+    assert journal.budget_consumed('requests') == 1
+    before = app_server[1].read_bytes() if app_server[1].exists() else None
+    with pytest.raises(UncertainPromptCall):
+        resume_collect(ds, ref)
+    assert (app_server[1].read_bytes() if app_server[1].exists() else None) == before
     if app_server[1].exists():
         assert_stopped(app_server)
 
@@ -338,11 +358,12 @@ def test_bounds_stop_process_and_retain_uncertain_journal(app_server, resource, 
 @pytest.mark.parametrize('mode', ['foreign', 'unsupported', 'failed', 'wrong_model'])
 def test_protocol_failures_no_silent_retry(app_server, resource, tmp_path, monkeypatch, mode):
     monkeypatch.setenv('DF_TEST_CODEX_MODE', mode)
-    row = collect(stream(app_server, resource, tmp_path))[0]
-    assert row['error']['type'] == 'PromptResponseContractError'
+    ds = stream(app_server, resource, tmp_path)
+    rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    assert rows[0]['error']['type'] == 'PromptResponseContractError'
     before = len(events(app_server))
-    row = collect(stream(app_server, resource, tmp_path))[0]
-    assert row['error']['type'] == 'UncertainPromptCall'
+    with pytest.raises(UncertainPromptCall):
+        resume_collect(ds, ref)
     assert len(events(app_server)) == before
     assert_stopped(app_server)
 
@@ -367,21 +388,21 @@ def test_concurrent_row_scope_and_callback_history(app_server, resource, tmp_pat
 
 def test_node_and_persistent_session_budget(app_server, resource, tmp_path, monkeypatch):
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'direct')
-    for item in ['A', 'B']:
-        rows = [{'item': item, 'resources': {}}]
-        row = collect(stream(app_server, resource, tmp_path, rows=rows, limit=1))[0]
-        if item == 'A':
-            assert row['answer'] == 'done'
-        else:
-            assert row['error']['type'] == 'PromptBudgetExceededError'
+    inputs = [{'item': item, 'resources': {}} for item in ['A', 'B']]
+    ds = stream(app_server, resource, tmp_path, rows=inputs, limit=1)
+    first, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    for rows in (first, resume_collect(ds, ref)):
+        assert rows[0]['answer'] == 'done'
+        assert rows[1]['error']['type'] == 'PromptBudgetExceededError'
+    assert RunJournal(ref.directory).budget_consumed('requests') == 1
     assert len([e for e in events(app_server) if 'cwd' in e]) == 1
 
 
 def test_cancel_reaps_process_and_marks_uncertain(app_server, resource, tmp_path, monkeypatch):
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'sleep')
-    actor = stream(app_server, resource, tmp_path)._stages[-1]
     async def run():
-        task = asyncio.create_task(actor({'item': 'q', 'resources': {'D1': resource}}))
+        client, request = client_component(app_server, tmp_path)
+        task = asyncio.create_task(client.execute(request))
         try:
             async with asyncio.timeout(3):
                 while not app_server[1].exists() or 'turn/start' not in app_server[1].read_text():
@@ -390,7 +411,7 @@ def test_cancel_reaps_process_and_marks_uncertain(app_server, resource, tmp_path
             with pytest.raises(asyncio.CancelledError):
                 await task
         finally:
-            await actor.aclose()
+            await client.aclose()
     asyncio.run(run())
     assert_stopped(app_server)
     journal = SQLitePromptJournal(tmp_path / 'calls.sqlite')
@@ -423,14 +444,15 @@ def test_configuration_rejected_without_start(options):
         validate_options(options)
 
 
-def test_cached_session_revalidates_documents_without_paid_restart(app_server, resource, tmp_path):
+def test_cached_session_revalidates_documents_without_paid_restart(app_server, resource, tmp_path, monkeypatch):
     from urllib.parse import urlparse, unquote
-    row = collect(stream(app_server, resource, tmp_path))[0]
-    assert row['answer'] == 'done'
+    ds = stream(app_server, resource, tmp_path)
+    rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    assert rows[0]['answer'] == 'done'
     before = len(events(app_server))
     path = Path(unquote(urlparse(resource['document_ref']['uri']).path))
     path.write_bytes(b'changed fixed document')
-    row = collect(stream(app_server, resource, tmp_path, limit=0))[0]
+    row, = resume_collect(ds, ref)
     assert row['error']['type'] == 'PromptResponseContractError'
     assert 'observations changed' in row['error']['detail']
     assert len(events(app_server)) == before
@@ -466,7 +488,7 @@ def test_disabled_operator_returns_error_to_codex(app_server, resource, tmp_path
         pytest.fail('disabled native operator executed')
     monkeypatch.setattr(module, 'read_documents', forbidden)
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'disabled')
-    row = collect(stream(app_server, resource, tmp_path,
+    row = collect_actor_component(stream(app_server, resource, tmp_path,
         environment=OperatorEnvironment(resources='resources', runtime='codex', operators=())))[0]
     assert row.get('answer') == 'done', row.get('error')
     assert row['call']['environment']['observations'][0]['result']['code'] == 'operator_not_allowed'
@@ -474,14 +496,17 @@ def test_disabled_operator_returns_error_to_codex(app_server, resource, tmp_path
 
 def test_namespace_error_replays_without_changing_invocation(app_server, resource, tmp_path, monkeypatch):
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'namespace')
-    for reused in (False, True):
-        row = collect(stream(app_server, resource, tmp_path))[0]
+    ds = stream(app_server, resource, tmp_path)
+    first, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    for reused, rows in ((False, first), (True, resume_collect(ds, ref))):
+        row, = rows
         assert row.get('answer') == 'done', row.get('error')
         assert row['call']['reused'] is reused
         observed = row['call']['environment']['observations']
         assert observed[0]['namespace'] == 'unknown'
         assert observed[0]['result']['code'] == 'operator_not_allowed'
         assert observed[1]['result']['status'] == 'ok'
+    assert len([e for e in events(app_server) if 'cwd' in e]) == 1
 
 
 def artifact_settings(tmp_path, **kw):
@@ -491,21 +516,24 @@ def artifact_settings(tmp_path, **kw):
 
 def test_native_artifacts_survive_cleanup_and_replay(app_server, resource, tmp_path, monkeypatch):
     from demiflow.objects import ObjectRef
+    from demiflow.execution.recovery_contract import RecoveryContractError
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'artifact')
     settings = artifact_settings(tmp_path)
-    first = collect(stream(app_server, resource, tmp_path, settings=settings))[0]
+    ds = stream(app_server, resource, tmp_path, settings=settings)
+    rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    first, = rows
     assert first.get('answer') == 'done', first.get('error')
     artifact = first['call']['artifacts'][0]
     assert ObjectRef(**artifact['object_ref']).read() == b'generated file bytes'
     assert first['call']['image_generation'] is True
     assert_stopped(app_server)
     before = len(events(app_server))
-    again = collect(stream(app_server, resource, tmp_path, settings=settings, limit=0))[0]
+    again, = resume_collect(ds, ref)
     assert again['call']['reused'] and again['call']['artifacts'] == first['call']['artifacts']
     assert len(events(app_server)) == before
-    changed = collect(stream(app_server, resource, tmp_path,
-        settings={**settings, 'max_artifact_files': 3}, limit=0))[0]
-    assert changed['error']['type'] == 'PromptBudgetExceededError'
+    changed = stream(app_server, resource, tmp_path, settings={**settings, 'max_artifact_files': 3})
+    with pytest.raises(RecoveryContractError):
+        resume_collect(changed, ref)
     assert len(events(app_server)) == before
 
 
@@ -518,14 +546,16 @@ def test_artifact_boundaries_are_technical_failures(app_server, resource, tmp_pa
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'artifact')
     monkeypatch.setenv('DF_TEST_CODEX_ARTIFACT', kind)
     settings = artifact_settings(tmp_path, **limits)
-    row = collect(stream(app_server, resource, tmp_path, settings=settings))[0]
+    ds = stream(app_server, resource, tmp_path, settings=settings)
+    rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    row, = rows
     assert row['error']['type'] == 'PromptResponseContractError'
     call = row['error']['call']
     assert call['execution_status'] == 'artifact_failed' and call['artifact_error']
     assert call['artifacts'] == []
     assert_stopped(app_server)
     before = len(events(app_server))
-    again = collect(stream(app_server, resource, tmp_path, settings=settings, limit=0))[0]
+    again, = resume_collect(ds, ref)
     assert again['error']['call']['execution_status'] == 'artifact_failed'
     assert again['error']['call']['reused']
     assert len(events(app_server)) == before
@@ -536,14 +566,16 @@ def test_cached_artifact_is_verified_without_new_session(app_server, resource, t
     from urllib.parse import urlparse, unquote
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'artifact')
     settings = artifact_settings(tmp_path)
-    row = collect(stream(app_server, resource, tmp_path, settings=settings))[0]
+    ds = stream(app_server, resource, tmp_path, settings=settings)
+    rows, run_ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    row, = rows
     ref = row['call']['artifacts'][0]['object_ref']
     path = Path(unquote(urlparse(ref['uri']).path))
     if mutation == 'missing': path.unlink()
     elif mutation == 'corrupt': path.write_bytes(b'changed file bytes!!')
     else: path.write_bytes(b'x' * 1024)
     before = len(events(app_server))
-    again = collect(stream(app_server, resource, tmp_path, settings=settings, limit=0))[0]
+    again, = resume_collect(ds, run_ref)
     assert again['error']['type'] == 'PromptResponseContractError'
     assert again['error']['call']['reused']
     assert len(events(app_server)) == before
@@ -551,13 +583,21 @@ def test_cached_artifact_is_verified_without_new_session(app_server, resource, t
 
 def test_artifact_storage_failure_retains_response(app_server, resource, tmp_path, monkeypatch):
     from demiflow.objects import LocalObjectStore
+    from demiflow.operator_llm.errors import PromptResponseContractError
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'artifact')
     def fail(*args, **kw):
         raise OSError('fixture disk full')
     monkeypatch.setattr(LocalObjectStore, 'put', fail)
-    row = collect(stream(app_server, resource, tmp_path, settings=artifact_settings(tmp_path)))[0]
-    assert row['error']['call']['execution_status'] == 'artifact_failed'
-    assert 'disk full' in row['error']['call']['artifact_error']
+    async def run():
+        client, request = client_component(app_server, tmp_path, settings=artifact_settings(tmp_path))
+        try:
+            with pytest.raises(PromptResponseContractError) as caught:
+                await client.execute(request)
+            assert caught.value.call['execution_status'] == 'artifact_failed'
+            assert 'disk full' in caught.value.call['artifact_error']
+        finally:
+            await client.aclose()
+    asyncio.run(run())
     journal = SQLitePromptJournal(tmp_path / 'calls.sqlite')
     try:
         saved = next(iter(journal.calls()))['response']
@@ -642,34 +682,50 @@ def test_cancel_during_export_drains_io_before_cleanup(app_server, tmp_path, mon
 
 
 def test_disabled_image_defaults_preserve_text_session_cache_identity(app_server, resource, tmp_path, monkeypatch):
+    from demiflow.execution.recovery_contract import RecoveryContractError
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'direct')
-    first = collect(stream(app_server, resource, tmp_path))[0]
-    assert first['answer'] == 'done'
-    journal = SQLitePromptJournal(tmp_path / 'calls.sqlite')
-    try:
-        saved = next(iter(journal.calls()))['request']
+    ds = stream(app_server, resource, tmp_path)
+    rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    assert rows[0]['answer'] == 'done'
+    with RunJournal(ref.directory)._connection() as db:
+        saved = json.loads(db.execute('SELECT request_json FROM calls').fetchone()[0])
         assert 'view_image' not in saved['settings'] and 'image_generation' not in saved['settings']
-    finally:
-        journal.close()
+    # Client request identity excludes explicit false defaults, independently of
+    # the immutable Dataset declaration/history identity.
+    async def identities():
+        values = []
+        for settings in ({}, {'view_image': False, 'image_generation': False}, {'view_image': True}):
+            client, _ = client_component(app_server, tmp_path, settings=settings, journal=False)
+            try:
+                values.append(client.source)
+            finally:
+                await client.aclose()
+        return values
+    plain, disabled, enabled = asyncio.run(identities())
+    assert plain == disabled and enabled != plain
     before = len(events(app_server))
-    same = collect(stream(app_server, resource, tmp_path,
-        settings={'view_image': False, 'image_generation': False}, limit=0))[0]
+    same, = resume_collect(ds, ref)
     assert same['call']['reused'] and same['answer'] == 'done'
-    changed = collect(stream(app_server, resource, tmp_path, settings={'view_image': True}, limit=0))[0]
-    assert changed['error']['type'] == 'PromptBudgetExceededError'
+    changed = stream(app_server, resource, tmp_path, settings={'view_image': True})
+    with pytest.raises(RecoveryContractError):
+        resume_collect(changed, ref)
     assert len(events(app_server)) == before
 
 
 def test_broken_callback_pipe_is_row_failure_and_other_rows_finish(app_server, resource, tmp_path, monkeypatch):
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'disconnect_write')
-    rows = [{'item': name, 'resources': {'D1': resource}} for name in ('row_A', 'row_B')]
-    results = {row['item']: row for row in collect(stream(app_server, resource, tmp_path, rows=rows, concurrency=2))}
+    inputs = [{'item': name, 'resources': {'D1': resource}} for name in ('row_A', 'row_B')]
+    ds = stream(app_server, resource, tmp_path, rows=inputs, concurrency=2)
+    rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)
+    results = {row['item']: row for row in rows}
     assert results['row_A']['error']['type'] == 'PromptResponseContractError'
     assert 'connection lost while sending' in results['row_A']['error']['detail']
     assert 'answer' in results['row_B'] and 'error' not in results['row_B']
     before = len(events(app_server))
-    again = {row['item']: row for row in collect(stream(app_server, resource, tmp_path, rows=rows, concurrency=2))}
-    assert again['row_A']['error']['type'] == 'UncertainPromptCall'
-    assert again['row_B']['call']['reused'] is True
+    with pytest.raises(UncertainPromptCall):
+        resume_collect(ds, ref)
+    with RunJournal(ref.directory)._connection() as db:
+        assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 1
+        assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NULL').fetchone()[0] == 1
     assert len(events(app_server)) == before
     assert_stopped(app_server)

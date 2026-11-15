@@ -1,0 +1,404 @@
+{
+  "tested_head": "3116146",
+  "dirty_input_sha256": {
+    "tests/test_codex_agent.py": "d9b4197d2f0bf9f14b0396c924cf9eb825594d44f7b2dd1924b6c048efce8f40"
+  },
+  "evidence": {
+    "/tmp/demiflow-regression-codex-first.xml": "ddd49b47ee6726737702f36e5166cf1f0d5114d2c4232ba8b6905eb4ad4a2237",
+    "/tmp/demiflow-regression-codex-first.log": "2a5793aeaf18d5fa900a61146d278796272c791896ff3898050a60372e00c757"
+  },
+  "records": [
+    {
+      "nodeid": "tests/test_codex_agent.py::test_read_callback_same_native_operator_and_replay",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bad_arguments_reach_codex_for_repair[bad0]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bad_arguments_reach_codex_for_repair[bad1]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bad_arguments_reach_codex_for_repair[bad2]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bad_arguments_reach_codex_for_repair[bad3]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bad_arguments_reach_codex_for_repair[bad4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bad_arguments_reach_codex_for_repair[bad5]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bad_arguments_reach_codex_for_repair[bad6]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_protocol_order_zero_calls_and_native_search[early]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_protocol_order_zero_calls_and_native_search[search]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_protocol_order_zero_calls_and_native_search[direct]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_native_tools_without_callback_state_or_resource_column",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_native_tools_can_coexist_with_operator_callbacks",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_native_shell_option_requires_boolean[true]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_native_shell_option_requires_boolean[1]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_native_shell_option_requires_boolean[None]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_callbacks_still_require_row_resources",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_disabled_message_cap_accepts_event_larger_than_default",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_message_cap_accepts_only_positive_integer_or_null[0]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_message_cap_accepts_only_positive_integer_or_null[-1]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_message_cap_accepts_only_positive_integer_or_null[True]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_message_cap_accepts_only_positive_integer_or_null[none]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[over_calls-settings0-env_options0-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[wide-settings1-env_options1-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[wide-settings2-env_options2-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[events-settings3-env_options3-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[events-settings4-env_options4-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[stderr-settings5-env_options5-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[read-settings6-env_options6-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[sleep-settings7-env_options7-0.3]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[read-settings8-env_options8-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_bounds_stop_process_and_retain_uncertain_journal[read-settings9-env_options9-4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_protocol_failures_no_silent_retry[foreign]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_protocol_failures_no_silent_retry[unsupported]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_protocol_failures_no_silent_retry[failed]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_protocol_failures_no_silent_retry[wrong_model]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_final_validated_against_original_schema[{\"wrong\":true}]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_final_validated_against_original_schema[{\"result\":1}]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_final_validated_against_original_schema[{\"result\":\"a\",\"result\":\"b\"}]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_final_validated_against_original_schema[invalid]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_concurrent_row_scope_and_callback_history",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_node_and_persistent_session_budget",
+      "outcome": "failed",
+      "reason": "demiflow.execution.recovery_contract.RecoveryContractError: Execution budget exhausted: requests-76a23fbfc9faa1145a975c2aea65318b0b6eaa6cdaf81c55e0bfdc8f27f74ab0\ndemiflow/execution/kernels/async_instance.py\", line 63, in __call__\n    return self.resolve(self.target(value))\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/kernels/async_instance.py\", line 49, in resolve\n    return future.result(timeout=min(.05, remaining))\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/_base.py\", line 456, in result\n    return self.__get_result()\n           ^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/_base.py\", line 401, in __get_result\n    raise self._exception\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/kernels/async_instance.py\", line 38, in wait\n    return await value\n           ^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/runtime.py\", line 575, in __call__\n    result, trace = await call_in_environment(self._runtime, self._operation.prompt_name,\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/environment.py\", line 388, in call_in_environment\n    return await call_in_codex_environment(runtime, prompt_name, values, resources, declaration)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/codex_agent.py\", line 608, in call_in_codex_environment\n    result, trace = await runtime.call_with_trace(prompt_name, current,\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/runtime.py\", line 451, in call_with_trace\n    request = exchange.throw(exc)  # a declared HTTP retry can continue this exchange\n              ^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/runtime.py\", line 218, in _exchange\n    response = yield request\n               ^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/runtime.py\", line 429, in call_with_trace\n    response = await execute(request)\n               ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/codex_agent.py\", line 511, in execute\n    if self.journal and not await _journal_io(self.journal.reserve, self.source):\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/client.py\", line 29, in _journal_io\n    return await asyncio.shield(future)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/thread.py\", line 58, in run\n    result = self.fn(*self.args, **self.kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_model_journal.py\", line 155, in reserve\n    return bool(self._rpc(self._command('reserve', request, reservation=reservation)))\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_model_journal.py\", line 125, in _rpc\n    reply = self._port.native_request(command)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_authority.py\", line 773, in native_request\n    value = self._request(\"native_request\", command.operation_id, payload)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_authority.py\", line 728, in _request\n    raise restore_failure(reply.payload)\ndemiflow.execution.recovery_contract.RecoveryContractError: Execution budget exhausted: requests-76a23fbfc9faa1145a975c2aea65318b0b6eaa6cdaf81c55e0bfdc8f27f74ab0\nTraceback (most recent call last):\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/sqlite_journal.py\", line 435, in _batch_run\n    item = self._batch_queue.get(timeout=self.flush_interval_s)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/queue.py\", line 179, in get\n    raise Empty\n_queue.Empty\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_authority.py\", line 332, in _serve\n    reply = self.dispatch(event)\n            ^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_authority.py\", line 379, in dispatch\n    reply = self.native_request(command, lease=lease)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_authority.py\", line 473, in native_request\n    return _NATIVE_HANDLERS[command.operation](self, journal, command, request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/dataflow_authority.py\", line 595, in _native_reserve\n    reserved = journal.reserve(request)\n               ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/sqlite_journal.py\", line 635, in reserve\n    return self._enqueue('reserve', (key, metadata, lease, ordinal),\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/stream_recovery.py\", line 136, in _enqueue\n    return super()._enqueue(operation, payload, size)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/sqlite_journal.py\", line 414, in _enqueue\n    return item.future.result()\n           ^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/_base.py\", line 456, in result\n    return self.__get_result()\n           ^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/_base.py\", line 401, in __get_result\n    raise self._exception\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/sqlite_journal.py\", line 527, in _commit_batch\n    result = self._apply_operation(db, item, effects)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/operator_llm/stream_recovery.py\", line 172, in _apply_operation\n    self.run.journal.reserve_budgets_in_transaction(db, reservation, charges)\n  File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/execution/run_journal.py\", line 1267, in reserve_budgets_in_transaction\n    raise RecoveryContractError('Execution budget exhausted: ' + name)\ndemiflow.execution.recovery_contract.RecoveryContractError: Execution budget exhausted: requests-76a23fbfc9faa1145a975c2aea65318b0b6eaa6cdaf81c55e0bfdc8f27f74ab0"
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_cancel_reaps_process_and_marks_uncertain",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_yaml_runtime_and_tightened_operator_budget",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_configuration_rejected_without_start[options0]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_configuration_rejected_without_start[options1]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_configuration_rejected_without_start[options2]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_configuration_rejected_without_start[options3]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_configuration_rejected_without_start[options4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_configuration_rejected_without_start[options5]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_cached_session_revalidates_documents_without_paid_restart",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_images_and_business_schema_are_passed_to_codex",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_initial_input_limits_reject_before_start",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_disabled_operator_returns_error_to_codex",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_namespace_error_replays_without_changing_invocation",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_native_artifacts_survive_cleanup_and_replay",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[symlink-limits0]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[hardlink-limits1]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[directory_symlink-limits2]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[fifo-limits3]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[nested-limits4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[many-limits5]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[file-limits6]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_boundaries_are_technical_failures[many-limits7]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_cached_artifact_is_verified_without_new_session[missing]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_cached_artifact_is_verified_without_new_session[corrupt]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_cached_artifact_is_verified_without_new_session[grown]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_artifact_storage_failure_retains_response",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_invalid_image_options_fail_before_start[settings0]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_invalid_image_options_fail_before_start[settings1]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_invalid_image_options_fail_before_start[settings2]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_invalid_image_options_fail_before_start[settings3]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_invalid_image_options_fail_before_start[settings4]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_invalid_image_options_fail_before_start[settings5]",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_native_image_files_match_attachment_order",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_cancel_during_export_drains_io_before_cleanup",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_disabled_image_defaults_preserve_text_session_cache_identity",
+      "outcome": "passed",
+      "reason": null
+    },
+    {
+      "nodeid": "tests/test_codex_agent.py::test_broken_callback_pipe_is_row_failure_and_other_rows_finish",
+      "outcome": "passed",
+      "reason": null
+    }
+  ],
+  "result": "77 passed, 1 real regression; assertion retained; root owns native quota exception mapping",
+  "note": "After this run parent offline/usage commit 401a84f was cherry-picked as 21e2301. This evidence is not claimed to run at 21e2301."
+}
