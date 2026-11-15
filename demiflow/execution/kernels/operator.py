@@ -286,6 +286,7 @@ class OperatorKernel:
                 bind = bind_prompt_adapter if instance.fn.environment is None else bind_agent_adapter
                 bind(instance.fn, services=self._services, node_id=self._occurrence)
         instance = AsyncInstance(instance, self._services,
+                                 owner=self._state_owner(instance),
                                  timeout=self._spec.configuration.get('hard_timeout'))
         instance.native_scope = (self._occurrence, self._partition_id) + ((slot,) if self._worker_scope else ())
         self._instances.append(instance)
@@ -348,6 +349,15 @@ class OperatorKernel:
             raise _err("RESOURCE_INFEASIBLE", "gpu role requires a gpu resource request")
 
     def _cleanup_on_failure(self) -> None:
+        # Startup restoration may already have launched native invocations.
+        # Their threads must finish before partial actor startup is unwound.
+        for instance in self._instances:
+            instance.request_stop()
+        if self._calls is not None:
+            try:
+                self._calls.close(timeout=min(30, self._services.bounds.timeout_ms / 1000))
+            except BaseException:
+                return  # Provider cleanup owns a worker that failed to drain.
         for instance in self._instances:
             try:
                 _close_instance(instance)
@@ -558,14 +568,17 @@ class OperatorKernel:
         import inspect
         instance = instance if instance is not None else self._instance
         owner = instance.target if isinstance(instance, AsyncInstance) else instance
-        while isinstance(owner, (_BoundCallable, _FieldCallable, functools.partial)):
+        while True:
             if isinstance(owner, _BoundCallable):
                 owner = owner._instance
             elif isinstance(owner, _FieldCallable):
                 owner = owner._fn
-            else:
+            elif isinstance(owner, functools.partial):
                 owner = owner.func
-        return owner.__self__ if inspect.ismethod(owner) else owner
+            elif inspect.ismethod(owner) or inspect.ismethodwrapper(owner):
+                owner = owner.__self__
+            else:
+                return owner
 
     def _snapshot_state(self, instance=None) -> Any:
         instance = instance if instance is not None else self._instance
@@ -676,9 +689,11 @@ class OperatorKernel:
     def close(self) -> None:
         if self._closed:
             return
-        self._closed = True
+        for instance in self._instances:
+            instance.request_stop()
         if self._calls is not None:
             self._calls.close(timeout=min(30, self._services.bounds.timeout_ms / 1000))
+        self._closed = True
         first_error: BaseException | None = None
         for instance in self._instances:
             try:
