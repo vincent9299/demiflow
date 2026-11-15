@@ -639,6 +639,7 @@ def _integration_cases(source):
     def neg(name,api,group,run,match):
         cases.append(Case(name,(api,),group,run,(ValueError,TypeError,DataflowError,RecoveryContractError),match,False,'negative'))
     pos('document-register','Dataset.register_documents','documents',_register_document)
+    pos('document-register-batch','Dataset.register_documents','documents',_register_document_batch)
     neg('register-invalid-library','Dataset.register_documents','documents',lambda r:_ds().register_documents(request='r',output='out',library=None),'DocumentLibrary')
     pos('document-read','Dataset.read_documents','documents',_read_documents)
     neg('read-invalid-context','Dataset.read_documents','documents',lambda r:_ds().read_documents(request='r',output='out',context=None),'PromptContext')
@@ -789,3 +790,16 @@ def _legacy(root,bad=False):
     assert hashlib.sha256(path.read_bytes()).hexdigest()==digest
     assert not Path(str(path)+'-wal').exists()
     return {'archive_unchanged':True,'legacy_not_certified':True}
+
+
+def _register_document_batch(root):
+    from demiflow import data
+    from demiflow.collect.document_library import DocumentLibrary
+    from test_runtime_v3_document_batch import rows
+    library=DocumentLibrary(index_path=root/'index.sqlite',object_directory=root/'objects')
+    output=data.from_items(rows()).register_documents(request='request',output='registration',
+        library=library,batch_size=2,concurrency=1,prepare_workers=1).take_all()
+    assert len(output)==2 and all(r['registration']['status']=='ok' for r in output)
+    for i,row in enumerate(output):
+        assert library.lookup('https://fixture.invalid/'+str(i),max_bytes=1024,max_document_bytes=4096)['document_ref']==row['registration']['document_ref']
+    return {'registered':len(output),'batch_size':2}

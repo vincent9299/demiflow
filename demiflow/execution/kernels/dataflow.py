@@ -500,7 +500,7 @@ def invoke_batch(
             )
         result = instance(batch)
         out_rows = _batch_to_rows(result, batch_format, on_schema=output_schema)
-    elif kind in ("BatchMapOp", "AddColumnOp", "embedding", "EmbeddingMapOp"):
+    elif kind in ("BatchMapOp", "AddColumnOp", "embedding", "EmbeddingMapOp", "RegisterDocumentsBatchOp"):
         if input_bytes > services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "batch exceeds max_batch_bytes", bytes=input_bytes)
         if kind == "AddColumnOp":
