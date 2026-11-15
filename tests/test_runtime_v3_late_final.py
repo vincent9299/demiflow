@@ -174,3 +174,131 @@ def test_late_native_eoi_obtains_final_ack_and_replays_live_result(
         server.server_close()
         server_thread.join(timeout=5)
         assert not server_thread.is_alive()
+
+
+@pytest.mark.parametrize('stop_when_complete', [False, True])
+def test_parked_complete_input_replays_without_new_worker_or_commit(
+        tmp_path, monkeypatch, stop_when_complete):
+    from demiflow.execution.dataflow_thread_host import ThreadHostEndpoint
+
+    original_send = ThreadHostEndpoint.send_business
+    original_begin = DataflowCheckpointCoordinator.begin
+    original_cut = _EndpointBase.request_cut
+    original_pump = DataflowExecution.pump
+    original_commit = DataflowCheckpointCoordinator.commit
+    original_start = DataflowExecution.start
+    current = None
+    selected_cut = None
+    held_eoi, held_cut, images, executions = [], [], [], []
+
+    def delay_eoi(endpoint, command):
+        terminal = current is not None and any(
+            set(stage.occurrences) & set(current._graph.terminals)
+            for stage in endpoint._assignment.stages)
+        if command.get('kind') == 'edge_eoi' and terminal and selected_cut is None:
+            held_eoi.append((endpoint, dict(command)))
+        else:
+            original_send(endpoint, command)
+
+    def begin(coordinator, **kwargs):
+        nonlocal selected_cut
+        cut = original_begin(coordinator, **kwargs)
+        if held_eoi:
+            assert current._durable_residency is not None and not cut.final
+            assert current._checkpoint.inputs_complete()
+            assert set(current._endpoints) - current._done
+            selected_cut = cut.cut_id
+            for endpoint, command in held_eoi:
+                original_send(endpoint, command)
+            held_eoi.clear()
+        return cut
+
+    def request_cut(endpoint, cut):
+        if cut.cut_id == selected_cut:
+            held_cut.append((endpoint, cut))
+        else:
+            original_cut(endpoint, cut)
+
+    def pump(execution, **kwargs):
+        nonlocal current
+        current = execution
+        status = original_pump(execution, **kwargs)
+        if held_cut and set(execution._endpoints) <= execution._done:
+            assert execution._durable_residency.final(True)
+            assert execution._checkpoint.inputs_complete()
+            if stop_when_complete:
+                execution.satisfy_terminal()
+            for endpoint, cut in held_cut:
+                original_cut(endpoint, cut)
+            held_cut.clear()
+        return status
+
+    def commit(coordinator, *args, **kwargs):
+        image = original_commit(coordinator, *args, **kwargs)
+        assert coordinator._action.context.journal.execution_commit(image.commit_id)['status'] == 'acked'
+        images.append(image)
+        return image
+
+    def start(execution):
+        executions.append(execution)
+        return original_start(execution)
+
+    class InterruptedAfterCompletion(Exception):
+        pass
+
+    expected = [{'n': 0}]
+    with monkeypatch.context() as patch:
+        patch.setattr(ThreadHostEndpoint, 'send_business', delay_eoi)
+        patch.setattr(DataflowCheckpointCoordinator, 'begin', begin)
+        patch.setattr(_EndpointBase, 'request_cut', request_cut)
+        patch.setattr(DataflowExecution, 'pump', pump)
+        patch.setattr(DataflowCheckpointCoordinator, 'commit', commit)
+        patch.setattr(DataflowExecution, 'start', start)
+        with pytest.raises(InterruptedAfterCompletion):
+            with RunContext.start(tmp_path / 'run', limits={
+                    'memory_bytes': 40 * 1024, 'max_batch_bytes': 16 * 1024,
+                    'max_row_bytes': 8 * 1024, 'max_state_bytes': 128 * 1024,
+                    'timeout_s': 30, 'checkpoint_rows': 2,
+                    'checkpoint_interval_ms': 60000}) as run, data.local_execution(worker_mode='thread'):
+                ref = run.ref
+                assert data.from_items(expected).take_all() == expected
+                commits = run.journal.execution_commits('action-1')
+                assert len(commits) == 3 and all(c['status'] == 'acked' for c in commits)
+                assert [image.cut.final for image in images] == [False, False, True]
+                assert images[1].cut.cut_id == selected_cut
+                assert executions[0]._observed_worker_count == 2
+                assert executions[0]._terminal_result.completion == 'source_exhausted'
+                assert not held_eoi and not held_cut
+                raise InterruptedAfterCompletion()
+        with RunContext.resume(ref) as resumed, data.local_execution(worker_mode='thread'):
+            assert data.from_items(expected).take_all() == expected
+            assert resumed.journal.execution_commits('action-1') == commits
+            assert len(executions) == 2 and executions[1]._endpoints == {}
+            assert executions[1]._observed_worker_count == 0
+            assert executions[1]._restore_image.commit_id == images[-1].commit_id
+
+
+def test_parked_incomplete_take_keeps_original_prefix_receipt(tmp_path, monkeypatch):
+    original = DataflowExecution._set_result
+    completed = []
+
+    def record_result(execution, image):
+        completed.append((execution, image))
+        return original(execution, image)
+
+    monkeypatch.setattr(DataflowExecution, '_set_result', record_result)
+    with RunContext.start(tmp_path / 'run', limits={
+            'memory_bytes': 40 * 1024, 'max_batch_bytes': 16 * 1024,
+            'max_row_bytes': 8 * 1024, 'max_state_bytes': 128 * 1024,
+            'timeout_s': 30, 'checkpoint_rows': 2,
+            'checkpoint_interval_ms': 60000}) as run, data.local_execution(worker_mode='thread'):
+        assert data.range(10000).take(2) == [{'id': 0}, {'id': 1}]
+        assert len(completed) == 1
+        execution, image = completed[0]
+        assert execution._durable_residency is not None
+        assert execution._stopping and not execution._checkpoint.inputs_complete()
+        assert not image.cut.final
+        assert execution._terminal_result.completion == 'terminal_satisfied'
+        assert run.journal.execution_commit(image.commit_id)['status'] == 'acked'
+        cursors = [cursor for contribution in image.contributions for cursor in contribution.sources]
+        assert cursors and all(not cursor.end_of_input and cursor.next_sequence <= 2 for cursor in cursors)

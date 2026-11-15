@@ -1073,7 +1073,7 @@ class DataflowExecution:
                 endpoint.send_business({"kind": "receipt", "cut_id": self._cut.cut_id,
                                         "commit_id": image.commit_id})
             if durable is not None:
-                if self._cut.final or self._stopping:
+                if self._cut.final:
                     self._set_result(image)
                 elif durable.final(all_workers <= self._done) and self._checkpoint.inputs_complete():
                     # Completion may arrive after begin froze a non-final cut.
@@ -1084,6 +1084,8 @@ class DataflowExecution:
                     self._idle.clear()
                     for endpoint in self._endpoints.values():
                         endpoint.send_business({'kind': 'pause'})
+                elif self._stopping:
+                    self._set_result(image)
                 else:
                     self._retire_phase(image)
             elif all_workers <= self._done and self._phase_index < len(self._phases) - 1:
