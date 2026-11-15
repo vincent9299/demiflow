@@ -753,8 +753,18 @@ class DataflowExecution:
                      or (time.monotonic() - self._checkpoint_at) * 1000 >= self._policy.checkpoint_interval_ms)):
             self.request_checkpoint()
         self._advance_cut()
-        if not events:
-            time.sleep(min(.002, deadline_ms / 1000))
+        if not events and not replies:
+            pause = min(.002, deadline_ms / 1000)
+            sockets = [getattr(endpoint, '_sock', None) for endpoint in self._endpoints.values()]
+            if self._policy.provider == 'local' and sockets and all(sock is not None for sock in sockets):
+                # The same driver still owns every read and control reply.
+                # Wait for readiness instead of sleeping through a newly
+                # produced row or RPC. The timeout also polls journal replies;
+                # this introduces no extra connection, thread or busy loop.
+                import select
+                select.select(sockets, [], [], pause)
+            else:
+                time.sleep(pause)
         return ExecutionStatus(state=self._state, pending_events=self._pending_events,
                                confirmed_rows=self._confirmed_rows)
 
