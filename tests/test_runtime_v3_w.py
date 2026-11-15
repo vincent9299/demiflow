@@ -1644,9 +1644,10 @@ const vm = require('vm');
 const path = require('path');
 const ROOT = process.env.W_ROOT;
 if (!ROOT) throw new Error('W_ROOT not set');
-const wbPath = path.join(ROOT, 'demiflow/workbench/web/workbench.js');
-const graphPath = path.join(ROOT, 'demiflow/workbench/web/workbench-graph.js');
-const wbSrc = fs.readFileSync(wbPath, 'utf8');
+const WEB = path.join(ROOT, 'demiflow/workbench/web');
+const presentationPath = path.join(WEB, 'workbench-presentation.js');
+const graphPath = path.join(WEB, 'workbench-graph.js');
+const presentationSrc = fs.readFileSync(presentationPath, 'utf8');
 const graphSrc = fs.readFileSync(graphPath, 'utf8');
 
 function assert(cond, msg) { if (!cond) throw new Error('ASSERT: ' + msg); }
@@ -1669,8 +1670,12 @@ function makeEl(tag) {
     replaceChildren(...ns) { this.children = []; this.append(...ns); },
     setAttribute(k, v) { this.attributes[k] = String(v); },
     getAttribute(k) { return k in this.attributes ? this.attributes[k] : null; },
-    contains(n) { return this.children.includes(n); },
+    contains(n) { return this === n || this.children.some(c => c.contains && c.contains(n)); },
     addEventListener() {}, removeEventListener() {},
+    remove() { if (this.parentNode) { const s = this.parentNode.children; const i = s.indexOf(this); if (i >= 0) s.splice(i, 1); this.parentNode = null; } },
+    getBoundingClientRect() { return {x: 0, y: 0, width: this.clientWidth, height: this.clientHeight, top: 0, left: 0, right: this.clientWidth, bottom: this.clientHeight}; },
+    scrollIntoView() {},
+    clientWidth: 800, clientHeight: 400,
     get textContent() { return this._text; },
     set textContent(v) { this._text = String(v); this.children = []; },
     get isConnected() { return true; },
@@ -1682,212 +1687,344 @@ function textOf(el) { if (!el) return ''; let t = el._text || ''; for (const c o
 function walk(el, fn) { fn(el); for (const c of el.children || []) walk(c, fn); }
 function findByAttr(root, attr, val) { let found = null; walk(root, e => { if (e.attributes && e.attributes[attr] === val) found = e; }); return found; }
 
-function extractFn(src, name) {
-  const marker = 'function ' + name + '(';
-  const start = src.indexOf(marker);
-  if (start < 0) throw new Error('missing function ' + name);
-  const i = src.indexOf('{', start);
-  let depth = 0, j = i;
-  for (; j < src.length; j++) { const c = src[j]; if (c === '{') depth++; else if (c === '}') { depth--; if (depth === 0) { j++; break; } } }
-  const body = src.slice(start, j);
-  assert(body.startsWith(marker) && body.endsWith('}'), 'extraction bounds for ' + name);
-  return body;
+// SVG nodes carry class via setAttribute, HTML nodes via the className property.
+function findAllByClass(root, cls) {
+  const out = [];
+  walk(root, e => {
+    const value = (e.attributes && e.attributes.class) || e.className || '';
+    if (String(value).split(/\s+/).includes(cls)) out.push(e);
+  });
+  return out;
 }
 
-function makeHost(state) {
-  const rec = { raw: [], messages: [], locate: [], choose: [], viewUpdate: [], viewSelect: [], details: [] };
-  const host = {
+// The C merge replaced the old workbench.js logical* projection with the pure
+// presentation module (C01-C04/C09). Load the real exported surface instead of
+// extracting deleted function names; no consumer double, no second authority.
+function presentation() {
+  const ctx = vm.createContext({console});
+  vm.runInContext(presentationSrc, ctx, {filename: presentationPath});
+  const api = ctx.ForgeWorkbenchPresentation;
+  assert(api, 'ForgeWorkbenchPresentation exported');
+  for (const name of ['chooseGraphView', 'buildNodeCard', 'buildGraphModel', 'buildNodeDetails', 'normalizeExecutionPlan'])
+    assert(typeof api[name] === 'function', 'presentation export ' + name);
+  return api;
+}
+
+function graphHost() {
+  const host = makeEl('div');
+  const ctx = vm.createContext({
     document: documentDouble, console,
-    disposed: false, logicalAction: null, logicalSelected: null,
-    logicalBar: makeEl('div'), graphLegend: makeEl('div'), graphTitle: makeEl('div'),
-    graphHost: makeEl('div'), inspector: makeEl('div'),
-    data: () => state,
-    $: (tag, text, cls) => { const n = documentDouble.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; },
-    select: (label, items, value) => { const s = makeEl('select'); s.value = value; s._items = items; return s; },
-    field: (name, el, parent) => { parent.append(el); },
-    details: (title, h) => { const b = makeEl('details'); b._title = title; rec.details.push(title); return b; },
-    raw: (name, value, box) => { rec.raw.push({ name, value }); const p = makeEl('pre'); p.textContent = JSON.stringify(value); box.append(p); },
-    button: (label, action, parent, opts) => { const b = makeEl('button'); b._label = label; b._action = action; b.disabled = !!(opts && opts.disabled); parent.append(b); return b; },
-    message: (text, tone) => { rec.messages.push(text); },
-    locateNode: id => { rec.locate.push(id); return Promise.resolve(); },
-    chooseNode: (id, opts) => { rec.choose.push({ id, opts }); },
-    logicalView: { update: (...a) => { rec.viewUpdate.push(a); }, select: id => { rec.viewSelect.push(id); } },
-  };
-  const fns = ['logicalName', 'actionStatusLabel', 'logicalEntry', 'logicalPanel', 'renderLogical', 'bridgeEntryFor', 'observationLabel', 'chooseLogicalNode'];
-  const code = fns.map(n => extractFn(wbSrc, n)).join('\n');
-  vm.createContext(host);
-  vm.runInContext(code, host, { filename: wbPath });
-  return { host, rec };
+    ResizeObserver: class { observe() {} disconnect() {} },
+    requestAnimationFrame: fn => { fn(0); return 1; },
+    cancelAnimationFrame: () => {},
+  });
+  vm.runInContext(graphSrc, ctx, {filename: graphPath});
+  const api = ctx.ForgeWorkbenchGraph;
+  assert(api, 'ForgeWorkbenchGraph exported');
+  for (const name of ['mount', 'layoutGraph', 'status', 'cpuChart'])
+    assert(typeof api[name] === 'function', 'graph export ' + name);
+  assert(!('mountLogical' in api), 'removed mountLogical must not be resurrected');
+  return {api, host, ctx};
 }
 
-function dagNode(logical, occ, extra) {
-  return Object.assign({ logical_node_id: logical, occurrence_id: occ, op_kind: 'map', input_ports: ['in'], output_ports: ['out'], shared_token: null, traits: null, operator_spec_ref: null }, extra || {});
-}
+// Contract-valid fixtures for the merged C projection. v3 identities must be
+// 64-hex (isSha) and edges must carry edge_id + occurrence endpoints; the real
+// schema is demiflow.dataflow_graph.v3 and resource_role must be a known ROLES
+// member. The old short-id / logical_dag.v3 / 'worker' fixtures are not admitted
+// by normalizeExecutionPlan and would fabricate a false refusal.
+const sha = c => c.repeat(64);
+const PROJECT_ID = 'w' + 'a1'.repeat(16);
+const BINDING = {basis_kind: 'run', workspace_id: PROJECT_ID, basis_digest: sha('b'), run_id: 'run-1', attempt: 1};
+const ACTION = 'a0', DAG_ID = sha('8'), PLAN_ID = sha('9');
+const L_SRC = sha('1'), L_MAP = sha('2');
+const O_SRC = sha('3'), O_MAP0 = sha('4'), O_MAP1 = sha('5');
+const E0 = sha('6'), E1 = sha('7');
+
 function v3Dag() {
   return {
-    schema_version: 'demiflow.logical_dag.v3', dag_id: 'd'.repeat(64),
-    nodes: [dagNode('src', 'occ-src'), dagNode('map', 'occ-map-0'), dagNode('map', 'occ-map-1')],
-    edges: [{ from: { logical_node_id: 'src', port: 'out' }, to: { logical_node_id: 'map', port: 'in' } }],
-    shared_ancestors: [{ logical_node_id: 'src' }],
+    schema_version: 'demiflow.dataflow_graph.v3', dag_id: DAG_ID, action_id: ACTION,
+    nodes: [
+      {logical_node_id: L_SRC, occurrence_id: O_SRC, op_kind: 'source', input_ports: [], output_ports: ['out'], shared_token: null, traits: null},
+      {logical_node_id: L_MAP, occurrence_id: O_MAP0, op_kind: 'map', input_ports: ['in'], output_ports: ['out'], shared_token: null, traits: {resource_role: 'cpu', effect: 'pure', state: 'stateless'}},
+      {logical_node_id: L_MAP, occurrence_id: O_MAP1, op_kind: 'map', input_ports: ['in'], output_ports: ['out'], shared_token: 'tok-123', traits: {resource_role: 'cpu', effect: 'pure', state: 'stateless'}},
+    ],
+    edges: [
+      {edge_id: E0, from: {logical_node_id: L_SRC, occurrence_id: O_SRC, port: 'out'}, to: {logical_node_id: L_MAP, occurrence_id: O_MAP0, port: 'in'}},
+      {edge_id: E1, from: {logical_node_id: L_SRC, occurrence_id: O_SRC, port: 'out'}, to: {logical_node_id: L_MAP, occurrence_id: O_MAP1, port: 'in'}},
+    ],
+    sources: [O_SRC], terminals: [O_MAP0, O_MAP1],
   };
 }
 function v3Physical() {
   return {
-    plan_id: 'p'.repeat(64), plan_revision: 3, recovery: 'checkpoint',
+    plan_id: PLAN_ID, plan_revision: 3, recovery: 'checkpoint',
     stages: {
-      'occ-map-0': { stage_id: 's0', partition_count: 2, replica_min: 1, replica_target: 2, replica_max: 4, resident_bytes: 10, output_bytes: 20, state_bytes: 30, profile: { requests: { cpu: '2', memory: '1Gi' } } },
-      'occ-map-1': { stage_id: 's1', partition_count: 3, replica_min: 1, replica_target: 3, replica_max: 6, resident_bytes: 11, output_bytes: 21, state_bytes: 31, profile: { requests: { cpu: '3' } } },
+      [O_MAP0]: {stage_id: 's0', partition_count: 2, replica_min: 1, replica_target: 2, replica_max: 4, profile: {requests: {cpu: '2', memory: '1Gi'}}},
+      [O_MAP1]: {stage_id: 's1', partition_count: 3, replica_min: 1, replica_target: 3, replica_max: 6, profile: {requests: {cpu: '3'}}},
     },
-    exchanges: [{ channel_id: 'c0', mode: 'durable_incremental' }, { channel_id: 'c1', mode: 'memory_incremental' }],
-    limitations: ['某资源 actor 未声明恢复钩子'], policy: {}, residency: {},
+    exchanges: [{channel_id: 'c0', edge_id: E0, mode: 'durable_incremental'}, {channel_id: 'c1', edge_id: E1, mode: 'memory_incremental'}],
+    limitations: ['某资源 actor 未声明恢复钩子'],
+  };
+}
+function legacyDag() {
+  return {
+    schema_version: 'demiflow.logical_dag.v1', dag_id: DAG_ID, action_id: ACTION,
+    nodes: [
+      {logical_node_id: 'src', occurrence_id: 'occ-src', op_kind: 'source', input_ports: [], output_ports: ['out']},
+      {logical_node_id: 'map', occurrence_id: 'occ-map-0', op_kind: 'map', input_ports: ['in'], output_ports: ['out']},
+      {logical_node_id: 'map', occurrence_id: 'occ-map-1', op_kind: 'map', input_ports: ['in'], output_ports: ['out']},
+    ],
+    edges: [{from: {logical_node_id: 'src', port: 'out'}, to: {logical_node_id: 'map', port: 'in'}}],
+    sources: ['src'], terminals: ['map'],
+  };
+}
+function legacyPhysical() {
+  return {
+    plan_id: PLAN_ID, plan_revision: 1, recovery: 'final_commit',
+    stages: {map: {stage_id: 's', partition_count: 1, role: 'worker', budgets: {cpu: 1}}},
+    channels: [{channel_id: 'c0', exchange_mode: 'memory'}], worker_groups: [], limitations: [],
+  };
+}
+function sealedEntry(over) {
+  return Object.assign({
+    action_id: ACTION, status: 'sealed', binding_level: 'sealed', version: 'v3',
+    dag: v3Dag(), physical: v3Physical(), plan_id: PLAN_ID, sealed_at: 1700000000,
+    recovery_restriction: {reason: 'actor_without_hook'},
+    node_map: {}, node_observations: {available: false, reason: 'observation_page_unavailable'},
+    identity_bridge: {available: false},
+  }, over || {});
+}
+function legacyEntry(over) {
+  return sealedEntry(Object.assign({version: 'v1', dag: legacyDag(), physical: legacyPhysical()}, over || {}));
+}
+function runGraph(entry, extra) {
+  return Object.assign({
+    binding: BINDING,
+    logical: {available: true, action_count: 1, actions: [entry]},
+    nodes: [{id: 'n0', api: 'x.y', kind: 'map', fields: {}, source: 'f.py', line: 1}],
+    edges: [],
+  }, extra || {});
+}
+// A real identity bridge + observation page, so the consumer half is exercised
+// against admitted facts rather than a missing-bridge placeholder.
+function bridged(occurrences) {
+  return {
+    identity_bridge: {available: true, bridge: {
+      schema: 'demiflow.identity_bridge.v1', action_id: ACTION, dag_id: DAG_ID, report_digest: BINDING.basis_digest,
+      entries: occurrences.map((occ, i) => ({logical_node_id: L_MAP, occurrence_id: occ, report_node_id: 'n' + i, report_occurrence: 0, mode: 'execute'})),
+    }},
+    node_observations: {available: true, attempt: 1, action_id: ACTION, dag_id: DAG_ID, plan_id: PLAN_ID, plan_revision: 3, has_more: false,
+      entries: occurrences.map((occ, i) => ({logical_node_id: L_MAP, occurrence_id: occ, report_node_id: 'n' + i, report_occurrence: 0, availability: 'observed'}))},
+    node_map: occurrences.reduce((acc, occ, i) => { acc[L_MAP] = 'n' + i; return acc; }, {}),
   };
 }
 
 function w018() {
-  const state = { graph: { logical: { available: true, actions: [] } } };
-  const { host } = makeHost(state);
-  assert(host.logicalEntry() === null, 'empty actions -> null');
-  state.graph.logical.available = false;
-  assert(host.logicalEntry() === null, 'unavailable -> null');
-  state.graph.logical.available = true;
-  const v3noDag = { action_id: 'a0', status: 'sealed', version: 'v3' };
-  state.graph.logical.actions = [v3noDag];
-  assert(host.logicalEntry() === null, 'sealed v3 without dag -> null (no fabricated graph)');
-  const v3dag = { action_id: 'a0', status: 'sealed', version: 'v3', dag: v3Dag() };
-  state.graph.logical.actions = [v3dag];
-  assert(host.logicalEntry() === v3dag, 'sealed v3 with dag -> entry');
-  const v1 = { action_id: 'a1', status: 'sealed', version: 'v1' };
-  state.graph.logical.actions = [v1];
-  assert(host.logicalEntry() === v1, 'sealed v1 without dag still returned (v1 not guarded)');
-  state.graph.logical.actions = [v3dag, { action_id: 'a2', status: 'projected', dag: v3Dag() }];
-  host.logicalAction = 'a2';
-  assert(host.logicalEntry().action_id === 'a2', 'logicalAction selects entry');
+  const P = presentation();
+  // No actions -> no sealed view, never a fabricated graph.
+  const empty = runGraph(sealedEntry()); empty.logical.actions = [];
+  assert(P.chooseGraphView(empty, {}).kind === 'unavailable', 'empty actions -> unavailable');
+  // Sealed v3 WITHOUT dag: the view may be chosen, but the projection must
+  // refuse. The old logicalEntry() guard moved into normalizeExecutionPlan and
+  // now covers BOTH formats (stricter than the old v1-exempt behaviour).
+  const noDag = sealedEntry({dag: undefined});
+  const g = runGraph(noDag);
+  const choice = P.chooseGraphView(g, {});
+  assert(choice.kind === 'sealed' && choice.actionId === ACTION, 'sealed v3 chosen');
+  let proj = P.normalizeExecutionPlan(noDag, BINDING);
+  assert(proj.available === false && proj.reason === 'unsupported_plan_schema', 'sealed v3 without dag -> refused (no fabricated graph)');
+  assert(/缺少 dag/.test(proj.detail), 'refusal names the missing dag');
+  const legacyNoDag = legacyEntry({dag: undefined});
+  proj = P.normalizeExecutionPlan(legacyNoDag, BINDING);
+  assert(proj.available === false, 'sealed legacy without dag also refused (guard covers both formats)');
+  // Sealed v3 WITH a contract-valid dag -> real projection.
+  const withDag = sealedEntry();
+  proj = P.normalizeExecutionPlan(withDag, BINDING);
+  assert(proj.available === true && proj.identity.format === 'v3', 'sealed v3 with dag -> v3 projection');
+  assert(proj.nodes.length === 3 && proj.edges.length === 2, 'v3 topology projected');
+  assert(proj.identity.dagId === DAG_ID && proj.identity.planId === PLAN_ID, 'identity carries dag/plan');
+  // Projected (not sealed) -> honest refusal, never a sealed view.
+  const projected = sealedEntry({status: 'projected', binding_level: 'declared'});
+  const g2 = runGraph(projected);
+  assert(P.chooseGraphView(g2, {}).kind === 'unavailable', 'projected action -> unavailable, not sealed');
+  proj = P.normalizeExecutionPlan(projected, BINDING);
+  assert(proj.available === false && proj.reason === 'not_sealed', 'projected -> not_sealed');
+  // Explicit actionId selects the entry; an unknown id is refused, not guessed.
+  const g3 = runGraph(withDag);
+  assert(P.chooseGraphView(g3, {actionId: ACTION}).actionId === ACTION, 'actionId selects entry');
+  assert(P.chooseGraphView(g3, {actionId: 'nope'}).reason === 'action_not_found', 'unknown actionId refused');
+  // A v3 dag with an inconsistent version marker must not be silently accepted.
+  proj = P.normalizeExecutionPlan(sealedEntry({version: 'v1'}), BINDING);
+  assert(proj.available === false && proj.reason === 'identity_mismatch', 'v3 dag with v1 marker refused');
   return { ok: true };
 }
 
 function w019() {
-  const dag = v3Dag();
-  const sealedEntry = {
-    action_id: 'a0', status: 'sealed', version: 'v3', binding_level: 'sealed',
-    dag, physical: v3Physical(), plan_id: 'p'.repeat(64), sealed_at: 1700000000,
-    recovery_restriction: { reason: 'actor_without_hook' }, node_map: {},
-    node_observations: [], identity_bridge: { available: false },
-  };
-  const state = { graph: { logical: { available: true, action_count: 1, actions: [sealedEntry] }, nodes: [{ id: 'n0', api: 'x.y', kind: 'map' }] } };
-  const { host, rec } = makeHost(state);
-  host.renderLogical(state.graph);
-  const bar = textOf(host.logicalBar);
-  assert(bar.includes('封存计划结构 · '), 'sealed structure tag present');
-  assert(!bar.includes('结构校验通过'), 'no execution-contract-passed claim');
-  assert(bar.includes('恢复级别 checkpoint'), 'recovery level shown');
-  assert(bar.includes('交换通道 2'), 'exchange count shown');
-  assert(bar.includes('durable_incremental') && bar.includes('memory_incremental'), 'exchange modes shown');
-  assert(bar.includes('恢复限制 1 项'), 'limitation count shown');
-  assert(bar.includes('某资源 actor 未声明恢复钩子'), 'limitation detail shown');
-  assert(bar.includes('中断后不能继续恢复'), 'recovery restriction warning shown');
-  assert(bar.includes('已绑定本次执行计划'), 'sealed bound tag');
-  assert(rec.viewUpdate.length === 1 && rec.viewUpdate[0][4] === 'sealed', 'logicalView basis sealed');
-  const projected = { action_id: 'a0', status: 'projected', version: 'v3', binding_level: 'declared', dag, node_map: {}, node_observations: [] };
-  state.graph.logical.actions = [projected];
-  host.logicalAction = null;
-  const h2 = makeHost(state);
-  h2.host.renderLogical(state.graph);
-  const bar2 = textOf(h2.host.logicalBar);
-  assert(bar2.includes('声明投影结构（未执行）'), 'static graph honest label');
-  assert(!bar2.includes('结构校验通过'), 'static graph no execution claim');
-  assert(!bar2.includes('已绑定本次执行计划'), 'static graph not bound to execution');
-  assert(bar2.includes('未绑定本次执行计划'), 'static graph unbound tag');
-  assert(h2.rec.viewUpdate[0][4] === 'declared', 'logicalView basis declared');
+  const P = presentation();
+  const entry = sealedEntry();
+  const g = runGraph(entry);
+  const choice = P.chooseGraphView(g, {});
+  const model = P.buildGraphModel(g, {choice});
+  assert(model.choice.kind === 'sealed' && model.choice.label === '运行封存计划', 'sealed basis label');
+  assert(model.execution && model.execution.format === 'v3', 'sealed model bound to this execution identity');
+  assert(model.nodes.length === 3, 'one card per v3 occurrence');
+  const proj = P.normalizeExecutionPlan(entry, BINDING);
+  assert(proj.recovery.declared === 'checkpoint', 'recovery level shown');
+  assert(proj.exchanges.length === 2, 'exchange count shown');
+  const modes = proj.exchanges.map(item => item.mode);
+  assert(modes.includes('durable_incremental') && modes.includes('memory_incremental'), 'exchange modes shown');
+  assert(proj.recovery.limitations.length === 1 && proj.recovery.limitations[0] === '某资源 actor 未声明恢复钩子', 'limitation detail shown');
+  assert(proj.recovery.restriction === 'actor_without_hook', 'recovery restriction shown');
+  const sealedText = JSON.stringify(model);
+  assert(!sealedText.includes('结构校验通过'), 'no execution-contract-passed claim');
+  assert(!sealedText.includes('执行完成') && !sealedText.includes('成功'), 'no fabricated success without observations');
+  assert(model.notices.includes('该 action 尚无节点身份桥；执行节点与报告观测的对应不猜测。'), 'missing bridge is honest, not guessed');
+  // Projected / declared -> honest unbound view, draws no plan, claims no execution.
+  const projected = sealedEntry({status: 'projected', binding_level: 'declared'});
+  const g2 = runGraph(projected);
+  const c2 = P.chooseGraphView(g2, {});
+  const m2 = P.buildGraphModel(g2, {choice: c2});
+  assert(m2.choice.kind === 'unavailable', 'projected honest unavailable label');
+  assert(m2.execution === null, 'projected not bound to execution');
+  assert(m2.nodes.length === 0, 'projected draws no fabricated plan');
+  assert(m2.notices.some(n => n.includes('该 action 没有封存执行计划')), 'projected refusal is explicit');
+  assert(!JSON.stringify(m2).includes('结构校验通过'), 'static graph no execution claim');
+  // Sealed but unprojectable -> explicit refusal, never a silent old-version plan.
+  const g3 = runGraph(sealedEntry({dag: undefined}));
+  const m3 = P.buildGraphModel(g3, {choice: P.chooseGraphView(g3, {})});
+  assert(m3.choice.kind === 'unavailable' && m3.execution === null, 'unprojectable sealed -> unbound');
+  assert(m3.notices.some(n => n.includes('不会按旧版悄悄画完整计划')), 'honest refusal notice, no silent fallback');
   return { ok: true };
 }
 
 function w020() {
-  const dag = v3Dag();
-  const phys = v3Physical();
-  const obsList = [
-    { occurrence_id: 'occ-map-0', observed: true, availability: 'observed', metrics: {} },
-    { occurrence_id: 'occ-map-1', observed: false, availability: 'unobserved', metrics: {} },
-  ];
-  const entry = {
-    action_id: 'a0', status: 'sealed', version: 'v3', binding_level: 'sealed',
-    dag, physical: phys, node_map: {}, identity_bridge: { available: false },
-    node_observations: obsList, plan_node_observations: obsList,
-    recovery_restriction: { reason: 'actor_without_hook' },
-  };
-  const state = { graph: { logical: { available: true, action_count: 1, actions: [entry] }, nodes: [{ id: 'n0', api: 'x.y', kind: 'map' }] } };
-  const { host, rec } = makeHost(state);
-  host.chooseLogicalNode('map', null);
-  const names = rec.raw.map(r => r.name);
-  assert(names.includes('stage.profile'), 'v3 stage.profile raw block');
-  assert(names.includes('stage.replicas'), 'v3 stage.replicas raw block');
-  assert(names.includes('stages_by_occurrence'), 'multi-occurrence stages_by_occurrence');
-  assert(names.includes('plan_node_observations'), 'plan_node_observations preserved');
-  assert(names.includes('plan_facts'), 'v3 plan_facts raw block');
-  const pf = rec.raw.find(r => r.name === 'plan_facts').value;
-  assert(Array.isArray(pf.exchanges) && pf.exchanges.length === 2, 'plan_facts carries exchanges');
-  assert(!('worker_groups' in pf), 'v3 plan_facts has no worker_groups');
-  const sp = rec.raw.find(r => r.name === 'stage.profile').value;
-  assert(sp.requests.cpu === '2', 'stage resolved by occurrence_id occ-map-0');
-  const sbo = rec.raw.find(r => r.name === 'stages_by_occurrence').value;
-  assert(sbo['occ-map-0'].stage_id === 's0' && sbo['occ-map-1'].stage_id === 's1', 'stages_by_occurrence keyed per occurrence');
-  const boxText = textOf(host.inspector);
-  assert(boxText.includes('已有观测'), 'list-shape observation label observed');
-  assert(boxText.includes('副本目标'), 'v3 replica target row');
-  assert(boxText.includes('资源画像'), 'v3 profile row');
-  assert(boxText.includes('中断后不能继续恢复'), 'recovery restriction note');
-  const v1entry = {
-    action_id: 'a0', status: 'sealed', version: 'v1', binding_level: 'sealed',
-    dag, node_map: {}, identity_bridge: { available: false }, node_observations: { available: false, reason: 'x' },
-    physical: { plan_id: 'p'.repeat(64), plan_revision: 1, recovery: 'final_commit', stages: { map: { stage_id: 's', partition_count: 1, role: 'worker', budgets: { cpu: 1 } } }, channels: [], worker_groups: [] },
-  };
-  const state2 = { graph: { logical: { available: true, action_count: 1, actions: [v1entry] }, nodes: [{ id: 'n0', api: 'x.y', kind: 'map' }] } };
-  const h2 = makeHost(state2);
-  h2.host.chooseLogicalNode('map', null);
-  const n2 = h2.rec.raw.map(r => r.name);
-  assert(n2.includes('stage.budgets'), 'v1 stage.budgets raw block');
-  const pf2 = h2.rec.raw.find(r => r.name === 'plan_facts').value;
-  assert('channels' in pf2 && 'worker_groups' in pf2, 'v1 plan_facts channels/worker_groups');
-  assert(!('exchanges' in pf2), 'v1 plan_facts has no exchanges');
-  assert(!n2.includes('stage.replicas'), 'v1 has no replica raw block');
+  const P = presentation();
+  // v3: stages resolve per occurrence, profile/replicas/exchanges are v3 facts.
+  const entry = sealedEntry(bridged([O_MAP0, O_MAP1]));
+  const g = runGraph(entry);
+  const proj = P.normalizeExecutionPlan(entry, BINDING);
+  assert(proj.available === true, 'bridged v3 entry projects');
+  const byOcc = new Map(proj.nodes.map(n => [n.occurrenceId, n]));
+  const m0 = byOcc.get(O_MAP0), m1 = byOcc.get(O_MAP1);
+  assert(m0 && m1, 'both occurrences projected');
+  assert(m0.placement.profile.requests.cpu === '2', 'v3 stage.profile resolved by occurrence O_MAP0');
+  assert(m1.placement.profile.requests.cpu === '3', 'v3 stage.profile resolved by occurrence O_MAP1');
+  assert(m0.placement.replicaTarget === 2 && m1.placement.replicaTarget === 3, 'v3 replica targets per occurrence');
+  assert(m0.placement.replicaMin === 1 && m0.placement.replicaMax === 4, 'v3 replica bounds');
+  assert(m0.placement.stageId === 's0' && m1.placement.stageId === 's1', 'stages keyed per occurrence');
+  assert(m0.placement.role === 'cpu', 'known resource_role admitted');
+  assert(proj.exchanges.length === 2 && proj.exchanges.every(e => e.edgeId), 'v3 exchanges carry edge identity');
+  assert(!('worker_groups' in proj), 'v3 projection has no worker_groups');
+  assert(proj.recovery.restriction === 'actor_without_hook', 'recovery restriction preserved');
+  // Node cards / details come from the real consumer surface.
+  const model = P.buildGraphModel(g, {choice: P.chooseGraphView(g, {})});
+  const card = model.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  assert(card, 'occurrence card present');
+  const summary = JSON.stringify(card.summary);
+  assert(summary.includes('s0') && summary.includes('2 分区'), 'placement summary shows stage and partitions');
+  assert(card.state.label.includes('已有观测'), 'observed availability label, not inferred success');
+  assert(!card.state.label.includes('执行完成') && !card.state.label.includes('成功'), 'no fabricated success state');
+  const details = P.buildNodeDetails(g, card.selection);
+  assert(details.execution && details.execution.format === 'v3', 'details bound to v3 execution identity');
+  assert(details.sourceAvailable === true, 'bridged node exposes source');
+  assert(details.recoveryRestriction === 'actor_without_hook', 'details carry recovery restriction');
+  assert(details.exchanges.length >= 1, 'details carry adjacent v3 exchanges');
+  // Unbridged node must stay honest rather than guess a correspondence.
+  const unbridged = P.buildGraphModel(runGraph(sealedEntry()), {choice: {kind: 'sealed', actionId: ACTION, label: '运行封存计划', reason: null}});
+  const ucard = unbridged.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  assert(ucard.state.label === '未桥接 · 无观测关联', 'missing bridge is honest');
+  const udetails = P.buildNodeDetails(runGraph(sealedEntry()), ucard.selection);
+  assert(udetails.sourceAvailable === false && udetails.sourceReason === 'identity_bridge_missing', 'unbridged source refused, not fabricated');
+  // legacy v1: budgets instead of profile, channels instead of exchanges, no replicas.
+  const lentry = legacyEntry();
+  const lproj = P.normalizeExecutionPlan(lentry, BINDING);
+  assert(lproj.available === true && lproj.identity.format === 'legacy', 'legacy entry projects as legacy');
+  const lmap = lproj.nodes.find(n => n.logicalNodeId === 'map');
+  assert(lmap.placement.profile.cpu === 1, 'legacy stage.budgets preserved');
+  assert(lmap.placement.replicaTarget === null && lmap.placement.replicaMin === null, 'legacy has no replica facts');
+  assert(lproj.exchanges.length === 1 && lproj.exchanges[0].edgeId === null, 'legacy channels projected without edge identity');
+  assert(!('exchanges' in lentry.physical), 'legacy physical has no exchanges');
+  assert(Array.isArray(lentry.physical.worker_groups), 'legacy physical keeps worker_groups');
+  assert(lproj.recovery.declared === 'final_commit', 'legacy recovery preserved');
+  // Multi-occurrence legacy group must not infer an execution outcome.
+  const lmodel = P.buildGraphModel(runGraph(lentry), {choice: P.chooseGraphView(runGraph(lentry), {})});
+  const lcard = lmodel.nodes.find(c => c.selection.logicalNodeId === 'map');
+  assert(lcard && lcard.occurrences.length === 2, 'legacy group lists both occurrences');
+  assert(lcard.state.label.includes('2 次出现'), 'multi-occurrence badge, no execution inference');
+  assert(!lcard.state.label.includes('成功') && !lcard.state.label.includes('执行完成'), 'no fabricated success state');
   return { ok: true };
 }
 
 function w021() {
-  const ctx = vm.createContext({ document: documentDouble, console });
-  vm.runInContext(graphSrc, ctx, { filename: graphPath });
-  const mountLogical = ctx.ForgeWorkbenchGraph.mountLogical;
-  assert(typeof mountLogical === 'function', 'mountLogical exported');
-  const host = makeEl('div'); host.clientWidth = 800; host.clientHeight = 400;
-  const view = mountLogical(host, {});
-  const dag = v3Dag();
-  dag.nodes[1].traits = { resource_role: 'worker', effect: 'pure', state: 'stateless' };
-  dag.nodes[1].shared_token = 'tok-123';
-  const nodeMap = { map: 'n0' }; const labels = { n0: '映射算子' };
-  view.update(dag, nodeMap, labels, null, 'sealed');
-  const canvas = host.children[0];
-  assert(canvas.getAttribute('aria-label') === '运行封存计划（E2）', 'sealed basis aria-label');
-  const mapGroup = findByAttr(canvas, 'data-node', 'map');
-  assert(mapGroup, 'map node group rendered');
-  const aria = mapGroup.getAttribute('aria-label');
-  assert(aria.includes('画像 worker · pure · stateless'), 'trait hint in aria-label');
-  const titleEl = mapGroup.children.find(c => c.tagName === 'title');
-  const titleText = titleEl ? titleEl._text : '';
-  assert(titleText.includes('shared_token tok-123'), 'shared_token in title');
-  assert(titleText.includes('资源画像 worker · pure · stateless'), 'resource profile in title');
-  assert(titleText.includes('物理 stage/profile/exchange 与恢复限制见节点详情'), 'sealed physical hint in title');
-  const stateEl = mapGroup.children.find(c => c.attributes && c.attributes.class === 'wb-node-state');
-  assert(stateEl && stateEl._text.includes('×2 次出现'), 'multi-occurrence badge, no execution inference');
-  assert(!stateEl._text.includes('成功') && !stateEl._text.includes('执行完成'), 'no fabricated success state');
-  view.select('map');
-  assert(mapGroup.getAttribute('aria-pressed') === 'true', 'selected before rebind');
-  view.update(dag, nodeMap, labels, null, 'declared');
-  const canvas2 = host.children[0];
-  assert(canvas2.getAttribute('aria-label') === '声明图投影（E2）', 'declared basis aria-label');
-  const mapGroup2 = findByAttr(canvas2, 'data-node', 'map');
-  assert(mapGroup2.getAttribute('aria-pressed') === 'false', 'selection cleared on new binding');
-  const title2 = mapGroup2.children.find(c => c.tagName === 'title')._text;
-  assert(!title2.includes('物理 stage/profile/exchange'), 'declared basis omits physical hint');
+  const P = presentation();
+  const {api, host} = graphHost();
+  const view = api.mount(host, {});
+  for (const name of ['update', 'select', 'fit', 'zoom', 'dispose'])
+    assert(typeof view[name] === 'function', 'unified mount controller export ' + name);
+  const canvasOf = () => findByAttr(host, 'class', 'wb-graph-canvas');
+  const tipOf = g => { const t = g.children.find(c => c.tagName === 'title'); return t ? t._text : ''; };
+  const textOfFirst = (g, cls) => { const e = findAllByClass(g, cls)[0]; return e ? e._text : ''; };
+  // Cards no longer carry data-node; locate them by the sealed selection identity
+  // that paintCard writes into <title>, which is the real consumer contract.
+  const groupFor = key => findAllByClass(canvasOf(), 'wb-node').find(g => tipOf(g).includes(key));
+
+  // Sealed v3: the main graph IS the executed plan (the old E2 toggle is gone).
+  const g = runGraph(sealedEntry(bridged([O_MAP0, O_MAP1])));
+  const model = P.buildGraphModel(g, {choice: P.chooseGraphView(g, {})});
+  view.update(model);
+  const canvas = canvasOf();
+  assert(canvas.getAttribute('aria-label') === '运行封存计划', 'sealed basis aria-label on the merged main graph');
+  assert(model.nodes.length === 3 && findAllByClass(canvas, 'wb-node').length === 3, 'one rendered card per v3 occurrence');
+  const mapCard = model.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  const group = groupFor(mapCard.key);
+  assert(group, 'occurrence card located by execution identity');
+  const tip = tipOf(group);
+  assert(tip.includes('物理 stage/profile/exchange 与恢复限制见节点详情'), 'sealed physical hint in title');
+  assert(tip.includes(mapCard.selection.key), 'title carries the sealed selection identity');
+  // The merged C surface keeps traits.resource_role as placement.role; the old
+  // 'worker' fixture value is not an admitted ROLES member, so it projected null.
+  const aria = group.getAttribute('aria-label');
+  assert(aria.includes('CPU'), 'resource role surfaces in the card aria-label');
+  assert(aria.includes('s0') && aria.includes('2 分区'), 'sealed stage/partition facts in aria-label');
+  assert(!textOfFirst(group, 'wb-node-state').includes('成功')
+    && !textOfFirst(group, 'wb-node-state').includes('执行完成'), 'no fabricated success state');
+
+  // Legacy multi-occurrence group: badge only, never an inferred outcome.
+  const lg = runGraph(legacyEntry());
+  const lmodel = P.buildGraphModel(lg, {choice: P.chooseGraphView(lg, {})});
+  view.update(lmodel);
+  assert(canvasOf().getAttribute('aria-label') === '运行封存计划', 'legacy sealed plan is also the main graph');
+  const lcard = lmodel.nodes.find(c => c.selection.logicalNodeId === 'map');
+  assert(lcard && lcard.occurrences.length === 2, 'legacy group keeps both occurrences');
+  const lgroup = groupFor(lcard.key);
+  assert(lgroup, 'legacy group card rendered');
+  assert(textOfFirst(lgroup, 'wb-node-kind').includes('×2'), 'multi-occurrence badge');
+  assert(textOfFirst(lgroup, 'wb-node-state').includes('2 次出现'), 'occurrence count, no execution inference');
+  assert(!textOfFirst(lgroup, 'wb-node-state').includes('成功')
+    && !textOfFirst(lgroup, 'wb-node-state').includes('执行完成'), 'no fabricated success state');
+  assert(tipOf(lgroup).includes('成员 2 次出现'), 'title lists member occurrences');
+  assert(tipOf(lgroup).includes('物理 stage/profile/exchange 与恢复限制见节点详情'), 'legacy sealed keeps physical hint');
+  view.select(lcard.key);
+  assert(lgroup.getAttribute('aria-pressed') === 'true', 'selected before rebind');
+
+  // Rebinding the same graph to the non-sealed report projection must clear the
+  // selection and drop the sealed physical hint (old 'declared' basis counterpart).
+  const rmodel = P.buildGraphModel(lg, {choice: P.chooseGraphView(lg, {preference: 'report'})});
+  view.update(rmodel);
+  const canvas2 = canvasOf();
+  assert(canvas2.getAttribute('aria-label') === '数据算子图', 'report basis aria-label');
+  assert(rmodel.selected === null, 'selection cleared on new binding');
+  const rgroups = findAllByClass(canvas2, 'wb-node');
+  assert(rgroups.length === 1 && rgroups.every(g2 => g2.getAttribute('aria-pressed') === 'false'), 'no stale pressed card after rebind');
+  assert(!tipOf(rgroups[0]).includes('物理 stage/profile/exchange'), 'report basis omits the sealed physical hint');
+
+  // An unavailable choice must render an honest empty graph, not a fabricated one.
+  const umodel = P.buildGraphModel(lg, {choice: P.chooseGraphView(lg, {actionId: 'nope'})});
+  view.update(umodel);
+  assert(findAllByClass(canvasOf(), 'wb-node').length === 0, 'unavailable choice renders no nodes');
+  assert(textOf(findAllByClass(host, 'wb-graph-notices')[0]).includes('action'), 'unavailable reason is surfaced');
   view.dispose();
+  assert(host.children.length === 0, 'dispose removes the mounted view');
   return { ok: true };
 }
 
