@@ -188,6 +188,16 @@
       choiceNode.onchange=()=>{if(disposed||!choiceNode.isConnected)return;actionExplicit=true;state.setGraphView({preference:data().graphPreference,actionId:choiceNode.value,execution:null});paintGraph();afterGraphPaint();};
       field('action',choiceNode,actionBar);
       actionBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
+      const selected=actions.find(a=>a.action_id===chosen);
+      if(selected?.status==='sealed'){
+        const value=selected.sealed_at;
+        const stamp=typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?new Date(value)
+          :typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(value)?new Date(value):null;
+        if(stamp&&Number.isFinite(stamp.getTime())){
+          const sealed=$('time','封存于 '+stamp.toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',timeZoneName:'short'}),'wb-caption wb-sealed-time');
+          sealed.dateTime=stamp.toISOString();actionBar.append(sealed);
+        }else actionBar.append($('span','封存时间未提供','wb-caption wb-sealed-time'));
+      }
       if(choice.kind==='unavailable')actionBar.append($('span',choice.reason||'所选 action 不可用','wb-tag'));
     }
     function paintAdvancedDiagnostics(graphValue,choice,model){
@@ -419,7 +429,13 @@
       const selection=data().selection;
       inspector.replaceChildren($('h3',!graph.nodes.length?'暂无可展示节点':node?(node.operator?.name||node.api.split(/[.:]/).at(-1)):'整图配置'));
       if(!graph.nodes.length)renderDiagnostics(graph.diagnostics,inspector);
-      if(node){inspector.append($('p',node.api+' · '+node.source+':'+node.line,'wb-caption'));const status=ForgeWorkbenchGraph.status(node,snapshot||run);inspector.append($('span',status.label,'wb-tag'));}
+      if(node){
+        inspector.append($('p',node.api+' · '+node.source+':'+node.line,'wb-caption'));
+        const status=selection?.execution?.format==='v3'
+          ?graphModel?.nodes.find(card=>card.selection.key===selection.key)?.state||{label:'观测尚未载入'}
+          :ForgeWorkbenchGraph.status(node,snapshot||run);
+        inspector.append($('span',status.label,'wb-tag'));
+      }
       if(selection){
         let nodeDetails=null;
         try{nodeDetails=presentation.buildNodeDetails(graph,selection);}catch(error){inspector.append($('p','节点详情暂不可用：'+error.message,'wb-caption'));}
@@ -726,8 +742,9 @@
       try{
       if(kind==='observations'){
         const node=data().node;if(!node)return;
-        const execution=data().selection?.execution??null;
-        const value=await request('run-observations',{...target,node_id:node,limit:32,...(observationCursor?{cursor:observationCursor}:{})});
+        const selection=data().selection,execution=selection?.execution??null;
+        const value=await request('run-observations',{...target,node_id:node,limit:32,
+          ...(execution?.format==='v3'?{action_id:execution.actionId}:{}),...(observationCursor?{cursor:observationCursor}:{})});
         if(!current(ticket)||sequence!==nodeSequence||detailKind!==kind)return;
         if(identityKey(data().selection?.execution??null)!==identityKey(execution))return;
         runDetailBody.replaceChildren($('p','节点关联观测 · '+target.run_id+' / 尝试 '+target.attempt+' · 观测 '+(value.observation_revision||'不可用').slice(0,10)+' · 不是完整节点日志','wb-caption'));
@@ -736,12 +753,16 @@
         if(execution?.format==='v3'&&(value.action_id!==execution.actionId||value.dag_id!==execution.dagId||value.plan_id!==execution.planId||value.plan_revision!==execution.planRevision)){
           runDetailBody.append($('p','观测页缺少与当前 v3 计划一致的作用域凭据；不提升为当前节点指标。','wb-caption'));return;
         }
-        if(!value.observations.length)runDetailBody.append($('p','这个节点没有单独观测；不会从整次运行状态推断节点成功。'));
+        const rows=execution?.format==='v3'?value.observations.filter(row=>
+          presentation.matchesExecutionObservation(row,execution,selection.occurrenceId)&&row.node_id===selection.reportNodeId):value.observations;
+        if(execution?.format==='v3'&&rows.length!==value.observations.length)
+          runDetailBody.append($('p','部分观测缺少与当前执行实例一致的完整凭据，未显示为节点指标。','wb-caption'));
+        if(!rows.length)runDetailBody.append($('p',execution?.format==='v3'?'本页没有与当前执行实例一致的完整观测凭据。':'这个节点没有单独观测；不会从整次运行状态推断节点成功。'));
         const paint=rows=>{for(const row of rows){const line=$('div',undefined,'wb-observation');line.append($('strong','动作 '+row.action_id+' · 第 '+(row.occurrence+1)+' 次 · '+(labels[row.state]||row.state)),
           $('p','输入 '+safe(row.rows_input)+' 行 · 输出 '+safe(row.rows_output)+' 行 · 调用 '+safe(row.calls)+' · 错误 '+safe(row.errors)),
           $('p','累计处理时间 '+safe(row.elapsed_s)+' 秒 · '+(row.timing_scope==='group'?'融合组共享范围':'节点观测范围'),'wb-caption'));
           if(row.error)line.append($('pre',json(row.error),'error-box'));raw('关联证据与生命周期',row,line);runDetailBody.append(line);}};
-        paint(value.observations);
+        paint(rows);
         const pager=$('div',undefined,'wb-inline-actions');runDetailBody.append(pager);
         button('上一页观测',async()=>{if(!current(ticket))return;observationCursor=observationPages.pop()??null;await loadRunDetail(true);},pager,{disabled:!observationPages.length});
         button('后续节点观测',async()=>{if(!current(ticket))return;if(observationPages.length>=32)observationPages.shift();observationPages.push(observationCursor);observationCursor=value.cursor;await loadRunDetail(true);},pager,{disabled:!value.has_more});

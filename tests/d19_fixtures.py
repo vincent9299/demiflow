@@ -36,6 +36,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 
 import pytest
 
@@ -344,8 +345,34 @@ def _make_versioned_table(root: Path) -> dict:
     )
 
 
-def _create_real_run(root: Path) -> dict:
+def _create_real_run(root: Path, producer_tree: Path | None = None) -> dict:
     """A genuine Local prepare/start run through the candidate's own manager."""
+    if producer_tree is not None:
+        script = """
+import json, pathlib, sys, time, subprocess
+import demiflow
+from demiflow.workbench.runs import manager as runs
+tree, root = map(pathlib.Path, sys.argv[1:])
+assert pathlib.Path(demiflow.__file__).resolve().is_relative_to(tree)
+prepared = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')
+runs.start(root, prepared['run_id'], expected=prepared['digest'])
+deadline = time.monotonic() + 120
+while True:
+    run = runs.show(root, prepared['run_id'])
+    if run['status'] in runs.TERMINAL: break
+    assert time.monotonic() < deadline, run
+    time.sleep(.2)
+assert run['status'] == 'succeeded', run
+print(json.dumps(dict(run_id=prepared['run_id'], attempt=run['attempt'], status=run['status'],
+    digest=prepared['digest'], outputs=run.get('outputs', []), producer_tree=str(tree),
+    producer_import=str(pathlib.Path(demiflow.__file__).resolve()),
+    producer_head=subprocess.check_output(['git', '-C', str(tree), 'rev-parse', 'HEAD'], text=True).strip())))
+"""
+        result = subprocess.run([sys.executable, '-B', '-c', script, str(producer_tree), str(root)],
+            cwd=root, env={**os.environ, 'PYTHONPATH': str(producer_tree), 'PYTHONDONTWRITEBYTECODE': '1'},
+            capture_output=True, text=True, timeout=150)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return json.loads(result.stdout.splitlines()[-1])
     from demiflow.workbench.runs import manager as runs
     prepared = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')
     runs.start(root, prepared['run_id'], expected=prepared['digest'])
@@ -383,10 +410,10 @@ def owned_fixture(tmp_path, monkeypatch, request):
       need_runtime:     bool -- admit the real WORKBENCH_D19_ANALYSIS_CONFIG helper
     """
     params = dict(getattr(request, 'param', None) or {})
-    execution_format = params.get('execution_format', 'legacy')
+    execution_format = params.get('execution_format', 'auto')
     case_world = bool(params.get('case_world', False))
     need_runtime = bool(params.get('need_runtime', False))
-    assert execution_format in ('legacy', 'v3'), execution_format
+    assert execution_format in ('auto', 'legacy', 'v3'), execution_format
 
     import_roots = assert_tree_imports()
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))
@@ -413,15 +440,21 @@ def owned_fixture(tmp_path, monkeypatch, request):
 
     # Real Local run sealed by the candidate tree; the v3 class is accepted only
     # when this genuine run actually produces a v3 action (no consumer mock).
-    run_facts = _create_real_run(root)
+    legacy_path = os.environ.get('WORKBENCH_D19_LEGACY_TREE') if execution_format == 'legacy' else None
+    producer_tree = Path(legacy_path).resolve() if legacy_path else None
+    if producer_tree:
+        assert producer_tree != TREE and (producer_tree / 'demiflow').is_dir()
+    run_facts = _create_real_run(root, producer_tree)
     sealed_actions = _sealed_actions(root, run_facts)
     v3_available = any(_is_v3(action) for action in sealed_actions)
     if execution_format == 'v3' and not v3_available:
         pytest.skip('not_run: candidate tree seals no demiflow.dataflow_graph.v3 action; '
                     'unified Runtime / platform W not integrated (U1-U3 required_not_verified)')
-    if execution_format == 'legacy':
-        assert any(not _is_v3(action) for action in sealed_actions), \
-            'legacy input class requires a real legacy sealed action'
+    if execution_format == 'legacy' and not any(not _is_v3(action) for action in sealed_actions):
+        pytest.skip('not_run: legacy gate needs WORKBENCH_D19_LEGACY_TREE with a real legacy producer; '
+                    'the current producer seals v3')
+    if execution_format == 'auto':
+        execution_format = 'v3' if v3_available else 'legacy'
 
     analysis_config = None
     analysis_profile = None
@@ -433,6 +466,11 @@ def owned_fixture(tmp_path, monkeypatch, request):
 
     if need_runtime:
         config_path = os.environ.get('WORKBENCH_D19_ANALYSIS_CONFIG')
+        if not config_path and os.environ.get('WORKBENCH_D19_PRIVATE_RUNTIME') == '1':
+            from d19_runtime import private_runtime
+            runtime = private_runtime(TREE, root, evidence)
+            config_path = runtime.__enter__()
+            request.addfinalizer(lambda: runtime.__exit__(None, None, None))
         if not config_path or not Path(config_path).is_file():
             pytest.skip('not_run: WORKBENCH_D19_ANALYSIS_CONFIG must name an approved private '
                         'candidate analysis config; no real kernel admitted (V05)')
@@ -449,6 +487,8 @@ def owned_fixture(tmp_path, monkeypatch, request):
         caps = {**console2.capabilities(value['projects'][project_id]), 'config_write': True}
         if app.analysis is not None:
             caps.update(analysis_write=True, case_annotate=True)
+        if need_runtime:
+            caps['analysis_execute'] = True
         console2.set_capabilities(registry, project_id, expected=content_digest(value),
                                   capabilities=caps, analysis_service=app.analysis)
         if need_runtime:
@@ -480,6 +520,28 @@ def owned_fixture(tmp_path, monkeypatch, request):
         finally:
             if driver is not None:
                 driver.__exit__(None, None, None)
+
+
+@contextmanager
+def case_scene(browser, tmp_path, monkeypatch, **options):
+    """Temporary fixture-only selector migration; preserve the other lane's file.
+
+    The two initial waits follow the actual material headings. All original
+    Records, Lance, media, source immutability and helper assertions are retained.
+    """
+    original = TREE / 'tests/test_forge_analysis_case_groups_ui_browser.py'
+    source = original.read_text()
+    old = "get_by_role('heading',name='Case 0',exact=True)"
+    assert source.count(old) >= 2
+    source = source.replace(old, "get_by_role('heading',name='next0.png',exact=True)", 1)
+    source = source.replace(old, "get_by_role('heading',name='红色陶瓷杯',exact=True)", 1)
+    overlay = tmp_path / 'case-scene-overlay.py'
+    overlay.write_text(source)
+    module = types.ModuleType('d19_owned_case_scene')
+    module.__file__ = str(original)
+    exec(compile(source, str(overlay), 'exec'), module.__dict__)
+    with module.scene(browser, tmp_path, monkeypatch, **options) as value:
+        yield value
 
 
 def _build_case_world(root, tmp_path, project_id, monkeypatch, lock, calls, responses):

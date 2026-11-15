@@ -881,11 +881,11 @@
     if (!alias) { const first=context.tables[0]; if (!first) return; alias=first.alias;expected=first.binding_digest; }
     // Fixed catalog context: aliasBinding is the alias's current preview binding;
     // binding/version describe the version actually read (possibly historical).
-    let profileHandle=null,shownFixed=null,offset=request.offset||0,pageRequest=0,versionsLoaded=false;
+    let profileHandle=null,shownFixed=null,offset=request.offset||0,pageRequest=0,versionsLoaded=false,versionsPending=false;
     const p=panel(null,holder);p.classList.add('bound-table');
     const headerHost=$('div'),pinnedBar=$('div',undefined,'version-pinned');pinnedBar.hidden=true;
-    const versionDetails=$('details',undefined,'bound-versions'),versionHost=$('div');versionDetails.append($('summary','版本'),versionHost);
-    versionDetails.addEventListener('toggle',()=>{if(versionDetails.open&&!versionsLoaded){versionsLoaded=true;loadVersions();}});
+    const versionDetails=$('details',undefined,'bound-versions'),versionHost=$('div');versionDetails.append($('summary','版本'),versionHost);versionDetails.hidden=true;
+    versionDetails.addEventListener('toggle',()=>{if(versionDetails.open)loadVersions();});
     const tools=$('div',undefined,'toolbar'),projection=$('input');projection.placeholder='字段投影（逗号分隔；默认前 16 列）';projection.className='wide';projection.setAttribute('aria-label','字段投影');projection.maxLength=4096;projection.value=(request.columns||[]).join(',');
     const pageSize=select(['20','5','50','100'],'20');pageSize.setAttribute('aria-label','每页行数');tools.append(projection,pageSize);
     const profileHost=$('div'),caseRail=$('div',undefined,'case-record-selector');
@@ -987,11 +987,12 @@
       }
     }
     async function loadVersions(){
-      const epoch=viewEpoch;versionHost.replaceChildren($('p','正在读取登记版本…','busy'));
+      if(!fixed||versionsLoaded||versionsPending)return;
+      const epoch=viewEpoch,aliasBinding=fixed.aliasBinding;versionsPending=true;versionHost.replaceChildren($('p','正在读取登记版本…','busy'));
       try{
-        const value=await api('table-versions',{alias,expected_binding:fixed.aliasBinding});
+        const value=await api('table-versions',{alias,expected_binding:aliasBinding});
         if(epoch!==viewEpoch||!versionHost.isConnected)throw staleRequest();
-        if(value.binding?.digest!==fixed.aliasBinding)throw new Error('版本来源与目录别名绑定不一致');
+        if(value.binding?.digest!==aliasBinding||fixed.aliasBinding!==aliasBinding)throw new Error('版本来源与目录别名绑定不一致');
         versionHost.replaceChildren();
         const aliasVersion=value.binding?.reference?.ref?.lance_version;
         if(value.reason==='run_output_sealed_version')versionHost.append($('p','运行产物固定于单一 sealed 版本，没有登记版本历史。','muted small'));
@@ -1003,13 +1004,14 @@
             row.title='固定查看 v'+item.lance_version+' 的样例与分布；不改变目录绑定';
             row.append($('span','v'+item.lance_version+(item.lance_version===aliasVersion?' · 目录当前绑定':''),'catalog-row-name'),
               $('span',String(item.row_count)+' 行 · '+(item.content_digest||'schema '+item.schema_name+'@'+item.schema_version),'catalog-row-meta'));
-            row.onclick=async()=>{row.disabled=true;try{await selectTableVersion({alias,aliasBinding:fixed.aliasBinding,version:item.lance_version},{epoch:viewEpoch,project:workspaceId});}finally{row.disabled=false;}};
+            row.onclick=async()=>{row.disabled=true;try{await selectTableVersion({alias,aliasBinding,version:item.lance_version},{epoch:viewEpoch,project:workspaceId});}finally{row.disabled=false;}};
             rowsHost.append(row);
           }
           versionHost.append($('p','点击版本固定查看该版本的样例与分布；不会改变目录绑定。'+(value.truncated?'仅显示前 128 个登记版本（共 '+value.total_registered+' 个）。':''),'muted small'));
         }
-        paintVersionMarkers();
+        paintVersionMarkers();versionsLoaded=true;
       }catch(err){if(err?.name!=='AbortError'&&epoch===viewEpoch&&versionHost.isConnected){versionHost.replaceChildren();renderLoadFailure(versionHost,err,{retryRead:loadVersions,scope:{project:workspaceId,operation:'table-versions',label:'登记版本'},isCurrent:()=>epoch===viewEpoch&&versionHost.isConnected});}}
+      finally{versionsPending=false;}
     }
     async function initFixed(){
       if(request.kind==='table_request'&&Object.hasOwn(request,'version')){
@@ -1112,6 +1114,7 @@
     };
     const resolved=await initFixed();
     if(!resolved){paintBoundHeader();rebuildProfile();}
+    versionDetails.hidden=false;if(versionDetails.open)loadVersions();
     if(fixed.version!==null){samplesRequested=true;samplePanel.hidden=false;samplesToggle.setAttribute('aria-expanded','true');}
     if(fixed.version===null){
       const t={alias,uri:fixed.binding.uri,reference:fixed.binding.reference,binding_digest:fixed.binding.digest};
@@ -1244,8 +1247,9 @@
       ...(report.edges||[]).map(e=>({...e,type:'data'})),...(report.value_edges||[]).map(e=>({...e,type:'value'})),...(report.action_edges||[]).map(e=>({...e,type:'action'}))];
     const graph={binding:{basis_kind:'report',basis_digest:report.digest},nodes:visible,edges:edges.filter(e=>ids.has(e.from)&&ids.has(e.to)).slice(0,256)};
     if(visible.length<(report.nodes||[]).length||graph.edges.length<edges.length)box.insertBefore($('p','显示已裁剪：'+visible.length+' / '+(report.nodes||[]).length+' 个节点。离线文件保留完整报告；显示范围不改变原始检查结论。','notice'),host);
-    const renderer=ForgeWorkbenchGraph.mount(host,{onSelect:id=>{const node=graph.nodes.find(n=>n.id===id);detail.replaceChildren($('h2',node.api),$('p',node.source+':'+node.line,'muted small'));raw(detail,'实际调用参数',node.parameters);raw(detail,'输出字段',node.fields);}});
-    renderer.update(graph,null,null);raw(box,'原始覆盖与绑定',{coverage:report.coverage,binding:report.binding});
+    const renderer=ForgeWorkbenchGraph.mount(host,{onSelect:selection=>{const node=graph.nodes.find(n=>n.id===selection.reportNodeId);detail.replaceChildren($('h2',node.api),$('p',node.source+':'+node.line,'muted small'));raw(detail,'实际调用参数',node.parameters);raw(detail,'输出字段',node.fields);}});
+    const presentation=ForgeWorkbenchPresentation;
+    renderer.update(presentation.buildGraphModel(graph,{choice:presentation.chooseGraphView(graph)}));raw(box,'原始覆盖与绑定',{coverage:report.coverage,binding:report.binding});
   }
   function projectHeading() {
     const name=document.getElementById('workspace-name');name.textContent=context?.name||projectList.find(p=>p.workspace_id===workspaceId)?.name||'选择项目';name.title=name.textContent;

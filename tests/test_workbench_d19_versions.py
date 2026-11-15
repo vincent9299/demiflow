@@ -213,15 +213,17 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     # -- 8. browser version switch drives the same fixed context (A06) --------
     with fx.open_page(browser) as (page, log):
         page.locator('.function-nav').get_by_role('button', name='数据', exact=True).click()
-        page.get_by_label('当前数据表', exact=True).select_option(alias)
+        with page.expect_response(lambda response: '/sample?' in response.url
+                                  and 'alias=' + alias in response.url
+                                  and 'version=' not in response.url) as initial:
+            page.get_by_label('当前数据表', exact=True).select_option(alias)
         # The version list loads on the panel's first toggle and reads fixed.aliasBinding;
         # opening it before the fixed table context is ready throws pre-fetch and the
         # versionsLoaded latch blocks retry. Wait for the initial (unversioned) sample
         # read, which is only issued once the fixed context is applied.
-        for _ in range(80):
-            page.wait_for_timeout(100)
-            if any('/sample' in r['url'] and 'version=' not in r['url'] for r in log['requests']):
-                break
+        assert initial.value.status == 200, initial.value.text()
+        initial.value.finished()
+        expect(page.locator('.data-source-context')).to_contain_text('v2')
         page.locator('details.bound-versions > summary').click()
         # registered facts preview shows the two genuinely different versions
         versions_panel = page.locator('details.bound-versions')
@@ -232,12 +234,16 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
         # replaces the fixed context and re-reads sample with version/version_binding.
         switch = page.locator('button.version-row[data-version="1"]')
         assert switch.count() > 0, 'A06 selectTableVersion: no historical version row affordance'
-        switch.first.click()
-        # wait for the real historical sample re-read to be issued (bounded)
-        for _ in range(40):
-            page.wait_for_timeout(100)
-            if any('/sample' in r['url'] and 'version=1' in r['url'] for r in log['requests']):
-                break
+        with page.expect_response(lambda response: '/sample?' in response.url
+                                  and 'version=1' in response.url) as historical_response:
+            switch.first.click()
+        assert historical_response.value.status == 200, historical_response.value.text()
+        historical_sample = historical_response.value.json()
+        assert historical_sample['binding']['digest'] == v1['binding']
+        assert historical_sample['rows'] == v1['rows']
+        expect(page.locator('.data-source-context')).to_contain_text('v1')
+        expect(page.locator('.data-source-context')).to_contain_text('2 行')
+        expect(page.locator('.data-source-context')).to_contain_text('5 字段')
         fx.shot(page, 'v02-version-one-selected')
         version_requests = [r for r in log['requests']
                             if '/sample' in r['url'] and 'version=1' in r['url']]

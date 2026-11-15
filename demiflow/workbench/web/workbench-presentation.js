@@ -262,8 +262,11 @@
           if (!byOccurrence.has(item)) return fail('invalid_topology', 'source/terminal occurrence 不在节点集合内');
       } else {
         for (const item of sources) {
-          const id = typeof item === 'string' ? item : isRecord(item) ? item.source_id : null;
-          if (!logicalIds.has(id)) return fail('invalid_topology', 'source 不在节点集合内');
+          // Native v1 sources identify the source descriptor, not its graph
+          // node. compile_logical_dag intentionally gives those different IDs.
+          // Read the sealed identity as-is; never rehash it to invent a node.
+          if (typeof item === 'string' ? !logicalIds.has(item) : !isRecord(item) || !isId(item.source_id))
+            return fail('invalid_topology', 'source 身份无效');
         }
         for (const item of terminals) {
           const id = typeof item === 'string' ? item : isRecord(item) ? item.logical_node_id : null;
@@ -394,13 +397,26 @@
       snapshot: snapshotFor(snapshot, binding),
     };
   }
+  function matchesExecutionObservation(row, identity, occurrenceId) {
+    // The snapshot/page wrapper binds run and attempt; an individual v3 row
+    // must independently carry its original plan and execution occurrence.
+    // A current wrapper cannot turn an old or unscoped row into current data.
+    return isRecord(row) && !!identity && identity.format === 'v3'
+      && row.action_id === identity.actionId && row.dag_id === identity.dagId
+      && row.plan_id === identity.planId && row.plan_revision === identity.planRevision
+      && row.occurrence_id === occurrenceId
+      && (row.run_id === undefined || row.run_id === identity.runId)
+      && (row.attempt === undefined || row.attempt === identity.attempt);
+  }
   function memberState(node, context) {
     const {identity, binding, bridgeEntries, page, terminals, snapshot} = context;
     const neutral = label => ({label, tone: 'neutral'});
     const isTerminal = identity.format === 'v3' ? terminals.has(node.occurrenceId) : terminals.has(node.logicalNodeId);
     if (snapshot && isTerminal) {
       const output = (Array.isArray(snapshot.outputs) ? snapshot.outputs : [])
-        .find(item => isRecord(item) && item.action_id === identity.actionId);
+        .find(item => isRecord(item) && item.action_id === identity.actionId
+          && (identity.format !== 'v3' || (matchesExecutionObservation(item, identity, node.occurrenceId)
+            && (item.retained_from_attempt == null || item.retained_from_attempt === identity.attempt))));
       if (output && output.status === 'committed')
         return {label: output.result ? '已提交并核验' : '已提交 · 登记待完成', tone: 'success'};
     }
@@ -414,10 +430,15 @@
     }
     const pageEntry = page.byKey.get(jsonKey([node.logicalNodeId, node.occurrenceId]));
     if (!pageEntry || pageEntry.availability !== 'observed') return neutral('本页未见观测');
+    if (identity.format === 'v3' && (pageEntry.report_node_id !== bridgeEntry.report_node_id
+        || pageEntry.report_occurrence !== bridgeEntry.report_occurrence)) return neutral('观测凭据不完整');
     if (!snapshot) return neutral('已有观测 · 摘要未载入');
-    const row = (Array.isArray(snapshot.observations) ? snapshot.observations : []).find(item =>
+    const rows = (Array.isArray(snapshot.observations) ? snapshot.observations : []).filter(item =>
       isRecord(item) && item.action_id === identity.actionId
       && item.node_id === bridgeEntry.report_node_id && item.occurrence === bridgeEntry.report_occurrence);
+    const row = identity.format === 'v3'
+      ? rows.find(item => matchesExecutionObservation(item, identity, node.occurrenceId)) : rows[0];
+    if (!row && rows.length) return neutral('观测凭据不完整');
     if (!row) return neutral('已有观测 · 摘要未载入');
     const stateText = STATES[row.state] || bounded(row.state, 40);
     if (row.timing_scope === 'group') return neutral('阶段观测 · ' + stateText);
@@ -831,6 +852,6 @@
   }
 
   globalThis.ForgeWorkbenchPresentation = Object.freeze({
-    chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, normalizeExecutionPlan,
+    chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, normalizeExecutionPlan, matchesExecutionObservation,
   });
 })();

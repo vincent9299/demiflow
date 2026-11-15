@@ -35,6 +35,42 @@ from demiflow.workbench.conversations import http as development_http
 from demiflow.workbench.analysis import http as analysis_http
 
 ASSETS = Path(__file__).with_name("web")
+# One closed asset allowlist serves both live pages and self-contained reports.
+STATIC_ASSETS = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/development.js": ("development.js", "text/javascript; charset=utf-8"),
+    "/analysis-state.js": ("analysis-state.js", "text/javascript; charset=utf-8"),
+    "/analysis.js": ("analysis.js", "text/javascript; charset=utf-8"),
+    "/analysis-render.js": ("analysis-render.js", "text/javascript; charset=utf-8"),
+    "/analysis-output.js": ("analysis-output.js", "text/javascript; charset=utf-8"),
+    "/analysis-output-media.js": ("analysis-output-media.js", "text/javascript; charset=utf-8"),
+    "/analysis-charts.js": ("analysis-charts.js", "text/javascript; charset=utf-8"),
+    "/analysis-transport.js": ("analysis-transport.js", "text/javascript; charset=utf-8"),
+    "/analysis-output.css": ("analysis-output.css", "text/css; charset=utf-8"),
+    "/analysis-case.css": ("analysis-case.css", "text/css; charset=utf-8"),
+    "/analysis-case-media.js": ("analysis-case-media.js", "text/javascript; charset=utf-8"),
+    "/analysis-case.js": ("analysis-case.js", "text/javascript; charset=utf-8"),
+    "/analysis.css": ("analysis.css", "text/css; charset=utf-8"),
+    "/workbench-state.js": ("workbench-state.js", "text/javascript; charset=utf-8"),
+    "/workbench-commands.js": ("workbench-commands.js", "text/javascript; charset=utf-8"),
+    "/workbench-presentation.js": ("workbench-presentation.js", "text/javascript; charset=utf-8"),
+    "/workbench-graph.css": ("workbench-graph.css", "text/css; charset=utf-8"),
+    "/workbench-graph.js": ("workbench-graph.js", "text/javascript; charset=utf-8"),
+    "/workbench-observer.js": ("workbench-observer.js", "text/javascript; charset=utf-8"),
+    "/workbench.js": ("workbench.js", "text/javascript; charset=utf-8"),
+    "/workbench.css": ("workbench.css", "text/css; charset=utf-8"),
+    "/development.css": ("development.css", "text/css; charset=utf-8"),
+    "/view.js": ("view.js", "text/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+    "/reading.css": ("reading.css", "text/css; charset=utf-8"),
+    "/reading.js": ("reading.js", "text/javascript; charset=utf-8"),
+    "/markdown-worker.js": ("markdown-worker.js", "text/javascript; charset=utf-8"),
+    "/markdown-it.min.js": ("markdown-it.min.js", "text/javascript; charset=utf-8"),
+    "/markdown-it.LICENSE.txt": ("markdown-it.LICENSE.txt", "text/plain; charset=utf-8"),
+    "/markdown-it.NOTICES.txt": ("markdown-it.NOTICES.txt", "text/plain; charset=utf-8"),
+    "/markdown-it.provenance.json": ("markdown-it.provenance.json", "application/json; charset=utf-8"),
+}
 HTTP_CONTRACT = 'demiflow_forge_http_v1'
 BODY_BYTES = 65536
 RESPONSE_BYTES = 9 * 1024**2
@@ -535,43 +571,10 @@ class Handler(BaseHTTPRequestHandler):
             if len(self.path) > 8192:
                 raise ForgeError('Request path exceeds budget', code='resource_limit')
             self._request_origin()
-            assets = {
-                "/": ("index.html", "text/html; charset=utf-8"),
-                "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                "/development.js": ("development.js", "text/javascript; charset=utf-8"),
-                "/analysis-state.js": ("analysis-state.js", "text/javascript; charset=utf-8"),
-                "/analysis.js": ("analysis.js", "text/javascript; charset=utf-8"),
-                "/analysis-render.js": ("analysis-render.js", "text/javascript; charset=utf-8"),
-                "/analysis-output.js": ("analysis-output.js", "text/javascript; charset=utf-8"),
-                "/analysis-output-media.js": ("analysis-output-media.js", "text/javascript; charset=utf-8"),
-                "/analysis-charts.js": ("analysis-charts.js", "text/javascript; charset=utf-8"),
-                "/analysis-transport.js": ("analysis-transport.js", "text/javascript; charset=utf-8"),
-                "/analysis-output.css": ("analysis-output.css", "text/css; charset=utf-8"),
-                "/analysis-case.css": ("analysis-case.css", "text/css; charset=utf-8"),
-                "/analysis-case-media.js": ("analysis-case-media.js", "text/javascript; charset=utf-8"),
-                "/analysis-case.js": ("analysis-case.js", "text/javascript; charset=utf-8"),
-                "/analysis.css": ("analysis.css", "text/css; charset=utf-8"),
-                "/workbench-state.js": ("workbench-state.js", "text/javascript; charset=utf-8"),
-                "/workbench-commands.js": ("workbench-commands.js", "text/javascript; charset=utf-8"),
-                "/workbench-graph.js": ("workbench-graph.js", "text/javascript; charset=utf-8"),
-                "/workbench-observer.js": ("workbench-observer.js", "text/javascript; charset=utf-8"),
-                "/workbench.js": ("workbench.js", "text/javascript; charset=utf-8"),
-                "/workbench.css": ("workbench.css", "text/css; charset=utf-8"),
-                "/development.css": ("development.css", "text/css; charset=utf-8"),
-                "/view.js": ("view.js", "text/javascript; charset=utf-8"),
-                "/style.css": ("style.css", "text/css; charset=utf-8"),
-                "/reading.css": ("reading.css", "text/css; charset=utf-8"),
-                "/reading.js": ("reading.js", "text/javascript; charset=utf-8"),
-                "/markdown-worker.js": ("markdown-worker.js", "text/javascript; charset=utf-8"),
-                "/markdown-it.min.js": ("markdown-it.min.js", "text/javascript; charset=utf-8"),
-                "/markdown-it.LICENSE.txt": ("markdown-it.LICENSE.txt", "text/plain; charset=utf-8"),
-                "/markdown-it.NOTICES.txt": ("markdown-it.NOTICES.txt", "text/plain; charset=utf-8"),
-                "/markdown-it.provenance.json": ("markdown-it.provenance.json", "application/json; charset=utf-8"),
-            }
-            if url.path in assets:
+            if url.path in STATIC_ASSETS:
                 if self.server.api_only:
                     raise ForgeError('Web assets are disabled', code='not_found')
-                filename, mime = assets[url.path]
+                filename, mime = STATIC_ASSETS[url.path]
                 self._send(read_bounded(ASSETS / filename, 512 * 1024), mime=mime)
                 return
             self._authorize()
@@ -898,16 +901,19 @@ def export_report(root, digest, path):
     html = read_bounded(ASSETS / "index.html", 512 * 1024).decode()
     # Inline only sealed Web assets; document text never becomes HTML/script.
     # Escape any script terminator inside vendored or application JavaScript.
-    for name in ("style.css", "reading.css", "development.css", "workbench.css"):
-        css = read_bounded(ASSETS / name, 512 * 1024).decode()
-        css = re.sub(r"</style", lambda match: "<\\/" + match[0][2:], css, flags=re.IGNORECASE)
-        html = html.replace(f'<link rel="stylesheet" href="/{name}">', "<style>" + css + "</style>")
-    for name in ("markdown-it.min.js", "view.js", "reading.js", "development.js", "workbench-state.js", "workbench-commands.js",
-                 "workbench-graph.js", "workbench-observer.js", "workbench.js", "app.js"):
-        script = read_bounded(ASSETS / name, 512 * 1024).decode()
-        script = re.sub(r"</script", lambda match: "<\\/" + match[0][2:], script, flags=re.IGNORECASE)
+    for name, mime in STATIC_ASSETS.values():
+        if mime.startswith("text/css"):
+            tag, opening, closing = f'<link rel="stylesheet" href="/{name}">', "<style>", "</style>"
+        elif mime.startswith("text/javascript"):
+            tag, opening, closing = f'<script src="/{name}" defer></script>', "<script>", "</script>"
+        else:
+            continue
+        if tag not in html:
+            continue  # Worker-only assets are not executed by an offline report.
+        content = read_bounded(ASSETS / name, 512 * 1024).decode()
+        content = re.sub(closing[:-1], lambda match: "<\\/" + match[0][2:], content, flags=re.IGNORECASE)
         prefix = "<script>window.FORGE_EXPORT=" + payload + ";</script>" if name == "app.js" else ""
-        html = html.replace(f'<script src="/{name}" defer></script>', prefix + "<script>" + script + "</script>")
+        html = html.replace(tag, prefix + opening + content + closing)
     notices = "\n\n".join(read_bounded(ASSETS / name, 512 * 1024).decode()
                             for name in ("markdown-it.LICENSE.txt", "markdown-it.NOTICES.txt"))
     html = html.replace("</body>", '<details class="export-notices"><summary>第三方许可证与通知</summary><pre>'
