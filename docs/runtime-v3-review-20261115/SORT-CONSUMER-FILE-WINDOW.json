@@ -1,0 +1,62 @@
+{
+  "base": "4c33cb125e0f4aec2e07c284ab65b610c5f1aa77",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115",
+  "source": {
+    "demiflow/execution/kernels/ordering.py": "6cff7fc9ed8d81bfa0e8d19d9918e65985a9f400780a7ab50f96c306cbb3fdf8",
+    "tests/test_runtime_v3_sort_handoff_files.py": "601e1dfa2850ab281bc8902164c9d1e9d696c248bac6a7bf1d8d6bea44ba5f9d"
+  },
+  "contract": "Final merge keeps one original store.PUT_FILES output window while its input readers remain live; same budget, no eager consumer materialization.",
+  "results": [
+    {
+      "xml": "/tmp/demiflow-sort-handoff.xml",
+      "sha256": "3371cab52c8106f8ce6cd00e658da8cde293eab9c351c100ed2da2d23164f795",
+      "passed": 9,
+      "nodeids": [
+        "tests.test_runtime_v3_sort_handoff_files::test_final_merge_immediately_publishes_each_typed_record_with_live_readers[1]",
+        "tests.test_runtime_v3_sort_handoff_files::test_final_merge_immediately_publishes_each_typed_record_with_live_readers[5]",
+        "tests.test_runtime_v3_sort_handoff_files::test_final_merge_immediately_publishes_each_typed_record_with_live_readers[11]",
+        "tests.test_runtime_v3_sort_handoff_files::test_infeasible_final_read_and_output_windows_fail_before_read[1-7]",
+        "tests.test_runtime_v3_sort_handoff_files::test_infeasible_final_read_and_output_windows_fail_before_read[5-9]",
+        "tests.test_runtime_v3_artifact_files::test_real_external_sort_fan_in_accounts_for_read_leases_and_output",
+        "tests.test_runtime_v3_real_seams::test_real_sort_spill_preserves_typed_records_and_provenance",
+        "::test_final_sort_can_feed_original_store_without_releasing_live_readers[current_policy]",
+        "::test_final_sort_can_feed_original_store_without_releasing_live_readers[two_way_control]"
+      ]
+    },
+    {
+      "xml": "/tmp/demiflow-sort-handoff-k.xml",
+      "sha256": "d4d4717d14926795bb71e573d3e8bcdf6117acf2638289ac0f7fcf337f299823",
+      "passed": 22,
+      "nodeids": [
+        "tests.test_runtime_v3_k::test_k001",
+        "tests.test_runtime_v3_k::test_k002",
+        "tests.test_runtime_v3_k::test_k003",
+        "tests.test_runtime_v3_k::test_k004",
+        "tests.test_runtime_v3_k::test_k005",
+        "tests.test_runtime_v3_k::test_k006",
+        "tests.test_runtime_v3_k::test_k007",
+        "tests.test_runtime_v3_k::test_k008",
+        "tests.test_runtime_v3_k::test_k009",
+        "tests.test_runtime_v3_k::test_k010",
+        "tests.test_runtime_v3_k::test_k011",
+        "tests.test_runtime_v3_k::test_k012",
+        "tests.test_runtime_v3_k::test_k013",
+        "tests.test_runtime_v3_k::test_k014",
+        "tests.test_runtime_v3_k::test_k015",
+        "tests.test_runtime_v3_k::test_k016",
+        "tests.test_runtime_v3_k::test_k017",
+        "tests.test_runtime_v3_k::test_k018",
+        "tests.test_runtime_v3_k::test_k019",
+        "tests.test_runtime_v3_k::test_k020",
+        "tests.test_runtime_v3_k::test_k021",
+        "tests.test_runtime_v3_k::test_k022"
+      ]
+    }
+  ],
+  "independent_reproduction": {
+    "file": "/tmp/demiflow-fd-independent/test_sort_consumer.py",
+    "sha256": "8825918843316097d93652379571f35e2a0252d14b8bd8b8683fe500f5697f5d",
+    "before": "current policy failed; test-only two-way fan-in control passed",
+    "after": "Both original arms passed without changing the independent script"
+  }
+}

@@ -321,8 +321,10 @@ def merge_sort_runs(
     if isinstance(services.store, RunArtifactStore):
         store = services.store
         available = min(services.bounds.max_open_files,store._bounds.max_open_files) - store.open_file_slots
-        final_fan_in = min(_MERGE_FAN_IN,max(0,available // store.READ_FILES))
-        fan_in = min(_MERGE_FAN_IN,max(0,(available - store.PUT_FILES) // store.READ_FILES))
+        # Readers remain open across yield. The immediate downstream consumer
+        # may publish through this same store before requesting another row, so
+        # the final merge needs the same output window as intermediate spills.
+        final_fan_in = fan_in = min(_MERGE_FAN_IN,max(0,(available - store.PUT_FILES) // store.READ_FILES))
     else:
         # In-memory contract stores have no physical files or lease overhead.
         final_fan_in = fan_in = min(_MERGE_FAN_IN,services.bounds.max_open_files)
