@@ -14,19 +14,24 @@ from runtime_v3_recovery_scenarios import _http_fixture, _provider
 
 
 @pytest.mark.parametrize('kind',['batch','save','embedding'])
-def test_timed_first_batch_reaches_downstream_before_slow_source_eoi(tmp_path,kind):
+def test_timed_first_batch_reaches_downstream_before_slow_source_eoi(tmp_path,kind,monkeypatch):
     seen=tmp_path/'seen';source_eoi=tmp_path/'eoi';ready=tmp_path/'downstream-ready'
+    from demiflow.execution.dataflow import DataflowExecution
+    original_start=DataflowExecution.start
+    def started(execution):
+        original_start(execution)
+        ready.write_text('physical endpoints activated')
+    monkeypatch.setattr(DataflowExecution,'start',started)
     def source():
         until=time.monotonic()+15
         while not ready.exists() and time.monotonic()<until:time.sleep(.01)
-        assert ready.exists(), 'downstream actor never started'
+        assert ready.exists(), 'physical endpoints never activated'
         yield {'id':'a','value':1,'text':'one'}
         until=time.monotonic()+4
         while not seen.exists() and time.monotonic()<until:time.sleep(.01)
         source_eoi.write_text('ended')
         yield {'id':'b','value':2,'text':'two'}
     class Observe:
-        async def astart(self):ready.write_text('started')
         def __call__(self,row):
             if not seen.exists():seen.write_text(json.dumps({'source_eoi':source_eoi.exists()}))
             return row
@@ -69,8 +74,13 @@ class Slow:
         elif os.environ['DF_BATCH_TIMING_MODE']=='crash':time.sleep(1.2)
         if os.environ['DF_BATCH_TIMING_MODE']=='resume_drift':return {**row,'value':99,'text':'changed'}
         return row
+from demiflow.execution.dataflow import DataflowExecution
+original_start=DataflowExecution.start
+def started(execution):
+    original_start(execution)
+    ready.write_text('physical endpoints activated')
+DataflowExecution.start=started
 class Observe:
-    async def astart(self):ready.write_text('started')
     def __call__(self,row):return row
 run_holder=[]
 if mode=='crash':
@@ -114,7 +124,7 @@ directory=root/'run'
 prior=RunJournal(directory).recovery_identity() if directory.exists() else None
 context=RunContext.resume(RunRef(str(directory),prior['run_id'])) if prior else RunContext.start(directory,
     limits={'timeout_s':60,'max_row_bytes':262144,'max_batch_bytes':524288,'max_requests':2,'checkpoint_rows':1 if kind=='timer' else 64})
-with context as run,data.local_execution():
+with context as run,data.local_execution(workers=8):
     run_holder.append(run)
     ds=data.from_items([{'id':'a','value':1,'text':'one'},{'id':'b','value':2,'text':'two'}]).map_async(Slow,concurrency=1)
     if kind=='save':

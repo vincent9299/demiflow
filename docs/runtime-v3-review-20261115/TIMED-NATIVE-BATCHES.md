@@ -14,3 +14,21 @@ Actual evidence in the isolated artifact recovery branch:
 - `/tmp/demiflow-timed-ray.xml`: 3 passed on real Ray Core workers. The same three public timed pipelines deliver before EOI.
 
 The tests use local owned HTTP transport and `/tmp/demiflow-*` state. They do not establish two-host, GPU, arbitrary UDF effect exactly-once, or single-worker source/batch fusion support. A blocking source and a timed batch cannot share one business thread; the coordinating branch owns that fusion admission rule. Full API, legacy and integrated workbench checks remain separate acceptance obligations.
+
+### Integrated lifecycle verification
+
+The readiness probe delegates to real `DataflowExecution.start` and only then
+announces that physical endpoints are active. User actors still start lazily on
+first input. The recovery pipeline has five independent stages (source, Slow,
+batch/native operator, Observe, terminal); the test explicitly supplies eight
+worker slots. The production default is four (`DataAPI.__init__` and
+`LocalDatasetExecutor.__init__`), not one. Insufficient-worker rejection/fusion
+is tested separately by `test_runtime_v3_single_worker_fusion.py`.
+
+On root-integrated `c28f5c8`: the three real first-output cases and all five
+crash/restore/drift/timer cases pass with the corrected physical readiness
+probe. The original before-EOI, confirmed-native-before-parent-cut, changed
+payload, exact two requests/charges and relative timer assertions remain.
+Evidence: `/tmp/demiflow-timer-integrated.xml` (first three plus fusion pass;
+old implicit-resource recovery cases fail honestly) and
+`/tmp/demiflow-timer-integrated-r2.xml` (all five recovery cases pass).
