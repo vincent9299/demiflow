@@ -182,6 +182,46 @@ def resolve_runtime_policy(
     return policy, bounds
 
 
+def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
+    """Size implicit streaming windows from the actual simultaneous workload.
+
+    This runs before staging programs or starting actors. Explicit payload
+    ceilings and caller-configured LocalKernelOptions are never rewritten. A
+    finite-input graph retains its independent, already bounded phase planning.
+    The allocator still makes the admission decision on the resulting profiles.
+    """
+    from dataclasses import replace
+    from .dataflow_compile import lower_action
+    from .dataflow_place import partition_stages
+    adjustable = {'max_row_bytes', 'max_batch_bytes', 'max_state_bytes'} - set(explicit_limits)
+    if not adjustable:
+        return bounds
+    for _ in range(8):
+        graph = lower_action(request, bounds=bounds).graph
+        if any(port.requirement == 'finite_complete' for node in graph.nodes for port in node.kernel.inputs):
+            return bounds
+        stages = partition_stages(graph, policy=policy, bounds=bounds)
+        resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
+                       * len(stage.partitions) for stage in stages)
+        control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+        available = bounds.max_resident_bytes - control
+        if resident <= available or available < 1:
+            return bounds
+        # Leave bounded slack for fixed parts and integer rounding. An explicit
+        # large row must still fit its batch, and may correctly make it infeasible.
+        changes = {name: max(1, getattr(bounds, name) * available * 9 // (resident * 10))
+                   for name in adjustable}
+        changes['max_batch_bytes'] = max(changes.get('max_batch_bytes', bounds.max_batch_bytes),
+                                        changes.get('max_row_bytes', bounds.max_row_bytes))
+        if 'max_batch_bytes' not in adjustable:
+            changes.pop('max_batch_bytes')
+        revised = replace(bounds, **changes)
+        if revised == bounds:
+            return bounds
+        bounds = revised
+    return bounds
+
+
 # Semantic native options that carry business meaning and map onto the unified
 # profile/partition contract. Anything else is reported, never silently dropped.
 _RAY_DATA_TUNING = frozenset({
