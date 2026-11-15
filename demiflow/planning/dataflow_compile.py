@@ -662,6 +662,15 @@ class _Capture:
             child = self.capture_chain(binding.source, binding.plan, binding.path)
             child_indices.append((child, binding.port))
         semantic = _source_semantic_facts(source)
+        reducer = None
+        if isinstance(source, KeyedSource) and source.kind == 'reduce':
+            # One code-pinned declaration owns the reducer and its fixed data.
+            # call_args carries the initial accumulator; the fold kernel copies
+            # it once per key and calls fn(state, row, **call_kwargs).
+            reducer = CallableSpec.create(source.reducer, fn_args=(source.initial,),
+                                          fn_kwargs=source.reducer_kwargs)
+            reducer = replace(reducer, runtime_contract=source.reducer_contract)
+        code_identity = _callable_code_identity(reducer) if reducer is not None else {}
         inputs = tuple(_input_port(port, kind) for _, port in child_indices)
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=inputs,
@@ -669,7 +678,15 @@ class _Capture:
             profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
-        index = self._add_node("relational", kernel, semantic, {}, {}, None)
+        index = self._add_node("relational", kernel, semantic, {}, code_identity, None)
+        if reducer is not None:
+            node = self.nodes[index]
+            configuration = _plain(node.kernel.configuration)
+            configuration['reducer_program'] = node.occurrence_id
+            self.nodes[index] = replace(node, kernel=replace(node.kernel, configuration=configuration))
+            self.declarations.append((index, ProgramDeclaration(
+                occurrence_id=node.occurrence_id, callable_spec=reducer,
+                source_spec=None, action_program=None, code_identity=_plain(code_identity))))
         for child, port in child_indices:
             self._add_edge(child, "main", index, port)
         return index
@@ -717,7 +734,7 @@ class _Capture:
         definition = terminal_registry().get(request.kind)
         if definition is None:
             raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
-        semantic = {"kind": request.kind, "arguments": dict(request.arguments)}
+        semantic = {"kind": request.kind, "arguments": _plain(request.arguments)}
         kernel = KernelSpec(
             kind=request.kind, implementation_ref=None, configuration=_plain(semantic),
             inputs=(_input_port("main", request.kind),),
@@ -725,7 +742,7 @@ class _Capture:
             profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
-        index = self._add_node("terminal", kernel, semantic, dict(request.arguments), {}, None)
+        index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)
         if self.checked is not None:
             key = (request.action.action_id, request.action.action_id, 0)
             if key in self.checked.observations:

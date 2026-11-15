@@ -205,10 +205,23 @@ def reduce_partition(
     on = tuple(_cfg(spec, "on"))
     if not on:
         raise _err("INVALID_CONTRACT", "empty group keys")
-    reducer = _program(services, _cfg(spec, "reducer_program"), "callable")
+    program = _program(services, _cfg(spec, "reducer_program"), "callable")
+    from ...data.plan import CallableSpec
+    from ...data.runtime_contract import validator
+    if isinstance(program, CallableSpec):
+        if len(program.call_args) != 1:
+            raise _err('INVALID_CONTRACT', 'Reducer program must bind one initial accumulator')
+        reducer = program.target
+        initial = program.call_args[0]
+        fn_kwargs = dict(program.call_kwargs)
+        validation = validator(reducer, program.runtime_contract) if program.runtime_contract is not None else None
+    else:
+        # Preserve the explicit low-level kernel fixture/legacy program form.
+        reducer, initial = program, _initial_state(spec, services)
+        fn_kwargs = dict(spec.configuration.get("reducer_kwargs") or {})
+        validation = None
     if not callable(reducer):
         raise _err("INVALID_CONTRACT", "reducer program must be callable")
-    fn_kwargs = dict(spec.configuration.get("reducer_kwargs") or {})
     occurrence = _occurrence(spec)
     budget = _OutputBudget(spec, services)
     max_state = services.bounds.max_state_bytes
@@ -217,9 +230,13 @@ def reduce_partition(
     ordered = _ordered_group_rows(records, on, spec, services)
     for key, items in itertools.groupby(ordered, key=lambda item: item[0]):
         _check_stop(services)
-        state = _initial_state(spec, services)
+        state = copy.deepcopy(initial)
         for _, row, _record in items:
+            if validation is not None:
+                validation.inputs((state, row), fn_kwargs)
             state = reducer(state, row, **fn_kwargs)
+            if validation is not None:
+                state = validation.output(state)
             if max_state > 0 and len(pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)) > max_state:
                 raise _err("BUDGET_EXCEEDED", "reducer state exceeds max_state_bytes")
         if state is None:
