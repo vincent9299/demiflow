@@ -544,6 +544,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/analysis-render.js": ("analysis-render.js", "text/javascript; charset=utf-8"),
                 "/analysis-output.js": ("analysis-output.js", "text/javascript; charset=utf-8"),
                 "/analysis-output-media.js": ("analysis-output-media.js", "text/javascript; charset=utf-8"),
+                "/analysis-charts.js": ("analysis-charts.js", "text/javascript; charset=utf-8"),
                 "/analysis-transport.js": ("analysis-transport.js", "text/javascript; charset=utf-8"),
                 "/analysis-output.css": ("analysis-output.css", "text/css; charset=utf-8"),
                 "/analysis-case.css": ("analysis-case.css", "text/css; charset=utf-8"),
