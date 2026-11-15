@@ -657,7 +657,16 @@ class DataflowExecution:
         for operation_id in tuple(self._scheduler._inflight):
             self._scheduler.complete(operation_id, receipt_ref=receipt)
         for endpoint in self._endpoints.values():
-            endpoint.drain(deadline_ms=self._policy.control_timeout_ms)
+            try:
+                endpoint.drain(deadline_ms=self._policy.control_timeout_ms)
+            except BaseException as error:
+                try:
+                    self._drain_worker_observations(endpoint)
+                except BaseException as observation_error:
+                    error.add_note('Final observations also failed: ' + str(observation_error))
+                raise
+            else:
+                self._drain_worker_observations(endpoint)
         for stage_id in self._phases[self._phase_index]:
             self._scheduler.drain(stage_id, deadline_ms=self._policy.control_timeout_ms)
         for endpoint in self._endpoints.values():
@@ -1134,6 +1143,13 @@ class DataflowExecution:
         # Unknown model requests are never replayed and committed results are
         # never deleted; physical owners are released only on confirmed exit.
 
+    def _drain_worker_observations(self, endpoint):
+        for event in endpoint.take_cleanup_observations():
+            self._validate_event(event)
+            self._handle_event(event)
+        if self._checked is not None:
+            self._checked.flush_observations(force=True)
+
     # -- E008 close -------------------------------------------------------
     def close(self) -> None:
         if self._closed:
@@ -1150,6 +1166,11 @@ class DataflowExecution:
                     endpoint.drain(deadline_ms=deadline_ms)
             except Exception as exc:
                 cleanup_error = cleanup_error or exc
+            finally:
+                try:
+                    self._drain_worker_observations(endpoint)
+                except Exception as exc:
+                    cleanup_error = cleanup_error or exc
         if self._scope_open and self._scheduler is not None:
             try:
                 self._scheduler.close(deadline_ms=deadline_ms)

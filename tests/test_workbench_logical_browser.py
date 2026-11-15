@@ -88,7 +88,7 @@ def test_logical_view_source_absence_then_report_projection(isolated, browser):
         expect(page.locator('.wb-basis')).to_contain_text('检查报告图 · checked')
         page.get_by_role('button', name='读图与配置', exact=True).click()
         page.get_by_role('button', name='声明图投影（E2）', exact=True).click()
-        expect(page.locator('.wb-logical-bar')).to_contain_text('结构校验通过')
+        expect(page.locator('.wb-logical-bar')).to_contain_text('声明投影结构（未执行）')
         expect(page.locator('.wb-logical-bar')).to_contain_text('未绑定本次执行计划')
         expect(page.locator('.wb-logical-bar')).to_contain_text('demiflow.logical_dag.v1')
         expect(page.locator('.wb-logical-bar')).to_contain_text('dag_id')
@@ -140,18 +140,23 @@ def test_logical_view_multi_action_selector(isolated, browser):
 
 def test_logical_view_projects_sealed_run_report(isolated, browser):
     run = runs.prepare(isolated, ENTRY, params=PARAMS)
+    source = isolated / 'operators/question_rules.py'
+    original = source.read_text()
+    source.write_text(original.replace('def normalize_question', 'def changed_after_prepare'))
     with service(isolated, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         pipeline(page)
         page.get_by_role('button', name='运行记录', exact=True).click()
         page.locator('.wb-run-record[data-run="' + run['run_id'] + '"]').click()
         expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
         page.get_by_role('button', name='声明图投影（E2）', exact=True).click()
-        expect(page.locator('.wb-logical-bar')).to_contain_text('结构校验通过')
+        expect(page.locator('.wb-logical-bar')).to_contain_text('声明投影结构（未执行）')
         expect(page.locator('.wb-logical-bar')).to_contain_text('未绑定本次执行计划')
         expect(page.locator('.wb-graph .wb-node')).to_have_count(7)
         page.locator('.wb-graph .wb-node').filter(has_text='normalize_question').click()
         expect(page.locator('.wb-inspector')).to_contain_text('声明逻辑节点（E2）')
         page.get_by_role('button', name='展开代码', exact=True).click()
         expect(page.locator('.wb-source-body')).to_contain_text('def normalize_question')
+        expect(page.locator('.wb-source-body')).not_to_contain_text('def changed_after_prepare')
+        expect(page.locator('.wb-source-body')).to_contain_text('封存来源')
         screenshot(page, 'logical-sealed-run')
         assert not errors, errors

@@ -198,17 +198,21 @@ def _recovery_rows():
 
 
 def test_recovery_uses_original_sealed_thread_mode(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
     class Interrupted(Exception): pass
     seen = []
-    def stop(execution, image):
-        seen.append(execution._physical)
+    commit = DataflowCheckpointCoordinator.commit
+    def stop(coordinator, *args, **kwargs):
+        image = commit(coordinator, *args, **kwargs)
+        assert not image.cut.final  # Real confirmed prefix; the suffix must execute on resume.
+        seen.append(coordinator._physical)
         raise Interrupted()
     with pytest.raises(Interrupted):
-        with RunContext.start(tmp_path/'run') as run, data.local_execution(workers=2, worker_mode='thread'):
+        with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':2,
+                'checkpoint_interval_ms':60000}) as run, data.local_execution(workers=2, worker_mode='thread'):
             ref = run.ref
             with monkeypatch.context() as patch:
-                patch.setattr(DataflowExecution, '_retire_phase', stop)
+                patch.setattr(DataflowCheckpointCoordinator, 'commit', stop)
                 _recovery_rows().take_all()
     assert seen[0].policy.worker_mode == 'thread'
     # Caller default must not replace the original sealed host strategy.

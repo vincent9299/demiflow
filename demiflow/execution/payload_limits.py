@@ -48,7 +48,8 @@ def active_limits(run, base):
     return active[1] if active is not None and active[0] is run else base
 
 
-def stream_limits(facts, limits, source_batch_size=1, *, retained_rows=0):
+def stream_limits(facts, limits, source_batch_size=1, *, retained_rows=0,
+                  adjustable_fields=('max_row_bytes', 'max_batch_bytes')):
     """Admit one existing graph using its queue/worker/reader residency model.
 
     Declared row/batch limits are ceilings, not guaranteed per-slot allocations.
@@ -61,10 +62,15 @@ def stream_limits(facts, limits, source_batch_size=1, *, retained_rows=0):
     if type(retained_rows) is not int or not 0 <= retained_rows <= limits['max_output_rows']:
         raise ValueError('Bounded delivery row count exceeds run output budget')
     facts = list(facts)
+    adjustable_fields = frozenset(adjustable_fields)
+    if not adjustable_fields <= {'max_row_bytes', 'max_batch_bytes'}:
+        raise ValueError('Only default payload ceilings can be adjusted')
 
     def candidate(cap):
-        result = dict(limits, max_row_bytes=min(limits['max_row_bytes'], cap),
-                      max_batch_bytes=min(limits['max_batch_bytes'], cap))
+        result = dict(limits)
+        result.update({name: min(limits[name], cap) for name in adjustable_fields})
+        if result['max_row_bytes'] > result['max_batch_bytes']:
+            return None
         try:
             reservation = stream_residency(facts, result)
         except ValueError as exc:
@@ -79,7 +85,12 @@ def stream_limits(facts, limits, source_batch_size=1, *, retained_rows=0):
     admitted = candidate(maximum)
     if admitted is not None:
         return admitted
-    low, high, admitted = 1, maximum - 1, None
+    # Residency is monotone only over legal row <= batch candidates. When
+    # the row ceiling is explicit, batch-only search must not descend into
+    # cap < row and mistake that invalid region for an oversized candidate.
+    minimum = (limits['max_row_bytes'] if 'max_batch_bytes' in adjustable_fields
+               and 'max_row_bytes' not in adjustable_fields else 1)
+    low, high, admitted = minimum, maximum - 1, None
     while low <= high:
         middle = (low + high) // 2
         value = candidate(middle)

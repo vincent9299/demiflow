@@ -249,7 +249,9 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     root, workspace, platform = ws.load_workspace(root)
     change_scope = workspace.get('audit', {}).get('change_scope')
     audit.require_scope(ws._check_change_scope(root), expected_scope=change_scope)
+    requested_limits = limits
     limits, parameter_path = admit_inputs(root, workspace, entry, params, limits)
+    payload_defaults = {'max_row_bytes', 'max_batch_bytes'} - set(requested_limits or {}) - set(workspace.get('budgets') or {})
     if type(new_outputs) is not bool:
         raise ForgeError('new_outputs must be boolean')
     original = ws.read_control(parameter_path) if parameter_path else copy.deepcopy(params)
@@ -336,7 +338,13 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                               'reserved_bytes': upstream['analysis'].get('reserved_bytes', 0)})
                 current = parents[current][0]
             try:
-                stream_residency(facts, limits)
+                if payload_defaults:
+                    from demiflow.execution.payload_limits import stream_limits
+                    # Seal the admitted defaults into the original manifest; every
+                    # reader, checked call and physical worker receives these caps.
+                    limits = stream_limits(facts, limits, adjustable_fields=payload_defaults)
+                else:
+                    stream_residency(facts, limits)
             except ValueError as exc:
                 raise ForgeError(str(exc)) from exc
     for operator in report['operators']:

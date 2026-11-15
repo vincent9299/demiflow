@@ -50,7 +50,7 @@ class _AsyncWorkPool(concurrent.futures.ThreadPoolExecutor):
 
 
 class AsyncInstance:
-    def __init__(self, target, services, *, timeout=None, owner=None, await_calls=True):
+    def __init__(self, target, services, *, timeout=None, owner=None, await_calls=True, lifecycle=None):
         self.target = target
         self.owner = target if owner is None else owner
         self.services = services
@@ -74,6 +74,9 @@ class AsyncInstance:
         self.validation = None
         self.validation_args = ()
         self.validation_kwargs = {}
+        self._observe_lifecycle = lifecycle
+        if lifecycle is not None:
+            lifecycle('created', True)
 
     def __getattr__(self, name):
         return getattr(self.target, name)
@@ -165,7 +168,14 @@ class AsyncInstance:
                 self._owner_task = asyncio.create_task(lifetime())
                 await started.wait()
                 self.check_lifecycle()
-            self.resolve(start_owner())
+            try:
+                self.resolve(start_owner())
+            except BaseException:
+                if self._observe_lifecycle is not None:
+                    self._observe_lifecycle('started', False)
+                raise
+        if self._observe_lifecycle is not None:
+            self._observe_lifecycle('started', True)
 
     def check_lifecycle(self):
         if self._lifecycle_failure is not None:
@@ -217,11 +227,16 @@ class AsyncInstance:
             hook = getattr(self.owner, "astop", None)
             if not self._stop_called:
                 self._stop_called = True
+                completed = False
                 try:
                     if hook is not None:
                         self.resolve(hook(), closing=True)
+                    completed = True
                 except BaseException as exc:
                     first_error = exc
+                finally:
+                    if self._observe_lifecycle is not None:
+                        self._observe_lifecycle('stopped', completed)
             # Background work created by astart must also finish before aclose.
             # If it cannot drain, do not pretend it is safe to close resources.
             self._drain(background=True)
@@ -230,11 +245,16 @@ class AsyncInstance:
             hook = getattr(self.owner, "aclose", None) or getattr(self.owner, "close", None)
             if not self._close_called:
                 self._close_called = True
+                completed = False
                 try:
                     if hook is not None:
                         self.resolve(hook(), closing=True)
+                    completed = True
                 except BaseException as exc:
                     first_error = first_error or exc
+                finally:
+                    if self._observe_lifecycle is not None:
+                        self._observe_lifecycle('closed', completed)
         finally:
             if self.loop is not None:
                 if self._owner_task is not None:

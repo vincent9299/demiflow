@@ -336,6 +336,28 @@ class _EndpointBase:
         else:
             self.deliver_reply(self._services.journal_service.dispatch(event))
 
+    def _accept_final_observations(self, result):
+        raw = result.get('final_progress', [])
+        from .recovery_contract import document
+        document(raw, self._services.bounds.max_control_bytes)
+        if type(raw) is not list:
+            raise DataflowError('INVALID_CONTRACT', 'final observations must be a bounded list')
+        for item in raw:
+            event = _event_from_dict(item, bounds=self._services.bounds)
+            if event.kind != 'progress' or event.payload.get('actor_lifecycle') is None:
+                raise DataflowError('INVALID_CONTRACT', 'cleanup only carries actor progress')
+            self._early_event(event)
+
+    def take_cleanup_observations(self):
+        # Preserve unrelated events: cleanup does not manufacture their ACKs.
+        remaining = deque()
+        observed = []
+        while self._events:
+            event = self._events.popleft()
+            (observed if event.kind == 'progress' else remaining).append(event)
+        self._events = remaining
+        return tuple(observed)
+
     def request_cut(self, request: "CutRequest") -> None:
         if not self._activated:
             raise DataflowError("FENCED", "cut requested before activation")
@@ -423,6 +445,7 @@ class LocalHostEndpoint(_EndpointBase):
             if message is None:
                 raise DataflowError("UNKNOWN_EFFECT", "local worker closed before responding")
             if message.get("response_to") == envelope["operation_id"]:
+                self._accept_final_observations(message)
                 if "error" in message:
                     from .dataflow_failures import restore_failure
                     raise restore_failure(message["error"])
@@ -548,6 +571,7 @@ class RayHostEndpoint(_EndpointBase):
                 raise DataflowError("DEADLINE_EXCEEDED", "Ray worker control command timed out")
             for event in self._connector.pull(self._allocation_id, limit=self._services.bounds.max_pending_events):
                 self._early_event(event)
+        self._accept_final_observations(result)
         if "error" in result:
             raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(result["error"]))
         if kind in ("Drain", "Quiesce", "Cancel"):

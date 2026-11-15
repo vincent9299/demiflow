@@ -66,7 +66,21 @@ def run(*, source, target):
     result = data.read_lance(source['uri'], version=source['version'], columns=['case_id']){wiring}.materialize()
     return result.write_lance(target['uri'], mode='create', return_receipt=True)
 '''
-    result = execute(root, custom(root, flow, operators=operator))
+    prepared = custom(root, flow, operators=operator)
+    if family in {'flat_batch', 'flat_batch_bounded'}:
+        from demiflow.workbench.runs import manager as runs
+        from demiflow.workbench.runs.limits import limits_with
+        _, sealed = runs._load(root, prepared['run_id'])
+        caps = sealed['manifest']['limits']
+        if family == 'flat_batch':
+            defaults = limits_with()
+            assert caps['memory_bytes'] == defaults['memory_bytes']
+            assert caps['max_row_bytes'] < defaults['max_row_bytes']
+            assert caps['max_batch_bytes'] < defaults['max_batch_bytes']
+        else:
+            assert caps['max_row_bytes'] == 1024**2
+            assert caps['max_batch_bytes'] == 2*1024**2
+    result = execute(root, prepared)
     assert result['status'] == 'succeeded', result
     source = lance.dataset(str(root / 'data/candidates.lance'), version=3).to_table(columns=['case_id']).to_pylist()
     expected = sorted(str(row['case_id']) + suffix for row in source for suffix in ('-a', '-b'))

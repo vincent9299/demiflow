@@ -391,23 +391,29 @@ class WorkerGraphRunner:
             self._cut = None
         return WorkerStep(processed=processed, blocked=not bool(processed), end_of_input=done, events=())
 
-    def _flush_metrics(self):
+    def _metrics_payload(self, occ):
         from ..dataflow_usage import worker_prompt_usage
+        kernel = self.e._kernels.get((occ, self.partition))
+        payload = {'occurrence_id': occ, 'partition_id': self.partition,
+                   'metrics': dict(self._metrics[occ])}
+        usage = worker_prompt_usage(kernel)
+        if usage is not None:
+            payload['prompt_usage'] = usage
+        if getattr(kernel, 'observations', None) is not None:
+            observed = kernel.observations.snapshot()
+            if observed['count']:
+                payload['callback_observations'] = observed
+            handoff = kernel.observations.output_handoff()
+            if handoff['peak']:
+                payload['output_handoff'] = handoff
+            lifecycle = kernel.observations.lifecycle_snapshot()
+            if lifecycle['created']:
+                payload['actor_lifecycle'] = lifecycle
+        return payload
+
+    def _flush_metrics(self):
         for occ in sorted(self._dirty_metrics):
-            usage = worker_prompt_usage(self.e._kernels.get((occ, self.partition)))
-            payload = {'occurrence_id': occ, 'partition_id': self.partition,
-                       'metrics': dict(self._metrics[occ])}
-            if usage is not None:
-                payload['prompt_usage'] = usage
-            kernel = self.e._kernels.get((occ, self.partition))
-            if getattr(kernel, 'observations', None) is not None:
-                observed = kernel.observations.snapshot()
-                if observed['count']:
-                    payload['callback_observations'] = observed
-                handoff = kernel.observations.output_handoff()
-                if handoff['peak']:
-                    payload['output_handoff'] = handoff
-            self._send('progress', payload)
+            self._send('progress', self._metrics_payload(occ))
         self._dirty_metrics.clear()
         self._metrics_at = time.monotonic()
 

@@ -410,6 +410,8 @@ class DataflowWorkerExecutor:
                                deadline_ms=self._timeout_ms)
             except BaseException as exc:
                 errors.append(exc)
+        self._final_progress = []
+        final_bytes = 2
         for key, kernel in list(self._kernels.items()):
             try:
                 kernel.close()
@@ -418,6 +420,26 @@ class DataflowWorkerExecutor:
                     aclose()
             except BaseException as exc:
                 errors.append(exc)
+            finally:
+                # The normal mailbox is closed during teardown. Carry only
+                # bounded, actual hook outcomes in the original Drain response.
+                try:
+                    runner = getattr(self, '_runner', None)
+                    if runner is not None and getattr(kernel, 'observations', None) is not None:
+                        payload = runner._metrics_payload(key[0])
+                        if payload.get('actor_lifecycle') is not None:
+                            from ..contracts.dataflow_codec import encode_wire
+                            import json
+                            raw = encode_wire(self._event('progress', payload=payload),
+                                type_name='WorkerEvent', bounds=self.assignment.bounds)
+                            # Wire envelopes overestimate each payload's bytes;
+                            # count once instead of reserializing the growing list.
+                            final_bytes += len(raw) + 1
+                            if final_bytes > self.assignment.bounds.max_control_bytes:
+                                raise _dataflow_error('BUDGET_EXCEEDED', 'final lifecycle observations exceed control budget')
+                            self._final_progress.append(json.loads(raw)['payload'])
+                except BaseException as exc:
+                    errors.append(exc)  # Continue physical cleanup; preserve the first error.
         for split_id, reader in list(self._readers.items()):
             try:
                 reader.close()

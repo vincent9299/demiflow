@@ -132,6 +132,12 @@ def _run_v3_worker(launch_spec, sock):
                     message = commands.get(timeout=0.05)
                 except queue.Empty:
                     continue
+                executor = getattr(runtime, '_v3_executor', None)
+                def final_observations():
+                    if message.get('kind') not in ('Drain', 'Quiesce', 'Cancel'):
+                        return {}
+                    events = getattr(executor, '_final_progress', ())
+                    return {'final_progress': list(events)} if events else {}
                 try:
                     if message.get("type") == "dataflow_command":
                         runtime._v3_ensure_executor().receive(message["command"])
@@ -145,17 +151,17 @@ def _run_v3_worker(launch_spec, sock):
                         # Acknowledgment means lifecycle cleanup finished. The
                         # main socket loop still services journal RPCs meanwhile.
                         runtime.close()
-                    send({"response_to": message["operation_id"], "receipt": receipt})
+                    send({"response_to": message["operation_id"], "receipt": receipt, **final_observations()})
                     if message["kind"] == "Restore":
                         runtime.ready(message["payload"]["assignment_ref"])
                     if message["kind"] in ("Drain", "Quiesce", "Cancel"):
                         stop.set()
                 except (ProtocolError, DataflowError) as exc:
                     error = exc.to_dict() if isinstance(exc, ProtocolError) else {"code": exc.code, "message": str(exc)}
-                    send({"response_to": message.get("operation_id"), "error": error})
+                    send({"response_to": message.get("operation_id"), "error": error, **final_observations()})
                 except BaseException as exc:
                     from ..dataflow_failures import failure_payload
-                    send({"response_to": message.get("operation_id"), "error": failure_payload(exc)})
+                    send({"response_to": message.get("operation_id"), "error": failure_payload(exc), **final_observations()})
                 finally:
                     commands.task_done()
         finally:

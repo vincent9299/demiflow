@@ -333,7 +333,9 @@
         locateNode(reportId).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
         return;
       }
-      if(reportId)chooseNode(reportId,{logical_node_id:id,occurrence_id:group[0]?.occurrence_id??null});
+      // A declaration is identified by its sealed report node; only an executed
+      // plan may ask the backend to resolve a logical occurrence through its bridge.
+      if(reportId)chooseNode(reportId,sealed?{logical_node_id:id,occurrence_id:group[0]?.occurrence_id??null}:null);
       logicalSelected=displayId;logicalView.select(displayId);
       if(!group.length)return;
       const node=group[0];

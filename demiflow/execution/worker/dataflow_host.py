@@ -150,25 +150,32 @@ class HostedDataflowWorker:
         }
         return self._runtime.handle(envelope, now_ms=now_ms)
 
+    def _final_observations(self, message, executor):
+        if message.get('kind') not in ('Drain', 'Quiesce', 'Cancel'):
+            return {}
+        events = getattr(executor, '_final_progress', ())
+        return {'final_progress': list(events)} if events else {}
+
     def handle(self, message: dict) -> dict:
         response_to = message.get("response_to")
         if response_to is not None:
             self.deliver_receipt(message.get("receipt", {}))
             return {"receipt": None}
+        executor = self._executor
         try:
             receipt = self._runtime.handle(message, now_ms=int(time.time() * 1000))
             if message["kind"] in ("Drain", "Quiesce", "Cancel"):
                 self._runtime.close()
         except ProtocolError as exc:
-            return {"error": exc.to_dict()}
+            return {"error": exc.to_dict(), **self._final_observations(message, executor)}
         except Exception as exc:
             from ..dataflow_failures import failure_payload
-            return {"error": failure_payload(exc)}
+            return {"error": failure_payload(exc), **self._final_observations(message, executor)}
         if message["kind"] == "Restore":
             self._runtime.ready(message["payload"]["assignment_ref"])
         if message["kind"] == "Assign":
             self._activated = True
-        return {"receipt": receipt}
+        return {"receipt": receipt, **self._final_observations(message, executor)}
 
     def poll(self, *, max_events: int, deadline_ms: int) -> tuple["WorkerEvent", ...]:
         return self.pull_events(max_events)

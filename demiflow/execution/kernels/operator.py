@@ -370,8 +370,12 @@ class OperatorKernel:
                 from ..dataflow_model_journal import bind_prompt_adapter, bind_agent_adapter
                 bind = bind_prompt_adapter if instance.fn.environment is None else bind_agent_adapter
                 bind(instance.fn, services=self._services, node_id=self._occurrence)
+        import inspect
+        owner = self._state_owner(instance)
+        lifecycle = (None if inspect.isroutine(owner) or inspect.isclass(owner)
+                     else self.observations.lifecycle)
         instance = AsyncInstance(instance, self._services,
-                                 owner=self._state_owner(instance),
+                                 owner=owner, lifecycle=lifecycle,
                                  timeout=self._spec.configuration.get('hard_timeout'),
                                  await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'})
         instance.native_scope = (self._occurrence, self._partition_id) + ((slot,) if self._worker_scope else ())

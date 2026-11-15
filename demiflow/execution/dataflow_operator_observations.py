@@ -8,6 +8,19 @@ from threading import Lock
 from .contracts.dataflow_errors import DataflowError
 
 
+_LIFECYCLE_FIELDS = ('created', 'started', 'stopped', 'closed',
+                     'start_failed', 'stop_failed', 'close_failed')
+
+
+def validated_lifecycle(value):
+    if (type(value) is not dict or set(value) != set(_LIFECYCLE_FIELDS)
+            or any(type(v) is not int or v < 0 for v in value.values())
+            or any(value[ok] + value[bad] > value['created'] for ok, bad in
+                   (('started', 'start_failed'), ('stopped', 'stop_failed'), ('closed', 'close_failed')))):
+        raise DataflowError('INVALID_CONTRACT', 'invalid actor lifecycle observation')
+    return dict(value)
+
+
 def empty():
     return {'count': 0, 'total_ns': 0, 'min_ns': 0, 'max_ns': 0, 'miss': {}}
 
@@ -31,8 +44,18 @@ class CallbackObservations:
     def __init__(self):
         self._lock = Lock()
         self._value = empty()
+        self._lifecycle = dict.fromkeys(_LIFECYCLE_FIELDS, 0)
         self._handoff = {'capacity': 1, 'current': 0, 'peak': 0,
                          'encoded_bytes': 0, 'peak_encoded_bytes': 0}
+
+    def lifecycle(self, field, completed):
+        failure = {'started': 'start_failed', 'stopped': 'stop_failed', 'closed': 'close_failed'}
+        with self._lock:
+            self._lifecycle[field if completed else failure[field]] += 1
+
+    def lifecycle_snapshot(self):
+        with self._lock:
+            return dict(self._lifecycle)
 
     def hold_output(self, encoded_bytes):
         with self._lock:
@@ -72,6 +95,26 @@ class CallbackObservations:
 
 
 def observe_operator(execution, event, payload):
+    lifecycle = payload.get('actor_lifecycle')
+    if lifecycle is not None:
+        lifecycle = validated_lifecycle(lifecycle)
+        slots = getattr(execution, '_operator_lifecycles', None)
+        if slots is None:
+            execution._operator_lifecycles = slots = {}
+        key = (payload['occurrence_id'], payload['partition_id'])
+        previous = slots.get(key)
+        if previous is not None and previous[0] == event.boot_id and any(
+                lifecycle[k] < previous[1][k] for k in _LIFECYCLE_FIELDS):
+            raise DataflowError('FENCED', 'actor lifecycle moved backwards within one boot')
+        slots[key] = (event.boot_id, lifecycle)
+        checked_key = execution._report_keys.get(payload['occurrence_id'])
+        if checked_key is not None:
+            total = dict.fromkeys(_LIFECYCLE_FIELDS, 0)
+            for (occurrence, _), (_, observed) in slots.items():
+                if occurrence == payload['occurrence_id']:
+                    for name in total:
+                        total[name] += observed[name]
+            execution._checked.worker_actor_lifecycle(checked_key, total)
     handoff = payload.get('output_handoff')
     if handoff is not None:
         fields = {'capacity', 'current', 'peak', 'encoded_bytes', 'peak_encoded_bytes'}

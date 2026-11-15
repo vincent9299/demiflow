@@ -201,6 +201,7 @@ class ThreadHostEndpoint(_EndpointBase):
             except TimeoutError:
                 pass
         result = future.result()
+        self._accept_final_observations(result)
         if 'error' in result:
             from .dataflow_failures import restore_failure
             raise restore_failure(result['error'])

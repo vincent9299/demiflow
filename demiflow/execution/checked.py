@@ -161,11 +161,27 @@ class CheckedExecution:
                     for field in ('created', 'started', 'stopped', 'closed')}
                 self.observations[key]['sequence'] += 1
 
-    def flush_observations(self, *, final=False, succeeded=False):
+    def worker_actor_lifecycle(self, key, counters):
+        """Project actual worker hook outcomes, never driver declaration objects."""
+        if self.observe is None:
+            return
+        from .dataflow_operator_observations import validated_lifecycle
+        counts = validated_lifecycle(counters)
+        if not counts['created']:
+            return
+        with self.observation_lock:
+            item = self.observations[tuple(key)]
+            item['lifecycle'] = {'created': True}
+            for field, failure in (('started', 'start_failed'), ('stopped', 'stop_failed'), ('closed', 'close_failed')):
+                item['lifecycle'][field] = (False if counts[failure] else
+                    True if counts[field] == counts['created'] else None)
+            item['sequence'] += 1
+
+    def flush_observations(self, *, final=False, succeeded=False, force=False):
         if self.observe is None:
             return
         now = time.monotonic()
-        if not final and now - self.last_flush < 0.5:
+        if not final and not force and now - self.last_flush < 0.5:
             return
         updates = []
         with self.observation_lock:
@@ -173,7 +189,7 @@ class CheckedExecution:
                 if key[0] != self.matching_action:
                     continue
                 previous_time, previous_sequence = self.node_flushed.get(key, (0, -1))
-                if not final and (now - previous_time < 1 or previous_sequence == item['sequence']):
+                if not final and not force and (now - previous_time < 1 or previous_sequence == item['sequence']):
                     continue
                 if final and item['state'] != 'reused':
                     item['state'] = ('succeeded' if succeeded and (item['rows_output'] is not None or key[1] in self.values) else 'failed' if item.get('errors') or False in item.get('lifecycle', {}).values() else 'incomplete')
