@@ -1,4 +1,4 @@
-"""Co-locate a linear streaming suffix in one admitted thread host.
+"""Co-locate a bounded incremental suffix DAG in one admitted worker.
 
 Sources stay independent: a blocking source must never starve async completions
 or timed batch flushes. Logical state/recovery/effect declarations remain intact.
@@ -15,18 +15,18 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds):
     if not policy.fusion:
         return stages
     nodes = {n.occurrence_id: n for n in graph.nodes}
-    # An attempt-local iterator cannot park. Its ordinary row transforms need
-    # the same source + suffix layout as explicitly streaming transforms; the
-    # existing kernel still owns per-task callable copies and state.
-    inline_iterator = (policy.provider == 'local' and policy.max_active_workers == 2
-        and any(nodes[occ].kernel.kind == 'iterable' for occ in graph.sources))
+    # Small-worker pipelines need the same source + suffix layout for ordinary
+    # per-task transforms. Co-location keeps each original kernel's task/state
+    # boundaries, including atomic expansion into a downstream batch consumer.
+    bounded_suffix = (policy.provider == 'local' and policy.max_active_workers == 2
+        and sum(len(s.partitions) for s in stages) > policy.max_active_workers)
     # A shared upstream feeding both prepend ports must run once. Preserve all
     # input owners/ports, but put the prepend and its result consumer together
     # when that removes an otherwise unnecessary worker-budget phase boundary.
     prepend_tail = (policy.provider == 'local' and policy.max_active_workers is not None
         and sum(len(s.partitions) for s in stages) > policy.max_active_workers
         and any(n.kernel.kind == 'StreamPrependOp' for n in graph.nodes))
-    if policy.worker_mode != 'thread' and not inline_iterator and not prepend_tail:
+    if policy.worker_mode != 'thread' and not bounded_suffix and not prepend_tail:
         return stages
     owner = {occ: stage for stage in stages for occ in stage.occurrences}
     incoming, outgoing = {}, {}
@@ -37,36 +37,44 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds):
     for terminal in graph.terminals:
         if nodes[terminal].kernel.kind not in _TERMINALS:
             continue
-        suffix, current = [terminal], terminal
-        while len(incoming.get(current, ())) == 1:
-            candidate = incoming[current][0].producer
-            node, stage = nodes[candidate], owner[candidate]
-            kernel = node.kernel
-            # SaveLance is a passive, single-partition native-journal RPC
-            # adapter. Its writer and CommitCoordinator remain in the driver;
-            # sharing a worker cannot move publication authority or turn its
-            # journaled effect into a pure node. Other IO/model/effect kernels
-            # retain their independent physical resource boundary.
-            native_save = (kernel.kind == 'SaveLanceOp' and kernel.effect == 'journaled'
-                           and kernel.state in {'adapter', 'nonrecoverable'}
-                           and kernel.resource_role == 'io')
-            prepend = (prepend_tail and kernel.kind == 'StreamPrependOp'
-                       and {port.name: port.requirement for port in kernel.inputs}
-                       == {'main': 'incremental', 'prefix': 'finite_complete'})
-            if (candidate in used or node.kind != 'transform'
-                    or not (kernel.effect == 'pure' and kernel.resource_role == 'cpu' or native_save)
-                    or not (prepend or len(kernel.inputs) == 1
-                            and kernel.inputs[0].requirement == 'incremental')
-                    or len(outgoing.get(candidate, ())) != 1
-                    or len(stage.occurrences) != 1 or len(stage.partitions) != 1
-                    or stage.profile.limits or stage.profile.requirements
-                    or set(stage.profile.requests) - {'cpu_millis', 'memory_bytes'}):
-                break
-            suffix.insert(0, candidate)
-            current = candidate
+        # Follow every declared input port. A shared branch remains one node
+        # owned by one worker; GraphRunner still calls the original kernels and
+        # propagates each edge/EOI separately. Source owners are never included.
+        selected, pending = {terminal}, [terminal]
+        while pending:
+            current = pending.pop()
+            inputs = incoming.get(current, ())
+            if not bounded_suffix and len(inputs) != 1:
+                continue
+            for edge in inputs:
+                candidate = edge.producer
+                if candidate in selected or candidate in used:
+                    continue
+                node, stage = nodes[candidate], owner[candidate]
+                kernel = node.kernel
+                native_save = (kernel.kind == 'SaveLanceOp' and kernel.effect == 'journaled'
+                               and kernel.state in {'adapter', 'nonrecoverable'}
+                               and kernel.resource_role == 'io')
+                prepend = (prepend_tail and kernel.kind == 'StreamPrependOp'
+                           and {port.name: port.requirement for port in kernel.inputs}
+                           == {'main': 'incremental', 'prefix': 'finite_complete'})
+                if (not (node.kind == 'transform' or node.kind == 'relational' and kernel.kind == 'union')
+                        or not (kernel.effect == 'pure' and kernel.resource_role == 'cpu' or native_save)
+                        or not (prepend or kernel.inputs
+                                and all(port.requirement == 'incremental' for port in kernel.inputs))
+                        or not bounded_suffix and len(outgoing.get(candidate, ())) != 1
+                        or len(stage.occurrences) != 1 or len(stage.partitions) != 1
+                        or stage.profile.limits or stage.profile.requirements
+                        or set(stage.profile.requests) - {'cpu_millis', 'memory_bytes'}):
+                    continue
+                selected.add(candidate)
+                pending.append(candidate)
+        # partition_stages already established topological order. Preserve it
+        # so mixed fan-in and per-task callbacks retain original ownership.
+        suffix = [o for stage in stages for o in stage.occurrences if o in selected]
         members = [owner[occ] for occ in suffix]
         if (len(suffix) < 2 or any(len(s.partitions) != 1 or len(s.occurrences) != 1 for s in members)
-                or not (inline_iterator or any(nodes[o].kernel.configuration.get('streaming_map')
+                or not (bounded_suffix or any(nodes[o].kernel.configuration.get('streaming_map')
                            or nodes[o].kernel.kind == 'AsyncMapOp'
                            or prepend_tail and nodes[o].kernel.kind == 'StreamPrependOp' for o in suffix))):
             continue

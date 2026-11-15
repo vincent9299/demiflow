@@ -231,7 +231,13 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             raise DataflowError("INVALID_CONTRACT",
                                 "Executable node has no program declaration: " + node.occurrence_id)
         config = node.kernel.configuration
-        force_live = bool(worker_mode == 'thread' and (config.get('streaming_map')
+        # An explicit thread stream also owns its lazy iterator in the same
+        # attempt. Preserve shared locks/counters rather than serializing a
+        # disconnected source closure; its source snapshot remains attempt_only
+        # and the planner keeps blocking next() in an independent worker.
+        live_iterator = (shared_stream and node.kind == 'source'
+                         and node.kernel.kind == 'iterable')
+        force_live = bool(worker_mode == 'thread' and (live_iterator or config.get('streaming_map')
                           and config.get('execution') == 'thread' or shared_stream
                           and node.kernel.kind == 'AsyncMapOp' and not config.get('task_batch_rows')))
         eligible = worker_mode == 'thread' and not config.get('task_batch_rows') and (
