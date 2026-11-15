@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from .run_context import RunAction
 
 _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown", "release_unsent"})
-_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging"})
+_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "settle_staging", "release_staging"})
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
                          "references", "media_references", "bind_membership"})
@@ -95,6 +95,26 @@ def apply_artifact_command(action: "RunAction", command: ArtifactCommand, *, bou
     identifier(command.owner)
     journal = action.context.journal
     fence = action.context.fence
+    if command.kind in {'settle_staging', 'release_staging'}:
+        ref = command.ref
+        if command.kind == 'release_staging' and ref is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Release cannot carry an artifact')
+        if command.kind == 'release_staging':
+            root = action.context.directory / '.dataflow-store'
+            if command.size_bytes != 0 or next(root.glob('*/staging/.pending-' + command.owner + '-*'), None) is not None:
+                raise DataflowError('INVALID_CONTRACT', 'Release requires deletion of owned staging files')
+        if command.kind == 'settle_staging':
+            if ref is None:
+                raise DataflowError('INVALID_CONTRACT', 'Settlement requires a durable artifact')
+            if command.size_bytes != ref.size_bytes:
+                raise DataflowError('INVALID_CONTRACT', 'Settlement size differs from its artifact')
+            from .dataflow_store import RunArtifactStore
+            store = RunArtifactStore(root=action.context.directory / '.dataflow-store',
+                store_id=ref.store_id, journal=None, bounds=bounds, readonly=True)
+            if not store.inspect(ref):
+                raise DataflowError('CORRUPT_ARTIFACT', 'Settlement object is not durable')
+        charged = journal.settle_dataflow_staging(fence, command.owner, ref)
+        return ArtifactReply(operation_id=command.operation_id, present=ref is not None, charged_bytes=charged)
     if command.kind == "reserve_staging":
         if type(command.size_bytes) is not int or command.size_bytes <= 0:
             raise DataflowError("INVALID_CONTRACT", "reserve_staging needs positive size_bytes")

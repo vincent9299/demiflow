@@ -75,7 +75,7 @@ _EVENT_KINDS = frozenset({
 _COMPLETIONS = frozenset({"source_exhausted", "terminal_satisfied", "cancelled", "incomplete"})
 _PRODUCER_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
 _POLL_STATUSES = frozenset({"record", "pending", "eoi"})
-_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging"})
+_ARTIFACT_KINDS = frozenset({"pin", "unpin", "inspect", "reserve_staging", "settle_staging", "release_staging"})
 _REPLY_STATUSES = frozenset({"ok", "error", "pending"})
 _SCOPE_CONDITIONS = frozenset({"input_eoi", "terminal_limit", "queue_drain_declared"})
 _QUEUE_MODES = frozenset({"sink", "explicit", "raw_fetch"})
@@ -1384,7 +1384,7 @@ class ScheduleChoice:
 @dataclass(frozen=True)
 class ArtifactCommand:
     operation_id: str
-    kind: Literal["pin", "unpin", "inspect", "reserve_staging"]
+    kind: Literal["pin", "unpin", "inspect", "reserve_staging", "settle_staging", "release_staging"]
     ref: ArtifactRef | None
     owner: str
     size_bytes: int

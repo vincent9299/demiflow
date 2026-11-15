@@ -199,6 +199,8 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), attempt INTEGER NOT NULL, fence TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_actions (action_id TEXT PRIMARY KEY, declaration TEXT NOT NULL, snapshot TEXT, result TEXT);
           CREATE TABLE IF NOT EXISTS runtime_effects (action_id TEXT NOT NULL, effect_id TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(action_id,effect_id));
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_objects (store_id TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY(store_id,digest));
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_settlements (reservation_id TEXT PRIMARY KEY, store_id TEXT, digest TEXT, bytes INTEGER NOT NULL, charged INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_artifacts (path TEXT PRIMARY KEY, commit_id TEXT, protected INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0);
           CREATE TABLE IF NOT EXISTS runtime_object_roots (root_id TEXT PRIMARY KEY, logical_root TEXT UNIQUE NOT NULL, physical_root TEXT NOT NULL, run_id TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_sources (action_id TEXT PRIMARY KEY, document TEXT NOT NULL);
@@ -1030,6 +1032,40 @@ class RunJournal:
         if old is not None and old[0] != raw:
             raise RecoveryContractError('Durable receipt changed')
         db.execute('INSERT OR IGNORE INTO runtime_receipts VALUES (?,?,?)', (commit_id, sink_id, raw))
+
+    def settle_dataflow_staging(self, fence, reservation_id, ref):
+        """Replace the staging maximum with unique durable bytes, atomically.
+
+        No refund for an unknown publication: callers release only after deleting
+        their temporary file, or settle a verified immutable object. Repeat RPCs
+        bind the same settlement and cannot refund twice.
+        """
+        from .recovery_contract import identifier, RecoveryContractError
+        identifier(reservation_id)
+        store_id, digest, size = (ref.store_id, ref.digest, ref.size_bytes) if ref is not None else (None, None, 0)
+        with self.execution_guard(fence) as db:
+            old = db.execute('SELECT store_id,digest,bytes,charged FROM runtime_dataflow_settlements WHERE reservation_id=?',
+                             (reservation_id,)).fetchone()
+            if old:
+                if old[:3] != (store_id, digest, size):
+                    raise RecoveryContractError('Artifact settlement changed')
+                return old[3]
+            reservation = db.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                                     (reservation_id,)).fetchone()
+            if reservation is None or size > reservation[0]:
+                raise RecoveryContractError('Artifact settlement exceeds its staging reservation')
+            prior = db.execute('SELECT bytes FROM runtime_dataflow_objects WHERE store_id=? AND digest=?', (store_id,digest)).fetchone() if digest else None
+            if prior and prior[0] != size:
+                raise RecoveryContractError('Immutable artifact size changed')
+            charged = 0 if prior else size
+            if digest:
+                db.execute('INSERT OR IGNORE INTO runtime_dataflow_objects VALUES (?,?,?)', (store_id, digest, size))
+            db.execute("UPDATE runtime_budgets SET consumed=consumed-? WHERE name='artifact_staging_bytes'",
+                       (reservation[0] - charged,))
+            db.execute("UPDATE runtime_reservations SET amount=? WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                       (charged, reservation_id))
+            db.execute('INSERT INTO runtime_dataflow_settlements VALUES (?,?,?,?,?)', (reservation_id, store_id, digest, size, charged))
+            return charged
 
     def transition_effect(self, fence, action_id, command, *, ceilings):
         """Native generic effect intent and budget share one fenced transaction.

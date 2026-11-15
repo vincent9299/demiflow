@@ -23,4 +23,6 @@
 
 Artifact staging 的累计 max_bytes 预留、重复内容结算、失败/崩溃回收还未修；Agent、cache、采集、queue、托管模型服务/媒体路径还未构成完整业务验收；真实 host 资源、pending/续租、跨 run 容量与多机读取域仍待修；actor 并发与状态限制、数据格式/生成器/长流和实际峰值预算、历史测试与工作台完整体验仍在总清单中。
 
+后续工件修复已落实实际字节结算、去重、明确失败退款，未知崩溃所有权仍保留，详见 [ARTIFACT-PROGRESS.md](ARTIFACT-PROGRESS.md)。
+
 原先 33 个失败的通过证据属于 CORE-PROGRESS 的已记录版本。最终须在最终提交重新绑定证据，不能沿用中间结果宣布 100%。

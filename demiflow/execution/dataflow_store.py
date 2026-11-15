@@ -14,9 +14,9 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
-from .contracts.dataflow import ArtifactRef
+from .contracts.dataflow import ArtifactRef, ArtifactCommand
 from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import identifier
+from .recovery_contract import identifier, identity
 
 if TYPE_CHECKING:
     from .contracts.dataflow import ArtifactAuthorityPort, Bounds
@@ -31,6 +31,14 @@ def _no_symlink(path: Path) -> None:
     for item in (path, *path.parents):
         if item.is_symlink():
             raise DataflowError("INVALID_CONTRACT", "artifact root contains a symlink: " + str(item))
+
+
+def _sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 class RunArtifactStore:
@@ -88,22 +96,25 @@ class RunArtifactStore:
             raise DataflowError("INVALID_CONTRACT", "media_type must be a nonempty string")
         operation_id = self._staging_operation()
         self._journal.reserve(operation_id, {ARTIFACT_STAGING_BUDGET: max_bytes})
-        descriptor, staging_name = tempfile.mkstemp(prefix=".pending-", dir=self._staging)
-        staging = Path(staging_name)
+        staging = None
         digest = hashlib.sha256()
         size = 0
+        published = False
         try:
+            descriptor, staging_name = tempfile.mkstemp(prefix='.pending-' + operation_id + '-', dir=self._staging)
+            staging = Path(staging_name)
             with os.fdopen(descriptor, "wb") as stream:
                 for chunk in chunks:
                     if type(chunk) is not bytes:
                         raise DataflowError("INVALID_CONTRACT", "artifact chunks must be bytes")
-                    if len(chunk) > _MAX_CHUNK_BYTES:
-                        raise DataflowError("BUDGET_EXCEEDED", "artifact chunk exceeds the single-chunk limit")
                     size += len(chunk)
                     if size > max_bytes:
                         raise DataflowError("BUDGET_EXCEEDED", "artifact exceeds max_bytes")
-                    digest.update(chunk)
-                    stream.write(chunk)
+                    view = memoryview(chunk)
+                    for offset in range(0, len(view), _MAX_CHUNK_BYTES):
+                        part = view[offset:offset + _MAX_CHUNK_BYTES]
+                        digest.update(part)
+                        stream.write(part)
                 stream.flush()
                 os.fsync(stream.fileno())
             hex_digest = digest.hexdigest()
@@ -120,10 +131,29 @@ class RunArtifactStore:
                 except FileExistsError:
                     if target.stat().st_size != size or _file_digest(target) != hex_digest:
                         raise DataflowError("INVALID_CONTRACT", "content digest collision on publish")
-            return ArtifactRef(digest=hex_digest, size_bytes=size, store_id=self.store_id,
-                               key=hex_digest, media_type=media_type)
+            published = True
+            _sync_directory(self._objects)
+            ref = ArtifactRef(digest=hex_digest, size_bytes=size, store_id=self.store_id,
+                              key=hex_digest, media_type=media_type)
+            # A deduplicated temporary still occupies a separate inode until
+            # unlink. Release that physical ownership before refunding budget.
+            staging.unlink()
+            _sync_directory(self._staging)
+            self._journal.artifact(ArtifactCommand(identity([operation_id, 'settle']),
+                'settle_staging', ref, operation_id, size))
+            return ref
         finally:
-            staging.unlink(missing_ok=True)
+            if staging is not None:
+                staging.unlink(missing_ok=True)
+                _sync_directory(self._staging)
+            if not published:
+                try:
+                    self._journal.artifact(ArtifactCommand(identity([operation_id, 'release']),
+                        'release_staging', None, operation_id, 0))
+                except BaseException:
+                    # Keep conservative accounting if the authority is unknown;
+                    # never hide the original write/iterator failure.
+                    pass
 
     def read(self, ref: ArtifactRef, *, max_bytes: int) -> Iterator[bytes]:
         if type(max_bytes) is not int or max_bytes <= 0:
