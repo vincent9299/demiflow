@@ -29,6 +29,7 @@ def test_repeated_real_failure_releases_driver_sockets_with_tracebacks_alive(tmp
         connector=executions[-1].services.resources.provider._control
         assert connector.driver_socks=={}
         assert connector._pending=={} and connector._staged=={}
+        assert connector._bounds_by_allocation=={}
     assert len(errors)==3 and all(error.__traceback__ is not None for error in errors)
 
 
@@ -40,6 +41,7 @@ def test_real_phase_retirement_and_stream_terminal_close_owned_transports(tmp_pa
     def launched(execution):
         if launches:
             assert not execution.services.resources.provider._control.driver_socks
+            assert not execution.services.resources.provider._control._bounds_by_allocation
         result=launch(execution);launches.append(execution._phase_index)
         return result
     monkeypatch.setattr(DataflowExecution,'_launch_phase',launched)

@@ -193,6 +193,14 @@ class DataflowLocalConnector(LocalControlConnector):
         self._bounds_by_allocation[allocation_id] = Bounds(**config["bounds"])
         super().stage(allocation_id, launch_spec)
 
+    def abort(self, allocation_id):
+        try:
+            super().abort(allocation_id)
+        finally:
+            # Inherited close() also calls abort after physical retirement.
+            # Do not retain one Bounds object per parked worker generation.
+            self._bounds_by_allocation.pop(allocation_id, None)
+
     def spawn_payload(self, allocation_id: str) -> dict:
         launch_spec = self._staged[allocation_id]
         v3 = launch_spec.get("dataflow_v3")

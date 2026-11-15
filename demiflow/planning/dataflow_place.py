@@ -726,10 +726,29 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                          "memory group cannot fit and its source/state cannot safely park") from original
         reason = ("active_worker_budget" if original.context.get('resource') == 'max_active_workers'
                   else "resident_budget")
-        upgraded = tuple(replace(e, mode="durable_incremental",
-                          storage_bytes=min(bounds.max_spill_bytes, e.credit_bytes * 8),
-                          reason=f"durable_incremental:{reason}_requires_checkpointed_parking;" + e.reason)
-                         if e in candidates else e for e in exchanges)
+        nodes = _node_map(graph)
+        edges = {edge.edge_id: edge for edge in graph.edges}
+        upgraded = []
+        for exchange in exchanges:
+            if exchange not in candidates:
+                upgraded.append(exchange)
+                continue
+            producer = nodes[edges[exchange.edge_id].producer].kernel
+            # A finite kernel emits its complete result inside finish(). An
+            # absent consumer cannot ACK a per-row durable window, and parking
+            # halfway through that invocation cannot snapshot its generator.
+            # Use the existing bounded finite spool/EOI proof for this natural
+            # boundary. Incremental and effectful kernels keep their original
+            # checkpoint/ACK protocol. Only newly compiled plans select here.
+            finite = (producer.effect == "pure" and bool(producer.inputs)
+                      and all(port.requirement == "finite_complete" for port in producer.inputs))
+            mode = "finite_sealed" if finite else "durable_incremental"
+            upgraded.append(replace(exchange, mode=mode,
+                scope_id="scope-" + exchange.edge_id if finite else None,
+                storage_bytes=min(bounds.max_spill_bytes, exchange.credit_bytes * 8),
+                reason=f"{mode}:{reason}_requires_" +
+                       ("finite_completion;" if finite else "checkpointed_parking;") + exchange.reason))
+        upgraded = tuple(upgraded)
         upgraded = _share_exchange_storage(upgraded, bounds)
         return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds,
                                         max_active_workers=policy.max_active_workers)
