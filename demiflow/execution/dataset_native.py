@@ -501,8 +501,9 @@ class Engine:
                     yield row[key], self.decode(rel, row)
 
     def python_rows(self, executor, source, plan):
+        from ..data.dataset import Dataset
         try:
-            yield from executor._apply_plan(source, plan, _native=False, execution=self.execution)
+            yield from Dataset(source, plan, executor).iter_rows()
         finally:
             child = executor._local_kernel_stats
             if child is not self.stats and child.get('engine') != 'datafusion':
@@ -563,88 +564,17 @@ class Engine:
 
 
 def execute(executor, source, plan, *, arrow=False, sink_schema=None, execution=None):
-    if executor._local_kernel_closed:
-        raise RuntimeError('local_execution is closed; execute actions inside its context')
-    # Preflight every branch before any source or callback has side effects.
-    def validate(item):
-        ex = item.executor or executor
-        if ex._local_kernel_closed:
-            raise RuntimeError('local_execution is closed')
-        ex.plan(item.source, item.plan, 'iter_rows')
-        if isinstance(item.source, KeyedSource):
-            validate(item.source.left)
-            if item.source.right:
-                validate(item.source.right)
-        elif isinstance(item.source, UnionSource):
-            for child in item.source.inputs:
-                validate(child)
-        if ex._local_kernel is None:
-            if any(isinstance(op, (ops.SortOp, ops.RepartitionOp, ops.RandomShuffleOp, ops.RandomizeBlockOrderOp)) for op in item.plan.operations):
-                ex._require_ray_backend(next(op for op in item.plan.operations if isinstance(op, (ops.SortOp, ops.RepartitionOp, ops.RandomShuffleOp, ops.RandomizeBlockOrderOp))))
-            allowed = (ops.MapOp, ops.BoundMapOp, ops.FilterOp, ops.FlatMapOp, ops.MapBatchesOp,
-                ops.LimitOp, ops.SelectColumnsOp, ops.DropColumnsOp, ops.RenameColumnsOp,
-                ops.AddColumnOp, ops.RandomSampleOp, ops.OperatorLLMMapOp)
-            for op in item.plan.operations:
-                if not isinstance(op, allowed):
-                    raise TypeError(f'unknown logical operation: {type(op).__name__}')
-        if ex._local_kernel is not None:
-            from .local_tasks import NARROW
-            for op in item.plan.operations:
-                if not isinstance(op, (*NARROW, ops.MapBatchesOp, ops.LimitOp)) or isinstance(op, ops.MapBatchesOp) and op.zero_copy_batch:
-                    raise NotImplementedError(f'local partition kernel does not support {type(op).__name__}')
-    stats = {'engine': 'datafusion', 'status': 'running', 'stages': []}
-    executor._local_kernel_stats = stats
-    started = time.monotonic()
-    try:
-        validate(PlanInput(source, plan, executor))
-        temp = executor._local_kernel.temp_directory if executor._local_kernel else None
-        with ExitStack() as stack:
-            directory = stack.enter_context(tempfile.TemporaryDirectory(prefix='demiflow-dataset-', dir=temp))
-            engine = Engine(executor, stack, directory, stats, execution=execution)
-            item = PlanInput(source, plan, executor)
-            rel = engine.typed(item) if arrow else None
-            from .local_tasks import NARROW
-            finish_rel = None
-            if (arrow and sink_schema is not None and executor._local_kernel is not None
-                    and executor._local_kernel.worker_mode == 'process'
-                    and plan.operations and all(isinstance(op, NARROW)
-                        and not isinstance(op, ops.FlatMapOp) for op in plan.operations)):
-                finish_rel = engine.typed(PlanInput(source, ops.LogicalPlan(), executor))
-            if finish_rel is not None:
-                from functools import partial
-                import cloudpickle
-                transform = partial(finish_typed_batch, columns=finish_rel.columns,
-                    encoded_operations=cloudpickle.dumps(plan.operations), schema=sink_schema)
-                stats['stages'].append({'name':'python_batch_callbacks', 'operators':[type(op).__name__ for op in plan.operations],
-                    'batch_rows':executor._local_kernel.batch_rows, 'placement':'native_worker_outside_engine'})
-                with closing(engine.render_batches(finish_rel, transform=transform, schema=sink_schema,
-                        transform_batch_rows=executor._local_kernel.batch_rows)) as batches:
-                    yield from batches
-            elif rel is not None:
-                import pyarrow as pa
-                with closing(engine.render_batches(rel)) as batches:
-                    for batch in batches:
-                        yield pa.RecordBatch.from_arrays([batch.column(c.value) for c in rel.columns],
-                            names=[c.name for c in rel.columns])
-            elif arrow:
-                # Arbitrary callbacks retain Python semantics and execution context.
-                with closing(engine.rows(item)) as rows:
-                    from .run_context import current_run
-                    yield from executor._rows_as_batches(rows, batch_size=8192, batch_format='pyarrow', schema=sink_schema,
-                                                       byte_limits=current_run().limits)
-            else:
-                with closing(engine.rows(item)) as rows:
-                    yield from rows
-        stats['status'] = 'complete'
-    except GeneratorExit:
-        stats['status'] = 'closed_early'
-        raise
-    except BaseException as exc:
-        stats.update(status='failed', error=f'{type(exc).__name__}: {exc}')
-        raise
-    finally:
-        stats['seconds'] = time.monotonic() - started
-        executor._local_kernel_stats = stats
-        executor._last_metadata = ExecutionMetadata(type(source).__name__,
-            stages=tuple(StageStats(s['name'], rows_output=s.get('rows_output'), elapsed_seconds=s.get('seconds')) for s in stats['stages']),
-            diagnostics=stats)
+    """Compat native relational entry adapted to the unified v3 request facade (E016).
+
+    The legacy DataFusion ``Engine``/``Compiler`` instantiation and the Ray-only
+    operator precheck are retired; rows/batches now flow through the same
+    ``run_dataset_action`` runtime. ``arrow`` selects the batch terminal and
+    ``sink_schema`` is preserved through the terminal contract.
+    """
+    from .dataflow_api import make_action_request, run_dataset_action
+
+    kind = "iter_batches" if arrow else "iter_rows"
+    arguments = {"batch_format": "pyarrow"} if arrow else {}
+    request = make_action_request(executor, source, plan, kind=kind, arguments=arguments)
+    result = run_dataset_action(request)
+    yield from result

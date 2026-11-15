@@ -85,10 +85,6 @@ def keyed_dataset(left, kind, on, *, right=None, right_on=None, how="inner",
     if chunk_bytes < 1:
         raise ValueError("chunk_bytes must be positive")
     if right is not None:
-        if getattr(right._executor, 'NAME', None) != 'local':
-            raise NotImplementedError('join supports local execution only')
-        if left._executor._local_kernel is not None and right._executor is not left._executor:
-            raise ValueError("parallel join inputs must belong to the same local_execution context")
         if how not in {"inner", "left", "semi", "anti"} or len(fields) != len(rfields):
             raise ValueError("invalid join type or key arity")
     if kind == "groups" and (max_rows < 1 or output in fields or output in {"group_index", "group_last"}):
@@ -99,6 +95,13 @@ def keyed_dataset(left, kind, on, *, right=None, right_on=None, how="inner",
         PlanInput(right._source, right._plan, right._executor) if right is not None else None,
         rfields, how, suffix, reducer, initial, chunk_bytes, max_rows, output,
         reducer_kwargs=dict(reducer_kwargs or {}))
+    from ..planning.dataflow_compile import expand_relational_inputs
+    from ..planning.dataflow_policy import resolve_runtime_policy
+    from .contracts.dataflow_errors import DataflowError
+    _, bounds = resolve_runtime_policy({}, {}, provider="local")
+    bindings = expand_relational_inputs(source, path=(), bounds=bounds)
+    if len(bindings) != (2 if right is not None else 1):
+        raise DataflowError("INVALID_CONTRACT", "relational input port multiplicity was not preserved")
     return Dataset(source, LogicalPlan(), left._executor)
 
 

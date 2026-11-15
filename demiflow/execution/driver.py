@@ -126,6 +126,11 @@ def execute_driver(request: PipelineDriverRequest) -> None:
         raise ValueError("Local Driver request cannot contain a Ray namespace")
 
     with ExitStack() as resources:
+        from ..planning.dataflow_policy import resolve_runtime_policy
+        from .dataflow_api import run_dataset_action
+        provider = "local" if request.backend == "local" else "ray_core"
+        runtime_policy, runtime_bounds = resolve_runtime_policy(
+            dict(request.planning_policy), {}, provider=provider)
         if request.backend == "local":
             dataset_executor = LocalDatasetExecutor(
                 workers=max(1,min(policy.max_parallelism,os.cpu_count() or 1)),
@@ -147,6 +152,9 @@ def execute_driver(request: PipelineDriverRequest) -> None:
             )
         else:
             raise ValueError(f"unsupported Driver backend: {request.backend}")
+        dataset_executor.runtime_policy = runtime_policy
+        dataset_executor.runtime_bounds = runtime_bounds
+        dataset_executor.run_dataset_action = run_dataset_action
         resources.callback(dataset_executor.close)
         from .run_context import RunContext
         with RunContext.start(entry_identity={
