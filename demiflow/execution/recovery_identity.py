@@ -58,6 +58,15 @@ def describe(value, depth=0):
             digest.update(part)
         return {'collection_type': type(value).__name__, 'items': len(value),
                 'sha256': digest.hexdigest()}
+    # Only newly supported data-only scalar types enter this branch. Keep the
+    # accepted JSON/set/enum and native model identity representations intact.
+    from .contracts.scalar_values import scalar_node
+    try:
+        scalar = scalar_node(value, max_bytes=MAX_DOCUMENT_BYTES)
+    except (ValueError, OverflowError) as exc:
+        raise RecoveryContractError('Unsupported scalar identity: ' + str(exc)) from exc
+    if scalar is not None:
+        return {'data_scalar': scalar}
     if isinstance(value, Path):
         return {"path": str(value.absolute())}
     if isinstance(value, types.ModuleType):

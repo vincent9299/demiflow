@@ -9,11 +9,13 @@ identity, bytes and numeric types, and it is data-only (never code pickle).
 import base64
 import hashlib
 import json
+import math
+import sys
 import re
 from collections.abc import Mapping
 
 from demiflow.execution.contracts.dataflow import (ArtifactRef, CutRequest, ExchangeSpec, Record,
-                                                  _FrozenRowList, thaw_record_value)
+                                                  _FrozenRowList, _FrozenRowSet, thaw_record_value)
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.exchange import (
     DATA_ENVELOPE_SCHEMA, build_data_ref, check_read_domain, validate_barrier,
@@ -80,50 +82,71 @@ def _validate_tree(value, *, max_bytes):
     """Frontier walk: depth/node/leaf budgets are checked before encoding."""
     pending = [(value, 0)]
     nodes = 0
+    minimum_bytes = 0
     while pending:
         item, depth = pending.pop()
         nodes += 1
         if nodes > _MAX_NODES or depth > _MAX_DEPTH:
             _fail("BUDGET_EXCEEDED", "record structure exceeds depth/node budget")
         kind = type(item)
+        minimum_bytes += 1
         if isinstance(item, Mapping):
             if len(item) > _MAX_NODES:
                 _fail("BUDGET_EXCEEDED", "record mapping exceeds budget")
             for key, child in item.items():
                 if type(key) is not str:
                     _fail("INVALID_CONTRACT", "record mapping keys must be strings")
+                minimum_bytes += len(key.encode("utf-8"))
                 if len(key.encode("utf-8")) > max_bytes:
                     _fail("BUDGET_EXCEEDED", "record key exceeds byte budget")
                 pending.append((child, depth + 1))
-        elif kind in (list, tuple, _FrozenRowList):
+        elif kind in (list, tuple, _FrozenRowList, set, frozenset, _FrozenRowSet):
             if len(item) > _MAX_NODES:
                 _fail("BUDGET_EXCEEDED", "record container exceeds budget")
             pending.extend((child, depth + 1) for child in item)
         elif kind is str:
+            minimum_bytes += len(item.encode("utf-8"))
             if len(item.encode("utf-8")) > max_bytes:
                 _fail("BUDGET_EXCEEDED", "record string exceeds byte budget")
         elif kind is bytes:
+            minimum_bytes += len(item)
             if len(item) > max_bytes:
                 _fail("BUDGET_EXCEEDED", "record bytes exceed byte budget")
         elif kind is int:
+            minimum_bytes += item.bit_length() // 8
             if item.bit_length() > 8 * max_bytes:
                 _fail("BUDGET_EXCEEDED", "record integer exceeds byte budget")
         elif kind is float:
-            continue
+            pass
         elif item is None or kind is bool:
-            continue
+            pass
         else:
+            from ..contracts.scalar_values import scalar_node
+            try:
+                scalar = scalar_node(item, max_bytes=max_bytes)
+            except OverflowError as exc:
+                raise DataflowError('BUDGET_EXCEEDED', str(exc)) from exc
+            except ValueError as exc:
+                raise DataflowError('INVALID_CONTRACT', str(exc)) from exc
+            if scalar is not None:
+                minimum_bytes += len(_codec_dumps(scalar))
+                if minimum_bytes > max_bytes:
+                    _fail("BUDGET_EXCEEDED", "record values exceed aggregate byte budget")
+                continue
             from ..contracts.array_values import numpy_value, validate_array
             if numpy_value(item) is not None:
                 try:
                     validate_array(item)
                 except ValueError as exc:
                     raise DataflowError('INVALID_CONTRACT', str(exc)) from exc
-                if item.nbytes > max_bytes:
+                minimum_bytes += int(item.nbytes)
+                if minimum_bytes > max_bytes:
                     _fail('BUDGET_EXCEEDED', 'NumPy payload exceeds row byte budget')
                 continue
             _fail("INVALID_CONTRACT",
                   "record payload carries a non-data object: " + kind.__name__)
+        if minimum_bytes > max_bytes:
+            _fail("BUDGET_EXCEEDED", "record values exceed aggregate byte budget")
 
 
 def _encode_value(value):
@@ -144,6 +167,14 @@ def _encode_value(value):
         return {"t": "list", "v": [_encode_value(child) for child in value]}
     if kind is tuple:
         return {"t": "tuple", "v": [_encode_value(child) for child in value]}
+    if kind in (set, frozenset, _FrozenRowSet):
+        children = [_encode_value(child) for child in value]
+        children.sort(key=_codec_dumps)
+        return {'t': 'frozenset' if kind is frozenset else 'set', 'v': children}
+    from ..contracts.scalar_values import scalar_node
+    scalar = scalar_node(value, max_bytes=sys.maxsize)
+    if scalar is not None:
+        return scalar
     if isinstance(value, Mapping):
         return {"t": "map", "v": [[key, _encode_value(value[key])] for key in sorted(value)]}
     from ..contracts.array_values import numpy_value, validate_array
@@ -159,10 +190,17 @@ def _encode_value(value):
     _fail("INVALID_CONTRACT", "record payload carries a non-data object: " + kind.__name__)
 
 
-def _decode_value(node):
+def _decode_value(node, _depth=0, _count=None):
+    if _count is None:
+        _count = [0]
+    _count[0] += 1
+    if _depth > _MAX_DEPTH or _count[0] > _MAX_NODES:
+        _fail('CORRUPT_ARTIFACT', 'record codec exceeds depth/node budget')
     if type(node) is not dict or "t" not in node:
         _fail("CORRUPT_ARTIFACT", "record codec node is malformed")
     tag = node["t"]
+    if type(tag) is not str:
+        _fail("CORRUPT_ARTIFACT", "record codec tag must be a string")
     if tag == "null":
         return None
     if tag in ("bool", "int", "float", "str"):
@@ -170,7 +208,7 @@ def _decode_value(node):
         expected = {"bool": bool, "int": int, "float": float, "str": str}[tag]
         if type(value) is not expected:
             _fail("CORRUPT_ARTIFACT", "record codec leaf type mismatch")
-        return value
+        return float("nan") if expected is float and math.isnan(value) else value
     if tag == "bytes":
         value = node.get("v")
         if type(value) is not str:
@@ -181,7 +219,6 @@ def _decode_value(node):
             raise DataflowError("CORRUPT_ARTIFACT", "record codec bytes are not base64") from exc
     if tag in ('numpy_scalar', 'numpy_array'):
         import numpy as np
-        import math
         try:
             if set(node) != {'t', 'dtype', 'shape', 'v'}:
                 raise ValueError('Malformed NumPy node')
@@ -198,7 +235,13 @@ def _decode_value(node):
             return array[()] if tag == 'numpy_scalar' else array
         except (ValueError, TypeError, OverflowError) as exc:
             raise DataflowError('CORRUPT_ARTIFACT', 'Invalid NumPy data payload') from exc
-    if tag in ("list", "tuple", "map"):
+    from ..contracts.scalar_values import SCALAR_TAGS, decode_scalar
+    if tag in SCALAR_TAGS:
+        try:
+            return decode_scalar(node)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise DataflowError('CORRUPT_ARTIFACT', 'Invalid scalar data payload') from exc
+    if tag in ("list", "tuple", "map", "set", "frozenset"):
         value = node.get("v")
         if type(value) is not list:
             _fail("CORRUPT_ARTIFACT", "record codec container malformed")
@@ -209,9 +252,17 @@ def _decode_value(node):
                     _fail("CORRUPT_ARTIFACT", "record codec map entry malformed")
                 if pair[0] in result:
                     _fail("CORRUPT_ARTIFACT", "record codec map has duplicate keys")
-                result[pair[0]] = _decode_value(pair[1])
+                result[pair[0]] = _decode_value(pair[1], _depth + 1, _count)
             return result
-        children = [_decode_value(child) for child in value]
+        children = [_decode_value(child, _depth + 1, _count) for child in value]
+        if tag in ('set', 'frozenset'):
+            try:
+                result = set(children) if tag == 'set' else frozenset(children)
+            except TypeError as exc:
+                raise DataflowError('CORRUPT_ARTIFACT', 'Unhashable set member') from exc
+            if len(result) != len(children):
+                _fail('CORRUPT_ARTIFACT', 'Set payload has duplicate members')
+            return result
         return children if tag == "list" else tuple(children)
     _fail("CORRUPT_ARTIFACT", "record codec tag is unsupported")
 

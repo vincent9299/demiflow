@@ -241,7 +241,9 @@ def _size_bytes(objects: Any, format: str, *, maximum=_DEFAULT_INPUT_MAX_BYTES) 
         try:
             return check_size(objects, maximum)
         except RuntimeContractError as exc:
-            raise DataflowError("BUDGET_EXCEEDED", "input exceeds resident budget") from exc
+            invalid = str(exc).startswith('Unsupported runtime value type:')
+            raise DataflowError('INVALID_CONTRACT' if invalid else 'BUDGET_EXCEEDED',
+                                'input refused: ' + str(exc)) from exc
     if format == "arrow":
         return sum(int(table.nbytes) for table in objects)
     if format == "numpy":

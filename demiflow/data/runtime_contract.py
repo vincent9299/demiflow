@@ -32,7 +32,18 @@ def check_size(value, maximum=8 * 1024**2):
             for child in item:
                 visit(child, depth + 1)
         elif item is not None and type(item) not in (str, bytes, int, float, bool):
-            raise RuntimeContractError('Unsupported runtime value type: ' + type(item).__name__)
+            from ..execution.contracts.scalar_values import scalar_node
+            try:
+                node = scalar_node(item, max_bytes=maximum)
+            except OverflowError as exc:
+                raise RuntimeContractError('Value byte budget exceeded') from exc
+            except ValueError as exc:
+                raise RuntimeContractError('Unsupported runtime value type: ' + str(exc)) from exc
+            if node is None:
+                raise RuntimeContractError('Unsupported runtime value type: ' + type(item).__name__)
+            # Account for timezone names/Decimal coefficients as well as their
+            # native scalar storage before the input deep copy is admitted.
+            visit(node, depth + 1)
 
     visit(value, 0)
     return maximum - remaining

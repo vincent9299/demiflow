@@ -1,0 +1,510 @@
+{
+  "head": "a580adbbc49b3e06e65ec5863c15dc4f3c532928",
+  "state": "dirty exact bytes bound below; initial red precedes implementation, r1 precedes added negative assertions",
+  "inputs": {
+    "demiflow/data/runtime_contract.py": "8c593821f2e23faee036142e46bf51878ef3b53f0c2f4fd9c198845cb33fad53",
+    "demiflow/execution/contracts/dataflow.py": "916279bebde0ae8dc6384135d53bf8bcfa48860d6caa3c2c93e4ff9fc6bd38a6",
+    "demiflow/execution/contracts/scalar_values.py": "6b78c53db6688afa74436ecaf96ea7caad89829bf1ddebc848a0ae797a3aed52",
+    "demiflow/execution/dataflow_inputs.py": "23505a1d134a3312a8568aa497ab3d5f8375eb0bfd1bfd0b59942c17383e8456",
+    "demiflow/execution/exchange/dataflow_bridge.py": "2940b2b1f14756e10538b254a9d0a7e47a0603cdcab39185f29cd436d3ad31c4",
+    "demiflow/execution/recovery_identity.py": "eb3456b8a8f317843deb312b10ca92088e5c4523a52eca76a04b2f9b211c8d07",
+    "tests/test_runtime_v3_scalar_values.py": "3b37f0fb8230c1eb0540064110473c1750b2b3960b1b4a92b942106d9a936978"
+  },
+  "runs": [
+    {
+      "path": "/tmp/demiflow-regression-scalars-red.xml",
+      "sha256": "83ee8dfd2873ccb20f8edd03e3ec6e32f39732130bf7e4c07aca5b1550ba8393",
+      "tests": [
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_data_scalar_codec_preserves_type_and_freezes_sets",
+          "result": "failed",
+          "reason": "demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: record payload carries a non-data object: frozenset"
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_public_scalar_materialization_and_committed_replay[items]",
+          "result": "failed",
+          "reason": "demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: input exceeds resident budget"
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_public_scalar_materialization_and_committed_replay[lance]",
+          "result": "failed",
+          "reason": "demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: INVALID_CONTRACT: record payload carries a non-data object: Decimal"
+        }
+      ]
+    },
+    {
+      "path": "/tmp/demiflow-regression-scalars-r1.xml",
+      "sha256": "079eacd2c182c2ee3e26187972cfd484a7b67c3787e66ef478b612fdf51ec49c",
+      "tests": [
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_data_scalar_codec_preserves_type_and_freezes_sets",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_public_scalar_materialization_and_committed_replay[items]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_public_scalar_materialization_and_committed_replay[lance]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_array_values.py::test_array_codec_fidelity_detachment_and_bounds",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_array_values.py::test_public_numpy_batch_exchange_materialize_and_committed_replay",
+          "result": "passed",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "path": "/tmp/demiflow-regression-scalars-r2.xml",
+      "sha256": "6cb4ee68f35226a31f70ce6890f2d7ebe592943bc5e3a48f9c4d8d001ff07b49",
+      "tests": [
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_data_scalar_codec_preserves_type_and_freezes_sets",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_public_scalar_materialization_and_committed_replay[items]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_public_scalar_materialization_and_committed_replay[lance]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value0]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value1]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value2]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value3]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value4]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value5]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value6]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value7]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value8]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value9]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_scalar_boundary_roundtrip[value10]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_new_scalar_domains_are_bounded_and_untrusted_objects_are_refused",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_set_encoding_is_order_independent_and_preserves_nan_members",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node0]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node1]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node2]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node3]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node4]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node5]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node6]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node7]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_corrupt_data_only_nodes_are_rejected[node8]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_named_zone_offset_and_payload_depth_cannot_silently_change",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_scalar_values.py::test_existing_primitive_payload_and_semantic_identity_bytes_stay_frozen",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_array_values.py::test_array_codec_fidelity_detachment_and_bounds",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_array_values.py::test_public_numpy_batch_exchange_materialize_and_committed_replay",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_execution_recovery_identity.py::test_unordered_collection_identity_is_stable_across_process_seeds",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_execution_recovery_identity.py::test_changed_set_source_is_rejected_on_resume",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_execution_recovery_identity.py::test_set_identity_has_cardinality_and_total_descriptor_byte_limits[value0]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_execution_recovery_identity.py::test_set_identity_has_cardinality_and_total_descriptor_byte_limits[value1]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_execution_recovery_identity.py::test_unadapted_objects_still_fail_closed",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_execution_recovery_identity.py::test_set_payload_size_counts_members_and_rejects_unknown_objects[set]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_execution_recovery_identity.py::test_set_payload_size_counts_members_and_rejects_unknown_objects[frozenset]",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x001",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x002",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x003",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x004",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x005",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x006",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x007",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x008",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x009",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x010",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x011",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x012",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x013",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x014",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x015",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x016",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x017",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x018",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_x.py::test_x019",
+          "result": "passed",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "path": "/tmp/demiflow-regression-scalar-inputs.xml",
+      "sha256": "02fcfeff4b8ef33f12b928f90446366ac3c5f1e96e3fe849adaba4b3c0ce79ed",
+      "tests": [
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f001",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f002",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f003",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f004",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f005",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f006",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f007",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f008",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f009",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f010",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f011",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f012",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f013",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f014",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f015",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f016",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f017",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f018",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f019",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f020",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_f.py::test_f021",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_forge_analysis_runtime_contract.py::test_oci_commands_have_fixed_nonce_scope_and_no_arbitrary_exec_restore_or_hooks",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_forge_analysis_runtime_contract.py::test_kernel_and_native_configs_do_not_accept_argv_env_or_host_paths",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_forge_analysis_runtime_contract.py::test_unadmitted_deployment_refuses_before_runtime_cgroup_or_filesystem_changes",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_forge_analysis_runtime_contract.py::test_owned_stop_still_targets_original_group_when_control_intent_cannot_be_saved",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_forge_analysis_runtime_contract.py::test_controller_constructor_never_adopts_a_missing_external_binding",
+          "result": "passed",
+          "reason": null
+        },
+        {
+          "nodeid": "tests/test_forge_analysis_runtime_contract.py::test_missing_hot_status_does_not_turn_a_live_original_unit_into_a_dead_process",
+          "result": "failed",
+          "reason": "AttributeError: 'TrustedLocalBackend' object has no attribute 'pending_retirement'"
+        },
+        {
+          "nodeid": "tests/test_forge_analysis_runtime_contract.py::test_only_validated_original_worker_survives_a_missing_status_window",
+          "result": "failed",
+          "reason": "AttributeError: 'TrustedLocalBackend' object has no attribute 'pending_retirement'"
+        }
+      ]
+    }
+  ],
+  "primary_acceptance": "55 passed, no skip/deselection",
+  "extra_inputs": {
+    "F": {
+      "passed": 21
+    },
+    "unrelated_product_fixture_failures": 2
+  },
+  "import_guard": "Physical __main__ runner asserts demiflow.__file__ is under Path.cwd(); PYTHONPATH=$PWD:$PWD/tests; env/bin/python -B",
+  "resource_root": "Each command uses DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-regression-capacity-*",
+  "limitations": [
+    "Local real workers verified; Ray provider not rerun in this subtask.",
+    "Named ZoneInfo uses installed tzdata; stored current UTC offset must match on decode, otherwise corrupt artifact refusal.",
+    "Data payload domain expanded, relation key semantics intentionally unchanged.",
+    "Not a peak-RSS proof: bounded encoding and resident input admission are separately tested.",
+    "Two unrelated legacy __new__ TrustedLocalBackend tests need retirement field initialization."
+  ]
+}

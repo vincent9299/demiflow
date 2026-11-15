@@ -267,6 +267,10 @@ class _FrozenRowList(tuple):
     """Immutable list payload retaining its business type across decoding."""
 
 
+class _FrozenRowSet(frozenset):
+    """Immutable set payload retaining its mutable business container type."""
+
+
 def thaw_record_value(value):
     """Return ordinary business containers without changing list/tuple identity."""
     if isinstance(value, Mapping):
@@ -277,6 +281,10 @@ def thaw_record_value(value):
         return tuple(thaw_record_value(item) for item in value)
     if type(value) is list:
         return [thaw_record_value(item) for item in value]
+    if type(value) in (_FrozenRowSet, set):
+        return {thaw_record_value(item) for item in value}
+    if type(value) is frozenset:
+        return frozenset(thaw_record_value(item) for item in value)
     from .array_values import numpy_value
     if numpy_value(value) is not None:
         return value.copy()
@@ -292,6 +300,10 @@ def _freeze_row_value(value, depth: int):
         return _FrozenRowList(_freeze_row_value(v, depth + 1) for v in value)
     if type(value) is tuple:
         return tuple(_freeze_row_value(v, depth + 1) for v in value)
+    if type(value) in (set, _FrozenRowSet):
+        return _FrozenRowSet(_freeze_row_value(v, depth + 1) for v in value)
+    if type(value) is frozenset:
+        return frozenset(_freeze_row_value(v, depth + 1) for v in value)
     from .array_values import numpy_value, freeze_array
     if numpy_value(value) is not None:
         try:
