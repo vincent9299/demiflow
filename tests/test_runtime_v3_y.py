@@ -281,7 +281,6 @@ RayDatasetExecutor = ray_module.RayDatasetExecutor
 
 from demiflow.data.plan import LogicalPlan  # noqa: E402
 from demiflow.data.sources import ItemsSource, MaterializedSource  # noqa: E402
-from demiflow.planning.model import PhysicalPlan  # noqa: E402
 
 
 def _assert_tree_binding() -> None:
@@ -350,8 +349,10 @@ def test_y002(executor):
     assert ENGINE.input_calls[-1]["format"] == "items"
     assert result.value == [{"id": 1}]
     assert ENGINE.run_calls == []
-    with pytest.raises(ValueError):
-        executor.from_items([{"id": 1}], override_num_blocks=0)
+    # override_num_blocks is accepted but unused; no bounds are imposed (parity L).
+    hinted = executor.from_items([{"id": 1}], override_num_blocks=0)
+    assert isinstance(hinted, FakeInputHandle)
+    assert ENGINE.input_calls[-1]["bounds"] is None
     with pytest.raises(TypeError):
         executor.from_items("not-a-list")
 
@@ -378,9 +379,11 @@ def test_y005(executor):
     result = executor.from_pandas(frame, override_num_blocks=2)
     assert isinstance(result, FakeInputHandle)
     assert ENGINE.input_calls[-1]["format"] == "pandas"
+    assert ENGINE.input_calls[-1]["bounds"] is None
     assert ENGINE.run_calls == []
-    with pytest.raises(ValueError):
-        executor.from_pandas(frame, override_num_blocks=-1)
+    # Negative hint is accepted but unused; no bounds validation (parity L).
+    executor.from_pandas(frame, override_num_blocks=-1)
+    assert ENGINE.input_calls[-1]["bounds"] is None
 
 
 def _assert_terminal(executor, source, plan, kind, call, expected_arguments=None):
@@ -450,12 +453,19 @@ def test_y012(executor, source, plan):
 
 
 def test_y013(executor, source, plan):
+    # fetch_if_missing=False short-circuits to None without any request (parity L).
+    ENGINE.reset()
+    assert executor.schema(source, plan, fetch_if_missing=False) is None
+    assert ENGINE.requests == [] and ENGINE.run_calls == []
     _assert_terminal(executor, source, plan, "schema",
-                     lambda: executor.schema(source, plan, fetch_if_missing=False),
-                     {"fetch_if_missing": False})
+                     lambda: executor.schema(source, plan, fetch_if_missing=True),
+                     {"fetch_if_missing": True})
 
 
 def test_y014(executor, source, plan):
+    ENGINE.reset()
+    assert executor.columns(source, plan, fetch_if_missing=False) is None
+    assert ENGINE.requests == [] and ENGINE.run_calls == []
     _assert_terminal(executor, source, plan, "columns",
                      lambda: executor.columns(source, plan, fetch_if_missing=True),
                      {"fetch_if_missing": True})
@@ -479,80 +489,115 @@ def test_y017(executor, source, plan):
     assert "not executed" in executor.stats(source, plan)
     ENGINE.next_result = FakeResultHandle("materialize")
     executor.materialize(source, plan)
-    assert executor.stats(source, plan) == "stats:materialize"
+    # stats reflects the executor-held ExecutionMetadata, not the result handle.
+    rendered = executor.stats(source, plan)
+    assert "not executed" not in rendered
+    assert "ItemsSource" in rendered
 
 
 def test_y018(executor, source, plan):
+    from demiflow.data.stats import ExecutionMetadata
     assert executor.execution_metadata(source, plan) is None
-    handle = FakeResultHandle("materialize")
-    handle._metadata = {"run": "r1"}
-    ENGINE.next_result = handle
+    ENGINE.next_result = FakeResultHandle("materialize")
     executor.materialize(source, plan)
-    assert executor.execution_metadata(source, plan) == {"run": "r1"}
+    metadata = executor.execution_metadata(source, plan)
+    assert isinstance(metadata, ExecutionMetadata)
+    assert metadata.source_name == "ItemsSource"
+    assert metadata.run_ref is None
 
 
 def test_y019(executor, source, plan):
     datasink = _Datasink()
     ENGINE.reset()
-    executor.write_datasink(source, plan, datasink)
+    # Ray is a valid native target: native_options are forwarded to the unified
+    # engine (P009 normalize_native_options owns the ActorPoolStrategy migration
+    # diagnostic); the adapter never instantiates Ray Data itself.
+    native = {"num_cpus": 2, "concurrency": 4}
+    executor.write_datasink(source, plan, datasink, native_options=native)
     request = ENGINE.requests[0]
     assert request.kind == "write_datasink"
     assert request.sink is datasink
+    assert request.arguments["native_options"] == native
     assert ENGINE.run_calls == [request]
+    # Without native_options the argument is absent (no silent fabrication).
+    ENGINE.reset()
+    executor.write_datasink(source, plan, datasink)
+    assert "native_options" not in ENGINE.requests[0].arguments
 
 
 def test_y020(executor, source, plan):
     spec = object()
     ENGINE.reset()
-    executor.write_lance(source, plan, spec)
+    native = {"num_gpus": 1}
+    executor.write_lance(source, plan, spec, native_options=native)
     request = ENGINE.requests[0]
     assert request.kind == "write_lance"
     assert len(request.programs) == 1
     assert request.programs[0].kind == "sink"
     assert request.programs[0].value is spec
+    assert request.arguments["native_options"] == native
     assert ENGINE.run_calls == [request]
 
 
 def test_y021(executor, source, plan):
     ENGINE.reset()
-    executor.write_file(source, plan, "parquet", "/tmp/demiflow-y/out",
-                        {"compression": "snappy", "_demiflow_native_options": {"x": 1}})
+    options = {"compression": "snappy", "_demiflow_native_options": {"x": 1}}
+    executor.write_file(source, plan, "parquet", "/tmp/demiflow-y/out", options)
     request = ENGINE.requests[0]
     assert request.kind == "write_file"
     assert request.arguments["format"] == "parquet"
     assert request.arguments["path"] == "/tmp/demiflow-y/out"
-    assert request.arguments["options"] == {"compression": "snappy"}
-    assert request.arguments["native_options"] == {"x": 1}
+    # options forwarded verbatim as a copy; no native_options extraction (parity L).
+    assert request.arguments["options"] == options
+    assert "native_options" not in request.arguments
+    assert request.arguments["options"] is not options
     assert ENGINE.run_calls == [request]
 
 
 def test_y022(executor, source, plan):
+    # Caller-owned result handles are never released by close (parity L).
     owned = FakeResultHandle("materialize")
     ENGINE.next_result = owned
     executor.materialize(source, plan)
     other = FakeResultHandle("materialize")
+    # The executor's own hosted resource scope IS released on close.
+    scope = FakeResultHandle("host")
+    executor._hosted_scopes.append(scope)
     executor.close()
-    assert owned.released is True
+    assert scope.released is True
+    assert owned.released is False
     assert other.released is False
-    assert executor._handles == [] and executor._results == []
+    assert executor._hosted_scopes == []
+    assert executor._closed is True
     executor.close()
 
 
 def test_y023(executor, source, plan):
+    ENGINE.reset()
     result = executor.plan(source, plan, "materialize")
-    assert isinstance(result, PhysicalPlan)
-    assert result.backend == "ray"
-    assert any(req.kind == "materialize" for req in ENGINE.requests)
+    # plan() is a capability explanation via explain_dataset, not execution.
+    assert result == {"supported": True, "provider": "ray_core"}
+    assert ENGINE.requests == [] and ENGINE.run_calls == []
     assert _RAY_BAN.attempts == []
 
 
 def test_y024(executor, source, plan):
+    # No hosted coordinators -> empty usage; materialize does not fabricate usage.
     assert executor.operator_llm_usage() == {}
-    handle = FakeResultHandle("materialize")
-    handle._usage = {"calls": 2, "tokens": 10}
-    ENGINE.next_result = handle
+    ENGINE.next_result = FakeResultHandle("materialize")
     executor.materialize(source, plan)
-    assert executor.operator_llm_usage() == {"calls": 2, "tokens": 10}
+    assert executor.operator_llm_usage() == {}
+
+    class _Coordinator:
+        def __init__(self, usage):
+            self._usage = usage
+
+        def usage(self):
+            return types.SimpleNamespace(to_dict=lambda: dict(self._usage))
+
+    executor._prompt_coordinators["a"] = _Coordinator({"calls": 2, "tokens": 10})
+    executor._prompt_coordinators["b"] = _Coordinator({"calls": 1, "tokens": 5})
+    assert executor.operator_llm_usage() == {"calls": 3, "tokens": 15}
 
 
 def test_y025(executor, source, plan):

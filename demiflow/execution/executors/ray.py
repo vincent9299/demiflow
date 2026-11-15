@@ -4,31 +4,23 @@ Ray hosts resources and workers only (I02, YARN-like). Every public terminal
 forwards one declaration through make_action_request/run_dataset_action into the
 single DataflowExecution engine shared with Local; dataflow semantics, scheduling,
 handoff, commit and recovery all belong to that engine, never to Ray Data. No
-Ray Data dataset is created or imported here, and no live Ray cluster is probed at
-plan time: resource admission comes from the unified runtime policy.
+Ray Data dataset is created or imported here. This mirrors LocalDatasetExecutor's
+provider/return-value adapter form; the only intended difference is provider
+'ray_core' and acceptance of Ray native options.
 """
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any, Iterable
 
-from ...data.constraints import (
-    analyze_source_constraints, analyze_stage_work_units, stage_parallelism_caps,
-)
 from ...data.datasink import Datasink, WriteResult as DemiflowWriteResult
 from ...data.plan import LogicalPlan, reject_streaming_map_options
-from ...data.sources import LanceSource, MaterializedSource, SourcePlan
+from ...data.sources import MaterializedSource, SourcePlan
 from ...data.stats import ExecutionMetadata
-from ...errors import PhysicalPlanningError, UnsupportedSourceError
-from ...planning import BackendResourceSnapshot, ResourceBundle, plan_action
+from ...errors import UnsupportedSourceError
 from ...planning.dataflow_policy import resolve_runtime_policy
 from ...planning.policy import parse_platform_planning_policy
-from ...planning.traits import requires_native_ray, terminal_traits
-from ..contracts.dataflow import ActionProgram
-from ..dataflow_api import make_action_request, run_dataset_action
-from ..dataflow_inputs import build_input_handle
 from .base import DatasetExecutor
 
 
@@ -52,54 +44,39 @@ class RayDatasetExecutor(DatasetExecutor):
         self._policy, self._bounds = resolve_runtime_policy(
             {}, {}, provider=self.PROVIDER,
         )
-        self._handles: list[Any] = []
-        self._results: list[Any] = []
+        self._prompt_coordinators: dict[str, Any] = {}
+        self._hosted_scopes: list[Any] = []
+        self._last_metadata: ExecutionMetadata | None = None
+        self._run_ref = None
         self._closed = False
 
-    def _execute(
-        self, source: SourcePlan, plan: LogicalPlan, kind: str,
-        arguments: dict[str, Any], *, sink: Datasink | None = None,
-        programs: tuple[ActionProgram, ...] = (),
-    ) -> Any:
-        # Single wiring seam for the modify cards: one declaration into the same
-        # DataflowExecution engine Local uses, never a Ray Data dataset.
-        request = make_action_request(
-            self, source, plan, kind=kind, arguments=arguments,
-            sink=sink, programs=programs,
-        )
-        result = run_dataset_action(request)
-        self._results.append(result)
-        if callable(getattr(result, "release", None)) or callable(getattr(result, "close", None)):
-            self._handles.append(result)
-        return result
-
     def operator_llm_usage(self) -> dict[str, int]:
+        # Read hosted usage facts only; never recompute or impose a common budget.
         totals: dict[str, int] = {}
-        for result in self._results:
-            usage = getattr(result, "operator_llm_usage", None)
-            facts = usage() if callable(usage) else getattr(result, "llm_usage", None)
-            if isinstance(facts, dict):
-                for key, value in facts.items():
-                    totals[key] = totals.get(key, 0) + int(value)
+        for coordinator in self._prompt_coordinators.values():
+            for key, value in coordinator.usage().to_dict().items():
+                totals[key] = totals.get(key, 0) + value
         return totals
 
     def from_items(self, items: list[Any], *, override_num_blocks: int | None = None) -> Any:
         if not isinstance(items, list):
-            raise TypeError("from_items requires a list")
-        _validate_block_hint(override_num_blocks)
-        return build_input_handle(list(items), format="items", bounds=self._bounds)
+            raise TypeError("from_items requires a materialized list")
+        from ..dataflow_inputs import build_input_handle
+        return build_input_handle(items, format="items")
 
     def from_arrow(self, tables: Any) -> Any:
-        return build_input_handle(tables, format="arrow", bounds=self._bounds)
+        from ..dataflow_inputs import build_input_handle
+        return build_input_handle(tables, format="arrow")
 
     def from_numpy(self, arrays: Any) -> Any:
-        return build_input_handle(arrays, format="numpy", bounds=self._bounds)
+        from ..dataflow_inputs import build_input_handle
+        return build_input_handle(arrays, format="numpy")
 
     def from_pandas(
         self, frames: Any, *, override_num_blocks: int | None = None,
     ) -> Any:
-        _validate_block_hint(override_num_blocks)
-        return build_input_handle(frames, format="pandas", bounds=self._bounds)
+        from ..dataflow_inputs import build_input_handle
+        return build_input_handle(frames, format="pandas")
 
     def plan(
         self, source, plan, action_kind, *, terminal_category="action",
@@ -107,70 +84,61 @@ class RayDatasetExecutor(DatasetExecutor):
         terminal_parallelism_cap=None,
     ):
         reject_streaming_map_options(plan, 'ray')
-        native = (
-            getattr(source, "native_options", None) is not None
-            or any(getattr(operation, "native_options", None) is not None for operation in plan.operations)
-            or terminal_native_options is not None
+        from ..dataflow_api import explain_dataset
+        options: dict[str, Any] = {
+            'action_kind': action_kind,
+            'terminal_category': terminal_category,
+        }
+        if terminal_native_options is not None:
+            options['terminal_native_options'] = terminal_native_options
+        if source_parallelism_cap is not None:
+            options['source_parallelism_cap'] = source_parallelism_cap
+        if terminal_parallelism_cap is not None:
+            options['terminal_parallelism_cap'] = terminal_parallelism_cap
+        return explain_dataset(source, plan, provider=self.PROVIDER, options=options)
+
+    def _run(
+        self, source: SourcePlan, plan: LogicalPlan, kind: str,
+        arguments: dict[str, Any], *, sink: Datasink | None = None,
+        programs: tuple = (),
+    ) -> Any:
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(
+            self, source, plan, kind=kind, arguments=arguments,
+            sink=sink, programs=programs,
         )
-        if native and (self._candidate_execution is None or self._candidate_execution.mode != "native"):
-            raise ValueError("Native options require Pipeline execution mode native")
-        if self._candidate_execution is not None and self._candidate_execution.mode == "portable" and any(requires_native_ray(operation) for operation in plan.operations):
-            raise PhysicalPlanningError("portable_operation_requires_ray_affinity", responsibility="candidate")
-        # Unified v3 admission (same engine as Local); no Ray Data lowering.
-        make_action_request(
-            self, source, plan, kind=action_kind,
-            arguments={"terminal_category": terminal_category},
-        )
-        # Resource snapshot describes the managed Ray Core pool from the unified
-        # policy, not a live ray.nodes() probe; liveness is the ResourceManager's.
-        pool = self._planning_policy.reusable_worker.scale(max(1, self._policy.max_replicas))
-        snapshot = BackendResourceSnapshot(
-            "ray", (pool,),
-            hashlib.sha256(
-                f"{self._policy.provider}:{self._policy.store_id}:{self._planning_policy.digest}".encode()
-            ).hexdigest(),
-            analysis_complete=True,
-        )
-        marker = type("Terminal", (), {})()
-        bounds = (*analyze_stage_work_units(source, plan), None)
-        if isinstance(source, LanceSource):
-            from ...lance.model import LanceScanSpec
-            leading_limit = analyze_source_constraints(plan).row_limit
-            if not isinstance(source.query, LanceScanSpec) or source.query.limit is not None or leading_limit is not None:
-                source_parallelism_cap = 1
-        caps = stage_parallelism_caps(plan, source_cap=source_parallelism_cap, terminal_cap=terminal_parallelism_cap)
-        return plan_action(
-            backend="ray", action_kind=action_kind, source=source,
-            operations=plan.operations, terminal_node=marker,
-            terminal_traits=terminal_traits(terminal_category),
-            policy=self._planning_policy, snapshot=snapshot,
-            work_units_by_stage=bounds, terminal_native_options=terminal_native_options,
-            parallelism_caps_by_stage=caps,
-        )
+        result = run_dataset_action(request)
+        self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
+        return result
 
     def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[dict[str, Any]]:
-        return self._execute(source, plan, "iter_rows", {})
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(self, source, plan, kind="iter_rows", arguments={})
+        return run_dataset_action(request)
 
     def iter_batches(
         self, source: SourcePlan, plan: LogicalPlan, *, prefetch_batches: int = 1,
         batch_size: int | None = 256, batch_format: str | None = "default", drop_last: bool = False,
     ) -> Iterable[Any]:
-        return self._execute(source, plan, "iter_batches", {
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(self, source, plan, kind="iter_batches", arguments={
             "prefetch_batches": prefetch_batches, "batch_size": batch_size,
             "batch_format": batch_format, "drop_last": drop_last,
         })
+        return run_dataset_action(request)
 
     def materialize(self, source: SourcePlan, plan: LogicalPlan) -> Any:
-        return self._execute(source, plan, "materialize", {})
+        return self._run(source, plan, "materialize", {})
 
     def materialize_stream(self, dataset, *, source=None, plan=None):
-        selected_source = source if source is not None else dataset._source
-        selected_plan = plan if plan is not None else dataset._plan
-        return self._execute(selected_source, selected_plan, "materialize", {})
+        selected_source = dataset._source if source is None else source
+        selected_plan = dataset._plan if plan is None else plan
+        return self._run(selected_source, selected_plan, "materialize", {})
 
     def materialize_graph(self, graph_spec):
-        # Translate the explicit fan-out declaration to the standard v3 entry; the
-        # full graph_spec->DataflowGraph lowering is the F lane seam (F012/F018).
+        # The explicit fan-out graph_spec is translated to a standard v3 request
+        # and forwarded to the same execute_action entry (F lane seam, parallel to
+        # Local run_local_graph); there is no independent graph driver here.
         source = graph_spec["source"]
         plan = graph_spec["ancestor"]["plan"]
         arguments: dict[str, Any] = {
@@ -180,70 +148,78 @@ class RayDatasetExecutor(DatasetExecutor):
         for key in ("key_fields", "target_field"):
             if graph_spec.get(key) is not None:
                 arguments[key] = graph_spec[key]
-        return self._execute(source, plan, "materialize", arguments)
+        return self._run(source, plan, "materialize", arguments)
 
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,
     ) -> list[dict[str, Any]]:
-        return self._execute(source, plan, "take", {"limit": limit})
+        return self._run(source, plan, "take", {"limit": limit})
 
     def take_batch(
         self, source: SourcePlan, plan: LogicalPlan, batch_size: int,
         *, batch_format: str,
     ) -> Any:
-        return self._execute(source, plan, "take_batch", {
+        return self._run(source, plan, "take_batch", {
             "batch_size": batch_size, "batch_format": batch_format,
         })
 
     def count(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        return self._execute(source, plan, "count", {})
+        return self._run(source, plan, "count", {})
 
     def aggregate(
         self, source: SourcePlan, plan: LogicalPlan,
         aggregates: tuple[Any, ...],
     ) -> Any:
-        # Aggregate callables travel as process-in program declarations (C16), not
-        # serialized arguments; the engine enforces the state budget via bounds.
+        from ..contracts.dataflow import ActionProgram
         programs = tuple(
             ActionProgram(name=aggregate.name, kind="aggregate", value=aggregate)
             for aggregate in aggregates
         )
-        return self._execute(
+        return self._run(
             source, plan, "aggregate",
             {"names": [aggregate.name for aggregate in aggregates]},
             programs=programs,
         )
 
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
-        return self._execute(source, plan, "schema", {"fetch_if_missing": fetch_if_missing})
+        if not fetch_if_missing:
+            return None
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(self, source, plan, kind="schema",
+                                      arguments={"fetch_if_missing": fetch_if_missing})
+        return run_dataset_action(request)
 
     def columns(
         self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool,
     ) -> list[str] | None:
-        return self._execute(source, plan, "columns", {"fetch_if_missing": fetch_if_missing})
+        if not fetch_if_missing:
+            return None
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(self, source, plan, kind="columns",
+                                      arguments={"fetch_if_missing": fetch_if_missing})
+        return run_dataset_action(request)
 
     def size_bytes(self, source: SourcePlan, plan: LogicalPlan) -> int:
-        return int(self._execute(source, plan, "size_bytes", {}))
+        return int(self._run(source, plan, "size_bytes", {}))
 
     def num_blocks(self, source: SourcePlan, plan: LogicalPlan) -> int:
         if not isinstance(source, MaterializedSource) or not plan.is_empty:
             raise TypeError("num_blocks is only available on MaterializedDataset")
-        return int(source.handle.num_blocks())
+        handle = source.handle
+        num_blocks = getattr(handle, "num_blocks", None)
+        if num_blocks is None:
+            raise UnsupportedSourceError("materialized source belongs to another backend")
+        return int(num_blocks())
 
     def stats(self, source: SourcePlan, plan: LogicalPlan) -> str:
-        for result in reversed(self._results):
-            stats = getattr(result, "stats", None)
-            if callable(stats):
-                return str(stats())
-        return f"Dataset({type(source).__name__}, operations={len(plan.operations)}, not executed)"
+        if self._last_metadata is None:
+            return f"Dataset({type(source).__name__}, operations={len(plan.operations)}, not executed)"
+        return str(self._last_metadata)
 
     def execution_metadata(self, source: SourcePlan, plan: LogicalPlan) -> ExecutionMetadata | None:
-        for result in reversed(self._results):
-            metadata = getattr(result, "execution_metadata", None)
-            if callable(metadata):
-                return metadata()
-            if isinstance(metadata, ExecutionMetadata):
-                return metadata
+        from dataclasses import replace
+        if self._last_metadata is not None:
+            return replace(self._last_metadata, run_ref=self._run_ref)
         return None
 
     def write_datasink(
@@ -253,34 +229,40 @@ class RayDatasetExecutor(DatasetExecutor):
         arguments: dict[str, Any] = {}
         if native_options is not None:
             arguments["native_options"] = native_options
-        return self._execute(source, plan, "write_datasink", arguments, sink=datasink)
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(self, source, plan, kind="write_datasink",
+                                      arguments=arguments, sink=datasink)
+        return run_dataset_action(request)
 
     def write_lance(self, source, plan, spec, *, native_options=None):
+        from ..contracts.dataflow import ActionProgram
         arguments: dict[str, Any] = {}
         if native_options is not None:
             arguments["native_options"] = native_options
-        programs = (ActionProgram(name="write_lance", kind="sink", value=spec),)
-        return self._execute(source, plan, "write_lance", arguments, programs=programs)
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(
+            self, source, plan, kind="write_lance", arguments=arguments,
+            programs=(ActionProgram(name="write_lance", kind="sink", value=spec),),
+        )
+        return run_dataset_action(request)
 
     def write_file(
         self, source: SourcePlan, plan: LogicalPlan, format_name: str,
         path: str, options: dict[str, Any],
     ) -> DemiflowWriteResult:
-        options = dict(options)
-        native_options = options.pop("_demiflow_native_options", None)
-        arguments: dict[str, Any] = {
-            "format": format_name, "path": path, "options": options,
-        }
-        if native_options is not None:
-            arguments["native_options"] = native_options
-        return self._execute(source, plan, "write_file", arguments)
+        from ..dataflow_api import make_action_request, run_dataset_action
+        request = make_action_request(self, source, plan, kind="write_file", arguments={
+            "format": format_name, "path": path, "options": dict(options),
+        })
+        return run_dataset_action(request)
 
     def close(self) -> None:
-        # Release only the handles this executor owns; other runs keep their pins.
+        # Release only this executor's hosted resource scope; unified ActionHandles
+        # are owned by their callers and other runs' pins are never touched here.
         errors: list[BaseException] = []
-        for handle in self._handles:
-            release = getattr(handle, "release", None)
-            close = getattr(handle, "close", None)
+        for scope in self._hosted_scopes:
+            release = getattr(scope, "release", None)
+            close = getattr(scope, "close", None)
             try:
                 if callable(release):
                     release()
@@ -288,15 +270,7 @@ class RayDatasetExecutor(DatasetExecutor):
                     close()
             except BaseException as exc:  # noqa: BLE001 - aggregate, never swallow
                 errors.append(exc)
-        self._handles.clear()
-        self._results.clear()
+        self._hosted_scopes.clear()
         self._closed = True
         if errors:
             raise errors[0]
-
-
-def _validate_block_hint(override_num_blocks: int | None) -> None:
-    if override_num_blocks is None:
-        return
-    if not isinstance(override_num_blocks, int) or isinstance(override_num_blocks, bool) or override_num_blocks < 1:
-        raise ValueError("override_num_blocks must be a positive integer or None")
