@@ -1273,22 +1273,31 @@ def test_w016(tmp_path, monkeypatch):
     import demiflow.workbench.projects.workspace as ws
     from demiflow.workbench.runs import manager as runs
     run_id = "r" + "1" * 24
-    report = {"digest": "digest-x", "entry": "entry-x", "actions": ["a0"],
+    report = {"digest": "digest-x", "entry": "entry-x", "actions": ["a0", "a1"],
               "binding": {"entry": "entry-x", "parameter_path": "params-x", "sources": {}, "parameters": {}},
               "nodes": [{"id": "n0", "api": "x", "source": "s"}]}
     binding = {"workspace_id": "ws", "basis_kind": "run", "basis_digest": "digest-x",
                "entry": "entry-x", "params": "params-x", "run_id": run_id, "attempt": 1}
-    code_pin = ref_json(aref("code-pin"))
+    pins = {"a0": ref_json(aref("code-pin-a0")), "a1": ref_json(aref("code-pin-a1"))}
     monkeypatch.setattr(ws, "load_workspace", lambda root: (root, {}, None))
     monkeypatch.setattr(ws, "workspace_id", lambda root, control: "ws")
     monkeypatch.setattr(runs, "_load", lambda *a, **k: (tmp_path, {"state": {"attempt": 1},
                                                                   "manifest": {"digest": "digest-x"}}))
     monkeypatch.setattr(runs, "_report", lambda *a, **k: report)
     monkeypatch.setattr(facts, "read_sealed_plan", lambda target, action_id: {
-        "available": True, "version": "v3", "plan_view": {"code_pin_ref": code_pin}})
+        "available": True, "version": "v3", "dag_id": "dag-" + action_id,
+        "plan_view": {"code_pin_ref": pins[action_id]}})
+
+    def fake_bridge(target, action_id, *, dag_id, report_digest):
+        entries = ([{"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+                     "occurrence_id": "occ1", "mode": "execute"}] if action_id == "a1" else [])
+        return {"available": True, "bridge": {"action_id": action_id, "entries": entries}}
+
+    monkeypatch.setattr(facts, "read_identity_bridge", fake_bridge)
     monkeypatch.setattr(parameters, "public_model", lambda *a, **k: {"sha256": "x", "fields": []})
-    result = model.bound_source(tmp_path, binding, "n0")
-    assert result["sealed_code_pin_ref"] == code_pin
+    result = model.bound_source(tmp_path, binding, "n0", logical_node_id="map", occurrence_id="occ1")
+    # U3: the code pin binds to the unique owning action a1, NOT the first v3 action a0.
+    assert result["sealed_code_pin_ref"] == pins["a1"]
     assert result["nodes"][0]["id"] == "n0"
 
 
@@ -1304,10 +1313,12 @@ def test_w017(tmp_path, monkeypatch):
         {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
          "occurrence_id": occs[0], "mode": "execute"}]}}
     entry = {"action_id": "a0", "status": "sealed", "version": "v3",
+             "dag": view["dag"], "plan_id": physical.plan_id, "physical": view["physical"],
              "node_observations": view["node_observations"], "identity_bridge": bridge}
     logical_view = {"actions": [entry]}
     page = {"format": "demiflow_forge_node_observation_page_v1", "attempt": 1, "action_id": "a0",
-            "plan_id": physical.plan_id, "availability": "available",
+            "plan_id": physical.plan_id, "dag_id": graph.dag_id, "plan_revision": physical.plan_revision,
+            "availability": "available",
             "observations": [{"action_id": "a0", "node_id": "n0", "occurrence": 0,
                               "plan_id": physical.plan_id, "state": "succeeded"}]}
     monkeypatch.setattr(run_view, "observations", lambda *a, **k: page)
@@ -1315,8 +1326,183 @@ def test_w017(tmp_path, monkeypatch):
     # The build_plan_view per-occurrence projection is preserved as plan-level authority.
     assert entry["plan_node_observations"] is view["node_observations"]
     # The attempt-scoped bridge join lands in node_observations (compatible shape).
-    assert entry["node_observations"]["available"] is True
-    assert entry["node_observations"]["entries"][0]["availability"] == "observed"
+    obs = entry["node_observations"]
+    assert obs["available"] is True
+    assert obs["entries"][0]["availability"] == "observed"
+    # U2: this-run scope credentials are attached after server-side verification.
+    assert obs["action_id"] == "a0" and obs["dag_id"] == graph.dag_id
+    assert obs["plan_id"] == physical.plan_id and obs["plan_revision"] == physical.plan_revision
+
+
+# --- U1 edge/occurrence identity (W004/W011/W015 consumption contract) ------
+
+def test_u1_edge_identity():
+    # src -> map0 -> map1: the two transforms share semantic_id "map" but are
+    # distinct occurrences in series (the one-to-many case the contract requires).
+    dag_id = sha("dag-u1")
+    src, m0, m1 = sha("occ-src-u1"), sha("occ-map-u1-0"), sha("occ-map-u1-1")
+    nodes = (
+        GraphNode(occurrence_id=src, semantic_id="src", kind="source",
+                  kernel=kernel("read_table", inputs=()), program_ref=None, shared_token="0"),
+        GraphNode(occurrence_id=m0, semantic_id="map", kind="transform",
+                  kernel=kernel("map"), program_ref=None, shared_token="1"),
+        GraphNode(occurrence_id=m1, semantic_id="map", kind="transform",
+                  kernel=kernel("map"), program_ref=None, shared_token="2"),
+    )
+    e0 = GraphEdge(edge_id=sha("e0"), producer=src, output_port="out", consumer=m0, input_port="in")
+    e1 = GraphEdge(edge_id=sha("e1"), producer=m0, output_port="out", consumer=m1, input_port="in")
+    graph = DataflowGraph(schema="demiflow.dataflow_graph.v3", action_id="a0", dag_id=dag_id,
+                          nodes=nodes, edges=(e0, e1), terminals=(m1,), sources=(src,))
+    physical = make_physical(graph)
+    view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
+    edges = view["dag"]["edges"]
+    assert len(edges) == 2
+    # edge_id, occurrence_id and ports are copied verbatim from the original GraphEdge.
+    assert edges[0]["edge_id"] == e0.edge_id
+    assert edges[0]["from"] == {"logical_node_id": "src", "occurrence_id": src, "port": "out"}
+    assert edges[0]["to"] == {"logical_node_id": "map", "occurrence_id": m0, "port": "in"}
+    assert edges[1]["edge_id"] == e1.edge_id
+    assert edges[1]["from"] == {"logical_node_id": "map", "occurrence_id": m0, "port": "out"}
+    assert edges[1]["to"] == {"logical_node_id": "map", "occurrence_id": m1, "port": "in"}
+    # Same-semantic series edge is not a self loop: endpoints differ by occurrence.
+    assert edges[1]["from"]["logical_node_id"] == edges[1]["to"]["logical_node_id"] == "map"
+    assert edges[1]["from"]["occurrence_id"] != edges[1]["to"]["occurrence_id"]
+    # One node per occurrence; the two "map" occurrences are never merged.
+    occs = [n["occurrence_id"] for n in view["dag"]["nodes"]]
+    assert len(occs) == 3 and occs.count(m0) == 1 and occs.count(m1) == 1
+    # physical.stages keyed by occurrence; every exchange joins an actual edge.
+    assert set(view["physical"]["stages"]) == {src, m0, m1}
+    edge_ids = {e["edge_id"] for e in edges}
+    assert all(x["edge_id"] in edge_ids for x in view["physical"]["exchanges"])
+    # source/terminal occurrences fall in the node set; plan identity preserved.
+    assert set(view["dag"]["sources"]) <= set(occs) and set(view["dag"]["terminals"]) <= set(occs)
+    assert view["plan_id"] == physical.plan_id and view["plan_revision"] == physical.plan_revision
+    assert view["dag"]["schema_version"] == "demiflow.dataflow_graph.v3"
+
+
+def test_u1_projection_rejects_dangling_and_bad_scope():
+    from dataclasses import replace
+    graph, occs = make_graph("a0")
+    physical = make_physical(graph)
+    # Dangling edge endpoint (unknown occurrence) -> INVALID_CONTRACT, never guessed.
+    bad = GraphEdge(edge_id=sha("bad"), producer=sha("ghost"), output_port="out",
+                    consumer=occs[0], input_port="in")
+    g2 = replace(graph, edges=graph.edges + (bad,))
+    with pytest.raises(DataflowError) as exc:
+        hist.build_plan_view(g2, make_sealed(), make_physical(g2), observations=())
+    assert exc.value.code == "INVALID_CONTRACT"
+    # Negative plan_revision -> rejected (non-negative safe integer required).
+    with pytest.raises(DataflowError) as exc:
+        hist.build_plan_view(graph, make_sealed(), replace(physical, plan_revision=-1), observations=())
+    assert exc.value.code == "INVALID_CONTRACT"
+    # Source occurrence outside the node set -> rejected (no dangling source).
+    g3 = replace(graph, sources=(sha("ghost-src"),))
+    with pytest.raises(DataflowError) as exc:
+        hist.build_plan_view(g3, make_sealed(), make_physical(g3), observations=())
+    assert exc.value.code == "INVALID_CONTRACT"
+
+
+# --- U2 this-run observation scope credentials (W012/W017) ------------------
+
+def test_u2_observation_scope():
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.runs import facts
+    graph, occs = make_graph("a0")
+    physical = make_physical(graph)
+    plan_id = physical.plan_id
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+         "occurrence_id": occs[0], "mode": "execute"}]}
+
+    def page(rows, **extra):
+        return dict({"format": "demiflow_forge_node_observation_page_v1", "attempt": 1,
+                     "action_id": "a0", "availability": "available", "observations": rows}, **extra)
+
+    row = {"action_id": "a0", "node_id": "n0", "occurrence": 0, "plan_id": plan_id, "state": "succeeded"}
+    # Verified v3 scope: a row carrying the matching plan is observed.
+    joined = facts.join_node_observations(bridge, page([row], plan_id=plan_id, dag_id=graph.dag_id,
+                                                       plan_revision=physical.plan_revision),
+                                          action_id="a0", attempt=1, plan_id=plan_id,
+                                          dag_id=graph.dag_id, plan_revision=physical.plan_revision)
+    assert joined[0]["availability"] == "observed" and joined[0]["occurrence_id"] == occs[0]
+    # A page lacking the plan scope is rejected, not promoted with a stitched identity.
+    with pytest.raises(ForgeError) as exc:
+        facts.join_node_observations(bridge, page([row]), action_id="a0", attempt=1, plan_id=plan_id)
+    assert exc.value.code == "conflict"
+    # A plan-less legacy row is never backfilled to the current plan under v3 scope.
+    legacy_row = {"action_id": "a0", "node_id": "n0", "occurrence": 0, "state": "succeeded"}
+    joined = facts.join_node_observations(bridge, page([legacy_row], plan_id=plan_id),
+                                          action_id="a0", attempt=1, plan_id=plan_id)
+    assert joined[0]["availability"] == "not_in_page" and joined[0]["observation"] is None
+    # A row from a different plan is not joined.
+    other = dict(row, plan_id=sha("other-plan"))
+    joined = facts.join_node_observations(bridge, page([other], plan_id=plan_id),
+                                          action_id="a0", attempt=1, plan_id=plan_id)
+    assert joined[0]["availability"] == "not_in_page"
+    # Legacy (no scope) preserves occurrence-only behaviour.
+    joined = facts.join_node_observations(bridge, page([legacy_row]), action_id="a0", attempt=1)
+    assert joined[0]["availability"] == "observed"
+
+
+def test_u2_v3_no_scope_not_promoted(tmp_path, monkeypatch):
+    from demiflow.workbench.graph import model
+    from demiflow.workbench.runs import view as run_view
+    graph, occs = make_graph("a0")
+    physical = make_physical(graph)
+    view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
+    bridge = {"available": True, "bridge": {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+         "occurrence_id": occs[0], "mode": "execute"}]}}
+    entry = {"action_id": "a0", "status": "sealed", "version": "v3", "dag": view["dag"],
+             "plan_id": physical.plan_id, "physical": view["physical"],
+             "node_observations": view["node_observations"], "identity_bridge": bridge}
+    logical_view = {"actions": [entry]}
+    # Real producer currently emits no page-level plan scope -> v3 must not promote.
+    page = {"format": "demiflow_forge_node_observation_page_v1", "attempt": 1, "action_id": "a0",
+            "availability": "available",
+            "observations": [{"action_id": "a0", "node_id": "n0", "occurrence": 0, "state": "succeeded"}]}
+    monkeypatch.setattr(run_view, "observations", lambda *a, **k: page)
+    model._join_sealed_observations(tmp_path, "r" + "1" * 24, 1, logical_view)
+    obs = entry["node_observations"]
+    assert obs["available"] is False and obs["reason"] == "observation_plan_scope_unverified"
+    assert obs["plan_id"] == physical.plan_id and obs["dag_id"] == graph.dag_id
+    # The plan-level authority remains the honest "no this-run observation" projection.
+    assert entry["plan_node_observations"] is view["node_observations"]
+    assert all(o["observed"] is False for o in entry["plan_node_observations"])
+
+
+# --- U3 unique-sealed-action source binding (W016) --------------------------
+
+def test_u3_unique_action_resolution(tmp_path, monkeypatch):
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.graph import model
+    from demiflow.workbench.runs import facts
+    report = {"digest": "digest-x", "actions": ["a0", "a1"]}
+    monkeypatch.setattr(facts, "read_sealed_plan", lambda target, action_id: {
+        "available": True, "version": "v3", "dag_id": "dag-" + action_id, "plan_view": {}})
+
+    def bridge_with(action_id, entries):
+        return {"available": True, "bridge": {"action_id": action_id, "entries": entries}}
+
+    entry = {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+             "occurrence_id": "occ1", "mode": "execute"}
+    # Ambiguous: both actions bridge the same logical/occurrence -> requires occurrence.
+    monkeypatch.setattr(facts, "read_identity_bridge",
+                        lambda target, action_id, *, dag_id, report_digest: bridge_with(action_id, [entry]))
+    with pytest.raises(ForgeError) as exc:
+        model._resolve_bridge_action(tmp_path, report, "map", "occ1")
+    assert exc.value.code == "conflict"
+    # Unique owner: only a1 bridges the pair -> a1 is returned (not the first action a0).
+    monkeypatch.setattr(facts, "read_identity_bridge",
+                        lambda target, action_id, *, dag_id, report_digest:
+                        bridge_with(action_id, [entry] if action_id == "a1" else []))
+    assert model._resolve_bridge_action(tmp_path, report, "map", "occ1") == "a1"
+    # Unbridged pair -> not_found, never guessed.
+    monkeypatch.setattr(facts, "read_identity_bridge",
+                        lambda target, action_id, *, dag_id, report_digest: bridge_with(action_id, []))
+    with pytest.raises(ForgeError) as exc:
+        model._resolve_bridge_action(tmp_path, report, "map", "occ1")
+    assert exc.value.code == "not_found"
 
 
 # --- W018-W021 workbench JS -------------------------------------------------

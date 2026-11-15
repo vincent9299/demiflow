@@ -546,6 +546,13 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
         raise _err("INVALID_CONTRACT", "observations must be a tuple of NodeObservation")
     if graph.dag_id != physical.dag_id:
         raise _err("INVALID_CONTRACT", "graph and physical dag_id differ")
+    revision = physical.plan_revision
+    if type(revision) is not int or not 0 <= revision <= 2**53 - 1:
+        raise _err("INVALID_CONTRACT", "plan_revision must be a non-negative safe integer")
+    occurrences = {node.occurrence_id for node in graph.nodes}
+    for endpoint in (*graph.sources, *graph.terminals):
+        if endpoint not in occurrences:
+            raise _err("INVALID_CONTRACT", "source/terminal occurrence is outside the node set")
     obs_by_occurrence = {}
     for obs in observations:
         if not isinstance(obs, NodeObservation):
@@ -571,8 +578,11 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
             "traits": {"state": node.kernel.state, "effect": node.kernel.effect,
                        "resource_role": node.kernel.resource_role, "mergeable": node.kernel.mergeable},
         })
-    edges = [{"from": {"logical_node_id": _semantic(graph, edge.producer), "port": edge.output_port},
-              "to": {"logical_node_id": _semantic(graph, edge.consumer), "port": edge.input_port}}
+    edges = [{"edge_id": edge.edge_id,
+              "from": {"logical_node_id": _semantic(graph, edge.producer),
+                       "occurrence_id": edge.producer, "port": edge.output_port},
+              "to": {"logical_node_id": _semantic(graph, edge.consumer),
+                     "occurrence_id": edge.consumer, "port": edge.input_port}}
              for edge in graph.edges]
     shared = _shared_ancestors(graph)
     dag = {"schema_version": graph.schema, "dag_id": graph.dag_id, "action_id": graph.action_id,

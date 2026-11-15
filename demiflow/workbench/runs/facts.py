@@ -221,7 +221,7 @@ def read_identity_bridge(target, action_id, *, dag_id, report_digest):
     return dict(available=True, ref=ref, bridge=bridge)
 
 
-def join_node_observations(bridge, observations, *, action_id, attempt):
+def join_node_observations(bridge, observations, *, action_id, attempt, plan_id=None, dag_id=None, plan_revision=None):
     """Join one observation page onto a bridge by exact report observation key.
 
     ``observations`` is a complete ``view.observations`` page document. The page's
@@ -231,6 +231,12 @@ def join_node_observations(bridge, observations, *, action_id, attempt):
     ``availability`` (``observed``/``not_in_page``). A page absence is NOT evidence
     that the run never observed the node; cursor/revision stay with the existing
     query. Scope mismatches raise rather than guess.
+
+    When a v3 ``plan_id`` scope is given, the page must carry and match that plan
+    identity (and dag/revision when present); a page without it is rejected so the
+    caller degrades honestly instead of promoting unverified rows. The current
+    plan is never backfilled onto legacy rows. With no scope (legacy v1/v2) the
+    original occurrence-only behaviour is preserved.
     """
     if type(bridge) is not dict or bridge.get('action_id') != action_id or type(bridge.get('entries')) is not list:
         raise ForgeError('Identity bridge does not belong to this action', code='invalid_request')
@@ -241,6 +247,13 @@ def join_node_observations(bridge, observations, *, action_id, attempt):
     page_action = observations.get('action_id')
     if page_action is not None and page_action != action_id:
         raise ForgeError('Observation page is scoped to a different action', code='conflict')
+    if plan_id is not None:
+        if observations.get('plan_id') != plan_id:
+            raise ForgeError('Observation page lacks the sealed plan scope; cannot verify this-run association', code='conflict')
+        if dag_id is not None and observations.get('dag_id') not in (None, dag_id):
+            raise ForgeError('Observation page dag scope differs from the sealed plan', code='conflict')
+        if plan_revision is not None and observations.get('plan_revision') not in (None, plan_revision):
+            raise ForgeError('Observation page plan revision differs from the sealed plan', code='conflict')
     rows = observations.get('observations')
     if type(rows) is not list:
         raise ForgeError('Observation page rows are invalid', code='invalid_request')
@@ -253,9 +266,16 @@ def join_node_observations(bridge, observations, *, action_id, attempt):
     for row in rows:
         if type(row) is not dict or row.get('action_id') != action_id:
             continue
-        row_plan = row.get('plan_id', page_plan)
-        if page_plan is not None and row_plan != page_plan:
-            continue
+        if plan_id is not None:
+            # v3 scope: a row must explicitly carry the verified plan; a plan-less
+            # legacy row is never promoted by defaulting it to the current plan.
+            if row.get('plan_id') != plan_id:
+                continue
+            row_plan = plan_id
+        else:
+            row_plan = row.get('plan_id', page_plan)
+            if page_plan is not None and row_plan != page_plan:
+                continue
         key = (row.get('node_id'), row.get('occurrence'), row_plan)
         if key not in index:
             index[key] = row
