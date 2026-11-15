@@ -42,6 +42,16 @@ from .recovery_contract import document, identity
 _RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 _MANIFEST_MEDIA_TYPE = "application/vnd.demiflow.source-manifest.v3"
 _REPLAY_KINDS = ("seek", "durable_spool", "lease_queue", "attempt_only")
+_SOURCE_KINDS = {"ItemsSource": "items", "RangeSource": "range", "FileSource": "file",
+                 "SqlSource": "sql", "LanceSource": "lance", "MaterializedSource": "materialized",
+                 "IterableSource": "iterable", "task": "datasource", "history": "queue_history"}
+
+
+def _canonical_kind(kind):
+    # Only new snapshots emit semantic kinds. Existing stored snapshots remain
+    # byte-for-byte unchanged and are interpreted through the explicit map.
+    return _SOURCE_KINDS.get(kind, kind)
+
 
 
 def _content_digest(value: Any) -> str:
@@ -155,13 +165,14 @@ def _datasource_kind(datasource: Datasource) -> str:
 
 def snapshot_source(
     source: SourcePlan, *, action: Any, store: Any, bounds: Bounds,
+    source_id: str | None = None,
 ) -> SourceSnapshot:
     """Freeze version/membership with bounded metadata; never list the whole source."""
     action_id = getattr(action, "action_id", None)
     if not isinstance(action_id, str) or not action_id:
         raise DataflowError("INVALID_CONTRACT", "snapshot requires a bound action_id")
     ordinal = _source_ordinal(source, action)
-    source_id = identity(["dataflow-occurrence-v3", action_id, ordinal])
+    source_id = source_id or identity(["dataflow-occurrence-v3", action_id, ordinal])
     facts = _source_facts(source)
     manifest_ref: ArtifactRef | None = None
 
@@ -221,7 +232,7 @@ def snapshot_source(
         raise DataflowError("INVALID_CONTRACT", f"unsupported source plan: {type(source).__name__}")
 
     return SourceSnapshot(
-        source_id=source_id, kind=kind, immutable_identity=immutable,
+        source_id=source_id, kind=_canonical_kind(kind), immutable_identity=immutable,
         finite=finite, replay=replay, manifest_ref=manifest_ref,
     )
 
@@ -253,10 +264,10 @@ def plan_source_splits(
     if target_partitions > bounds.max_partitions:
         raise DataflowError("BUDGET_EXCEEDED", "target_partitions exceeds partition budget")
     source_id = snapshot.source_id
-    kind = snapshot.kind
+    kind = _canonical_kind(snapshot.kind)
     domain = "local"
 
-    if kind in ("ItemsSource", "MaterializedSource"):
+    if kind in ("items", "materialized"):
         count = snapshot.immutable_identity.get("count")
         if count is None:
             count = snapshot.immutable_identity.get("row_count") or 0
@@ -265,14 +276,14 @@ def plan_source_splits(
             splits.append(_split(source_id, {"partition": index, "start": start, "end": end},
                                  {"index": start}, estimated_bytes=None, required_domain=domain))
         return tuple(splits)
-    if kind == "RangeSource":
+    if kind == "range":
         count = int(snapshot.immutable_identity["count"])
         splits = []
         for index, (start, end) in enumerate(_partition_ranges(count, target_partitions)):
             splits.append(_split(source_id, {"partition": index, "start": start, "end": end},
                                  {"next": start}, estimated_bytes=None, required_domain=domain))
         return tuple(splits)
-    if kind == "FileSource":
+    if kind == "file":
         paths = list(source.paths) if isinstance(source, FileSource) else []
         if not paths:
             return (_split(source_id, {"file_index": 0, "empty": True},
@@ -283,7 +294,7 @@ def plan_source_splits(
                    estimated_bytes=None, required_domain=domain)
             for index in range(len(paths))
         )
-    if kind == "LanceSource":
+    if kind == "lance":
         if isinstance(source, LanceSource) and isinstance(source.query, LanceScanSpec) and source.query.limit is None:
             from ..lance.read import plan_lance_scan_partitions
 
@@ -305,12 +316,12 @@ def plan_source_splits(
                        {"version": int(snapshot.immutable_identity["version"]),
                         "fragment_id": 0, "row_offset": 0},
                        estimated_bytes=None, required_domain=domain),)
-    if kind == "SqlSource":
+    if kind == "sql":
         immutable = snapshot.immutable_identity
         return (_split(source_id, {"partition": "0"},
                        {"snapshot_id": immutable.get("snapshot_id"), "partition": "0", "last_key": None},
                        estimated_bytes=None, required_domain=domain),)
-    if kind in ("task", "history"):
+    if kind in ("datasource", "queue_history"):
         if isinstance(source, DatasourceSource):
             tasks = source.datasource.get_read_tasks(target_partitions)
         else:
@@ -323,7 +334,7 @@ def plan_source_splits(
                    estimated_bytes=None, required_domain=domain)
             for index in range(len(tasks))
         )
-    if kind == "IterableSource":
+    if kind == "iterable":
         return (_split(source_id, {"partition": 0}, {"index": 0},
                        estimated_bytes=None, required_domain=domain),)
     if kind == "queue":
@@ -347,9 +358,9 @@ def verify_source_snapshot(snapshot: SourceSnapshot, *, store: Any, bounds: Boun
         raise DataflowError("INVALID_CONTRACT", f"unknown replay mode: {snapshot.replay}")
     if not isinstance(snapshot.immutable_identity, Mapping):
         raise DataflowError("INVALID_CONTRACT", "snapshot immutable_identity must be a mapping")
-    kind = snapshot.kind
-    if kind not in ("ItemsSource", "RangeSource", "FileSource", "SqlSource", "LanceSource",
-                    "MaterializedSource", "IterableSource", "task", "history", "queue"):
+    kind = _canonical_kind(snapshot.kind)
+    if kind not in ("items", "range", "file", "sql", "lance",
+                    "materialized", "iterable", "datasource", "queue_history", "queue"):
         raise DataflowError("INVALID_CONTRACT", f"unknown source kind: {kind}")
 
     if snapshot.manifest_ref is not None:
@@ -359,7 +370,7 @@ def verify_source_snapshot(snapshot: SourceSnapshot, *, store: Any, bounds: Boun
         if hashlib.sha256(raw).hexdigest() != snapshot.manifest_ref.digest:
             raise DataflowError("CORRUPT_ARTIFACT", "source manifest digest mismatch")
         manifest = json.loads(raw.decode("utf-8"))
-        if kind == "FileSource":
+        if kind == "file":
             expected = snapshot.immutable_identity.get("manifest_digest")
             if expected != snapshot.manifest_ref.digest:
                 raise DataflowError("SOURCE_CHANGED", "source manifest binding changed")
@@ -367,7 +378,7 @@ def verify_source_snapshot(snapshot: SourceSnapshot, *, store: Any, bounds: Boun
                 current = _file_entry(entry["path"])
                 if current["sha256"] != entry["sha256"] or current["size"] != entry["size"]:
                     raise DataflowError("SOURCE_CHANGED", f"source file changed: {entry['path']}")
-    if kind == "LanceSource":
+    if kind == "lance":
         from ..lance.storage import open_lance_dataset
 
         query = snapshot.immutable_identity.get("query", {})
@@ -387,7 +398,8 @@ def spool_record(
         return record.payload_ref
     if record.inline is None:
         raise DataflowError("INVALID_CONTRACT", "spool record has neither inline payload nor ref")
-    raw = pickle.dumps(record.inline, protocol=4)
+    from .exchange.dataflow_bridge import _encode_payload
+    raw = _encode_payload(record.inline, max_bytes=bounds.max_row_bytes)
     if len(raw) > bounds.max_row_bytes:
         raise DataflowError("BUDGET_EXCEEDED", "spool record exceeds row byte budget")
     return store.put(iter((raw,)), max_bytes=len(raw), media_type=_RECORD_MEDIA_TYPE)
@@ -396,7 +408,7 @@ def spool_record(
 def _resolve_reader(reader_symbol: str) -> type:
     from . import source_readers
 
-    prefix = "demiflow.execution.source_readers."
+    prefix = "demiflow.execution.source_readers:"
     if not reader_symbol.startswith(prefix):
         raise DataflowError("INVALID_CONTRACT", f"reader symbol outside source_readers: {reader_symbol}")
     name = reader_symbol[len(prefix):]
@@ -419,7 +431,10 @@ def open_source_reader(
     if split.split_id != identity([snapshot.source_id, dict(split.locator)]):
         raise DataflowError("INVALID_CONTRACT", "split_id does not match its locator")
     registry = source_registry()
-    definition = registry.get(snapshot.kind)
+    # Snapshot versions preserve their original class-name kind. The registry
+    # names reader capabilities; translate only this closed vocabulary.
+    reader_kind = _canonical_kind(snapshot.kind)
+    definition = registry.get(reader_kind)
     if definition is None:
         raise DataflowError("INVALID_CONTRACT", f"no registered reader for kind: {snapshot.kind}")
     reader_class = _resolve_reader(definition.reader_symbol)

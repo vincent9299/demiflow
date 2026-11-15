@@ -69,75 +69,102 @@ def _manifest_loader(directory):
     return load
 
 
-class _SocketControlTransport:
-    """Local v3 control transport over the inherited socketpair (C07).
-
-    Business-thread request/wait; the driver drains events and delivers replies.
-    Frames reuse the bounded length-prefixed JSON document channel.
-    """
-
-    def __init__(self, sock, *, send_lock, bounds):
-        self._sock = sock
-        self._send_lock = send_lock
-        self._bounds = bounds
-
-    def request(self, event, *, deadline_ms):
-        from ..contracts.dataflow import ControlReply
-        from ..contracts.dataflow_errors import DataflowError
-        frame = {"type": "worker_event", "event": asdict(event), "deadline_ms": deadline_ms}
-        with self._send_lock:
-            send_message(self._sock, frame)
-            reply = recv_message(self._sock)
-        if reply is None:
-            raise DataflowError("FENCED", "control channel closed before reply")
-        return ControlReply(operation_id=reply["operation_id"], status=reply["status"],
-                            payload=reply.get("payload"), payload_ref=None,
-                            error_code=reply.get("error_code"))
-
-
 def _run_v3_worker(launch_spec, sock):
-    """Assemble the unified v3 worker; verify artifact/code pin before business."""
+    """One socket reader serves replies while the command thread verifies/restores.
+
+    A command may need the driver journal port. Reading its reply on the same
+    command thread would deadlock or steal another command's frame. The socket
+    loop therefore owns all reads and the bounded mailbox correlates replies.
+    """
+    import queue
+    import select
+    from ..contracts.dataflow import Bounds
+    from ..contracts.dataflow_codec import encode_wire, decode_wire
     from ..contracts.dataflow_errors import DataflowError
+    from ..dataflow_hosts import ControlMailbox
+    from ..dataflow_store import RunArtifactStore
     from .runtime import WorkerRuntime
+
+    config = dict(launch_spec["dataflow_v3"])
+    bounds = Bounds(**config["bounds"])
+    stop = threading.Event()
     send_lock = threading.Lock()
+
+    def check_stop():
+        if stop.is_set():
+            raise DataflowError("CANCELLED", "worker host is stopping")
 
     def send(frame):
         with send_lock:
             send_message(sock, frame)
 
-    v3 = launch_spec["dataflow_v3"]
-    bounds = v3.get("bounds")
-    transport = _SocketControlTransport(sock, send_lock=send_lock, bounds=bounds)
-    v3 = dict(v3)
-    v3["transport"] = transport
-    launch_spec = dict(launch_spec)
-    launch_spec["dataflow_v3"] = v3
-    runtime = WorkerRuntime(
-        launch_spec, control=send,
-        manifest_loader=_manifest_loader(launch_spec["directory"]))
+    mailbox = ControlMailbox(bounds=bounds, check_stop=check_stop)
+    mailbox.check_stop = check_stop
+    # The initial store only reads the authenticated grant; RuntimeServices
+    # replaces it with the worker journal port before any write is admitted.
+    mailbox.store = RunArtifactStore(root=Path(config["store_root"]),
+        store_id=config["store_id"], journal=None, bounds=bounds)
+    config.update(transport=mailbox, mailbox=mailbox)
+    launch_spec = dict(launch_spec, dataflow_v3=config)
+    runtime = WorkerRuntime(launch_spec, control=send)
+    commands = queue.Queue(maxsize=bounds.max_pending_events)
+
+    def serve_commands():
+        try:
+            while not stop.is_set():
+                try:
+                    message = commands.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                try:
+                    if message.get("type") == "cut_request":
+                        request = decode_wire(message["wire"].encode(), type_name="CutRequest", bounds=bounds)
+                        runtime._v3_ensure_executor().request_cut(request)
+                        continue
+                    receipt = runtime.handle(message, now_ms=int(time.time() * 1000))
+                    send({"response_to": message["operation_id"], "receipt": receipt})
+                    if message["kind"] == "Restore":
+                        runtime.ready(message["payload"]["assignment_ref"])
+                    if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                        stop.set()
+                except (ProtocolError, DataflowError) as exc:
+                    error = exc.to_dict() if isinstance(exc, ProtocolError) else {"code": exc.code, "message": str(exc)}
+                    send({"response_to": message.get("operation_id"), "error": error})
+                except BaseException as exc:
+                    send({"response_to": message.get("operation_id"),
+                          "error": {"code": "INTERNAL_PROTOCOL", "message": str(exc)}})
+                finally:
+                    commands.task_done()
+        finally:
+            stop.set()
+
     runtime.register()
+    command_thread = threading.Thread(target=serve_commands, name="dataflow-commands", daemon=True)
+    command_thread.start()
     try:
-        while True:
+        while not stop.is_set():
+            for event in mailbox.drain(max_events=bounds.max_pending_events):
+                frame = json.loads(encode_wire(event, type_name="WorkerEvent", bounds=bounds))
+                send({"type": "worker_event", "event": frame["payload"]})
+            if not select.select([sock], [], [], 0.01)[0]:
+                continue
             message = recv_message(sock)
             if message is None:
                 break
             if message.get("type") == "control_reply":
-                continue
-            if "kind" not in message:
-                continue
-            operation_id = message["operation_id"]
-            try:
-                receipt = runtime.handle(message, now_ms=int(time.time() * 1000))
-                send({"response_to": operation_id, "receipt": receipt})
-            except ProtocolError as exc:
-                send({"response_to": operation_id, "error": exc.to_dict()})
-            kind = message["kind"]
-            if kind == "Restore":
-                runtime.ready(message["payload"]["assignment_ref"])
-            if kind in ("Drain", "Quiesce", "Cancel"):
-                break
+                reply = decode_wire(message["wire"].encode(), type_name="ControlReply", bounds=bounds)
+                mailbox.deliver(reply)
+            else:
+                try:
+                    commands.put_nowait(message)
+                except queue.Full:
+                    raise DataflowError("BUDGET_EXCEEDED", "worker command queue is full")
     finally:
-        runtime.close()
+        stop.set()
+        mailbox.close()
+        command_thread.join(timeout=bounds.timeout_ms / 1000)
+        if not command_thread.is_alive():
+            runtime.close()
         sock.close()
     return runtime
 

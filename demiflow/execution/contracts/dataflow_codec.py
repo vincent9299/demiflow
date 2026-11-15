@@ -1029,3 +1029,15 @@ def compute_physical_digest(physical: PhysicalDataflow) -> str:
         if field.name != "plan_id"
     }
     return _canonical_sha(["dataflow-physical-v3", projection])
+
+
+def compute_participant_id(stage_id: str, partition_id: str) -> str:
+    """Bounded identity of one stage/partition checkpoint participant.
+
+    Both source names can already be 128 characters. Concatenating them does
+    not satisfy the C identifier contract; one domain-separated digest does.
+    """
+    from .dataflow import _ident
+    _ident(stage_id, "participant stage")
+    _ident(partition_id, "participant partition")
+    return _canonical_sha(["dataflow-participant-v3", stage_id, partition_id])

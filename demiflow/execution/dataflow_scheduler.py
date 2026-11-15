@@ -77,6 +77,8 @@ class DataflowScheduler:
         self._receipts: dict[str, ArtifactRef] = {}
         self._desired_revision = 0
         self._closed = False
+        self._requests = {}
+        self._allocation_by_operation = {}
         # Grant documents staged by the driver before activate; the lease carries
         # the content identity, the driver reconciles it with the stored ref.
         self.grants: dict[str, bytes] = {}
@@ -125,7 +127,7 @@ class DataflowScheduler:
         if work.operation_id in self._inflight or work.operation_id in self._completed:
             raise DataflowError("INVALID_CONTRACT", "operation_id already scheduled")
         if len(self._ready) >= self._ready_limit:
-            raise DataflowError("BUDGET_EXCEEDED", "ready queue is full", retryable=True)
+            raise DataflowError("CAPACITY_PENDING", "ready queue is full", retryable=True)
         self._ready.append(work)
         self._ready_index[work.operation_id] = work
 
@@ -182,6 +184,7 @@ class DataflowScheduler:
             "fence": fence, "scope_id": self.scope_id, "allocation_id": allocation_id,
             "boot_id": boot_id, "controller_epoch": attempt, "stage_id": work.stage_id,
             "partition_id": work.partition_id, "operation_id": work.operation_id,
+            "plan_revision": self._physical.plan_revision,
             "expires_at_ms": expires_at_ms,
         }
         raw = _grant_bytes(document_value)
@@ -192,51 +195,83 @@ class DataflowScheduler:
         self.grant_refs[allocation_id] = ref
         return ref
 
-    def place(self, work: ReadyWork) -> WorkerLease:
+    def place(self, work: ReadyWork, *, prepare=None, host_id: str | None = None) -> WorkerLease:
+        """Stage the immutable launch before asking the sole allocator to spawn.
+
+        A pending allocation retains its identity and request across retries.
+        The desired plan includes existing live workers. Failed/pending physical
+        allocations remain visible to close(), even if activation never ran.
+        """
         if self._closed:
             raise DataflowError("CANCELLED", "scheduler is closed")
         stage = self._stages.get(work.stage_id)
-        if stage is None:
-            raise DataflowError("INVALID_CONTRACT", "unknown stage: " + work.stage_id)
-        if len(self.leases) >= self._lease_limit:
-            raise DataflowError("BUDGET_EXCEEDED", "lease table is full", retryable=True)
+        if stage is None or work.partition_id not in stage.partitions:
+            raise DataflowError("INVALID_CONTRACT", "unknown stage/partition")
         if work.operation_id in self._inflight:
-            raise DataflowError("INVALID_CONTRACT", "operation already placed: " + work.operation_id)
-        if not self._feasible(work):
-            raise DataflowError("BUDGET_EXCEEDED", "resident budget exhausted", retryable=True)
+            raise DataflowError("INVALID_CONTRACT", "operation already placed")
         run_id, attempt, fence = self._owner_binding()
-        # Provider preflight: a GPU profile cannot be carried by a CPU-only host.
-        self._resources.describe({"provider": self._policy.provider}, stage.profile.requirements)
-        allocation_id = uuid.uuid4().hex
-        boot_id = uuid.uuid4().hex
-        worker_id = uuid.uuid4().hex
-        grant_ref = self._grant(allocation_id, boot_id, work, run_id, attempt, fence)
-        request = WorkerRequest(
-            worker_id, allocation_id, stage.profile, self._launch_spec(stage),
-            provision_deadline_ms=self._policy.control_timeout_ms,
-            placement=None, reservation_group=work.stage_id)
-        accepted = self._resources.apply(
-            self._context(uuid.uuid4().hex), ResourcePlan(self.scope_id, (request,), ()))
-        self._desired_revision = accepted["desired_revision"]
-        self._resources.reconcile_once(fence, time.monotonic() + self._policy.control_timeout_ms / 1000.0, 16)
+        allocation_id = self._allocation_by_operation.get(work.operation_id)
+        if allocation_id is None:
+            if len(self.leases) >= self._lease_limit or not self._feasible(work):
+                raise DataflowError("CAPACITY_PENDING", "worker/resident admission pending", retryable=True)
+            allocation_id, boot_id = uuid.uuid4().hex, uuid.uuid4().hex
+            grant_ref = self._grant(allocation_id, boot_id, work, run_id, attempt, fence)
+            lease = WorkerLease(allocation_id, boot_id, work.stage_id, (work.partition_id,),
+                                host_id or self._policy.provider, allocation_id, grant_ref,
+                                _now_ms() + max(120000, self._policy.control_timeout_ms))
+            if prepare is None:
+                raise DataflowError("INVALID_CONTRACT", "placement requires a staged worker launch")
+            lease = prepare(lease, stage)
+            if not isinstance(lease, WorkerLease) or lease.allocation_id != allocation_id:
+                raise DataflowError("INVALID_CONTRACT", "launch preparation changed allocation identity")
+            request = WorkerRequest(uuid.uuid4().hex, allocation_id, stage.profile,
+                self._launch_spec(stage), provision_deadline_ms=self._policy.control_timeout_ms,
+                placement=None, reservation_group=work.stage_id)
+            desired = (*self._requests.values(), request)
+            accepted = self._resources.apply(self._context(uuid.uuid4().hex),
+                                             ResourcePlan(self.scope_id, desired, ()))
+            self._desired_revision = accepted["desired_revision"]
+            self._requests[allocation_id] = request
+            self._allocation_by_operation[work.operation_id] = allocation_id
+            self.leases[allocation_id] = lease
+            self._lease_stage[allocation_id] = work.stage_id
+            self._resident_used += work.resident_bytes
+            self._cumulative_cost += work.resident_bytes
+        lease = self.leases[allocation_id]
+        self._resources.reconcile_once(fence,
+            time.monotonic() + self._policy.control_timeout_ms / 1000.0, 16)
         snapshot = self._resources.get(self.scope_id)
-        observation = next((a for a in snapshot["allocations"] if a["allocation_id"] == allocation_id), None)
-        if observation is None or observation["phase"] != "RUNNING":
-            phase = observation["phase"] if observation else "absent"
-            raise DataflowError("RESOURCE_INFEASIBLE", "worker did not reach RUNNING: " + str(phase),
-                                retryable=True, context={"allocation_id": allocation_id})
-        host_id = (observation.get("placement") or {}).get("host_id") or self._policy.provider
-        observed_boot = observation.get("boot_id") or boot_id
-        lease = WorkerLease(
-            allocation_id=allocation_id, boot_id=observed_boot, stage_id=work.stage_id,
-            partition_ids=(work.partition_id,), host_id=host_id, endpoint_ref=allocation_id,
-            grant_ref=grant_ref, expires_at_ms=_now_ms() + max(120000, self._policy.control_timeout_ms))
-        self.leases[allocation_id] = lease
-        self._lease_stage[allocation_id] = work.stage_id
+        observed = next((a for a in snapshot["allocations"] if a["allocation_id"] == allocation_id), None)
+        phase = observed["phase"] if observed else "absent"
+        if phase != "RUNNING":
+            pending = phase in ("REQUESTED", "PENDING", "STARTING", "absent")
+            raise DataflowError("CAPACITY_PENDING" if pending else "RESOURCE_INFEASIBLE",
+                                "worker did not reach RUNNING: " + phase,
+                                retryable=pending, context={"allocation_id": allocation_id,
+                                "conditions": list((observed or {}).get("conditions") or ())})
+        if observed.get("boot_id") not in (None, lease.boot_id):
+            raise DataflowError("FENCED", "provider reported a different worker boot")
         self._inflight[work.operation_id] = work
-        self._resident_used += work.resident_bytes
-        self._cumulative_cost += work.resident_bytes
         return lease
+
+    def close(self, *, deadline_ms: int) -> None:
+        if self._closed:
+            return
+        _, _, fence = self._owner_binding()
+        accepted = self._resources.close(self._context("close-" + uuid.uuid4().hex), {
+            "mode": "ABANDON", "engine_receipt_ref": "execution-close",
+            "terminate_deadline_ms": deadline_ms, "reason": "execution_close"})
+        self._desired_revision = accepted["desired_revision"]
+        deadline = time.monotonic() + deadline_ms / 1000.0
+        while True:
+            self._resources.reconcile_once(fence, deadline, 16)
+            snapshot = self._resources.get(self.scope_id)
+            if all(a.get("cleanup") == "CONFIRMED" for a in snapshot["allocations"]):
+                self._closed = True
+                return
+            if time.monotonic() >= deadline:
+                raise DataflowError("DEADLINE_EXCEEDED", "worker exit remains unconfirmed")
+            time.sleep(min(0.01, max(0, deadline - time.monotonic())))
 
     # -- E013 complete ----------------------------------------------------
     def complete(self, operation_id: str, *, receipt_ref: ArtifactRef) -> None:
@@ -260,7 +295,9 @@ class DataflowScheduler:
                                   uuid.uuid4().hex, self._desired_revision)
         release = ReleaseSpec(allocation_id, "DRAINED", "drain-" + allocation_id,
                               max(1, deadline_ms), reason)
-        accepted = self._resources.close(context, release)
+        desired = tuple(request for key, request in self._requests.items() if key != allocation_id)
+        accepted = self._resources.apply(context, ResourcePlan(self.scope_id, desired, (release,)))
+        self._requests.pop(allocation_id, None)
         self._desired_revision = accepted["desired_revision"]
         self._resources.reconcile_once(fence, time.monotonic() + deadline_ms / 1000.0, 16)
         snapshot = self._resources.get(self.scope_id)

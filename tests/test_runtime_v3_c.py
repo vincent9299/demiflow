@@ -386,6 +386,9 @@ def test_c006():
     with pytest.raises(ValueError):
         DataflowError("UNKNOWN_EFFECT", "x", retryable=True)
     with pytest.raises(ValueError):
+        DataflowError("BUDGET_EXCEEDED", "x", retryable=True)
+    assert DataflowError("CAPACITY_PENDING", "temporary capacity", retryable=True).retryable
+    with pytest.raises(ValueError):
         DataflowError("FENCED", "x", context={"password": "hunter2"})
     with pytest.raises(ValueError):
         DataflowError("FENCED", "")
@@ -761,7 +764,8 @@ def test_c074():
 # --- C075 DataflowError class ----------------------------------------------
 def test_c075():
     assert issubclass(DataflowError, Exception)
-    assert len(DATAFLOW_ERROR_CODES) == 13
+    assert len(DATAFLOW_ERROR_CODES) == 14
+    assert "CAPACITY_PENDING" in DATAFLOW_ERROR_CODES
     err = DataflowError("SOURCE_CHANGED", "changed", context={"source_id": "s0"})
     restored = pickle.loads(pickle.dumps(err))
     assert restored.code == err.code

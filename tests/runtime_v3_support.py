@@ -350,6 +350,7 @@ class _ExecuteActionRecorder:
         self.calls: list[dict[str, Any]] = []
         self._original: Any = None
         self._module: Any = None
+        self._aliases = []
 
     def __enter__(self) -> "_ExecuteActionRecorder":
         try:
@@ -374,15 +375,22 @@ class _ExecuteActionRecorder:
             return handle
 
         self._module.execute_action = wrapped
+        api = importlib.import_module("demiflow.execution.dataflow_api")
+        if getattr(api, "execute_action", None) is self._original:
+            self._aliases.append((api, self._original))
+            api.execute_action = wrapped
         return self
 
     def __exit__(self, *exc: Any) -> None:
         if self._module is not None and self._original is not None:
             self._module.execute_action = self._original
+        for module, original in self._aliases:
+            module.execute_action = original
 
 
 def _extract_plan_id(handle: Any, request: Any) -> Any:
-    for obj in (handle, getattr(handle, "result", lambda: None)(), getattr(request, "action", None)):
+    for obj in (getattr(getattr(handle, "_execution", None), "_physical", None),
+                handle, getattr(request, "action", None)):
         if obj is None:
             continue
         for attr in ("plan_id", "physical", "plan"):
@@ -485,12 +493,22 @@ class RuntimeV3Fixture:
         envs = SCENARIOS[scenario]["environments"]
         # "all" means the gate aggregates every environment; the scenario itself
         # runs locally and declares any specific need via require_environment.
-        if "all" not in envs:
-            self.require_environment(*envs)
+        selected = "ray" if self.provider == "ray_core" else "local"
+        self.require_environment(selected)
+        self.require_environment(*(e for e in envs if e not in {"local", "ray", "all"}))
         self.require_modules(scenario)
         func = _SCENARIO_FUNCS[scenario]
-        with _RayDataBlocker() as blocker, _ExecuteActionRecorder() as recorder:
-            evidence = func(self, fault)
+        from demiflow.data.api import _use_executor
+        from demiflow.execution.executors.local import LocalDatasetExecutor
+        from demiflow.execution.executors.ray import RayDatasetExecutor
+        from demiflow.execution.run_context import RunContext
+        executor = LocalDatasetExecutor() if self.provider == "local" else RayDatasetExecutor()
+        try:
+            with RunContext.start(self.journal_dir / scenario), _use_executor(executor):
+                with _RayDataBlocker() as blocker, _ExecuteActionRecorder() as recorder:
+                    evidence = func(self, fault)
+        finally:
+            executor.close()
         evidence = dict(evidence)
         evidence["scenario"] = scenario
         evidence["fault"] = fault
@@ -721,8 +739,8 @@ def _s_no_ray_data(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
     rows = [{"id": i, "v": i * 2} for i in range(24)]
     src = fx.source_dir / "items.jsonl"
     src.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    ds = data.read_json(str(src)).map(lambda r: {**r, "w": r["v"] + 1}).filter(lambda r: r["w"] % 2 == 0)
-    batched = ds.map_batches(lambda batch: [{**r, "b": len(batch)} for r in batch], max_batch=4)
+    ds = data.read_json(str(src)).map(lambda r: {**r, "w": r["v"] + 1}).filter(lambda r: r["w"] % 2 == 1)
+    batched = ds.map_batches(lambda batch: batch, batch_size=4, batch_format="pyarrow")
     out = batched.take_all()
     fx.assert_semantics(24, len(out), ordering="ordered")
     sorted_out = ds.sort("id").take_all()
@@ -731,27 +749,9 @@ def _s_no_ray_data(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 
 def _s_api_matrix(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    plan = json.loads((TASK_PACKAGE / "plan.json").read_text())
-    api = plan["api"]
-    results: dict[str, Any] = {}
-    retired = []
-    for entry in api:
-        symbol = entry["symbol"]
-        disposition = entry["disposition"]
-        if disposition == "retired_preserved_rejection":
-            method = symbol.split(".")[-1]
-            ds = data.from_items([{"i": 1}])
-            try:
-                getattr(ds, method)("x", version="v1")
-                results[symbol] = "NOT_REJECTED"
-            except Exception as exc:
-                results[symbol] = f"rejected:{type(exc).__name__}"
-                retired.append(symbol)
-        else:
-            results[symbol] = _api_positive_and_negative(data, symbol, fx)
-    fx.assert_semantics(4, len(retired), ordering="ordered")
-    return {"api_count": len(api), "retired_rejected": retired, "results": results}
+    detail = {"missing_semantic_harness": '98 entries need real positive/negative behavior cases; caught exceptions and surface_present are not evidence'}
+    fx._record_not_run('api_matrix', detail)
+    raise NotRunError('api_matrix', detail)
 
 
 def _api_positive_and_negative(data: Any, symbol: str, fx: RuntimeV3Fixture) -> str:
@@ -904,97 +904,33 @@ def _api_negative(ds: Any, name: str) -> str:
 
 
 def _s_shared_diamond(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    calls: list[int] = []
-
-    def counted(row: dict) -> dict:
-        calls.append(row["i"])
-        return {**row, "c": row["i"] + 1}
-
-    base = data.from_items([{"i": 1}, {"i": 2}, {"i": 3}]).map(counted)
-    left = base.map(lambda r: {**r, "side": "L"})
-    right = base.map(lambda r: {**r, "side": "R"})
-    union = left.union(right).take_all()
-    # shared upstream executes once per action; union yields both branches.
-    fx.assert_semantics(6, len(union), ordering="unordered")
-    fx.assert_semantics(3, len(calls), ordering="ordered")
-    # two independent calls of the same function must NOT be merged.
-    calls.clear()
-    a = data.from_items([{"i": 9}]).map(counted)
-    b = data.from_items([{"i": 9}]).map(counted)
-    both = a.union(b).take_all()
-    fx.assert_semantics(2, len(both), ordering="unordered")
-    fx.assert_semantics(2, len(calls), ordering="ordered")
-    return {"union_rows": len(union), "shared_calls": 3, "independent_calls": len(calls)}
+    detail = {"missing_semantic_harness": 'worker-side effect counts need durable observations; driver closure counters cannot count subprocess calls'}
+    fx._record_not_run('shared_diamond', detail)
+    raise NotRunError('shared_diamond', detail)
 
 
 def _s_incremental_first_row(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    import threading
-
-    gate = threading.Event()
-    first_seen = threading.Event()
-
-    def slow_source() -> Iterator[dict]:
-        yield {"i": 0}
-        first_seen.set()
-        # Block the rest of the source until the downstream first row arrives.
-        if not gate.wait(timeout=10):
-            raise TimeoutError("downstream never consumed the first row")
-        for i in range(1, 5):
-            yield {"i": i}
-
-    received: list[int] = []
-
-    def sink(row: dict) -> dict:
-        received.append(row["i"])
-        if len(received) == 1:
-            gate.set()
-        return row
-
-    ds = data.from_iter(slow_source).map(sink)
-    out = ds.take_all()
-    fx.assert_semantics([0, 1, 2, 3, 4], [r["i"] for r in out], ordering="ordered")
-    if not first_seen.is_set():
-        raise RuntimeV3Error("INTERNAL_PROTOCOL", "source first row never produced")
-    return {"first_row_before_eoi": bool(received and received[0] == 0), "rows": len(out)}
+    detail = {"missing_semantic_harness": 'the source must use a serializable owned synchronization fixture, not a captured threading.Event'}
+    fx._record_not_run('incremental_first_row', detail)
+    raise NotRunError('incremental_first_row', detail)
 
 
 def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    modes = ("memory_incremental", "durable_incremental", "finite_sealed")
-    results = {}
-    for mode in modes:
-        ds = data.from_items([{"i": i} for i in range(6)]).map(lambda r: {**r, "m": mode})
-        out = ds.take_all()
-        results[mode] = len(out)
-    fx.assert_semantics({m: 6 for m in modes}, results, ordering="ordered")
-    return {"modes": results}
+    detail = {"missing_semantic_harness": 'must configure and inspect all three real exchanges and producer-success seals'}
+    fx._record_not_run('three_exchange_modes', detail)
+    raise NotRunError('three_exchange_modes', detail)
 
 
 def _s_cpu_gpu_isolation(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    fx.require_environment("gpu")
-    data = _data()
-    prepared = data.from_items([{"i": i} for i in range(8)]).map(lambda r: {**r, "x": r["i"] * 1.0})
-    out = prepared.map(lambda r: {**r, "y": r["x"] + 1}).take_all()
-    fx.assert_semantics(8, len(out), ordering="ordered")
-    return {"rows": len(out), "gpu": fx.environments["gpu"]}
+    detail = {"missing_semantic_harness": 'must launch a GPU stage and inspect actual placements, residency and prefetch'}
+    fx._record_not_run('cpu_gpu_isolation', detail)
+    raise NotRunError('cpu_gpu_isolation', detail)
 
 
 def _s_fairness_deadlock(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    import time as _time
-
-    def slow_branch(row: dict) -> dict:
-        _time.sleep(0.001)
-        return {**row, "slow": True}
-
-    fast = data.from_items([{"i": i, "k": i % 2} for i in range(20)])
-    slow = fast.map(slow_branch)
-    hot = fast.filter(lambda r: r["k"] == 0)
-    merged = slow.union(hot).take_all()
-    fx.assert_semantics(30, len(merged), ordering="unordered")
-    return {"rows": len(merged)}
+    detail = {"missing_semantic_harness": 'must exercise small resource limits and a blocked consumer; ordinary union cannot prove fairness'}
+    fx._record_not_run('fairness_deadlock', detail)
+    raise NotRunError('fairness_deadlock', detail)
 
 
 def _s_relational_semantics(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
@@ -1049,67 +985,33 @@ def _s_source_snapshots(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, An
 
 
 def _s_multiworker_barrier(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    with data.local_execution(workers=3, temp_directory=str(fx.root / "wk")):
-        left = data.from_items([{"i": i} for i in range(9)]).map(lambda r: {**r, "x": r["i"] + 1})
-        right = data.from_items([{"i": i} for i in range(9)]).map(lambda r: {**r, "y": r["i"] * 2})
-        joined = left.join(right, on="i").take_all()
-    fx.assert_semantics(9, len(joined), ordering="unordered")
-    return {"workers": 3, "joined": len(joined)}
+    detail = {"missing_semantic_harness": 'must collect every real worker contribution and interrupt pending batch/flatmap output'}
+    fx._record_not_run('multiworker_barrier', detail)
+    raise NotRunError('multiworker_barrier', detail)
 
 
 def _s_route_recovery(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    ds = data.from_items([{"i": i, "k": i % 4} for i in range(40)]).repartition(4, keys=["k"])
-    out = ds.take_all()
-    fx.assert_semantics(40, len(out), ordering="unordered")
-    return {"rows": len(out), "fault": fault}
+    detail = {"missing_semantic_harness": 'must interrupt and resume, comparing route counters and exact suffix deliveries'}
+    fx._record_not_run('route_recovery', detail)
+    raise NotRunError('route_recovery', detail)
 
 
 def _s_commit_crash_matrix(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    boundaries = (
-        "before_intent", "after_intent", "after_prepare_before_record",
-        "after_prepared_before_publish", "after_publish_before_receipt", "after_receipt_before_ack",
-    )
-    if fault is None:
-        fault = "after_prepare_before_record"
-    if fault not in boundaries:
-        raise RuntimeV3Error("INVALID_CONTRACT", f"unknown crash boundary {fault!r}")
-    body = (
-        "import json, time; from pathlib import Path; "
-        f"j=Path({str(fx.journal_dir)!r}); "
-        f"(j/'boundary-{fault}.json').write_text(json.dumps({{'boundary':{fault!r},'pid':__import__('os').getpid()}})); "
-        "time.sleep(30)"
-    )
-    fx.spawn_child(body, name=f"commit-{fault}")
-    fx.crash(fault)
-    record = json.loads((fx.evidence_dir / f"crash-{fault}.json").read_text())
-    return {"boundary": fault, "crash": record}
+    detail = {"missing_semantic_harness": 'child must reach a native commit boundary; killing a sleeping marker process proves no recovery'}
+    fx._record_not_run('commit_crash_matrix', detail)
+    raise NotRunError('commit_crash_matrix', detail)
 
 
 def _s_model_effect_recovery(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    # Local transport fixture only; no paid model calls.
-    ds = data.from_items([{"i": i} for i in range(4)]).map(lambda r: {**r, "emb": [float(r["i"])]})
-    out = ds.take_all()
-    fx.assert_semantics(4, len(out), ordering="ordered")
-    return {"rows": len(out), "fault": fault, "transport": "local_fixture"}
+    detail = {"missing_semantic_harness": 'must use real Prompt/Embedding/Agent actors and local external transport with fault injection'}
+    fx._record_not_run('model_effect_recovery', detail)
+    raise NotRunError('model_effect_recovery', detail)
 
 
 def _s_actor_state_lifecycle(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-
-    class Accum:
-        def __init__(self) -> None:
-            self.total = 0
-
-        def __call__(self, row: dict) -> dict:
-            self.total += row["i"]
-            return {**row, "total": self.total}
-
-    out = data.from_items([{"i": i} for i in range(5)]).map(Accum(), execution="thread", concurrency=1).take_all()
-    fx.assert_semantics(5, len(out), ordering="ordered")
-    return {"rows": len(out), "final_total": out[-1]["total"]}
+    detail = {"missing_semantic_harness": 'must validate state restoration and lifecycle on success/failure/cancel across real workers'}
+    fx._record_not_run('actor_state_lifecycle', detail)
+    raise NotRunError('actor_state_lifecycle', detail)
 
 
 def _s_cache_materialize(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
@@ -1128,98 +1030,63 @@ def _s_cache_materialize(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, A
 
 
 def _s_queue_full_business(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    # Real bounded business chain on local fixtures; queue settlement uses the
-    # frozen native protocol via the public read/enqueue entries.
-    ds = data.from_items([{"i": i, "text": f"doc{i}"} for i in range(4)]).map(lambda r: {**r, "clean": r["text"].upper()})
-    out = ds.take_all()
-    fx.assert_semantics(4, len(out), ordering="ordered")
-    return {"rows": len(out), "fault": fault}
+    detail = {"missing_semantic_harness": 'must use native acquisition/finalize/ACK and actual queue history, not a map fixture'}
+    fx._record_not_run('queue_full_business', detail)
+    raise NotRunError('queue_full_business', detail)
 
 
 def _s_memory_peak(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    wide = [{"i": i, "payload": "x" * 4096} for i in range(16)]
-    out = data.from_items(wide).map(lambda r: {**r, "n": len(r["payload"])}).take_all()
-    fx.assert_semantics(16, len(out), ordering="ordered")
-    fx.assert_semantics([4096] * 16, [r["n"] for r in out], ordering="ordered")
-    return {"rows": len(out), "row_bytes": 4096}
+    detail = {"missing_semantic_harness": 'must measure and assert simultaneous resident copies under a fixed small budget'}
+    fx._record_not_run('memory_peak', detail)
+    raise NotRunError('memory_peak', detail)
 
 
 def _s_disk_gc(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    ds = data.from_items([{"i": i} for i in range(32)]).map(lambda r: {**r, "v": r["i"] * 3})
-    mat = ds.materialize()
-    out = mat.take_all()
-    fx.assert_semantics(32, len(out), ordering="ordered")
-    mat.release()
-    return {"rows": len(out), "released": True}
+    detail = {"missing_semantic_harness": 'must verify live pins, orphan reclamation and scratch exhaustion using real artifacts'}
+    fx._record_not_run('disk_gc', detail)
+    raise NotRunError('disk_gc', detail)
 
 
 def _s_remote_journal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    out = data.from_items([{"i": i} for i in range(6)]).map(lambda r: {**r, "j": r["i"]}).take_all()
-    fx.assert_semantics(6, len(out), ordering="ordered")
-    return {"rows": len(out), "worker_sqlite": "forbidden"}
+    detail = {"missing_semantic_harness": 'must prohibit worker SQLite access and exercise cross-process journal requests'}
+    fx._record_not_run('remote_journal', detail)
+    raise NotRunError('remote_journal', detail)
 
 
 def _s_two_hosts(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    fx.require_environment("two_hosts")
-    info = json.loads(Path(os.environ["DEMIFLOW_V3_TWO_HOSTS"]).read_text())
-    hosts = {h["host_id"] for h in info["hosts"]}
-    nodes = {h["node_id"] for h in info["hosts"]}
-    if len(hosts) < 2 or len(nodes) < 2:
-        raise RuntimeV3Error("INVALID_CONTRACT", "two_hosts requires >=2 distinct host_id and node_id")
-    data = _data()
-    out = data.from_items([{"i": i} for i in range(8)]).map(lambda r: {**r, "v": r["i"] * 2}).take_all()
-    fx.assert_semantics(8, len(out), ordering="ordered")
-    return {"hosts": sorted(hosts), "nodes": sorted(nodes), "rows": len(out)}
+    detail = {"missing_semantic_harness": 'host names in a JSON file do not prove actual Ray node placement or shared-store access'}
+    fx._record_not_run('two_hosts', detail)
+    raise NotRunError('two_hosts', detail)
 
 
 def _s_node_loss(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    fx.require_environment("two_hosts")
-    data = _data()
-    out = data.from_items([{"i": i} for i in range(8)]).map(lambda r: {**r, "v": r["i"]}).take_all()
-    fx.assert_semantics(8, len(out), ordering="ordered")
-    return {"fault": fault, "rows": len(out), "durable_cut_refs": "required"}
+    detail = {"missing_semantic_harness": 'must kill the actual producer host and recover its committed outputs'}
+    fx._record_not_run('node_loss', detail)
+    raise NotRunError('node_loss', detail)
 
 
 def _s_driver_restart(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    out = data.from_items([{"i": i} for i in range(4)]).take_all()
-    fx.assert_semantics(4, len(out), ordering="ordered")
-    return {"rows": len(out), "fault": fault}
+    detail = {"missing_semantic_harness": 'must kill and replace the driver, asserting new fence and late-message rejection'}
+    fx._record_not_run('driver_restart', detail)
+    raise NotRunError('driver_restart', detail)
 
 
 def _s_history_identity(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    from demiflow.execution.recovery_identity import identity
-
-    # Historical enum>1024 formula must be preserved verbatim.
-    samples = {n: identity(["enum", n]) for n in (1024, 1025, 1500)}
-    fx.assert_semantics(3, len(samples), ordering="ordered")
-    return {"enum_identities": samples}
+    detail = {"missing_semantic_harness": 'must compare the original prompt identities and historical artifacts, not synthetic enum hashes'}
+    fx._record_not_run('history_identity', detail)
+    raise NotRunError('history_identity', detail)
 
 
 def _s_workbench_real_plan(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    fx.require_environment("browser")
-    data = _data()
-    out = data.from_items([{"i": i} for i in range(6)]).map(lambda r: {**r, "v": r["i"] + 1}).take_all()
-    fx.assert_semantics(6, len(out), ordering="ordered")
-    from demiflow.workbench.runs import manager
-
-    runs = manager.list_runs(str(fx.journal_dir))
-    return {"rows": len(out), "workbench_runs": len(runs), "ui": "browser prepare/start/show/cancel/resume (W lane)"}
+    detail = {"missing_semantic_harness": 'must execute prepare/start/show/cancel/resume and join the actual report/plan bridge'}
+    fx._record_not_run('workbench_real_plan', detail)
+    raise NotRunError('workbench_real_plan', detail)
 
 
 def _s_product_regression(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    fx.require_environment("browser")
-    data = _data()
-    out = data.from_items([{"i": i} for i in range(6)]).map(lambda r: {**r, "v": r["i"]}).take_all()
-    fx.assert_semantics(6, len(out), ordering="ordered")
-    from demiflow.workbench.runs import manager
-
-    runs = manager.list_runs(str(fx.journal_dir))
-    return {"rows": len(out), "workbench_runs": len(runs), "products": "Notebook/Python/SQL/Case/devchat/source (W lane)"}
+    detail = {"missing_semantic_harness": 'must exercise Notebook/Python/SQL/Case/development-chat UI behavior, not list_runs'}
+    fx._record_not_run('product_regression', detail)
+    raise NotRunError('product_regression', detail)
 
 
 def _s_bounded_terminal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
@@ -1229,40 +1096,34 @@ def _s_bounded_terminal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, An
     fx.assert_semantics(1, len(ds.take(1)), ordering="ordered")
     fx.assert_semantics(10, len(ds.take_all()), ordering="ordered")
     fx.assert_semantics(10, ds.count(), ordering="ordered")
-    limited = ds.take_all(limit=5)
-    fx.assert_semantics(5, len(limited), ordering="ordered")
+    try:
+        ds.take_all(limit=5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("take_all(limit=5) truncated instead of rejecting overflow")
     it = ds.iter_rows()
     next(it)
     it.close()
-    return {"take0": 0, "take1": 1, "take_all": 10, "limit5": len(limited)}
+    return {"take0": 0, "take1": 1, "take_all": 10, "limit5": "overflow_rejected"}
 
 
 def _s_artifact_security(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    out = data.from_items([{"i": 1}]).take_all()
-    fx.assert_semantics([{"i": 1}], out, ordering="ordered")
-    return {"rows": len(out), "checks": "code_pin/cross_domain/traversal/symlink/checksum/grant/size"}
+    detail = {"missing_semantic_harness": 'must execute the code-pin/path/domain/grant counterexamples, not return their names'}
+    fx._record_not_run('artifact_security', detail)
+    raise NotRunError('artifact_security', detail)
 
 
 def _s_performance(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    data = _data()
-    import time as _time
-
-    rows = [{"i": i} for i in range(200)]
-    timings = []
-    for _ in range(5):
-        start = _time.perf_counter()
-        out = data.from_items(rows).map(lambda r: {**r, "v": r["i"] * 2}).take_all()
-        timings.append(_time.perf_counter() - start)
-    fx.assert_semantics(200, len(out), ordering="ordered")
-    ordered = sorted(timings)
-    return {"measurements": timings, "p50": ordered[2], "p95": ordered[4], "warmup_separate": True}
+    detail = {"missing_semantic_harness": 'must measure all workload categories against a same-budget baseline with actual warmup and peaks'}
+    fx._record_not_run('performance', detail)
+    raise NotRunError('performance', detail)
 
 
 def _s_all_regressions(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    collection = collect_repository(fx.root / "regressions")
-    dispositions = build_disposition_table()
-    return {"collection": collection, "dispositions": dispositions}
+    detail = {"missing_semantic_harness": 'must execute classified historical nodeids; collection is inventory, not a passing regression run'}
+    fx._record_not_run('all_regressions', detail)
+    raise NotRunError('all_regressions', detail)
 
 
 _SCENARIO_FUNCS: dict[str, Callable[[RuntimeV3Fixture, str | None], dict[str, Any]]] = {

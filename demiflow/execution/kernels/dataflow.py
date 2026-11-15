@@ -7,7 +7,7 @@ modules; they implement the versioned business record codec, the fidelity
 preserving key encoding and the pre-allocation budget checks required by C06.
 
 Resource accounting: ``encoded_bytes`` is the byte length of the versioned
-pickle row codec (``application/x-demiflow-row-v1``). It bounds wire/spool size,
+data-only row codec (``application/vnd.demiflow.record.v3``). It bounds wire/spool size,
 not process RSS; Arrow logical bytes and decoded Python objects are accounted
 separately where they coexist (see ``invoke_batch``).
 """
@@ -26,10 +26,11 @@ from demiflow.execution.contracts.dataflow import (
     KernelSpec,
     Record,
     RuntimeServices,
+    thaw_record_value,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
-ROW_MEDIA_TYPE = "application/x-demiflow-row-v1"
+ROW_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 RECORD_MEDIA_TYPE = "application/x-demiflow-record-v1"
 SHUFFLE_DOMAIN = "demiflow-shuffle-v3"
 RECORD_DOMAIN = "dataflow-record-v3"
@@ -39,7 +40,7 @@ _MISSING = object()
 
 def _canonical(value: Any) -> str:
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+        thaw_record_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
 
 
@@ -119,11 +120,14 @@ def _group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
 
 
 def _dumps_row(row: Mapping[str, Any]) -> bytes:
-    return pickle.dumps(dict(row), protocol=pickle.HIGHEST_PROTOCOL)
+    from ..exchange.dataflow_bridge import _encode_payload
+    from ..recovery_contract import MAX_DOCUMENT_BYTES
+    return _encode_payload(row, max_bytes=MAX_DOCUMENT_BYTES)
 
 
 def _loads_row(data: bytes) -> dict[str, Any]:
-    return pickle.loads(data)
+    from ..exchange.dataflow_bridge import _decode_payload
+    return _decode_payload(data, max_bytes=max(1, len(data)))
 
 
 def _row_bytes(row: Mapping[str, Any]) -> int:
@@ -142,7 +146,7 @@ def _materialize_row(record: Record, services: RuntimeServices) -> dict[str, Any
     if (record.inline is None) == (record.payload_ref is None):
         raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
     if record.inline is not None:
-        return dict(record.inline)
+        return thaw_record_value(record.inline)
     ref = record.payload_ref
     limit = services.bounds.max_row_bytes
     if ref.size_bytes > limit:
@@ -160,7 +164,8 @@ def _output_record(
     sequence: int,
     services: RuntimeServices,
 ) -> Record:
-    data = _dumps_row(row)
+    from ..exchange.dataflow_bridge import _encode_payload
+    data = _encode_payload(row, max_bytes=services.bounds.max_row_bytes)
     if len(data) > services.bounds.max_row_bytes:
         raise _err("BUDGET_EXCEEDED", "output row exceeds max_row_bytes", size=len(data))
     return Record(

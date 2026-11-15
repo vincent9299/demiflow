@@ -1,0 +1,101 @@
+{
+  "schema": "demiflow.review-evidence.v1",
+  "created_at": "2026-11-15T13:01:47.285521+08:00",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115",
+  "branch": "engine/gpt-runtime-v3-review-20261115",
+  "input_head": "362d8528c27ae60a0d6ae0ccc986a0ff93847de8",
+  "full_acceptance_passed": false,
+  "dispatch_or_merge_ready": false,
+  "business_golden_passed": false,
+  "source_stable": true,
+  "source_and_test_files_hashed": 1920,
+  "evidence_inputs": "evidence/real-proof-final.json",
+  "tests": {
+    "real_seams_and_guards": {
+      "passed": 165,
+      "failed": 0,
+      "kind": "partial_evidence_not_business_acceptance"
+    },
+    "lane_diagnostic": {
+      "collected": 559,
+      "passed": 225,
+      "failed": 334,
+      "timeouts": 2,
+      "kind": "diagnostic_with_explicit_deadlines"
+    },
+    "all_runtime": {
+      "status": "timed_out",
+      "timeout_s": 240
+    },
+    "public_golden": {
+      "status": "failed",
+      "error": "unknown kernel kind",
+      "exit_code": 1
+    },
+    "ray_core_host": {
+      "status": "passed",
+      "version": "2.60.0",
+      "hosts": 1,
+      "activated": true,
+      "cleanup_confirmed": true,
+      "full_business_run": false,
+      "exit_code": 0
+    }
+  },
+  "not_verified": [
+    "whole historical suite",
+    "full Local/Ray business pipeline",
+    "two hosts",
+    "physical GPU",
+    "native business crash matrix",
+    "browser/product regression",
+    "same-budget performance"
+  ],
+  "frozen_and_main": "evidence/boundaries.json",
+  "external_raw_logs": {
+    "lanes-diagnostic.log": {
+      "path": "/tmp/demiflow-gpt-runtime-v3-review-20261115/lanes-diagnostic.log",
+      "sha256": "5ff3b4d45641526a84d8139ce7db7457dd76eaf7f4ebedce491afa26dc740851",
+      "bytes": 288171
+    },
+    "lanes-diagnostic.xml": {
+      "path": "/tmp/demiflow-gpt-runtime-v3-review-20261115/lanes-diagnostic.xml",
+      "sha256": "3a238cc899083719ab144c9b1f36471fb6df6589b967cd6523048cfe94a119db",
+      "bytes": 329109
+    },
+    "all-runtime.log": {
+      "path": "/tmp/demiflow-gpt-runtime-v3-review-20261115/all-runtime.log",
+      "sha256": "0fe4ed6e6d25bdda57e8805273bb6fbce5bfbad6c9bba7bd74d5876610ec6af0",
+      "bytes": 49
+    },
+    "lanes-final.log": {
+      "path": "/tmp/demiflow-gpt-runtime-v3-review-20261115/lanes-final.log",
+      "sha256": "7f7ffb8ed3c4e98043187315705426e1eb96f18d0a7a2f030ee223340a1fbc32",
+      "bytes": 13651
+    }
+  },
+  "metadata_correction": {
+    "files": [
+      "real-proof-final.json",
+      "lanes-diagnostic.json"
+    ],
+    "field": "PYTHONPATH",
+    "actual_value": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115:/tmp/demiflow-gpt-runtime-v3-review-20261115",
+    "reason": "runner env included its diagnostic plugin directory; original metadata only recorded repository prefix; demiflow.__file__ and cwd were bound to the correct tree"
+  },
+  "remaining_blockers": "REVIEW.md sections 4-6",
+  "evidence_asset_digests": {
+    "review_deadline.py": "016bba3e031f2b1a06f6f2f6a85af80b83a74fdaf0dcce98f0c93d94e34c0baf",
+    "public-golden-final.log": "909a369c834cc4a80b31190cc7dfb0a3cb31af88b24b0c48e6ef9ea6f7047804",
+    "public_golden_probe.py": "6c18955dfab9cb6b596bd19ef65d5aaa2f57d0dfe2bcf6cfc326ff5126aa024d",
+    "lanes-diagnostic.json": "3ab955c1d1c6c8c9b41b662de0a21e9119a2ea0f6dde150fe8f0cd8bcd777943",
+    "boundaries.json": "a2aa7b95a40465004c6928190438c0861d2f98a219a966e2f1157f764ffa5608",
+    "run_verified.py": "b929509ed90955af0cd9900aac51fe580f80604a04532508bf2ea401aa430854",
+    "real-proof-final.json": "e857411f0ef0e663c7ff6e2e02511eb20348145bfe92a0353e0bdf7f46117f91",
+    "real-proof-final.log": "6fbce275d1173d0e1cd8d3ef3e6d14228898e39ce6a89f04c3b35f1c41145878",
+    "real-proof-final.xml": "a098765ed892f49f2e4bb5acf3dfc31157872545becb4c9f35eabcd48f4f4217",
+    "ray-host-final.log": "dca36476b5d4ddac1eeabd2030e3c26ea3f6326f9286ce78d2aa5c8b6cf2d29a",
+    "all-runtime.json": "48c9082057e32122e4cd489f9eecb0335a8df97687c45852e3273b3bbf4464a1",
+    "ray_host_probe.py": "175600c96f8b2850d173026839bea1c804fde4d78542d7679df209557997ceed"
+  }
+}

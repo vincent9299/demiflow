@@ -263,12 +263,31 @@ def _float_map(value, label: str) -> Mapping[str, float]:
     return MappingProxyType(frozen)
 
 
+class _FrozenRowList(tuple):
+    """Immutable list payload retaining its business type across decoding."""
+
+
+def thaw_record_value(value):
+    """Return ordinary business containers without changing list/tuple identity."""
+    if isinstance(value, Mapping):
+        return {key: thaw_record_value(item) for key, item in value.items()}
+    if isinstance(value, _FrozenRowList):
+        return [thaw_record_value(item) for item in value]
+    if type(value) is tuple:
+        return tuple(thaw_record_value(item) for item in value)
+    if type(value) is list:
+        return [thaw_record_value(item) for item in value]
+    return value
+
+
 def _freeze_row_value(value, depth: int):
     if depth > _ROW_MAX_DEPTH:
         raise _budget_err("record row exceeds depth budget")
-    if type(value) is dict:
+    if isinstance(value, Mapping):
         return MappingProxyType({k: _freeze_row_value(v, depth + 1) for k, v in value.items()})
-    if type(value) is list:
+    if type(value) is list or isinstance(value, _FrozenRowList):
+        return _FrozenRowList(_freeze_row_value(v, depth + 1) for v in value)
+    if type(value) is tuple:
         return tuple(_freeze_row_value(v, depth + 1) for v in value)
     return value
 
@@ -1667,17 +1686,9 @@ def _is_action_program(value, label):
     return value
 
 
-@dataclass(frozen=True)
-class NativeOperation(LogicalOp):
-    kind: str
-    configuration: Mapping[str, Json]
-    bindings: Mapping[str, Json]
-    factory: CallableSpec
-
-    def __post_init__(self):
-        _ident(self.kind, "NativeOperation.kind")
-        object.__setattr__(self, "configuration", _json_map(self.configuration, "NativeOperation.configuration"))
-        object.__setattr__(self, "bindings", _json_map(self.bindings, "NativeOperation.bindings"))
+# One declaration type is shared by public API, compiler and runtime. Two
+# structurally identical dataclasses still fail isinstance and split identity.
+from ...data.dataflow_operation import NativeOperation
 
 
 @runtime_checkable

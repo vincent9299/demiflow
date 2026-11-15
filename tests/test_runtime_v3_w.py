@@ -59,7 +59,6 @@ _IDENT = re.compile(r"[A-Za-z0-9_.:\-]{1,128}\Z")
 
 def _build_errors_module() -> types.ModuleType:
     mod = types.ModuleType("demiflow.execution.contracts.dataflow_errors")
-    mod.__file__ = str(ROOT / "demiflow/execution/contracts/dataflow_errors.py")
 
     class DataflowError(Exception):
         def __init__(self, code, message, *, retryable=False, context=None):
@@ -84,7 +83,6 @@ def _build_errors_module() -> types.ModuleType:
 
 def _build_dataflow_module() -> types.ModuleType:
     mod = types.ModuleType("demiflow.execution.contracts.dataflow")
-    mod.__file__ = str(ROOT / "demiflow/execution/contracts/dataflow.py")
     errors = sys.modules["demiflow.execution.contracts.dataflow_errors"]
     DataflowError = errors.DataflowError
 
@@ -372,7 +370,6 @@ def _build_dataflow_module() -> types.ModuleType:
 
 def _build_store_module() -> types.ModuleType:
     mod = types.ModuleType("demiflow.execution.dataflow_store")
-    mod.__file__ = str(ROOT / "demiflow/execution/dataflow_store.py")
     errors = sys.modules["demiflow.execution.contracts.dataflow_errors"]
     DataflowError = errors.DataflowError
 
@@ -418,7 +415,6 @@ def _build_store_module() -> types.ModuleType:
 
 def _build_seal_module() -> types.ModuleType:
     mod = types.ModuleType("demiflow.execution.dataflow_seal")
-    mod.__file__ = str(ROOT / "demiflow/execution/dataflow_seal.py")
     # Test-domain registry: (directory, action_id) -> (graph, physical, sealed).
     mod._registry = {}
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import sys
 import threading
 import time
@@ -18,7 +19,7 @@ from collections import deque
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Callable
 
-from .contracts.dataflow_codec import encode_wire
+from .contracts.dataflow_codec import encode_wire, decode_wire
 from .contracts.dataflow_errors import DataflowError
 from .worker.bootstrap import LocalControlConnector
 
@@ -134,19 +135,13 @@ class ControlMailbox:
             self._condition.notify_all()
 
 
-def _event_from_dict(data: dict) -> "WorkerEvent":
-    from .contracts.dataflow import ArtifactRef, WorkerEvent
-    payload_ref = data.get("payload_ref")
-    if isinstance(payload_ref, dict):
-        payload_ref = ArtifactRef(**payload_ref)
-    fields = dict(data)
-    fields["payload_ref"] = payload_ref
-    return WorkerEvent(**fields)
+def _event_from_dict(data: dict, *, bounds) -> "WorkerEvent":
+    raw = json.dumps({"schema": "demiflow.runtime_wire.v3", "type": "WorkerEvent", "payload": data}).encode()
+    return decode_wire(raw, type_name="WorkerEvent", bounds=bounds)
 
 
-def _reply_frame(reply: "ControlReply") -> dict:
-    return {"type": "control_reply", "operation_id": reply.operation_id, "status": reply.status,
-            "payload": reply.payload, "error_code": reply.error_code}
+def _reply_frame(reply: "ControlReply", *, bounds) -> dict:
+    return {"type": "control_reply", "wire": encode_wire(reply, type_name="ControlReply", bounds=bounds).decode()}
 
 
 class DataflowLocalConnector(LocalControlConnector):
@@ -157,6 +152,15 @@ class DataflowLocalConnector(LocalControlConnector):
     spawn runs the inherited abort cleanup so no scope or fd is leaked.
     """
 
+    def __init__(self):
+        super().__init__()
+        self._bounds_by_allocation = {}
+
+    def stage(self, allocation_id, launch_spec):
+        from .contracts.dataflow import Bounds
+        self._bounds_by_allocation[allocation_id] = Bounds(**launch_spec["dataflow_v3"]["bounds"])
+        super().stage(allocation_id, launch_spec)
+
     def spawn_payload(self, allocation_id: str) -> dict:
         launch_spec = self._staged[allocation_id]
         v3 = launch_spec.get("dataflow_v3")
@@ -166,11 +170,14 @@ class DataflowLocalConnector(LocalControlConnector):
 
     def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
         from .worker.bootstrap import send_message
-        send_message(self.driver_socks[allocation_id], {"type": "cut_request", "cut": asdict(request)})
+        bounds = self._bounds_by_allocation[allocation_id]
+        send_message(self.driver_socks[allocation_id], {"type": "cut_request", "wire":
+            encode_wire(request, type_name="CutRequest", bounds=bounds).decode()})
 
     def deliver_control_reply(self, allocation_id: str, reply: "ControlReply") -> None:
         from .worker.bootstrap import send_message
-        send_message(self.driver_socks[allocation_id], _reply_frame(reply))
+        bounds = self._bounds_by_allocation[allocation_id]
+        send_message(self.driver_socks[allocation_id], _reply_frame(reply, bounds=bounds))
 
 
 class _EndpointBase:
@@ -186,15 +193,27 @@ class _EndpointBase:
         self._closed_flag = False
         self._grant = None
         self._model = None
+        self._manager = services.resources
+        self._state = self._manager.state
+        self._provider = self._manager.provider
+        self._connector = self._provider._control
+        self._assignment = None
+        self._events = deque()
 
     def _build_launch(self, assignment: "WorkerAssignment") -> tuple[dict, dict, dict]:
         run = self._services.action.context
         lease = self._lease
-        scope_id = assignment.action_id
-        grant = {"grant_id": uuid.uuid4().hex, "run_id": run.ref.run_id, "attempt": run.attempt,
-                 "fence": run.fence, "scope_id": scope_id, "allocation_id": lease.allocation_id,
-                 "boot_id": lease.boot_id, "controller_epoch": run.attempt,
-                 "expires_at_ms": int(time.time() * 1000) + max(120000, int(run.limits["timeout_s"] * 1000))}
+        scope_id = "df-" + assignment.plan_id
+        raw = b"".join(self._services.store.read(lease.grant_ref,
+                        max_bytes=assignment.bounds.max_control_bytes))
+        grant = json.loads(raw)
+        if (grant["scope_id"] != scope_id or grant["allocation_id"] != lease.allocation_id
+                or grant["boot_id"] != lease.boot_id):
+            raise DataflowError("FENCED", "worker grant differs from staged allocation")
+        # The v3 grant artifact also carries scheduling metadata; K3 consumes
+        # its frozen nine-field authority projection, not those extra fields.
+        grant = {key: grant[key] for key in ("grant_id", "run_id", "attempt", "fence",
+                 "scope_id", "allocation_id", "boot_id", "controller_epoch", "expires_at_ms")}
         code_pin = assignment.sealed.code_pin_ref.digest
         manifest_ref = {"manifest_id": code_pin, "sha256": code_pin}
         launch_spec = {
@@ -204,40 +223,30 @@ class _EndpointBase:
             "artifact_digest_observed": code_pin,
             "dataflow_v3": {"entrypoint": "dataflow_worker_v3", "bounds": asdict(assignment.bounds),
                             "limits": dict(run.limits), "code_pin": code_pin,
-                            "cache": str(run.directory / "worker-cache"), "assignment": asdict(assignment)},
+                            "cache": str(run.directory / "worker-cache"),
+                            "store_root": str(self._services.store.root), "store_id": self._services.store.store_id,
+                            "assignment": {"wire": encode_wire(assignment, type_name="WorkerAssignment",
+                                                   bounds=assignment.bounds).decode("utf-8")}},
         }
         return launch_spec, grant, manifest_ref
 
-    def _resource_request(self, assignment: "WorkerAssignment", scope_id: str, code_pin: str):
-        from ..resources.contracts import (RESOURCE_PROTOCOL_VERSION, ResourceProfile,
-                                           WorkerLaunchSpec, WorkerRequest)
-        run = self._services.action.context
-        profile = ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 1024 ** 3})
-        launch = WorkerLaunchSpec(
-            artifact_refs={"code_pin": {"digest": code_pin, "location": "file://" + str(run.directory)}},
-            entrypoint=self._entrypoint, argv=self._argv, bootstrap_ref="bootstrap-ref",
-            access_refs={}, runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
-        return WorkerRequest(uuid.uuid4().hex, self._allocation_id, profile, launch,
-                             provision_deadline_ms=60000)
+    def prepare(self, assignment: "WorkerAssignment") -> None:
+        if self._assignment is not None:
+            if self._assignment != assignment:
+                raise DataflowError("FENCED", "allocation assignment changed after staging")
+            return
+        launch, grant, _ = self._build_launch(assignment)
+        self._grant = grant
+        self._scope_id = grant["scope_id"]
+        self._assignment = assignment
+        self._connector.stage(self._allocation_id, launch)
 
-    def _open_scope(self, scope_id: str, provider: str) -> None:
-        from ..resources.contracts import ResourceScope
-        run = self._services.action.context
-        self._state.open_scope(run.fence, ResourceScope(
-            scope_id, run.ref.run_id, {"provider": provider}, run.fence,
-            {"cpu_millis": 8000, "memory_bytes": 8 * 1024 ** 3, "max_workers": 4}))
-
-    def _apply(self, scope_id: str, request) -> None:
-        from ..resources.contracts import RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan
-        run = self._services.action.context
-        self._manager.apply(
-            MutationContext(RESOURCE_PROTOCOL_VERSION, scope_id, run.attempt, run.fence, uuid.uuid4().hex, 0),
-            ResourcePlan(scope_id, (request,), ()))
-        self._manager.reconcile_once(run.fence, time.monotonic() + 30, 16)
-        snapshot = self._manager.get(scope_id)
-        phase = snapshot["allocations"][0]["phase"] if snapshot["allocations"] else None
-        if phase != "RUNNING":
-            raise DataflowError("RESOURCE_INFEASIBLE", "worker did not reach RUNNING: " + str(phase))
+    def _check_event_identity(self, event):
+        assignment = self._assignment
+        if (event.run_id != assignment.run_id or event.attempt != assignment.attempt
+                or event.fence != assignment.fence or event.allocation_id != self._allocation_id
+                or event.boot_id != self._boot_id or event.plan_revision != assignment.plan_revision):
+            raise DataflowError("FENCED", "Worker event differs from its allocation/attempt")
 
     def _k3_envelope(self, kind: str, payload: dict) -> dict:
         from .contracts.envelope import WORKER_PROTOCOL_VERSION
@@ -263,9 +272,6 @@ class _EndpointBase:
             self._send_k3("Cancel", {"operation_id": uuid.uuid4().hex, "reason": reason})
         except DataflowError:
             pass
-        identity = {"scope_id": self._scope_id, "allocation_id": self._allocation_id}
-        evidence = self._provider.ensure_absent(identity, deadline_ms)
-        self._closed_flag = evidence.get("cleanup") == "CONFIRMED"
 
     def closed(self) -> bool:
         if self._scope_id is None:
@@ -274,7 +280,8 @@ class _EndpointBase:
         allocations = snapshot.get("allocations") or []
         if not allocations:
             return self._closed_flag
-        return allocations[0].get("phase") == "TERMINATED"
+        return any(a["allocation_id"] == self._allocation_id and a.get("cleanup") == "CONFIRMED"
+                   for a in allocations)
 
 
 class LocalHostEndpoint(_EndpointBase):
@@ -282,19 +289,6 @@ class LocalHostEndpoint(_EndpointBase):
 
     def __init__(self, lease: "WorkerLease", *, services: "DriverServices"):
         super().__init__(lease, services=services)
-        from ..resources.capacity import LocalCapacityPool
-        from ..resources.local import LocalResourceProvider
-        from ..resources.manager import ManagerBounds, ResourceManager
-        from ..resources.process_unit import ManagedProcessUnit
-        from .resource_state import RunResourceState
-        run = services.action.context
-        root = run.directory.with_name(run.directory.name + "-resources")
-        pool = LocalCapacityPool(root / "capacity", capacity={"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3})
-        unit = ManagedProcessUnit(root / "units")
-        self._connector = DataflowLocalConnector()
-        self._provider = LocalResourceProvider(pool, unit, control=self._connector)
-        self._state = RunResourceState(run.journal)
-        self._manager = ResourceManager(self._provider, self._state, bounds=ManagerBounds())
         self._sock = None
         self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.bootstrap")
 
@@ -302,12 +296,9 @@ class LocalHostEndpoint(_EndpointBase):
         from .contracts.worker import WorkerProtocolModel
         from .worker.bootstrap import recv_message
         from .worker.dataflow_host import make_worker_control_assignment
-        launch_spec, grant, manifest_ref = self._build_launch(assignment)
-        self._grant = grant
-        self._scope_id = assignment.action_id
-        self._connector.stage(self._allocation_id, launch_spec)
-        self._open_scope(self._scope_id, "local")
-        self._apply(self._scope_id, self._resource_request(assignment, self._scope_id, manifest_ref["sha256"]))
+        if self._assignment != assignment:
+            raise DataflowError("FENCED", "worker assignment was not staged before allocation")
+        _, grant, manifest_ref = self._build_launch(assignment)
         self._sock = self._connector.driver_socks[self._allocation_id]
         self._sock.settimeout(self._services.policy.control_timeout_ms / 1000.0)
         run = self._services.action.context
@@ -342,6 +333,11 @@ class LocalHostEndpoint(_EndpointBase):
                 if "error" in message:
                     raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(message["error"]))
                 return message["receipt"]
+            if message.get("type") == "worker_event":
+                event = _event_from_dict(message["event"], bounds=self._services.bounds)
+                self._check_event_identity(event)
+                reply = self._services.journal_service.dispatch(event)
+                self.deliver_reply(reply)
             if message.get("kind") in ("Register", "Ready", "Heartbeat"):
                 self._model.handle(message, now_ms=int(time.time() * 1000))
 
@@ -358,7 +354,7 @@ class LocalHostEndpoint(_EndpointBase):
             if frame is None:
                 break
             if frame.get("type") == "worker_event":
-                events.append(_event_from_dict(frame["event"]))
+                events.append(_event_from_dict(frame["event"], bounds=self._services.bounds))
         return tuple(events)
 
     def deliver_reply(self, reply: "ControlReply") -> None:
@@ -381,70 +377,80 @@ def make_host_endpoint(lease: "WorkerLease", *, services: "DriverServices"):
 if _RAY_AVAILABLE:
     import ray
     from ray.exceptions import GetTimeoutError, RayActorError
+    from .worker.ray_host import RayControlConnector as _RayControlConnector
+else:
+    _RayControlConnector = object
 
-    from .worker.ray_host import RayControlConnector
 
-    class DataflowRayConnector(RayControlConnector):
-        """Ray actor connector hosting the v3 dataflow worker (H054)."""
+class DataflowRayConnector(_RayControlConnector):
+    """Ray actor connector hosting the v3 dataflow worker (H054)."""
 
-        def host_class(self):
-            from .worker.dataflow_host import HostedDataflowWorker
-            return ray.remote(max_restarts=0, max_task_retries=0)(HostedDataflowWorker)
+    def __init__(self, **kwargs):
+        if not _RAY_AVAILABLE:
+            raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
+        super().__init__(**kwargs)
 
-        def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
-            ray.get(self._actor(allocation_id).request_cut.remote(request),
-                    timeout=self._command_timeout_s)
+    def host_class(self):
+        from .worker.dataflow_host import HostedDataflowWorker
+        return ray.remote(max_restarts=0, max_task_retries=0, max_concurrency=8)(HostedDataflowWorker)
 
-        def deliver_control_reply(self, allocation_id: str, reply: "ControlReply") -> None:
-            ray.get(self._actor(allocation_id).deliver_control_reply.remote(reply),
-                    timeout=self._command_timeout_s)
+    def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
+        ray.get(self._actor(allocation_id).request_cut.remote(request),
+                timeout=self._command_timeout_s)
 
-    class RayHostEndpoint(_EndpointBase):
-        _entrypoint = "demiflow-worker-actor"
+    def deliver_control_reply(self, allocation_id: str, reply: "ControlReply") -> None:
+        ray.get(self._actor(allocation_id).deliver_control_reply.remote(reply),
+                timeout=self._command_timeout_s)
 
-        def __init__(self, lease: "WorkerLease", *, services: "DriverServices"):
-            super().__init__(lease, services=services)
-            from ..resources.manager import ManagerBounds, ResourceManager
-            from ..resources.ray import RayResourceProvider
-            from .resource_state import RunResourceState
-            run = services.action.context
-            self._connector = DataflowRayConnector(command_timeout_s=services.policy.control_timeout_ms / 1000.0)
-            self._provider = RayResourceProvider(self._connector)
-            self._state = RunResourceState(run.journal)
-            self._manager = ResourceManager(self._provider, self._state, bounds=ManagerBounds())
-            self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.dataflow_host")
+class RayHostEndpoint(_EndpointBase):
+    _entrypoint = "demiflow-worker-actor"
 
-        def activate(self, assignment: "WorkerAssignment") -> None:
-            from .worker.dataflow_host import make_worker_control_assignment
-            launch_spec, grant, manifest_ref = self._build_launch(assignment)
-            self._grant = grant
-            self._scope_id = assignment.action_id
-            self._connector.stage(self._allocation_id, launch_spec)
-            self._open_scope(self._scope_id, "ray")
-            self._apply(self._scope_id, self._resource_request(assignment, self._scope_id, manifest_ref["sha256"]))
-            control = make_worker_control_assignment(assignment, grant=grant, manifest_ref=manifest_ref,
-                                                     ready_deadline_ms=60000)
-            run = self._services.action.context
-            self._send_k3("VerifyArtifactAndCapabilities",
-                          {"artifact_manifest_ref": manifest_ref, "required_capabilities": ["cpu-map", "stream"]})
-            self._send_k3("Restore", {"assignment_ref": assignment.action_id,
-                                      "restore_point": control["restore_point"], "state_refs": []})
-            self._send_k3("Activate", {"grant_ref": grant["grant_id"], "controller_epoch": run.attempt,
-                                       "operation_id": uuid.uuid4().hex})
-            self._send_k3("Assign", {"assignment": control})
-            self._activated = True
+    def __init__(self, lease: "WorkerLease", *, services: "DriverServices"):
+        if not _RAY_AVAILABLE:
+            raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
+        super().__init__(lease, services=services)
+        self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.dataflow_host")
 
-        def _send_k3(self, kind: str, payload: dict) -> dict:
-            result = self._connector.handle(self._allocation_id, self._k3_envelope(kind, payload))
-            if "error" in result:
-                raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(result["error"]))
-            return result.get("receipt")
+    def activate(self, assignment: "WorkerAssignment") -> None:
+        from .worker.dataflow_host import make_worker_control_assignment
+        if self._assignment != assignment:
+            raise DataflowError("FENCED", "worker assignment was not staged before allocation")
+        _, grant, manifest_ref = self._build_launch(assignment)
+        control = make_worker_control_assignment(assignment, grant=grant, manifest_ref=manifest_ref,
+                                                 ready_deadline_ms=60000)
+        run = self._services.action.context
+        self._send_k3("VerifyArtifactAndCapabilities",
+                      {"artifact_manifest_ref": manifest_ref, "required_capabilities": ["cpu-map", "stream"]})
+        self._send_k3("Restore", {"assignment_ref": assignment.action_id,
+                                  "restore_point": control["restore_point"], "state_refs": []})
+        self._send_k3("Activate", {"grant_ref": grant["grant_id"], "controller_epoch": run.attempt,
+                                   "operation_id": uuid.uuid4().hex})
+        self._send_k3("Assign", {"assignment": control})
+        self._activated = True
 
-        def poll(self, *, max_events: int, deadline_ms: int) -> tuple["WorkerEvent", ...]:
-            try:
-                return tuple(self._connector.pull(self._allocation_id, limit=max_events))
-            except (RayActorError, GetTimeoutError):
-                return ()
+    def _send_k3(self, kind: str, payload: dict) -> dict:
+        actor = self._connector._actor(self._allocation_id)
+        command = actor.handle.remote(self._k3_envelope(kind, payload))
+        deadline = time.monotonic() + self._services.policy.control_timeout_ms / 1000
+        while True:
+            ready, _ = ray.wait([command], timeout=0.01)
+            if ready:
+                result = ray.get(command)
+                break
+            if time.monotonic() >= deadline:
+                raise DataflowError("DEADLINE_EXCEEDED", "Ray worker control command timed out")
+            for event in self._connector.pull(self._allocation_id, limit=self._services.bounds.max_pending_events):
+                self._check_event_identity(event)
+                self.deliver_reply(self._services.journal_service.dispatch(event))
+        if "error" in result:
+            raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(result["error"]))
+        return result.get("receipt")
 
-        def deliver_reply(self, reply: "ControlReply") -> None:
-            self._connector.deliver_control_reply(self._allocation_id, reply)
+    def poll(self, *, max_events: int, deadline_ms: int) -> tuple["WorkerEvent", ...]:
+        try:
+            return tuple(self._connector.pull(self._allocation_id, limit=max_events))
+        except (RayActorError, GetTimeoutError):
+            return ()
+
+    def deliver_reply(self, reply: "ControlReply") -> None:
+        self._connector.deliver_control_reply(self._allocation_id, reply)

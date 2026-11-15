@@ -163,7 +163,7 @@ class DataflowCheckpointCoordinator:
     __slots__ = ("_action", "_physical", "_store", "_commit", "_artifacts",
                  "_participants", "_route_epoch", "_lock", "_sequence",
                  "_pending", "_last_acked_sequence", "_source_eoi", "_closed",
-                 "_fence", "__weakref__")
+                 "_fence", "_owner_key", "__weakref__")
 
     def __init__(self, action: RunAction, physical: PhysicalDataflow, *, store) -> None:
         if not isinstance(action, RunAction):
@@ -174,22 +174,24 @@ class DataflowCheckpointCoordinator:
             raise DataflowError("FENCED", "Checkpoint coordinator requires the live driver context")
         if not isinstance(physical, PhysicalDataflow):
             raise DataflowError("INVALID_CONTRACT", "Checkpoint coordinator requires a PhysicalDataflow")
+        from .contracts.dataflow_codec import compute_participant_id
         participants = []
         for stage in physical.stages:
             for partition in stage.partitions:
-                participants.append(stage.stage_id + ":" + partition)
+                participants.append(compute_participant_id(stage.stage_id, partition))
         if not participants:
             raise DataflowError("INVALID_CONTRACT", "Physical plan has no cut participants")
         if len(participants) != len(set(participants)):
             raise DataflowError("INVALID_CONTRACT", "Duplicate cut participant identity")
         if len(participants) > MAX_STATES:
             raise DataflowError("BUDGET_EXCEEDED", "Cut participant count exceeds state budget")
+        self._owner_key = (context.ref.run_id, action.action_id)
         with _OWNERS_LOCK:
-            existing = _OWNERS.get(action.action_id)
+            existing = _OWNERS.get(self._owner_key)
             if existing is not None and not existing._closed:
                 raise DataflowError("INVALID_CONTRACT",
                                     "Action already has a live checkpoint coordinator")
-            _OWNERS[action.action_id] = self
+            _OWNERS[self._owner_key] = self
         self._action = action
         self._physical = physical
         self._store = store
@@ -333,7 +335,7 @@ class DataflowCheckpointCoordinator:
                             raise DataflowError("INVALID_CONTRACT",
                                                 "final cut committed without full source EOI")
             source_vector = self._merge_source_vector(contributions)
-            image = RecoveryImage(commit_id="", cut=request, contributions=contributions,
+            image = RecoveryImage(commit_id="0" * 64, cut=request, contributions=contributions,
                                   confirmed_sinks={}, source_vector=source_vector)
             position = source_vector_position(image, action_id=self._action.action_id)
             states = {_CUT_STATE_KEY: {
@@ -482,8 +484,8 @@ class DataflowCheckpointCoordinator:
             self._closed = True
             self._pending.clear()
             with _OWNERS_LOCK:
-                if _OWNERS.get(self._action.action_id) is self:
-                    del _OWNERS[self._action.action_id]
+                if _OWNERS.get(self._owner_key) is self:
+                    del _OWNERS[self._owner_key]
 
 
 # -- D007 -----------------------------------------------------------------

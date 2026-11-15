@@ -102,7 +102,9 @@ def _isolation_tokens(profile: ResourceProfile) -> tuple[str, ...]:
 
 
 def _partition_ids(stage_id: str, count: int) -> tuple[str, ...]:
-    return tuple(f"{stage_id}:p{index}" for index in range(count))
+    # Native K3/K4 identifiers exclude ':'; the physical plan must be usable
+    # by both frozen protocols without rewriting its partition identities.
+    return tuple(f"{stage_id}-p{index}" for index in range(count))
 
 
 def _kernel_refs(node) -> tuple[ArtifactRef, ...]:
@@ -429,7 +431,8 @@ def solve_residency(
         memory_needed += requests["memory_bytes"] * stage.replica_target
         gpu_needed += _gpu_count(stage.profile) * stage.replica_target
         isolation.update(_isolation_tokens(stage.profile))
-    cpu_capacity = sum(host.logical_resources.get("cpu", 0.0) for host in hosts) * 1000
+    cpu_capacity = sum(host.logical_resources.get(
+        "cpu_millis", host.logical_resources.get("cpu", 0.0) * 1000) for host in hosts)
     memory_capacity = sum(host.logical_resources.get("memory_bytes", 0.0) for host in hosts)
     gpu_capacity = sum(host.logical_resources.get("gpu", 0.0) for host in hosts)
     if cpu_needed > cpu_capacity:
@@ -713,7 +716,7 @@ def compile_physical_dataflow(
     physical = PhysicalDataflow(
         schema="demiflow.physical_dataflow.v3",
         dag_id=graph.dag_id,
-        plan_id="",
+        plan_id="0" * 64,
         plan_revision=0,
         stages=stages,
         exchanges=exchanges,

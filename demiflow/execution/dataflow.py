@@ -56,8 +56,11 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
         execution.prepare()
         execution.start()
         return open_terminal(request, execution=execution)
-    except BaseException:
-        execution.close()
+    except BaseException as failure:
+        try:
+            execution.close()
+        except Exception as cleanup:
+            failure.add_note("Execution cleanup also failed: " + str(cleanup))
         raise
 
 
@@ -137,8 +140,11 @@ class DataflowExecution:
         if self._restore_image is not None:
             restore_refs = tuple(ref for contribution in self._restore_image.contributions
                                  for ref in contribution.buffers)
-        splits = tuple(s for s in self._physical.splits
-                       if s.source_id in {src.source_id for src in self._physical.sources})
+        source_ids = set(stage.occurrences) & set(self._graph.sources)
+        splits = tuple(split for source_id in source_ids
+                       for index, split in enumerate(s for s in self._physical.splits
+                                                     if s.source_id == source_id)
+                       if stage.partitions[index % len(stage.partitions)] in lease.partition_ids)
         return WorkerAssignment(
             schema="demiflow.dataflow_assignment.v3", run_id=self._run_id(),
             action_id=self._action.action_id, attempt=self._attempt(), fence=self._fence(),
@@ -146,17 +152,21 @@ class DataflowExecution:
             lease=lease, sealed=self._sealed, stages=(stage,), inputs=inputs, outputs=outputs,
             source_splits=splits, restore_refs=restore_refs, bounds=self._bounds)
 
-    def _activate(self, lease: WorkerLease, stage) -> None:
+    def _prepare_launch(self, lease: WorkerLease, stage) -> WorkerLease:
         grant_bytes = self._scheduler.grants.get(lease.allocation_id)
         if grant_bytes is not None:
             staged = self._store.put(iter((grant_bytes,)), max_bytes=self._bounds.max_control_bytes,
                                      media_type="application/json")
             from dataclasses import replace
             lease = replace(lease, grant_ref=staged)
-            self._scheduler.leases[lease.allocation_id] = lease
         endpoint = make_host_endpoint(lease, services=self._services)
-        endpoint.activate(self._assignment(lease, stage))
+        endpoint.prepare(self._assignment(lease, stage))
         self._endpoints[lease.allocation_id] = endpoint
+        return lease
+
+    def _activate(self, lease: WorkerLease, stage) -> None:
+        endpoint = self._endpoints[lease.allocation_id]
+        endpoint.activate(self._assignment(lease, stage))
         self._lease_by_operation[self._operation_for_lease(lease)] = lease
 
     def _operation_for_lease(self, lease: WorkerLease) -> str:
@@ -177,13 +187,19 @@ class DataflowExecution:
         compiled = lower_action(self._request, bounds=self._bounds)
         graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,
                                         bounds=self._bounds)
-        snapshot = snapshot_source(self._request.source, action=self._action, store=self._store,
-                                   bounds=self._bounds)
-        splits = plan_source_splits(snapshot, self._request.source,
-                                    target_partitions=self._policy.default_partitions, bounds=self._bounds)
+        snapshots, splits = [], []
+        for declaration in compiled.declarations:
+            if declaration.source_spec is None:
+                continue
+            snapshot = snapshot_source(declaration.source_spec, action=self._action,
+                                       store=self._store, bounds=self._bounds,
+                                       source_id=declaration.occurrence_id)
+            snapshots.append(snapshot)
+            splits.extend(plan_source_splits(snapshot, declaration.source_spec,
+                          target_partitions=self._policy.default_partitions, bounds=self._bounds))
         constants_ref = resolve_execution_constants(graph, action=self._action, store=self._store)
         physical = compile_physical_dataflow(
-            graph, (snapshot,), splits, policy=self._policy, hosts=self._services.hosts,
+            graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
             bounds=self._bounds, constants_ref=constants_ref)
         sealed = seal_dataflow(self._action, graph, physical, store=self._store)
         stage_runtime_bundle(sealed, store=self._store, bounds=self._bounds)
@@ -192,9 +208,17 @@ class DataflowExecution:
         self._sealed = sealed
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources)
         self._checkpoint = DataflowCheckpointCoordinator(self._action, physical, store=self._store)
-        self._acquisition = NativeAcquisitionService(self._action, services=self._services)
-        self._acquisition.configure(self._request.source, self._request.plan, self._request.sink)
-        self._services.journal_service.bind_queue(self._acquisition)
+        from .queue_execution import queue_source
+        from .raw_fetch import RawFetch
+        from ..data.plan import AsyncMapOp
+        requires_acquisition = queue_source(self._request.source) is not None or any(
+            isinstance(op, AsyncMapOp) and isinstance(
+                getattr(op.callable.target, "__self__", op.callable.target), RawFetch)
+            for op in self._request.plan.operations)
+        if requires_acquisition:
+            self._acquisition = NativeAcquisitionService(self._action, services=self._services)
+            self._acquisition.configure(self._request.source, self._request.plan, self._request.sink)
+            self._services.journal_service.bind_queue(self._acquisition)
         self._prepared = True
         return sealed
 
@@ -214,17 +238,20 @@ class DataflowExecution:
             self._scheduler.scope_id, self._run_id(), {"provider": self._policy.provider},
             self._fence(), budget))
         self._scope_open = True
-        self._restore_image = self._checkpoint.recover(sinks=self._sinks)
-        self._acquisition.start()
+        self._restore_image = (self._checkpoint.recover(sinks=self._sinks)
+                               if self._action.context.resuming else None)
+        if self._acquisition is not None:
+            self._acquisition.start()
         # Consumers and control reserve capacity before producers; a partial
         # allocation still progresses, never all-to-producers (deadlock gate).
         for stage in self._stage_order():
             for partition_id in stage.partitions:
                 work = self._initial_work(stage, partition_id)
                 try:
-                    lease = self._scheduler.place(work)
+                    lease = self._scheduler.place(work, prepare=self._prepare_launch, host_id=self._services.hosts[0].host_id)
                 except DataflowError as exc:
                     if exc.retryable:
+                        self._scheduler.enqueue(work)
                         continue
                     raise
                 self._activate(lease, stage)
@@ -294,7 +321,7 @@ class DataflowExecution:
             choice = self._scheduler.choose(now_ms=_now_ms())
             if choice.work is not None:
                 stage = next(s for s in self._physical.stages if s.stage_id == choice.work.stage_id)
-                lease = self._scheduler.place(choice.work)
+                lease = self._scheduler.place(choice.work, prepare=self._prepare_launch, host_id=self._services.hosts[0].host_id)
                 self._activate(lease, stage)
             return
         if kind == "cut":
@@ -327,7 +354,8 @@ class DataflowExecution:
         self._checkpoint.commit(self._cut.cut_id, sinks=self._sinks)
         for stage in self._physical.stages:
             self._scheduler.drain(stage.stage_id, deadline_ms=self._policy.control_timeout_ms)
-        self._acquisition.finish()
+        if self._acquisition is not None:
+            self._acquisition.finish()
         completion = "source_exhausted" if self._source_exhausted else "terminal_satisfied"
         self._terminal_result = TerminalResult(
             kind=self._request.kind, rows=self._confirmed_rows, scalar=None,
@@ -354,30 +382,23 @@ class DataflowExecution:
             return
         self._closed = True
         deadline_ms = self._policy.control_timeout_ms
+        cleanup_error = None
         if self._scope_open and self._scheduler is not None:
-            resources = self._services.resources
-            for allocation_id in list(self._scheduler.leases):
-                try:
-                    _, attempt, fence = self._scheduler._owner_binding()
-                    context = MutationContext(RESOURCE_PROTOCOL_VERSION, self._scheduler.scope_id,
-                                              attempt, fence, "close-" + allocation_id,
-                                              self._scheduler._desired_revision)
-                    release = ReleaseSpec(allocation_id, "ABANDON", "close-" + allocation_id,
-                                          deadline_ms, "execution_close")
-                    accepted = resources.close(context, release)
-                    self._scheduler._desired_revision = accepted["desired_revision"]
-                    resources.reconcile_once(fence, time.monotonic() + deadline_ms / 1000.0, 16)
-                except DataflowError:
-                    # Preserve failure evidence; an unconfirmed exit is not hidden.
-                    pass
-                self._scheduler.leases.pop(allocation_id, None)
+            try:
+                self._scheduler.close(deadline_ms=deadline_ms)
+            except Exception as exc:
+                cleanup_error = exc
         if self._channels is not None:
             close_channels(self._channels, reason="execution_close", deadline_ms=deadline_ms)
             self._channels = None
         if self._acquisition is not None:
             self._acquisition.close()
+        if self._checkpoint is not None:
+            self._checkpoint.close()
         try:
             self._services.journal_service.close(deadline_ms=deadline_ms)
         except DataflowError:
             pass
         self._endpoints.clear()
+        if cleanup_error is not None:
+            raise cleanup_error

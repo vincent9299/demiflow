@@ -34,24 +34,27 @@ def _no_symlink(path: Path) -> None:
 
 
 class RunArtifactStore:
-    def __init__(self, *, root: Path, store_id: str, journal: "ArtifactAuthorityPort", bounds: "Bounds"):
+    def __init__(self, *, root: Path, store_id: str, journal: "ArtifactAuthorityPort", bounds: "Bounds", readonly: bool = False):
         identifier(store_id)
         root = Path(root)
         if not root.is_absolute():
             raise DataflowError("INVALID_CONTRACT", "artifact store root must be absolute")
         _no_symlink(root)
-        root.mkdir(parents=True, exist_ok=True)
+        if not readonly:
+            root.mkdir(parents=True, exist_ok=True)
         if not root.is_dir():
             raise DataflowError("INVALID_CONTRACT", "artifact store root is not a directory")
         _no_symlink(root)
         self._root = root
+        self._readonly = readonly
         self.store_id = store_id
         self._journal = journal
         self._bounds = bounds
         self._objects = root / store_id / _OBJECTS
         self._staging = root / store_id / _STAGING
-        self._objects.mkdir(parents=True, exist_ok=True)
-        self._staging.mkdir(parents=True, exist_ok=True)
+        if not readonly:
+            self._objects.mkdir(parents=True, exist_ok=True)
+            self._staging.mkdir(parents=True, exist_ok=True)
         _no_symlink(self._objects)
         _no_symlink(self._staging)
 
@@ -72,9 +75,11 @@ class RunArtifactStore:
         return path
 
     def _staging_operation(self) -> str:
-        return "put-" + secrets.token_hex(16)
+        return secrets.token_hex(32)
 
     def put(self, chunks: Iterator[bytes], *, max_bytes: int, media_type: str) -> ArtifactRef:
+        if self._readonly:
+            raise DataflowError("FENCED", "historical artifact store is read-only")
         if type(max_bytes) is not int or max_bytes <= 0:
             raise DataflowError("INVALID_CONTRACT", "max_bytes must be a positive int")
         if max_bytes > self._bounds.max_spill_bytes:
@@ -168,18 +173,22 @@ class RunArtifactStore:
         return True
 
     def retain(self, ref: ArtifactRef, *, owner: str) -> None:
+        if self._readonly:
+            raise DataflowError("FENCED", "historical artifact store is read-only")
         from .contracts.dataflow import ArtifactCommand
         identifier(owner)
         self._object_path(ref)
-        operation_id = "pin-" + _pin_identity(ref, owner)
+        operation_id = hashlib.sha256(("pin:" + _pin_identity(ref, owner)).encode()).hexdigest()
         self._journal.artifact(ArtifactCommand(operation_id=operation_id, kind="pin", ref=ref,
                                                owner=owner, size_bytes=ref.size_bytes))
 
     def release(self, ref: ArtifactRef, *, owner: str) -> None:
+        if self._readonly:
+            raise DataflowError("FENCED", "historical artifact store is read-only")
         from .contracts.dataflow import ArtifactCommand
         identifier(owner)
         self._object_path(ref)
-        operation_id = "unpin-" + _pin_identity(ref, owner)
+        operation_id = hashlib.sha256(("unpin:" + _pin_identity(ref, owner)).encode()).hexdigest()
         self._journal.artifact(ArtifactCommand(operation_id=operation_id, kind="unpin", ref=ref,
                                                owner=owner, size_bytes=ref.size_bytes))
 

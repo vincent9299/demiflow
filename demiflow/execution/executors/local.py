@@ -212,7 +212,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         if not isinstance(items, list):
             raise TypeError("from_items requires a materialized list")
         from ..dataflow_inputs import build_input_handle
-        return build_input_handle(items, format='items')
+        return build_input_handle(items, format='items', override_num_blocks=override_num_blocks)
 
     def from_arrow(self, tables: Any) -> Any:
         from ..dataflow_inputs import build_input_handle
@@ -226,7 +226,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         self, frames: Any, *, override_num_blocks: int | None = None,
     ) -> Any:
         from ..dataflow_inputs import build_input_handle
-        return build_input_handle(frames, format='pandas')
+        return build_input_handle(frames, format='pandas', override_num_blocks=override_num_blocks)
 
     def _iter_block_rows(self, block: Any) -> Iterator[Any]:
         if block is None:

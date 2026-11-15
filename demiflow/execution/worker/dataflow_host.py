@@ -36,7 +36,10 @@ def make_worker_control_assignment(assignment: "WorkerAssignment", *, grant: dic
                                    manifest_ref: dict, ready_deadline_ms: int) -> dict:
     lease = assignment.lease
     stages = [stage.stage_id for stage in assignment.stages]
-    partitions = list(lease.partition_ids)
+    # K3 identifiers exclude ':'; keep the physical v3 IDs in the sealed
+    # assignment and use a deterministic transport-only projection here.
+    from ..recovery_contract import identity
+    partitions = [identity(["dataflow-k3-partition-v3", value]) for value in lease.partition_ids]
     inputs = [{"channel_id": exchange.channel_id} for exchange in assignment.inputs]
     outputs = [exchange.channel_id for exchange in assignment.outputs]
     restore_point = None
@@ -46,7 +49,7 @@ def make_worker_control_assignment(assignment: "WorkerAssignment", *, grant: dic
         "schema_version": "demiflow.worker_assignment.v1",
         "assignment_id": assignment.action_id,
         "operation_id": uuid.uuid4().hex,
-        "scope_id": assignment.action_id,
+        "scope_id": grant["scope_id"],
         "allocation_id": lease.allocation_id,
         "boot_id": lease.boot_id,
         "worker_id": lease.host_id,
@@ -84,7 +87,12 @@ class HostedDataflowWorker:
                 raise DataflowError("CANCELLED", "worker has been cancelled")
 
         self._mailbox = ControlMailbox(bounds=bounds, check_stop=check_stop)
+        from ..dataflow_store import RunArtifactStore
+        self._mailbox.check_stop = check_stop
+        self._mailbox.store = RunArtifactStore(root=Path(config["store_root"]),
+            store_id=config["store_id"], journal=None, bounds=bounds)
         config["mailbox"] = self._mailbox
+        config["transport"] = self._mailbox
         launch_spec = dict(launch_spec)
         launch_spec["dataflow_v3"] = config
         directory = launch_spec["directory"]
@@ -96,7 +104,7 @@ class HostedDataflowWorker:
             with self._lock:
                 if len(self._control_outbox) >= _MAX_CONTROL_OUTBOX:
                     raise DataflowError("BUDGET_EXCEEDED", "worker control outbox exceeded its budget")
-                self._control_outbox.append(self._control_event(envelope))
+                self._control_outbox.append(envelope)
 
         self._runtime = WorkerRuntime(launch_spec, control=control, manifest_loader=manifest_loader)
         self._runtime.register()
@@ -104,18 +112,6 @@ class HostedDataflowWorker:
     @property
     def _executor(self):
         return getattr(self._runtime, "_v3_executor", None)
-
-    def _control_event(self, envelope: dict) -> "WorkerEvent":
-        from ..contracts.dataflow import WorkerEvent
-        kind = {"Register": "ready", "Ready": "ready", "Heartbeat": "progress"}.get(envelope["kind"], "progress")
-        operation_id = hashlib.sha256(envelope["operation_id"].encode()).hexdigest()
-        return WorkerEvent(
-            schema="demiflow.dataflow_event.v3", kind=kind, operation_id=operation_id,
-            run_id=envelope["run_id"], attempt=int(envelope["controller_epoch"]),
-            fence=self._boot_id, allocation_id=envelope["allocation_id"], boot_id=envelope["boot_id"],
-            plan_revision=self._runtime.plan_revision, scope_id=envelope["scope_id"],
-            controller_epoch=int(envelope["controller_epoch"]), payload_ref=None,
-            payload={"k3_kind": envelope["kind"], "k3_payload": envelope["payload"]})
 
     def identity(self) -> dict:
         return {"spec_hash": self._spec_hash, "boot_id": self._boot_id}
@@ -163,23 +159,28 @@ class HostedDataflowWorker:
             receipt = self._runtime.handle(message, now_ms=int(time.time() * 1000))
         except ProtocolError as exc:
             return {"error": exc.to_dict()}
+        except DataflowError as exc:
+            return {"error": {"code": exc.code, "message": str(exc)}}
         if message["kind"] == "Restore":
             self._runtime.ready(message["payload"]["assignment_ref"])
+        if message["kind"] == "Assign":
+            self._activated = True
         return {"receipt": receipt}
 
     def poll(self, *, max_events: int, deadline_ms: int) -> tuple["WorkerEvent", ...]:
         return self.pull_events(max_events)
 
     def pull_events(self, limit: int) -> tuple["WorkerEvent", ...]:
-        if limit < 1:
+        # K3 Register/Ready are lifecycle envelopes, never scheduling ReadyWork.
+        return self._mailbox.drain(max_events=limit)
+
+    def pull_control(self, limit: int) -> tuple[dict, ...]:
+        if type(limit) is not int or limit < 1:
             raise DataflowError("INVALID_CONTRACT", "pull limit must be positive")
         with self._lock:
             batch = []
             while self._control_outbox and len(batch) < limit:
                 batch.append(self._control_outbox.popleft())
-        remaining = limit - len(batch)
-        if remaining > 0:
-            batch.extend(self._mailbox.drain(max_events=remaining))
         return tuple(batch)
 
     def request_cut(self, request: "CutRequest") -> None:

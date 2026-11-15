@@ -23,18 +23,21 @@ _DEFAULT_INPUT_MAX_BYTES = 256 * 1024 * 1024
 
 def build_input_handle(
     value: object, *, format: str, bounds: "Bounds | None" = None,
+    override_num_blocks: int | None = None,
 ) -> "MaterializedHandle":
     """Wrap already-materialized bounded driver data as a neutral input handle."""
     if format not in _FORMATS:
         raise DataflowError("INVALID_CONTRACT", f"unsupported input format: {format!r}")
     max_bytes = _DEFAULT_INPUT_MAX_BYTES if bounds is None else int(bounds.max_resident_bytes)
-    return InputMaterializedHandle(value, format=format, max_bytes=max_bytes)
+    return InputMaterializedHandle(value, format=format, max_bytes=max_bytes,
+                                   override_num_blocks=override_num_blocks)
 
 
 class InputMaterializedHandle:
     """Read-only, bounded view over one materialized driver value."""
 
-    def __init__(self, value: object, *, format: str, max_bytes: int) -> None:
+    def __init__(self, value: object, *, format: str, max_bytes: int,
+                 override_num_blocks: int | None = None) -> None:
         if format not in _FORMATS:
             raise DataflowError("INVALID_CONTRACT", f"unsupported input format: {format!r}")
         if max_bytes is None or int(max_bytes) <= 0:
@@ -42,18 +45,59 @@ class InputMaterializedHandle:
         self._format = format
         self._max_bytes = int(max_bytes)
         self._released = False
+        self._block_count = max(1, int(override_num_blocks or 1))
+        self._blocks = None
 
         objects = _normalize(value, format)
         row_count = _row_count(objects, format)
-        size_bytes = _size_bytes(objects, format)
-        if size_bytes > self._max_bytes:
+        size_bytes = _size_bytes(objects, format, maximum=self._max_bytes)
+        peak = size_bytes * (1 if format == "arrow" else 2)
+        if peak > self._max_bytes:
             raise DataflowError(
                 "BUDGET_EXCEEDED",
-                f"input {size_bytes} bytes exceeds resident budget {self._max_bytes}",
+                f"input and copy {peak} bytes exceeds resident budget {self._max_bytes}",
             )
         self._value = _safe_copy(objects, format)
         self._row_count = row_count
-        self._num_blocks = 0 if row_count == 0 else 1
+        block_size = max(1, (row_count + self._block_count - 1) // self._block_count)
+        self._num_blocks = (row_count + block_size - 1) // block_size
+
+    @property
+    def row_count(self) -> int:
+        self._check_open()
+        return self._row_count
+
+    @property
+    def blocks(self) -> tuple:
+        """Preserve the literal materialization identity used before v3.
+
+        Do not introduce a recovery_reference for in-memory literals: that
+        selects a different historical identity branch. Partition boundaries
+        are also part of that old identity and must honor override_num_blocks.
+        """
+        self._check_open()
+        if self._blocks is None:
+            from ..data.runtime_contract import check_size, RuntimeContractError
+            size = max(1, (self._row_count + self._block_count - 1) // self._block_count)
+            blocks, block, total = [], [], 0
+            for row in self._iter_rows():
+                try:
+                    total += check_size(row, self._max_bytes)
+                except RuntimeContractError as exc:
+                    raise DataflowError("BUDGET_EXCEEDED", "literal identity row exceeds budget") from exc
+                if total > self._max_bytes:
+                    raise DataflowError("BUDGET_EXCEEDED", "literal identity exceeds resident budget")
+                block.append(row)
+                if len(block) == size:
+                    blocks.append(tuple(block))
+                    block = []
+            if block:
+                blocks.append(tuple(block))
+            self._blocks = tuple(blocks)
+        return self._blocks
+
+    def check_open(self) -> None:
+        self._check_open()
 
     def rows(self) -> Iterator[Any]:
         self._check_open()
@@ -68,6 +112,7 @@ class InputMaterializedHandle:
             return
         self._released = True
         self._value = None
+        self._blocks = ()
 
     def _check_open(self) -> None:
         if self._released:
@@ -83,7 +128,7 @@ class InputMaterializedHandle:
                 yield row
         elif fmt == "arrow":
             for table in value:
-                for batch in table.to_batches():
+                for batch in table.to_batches(max_chunksize=1):
                     for row in batch.to_pylist():
                         yield row
         elif fmt == "numpy":
@@ -92,8 +137,8 @@ class InputMaterializedHandle:
                     yield {"data": item}
         elif fmt == "pandas":
             for frame in value:
-                for row in frame.to_dict(orient="records"):
-                    yield row
+                for index in range(len(frame)):
+                    yield frame.iloc[index:index + 1].to_dict(orient="records")[0]
 
 
 def _normalize(value: object, format: str) -> Any:
@@ -155,9 +200,13 @@ def _row_count(objects: Any, format: str) -> int:
     raise DataflowError("INVALID_CONTRACT", f"unsupported input format: {format!r}")
 
 
-def _size_bytes(objects: Any, format: str) -> int:
+def _size_bytes(objects: Any, format: str, *, maximum=_DEFAULT_INPUT_MAX_BYTES) -> int:
     if format == "items":
-        return sys.getsizeof(objects) + sum(sys.getsizeof(row) for row in objects)
+        from ..data.runtime_contract import check_size, RuntimeContractError
+        try:
+            return check_size(objects, maximum)
+        except RuntimeContractError as exc:
+            raise DataflowError("BUDGET_EXCEEDED", "input exceeds resident budget") from exc
     if format == "arrow":
         return sum(int(table.nbytes) for table in objects)
     if format == "numpy":

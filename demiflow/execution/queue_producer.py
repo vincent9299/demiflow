@@ -53,7 +53,8 @@ def validate_source(source, specification):
             raise RecoveryContractError('Producer literal source exceeds its row budget')
     elif type(source) is MaterializedSource:
         from .executors.local import _LocalMaterializedHandle
-        if type(source.handle) is not _LocalMaterializedHandle or any(type(b) not in (tuple, list) for b in source.handle.blocks):
+        from .dataflow_inputs import InputMaterializedHandle
+        if type(source.handle) not in {_LocalMaterializedHandle, InputMaterializedHandle} or any(type(b) not in (tuple, list) for b in source.handle.blocks):
             raise RecoveryContractError('Producer materialization needs fixed literal records; use fixed JSONL for large metadata')
         source.handle.check_open()
         if source.handle.row_count > specification.max_rows:

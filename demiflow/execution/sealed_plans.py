@@ -111,31 +111,37 @@ def _validate_f1(facts, journal, action_id):
              "invalid_contract", "sealed_at must be an int or string")
 
 
-def _v3_read_store(directory):
-    """Single adjustable v3 read point (W007/W008).
-
-    Builds the run-rooted artifact store and read bounds used to load a v3 sealed
-    dataflow. D012's exact carrier layout and the H store authority are wired here
-    once they land; the imports are the real engine paths (no fallback). The store
-    domain is the fixed run-relative ``run`` label shared with the history reader.
-    """
-    from .dataflow_store import RunArtifactStore
+def _v3_read_bounds():
     from .contracts.dataflow import Bounds
-    bounds = Bounds(max_nodes=4096, max_edges=8192, max_partitions=4096, max_depth=128,
+    return Bounds(max_nodes=4096, max_edges=8192, max_partitions=4096, max_depth=128,
                     max_control_bytes=MAX_SEALED_PLAN_BYTES, max_row_bytes=1024 * 1024,
                     max_batch_bytes=MAX_SEALED_PLAN_BYTES, max_resident_bytes=MAX_SEALED_PLAN_BYTES,
                     max_spill_bytes=MAX_SEALED_PLAN_BYTES, max_state_bytes=MAX_SEALED_PLAN_BYTES,
                     max_pending_events=4096, max_open_files=256, max_output_rows=1024 * 1024,
                     timeout_ms=60000)
-    store = RunArtifactStore(root=Path(directory), store_id="run",
-                             journal=RunJournal(directory), bounds=bounds)
+
+
+def _v3_read_store(directory, *, store_id):
+    """Single adjustable v3 read point (W007/W008).
+
+    Builds the run-rooted artifact store and read bounds used to load a v3 sealed
+    dataflow. The root is the writer's .dataflow-store directory and the domain
+    comes from its authenticated artifact reference. Reading history creates no
+    directories, reservations or journal writes.
+    """
+    from .dataflow_store import RunArtifactStore
+    bounds = _v3_read_bounds()
+    store = RunArtifactStore(root=Path(directory).absolute() / ".dataflow-store", store_id=store_id,
+                             journal=None, bounds=bounds, readonly=True)
     return store, bounds
 
 
 def _load_sealed_v3(directory, action_id, marker):
     """v3 branch: read and fully validate the original artifacts via load_dataflow."""
     from .dataflow_seal import load_dataflow
-    store, bounds = _v3_read_store(directory)
+    from .dataflow_history import _ref_from_json
+    ref = _ref_from_json(marker["physical_ref"], "physical_ref")
+    store, bounds = _v3_read_store(directory, store_id=ref.store_id)
     graph, physical, sealed = load_dataflow(Path(directory), action_id, store=store, bounds=bounds)
     return {"version": "v3", "facts": marker, "graph": graph,
             "physical": physical, "sealed": sealed}
@@ -190,7 +196,7 @@ def _load_bindings_v3(directory, action_id, sealed_plan):
     """
     from .dataflow_history import _store_read_json, _ref_json
     graph, physical, sealed = sealed_plan["graph"], sealed_plan["physical"], sealed_plan["sealed"]
-    store, _ = _v3_read_store(directory)
+    store, _ = _v3_read_store(directory, store_id=sealed.physical_ref.store_id)
     ref = sealed.identity_bridge_ref
     doc = _store_read_json(store, ref, max_bytes=MAX_BINDINGS_BYTES)
     _require(doc.get("action_id") == action_id,

@@ -9,7 +9,7 @@ is reused from recovery_contract; dag_id is computed once by C004.
 """
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -283,7 +283,13 @@ def compile_kernel_spec(
     if traits is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator traits are not registered: " + kind)
     state, effect, role, mergeable = traits
-    configuration = _freeze(_operation_semantic_facts(operation))
+    # Semantic descriptions are for identity, not executable parameters. The
+    # kernel consumes the declared field values (e.g. columns, seed, limit).
+    configuration = {
+        field.name: _plain(getattr(operation, field.name))
+        for field in fields(operation)
+        if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
+    }
     inputs = tuple(_input_port(name, kind) for name in definition.inputs)
     return KernelSpec(
         kind=kind,
@@ -492,8 +498,14 @@ class _Capture:
                   program_ref: ArtifactRef | None) -> int:
         self._check_node_budget()
         index = len(self.nodes)
+        occurrence = _hash(["dataflow-occurrence-v3", self.request.action.action_id, index])
+        configuration = _plain(kernel.configuration)
+        configuration["occurrence_id"] = occurrence
+        if code_identity and kind == "transform":
+            configuration["program"] = occurrence
+        kernel = replace(kernel, configuration=configuration)
         self.nodes.append(GraphNode(
-            occurrence_id=str(index),
+            occurrence_id=occurrence,
             semantic_id=_hash(["dataflow-semantic-v3", semantic, arguments, code_identity]),
             kind=kind,
             kernel=kernel,
@@ -531,15 +543,15 @@ class _Capture:
             raise _error("UNSUPPORTED_CAPABILITY", "source kind is not registered: " + kind)
         semantic = _source_semantic_facts(source)
         kernel = KernelSpec(
-            kind=kind, implementation_ref=None, configuration=_freeze(semantic), inputs=(),
+            kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=(),
             state="none", effect="pure", resource_role="io",
             profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("source", kernel, semantic, {}, {"source_kind": kind}, None)
         self.declarations.append((index, ProgramDeclaration(
-            occurrence_id=str(index), callable_spec=None, source_spec=source,
-            action_program=None, code_identity=_freeze({"source_kind": kind}),
+            occurrence_id=self.nodes[index].occurrence_id, callable_spec=None, source_spec=source,
+            action_program=None, code_identity={"source_kind": kind},
         )))
         return index
 
@@ -553,7 +565,7 @@ class _Capture:
         semantic = _source_semantic_facts(source)
         inputs = tuple(_input_port(port, kind) for _, port in child_indices)
         kernel = KernelSpec(
-            kind=kind, implementation_ref=None, configuration=_freeze(semantic), inputs=inputs,
+            kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=inputs,
             state="none", effect="pure", resource_role="cpu",
             profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
@@ -586,9 +598,9 @@ class _Capture:
             self._add_edge(index, "main", new_index, "main")
             if isinstance(callable_spec, CallableSpec):
                 self.declarations.append((new_index, ProgramDeclaration(
-                    occurrence_id=str(new_index), callable_spec=callable_spec,
+                    occurrence_id=self.nodes[new_index].occurrence_id, callable_spec=callable_spec,
                     source_spec=None, action_program=None,
-                    code_identity=_freeze(_callable_code_identity(callable_spec)),
+                    code_identity=_plain(_callable_code_identity(callable_spec)),
                 )))
             for binding in expand_operation_inputs(operation, path=path, bounds=self.bounds):
                 child = self.capture_chain(binding.source, binding.plan, binding.path)
@@ -604,7 +616,7 @@ class _Capture:
             raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
         semantic = {"kind": request.kind, "arguments": dict(request.arguments)}
         kernel = KernelSpec(
-            kind=request.kind, implementation_ref=None, configuration=_freeze(semantic),
+            kind=request.kind, implementation_ref=None, configuration=_plain(semantic),
             inputs=(_input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",
             profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
@@ -617,9 +629,9 @@ class _Capture:
             programs.append(ActionProgram(name="sink", kind="sink", value=request.sink))
         for program in programs:
             self.declarations.append((index, ProgramDeclaration(
-                occurrence_id=str(index), callable_spec=None, source_spec=None,
+                occurrence_id=self.nodes[index].occurrence_id, callable_spec=None, source_spec=None,
                 action_program=program,
-                code_identity=_freeze({"program_kind": program.kind, "name": program.name}),
+                code_identity={"program_kind": program.kind, "name": program.name},
             )))
         return index
 
@@ -628,7 +640,7 @@ def _lower_request(request: ActionRequest) -> ActionRequest:
     """take(0) becomes an explicit literal_empty zero-read plan."""
     if request.kind == "take" and request.arguments.get("limit") == 0:
         return ActionRequest(
-            kind=request.kind, source=_LiteralEmptySource(), plan=LogicalPlan(),
+            kind=request.kind, source=ItemsSource(()), plan=LogicalPlan(),
             arguments=request.arguments, sink=request.sink, programs=request.programs,
             provider=request.provider, action=request.action,
         )
@@ -643,34 +655,23 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
     capture = _Capture(request, bounds)
     producer = capture.capture_chain(request.source, request.plan, ())
     terminal = capture.capture_terminal(producer)
-    draft_nodes = tuple(capture.nodes)
-    draft_edges = tuple(
-        GraphEdge(edge_id="", producer=str(p), output_port=op, consumer=str(c), input_port=ip)
-        for p, op, c, ip in capture.edges
-    )
-    bound_nodes = bind_occurrences(draft_nodes, draft_edges, action_id=request.action.action_id)
-    token_to_id = {str(i): node.occurrence_id for i, node in enumerate(bound_nodes)}
+    # DTO constructors validate identities. Keep integer graph indices private;
+    # never construct invalid public DTOs merely to replace their IDs later.
+    bound_nodes = tuple(capture.nodes)
     edges = tuple(
         GraphEdge(
-            edge_id=_hash(["dataflow-edge-v3", token_to_id[e.producer], e.output_port,
-                           token_to_id[e.consumer], e.input_port]),
-            producer=token_to_id[e.producer], output_port=e.output_port,
-            consumer=token_to_id[e.consumer], input_port=e.input_port,
+            edge_id=_hash(["dataflow-edge-v3", bound_nodes[p].occurrence_id, op,
+                           bound_nodes[c].occurrence_id, ip]),
+            producer=bound_nodes[p].occurrence_id, output_port=op,
+            consumer=bound_nodes[c].occurrence_id, input_port=ip,
         )
-        for e in draft_edges
+        for p, op, c, ip in capture.edges
     )
-    declarations = tuple(
-        ProgramDeclaration(
-            occurrence_id=token_to_id[decl.occurrence_id],
-            callable_spec=decl.callable_spec, source_spec=decl.source_spec,
-            action_program=decl.action_program, code_identity=decl.code_identity,
-        )
-        for _, decl in capture.declarations
-    )
+    declarations = tuple(decl for _, decl in capture.declarations)
     sources = tuple(node.occurrence_id for node in bound_nodes if node.kind == "source")
     terminals = (bound_nodes[terminal].occurrence_id,)
     graph = DataflowGraph(
-        schema=_SCHEMA, action_id=request.action.action_id, dag_id="",
+        schema=_SCHEMA, action_id=request.action.action_id, dag_id="0" * 64,
         nodes=bound_nodes, edges=edges, terminals=terminals, sources=sources,
     )
     graph = DataflowGraph(

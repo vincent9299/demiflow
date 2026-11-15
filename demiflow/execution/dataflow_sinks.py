@@ -11,6 +11,7 @@ the native finalize fact and never issues a second ACK (C08/C16).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 
 from ..data.datasink import Datasink, WriteContext
 from .contracts.dataflow import (
@@ -88,7 +89,7 @@ def make_sink_adapter(spec: KernelSpec, *, services: DriverServices) -> Datasink
     if not isinstance(spec, KernelSpec):
         raise DataflowError("INVALID_CONTRACT", "make_sink_adapter requires a KernelSpec")
     config = spec.configuration
-    if type(config) is not dict:
+    if not isinstance(config, Mapping):
         raise DataflowError("INVALID_CONTRACT", "Sink kernel configuration must be a mapping")
     candidate = config.get("sink", config.get("datasink"))
     if candidate is not None:
@@ -99,7 +100,8 @@ def make_sink_adapter(spec: KernelSpec, *, services: DriverServices) -> Datasink
     if type(sink_id) is not str:
         raise DataflowError("INVALID_CONTRACT", "Sink id must be a string")
     identifier(sink_id)
-    pure = {k: v for k, v in config.items() if k not in {"sink", "datasink"}}
+    from .contracts.dataflow import thaw_record_value
+    pure = thaw_record_value({k: v for k, v in config.items() if k not in {"sink", "datasink"}})
     try:
         document(pure)
     except RecoveryContractError as exc:
@@ -219,18 +221,13 @@ def _partition_id(spec: KernelSpec, services: RuntimeServices) -> str:
 
 
 def _encode_record(record: Record, bounds) -> bytes:
-    if record.inline is not None and record.payload_ref is not None:
-        raise DataflowError("INVALID_CONTRACT", "Record carries both inline and payload_ref")
-    if record.payload_ref is not None:
-        _validate_ref(record.payload_ref, what="record payload")
-    body = {"record_id": record.record_id, "source_position": dict(record.source_position),
-            "sequence": record.sequence,
-            "inline": record.inline,
-            "payload_ref": _artifact_json(record.payload_ref) if record.payload_ref is not None else None}
-    raw = document(body, bounds.max_row_bytes)
-    if record.encoded_bytes != len(raw):
-        raise DataflowError("SOURCE_CHANGED", "Record encoded byte count drifted")
-    return raw
+    from .exchange.dataflow_bridge import _encode_record_document, _validate_record
+    _validate_record(record)
+    raw = _encode_record_document(record, max_bytes=bounds.max_row_bytes)
+    # The data-only transfer document preserves tuple/bytes/IEEE values. The
+    # record's encoded_bytes describes its payload, not this provenance frame.
+    return document({"record_id": record.record_id, "sequence": record.sequence,
+                     "document": raw.decode("utf-8")}, bounds.max_row_bytes)
 
 
 def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServices) -> ArtifactRef:

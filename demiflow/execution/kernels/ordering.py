@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import heapq
-import pickle
 import struct
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -28,6 +27,11 @@ from demiflow.execution.contracts.dataflow import (
     KernelSpec,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+from ..exchange.dataflow_bridge import (
+    _encode_payload, _decode_payload, _encode_record_document, _decode_record_document,
+)
+from ..contracts.dataflow import thaw_record_value
 
 from .dataflow import (
     RECORD_MEDIA_TYPE,
@@ -112,7 +116,7 @@ def _field_token(value: Any, descending: bool) -> tuple[int, bytes]:
 
 
 def _provenance(record: Record) -> tuple[bytes, int, str]:
-    return (_canonical(record.source_position).encode("utf-8"), record.sequence, record.record_id)
+    return (_canonical(thaw_record_value(record.source_position)).encode("utf-8"), record.sequence, record.record_id)
 
 
 def _descending_flags(spec: KernelSpec, count: int) -> tuple[bool, ...]:
@@ -150,8 +154,8 @@ def _record_sort_key(
 
 
 def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes) -> bytes:
-    key_bytes = pickle.dumps(key, protocol=pickle.HIGHEST_PROTOCOL)
-    prov_bytes = pickle.dumps(prov, protocol=pickle.HIGHEST_PROTOCOL)
+    key_bytes = _encode_payload({"value": key}, max_bytes=len(rec_bytes) * 4 + 1024)
+    prov_bytes = _encode_payload({"value": prov}, max_bytes=len(rec_bytes) * 4 + 1024)
     return (
         struct.pack(">I", len(key_bytes)) + key_bytes
         + struct.pack(">I", len(prov_bytes)) + prov_bytes
@@ -159,14 +163,18 @@ def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes) -> bytes:
     )
 
 
-def _encode_frame(key: tuple, prov: tuple, record: Record) -> bytes:
-    return _frame_bytes(key, prov, pickle.dumps(record, protocol=pickle.HIGHEST_PROTOCOL))
+def _encode_frame(key: tuple, prov: tuple, record: Record, *, max_bytes: int) -> bytes:
+    raw = _encode_record_document(record, max_bytes=max_bytes)
+    encoded = _encode_payload({"record_id": record.record_id, "sequence": record.sequence,
+                               "document": raw}, max_bytes=max_bytes * 4 + 1024)
+    return _frame_bytes(key, prov, encoded)
 
 
 class _FrameReader:
     """Streaming length-prefixed frame reader over bounded store chunks."""
 
-    def __init__(self, chunks: Iterator[bytes]) -> None:
+    def __init__(self, chunks: Iterator[bytes], *, max_frame_bytes: int) -> None:
+        self._max_frame_bytes = max_frame_bytes
         self._chunks = iter(chunks)
         self._buffer = bytearray()
         self._eof = False
@@ -193,16 +201,23 @@ class _FrameReader:
         if not self._buffer:
             return None
         (key_len,) = struct.unpack(">I", self._read_exact(4))
-        key = pickle.loads(self._read_exact(key_len))
+        if key_len > self._max_frame_bytes:
+            raise _err("BUDGET_EXCEEDED", "sort key frame exceeds the resident budget")
+        key = _decode_payload(self._read_exact(key_len), max_bytes=self._max_frame_bytes)["value"]
         (prov_len,) = struct.unpack(">I", self._read_exact(4))
-        prov = pickle.loads(self._read_exact(prov_len))
+        if key_len + prov_len + 12 > self._max_frame_bytes:
+            raise _err("BUDGET_EXCEEDED", "sort provenance frame exceeds the resident budget")
+        prov = _decode_payload(self._read_exact(prov_len), max_bytes=self._max_frame_bytes)["value"]
         (rec_len,) = struct.unpack(">I", self._read_exact(4))
+        if key_len + prov_len + rec_len + 12 > self._max_frame_bytes:
+            raise _err("BUDGET_EXCEEDED", "sort record frame exceeds the resident budget")
         rec_bytes = self._read_exact(rec_len)
         return (key, prov, rec_bytes)
 
 
 def _run_frames(ref: ArtifactRef, services: RuntimeServices) -> Iterator[tuple]:
-    reader = _FrameReader(services.store.read(ref, max_bytes=ref.size_bytes))
+    reader = _FrameReader(services.store.read(ref, max_bytes=ref.size_bytes),
+                          max_frame_bytes=services.bounds.max_resident_bytes)
     while True:
         frame = reader.next_frame()
         if frame is None:
@@ -213,9 +228,9 @@ def _run_frames(ref: ArtifactRef, services: RuntimeServices) -> Iterator[tuple]:
 def _write_run(
     frames: list[tuple], services: RuntimeServices
 ) -> ArtifactRef:
-    blob = b"".join(frame[2] for frame in frames)
     return services.store.put(
-        iter([blob]), max_bytes=len(blob), media_type=RECORD_MEDIA_TYPE
+        (frame[2] for frame in frames), max_bytes=sum(len(frame[2]) for frame in frames),
+        media_type=RECORD_MEDIA_TYPE
     )
 
 
@@ -254,8 +269,10 @@ def build_sort_runs(
             row = _materialize_row(record, services)
             key = _record_sort_key(record, row, spec, services)
             prov = _provenance(record)
-            encoded = _encode_frame(key, prov, record)
+            encoded = _encode_frame(key, prov, record, max_bytes=bounds.max_row_bytes)
             frame_bytes = len(encoded) + _FRAME_OVERHEAD
+            if frame_bytes > run_budget:
+                raise _err("BUDGET_EXCEEDED", "single sort frame exceeds the resident budget")
             if frames and used + frame_bytes > run_budget:
                 flush()
             frames.append((key, prov, encoded))
@@ -286,7 +303,9 @@ def merge_sort_runs(
     """K010: finite fan-in multi-pass merge; releases only owned intermediates."""
     if not runs:
         return
-    fan_in = max(2, min(_MERGE_FAN_IN, services.bounds.max_open_files))
+    if len(runs) > 1 and services.bounds.max_open_files < 2:
+        raise _err("BUDGET_EXCEEDED", "sort merge requires at least two input file slots")
+    fan_in = min(_MERGE_FAN_IN, services.bounds.max_open_files)
     max_spill = services.bounds.max_spill_bytes
     owned: list[ArtifactRef] = []
     current = tuple(runs)
@@ -316,7 +335,9 @@ def merge_sort_runs(
             current = tuple(merged)
         for key, prov, rec_bytes in _merge_into(current, services):
             _check_stop(services)
-            yield pickle.loads(rec_bytes)
+            saved = _decode_payload(rec_bytes, max_bytes=services.bounds.max_resident_bytes)
+            yield _decode_record_document(saved["document"], record_id=saved["record_id"],
+                sequence=saved["sequence"], max_bytes=services.bounds.max_row_bytes)
     finally:
         for ref in owned:
             services.store.release(ref, owner="kernel-sort")

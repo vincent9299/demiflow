@@ -10,8 +10,10 @@ import base64
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 
-from demiflow.execution.contracts.dataflow import ArtifactRef, CutRequest, ExchangeSpec, Record
+from demiflow.execution.contracts.dataflow import (ArtifactRef, CutRequest, ExchangeSpec, Record,
+                                                  _FrozenRowList, thaw_record_value)
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.exchange import (
     DATA_ENVELOPE_SCHEMA, build_data_ref, check_read_domain, validate_barrier,
@@ -84,7 +86,7 @@ def _validate_tree(value, *, max_bytes):
         if nodes > _MAX_NODES or depth > _MAX_DEPTH:
             _fail("BUDGET_EXCEEDED", "record structure exceeds depth/node budget")
         kind = type(item)
-        if kind is dict:
+        if isinstance(item, Mapping):
             if len(item) > _MAX_NODES:
                 _fail("BUDGET_EXCEEDED", "record mapping exceeds budget")
             for key, child in item.items():
@@ -93,7 +95,7 @@ def _validate_tree(value, *, max_bytes):
                 if len(key.encode("utf-8")) > max_bytes:
                     _fail("BUDGET_EXCEEDED", "record key exceeds byte budget")
                 pending.append((child, depth + 1))
-        elif kind in (list, tuple):
+        elif kind in (list, tuple, _FrozenRowList):
             if len(item) > _MAX_NODES:
                 _fail("BUDGET_EXCEEDED", "record container exceeds budget")
             pending.extend((child, depth + 1) for child in item)
@@ -129,11 +131,11 @@ def _encode_value(value):
         return {"t": "str", "v": value}
     if kind is bytes:
         return {"t": "bytes", "v": base64.b64encode(value).decode("ascii")}
-    if kind is list:
+    if kind in (list, _FrozenRowList):
         return {"t": "list", "v": [_encode_value(child) for child in value]}
     if kind is tuple:
         return {"t": "tuple", "v": [_encode_value(child) for child in value]}
-    if kind is dict:
+    if isinstance(value, Mapping):
         return {"t": "map", "v": [[key, _encode_value(value[key])] for key in sorted(value)]}
     _fail("INVALID_CONTRACT", "record payload carries a non-data object: " + kind.__name__)
 
@@ -177,7 +179,7 @@ def _decode_value(node):
 
 
 def _codec_dumps(value):
-    return json.dumps(value, sort_keys=True, ensure_ascii=False,
+    return json.dumps(thaw_record_value(value), sort_keys=True, ensure_ascii=False,
                       separators=(",", ":"), allow_nan=True).encode("utf-8")
 
 
@@ -237,9 +239,9 @@ def _validate_record(record):
     _nonneg_int(record.encoded_bytes, "record encoded_bytes")
     if (record.inline is None) == (record.payload_ref is None):
         _fail("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
-    if not isinstance(record.source_position, dict):
+    if not isinstance(record.source_position, Mapping):
         _fail("INVALID_CONTRACT", "source_position must be a Json mapping")
-    _document(record.source_position, "source_position")
+    _document(thaw_record_value(record.source_position), "source_position")
     if record.payload_ref is not None:
         _validate_artifact_ref(record.payload_ref, "payload_ref")
         if record.payload_ref.media_type not in _DATA_MEDIA_TYPES:

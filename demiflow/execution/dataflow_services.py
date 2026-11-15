@@ -20,9 +20,9 @@ from typing import TYPE_CHECKING
 from .contracts.dataflow import (Bounds, DriverServices, HostDescriptor, LoadedProgram,
                                  RuntimePolicy, RuntimeServices, WorkerAssignment)
 from .contracts.dataflow_errors import DataflowError
-from .dataflow_artifacts import fetch_runtime_bundle, verify_host_domain
+from .dataflow_artifacts import verify_host_domain
 from .dataflow_authority import DriverArtifactPort, DriverJournalService, WorkerJournalClient
-from .dataflow_seal import load_dataflow, verify_dataflow_program
+from .dataflow_seal import load_sealed_dataflow, verify_dataflow_program
 from .dataflow_store import RunArtifactStore
 from .recovery_contract import identity
 
@@ -137,21 +137,22 @@ def _read_constants(ref: "ArtifactRef", *, store: RunArtifactStore, bounds: Boun
     return value
 
 
-def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds,
-                   bundle: Path) -> dict[str, LoadedProgram]:
-    graph, physical, sealed = load_dataflow(bundle, assignment.action_id, store=store, bounds=bounds)
-    if sealed.code_pin_ref.digest != assignment.sealed.code_pin_ref.digest:
-        raise DataflowError("CODE_MISMATCH", "sealed code pin differs from the assignment")
+def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds) -> dict[str, LoadedProgram]:
+    graph, physical, pin = load_sealed_dataflow(assignment.sealed,
+        action_id=assignment.action_id, store=store, bounds=bounds)
     if physical.plan_id != assignment.plan_id:
         raise DataflowError("CODE_MISMATCH", "loaded plan_id differs from the assignment")
     if physical.plan_revision != assignment.plan_revision:
         raise DataflowError("FENCED", "loaded plan_revision differs from the assignment")
+    from .recovery_identity import platform_identity
+    if pin.get("platform_revision") != platform_identity():
+        raise DataflowError("CODE_MISMATCH", "Worker platform code differs from the sealed revision")
     programs: dict[str, LoadedProgram] = {}
     for node in graph.nodes:
         if node.program_ref is None:
             continue
         programs[node.occurrence_id] = verify_dataflow_program(
-            node.program_ref, expected_pin={"code_pin": sealed.code_pin_ref.digest},
+            node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
             store=store, bounds=bounds)
     return programs
 
@@ -171,8 +172,7 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
     if store_id != shared_store.store_id:
         raise DataflowError("INVALID_CONTRACT", "assignment artifacts belong to another store domain")
     store = RunArtifactStore(root=shared_store.root, store_id=store_id, journal=journal, bounds=bounds)
-    bundle = fetch_runtime_bundle(assignment.sealed.code_pin_ref, cache=cache, store=store, bounds=bounds)
-    programs = _load_programs(assignment, store=store, bounds=bounds, bundle=bundle)
+    programs = _load_programs(assignment, store=store, bounds=bounds)
     constants = _read_constants(assignment.sealed.constants_ref, store=store, bounds=bounds)
     return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,
                            clock_ms=_now_ms, check_stop=transport.check_stop,

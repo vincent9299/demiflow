@@ -17,6 +17,7 @@ DATAFLOW_ERROR_CODES = frozenset({
     "INVALID_CONTRACT",
     "UNSUPPORTED_CAPABILITY",
     "RESOURCE_INFEASIBLE",
+    "CAPACITY_PENDING",
     "BUDGET_EXCEEDED",
     "SOURCE_CHANGED",
     "CODE_MISMATCH",
@@ -148,8 +149,8 @@ class DataflowError(Exception):
             raise ValueError("error message must not carry credentials or model content")
         if type(retryable) is not bool:
             raise ValueError("retryable must be a bool")
-        if code == "UNKNOWN_EFFECT" and retryable:
-            raise ValueError("UNKNOWN_EFFECT must not be retryable")
+        if code in {"UNKNOWN_EFFECT", "BUDGET_EXCEEDED"} and retryable:
+            raise ValueError(code + " must not be retryable")
         frozen = _freeze_context(context)
         self.code = code
         self.retryable = retryable

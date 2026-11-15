@@ -36,6 +36,7 @@ from .dataflow import (
     _group_key,
     _hash_id,
     _loads_row,
+    _dumps_row,
     _materialize_row,
     _occurrence,
     _output_record,
@@ -88,7 +89,7 @@ def _join_reader(
             row = _materialize_row(record, services)
             null_key = any(row.get(field) is None for field in fields)
             token = None if null_key else _group_key(row, fields)
-            batch.append({"k": token, "p": pickle.dumps(dict(row), protocol=pickle.HIGHEST_PROTOCOL)})
+            batch.append({"k": token, "p": _dumps_row(row)})
             if len(batch) >= batch_rows:
                 yield pa.RecordBatch.from_pylist(batch, schema=schema)
                 batch = []

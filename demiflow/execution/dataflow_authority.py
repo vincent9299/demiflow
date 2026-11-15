@@ -119,7 +119,8 @@ def _payload_bytes(event: WorkerEvent, bounds: "Bounds") -> None:
     if event.payload is None and event.payload_ref is None:
         raise DataflowError("INVALID_CONTRACT", "event needs payload or payload_ref")
     if event.payload is not None:
-        raw = document(event.payload)
+        from .contracts.dataflow import thaw_record_value
+        raw = document(thaw_record_value(event.payload))
         if len(raw) > bounds.max_control_bytes:
             raise DataflowError("BUDGET_EXCEEDED", "control payload exceeds max_control_bytes")
 
@@ -194,7 +195,7 @@ class DriverJournalService:
         self._queue: queue.Queue = queue.Queue(maxsize=max(1, bounds.max_pending_events))
         self._inflight: dict[str, WorkerEvent] = {}
         self._completed: list[CompletedControl] = []
-        self._completed_ops: set[str] = set()
+        self._pending_payloads: dict[str, WorkerEvent] = {}
         self._lock = threading.Lock()
         self._closed = False
         self._native = None
@@ -215,15 +216,22 @@ class DriverJournalService:
         if event.kind not in _COMMAND_KINDS:
             raise DataflowError("INVALID_CONTRACT", "event kind is not a journal command")
         with self._lock:
-            if event.operation_id in self._inflight or event.operation_id in self._completed_ops:
+            if self._closed:
+                return False
+            prior = self._pending_payloads.get(event.operation_id)
+            if prior is not None:
+                if prior != event:
+                    raise DataflowError("INVALID_CONTRACT", "Operation id reused for a different control request")
                 return True
-            if len(self._inflight) >= self._bounds.max_pending_events:
+            # An unread reply still consumes a slot. Never silently evict it.
+            if len(self._pending_payloads) >= self._bounds.max_pending_events:
                 return False
             try:
                 self._queue.put_nowait(event)
             except queue.Full:
                 return False
             self._inflight[event.operation_id] = event
+            self._pending_payloads[event.operation_id] = event
         return True
 
     def poll_replies(self, *, max_replies: int) -> tuple[CompletedControl, ...]:
@@ -232,6 +240,8 @@ class DriverJournalService:
         with self._lock:
             batch = self._completed[:max_replies]
             del self._completed[:max_replies]
+            for completed in batch:
+                self._pending_payloads.pop(completed.reply.operation_id, None)
         return tuple(batch)
 
     def close(self, *, deadline_ms: int) -> None:
@@ -289,10 +299,8 @@ class DriverJournalService:
             completed = CompletedControl(allocation_id=event.allocation_id, boot_id=event.boot_id, reply=reply)
             with self._lock:
                 self._inflight.pop(event.operation_id, None)
-                self._completed.append(completed)
-                self._completed_ops.add(event.operation_id)
-                if len(self._completed) > self._bounds.max_pending_events:
-                    del self._completed[:len(self._completed) - self._bounds.max_pending_events]
+                if not self._closed:
+                    self._completed.append(completed)
             self._queue.task_done()
 
     # -- validation + fixed dispatch (H002) ---------------------------------
@@ -301,7 +309,8 @@ class DriverJournalService:
         _payload_bytes(event, self._bounds)
         if event.kind not in _COMMAND_KINDS:
             raise DataflowError("INVALID_CONTRACT", "event kind is not a journal command")
-        payload = event.payload or {}
+        from .contracts.dataflow import thaw_record_value
+        payload = thaw_record_value(event.payload) if event.payload is not None else {}
         try:
             if event.kind == "effect":
                 reply = self.effect(_effect_command(payload), lease=None)
@@ -393,14 +402,16 @@ class DriverJournalService:
     # -- budget admission (H004) --------------------------------------------
     def reserve(self, operation_id: str, amounts: Mapping[str, int], *, lease: "WorkerLease | None") -> None:
         identifier(operation_id)
-        if type(amounts) is not dict or not 1 <= len(amounts) <= 4:
+        if not isinstance(amounts, Mapping) or not 1 <= len(amounts) <= 4:
             raise DataflowError("INVALID_CONTRACT", "bounded budget component set required")
         charges = {}
         for name, amount in amounts.items():
             identifier(name)
             if type(amount) is not int or amount <= 0:
                 raise DataflowError("INVALID_CONTRACT", "budget amount must be a positive int")
-            charges[name] = (amount, self._bounds.max_resident_bytes)
+            from .dataflow_store import ARTIFACT_STAGING_BUDGET
+            ceiling = self._bounds.max_spill_bytes if name == ARTIFACT_STAGING_BUDGET else self._bounds.max_resident_bytes
+            charges[name] = (amount, ceiling)
         self._journal.reserve_budgets(self._fence, operation_id, charges)
 
     # -- artifact (H036) ----------------------------------------------------
@@ -611,7 +622,7 @@ class WorkerJournalClient:
         return WorkerEvent(schema="demiflow.dataflow_event.v3", kind=kind, operation_id=operation_id,
                            run_id=grant["run_id"], attempt=grant["attempt"], fence=grant["fence"],
                            allocation_id=self._lease.allocation_id, boot_id=self._lease.boot_id,
-                           plan_revision=grant.get("plan_revision", 0), scope_id=self._lease.stage_id,
+                           plan_revision=grant.get("plan_revision", 0), scope_id=grant["scope_id"],
                            controller_epoch=grant.get("controller_epoch", 0),
                            payload_ref=None, payload=payload)
 
@@ -677,12 +688,12 @@ class WorkerJournalClient:
 
     def read_action(self, action_id: str) -> Mapping[str, object]:
         identifier(action_id)
-        return self._request("read_action", "read-" + identity({"action_id": action_id}), {"action_id": action_id})
+        return self._request("read_action", identity(["read-action-v3", action_id]), {"action_id": action_id})
 
     def read_configuration(self) -> Mapping[str, object]:
-        return self._request("read_configuration", "read-configuration", {})
+        return self._request("read_configuration", identity(["read-configuration-v3", self._lease.boot_id]), {})
 
     def check_grant(self) -> None:
         if self._lease.expires_at_ms <= _now_ms():
             raise DataflowError("FENCED", "worker grant has expired")
-        self._request("check_grant", "check-grant-" + self._lease.boot_id, {})
+        self._request("check_grant", identity(["check-grant-v3", self._lease.boot_id]), {})

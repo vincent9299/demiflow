@@ -147,9 +147,43 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
 
 # -- E016 run_dataset_action ----------------------------------------------
 def run_dataset_action(request: ActionRequest) -> object:
-    policy, bounds = resolve_runtime_policy({}, {}, provider=request.provider)
+    policy, bounds = resolve_runtime_policy({}, request.action.context.limits, provider=request.provider)
     handle = execute_action(request, policy=policy, bounds=bounds)
-    return handle.result()
+    from .dataflow_terminals import (collect_rows, iterate_rows, iterate_batches,
+                                     materialized_handle, write_result, inspect_result,
+                                     _convert_batch)
+    arguments = request.arguments
+    # Streaming adapters retain the action handle until exhaustion or close.
+    if request.kind == "iter_rows":
+        return iterate_rows(handle)
+    if request.kind == "iter_batches":
+        return iterate_batches(handle, batch_size=arguments.get("batch_size"),
+                               batch_format=arguments.get("batch_format", "default"),
+                               drop_last=arguments.get("drop_last", False))
+    try:
+        if request.kind == "take":
+            return collect_rows(handle, limit=arguments.get("limit", 20), bounds=bounds)
+        if request.kind == "take_all":
+            limit = arguments.get("limit")
+            rows = collect_rows(handle, limit=None if limit is None else limit + 1, bounds=bounds)
+            if limit is not None and len(rows) > limit:
+                raise ValueError("Dataset contains more than the take_all limit")
+            return rows
+        if request.kind == "take_batch":
+            rows = collect_rows(handle, limit=arguments.get("batch_size", 20), bounds=bounds)
+            return _convert_batch(rows, arguments.get("batch_format", "default"), handle)
+        result = handle.result()
+        if request.kind in {"count", "aggregate"}:
+            return result.scalar
+        if request.kind == "materialize":
+            return materialized_handle(result, execution=handle._execution)
+        if request.kind in {"write_datasink", "write_lance", "write_file"}:
+            return write_result(result, kind=request.kind)
+        if request.kind in {"schema", "columns", "size_bytes", "collect_summary"}:
+            return inspect_result(handle, kind=request.kind)
+        return result
+    finally:
+        handle.close()
 
 
 class _CompileContext:

@@ -141,12 +141,13 @@ class DataflowWorkerExecutor:
         return reply
 
     def _participant_ids(self):
+        from ..contracts.dataflow_codec import compute_participant_id
         assignment = self.assignment
         ids = []
         for stage in assignment.stages:
             for partition in assignment.lease.partition_ids:
                 if partition in stage.partitions:
-                    ids.append(stage.stage_id + ":" + partition)
+                    ids.append(compute_participant_id(stage.stage_id, partition))
         return tuple(dict.fromkeys(ids))
 
     def _check_grant(self):
@@ -155,8 +156,7 @@ class DataflowWorkerExecutor:
 
     # ---- B002 load ----
     def load(self, assignment: "WorkerAssignment") -> None:
-        from ..dataflow_artifacts import fetch_runtime_bundle
-        from ..dataflow_seal import load_dataflow, verify_dataflow_program
+        from ..dataflow_seal import load_sealed_dataflow
         with self._control_lock:
             if self._state != "constructed":
                 raise _dataflow_error("INVALID_CONTRACT", "load requires a fresh executor",
@@ -171,27 +171,17 @@ class DataflowWorkerExecutor:
             self._validate_assignment(assignment)
             self._cache = Path(tempfile.mkdtemp(prefix="demiflow-worker-cache-"))
             try:
-                bundle = fetch_runtime_bundle(
-                    assignment.sealed.code_pin_ref, cache=self._cache,
+                graph, physical, pin = load_sealed_dataflow(
+                    assignment.sealed, action_id=assignment.action_id,
                     store=self._services.store, bounds=self._services.bounds)
-                graph, physical, sealed = load_dataflow(
-                    Path(bundle), assignment.action_id,
-                    store=self._services.store, bounds=self._services.bounds)
-                if sealed.code_pin_ref.digest != assignment.sealed.code_pin_ref.digest:
-                    raise _dataflow_error("CODE_MISMATCH", "sealed code pin differs from assignment")
+                sealed = assignment.sealed
                 if physical.plan_id != assignment.plan_id:
                     raise _dataflow_error("CODE_MISMATCH", "loaded plan_id differs from assignment")
                 if physical.plan_revision != assignment.plan_revision:
                     raise _dataflow_error("FENCED", "loaded plan_revision differs from assignment")
-                programs = {}
-                for node in graph.nodes:
-                    if node.program_ref is None:
-                        continue
-                    loaded = verify_dataflow_program(
-                        node.program_ref,
-                        expected_pin={"code_pin": sealed.code_pin_ref.digest},
-                        store=self._services.store, bounds=self._services.bounds)
-                    programs[node.occurrence_id] = loaded
+                programs = self._services.programs
+                if set(programs) != set(pin["programs"]):
+                    raise _dataflow_error("CODE_MISMATCH", "verified program membership differs")
                 self._prepare_factories(assignment, graph, physical)
             except BaseException:
                 self._cleanup_cache()

@@ -37,16 +37,26 @@ def _is_dataflow_executor(executor):
     return executor is not None and executor.__class__.__name__ == "DataflowWorkerExecutor"
 
 
+def _decode_v3_assignment(config):
+    from ..contracts.dataflow import Bounds, WorkerAssignment
+    from ..contracts.dataflow_codec import decode_wire
+    assignment = config["assignment"]
+    if isinstance(assignment, WorkerAssignment):
+        return assignment
+    bounds = config["bounds"]
+    if isinstance(bounds, dict):
+        bounds = Bounds(**bounds)
+    raw = assignment["wire"]
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    return decode_wire(raw, type_name="WorkerAssignment", bounds=bounds)
+
+
 def _build_v3_executor(config, *, control):
     """Assemble the unified v3 executor from a sealed launch payload (H027/B001/B002)."""
     from ..dataflow_services import make_runtime_services
     from .dataflow_execution import DataflowWorkerExecutor
-    assignment = config["assignment"]
-    if isinstance(assignment, dict):
-        from ..contracts.dataflow_codec import decode_wire
-        from ..contracts.dataflow import WorkerAssignment
-        assignment = decode_wire(assignment["wire"], type_name="WorkerAssignment",
-                                 bounds=config["bounds"])
+    assignment = _decode_v3_assignment(config)
     transport = config.get("transport")
     if transport is None:
         transport = control
@@ -245,6 +255,15 @@ class WorkerRuntime:
         raise ProtocolError("INVALID_SPEC", "unhandled worker command: " + str(kind))
 
     def _verify(self, ref):
+        if self._v3:
+            from ..contracts.dataflow_errors import DataflowError
+            assignment = _decode_v3_assignment(self._v3_config)
+            if ref.get("sha256") != assignment.sealed.code_pin_ref.digest:
+                raise DataflowError("CODE_MISMATCH", "Control manifest differs from sealed assignment")
+            # Loads and hashes the original sealed refs, and verifies the installed
+            # platform and user programs. This path never opens RunJournal.
+            self._v3_ensure_executor()
+            return
         # Fail-closed for v2 and v3 alike: VerifyArtifactAndCapabilities runs
         # before Assign/load, so nothing has been verified yet at this point.
         if self._manifest_loader is None:

@@ -126,7 +126,7 @@ def encode_record(record, *, bounds):
     _validate_record(record)
     raw = _encode_record_document(record, max_bytes=bounds.max_row_bytes)
     return EncodedRecord(record_id=record.record_id, encoding=RECORD_ENCODING, data=raw,
-                         ref=record.payload_ref, encoded_bytes=len(raw),
+                         ref=None, encoded_bytes=len(raw),
                          decoded_upper_bytes=len(raw), sequence=record.sequence)
 
 
@@ -146,33 +146,28 @@ def resolve_record(encoded, *, store, bounds):
         _fail("INVALID_CONTRACT", "bounds must be a Bounds declaration")
     if encoded.encoding != RECORD_ENCODING:
         _fail("INVALID_CONTRACT", "unsupported record encoding")
-    if type(encoded.data) is not bytes:
-        _fail("INVALID_CONTRACT", "encoded record must carry the provenance document")
     if encoded.decoded_upper_bytes > bounds.max_row_bytes:
         _fail("BUDGET_EXCEEDED", "decoded record exceeds the row byte budget")
-    if len(encoded.data) != encoded.encoded_bytes:
+    # EncodedRecord owns exactly one *transfer document*: inline bytes or a
+    # reference to those bytes. A business payload ref lives inside that
+    # document together with provenance; it is not a second EncodedRecord body.
+    raw = encoded.data if encoded.data is not None else _read_bounded(
+        store, encoded.ref, max_bytes=bounds.max_row_bytes)
+    if len(raw) != encoded.encoded_bytes:
         _fail("CORRUPT_ARTIFACT", "encoded record size mismatch")
-    skeleton = _decode_record_document(encoded.data, record_id=encoded.record_id,
+    skeleton = _decode_record_document(raw, record_id=encoded.record_id,
                                        sequence=encoded.sequence, max_bytes=bounds.max_row_bytes)
-    if encoded.ref is None:
-        if skeleton.inline is None:
-            _fail("CORRUPT_ARTIFACT", "encoded record ref/document mismatch")
+    ref = skeleton.payload_ref
+    if ref is None:
         return skeleton
-    _validate_artifact_ref(encoded.ref, "encoded ref")
-    if skeleton.payload_ref != encoded.ref:
-        _fail("CORRUPT_ARTIFACT", "encoded record ref/document mismatch")
-    if encoded.ref.store_id != store.store_id:
+    _validate_artifact_ref(ref, "record payload ref")
+    if ref.store_id != store.store_id:
         _fail("INVALID_CONTRACT", "record ref belongs to a different store domain")
-    payload = _read_bounded(store, encoded.ref, max_bytes=bounds.max_row_bytes)
-    if len(payload) != encoded.ref.size_bytes:
-        _fail("CORRUPT_ARTIFACT", "record payload size mismatch")
-    if hashlib.sha256(payload).hexdigest() != encoded.ref.digest:
-        _fail("CORRUPT_ARTIFACT", "record payload digest mismatch")
-    # Decode verifies structure and budget; the durable ref form is preserved.
+    payload = _read_bounded(store, ref, max_bytes=bounds.max_row_bytes)
+    if len(payload) != ref.size_bytes or hashlib.sha256(payload).hexdigest() != ref.digest:
+        _fail("CORRUPT_ARTIFACT", "record payload size/digest mismatch")
     _decode_payload(payload, max_bytes=bounds.max_row_bytes)
-    return Record(record_id=encoded.record_id, source_position=skeleton.source_position,
-                  payload_ref=encoded.ref, inline=None, encoded_bytes=encoded.ref.size_bytes,
-                  sequence=encoded.sequence)
+    return skeleton
 
 
 # -- X004 ---------------------------------------------------------------------

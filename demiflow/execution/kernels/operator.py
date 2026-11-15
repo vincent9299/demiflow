@@ -68,7 +68,26 @@ def _resolve_instance(spec: KernelSpec, services: RuntimeServices) -> Any:
     program = services.programs.get(key)
     if program is None or program.kind not in ("callable", "native"):
         raise _err("INVALID_CONTRACT", "callable program not staged", program=str(key))
-    return program.value
+    from demiflow.data.plan import CallableSpec
+    declaration = program.value
+    if isinstance(declaration, CallableSpec):
+        instance = declaration.instantiate()
+        if declaration.call_args or declaration.call_kwargs:
+            return _BoundCallable(instance, declaration.call_args, dict(declaration.call_kwargs))
+        return instance
+    return declaration
+
+
+class _BoundCallable:
+    """Keep lifecycle hooks on the actor when binding call-time arguments."""
+    def __init__(self, instance, args, kwargs):
+        self._instance, self._args, self._kwargs = instance, args, kwargs
+
+    def __call__(self, value):
+        return self._instance(value, *self._args, **self._kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._instance, name)
 
 
 def _run_astart(instance: Any) -> None:

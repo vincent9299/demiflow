@@ -11,6 +11,8 @@ from __future__ import annotations
 import csv
 import gzip
 import pickle
+import itertools
+from collections import deque
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
@@ -44,7 +46,8 @@ _RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 
 def _load_row(ref: ArtifactRef, store: Any, max_bytes: int) -> Any:
     raw = b"".join(store.read(ref, max_bytes=max_bytes))
-    return pickle.loads(raw)
+    from .exchange.dataflow_bridge import _decode_payload
+    return _decode_payload(raw, max_bytes=max_bytes)
 
 
 def _source_plan(snapshot: SourceSnapshot, services: RuntimeServices) -> Any:
@@ -54,8 +57,9 @@ def _source_plan(snapshot: SourceSnapshot, services: RuntimeServices) -> Any:
     return program.value
 
 
-def _encoded_size(row: Any) -> int:
-    return len(pickle.dumps(row, protocol=4))
+def _encoded_size(row: Any, *, max_bytes: int) -> int:
+    from .exchange.dataflow_bridge import _encode_payload
+    return len(_encode_payload(row, max_bytes=max_bytes))
 
 
 class _BaseReader:
@@ -69,6 +73,7 @@ class _BaseReader:
         self._next_sequence = 0
         self._eoi = False
         self._pending: tuple[ArtifactRef, ...] = ()
+        self._replay_pending = deque()
         self._lease_ref: ArtifactRef | None = None
         self._closed = False
         self._opened = False
@@ -90,6 +95,7 @@ class _BaseReader:
             self._next_sequence = cursor.next_sequence
             self._eoi = cursor.end_of_input
             self._pending = tuple(cursor.pending_refs)
+            self._replay_pending.extend(cursor.pending_refs)
             self._lease_ref = cursor.lease_ref
         else:
             self._offset = dict(split.start_cursor)
@@ -103,6 +109,21 @@ class _BaseReader:
 
     def next_record(self) -> SourcePoll:
         self._check_open()
+        if self._replay_pending:
+            from .exchange.dataflow_bridge import _decode_record_document
+            import json
+            ref = self._replay_pending.popleft()
+            if ref.media_type != "application/vnd.demiflow.source-pending.v3":
+                raise DataflowError("INCOMPATIBLE_HISTORY", "pending source record lacks provenance")
+            raw = b"".join(self._services.store.read(ref, max_bytes=self._services.bounds.max_control_bytes))
+            saved = json.loads(raw)
+            record = _decode_record_document(saved["document"].encode("utf-8"),
+                record_id=saved["record_id"], sequence=saved["sequence"],
+                max_bytes=self._services.bounds.max_row_bytes)
+            # Retain the replayed item until the next successful pull confirms
+            # ordered publication, just as on the original attempt.
+            self._pending = (ref, *self._replay_pending)
+            return SourcePoll("record", record, 0)
         if self._eoi:
             return SourcePoll("eoi", None, 0)
         # Pulling again confirms the previous record reached the ordered output.
@@ -114,7 +135,7 @@ class _BaseReader:
         row, position = result
         sequence = self._next_sequence
         record_id = identity([self._snapshot.source_id, self._split.split_id, position])
-        encoded_bytes = _encoded_size(row)
+        encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
         if self._snapshot.replay == "attempt_only":
             record = Record(record_id, position, None, row, encoded_bytes, sequence)
             self._pending = ()
@@ -123,7 +144,15 @@ class _BaseReader:
             ref = spool_record(inline, split_id=self._split.split_id, sequence=sequence,
                                store=self._services.store, bounds=self._services.bounds)
             record = Record(record_id, position, ref, None, ref.size_bytes, sequence)
-            self._pending = (ref,)
+            from .exchange.dataflow_bridge import _encode_record_document
+            from .recovery_contract import document
+            pending = document({"record_id": record_id, "sequence": sequence,
+                "document": _encode_record_document(record,
+                    max_bytes=self._services.bounds.max_row_bytes).decode("utf-8")},
+                self._services.bounds.max_control_bytes)
+            pending_ref = self._services.store.put(iter((pending,)), max_bytes=len(pending),
+                media_type="application/vnd.demiflow.source-pending.v3")
+            self._pending = (pending_ref,)
         self._next_sequence += 1
         return SourcePoll("record", record, 0)
 
@@ -166,29 +195,40 @@ class ItemsReader(_BaseReader):
 
     def _setup(self, split: SourceSplit) -> None:
         plan = _source_plan(self._snapshot, self._services)
+        self._start = int(split.locator.get("start", 0))
+        self._index = int(self._offset.get("index", self._start))
         if isinstance(plan, ItemsSource):
-            self._items = tuple(plan.items)
+            count = len(plan.items)
+            rows = iter(plan.items)
         elif isinstance(plan, MaterializedSource):
-            handle = plan.handle
-            rows = handle.rows() if hasattr(handle, "rows") else iter(handle)
-            self._items = tuple(rows)
+            # A materialized handle may contain many disk blocks: never turn its
+            # entire row iterator into a tuple merely to seek to this split.
+            count = plan.handle.row_count
+            rows = plan.handle.rows()
         else:
             raise DataflowError("INVALID_CONTRACT", "ItemsReader requires items/materialized source")
-        self._start = int(split.locator.get("start", 0))
-        self._end = int(split.locator.get("end", len(self._items)))
-        index = int(self._offset.get("index", self._start))
-        if index < self._start or index > self._end:
+        self._end = int(split.locator.get("end", count))
+        if not self._start <= self._index <= self._end <= count:
             raise DataflowError("INVALID_CONTRACT", "items cursor outside split range")
-        self._index = index
+        self._rows = rows
+        self._iterator = itertools.islice(rows, self._index, self._end)
 
     def _advance(self) -> tuple[Any, dict[str, Any]] | None:
         if self._index >= self._end:
             return None
+        try:
+            row = next(self._iterator)
+        except StopIteration as exc:
+            raise DataflowError("SOURCE_CHANGED", "materialized input ended before its sealed row count") from exc
         position = {"index": self._index}
-        row = self._items[self._index]
         self._index += 1
         self._offset = {"index": self._index}
         return row, position
+
+    def _teardown(self) -> None:
+        close = getattr(self._rows, "close", None)
+        if close is not None:
+            close()
 
 
 class RangeReader(_BaseReader):

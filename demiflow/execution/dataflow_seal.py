@@ -16,6 +16,7 @@ import hashlib
 import secrets
 from dataclasses import replace
 from pathlib import Path
+from collections.abc import Mapping
 
 from ..data.datasink import Datasink
 from ..data.plan import CallableSpec, LogicalPlan, MapOp
@@ -48,6 +49,14 @@ CONSTANTS_MEDIA = "application/x-demiflow-constants-v3"
 _SEAL_KEY = "-dataflow-sealed"
 _CONSTANTS_KEY = "-dataflow-constants"
 _SEED_KEYS = ("seed", "shuffle_seed", "sample_seed", "block_order_seed")
+
+
+def _builtin_node(node):
+    """Only registered platform implementations may omit a user program."""
+    from ..planning.dataflow_registry import operator_registry, source_registry, terminal_registry
+    table = terminal_registry() if node.kind == "terminal" else (
+        source_registry() if node.kind == "relational" else operator_registry())
+    return node.kind != "source" and node.kernel.kind in table
 
 
 def _artifact_json(ref: ArtifactRef) -> dict:
@@ -176,7 +185,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             continue
         declaration = declarations.get(node.occurrence_id)
         if declaration is None:
-            if node.kernel.implementation_ref is not None:
+            if _builtin_node(node):
                 nodes.append(node)
                 continue
             raise DataflowError("INVALID_CONTRACT",
@@ -254,7 +263,7 @@ def _generate_constants(graph: DataflowGraph) -> dict:
     constants = {}
     for node in graph.nodes:
         config = node.kernel.configuration
-        if type(config) is not dict:
+        if not isinstance(config, Mapping):
             continue
         generated = {key: secrets.randbelow(2**31) for key in _SEED_KEYS
                      if key in config and config[key] is None}
@@ -304,7 +313,7 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
     programs, code_pin = [], {}
     for node in graph.nodes:
         if node.program_ref is None:
-            if node.kernel.implementation_ref is None:
+            if not _builtin_node(node):
                 raise DataflowError("INVALID_CONTRACT",
                                     "Executable node lacks a real program artifact: " + node.occurrence_id)
             continue
@@ -315,11 +324,16 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
         programs.append(node.program_ref)
         code_pin[node.occurrence_id] = manifest["code_identity"]
     code_pin_raw = document({"schema": CODE_PIN_SCHEMA, "action_id": action.action_id,
+                             "platform_revision": context.journal.recovery_identity()["platform_revision"],
                              "programs": code_pin}, bounds.max_control_bytes)
     code_pin_ref = store.put(iter([code_pin_raw]), max_bytes=bounds.max_control_bytes, media_type=CODE_PIN_MEDIA)
-    bindings = {n.occurrence_id: {"occurrence_id": n.occurrence_id, "mode": "execute"}
-                for n in graph.nodes}
-    bridge = build_dataflow_identity_bridge(graph, report_digest=compute_graph_digest(graph), bindings=bindings)
+    # No report bindings have been supplied at this seam. Execution occurrence
+    # IDs are not report node IDs, and a graph digest is not a report digest.
+    # Keep a bounded, explicit absence fact until the checked-execution producer
+    # is connected; never manufacture a bridge that looks validated.
+    bridge = {"schema": "demiflow.identity_bridge_unavailable.v3",
+              "action_id": action.action_id, "dag_id": graph.dag_id,
+              "available": False, "reason": "checked_report_binding_missing"}
     bridge_raw = document(bridge, bounds.max_control_bytes)
     identity_bridge_ref = store.put(iter([bridge_raw]), max_bytes=bounds.max_control_bytes, media_type=BRIDGE_MEDIA)
     source_refs = tuple(s.manifest_ref for s in physical.sources if s.manifest_ref is not None)
@@ -393,3 +407,42 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds):
                              identity_bridge_ref=identity_bridge_ref, source_refs=source_refs,
                              constants_ref=constants_ref)
     return graph, physical, sealed
+
+
+def load_sealed_dataflow(sealed: SealedExecution, *, action_id: str, store, bounds: Bounds):
+    """Read the driver's sealed refs without opening its journal on a worker.
+
+    The assignment is the authenticated root. Content hashes, semantic IDs,
+    program membership and the code-pin manifest must all agree before loading
+    any user pickle. Files merely present in a worker cache confer no authority.
+    """
+    identifier(action_id)
+    if not isinstance(sealed, SealedExecution):
+        raise DataflowError("INVALID_CONTRACT", "Expected a sealed execution")
+    graph = decode_wire(_read_bytes(store, sealed.logical_ref,
+                        max_bytes=bounds.max_control_bytes, media_type=GRAPH_MEDIA),
+                        type_name="DataflowGraph", bounds=bounds)
+    physical = decode_wire(_read_bytes(store, sealed.physical_ref,
+                           max_bytes=bounds.max_control_bytes, media_type=PHYSICAL_MEDIA),
+                           type_name="PhysicalDataflow", bounds=bounds)
+    if graph.action_id != action_id:
+        raise DataflowError("CODE_MISMATCH", "Sealed action differs from assignment")
+    if graph.dag_id != compute_graph_digest(graph):
+        raise DataflowError("CORRUPT_ARTIFACT", "Sealed graph identity differs")
+    if physical.dag_id != graph.dag_id or physical.plan_id != compute_physical_digest(physical):
+        raise DataflowError("CORRUPT_ARTIFACT", "Sealed physical identity differs")
+    programs = tuple(node.program_ref for node in graph.nodes if node.program_ref is not None)
+    if programs != sealed.programs or physical.constants_ref != sealed.constants_ref:
+        raise DataflowError("CORRUPT_ARTIFACT", "Sealed program/constants membership differs")
+    if tuple(s.manifest_ref for s in physical.sources if s.manifest_ref is not None) != sealed.source_refs:
+        raise DataflowError("CORRUPT_ARTIFACT", "Sealed source membership differs")
+    pin = _read_json(store, sealed.code_pin_ref, max_bytes=bounds.max_control_bytes,
+                     media_type=CODE_PIN_MEDIA)
+    expected = {node.occurrence_id for node in graph.nodes if node.program_ref is not None}
+    if (pin.get("schema") != CODE_PIN_SCHEMA or pin.get("action_id") != action_id
+            or type(pin.get("programs")) is not dict or set(pin["programs"]) != expected):
+        raise DataflowError("CODE_MISMATCH", "Code-pin manifest membership differs")
+    for ref in (*programs, sealed.identity_bridge_ref, *sealed.source_refs, sealed.constants_ref):
+        if not store.inspect(ref):
+            raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact is absent")
+    return graph, physical, pin

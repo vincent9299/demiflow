@@ -170,7 +170,7 @@ def test_product_regression(runtime_v3_fixture):
 
 def test_bounded_terminal(runtime_v3_fixture):
     evidence = _run_unified(runtime_v3_fixture, "bounded_terminal")
-    assert evidence["take0"] == 0 and evidence["take1"] == 1 and evidence["take_all"] == 10 and evidence["limit5"] == 5
+    assert evidence["take0"] == 0 and evidence["take1"] == 1 and evidence["take_all"] == 10 and evidence["limit5"] == "overflow_rejected"
 
 
 def test_artifact_security(runtime_v3_fixture):

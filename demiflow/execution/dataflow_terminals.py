@@ -58,11 +58,13 @@ def open_terminal(request: "ActionRequest", *, execution: "DataflowExecution") -
 
 def _record_row(record: "Record", handle: "ActionHandle") -> "Row":
     if record.inline is not None:
-        return record.inline
+        from .contracts.dataflow import thaw_record_value
+        return thaw_record_value(record.inline)
     if record.payload_ref is not None:
         ref = record.payload_ref
         chunks = handle.services.store.read(ref, max_bytes=ref.size_bytes)
-        return pickle.loads(b"".join(chunks))
+        from .exchange.dataflow_bridge import _decode_payload
+        return _decode_payload(b"".join(chunks), max_bytes=handle.bounds.max_row_bytes)
     raise _error("INVALID_CONTRACT", "record has neither inline nor payload_ref")
 
 
