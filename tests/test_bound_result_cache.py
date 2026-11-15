@@ -6,6 +6,7 @@ import time
 import pytest
 from demiflow import data
 from demiflow.data.result_cache import CachedMap
+from _worker_event_fixtures import emit, events
 
 
 def _competing_process(directory, ready, start, output, concept):
@@ -46,14 +47,14 @@ def test_local_processes_share_one_completed_result_and_keep_current_rows(tmp_pa
 
 
 def test_unbound_async_none_and_list_keep_map_semantics(tmp_path):
-    calls = []
+    calls = tmp_path / "worker-calls"
     async def compute(row):
-        calls.append(row['n'])
+        emit(calls, 'call', value=row['n'])
         return None if row['n']==0 else [{'answer':1},{'answer':2}]
     def run():
         return data.from_items([{'n':0},{'n':1}]).map_cached(compute,cache_dir=tmp_path,version='v1').materialize().take(4)
     assert run() == run() == [{'answer':1},{'answer':2}]
-    assert calls == [0,1]
+    assert [e["value"] for e in events(calls)] == [0,1]
 
 
 def test_legacy_cache_requires_explicit_cutover_without_eager_io(tmp_path):
@@ -76,35 +77,41 @@ def test_relative_cache_and_lock_paths_are_pinned_at_declaration(tmp_path, monke
 @pytest.mark.parametrize('synchronous', [False, True])
 @pytest.mark.parametrize('answer', [None, [1, 2], {'n': 3}])
 def test_only_computation_result_is_shared(tmp_path, synchronous, answer):
-    calls = []
+    calls = tmp_path / "worker-calls"
     def compute(url):
-        calls.append(url)
+        emit(calls, "call", value=url)
         return answer
     rows = data.from_items([{'url':'same', 'concept':'first'}, {'url':'same','concept':'second'}]).map_cached(
         compute, cache_dir=tmp_path, version='v1', inputs=['url'], output='answer', synchronous=synchronous)
     result = (rows if synchronous else rows.materialize()).take(4)
-    assert calls == ['same']
+    assert [e['value'] for e in events(calls)] == ['same']
     assert [r['concept'] for r in result] == ['first', 'second']
     assert all(r['answer'] == answer for r in result)
 
 
 def test_shared_wait_cancellation_and_actor_hooks(tmp_path):
+    event_path = tmp_path / "actor-events"
     class Compute:
         concurrency = 2
         def __init__(self):
-            self.calls = 0; self.events = []
-        async def astart(self): self.events.append('start')
-        async def astop(self): self.events.append('stop')
-        async def aclose(self): self.events.append('close')
+            self.calls = 0
+        def snapshot_state(self): return {"calls": self.calls}
+        def restore_state(self, state): self.calls = state["calls"]
+        async def astart(self): emit(event_path, 'start')
+        async def astop(self): emit(event_path, 'stop')
+        async def aclose(self): emit(event_path, 'close')
         async def __call__(self, url):
             self.calls += 1
+            emit(event_path, "call", url=url)
             await asyncio.sleep(.03)
             return url
     compute = Compute()
     rows = data.from_items([{'url':'same'}]*4).map_cached(compute, cache_dir=tmp_path,
         version='v1', inputs=['url'], output='answer', queue_depth=1).materialize().take(5)
-    assert len(rows) == 4 and compute.calls == 1
-    assert compute.events == ['start', 'stop', 'close']
+    assert len(rows) == 4
+    observed = events(event_path)
+    assert len([e for e in observed if e["event"] == "call"]) == 1
+    assert [e["event"] for e in observed if e["event"] != "call"] == ["start", "stop", "close"]
     actor = CachedMap(compute, tmp_path, 'v2', inputs=['url'], output='answer', wait_timeout_s=.03)
     _, key = actor.prepare({'url':'locked'})
     async def run():

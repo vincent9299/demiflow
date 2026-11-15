@@ -1,0 +1,179 @@
+{
+  "head": "3d2bc03",
+  "snapshot": "dirty test-only migration at recorded run; fixture corrections retested separately",
+  "runs": [
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_async_materialize.py::test_async_materialize_spills_reuses_and_writes",
+      "status": "failed",
+      "reason": "assert False"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_async_materialize.py::test_failed_materialize_cleans_only_its_spills",
+      "status": "failed",
+      "reason": "assert False"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_async_materialize.py::test_empty_async_materialize_closes_actor",
+      "status": "failed",
+      "reason": "assert False"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_async_materialize.py::test_batch_materialize_reuses_complete_batches",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_async_materialize.py::test_wide_rows_spill_before_row_limit_and_restore_individually",
+      "status": "failed",
+      "reason": "AttributeError: 'RunArtifactStore' object has no attribute 'has'"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_async_materialize.py::test_materialization_retains_snapshot_for_reused_mutable_input",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_local_processes_share_one_completed_result_and_keep_current_rows",
+      "status": "failed",
+      "reason": "_queue.Empty"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_unbound_async_none_and_list_keep_map_semantics",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_legacy_cache_requires_explicit_cutover_without_eager_io",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_relative_cache_and_lock_paths_are_pinned_at_declaration",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[None-False]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[None-True]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer1-False]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer1-True]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer2-False]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer2-True]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_shared_wait_cancellation_and_actor_hooks",
+      "status": "failed",
+      "reason": "AssertionError: assert ['start', 'close'] == ['start', 'stop', 'close']"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_configuration_and_limits_are_cache_identity",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_arrow_batch_sink.py::test_arrow_sink_preserves_exact_scan_global_batches_and_nested_values[False-thread]",
+      "status": "failed",
+      "reason": "assert False"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_arrow_batch_sink.py::test_arrow_sink_preserves_exact_scan_global_batches_and_nested_values[False-process]",
+      "status": "failed",
+      "reason": "assert False"
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_arrow_batch_sink.py::test_arrow_sink_preserves_exact_scan_global_batches_and_nested_values[True-thread]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_arrow_batch_sink.py::test_arrow_sink_preserves_exact_scan_global_batches_and_nested_values[True-process]",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_arrow_batch_sink.py::test_arrow_callback_failure_does_not_publish_or_retry",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize.xml",
+      "nodeid": "tests/test_codex_agent.py::test_node_and_persistent_session_budget",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize-fixture.xml",
+      "nodeid": "tests/test_async_materialize.py::test_wide_rows_spill_before_row_limit_and_restore_individually",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "report": "/tmp/demiflow-regression-materialize-fixture.xml",
+      "nodeid": "tests/test_bound_result_cache.py::test_local_processes_share_one_completed_result_and_keep_current_rows",
+      "status": "passed",
+      "reason": null
+    }
+  ],
+  "input_sha256": {
+    "tests/test_async_materialize.py": "bd086536d542691f65a9813b778cdf8c8d6d0038fdc80d689844c63d10810b39",
+    "tests/test_bound_result_cache.py": "b7a430f0ec4e8ab2742c7c5d6ddd26786cf2e010d8837251f064904fc2b002b2",
+    "tests/test_arrow_batch_sink.py": "398b7b20a994683328ea913d8707de7a380e3101751d9ac3a5ad14efe47a9978",
+    "tests/_worker_event_fixtures.py": "6b59da508679d61a5d259bede46b181f59c0034ed7796d8b1a0675e58f581874"
+  },
+  "latest_unique": "18 passed / 6 retained genuine failures across 24 nodes (includes quota closure)",
+  "remaining": {
+    "lifecycle": 4,
+    "arrow_schema": 2
+  },
+  "limitations": [
+    "Full combined rerun pending lifecycle and Arrow fixes.",
+    "Arrow old executor _apply_plan hook no longer exists; exact source version/filter/limit/nested Arrow schema, batches, output bytes and nonpublication assertions remain.",
+    "Old private executor spill tracking replaced with true StoredMaterializedHandle/store, release and journal assertions. Historical committed blocks deliberately retained.",
+    "No peak RSS guarantee claimed from encoded row bound; wide readback checks one actual decoded record <=8192 bytes."
+  ]
+}
