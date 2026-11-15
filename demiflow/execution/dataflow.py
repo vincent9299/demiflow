@@ -132,6 +132,7 @@ class DataflowExecution:
                        request.arguments.get("batch_size", 20) if request.kind == "take_batch" else None)
         self._failure = None
         self._checkpoint_requested = False
+        self._checkpoint_deferred = set()
         self._replay = None
         self._node_metrics = {}
         self._observed_workers = {}
@@ -159,6 +160,7 @@ class DataflowExecution:
         if self._stopping or self._state == "succeeded":
             return
         self._stopping = True
+        self._checkpoint_deferred.clear()
         self._idle.clear()
         for endpoint in self._endpoints.values():
             endpoint.send_business({"kind": "pause"})
@@ -676,6 +678,7 @@ class DataflowExecution:
         self._cut = None
         self._contributions.clear()
         self._checkpoint_requested = False
+        self._checkpoint_deferred.clear()
         self._launch_phase()
 
     # -- E005 pump --------------------------------------------------------
@@ -958,6 +961,16 @@ class DataflowExecution:
             return
         all_workers = set(self._endpoints)
         durable = self._durable_residency
+        if self._checkpoint_deferred:
+            sources = all_workers - self._checkpoint_deferred
+            if sources <= self._idle | self._done:
+                # Stop admission before freezing consumers. A slow source read
+                # must not prevent an already admitted batch from reaching its
+                # downstream consumer while we wait for the input frontier.
+                for allocation_id in self._checkpoint_deferred:
+                    self._idle.discard(allocation_id)
+                    self._endpoints[allocation_id].send_business({'kind': 'pause'})
+                self._checkpoint_deferred.clear()
         if (self._cut is None and all_workers and (not self._deliveries or durable is not None and durable.can_cut())
                 and all_workers <= self._idle and (durable is not None or self._stopping or self._checkpoint_requested or all_workers <= self._done)):
             self._source_exhausted = self._checkpoint._sources_exhausted()
@@ -1027,6 +1040,7 @@ class DataflowExecution:
                 self._contributions.clear()
                 self._idle.clear()
                 self._checkpoint_requested = False
+                self._checkpoint_deferred.clear()
                 for endpoint in self._endpoints.values():
                     endpoint.send_business({"kind": "resume"})
 
@@ -1035,8 +1049,15 @@ class DataflowExecution:
             return
         self._checkpoint_requested = True
         self._idle.clear()
-        for endpoint in self._endpoints.values():
-            endpoint.send_business({"kind": "pause"})
+        sources = {allocation_id for allocation_id, endpoint in self._endpoints.items()
+                   if endpoint._assignment.source_splits}
+        # Durable residency has its own parked-frontier protocol. Finite phases
+        # without sources likewise retain the ordinary all-participant pause.
+        self._checkpoint_deferred = (set(self._endpoints) - sources
+            if sources and self._durable_residency is None else set())
+        for allocation_id, endpoint in self._endpoints.items():
+            if allocation_id not in self._checkpoint_deferred:
+                endpoint.send_business({"kind": "pause"})
 
     def _publication(self, image):
         result_ref = image.confirmed_sinks[self._request.kind]
