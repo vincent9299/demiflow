@@ -1193,7 +1193,7 @@ class _OutputSubscription:
         self.closed = False
 
     def read(self, *, max_records, deadline_ms):
-        from .exchange.dataflow_transport import read_peer
+        from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH
         from .exchange.dataflow_bridge import _decode_record_document
         e = self.execution
         records = []
@@ -1202,12 +1202,35 @@ class _OutputSubscription:
                 records.append(next(e._replay))
             except StopIteration:
                 e._replay = None
+        from itertools import islice
+        byte_window = min(e._bounds.max_batch_bytes, e._bounds.max_resident_bytes)
+        admitted = sum(record.encoded_bytes for record in records)
         while not self.closed and e._terminal_queue and len(records) < max_records:
-            payload = e._terminal_queue.popleft()
-            raw = read_peer(payload["peer"], bounds=e._bounds)
-            records.append(_decode_record_document(raw, record_id=payload["record_id"],
-                sequence=payload["sequence"], max_bytes=e._bounds.max_row_bytes))
-            e._ack(payload["delivery_id"])
+            batch, size, endpoint = [], 0, None
+            for payload in islice(e._terminal_queue, min(MAX_PEER_BATCH, max_records - len(records))):
+                peer = payload['peer']
+                owner = (peer['host'], peer['port'], peer['token'])
+                if endpoint is not None and owner != endpoint:
+                    break
+                if (records or batch) and admitted + size + peer['bytes'] > byte_window:
+                    break
+                if peer['bytes'] > e._bounds.max_resident_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'terminal row exceeds admitted resident window')
+                endpoint = owner
+                batch.append(payload)
+                size += peer['bytes']
+            if not batch:
+                break
+            frames = read_peer_many(tuple(item['peer'] for item in batch), bounds=e._bounds)
+            try:
+                for payload, raw in zip(batch, frames):
+                    records.append(_decode_record_document(raw, record_id=payload['record_id'],
+                        sequence=payload['sequence'], max_bytes=e._bounds.max_row_bytes))
+                    e._terminal_queue.popleft()
+                    e._ack(payload['delivery_id'])
+                    admitted += payload['peer']['bytes']
+            finally:
+                frames.close()
         return tuple(records)
 
     def close(self):
