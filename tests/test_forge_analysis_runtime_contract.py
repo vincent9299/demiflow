@@ -79,6 +79,7 @@ def observed_local_unit(tmp_path):
     fcntl.flock(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB);info=os.fstat(descriptor)
     runtime=TrustedLocalBackend.__new__(TrustedLocalBackend)
     runtime.root=tmp_path;runtime.processes={};runtime.worker_identities={};runtime.stop_fences=set()
+    runtime.pending_retirement=None;runtime.retiring_reads=set()
     parent=process_identity(os.getpid())
     runtime.leases={identifier:dict(state='started',init_identity=parent,context_sha256='a'*64,
         unit_identity=dict(device=info.st_dev,inode=info.st_ino))}
