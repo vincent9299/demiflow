@@ -326,9 +326,18 @@ class RunContext:
         native_file = (declaration.get('kind') == 'write_file'
             and self.journal.source_binding(action_id + '-file-target') is not None
             and self.journal.source_binding(action_id + '-dataflow-sealed') is not None)
+        sealed_stream = self.journal.source_binding(action_id + '-dataflow-sealed')
+        checkpointed_stream = (declaration.get('kind') == 'run_stream'
+            and type(sealed_stream) is dict and sealed_stream.get('schema') == 'demiflow.dataflow_seal.v3'
+            and bool(self.journal.execution_commits(action_id)))
+        # This admits the action to the SAME engine's recovery verifier. It is
+        # not proof of success/recoverability: code, sources, actor state, effects
+        # and the original journal cut must still pass before a worker starts.
+        # An old delivery-only action or a directory containing no cut gains no
+        # recovery authority, and queue authorization above is unchanged.
         if old is not None and (declaration.get('kind') == 'delivery' or
                 declaration.get('kind') == 'write_file' and not native_file or
-                declaration.get('kind')=='run_stream' and not native_stream or
+                declaration.get('kind')=='run_stream' and not native_stream and not checkpointed_stream or
                 declaration.get('kind') == 'write_table' and not self.journal.execution_commits(action_id)
                 and not self._create_target_was_absent(action_id, declaration)):
             raise RecoveryContractError('This delivery-only entry needs its P3 native sink adapter before replay')
