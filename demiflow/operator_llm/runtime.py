@@ -370,9 +370,18 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
         client = client_override if client_override is not None else self._clients.get(prompt.model)
         if client is None:
             try:
-                client = (create_async_operator_llm_client(prompt.model,self.options)
-                          if self.options else create_async_operator_llm_client(prompt.model))
                 recovery = getattr(self, 'native_recovery', None)
+                native_journal = None
+                if recovery is not None:
+                    # Take the recovery journal first and pass it to the factory
+                    # so the constructor's http_error_retry guard sees a verified
+                    # writable journal; bind_client then installs the scopes.
+                    from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+                    journal = getattr(recovery, 'journal', None)
+                    if isinstance(journal, RemotePromptJournal):
+                        native_journal = journal
+                client = (create_async_operator_llm_client(prompt.model,self.options,native_journal=native_journal)
+                          if self.options else create_async_operator_llm_client(prompt.model,native_journal=native_journal))
                 if recovery is not None:
                     recovery.bind_client(client)
                 configure = getattr(client, 'configure_capacity', None)
