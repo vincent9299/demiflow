@@ -26,7 +26,10 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds):
     prepend_tail = (policy.provider == 'local' and policy.max_active_workers is not None
         and sum(len(s.partitions) for s in stages) > policy.max_active_workers
         and any(n.kernel.kind == 'StreamPrependOp' for n in graph.nodes))
-    if policy.worker_mode != 'thread' and not bounded_suffix and not prepend_tail:
+    async_suffix = (policy.provider == 'local' and policy.max_active_workers is not None
+        and sum(len(s.partitions) for s in stages) > policy.max_active_workers
+        and any(n.kernel.kind == 'AsyncMapOp' for n in graph.nodes))
+    if policy.worker_mode != 'thread' and not bounded_suffix and not prepend_tail and not async_suffix:
         return stages
     owner = {occ: stage for stage in stages for occ in stage.occurrences}
     incoming, outgoing = {}, {}

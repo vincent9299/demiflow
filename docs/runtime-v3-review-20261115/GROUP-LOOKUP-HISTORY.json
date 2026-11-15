@@ -1,0 +1,31 @@
+{
+  "head_before_commit": "911aa3cd959a7074d3bdf69da495e96066a143fb",
+  "source_sha256": {
+    "demiflow/planning/dataflow_thread_fusion.py": "cd369df9c06b4608468613184a5788a751243e3f1db380bb5863c9853fbc4231",
+    "tests/test_stream_grouping_lookup.py": "440c5da163aa0d7d1a0f5bb1b9fbe899a0746c1c03e37fd44d335cb2370e1b95"
+  },
+  "runs": [
+    {
+      "xml": "/tmp/demiflow-regression-lookup-original.xml",
+      "sha256": "bb673a10be4ba088c00eeaec1cc22da07cb975ee39af0ea74e93438a14f034fa",
+      "passed": 4,
+      "failed": 2
+    },
+    {
+      "xml": "/tmp/demiflow-regression-group-lookup-final.xml",
+      "sha256": "f66d4c1be3a1c0906350ea73442f5c003aa2151dd409aa8d98b9b27be9cb3401",
+      "passed": 5,
+      "failed": 1
+    },
+    {
+      "xml": "/tmp/demiflow-regression-group-lookup-r2.xml",
+      "sha256": "ad87b378ec49e6d26217f36b624c66148b60895cfed1e9056ff78d61497a86bb",
+      "passed": 10,
+      "failed": 0
+    }
+  ],
+  "upstream_group_fix": "96c6d4b (local cherry-pick911aa3c)",
+  "new_change": "Oversubscribed Local AsyncMap linear suffix uses existing bounded colocation; source remains separate; same stage profile sums.",
+  "historical_fixture_migration": "Parent seen lists become actual worker files; cross-worker timer dependency uses bounded tmp gate, keeps2s timeout and30ms timer, all row/version/cache/schema/budget assertions.",
+  "pending_audit": "Potential EOF drains synchronously while downstream same-worker timer pending; longer flush<2s counterexample is next, not claimed verified."
+}
