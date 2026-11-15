@@ -1,11 +1,10 @@
-"""G-F gate: lane F (F001-F021) Pipeline/data and old-call compatibility wiring.
+"""Lane F regression gate against the integrated v3 contracts.
 
-Cross-lane parallel implementation: the C/E/G/P v3 modules are not present in this
-worktree at baseline. Per C14, this test domain installs spec-bound fakes (field
-compatible with the frozen ``interfaces.pyi`` and the delivered C lane DTOs) into
-``sys.modules`` before importing the production modules under test. The production
-code itself uses real, unconditional imports with no fallback. Fakes are recorded
-as ``test_doubles`` and never impersonate a real in-tree file binding.
+DTO construction uses the delivered closed contracts. Adapter tests patch only
+explicit cross-module call boundaries for their unit assertions. Source and
+native queue tests retain their real readers, journal/HTTP/SQLite paths where
+originally exercised. Carrier doubles are unit evidence, not Local/Ray or
+end-to-end acceptance evidence.
 """
 from __future__ import annotations
 
@@ -224,7 +223,7 @@ def _install_fakes():
     comp.expand_operation_inputs = _fake_expand_operation_inputs
 
 
-_install_fakes()
+from demiflow.execution.contracts.dataflow_errors import DataflowError as _FakeDataflowError
 
 # Production modules under test (real, in-tree).
 from demiflow.execution import dataflow_inputs  # noqa: E402
@@ -232,7 +231,21 @@ from demiflow.execution.dataflow_inputs import build_input_handle, InputMaterial
 
 
 @pytest.fixture(autouse=True)
-def _reset_state():
+def _reset_state(monkeypatch):
+    """These are adapter unit tests; fake only the called cross-module seam."""
+    import demiflow.execution.dataflow as engine
+    import demiflow.execution.dataflow_api as api
+    import demiflow.planning.dataflow_policy as policy
+    import demiflow.planning.dataflow_compile as compiler
+    import demiflow.execution.driver as driver
+    monkeypatch.setattr(engine, "execute_action", _fake_execute_action)
+    monkeypatch.setattr(api, "make_action_request", _fake_make_action_request)
+    monkeypatch.setattr(api, "run_dataset_action", _fake_run_dataset_action)
+    monkeypatch.setattr(policy, "resolve_runtime_policy", _fake_resolve_runtime_policy)
+    if hasattr(driver, "resolve_runtime_policy"):
+        monkeypatch.setattr(driver, "resolve_runtime_policy", _fake_resolve_runtime_policy)
+    monkeypatch.setattr(compiler, "expand_relational_inputs", _fake_expand_relational_inputs)
+    monkeypatch.setattr(compiler, "expand_operation_inputs", _fake_expand_operation_inputs)
     STATE.reset()
     yield
 

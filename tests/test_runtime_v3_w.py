@@ -1,13 +1,10 @@
-"""Lane W acceptance: workbench real graph & history (cards W001-W021).
+"""Lane W regression gate against the integrated v3 contracts.
 
-Every test calls the real production symbol in this worktree. Lanes C (shared
-DTO/codec/error) and D (artifact store / seal) own modules that are not yet merged
-into this isolated tree; when absent, a strict spec-bound test-domain fake
-(mirroring ``interfaces.pyi``) stands in for them. No production fallback exists.
-An in-process assertion binds every loaded demiflow module to this worktree
-(IL012). Injected fakes are recorded in ``TEST_DOUBLES`` so real modules and
-test-domain doubles stay distinguishable in the evidence report; a synthetic
-``__file__`` never impersonates a real file binding.
+DTO construction uses the delivered closed contracts. Adapter tests patch only
+explicit cross-module call boundaries for their unit assertions. Source and
+native queue tests retain their real readers, journal/HTTP/SQLite paths where
+originally exercised. Carrier doubles are unit evidence, not Local/Ray or
+end-to-end acceptance evidence.
 """
 from __future__ import annotations
 
@@ -479,7 +476,7 @@ def sha(text: str) -> str:
 def aref(label: str = "artifact", *, store_id="run", media_type="application/json") -> ArtifactRef:
     digest = sha(label)
     return ArtifactRef(digest=digest, size_bytes=1, store_id=store_id,
-                       key="objects/" + digest, media_type=media_type)
+                       key=digest, media_type=media_type)
 
 
 def ref_json(ref: ArtifactRef) -> dict:
@@ -491,7 +488,7 @@ def json_ref(value, *, store_id="run"):
     raw = json.dumps(value).encode("utf-8")
     digest = hashlib.sha256(raw).hexdigest()
     return ArtifactRef(digest=digest, size_bytes=len(raw), store_id=store_id,
-                       key="objects/" + digest, media_type="application/json"), raw
+                       key=digest, media_type="application/json"), raw
 
 
 def profile(cpu=1000, memory=8 * 1024 * 1024) -> ResourceProfile:
@@ -511,7 +508,7 @@ def bounds(**overrides) -> Bounds:
 
 def kernel(kind="map", *, role="cpu", state="none", effect="pure", inputs=None) -> KernelSpec:
     return KernelSpec(kind=kind, implementation_ref=None, configuration={},
-                      inputs=tuple(inputs if inputs is not None else (InputPort("in", "incremental", "none"),)),
+                      inputs=tuple(inputs if inputs is not None else (InputPort("in", "incremental", "none", None),)),
                       state=state, effect=effect, resource_role=role, profile=profile(),
                       output_bound_bytes=1024 * 1024, mergeable=True)
 
@@ -520,14 +517,14 @@ def make_graph(action_id="a0", *, occurrences=1):
     """A source -> transform chain; ``occurrences`` repeats the transform occurrence."""
     dag_id = sha("dag-" + action_id)
     src_occ = sha("occ-src-" + action_id)
-    nodes = [GraphNode(occurrence_id=src_occ, semantic_id="src", kind="source",
+    nodes = [GraphNode(occurrence_id=src_occ, semantic_id=sha("src"), kind="source",
                        kernel=kernel("read_table", inputs=()), program_ref=None, shared_token="0")]
     edges = []
     transform_occs = []
     for index in range(occurrences):
         occ = sha(f"occ-map-{action_id}-{index}")
         transform_occs.append(occ)
-        nodes.append(GraphNode(occurrence_id=occ, semantic_id="map", kind="transform",
+        nodes.append(GraphNode(occurrence_id=occ, semantic_id=sha("map"), kind="transform",
                                kernel=kernel("map"), program_ref=aref("prog-" + str(index)),
                                shared_token=str(index + 1)))
         edges.append(GraphEdge(edge_id=sha(f"edge-{index}"), producer=src_occ, output_port="out",
@@ -894,7 +891,7 @@ def test_w004():
     assert view["schema"] == hist.PLAN_VIEW_SCHEMA
     assert view["binding_level"] == "sealed" and view["status"] == "sealed"
     # Same function at two call sites stays two nodes, never merged.
-    map_nodes = [n for n in view["dag"]["nodes"] if n["logical_node_id"] == "map"]
+    map_nodes = [n for n in view["dag"]["nodes"] if n["logical_node_id"] == sha("map")]
     assert len(map_nodes) == 2
     assert {n["occurrence_id"] for n in map_nodes} == set(occs)
     # Observed occurrence is observed; the other is explicitly not_observed (no inference).
@@ -996,12 +993,17 @@ def test_w006(tmp_path, monkeypatch):
 
 # --- W007 load_sealed_plan v3 ----------------------------------------------
 
-def _register_seal(target, action_id, graph, physical, sealed):
-    seal_mod = sys.modules["demiflow.execution.dataflow_seal"]
-    seal_mod._registry[(str(Path(target).resolve()), action_id)] = (graph, physical, sealed)
+def _register_seal(target, action_id, graph, physical, sealed, monkeypatch):
+    """Unit boundary only; production sealed-byte integration is tested separately."""
+    import demiflow.execution.dataflow_seal as seal_mod
+    (Path(target) / ".dataflow-store").mkdir(exist_ok=True)
+    def load(directory, wanted, *, store, bounds):
+        assert Path(directory).resolve() == Path(target).resolve() and wanted == action_id
+        return graph, physical, sealed
+    monkeypatch.setattr(seal_mod, "load_dataflow", load)
 
 
-def test_w007(tmp_path):
+def test_w007(tmp_path, monkeypatch):
     from demiflow.execution.plan_interpreter import PlanContractError
     target, journal, fence, run_id = make_journal(tmp_path)
     graph, _ = make_graph("a0")
@@ -1009,7 +1011,7 @@ def test_w007(tmp_path):
     sealed = make_sealed()
     marker = v3_marker(run_id, "a0", dag_id=graph.dag_id, plan_id=physical.plan_id)
     journal.bind_source(fence, "a0-dataflow-sealed", marker)
-    _register_seal(target, "a0", graph, physical, sealed)
+    _register_seal(target, "a0", graph, physical, sealed, monkeypatch)
     bundle = sealed_plans.load_sealed_plan(target, "a0")
     assert bundle["version"] == "v3"
     assert bundle["graph"] is graph and bundle["physical"] is physical and bundle["sealed"] is sealed
@@ -1028,7 +1030,7 @@ def test_w007(tmp_path):
 
 def write_store_json(target, value):
     ref, raw = json_ref(value)
-    obj = Path(target) / "run" / "objects" / ref.digest
+    obj = Path(target) / ".dataflow-store" / "run" / "objects" / ref.digest
     obj.parent.mkdir(parents=True, exist_ok=True)
     obj.write_bytes(raw)
     return ref
@@ -1070,7 +1072,7 @@ def test_w008(tmp_path):
 
 # --- W009 facts.read_sealed_plan v3 ----------------------------------------
 
-def test_w009(tmp_path):
+def test_w009(tmp_path, monkeypatch):
     from demiflow.workbench.runs import facts
     target, journal, fence, run_id = make_journal(tmp_path)
     graph, _ = make_graph("a0")
@@ -1078,7 +1080,7 @@ def test_w009(tmp_path):
     sealed = make_sealed()
     marker = v3_marker(run_id, "a0", dag_id=graph.dag_id, plan_id=physical.plan_id)
     journal.bind_source(fence, "a0-dataflow-sealed", marker)
-    _register_seal(target, "a0", graph, physical, sealed)
+    _register_seal(target, "a0", graph, physical, sealed, monkeypatch)
     result = facts.read_sealed_plan(target, "a0")
     assert result["available"] is True and result["version"] == "v3"
     assert result["dag_id"] == graph.dag_id and result["plan_id"] == physical.plan_id
@@ -1518,11 +1520,11 @@ function w020() {
   };
   const state = { graph: { logical: { available: true, action_count: 1, actions: [entry] }, nodes: [{ id: 'n0', api: 'x.y', kind: 'map' }] } };
   const { host, rec } = makeHost(state);
-  host.chooseLogicalNode('map', null);
+  host.chooseLogicalNode('occ-map-0', null);
   const names = rec.raw.map(r => r.name);
   assert(names.includes('stage.profile'), 'v3 stage.profile raw block');
   assert(names.includes('stage.replicas'), 'v3 stage.replicas raw block');
-  assert(names.includes('stages_by_occurrence'), 'multi-occurrence stages_by_occurrence');
+  assert(!names.includes('stages_by_occurrence'), 'v3 selection resolves exactly one occurrence');
   assert(names.includes('plan_node_observations'), 'plan_node_observations preserved');
   assert(names.includes('plan_facts'), 'v3 plan_facts raw block');
   const pf = rec.raw.find(r => r.name === 'plan_facts').value;
@@ -1530,8 +1532,7 @@ function w020() {
   assert(!('worker_groups' in pf), 'v3 plan_facts has no worker_groups');
   const sp = rec.raw.find(r => r.name === 'stage.profile').value;
   assert(sp.requests.cpu === '2', 'stage resolved by occurrence_id occ-map-0');
-  const sbo = rec.raw.find(r => r.name === 'stages_by_occurrence').value;
-  assert(sbo['occ-map-0'].stage_id === 's0' && sbo['occ-map-1'].stage_id === 's1', 'stages_by_occurrence keyed per occurrence');
+
   const boxText = textOf(host.inspector);
   assert(boxText.includes('已有观测'), 'list-shape observation label observed');
   assert(boxText.includes('副本目标'), 'v3 replica target row');

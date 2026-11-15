@@ -1,9 +1,10 @@
-"""Lane G unit gate (G-G): real graph capture and operator registration.
+"""Lane G regression gate against the integrated v3 contracts.
 
-Each test calls the real production symbol in this worktree and asserts the
-card's required counterexamples. Cross-lane modules (C DTO/codec/errors, M model
-factory) are spec-bound test-domain fakes injected in-process; production code
-never imports them. In-process tree binding is asserted in every test.
+DTO construction uses the delivered closed contracts. Adapter tests patch only
+explicit cross-module call boundaries for their unit assertions. Source and
+native queue tests retain their real readers, journal/HTTP/SQLite paths where
+originally exercised. Carrier doubles are unit evidence, not Local/Ray or
+end-to-end acceptance evidence.
 """
 from __future__ import annotations
 
@@ -18,16 +19,13 @@ import pytest
 
 _TREE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_TREE / "tests"))
-from _runtime_v3_g_fakes import (  # noqa: E402
-    ActionProgram,
-    ActionRequest,
-    Bounds,
-    DataflowError,
-    _install_fakes,
-    assert_tree_binding,
-)
+from _runtime_v3_g_fakes import assert_tree_binding
+from demiflow.execution.contracts.dataflow import ActionProgram, ActionRequest, Bounds
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
-_install_fakes()
+def Bounds(**overrides):
+    return replace(resolve_runtime_policy({}, {}, provider="local")[1], **overrides)
 
 from demiflow.data import plan as ops  # noqa: E402
 from demiflow.data.dataflow_operation import NativeOperation  # noqa: E402
@@ -73,11 +71,10 @@ def _map_plan():
 
 
 def _req(source, plan, kind="take", args=None, action_id="act", sink=None):
-    program = ActionProgram(name=kind, kind=kind, value=None)
     return ActionRequest(
         kind=kind, source=source, plan=plan,
         arguments=args if args is not None else {"limit": 2},
-        sink=sink, programs=(program,), provider=None,
+        sink=sink, programs=(), provider="local",
         action=type("Action", (), {"action_id": action_id})(),
     )
 
@@ -128,17 +125,17 @@ def test_g001():
 _HASHSEED_PROGRAM = r"""
 import sys
 sys.path.insert(0, "tests")
-from _runtime_v3_g_fakes import _install_fakes, ActionRequest, ActionProgram, Bounds
-_install_fakes()
+from demiflow.execution.contracts.dataflow import ActionRequest, ActionProgram
+from demiflow.planning.dataflow_policy import resolve_runtime_policy
+def Bounds(): return resolve_runtime_policy({}, {}, provider="local")[1]
 from demiflow.data.sources import ItemsSource
 from demiflow.data.plan import LogicalPlan, MapOp, CallableSpec
 from demiflow.planning.dataflow_compile import capture_graph
 def fn(row): return row
 src = ItemsSource(items=({"x": 1},))
 plan = LogicalPlan((MapOp(callable=CallableSpec.create(fn)),))
-prog = ActionProgram(name="take", kind="take", value=None)
 req = ActionRequest(kind="take", source=src, plan=plan, arguments={"limit": 1},
-                    sink=None, programs=(prog,), provider=None,
+                    sink=None, programs=(), provider="local",
                     action=type("A", (), {"action_id": "fixed"})())
 g = capture_graph(req, bounds=Bounds()).graph
 print(g.dag_id)
@@ -194,7 +191,7 @@ def test_g003():
     )
     assert constructions == []  # side-effect constructor count stays zero
     assert spec.kind == "MapOp"
-    assert spec.state == "none" and spec.effect == "pure"
+    assert spec.state == "auto_json" and spec.effect == "pure"  # class factories own per-instance state
 
     class UnregisteredOp(LogicalOp):
         pass
@@ -229,7 +226,7 @@ def test_g005():
     validate_graph(g, bounds=Bounds())  # valid baseline
 
     dangling = replace(g, edges=g.edges + (
-        replace(g.edges[0], producer="missing-node"),))
+        replace(g.edges[0], producer="f" * 64),))
     _expect_error("INVALID_CONTRACT", lambda: validate_graph(dangling, bounds=Bounds()))
 
     dup = replace(g, nodes=g.nodes + (g.nodes[0],))
@@ -248,10 +245,20 @@ def test_g005():
 # ---------------------------------------------------------------------------
 def test_g006():
     _bind()
-    zero = lower_action(_req(ItemsSource(items=({"x": 1},)), LogicalPlan(), args={"limit": 0}),
-                        bounds=Bounds()).graph
-    assert [n.kernel.kind for n in zero.nodes if n.kind == "source"] == ["literal_empty"]
+    zero_compiled = lower_action(_req(ItemsSource(items=({"x": 1},)), _map_plan(), args={"limit": 0}),
+                        bounds=Bounds())
+    zero = zero_compiled.graph
+    source_declarations = [d.source_spec for d in zero_compiled.declarations if d.source_spec is not None]
+    assert len(source_declarations) == 1 and source_declarations[0].items == ()
+    assert not [n for n in zero.nodes if n.kind == "transform"]
     assert not [n for n in zero.nodes if n.kernel.kind in {"prompt", "embedding", "agent"}]
+
+    from demiflow import data
+    def unread_source():
+        raise AssertionError("take(0) must never invoke the source")
+        yield {"x": 1}
+    with data.local_execution(worker_mode="thread"):
+        assert data.from_iter(unread_source).take(0) == []
 
     schema = lower_action(_req(ItemsSource(items=({"x": 1},)), LogicalPlan(), kind="schema",
                                args={"fetch_if_missing": False}), bounds=Bounds()).graph
@@ -310,7 +317,7 @@ def test_g009():
     assert registry["write_datasink"].result_kind == "write_result"
     assert registry["take"].result_kind == "rows"
     assert registry["write_datasink"].adapter_symbol != registry["take"].adapter_symbol
-    _expect_error("UNSUPPORTED_CAPABILITY",
+    _expect_error("INVALID_CONTRACT",
                   lambda: lower_action(_req(ItemsSource(items=({"x": 1},)), LogicalPlan(),
                                             kind="unknown_terminal_xyz"), bounds=Bounds()))
 

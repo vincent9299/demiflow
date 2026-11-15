@@ -176,7 +176,7 @@ def test_u001():
 # ---------------------------------------------------------------------------
 # U002 union
 # ---------------------------------------------------------------------------
-def test_u002():
+def test_u002(monkeypatch, tmp_path):
     _bind()
     with data.local_execution(worker_mode="thread"):
         a = data.from_items([{"x": 1}])
@@ -188,9 +188,18 @@ def test_u002():
         ra = _ray_ds([{"x": 1}])
         rb = Dataset(ra._source, ra._plan, ra._executor)
         assert isinstance(ra.union(rb)._source, UnionSource)
-        # Mixed contexts still fail closed (kept business guard).
-        with pytest.raises(ValueError, match="same local_execution context"):
-            a.union(_ray_ds([{"x": 3}]))
+        # Inputs are declarations; the terminal chooses the hosting provider.
+        other = _ray_ds([{"x": 3}])
+        mixed = a.union(other)
+        assert mixed._source.inputs[0].source is a._source
+        assert mixed._source.inputs[1].source is other._source
+        assert mixed._source.inputs[1].plan is other._plan
+        assert mixed._executor is a._executor
+        # Leave the facade recording double and execute the actual Local engine.
+        monkeypatch.undo()
+        assert mixed.take_all() == [{"x": 1}, {"x": 3}]
+        with pytest.raises((TypeError, AttributeError)):
+            a.union(object())
 
 
 # ---------------------------------------------------------------------------

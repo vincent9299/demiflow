@@ -1,12 +1,10 @@
-"""G-Y local gate for lane Y: Ray Core entry / Ray Data exit.
+"""Lane Y regression gate against the integrated v3 contracts.
 
-Runs WITHOUT ray installed. The cross-lane facade modules (E/F/P/C) are not yet
-implemented in this worktree, so this test domain injects strict spec-bound fakes
-matching the frozen signatures (C14). Production ``executors/ray.py`` carries no
-ImportError fallback. A meta-path hook bans ``ray``/``ray.data`` imports and an
-in-process assertion binds every loaded demiflow module to this worktree (IL012).
-These leaf tests prove wiring/retirement only; they do not substitute for the
-ACCEPTANCE.md real combination scenarios.
+DTO construction uses the delivered closed contracts. Adapter tests patch only
+explicit cross-module call boundaries for their unit assertions. Source and
+native queue tests retain their real readers, journal/HTTP/SQLite paths where
+originally exercised. Carrier doubles are unit evidence, not Local/Ray or
+end-to-end acceptance evidence.
 """
 from __future__ import annotations
 
@@ -203,7 +201,7 @@ class _FakeEngine:
     def normalize_native_options(self, options, *, operation_kind):
         return dict(options or {})
 
-    def build_input_handle(self, value, *, format, bounds=None):
+    def build_input_handle(self, value, *, format, bounds=None, override_num_blocks=None):
         if format not in _VALID_FORMATS:
             raise ValueError(f"input format invalid: {format!r}")
         self.input_calls.append({"value": value, "format": format, "bounds": bounds})
@@ -241,6 +239,8 @@ class _FakeEngine:
             raise ValueError(f"provider invalid: {provider!r}")
         return {"supported": True, "provider": provider}
 
+
+from demiflow.execution.contracts.dataflow import ActionProgram as FakeActionProgram
 
 ENGINE = _FakeEngine()
 
@@ -315,7 +315,17 @@ _assert_tree_binding()
 
 
 @pytest.fixture(autouse=True)
-def _reset_engine():
+def _reset_engine(monkeypatch):
+    """Unit-test the Ray adapter against explicit facade seams, never sys.modules."""
+    import demiflow.execution.dataflow_api as api
+    import demiflow.execution.dataflow_inputs as inputs
+    import demiflow.planning.dataflow_policy as policy
+    monkeypatch.setattr(api, "make_action_request", ENGINE.make_action_request)
+    monkeypatch.setattr(api, "run_dataset_action", ENGINE.run_dataset_action)
+    monkeypatch.setattr(api, "explain_dataset", ENGINE.explain_dataset)
+    monkeypatch.setattr(inputs, "build_input_handle", ENGINE.build_input_handle)
+    monkeypatch.setattr(policy, "resolve_runtime_policy", ENGINE.resolve_runtime_policy)
+    monkeypatch.setattr(ray_module, "resolve_runtime_policy", ENGINE.resolve_runtime_policy)
     ENGINE.reset()
     _RAY_BAN.attempts.clear()
     _assert_tree_binding()

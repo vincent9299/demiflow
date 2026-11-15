@@ -1,10 +1,10 @@
-"""G-P unit contract tests for lane P (physical placement and resource policy).
+"""Lane P regression gate against the integrated v3 contracts.
 
-Each test calls the real production symbol in this worktree. Lane C owns the
-shared DTO/codec/error modules; when they are not yet merged into this isolated
-tree, a strict spec-bound test-domain fake (mirroring interfaces.pyi) stands in
-for them. No production fallback exists. An in-process assertion binds every
-loaded demiflow module to this worktree (IL012).
+DTO construction uses the delivered closed contracts. Adapter tests patch only
+explicit cross-module call boundaries for their unit assertions. Source and
+native queue tests retain their real readers, journal/HTTP/SQLite paths where
+originally exercised. Carrier doubles are unit evidence, not Local/Ray or
+end-to-end acceptance evidence.
 """
 from __future__ import annotations
 
@@ -358,24 +358,27 @@ def _kernel(kind, role="cpu", profile=None, *, state="none", effect="pure", inpu
             output_bound_bytes=MiB, mergeable=True, configuration=None):
     return KernelSpec(
         kind=kind, implementation_ref=None, configuration=configuration or {},
-        inputs=tuple(inputs if inputs is not None else (InputPort("in", "incremental", "none"),)),
+        inputs=tuple(inputs if inputs is not None else (InputPort("in", "incremental", "none", None),)),
         state=state, effect=effect, resource_role=role,
         profile=profile if profile is not None else _profile(),
         output_bound_bytes=output_bound_bytes, mergeable=mergeable,
     )
 
 
+def _id(label):
+    return hashlib.sha256(label.encode()).hexdigest()
+
 def _node(occ, kind, kernel, *, node_kind="transform"):
-    return GraphNode(occ, "sem-" + occ, node_kind, kernel, None, "0")
+    return GraphNode(_id(occ), _id("sem-" + occ), node_kind, kernel, None, "0")
 
 
 def _edge(producer, consumer, *, input_port="in", output_port="out"):
-    return GraphEdge(f"edge-{producer}-{consumer}-{input_port}", producer, output_port, consumer, input_port)
+    return GraphEdge(_id(f"edge-{producer}-{consumer}-{input_port}"), _id(producer), output_port, _id(consumer), input_port)
 
 
 def _graph(nodes, edges, terminals, sources):
-    return DataflowGraph("demiflow.dataflow_graph.v3", "action-1", "dag-1",
-                         tuple(nodes), tuple(edges), tuple(terminals), tuple(sources))
+    return DataflowGraph("demiflow.dataflow_graph.v3", "action-1", _id("dag-1"),
+                         tuple(nodes), tuple(edges), tuple(map(_id, terminals)), tuple(map(_id, sources)))
 
 
 def _host(host_id="host-1", *, provider="local", cpu=64.0, memory=4096 * MiB, gpu=0.0, isolation=()):
@@ -384,11 +387,11 @@ def _host(host_id="host-1", *, provider="local", cpu=64.0, memory=4096 * MiB, gp
 
 
 def _snapshot(source_id, *, replay="seek", finite=True):
-    return SourceSnapshot(source_id, "items", {}, finite, replay, None)
+    return SourceSnapshot(_id(source_id), "items", {}, finite, replay, None)
 
 
 def _split(split_id, source_id, *, domain="local"):
-    return SourceSplit(split_id, source_id, {}, {}, None, domain)
+    return SourceSplit(_id(split_id), _id(source_id), {}, {}, None, domain)
 
 
 def _constants():
@@ -398,7 +401,7 @@ def _constants():
 def _cpu_gpu_io_graph():
     cpu = _node("src", "source", _kernel("items_source", "cpu", inputs=()), node_kind="source")
     gpu = _node("model", "model_map", _kernel("model_map", "gpu", _profile(gpu=1), state="adapter", effect="journaled"))
-    io = _node("sink", "write", _kernel("write_file", "io", inputs=(InputPort("in", "incremental", "none"),)), node_kind="terminal")
+    io = _node("sink", "write", _kernel("write_file", "io", inputs=(InputPort("in", "incremental", "none", None),)), node_kind="terminal")
     edges = [_edge("src", "model"), _edge("model", "sink")]
     return _graph([cpu, gpu, io], edges, ("sink",), ("src",))
 
@@ -448,7 +451,7 @@ def test_p002():
     src = _node("s", "source", _kernel("items_source", "cpu", inputs=()), node_kind="source")
     g2 = _graph([src, stateful], [_edge("s", "st")], ("st",), ("s",))
     stages2 = place.partition_stages(g2, policy=_policy(default_partitions=4), bounds=_bounds())
-    stateful_stage = next(s for s in stages2 if "st" in s.occurrences)
+    stateful_stage = next(s for s in stages2 if _id("st") in s.occurrences)
     assert stateful_stage.replica_max == 1  # stateful map not auto-scaled into shared instances
 
 
@@ -462,9 +465,9 @@ def test_p003():
     graph = _graph([src, a, b], [_edge("s", "a"), _edge("a", "b")], ("b",), ("s",))
     stages = place.partition_stages(graph, policy=_policy(), bounds=_bounds())
     fused = place.select_fusion_groups(graph, stages, policy=_policy())
-    ab = next(s for s in fused if "a" in s.occurrences)
-    assert "b" in ab.occurrences  # pure same-resource linear chain fused, occurrences kept
-    assert ab.resident_bytes == sum(s.resident_bytes for s in stages if s.occurrences[0] in {"a", "b"})
+    ab = next(s for s in fused if _id("a") in s.occurrences)
+    assert _id("b") in ab.occurrences  # pure same-resource linear chain fused, occurrences kept
+    assert ab.resident_bytes == sum(s.resident_bytes for s in stages if s.occurrences[0] in {_id("a"), _id("b")})
 
     # Two stages each filling the per-replica budget must not fuse into a double allowance.
     full = _bounds(max_batch_bytes=8 * MiB)
@@ -472,11 +475,11 @@ def test_p003():
     full_stages = tuple(
         StageSpec(s.stage_id, s.occurrences, s.partitions, s.profile, s.replica_min, s.replica_target,
                   s.replica_max, 8 * MiB, s.output_bytes, s.state_bytes, s.kernel_refs)
-        if s.occurrences[0] in {"a", "b"} else s
+        if s.occurrences[0] in {_id("a"), _id("b")} else s
         for s in stages_full
     )
     not_fused = place.select_fusion_groups(graph, full_stages, policy=_policy())
-    assert sum(1 for s in not_fused if s.occurrences[0] in {"a", "b"}) == 2
+    assert sum(1 for s in not_fused if s.occurrences[0] in {_id("a"), _id("b")}) == 2
 
     # Model initialization (stateful GPU) is never fused/replicated.
     model = _node("m", "model_map", _kernel("model_map", "gpu", _profile(gpu=1), state="adapter", effect="journaled"))
@@ -497,7 +500,7 @@ def test_p004():
     assert exchanges[0].mode == "memory_incremental"  # incremental map gets no finite seal
     assert exchanges[0].read_domain == "local"
 
-    sort = _node("sort", "sort", _kernel("sort", "cpu", inputs=(InputPort("in", "finite_complete", "global"),)))
+    sort = _node("sort", "sort", _kernel("sort", "cpu", inputs=(InputPort("in", "finite_complete", "global", None),)))
     g2 = _graph([src, sort], [_edge("s", "sort")], ("sort",), ("s",))
     ex2 = place.plan_exchanges(g2, place.partition_stages(g2, policy=_policy(), bounds=_bounds()), policy=_policy(), bounds=_bounds())
     assert ex2[0].mode == "finite_sealed"  # global sort cannot fake completion with memory incremental

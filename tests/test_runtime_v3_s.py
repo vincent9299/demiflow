@@ -1,9 +1,10 @@
-"""Lane S (C04) unit acceptance: incremental sources and cursors.
+"""Lane S regression gate against the integrated v3 contracts.
 
-Calls the real dataflow_sources/source_readers symbols. Cross-lane DTO/registry/
-queue-service modules are strict test-domain fakes of the frozen interfaces.pyi
-contracts (no production fallback). Every test asserts in-process that all loaded
-demiflow modules come from this worktree (IL012).
+DTO construction uses the delivered closed contracts. Adapter tests patch only
+explicit cross-module call boundaries for their unit assertions. Source and
+native queue tests retain their real readers, journal/HTTP/SQLite paths where
+originally exercised. Carrier doubles are unit evidence, not Local/Ray or
+end-to-end acceptance evidence.
 """
 from __future__ import annotations
 
@@ -261,6 +262,11 @@ assert Path(ds.__file__).resolve().is_relative_to(WORKTREE)
 assert Path(sr.__file__).resolve().is_relative_to(WORKTREE)
 
 
+from demiflow.execution.contracts.dataflow import (
+    ArtifactRef, Bounds, LoadedProgram, RuntimeServices, WorkerAssignment,
+    WorkerLease, SealedExecution, QueueReply,
+)
+
 # --- helpers ----------------------------------------------------------------
 def assert_worktree():
     for name, module in list(sys.modules.items()):
@@ -321,6 +327,9 @@ class FakeJournal:
         self.replies = list(replies)
         self.commands = []
 
+    def read_configuration(self):
+        return {"queue_binding": self.binding}
+
     def queue(self, command):
         self.commands.append(command)
         if not self.replies:
@@ -330,16 +339,23 @@ class FakeJournal:
 
 
 def make_assignment(action_id, bounds):
+    ref = ArtifactRef("a" * 64, 1, "test-store", "a" * 64, "application/json")
+    lease = WorkerLease("allocation", "boot", "stage", ("p0",), "local", "endpoint", ref, 10 ** 13)
+    sealed = SealedExecution(ref, ref, (), ref, ref, (), ref)
     return WorkerAssignment(
         schema="demiflow.dataflow_assignment.v3", run_id="run", action_id=action_id,
-        attempt=1, fence="fence", plan_id="plan", plan_revision=1, lease=None,
-        sealed=None, stages=(), inputs=(), outputs=(), source_splits=(),
+        attempt=1, fence="fence", plan_id="a" * 64, plan_revision=1, lease=lease,
+        sealed=sealed, stages=(), inputs=(), outputs=(), source_splits=(),
         restore_refs=(), bounds=bounds,
     )
 
 
 def make_services(store, plan, source_id, *, journal=None, bounds=None, action_id="act"):
     bounds = bounds or make_bounds()
+    if journal is not None:
+        journal.binding = dict(action_id=action_id, source_id=source_id, mode="explicit",
+            contract_digest="a" * 64, generation=None, pool=None, source_occurrence=source_id,
+            fetch_occurrence=source_id, final_occurrence=None)
     programs = {source_id: LoadedProgram("source", plan, identity(["program", source_id]))}
     return RuntimeServices(
         store=store, journal=journal if journal is not None else FakeJournal(),
@@ -425,7 +441,7 @@ def test_s001(tmp_path, monkeypatch):
     assert_worktree()
     store = FakeStore()
     items = make_snapshot(ItemsSource((1, 2, 3)), store)
-    assert items.kind == "ItemsSource" and items.replay == "seek" and items.finite is True
+    assert items.kind == "items" and items.replay == "seek" and items.finite is True
     rng = make_snapshot(RangeSource(5), store)
     assert rng.replay == "seek" and rng.immutable_identity["count"] == 5
     it = make_snapshot(IterableSource(lambda: iter([1])), store)
@@ -547,7 +563,7 @@ def test_s005():
 # --- S006-S010 ItemsReader --------------------------------------------------
 def _items_setup(tmp_path, items):
     store = FakeStore()
-    plan = ItemsSource(tuple(items))
+    plan = ItemsSource(tuple({"value": item} for item in items))
     snap = make_snapshot(plan, store)
     split = first_split(snap, plan)
     services = make_services(store, plan, snap.source_id)
@@ -587,9 +603,10 @@ def test_s008(tmp_path):
     records = drain(reader)
     assert len(records) == len(items)
     for record, original in zip(records, items):
-        value = load_inline(record, store)
+        value = load_inline(record, store)["value"]
         assert value == original and type(value) is type(original)
-    assert pickle.loads(b"".join(store.read(records[2].payload_ref, max_bytes=1 << 20))) == -0.0
+    import math
+    assert math.copysign(1.0, load_inline(records[2], store)["value"]) == -1.0
     reader.close()
     # empty array does not drift: immediate eoi
     store2, plan2, snap2, split2, services2 = _items_setup(tmp_path, [])
@@ -608,10 +625,14 @@ def test_s009(tmp_path):
     first = reader.next_record()
     cursor = reader.snapshot()
     # read-but-unconfirmed frontier holds exactly the last sent record
-    assert cursor.pending_refs == (first.record.payload_ref,)
+    assert len(cursor.pending_refs) == 1
+    assert cursor.pending_refs[0].media_type == "application/vnd.demiflow.source-pending.v3"
+    restored = open_reader(snap, split, services, cursor=cursor)
+    assert restored.next_record().record == first.record
+    restored.close()
     assert cursor.offset == {"index": 1} and cursor.next_sequence == 1
     reader.next_record()  # pulling again confirms the previous record
-    assert reader.snapshot().pending_refs != (first.record.payload_ref,)
+    assert reader.snapshot().pending_refs != cursor.pending_refs
     reader.close()
 
 
@@ -727,7 +748,7 @@ def test_s017(tmp_path):
     cursor = SourceCursor(split.split_id, {"file_index": 0, "record_index": 2}, 2, False, None, ())
     reader2 = open_reader(snap, split, services, cursor=cursor)
     rows = [load_inline(r, store) for r in drain(reader2)]
-    assert [r["value"]["x"] for r in rows] == [2]
+    assert [r["x"] for r in rows] == [2]
     reader2.close()
 
 
@@ -1077,17 +1098,17 @@ def test_s037():
 
 def test_s038():
     assert_worktree()
-    store, plan, snap, split, services = _iter_setup(lambda: iter([10, 20, 30]))
+    store, plan, snap, split, services = _iter_setup(lambda: iter([{"value": i} for i in [10, 20, 30]]))
     reader = open_reader(snap, split, services)
     records = drain(reader)
-    assert [r.inline for r in records] == [10, 20, 30]
+    assert [r.inline["value"] for r in records] == [10, 20, 30]
     assert all(r.payload_ref is None for r in records)  # attempt_only
     reader.close()
 
 
 def test_s039():
     assert_worktree()
-    store, plan, snap, split, services = _iter_setup(lambda: iter([1, 2]))
+    store, plan, snap, split, services = _iter_setup(lambda: iter([{"value": 1}, {"value": 2}]))
     reader = open_reader(snap, split, services)
     reader.next_record()
     cursor = reader.snapshot()
@@ -1101,8 +1122,8 @@ def test_s040():
 
     def factory():
         try:
-            yield 1
-            yield 2
+            yield {"value": 1}
+            yield {"value": 2}
         finally:
             closed.append(1)
 
@@ -1127,8 +1148,9 @@ def _queue_setup(tmp_path, replies):
 
 
 def _queue_row_ref(store, row):
-    raw = pickle.dumps(row, protocol=4)
-    return store.put(iter((raw,)), max_bytes=len(raw), media_type="application/vnd.demiflow.record.v3")
+    import json
+    raw = json.dumps(row).encode()
+    return store.put(iter((raw,)), max_bytes=len(raw), media_type="application/json")
 
 
 def _delivery_ref(key):
@@ -1206,8 +1228,21 @@ def test_s044(tmp_path):
     cursor = reader.snapshot()
     assert cursor.offset["record_index"] == 1
     assert cursor.lease_ref == delivery
-    assert cursor.pending_refs == (row_ref,)
+    assert len(cursor.pending_refs) == 1
+    assert cursor.pending_refs[0].media_type == "application/vnd.demiflow.source-pending.v3"
+    import json
+    pending = json.loads(b"".join(store.read(cursor.pending_refs[0], max_bytes=1 << 20)))
+    assert pending["sequence"] == 0
+    assert "queue_delivery_ref" in pending["document"]
     reader.close()
+    restored = open_reader(snap, split, services, cursor=cursor)
+    replay = restored.next_record()
+    assert replay.status == "record" and replay.record.sequence == 0
+    assert load_inline(replay.record, store) == {"x": 1}
+    assert restored._delivery_ref == delivery
+    assert restored.snapshot() == cursor
+    assert len(journal.commands) == 1  # captured row is not a new native claim
+    restored.close()
 
 
 def test_s045(tmp_path):
@@ -1296,3 +1331,33 @@ def test_s050():
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 from demiflow.execution.contracts.dataflow import ArtifactRef
+
+
+def test_producer_pending_replay_preserves_identity_and_cursor(tmp_path):
+    """Pending replay preserves data; it does not grant a new native lease."""
+    import json
+    from dataclasses import replace
+    store, plan, snap, split, services, journal = _queue_setup(tmp_path, [])
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+    snap = replace(snap, kind="producer", immutable_identity=thaw_record_value(snap.immutable_identity))
+    descriptor = {"position": 7, "next_cursor": {"offset": 8}, "occurrence": "b" * 64}
+    delivery = _queue_row_ref(store, descriptor)
+    row_ref = _queue_row_ref(store, {"x": 9})
+    journal.replies.append(("record", delivery, row_ref, 0))
+    first = sr.ProducerReader(snap, services=services)
+    first.open(split, None)
+    record = first.next_record().record
+    cursor = first.snapshot()
+    assert record.record_id == descriptor["occurrence"]
+    assert cursor.offset["producer_position"] == 8
+    first.close()
+    # The pending artifact contains the complete source identity. Replaying it
+    # must neither re-read the producer descriptor nor request a fresh claim.
+    del store.blobs[delivery.key]
+    resumed = sr.ProducerReader(snap, services=services)
+    resumed.open(split, cursor)
+    assert resumed.next_record().record == record
+    assert resumed.snapshot() == cursor
+    assert resumed._delivery_ref == delivery
+    assert len(journal.commands) == 1
+    resumed.close()

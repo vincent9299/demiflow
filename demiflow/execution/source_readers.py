@@ -738,6 +738,22 @@ class QueueReader(_BaseReader):
 
     def next_record(self) -> SourcePoll:
         self._check_open()
+        if self._replay_pending:
+            # Re-deliver the already captured record, without claiming another
+            # task. This restores provenance only; the driver still owns lease
+            # validation before any acquire/finalize operation.
+            poll = super().next_record()
+            encoded = poll.record.source_position.get("queue_delivery_ref")
+            if not isinstance(encoded, str):
+                raise DataflowError("INCOMPATIBLE_HISTORY", "pending queue record lacks delivery provenance")
+            try:
+                delivery = ArtifactRef(**json.loads(encoded))
+            except (TypeError, ValueError) as exc:
+                raise DataflowError("INCOMPATIBLE_HISTORY", "pending queue delivery provenance is invalid") from exc
+            if self._lease_ref != delivery:
+                raise DataflowError("INCOMPATIBLE_HISTORY", "pending queue delivery differs from cursor lease")
+            self._delivery_ref = delivery
+            return poll
         if self._eoi:
             return SourcePoll("eoi", None, 0)
         self._pending = ()
@@ -759,7 +775,6 @@ class QueueReader(_BaseReader):
             return SourcePoll("eoi", None, 0)
         if reply.status != "record" or reply.row_ref is None:
             raise DataflowError("INTERNAL_PROTOCOL", f"unexpected queue reply: {reply.status}")
-        import json
         from dataclasses import asdict
         if reply.delivery_ref is None:
             raise DataflowError('FENCED', 'Queue delivery lacks native ownership')
@@ -795,8 +810,11 @@ class ProducerReader(QueueReader):
     def next_record(self):
         from dataclasses import replace
         import json
+        replaying = bool(self._replay_pending)
         poll = super().next_record()
-        if poll.status != 'record':
+        if poll.status != 'record' or replaying:
+            # Producer provenance and next cursor were already sealed together.
+            # Rewriting them would advance the producer a second time.
             return poll
         descriptor = json.loads(b''.join(self._services.store.read(self._delivery_ref,
             max_bytes=self._services.bounds.max_control_bytes)))

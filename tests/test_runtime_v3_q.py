@@ -1,11 +1,10 @@
-"""Lane Q gate G-Q: native acquisition / queue settlement service (C16).
+"""Lane Q regression gate against the integrated v3 contracts.
 
-The C-lane DTO modules (contracts.dataflow / contracts.dataflow_errors) are not
-merged into this lane tree, so spec-bound test-domain substitutes are installed
-before importing the production module; the final integration runs the real
-C-lane implementation. The production module itself has no fallback. Every test
-asserts in-process that demiflow and its loaded queue submodules come from this
-worktree (IL012). Heavy native HTTP/SQLite tests run single-path.
+DTO construction uses the delivered closed contracts. Adapter tests patch only
+explicit cross-module call boundaries for their unit assertions. Source and
+native queue tests retain their real readers, journal/HTTP/SQLite paths where
+originally exercised. Carrier doubles are unit evidence, not Local/Ray or
+end-to-end acceptance evidence.
 """
 from __future__ import annotations
 
@@ -258,19 +257,19 @@ def _make_bounds(**over):
 
 def _make_driver_services(action, store, bounds, clock):
     return DriverServices(action=action, journal_service=object(), store=store,
-                          resources=object(), policy=object(), bounds=bounds,
+                          resources=object(), policy=__import__("demiflow.planning.dataflow_policy", fromlist=["resolve_runtime_policy"]).resolve_runtime_policy({}, {}, provider="local")[0], bounds=bounds,
                           hosts=(), clock_ms=clock)
 
 
 def _lease(clock, *, allocation='alloc-1', boot='boot-1', ttl=60000):
     return WorkerLease(allocation_id=allocation, boot_id=boot, stage_id='stage-1',
                        partition_ids=('p0',), host_id='host-1', endpoint_ref='ep-1',
-                       grant_ref=ArtifactRef('g' * 64, 1, 'mem', 'grant', 'application/json'),
+                       grant_ref=ArtifactRef('a' * 64, 1, 'mem', 'grant', 'application/json'),
                        expires_at_ms=clock() + ttl)
 
 
 def _cmd(binding, operation, op_id, *, delivery_ref=None, row_ref=None, record_id=None):
-    return QueueCommand(operation_id=op_id, operation=operation, binding=binding,
+    return QueueCommand(operation_id=op_id if len(op_id) == 64 else hashlib.sha256(op_id.encode()).hexdigest(), operation=operation, binding=binding,
                         record_id=record_id, delivery_ref=delivery_ref, row_ref=row_ref)
 
 
@@ -385,7 +384,12 @@ class _DriverPort:
 
 
 def _runtime_services(store, port, bounds, clock, check_stop=None):
-    return RuntimeServices(store=store, journal=port, bounds=bounds, assignment=None,
+    from demiflow.execution.contracts.dataflow import WorkerAssignment, SealedExecution
+    ref = port.lease.grant_ref
+    sealed = SealedExecution(ref, ref, (), ref, ref, (), ref)
+    assignment = WorkerAssignment("demiflow.dataflow_assignment.v3", "run", "action", 1,
+        "fence", "a" * 64, 0, port.lease, sealed, (), (), (), (), (), bounds)
+    return RuntimeServices(store=store, journal=port, bounds=bounds, assignment=assignment,
                            clock_ms=clock, check_stop=check_stop or (lambda: None),
                            constants={}, programs={})
 
@@ -841,7 +845,9 @@ def test_q009(tmp_path, channel):
             assert finalize.status == 'confirmed'
             assert channel.completion(producer.generation, 't0')['settled']
             # The worker holds no native datasource/journal object.
-            assert not hasattr(worker, 'datasource') and worker.assignment is None
+            assert not hasattr(worker, 'datasource')
+            assert not hasattr(worker.journal, 'connection')
+            assert worker.assignment.lease == lease
             # Contract violations are rejected at the port boundary.
             with pytest.raises(DataflowError) as caught:
                 queue_service_request(object(), services=worker)
@@ -866,7 +872,7 @@ def test_q009(tmp_path, channel):
             # A mismatched reply operation_id is a protocol error.
             class BadPort(_DriverPort):
                 def queue(self, command):
-                    return QueueReply('other-id', 'pending', None, None, None, 0)
+                    return QueueReply('b' * 64, 'pending', None, None, None, 0)
 
             bad = _runtime_services(store, BadPort(lease), _make_bounds(), clock)
             with pytest.raises(DataflowError) as caught:
