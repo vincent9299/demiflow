@@ -47,6 +47,8 @@ def exclude_keys(left, right, *, spec, services):
     runs = build_sort_runs(ids(), spec=ordering, services=services)
     ordered = merge_sort_runs(runs, spec=ordering, services=services)
     batch_rows = max(1, min(256, services.bounds.max_batch_bytes // services.bounds.max_row_bytes))
+    from ..dataflow_native_limits import limit_value
+    batch_rows = limit_value(services, 'batch_rows', batch_rows)
     pending, sequence, budget = [], 0, _OutputBudget(spec, services, streaming=True)
     def hydrate(batch):
         services.check_stop()

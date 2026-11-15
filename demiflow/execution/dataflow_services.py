@@ -147,6 +147,11 @@ def _read_constants(ref: "ArtifactRef", *, store: RunArtifactStore, bounds: Boun
     return value
 
 
+class _VerifiedPrograms(dict):
+    """Programs and policy returned from the same authenticated sealed plan."""
+    native_limits = None
+
+
 def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds, cache=None) -> dict[str, LoadedProgram]:
     graph, physical, pin = load_sealed_dataflow(assignment.sealed,
         action_id=assignment.action_id, store=store, bounds=bounds)
@@ -157,7 +162,8 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
     from .recovery_identity import platform_identity
     if pin.get("platform_revision") != platform_identity():
         raise DataflowError("CODE_MISMATCH", "Worker platform code differs from the sealed revision")
-    programs: dict[str, LoadedProgram] = {}
+    programs = _VerifiedPrograms()
+    programs.native_limits = physical.policy.native_limits
     owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
     for node in graph.nodes:
         if node.occurrence_id not in owned or node.program_ref is None:
@@ -185,7 +191,13 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
     store = RunArtifactStore(root=shared_store.root, store_id=store_id, journal=journal, bounds=bounds)
     programs = _load_programs(assignment, store=store, bounds=bounds, cache=cache)
     constants = _read_constants(assignment.sealed.constants_ref, store=store, bounds=bounds)
+    from .dataflow_native_limits import NativeBudgetGuard, intersect_native_limits
+    limits = intersect_native_limits(getattr(programs, "native_limits", None), assignment.native_limits)
+    if limits is not None:
+        constants['native_limits'] = limits
+    guard = NativeBudgetGuard(limits)
     def check_stop():
+        guard.check()
         transport.check_stop()
         journal.check_lease()
     return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,

@@ -78,6 +78,10 @@ class DataflowExecution:
         self._policy = services.policy
         self._active_worker_limit = self._policy.max_active_workers
         self._bounds = services.bounds
+        from .dataflow_native_limits import NativeBudgetGuard
+        self._native_limits = self._policy.native_limits
+        self._native_guard = NativeBudgetGuard(self._native_limits)
+        self._began_at = time.monotonic()
         self._store = services.store
         self._state = "preparing"
         self._sealed: SealedExecution | None = None
@@ -158,6 +162,9 @@ class DataflowExecution:
 
     def _check_stop(self) -> None:
         self._action.context.check_stop()
+        self._native_guard.check()
+        if time.monotonic() - self._began_at >= self._bounds.timeout_ms / 1000:
+            raise DataflowError('DEADLINE_EXCEEDED', 'action exceeded its admitted execution timeout')
 
     def _stage_order(self) -> list:
         stages = list(self._physical.stages)
@@ -230,7 +237,8 @@ class DataflowExecution:
             action_id=self._action.action_id, attempt=self._attempt(), fence=self._fence(),
             plan_id=self._physical.plan_id, plan_revision=self._physical.plan_revision,
             lease=lease, sealed=self._sealed, stages=(stage,), inputs=inputs, outputs=outputs,
-            source_splits=splits, restore_refs=restore_refs, bounds=self._bounds)
+            source_splits=splits, restore_refs=restore_refs, bounds=self._bounds,
+            native_limits=self._native_limits)
 
     def _prepare_launch(self, lease: WorkerLease, stage) -> WorkerLease:
         grant_bytes = self._scheduler.grants.get(lease.allocation_id)
@@ -341,6 +349,19 @@ class DataflowExecution:
                         bindings=[thaw_record_value(b) for b in compiled.report_bindings])
             sealed = seal_dataflow(self._action, graph, physical, store=self._store, identity_bridge=bridge)
             stage_runtime_bundle(sealed, store=self._store, bounds=self._bounds)
+        # Preserve the sealed plan; current execution budgets only intersect
+        # its original ceilings. The same store/journal/allocator retain ownership.
+        from dataclasses import replace
+        from .dataflow_native_limits import NativeBudgetGuard, intersect_bounds, intersect_native_limits
+        self._bounds = intersect_bounds(physical.bounds, self._bounds)
+        self._native_limits = intersect_native_limits(physical.policy.native_limits, self._native_limits)
+        self._native_guard = NativeBudgetGuard(self._native_limits)
+        live_policy = replace(physical.policy, native_limits=self._native_limits)
+        self._services = replace(self._services, bounds=self._bounds, policy=live_policy)
+        self._store._bounds = self._bounds
+        self._store._journal._bounds = self._bounds
+        self._services.journal_service._bounds = self._bounds
+        self._check_stop()
         from .checked import current
         self._checked = current()
         if self._checked is not None:
@@ -361,13 +382,14 @@ class DataflowExecution:
         bind_image_sinks(graph, services=self._services, sinks=self._sinks)
         self._graph = graph
         self._physical = physical
-        self._policy = physical.policy
+        self._policy = live_policy
         # Historical physical plans stay byte-identical. Current caller limits
         # may only tighten their live admission envelope, never enlarge it.
         limits = [v for v in (self._active_worker_limit, physical.policy.max_active_workers) if v is not None]
         self._active_worker_limit = min(limits) if limits else None
         self._sealed = sealed
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources)
+        self._scheduler._policy = live_policy
         from .contracts.dataflow_codec import runtime_scope_id
         self._scheduler.scope_id = runtime_scope_id(physical.plan_id, self._attempt())
         self._checkpoint = DataflowCheckpointCoordinator(self._action, physical, store=self._store)
@@ -526,7 +548,8 @@ class DataflowExecution:
                    for stage in stages for partition in stage.partitions]
         hosts = self._place_hosts(pending)
         ready = []
-        deadline = time.monotonic() + self._policy.control_timeout_ms / 1000
+        from .dataflow_native_limits import admission_timeout_ms
+        deadline = time.monotonic() + admission_timeout_ms(self._policy) / 1000
         while pending:
             deferred = []
             for stage, work in pending:

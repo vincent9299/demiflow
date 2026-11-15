@@ -238,8 +238,9 @@ class DataflowScheduler:
             lease = prepare(lease, stage)
             if not isinstance(lease, WorkerLease) or lease.allocation_id != allocation_id:
                 raise DataflowError("INVALID_CONTRACT", "launch preparation changed allocation identity")
+            from .dataflow_native_limits import admission_timeout_ms
             request = WorkerRequest(uuid.uuid4().hex, allocation_id, stage.profile,
-                self._launch_spec(stage), provision_deadline_ms=self._policy.control_timeout_ms,
+                self._launch_spec(stage), provision_deadline_ms=admission_timeout_ms(self._policy),
                 placement=None, reservation_group=work.stage_id)
             desired = (*self._requests.values(), request)
             accepted = self._resources.apply(self._context(uuid.uuid4().hex),
@@ -253,8 +254,9 @@ class DataflowScheduler:
             self._resident_by_allocation[allocation_id] = work.resident_bytes
             self._cumulative_cost += work.resident_bytes
         lease = self.leases[allocation_id]
+        from .dataflow_native_limits import admission_timeout_ms
         self._resources.reconcile_once(fence,
-            time.monotonic() + self._policy.control_timeout_ms / 1000.0, 16)
+            time.monotonic() + admission_timeout_ms(self._policy) / 1000.0, 16)
         observed = self._observation(allocation_id)
         phase = observed["phase"] if observed else "absent"
         if phase != "RUNNING":

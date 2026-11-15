@@ -195,8 +195,27 @@ def resolve_action_runtime(request: ActionRequest):
     if local is not None:
         options['memory_bytes'] = local.memory_bytes
     run = request.action.context
-    return resolve_runtime_policy(options, run.limits, provider=request.provider,
-                                  explicit_limits=tuple(run.explicit_limits))
+    limits = dict(run.limits)
+    explicit = set(run.explicit_limits)
+    declared = getattr(local, 'native_resources', None)
+    native = None
+    if declared is not None:
+        from .dataflow_native_limits import effective_native_limits
+        native = effective_native_limits(declared, limits)
+        for name in ('memory_bytes', 'max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes', 'batch_rows'):
+            if name in native:
+                limits[name] = native[name]
+                explicit.add(name)
+        if 'memory_bytes' in native:
+            options['memory_bytes'] = min(options.get('memory_bytes', limits['memory_bytes']), native['memory_bytes'])
+    policy, bounds = resolve_runtime_policy(options, limits, provider=request.provider,
+                                           explicit_limits=tuple(explicit))
+    if native is not None:
+        from dataclasses import replace
+        policy = replace(policy, native_limits=native)
+        if 'timeout_s' in native:
+            bounds = replace(bounds, timeout_ms=min(bounds.timeout_ms, max(1, int(native['timeout_s'] * 1000))))
+    return policy, bounds
 
 
 # -- E016 run_dataset_action ----------------------------------------------

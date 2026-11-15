@@ -506,6 +506,10 @@ class LanceReader(_BaseReader):
             return
         exact = replace(self._plan.query, version=self._version)
         batch_rows = max(1, min(256, self._services.bounds.max_batch_bytes // self._services.bounds.max_row_bytes))
+        from .dataflow_native_limits import limit_value
+        batch_rows = limit_value(self._services, 'batch_rows', batch_rows)
+        if getattr(exact, 'batch_size', None) is not None:
+            exact = replace(exact, batch_size=min(exact.batch_size, batch_rows))
         def rows(batch):
             if batch.nbytes > self._services.bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'Lance decoded batch exceeds max_batch_bytes')

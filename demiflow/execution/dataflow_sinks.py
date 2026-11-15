@@ -364,9 +364,10 @@ class NativeTerminalSink(_DataflowArtifactSink):
     Staging streams bounded Arrow batches from worker-produced data. Native
     prepare/inspect/commit/abort retain all destination CAS and recovery rules.
     """
-    def __init__(self, *, native, **kwargs):
+    def __init__(self, *, native, batch_rows=256, **kwargs):
         super().__init__(**kwargs)
         self.native = native
+        self._batch_rows = batch_rows
 
     def _blocks(self, manifest):
         import pyarrow as pa
@@ -398,7 +399,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
                         max_bytes=self._bounds.max_row_bytes)), max_bytes=self._bounds.max_row_bytes)
                 else:
                     row = thaw_record_value(record.inline)
-                if batch and (record.schema_ref != schema_ref or len(batch) >= 256 or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
+                if batch and (record.schema_ref != schema_ref or len(batch) >= self._batch_rows or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
                     yield table()
                     batch, size = [], 0
                 schema_ref = record.schema_ref
@@ -497,7 +498,8 @@ def make_native_terminal_sink(spec, *, request, services):
         _require_durable(native)
     else:
         raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')
-    return NativeTerminalSink(native=native, sink_id=request.kind, store=services.store,
+    batch_rows = min(256, (services.policy.native_limits or {}).get("batch_rows", 256))
+    return NativeTerminalSink(native=native, batch_rows=batch_rows, sink_id=request.kind, store=services.store,
         action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))
 
 

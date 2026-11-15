@@ -696,6 +696,20 @@ class ExchangeSpec:
         _text(self.reason, "ExchangeSpec.reason", max_len=1024)
 
 
+def _native_limits(value):
+    allowed = {'memory_bytes', 'max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes',
+               'batch_rows', 'threads', 'partitions', 'timeout_s', 'admission_timeout_s',
+               'cgroup_headroom_bytes'}
+    if not isinstance(value, Mapping) or set(value) - allowed:
+        raise _err('unknown native resource limit')
+    for key, amount in value.items():
+        valid = (type(amount) in (int, float) and math.isfinite(amount) and amount > 0
+                 if key.endswith('_s') else type(amount) is int and amount > 0)
+        if not valid:
+            raise _err('native resource limit must be finite and positive: ' + key)
+    return _json_map(value, 'native_limits')
+
+
 @dataclass(frozen=True)
 class RuntimePolicy:
     provider: Provider
@@ -710,6 +724,7 @@ class RuntimePolicy:
     store_id: str
     required_recovery: Recovery
     max_active_workers: int | None = None
+    native_limits: Mapping[str, Json] | None = None
 
     def __post_init__(self):
         _enum(self.provider, "RuntimePolicy.provider", _PROVIDERS)
@@ -725,6 +740,8 @@ class RuntimePolicy:
         _enum(self.required_recovery, "RuntimePolicy.required_recovery", _RECOVERIES)
         if self.max_active_workers is not None:
             _int(self.max_active_workers, "RuntimePolicy.max_active_workers", minimum=1)
+        if self.native_limits is not None:
+            object.__setattr__(self, 'native_limits', _native_limits(self.native_limits))
 
 
 @dataclass(frozen=True)
@@ -903,6 +920,7 @@ class WorkerAssignment:
     source_splits: tuple[SourceSplit, ...]
     restore_refs: tuple[ArtifactRef, ...]
     bounds: Bounds
+    native_limits: Mapping[str, Json] | None = None
 
     def __post_init__(self):
         if self.schema != "demiflow.dataflow_assignment.v3":
@@ -924,6 +942,8 @@ class WorkerAssignment:
         object.__setattr__(self, "restore_refs", _ref_tuple(self.restore_refs, "WorkerAssignment.restore_refs"))
         if not isinstance(self.bounds, Bounds):
             raise _err("WorkerAssignment.bounds must be a Bounds")
+        if self.native_limits is not None:
+            object.__setattr__(self, 'native_limits', _native_limits(self.native_limits))
 
 
 @dataclass(frozen=True)

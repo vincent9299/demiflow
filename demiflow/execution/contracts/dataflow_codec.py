@@ -254,6 +254,7 @@ _WIRE_TYPES = {
         ("fairness_quantum_bytes", _i(1)), ("control_timeout_ms", _i(1)), ("store_id", _I),
         ("required_recovery", _e(_RECOVERIES)),
         ("max_active_workers", _oi(1)),
+        ("native_limits", _OJM),
     )),
     "ResidencyPlan": (ResidencyPlan, (
         ("simultaneous_groups", ("strs_nested",)), ("control_reserved_bytes", _i()),
@@ -285,7 +286,7 @@ _WIRE_TYPES = {
         ("attempt", _i()), ("fence", _I), ("plan_id", _S), ("plan_revision", _i()),
         ("lease", _dto("WorkerLease")), ("sealed", _dto("SealedExecution")), ("stages", _dtos("StageSpec")),
         ("inputs", _dtos("ExchangeSpec")), ("outputs", _dtos("ExchangeSpec")), ("source_splits", _dtos("SourceSplit")),
-        ("restore_refs", _RS), ("bounds", _dto("Bounds")),
+        ("restore_refs", _RS), ("bounds", _dto("Bounds")), ("native_limits", _OJM),
     )),
     "CutRequest": (CutRequest, (
         ("cut_id", _S), ("sequence", _i()), ("plan_revision", _i()), ("route_epoch", _i()),
@@ -623,6 +624,8 @@ def _validate_payload(payload, type_name):
         payload = dict(payload, block_partition=None)
     if type_name == "RuntimePolicy" and "max_active_workers" not in payload:
         payload = dict(payload, max_active_workers=None)
+    if type_name in ("RuntimePolicy", "WorkerAssignment") and "native_limits" not in payload:
+        payload = dict(payload, native_limits=None)
     if set(payload) != expected:
         raise _err(type_name + " payload key set is not closed: " + str(sorted(set(payload) ^ expected)))
     for name, spec in fields:
@@ -771,7 +774,7 @@ def _construct_payload(payload, type_name):
     cls, fields = entry
     kwargs = {}
     for name, spec in fields:
-        optional = (type_name, name) in {("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers")}
+        optional = (type_name, name) in {("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers"), ("RuntimePolicy", "native_limits"), ("WorkerAssignment", "native_limits")}
         value = payload.get(name) if optional else payload[name]
         kwargs[name] = _construct_field(value, spec, type_name + "." + name)
     return cls(**kwargs)
@@ -831,7 +834,9 @@ def _project_payload(value, type_name):
     for name, spec in fields:
         if type_name == "Record" and name in ("schema_ref", "block_partition") and getattr(value, name) is None:
             continue
-        if type_name == "RuntimePolicy" and name == "max_active_workers" and value.max_active_workers is None:
+        if type_name == "RuntimePolicy" and name in ("max_active_workers", "native_limits") and getattr(value, name) is None:
+            continue
+        if type_name == "WorkerAssignment" and name == "native_limits" and value.native_limits is None:
             continue
         payload[name] = _project_field(getattr(value, name), spec)
     return payload
@@ -1007,8 +1012,10 @@ def _identity_project(value):
         return {
             field.name: _identity_project(getattr(value, field.name))
             for field in dataclasses.fields(value)
-            if not (isinstance(value, RuntimePolicy) and field.name == "max_active_workers"
-                    and value.max_active_workers is None)
+            if not (isinstance(value, RuntimePolicy) and field.name in ("max_active_workers", "native_limits")
+                    and getattr(value, field.name) is None)
+            and not (isinstance(value, WorkerAssignment) and field.name == "native_limits"
+                     and value.native_limits is None)
             and not (isinstance(value, Record) and field.name == "block_partition"
                      and value.block_partition is None)
         }
