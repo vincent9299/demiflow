@@ -19,6 +19,13 @@
   };
   fields.left = fields.right = fields.run_id;
   fields.expected_binding = fields.binding_digest;
+  fields.version = {type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER};
+  fields.alias_binding = fields.binding_digest;
+  fields.action_id = text(128);
+  fields.logical_node_id = fields.occurrence_id = text(64, '^[0-9a-f]{64}$');
+  fields.dag_id = fields.plan_id = fields.binding_digest;
+  fields.plan_revision = {type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER};
+  fields.plan_format = {type: 'string', minLength: 2, maxLength: 6, pattern: '^(?:legacy|v3)$'};
   const kinds = {
     development: [[], []], development_session: [['session_id'], []],
     overview: [[], []], tables: [[], []], runs: [[], []], checks: [[], []],
@@ -50,6 +57,17 @@
   schemasV2.tables.properties.view_id=text(96,'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$');
   schemasV2.tables.properties.revision={type:'integer',minimum:1,maximum:2147483647};
   schemasV2.tables.dependentRequired={view_id:['revision'],revision:['view_id']};
+  // C4.2: a fixed historical version is addressed by the paired (version, alias_binding).
+  for (const kind of ['table', 'case', 'table_request']) {
+    schemasV2[kind].properties.version = fields.version;
+    schemasV2[kind].properties.alias_binding = fields.alias_binding;
+    schemasV2[kind].dependentRequired = {...schemasV2[kind].dependentRequired, version: ['alias_binding'], alias_binding: ['version']};
+  }
+  // C8: run links may carry the executed-plan identity; the four plan fields travel together.
+  Object.assign(schemasV2.run.properties, {
+    action_id: fields.action_id, logical_node_id: fields.logical_node_id, occurrence_id: fields.occurrence_id,
+    dag_id: fields.dag_id, plan_id: fields.plan_id, plan_revision: fields.plan_revision, plan_format: fields.plan_format,
+  });
   function object(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value) &&
       (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
@@ -75,6 +93,18 @@
     if (keys.some(key => !Object.hasOwn(spec.properties, key)) || spec.required.some(key => !Object.hasOwn(value, key)) ||
         keys.some(key => !check(value[key], spec.properties[key]))) throw new Error('视图字段或版本不合法');
     if (value.v===2&&value.kind==='tables'&&(Object.hasOwn(value,'view_id')!==Object.hasOwn(value,'revision'))) throw new Error('Case 视图链接必须绑定已保存的具体版本');
+    if (value.v===2&&['table','case','table_request'].includes(value.kind)&&Object.hasOwn(value,'version')!==Object.hasOwn(value,'alias_binding')) throw new Error('历史版本链接必须同时提供 version 与 alias_binding');
+    if (value.v===2&&value.kind==='table_request'&&Object.hasOwn(value,'version')&&Object.hasOwn(value,'expected_binding')&&value.expected_binding!==value.alias_binding) throw new Error('历史版本请求的 expected_binding 必须等于 alias_binding');
+    if (value.v===2&&value.kind==='run') {
+      const has=key=>Object.hasOwn(value,key);
+      if (has('logical_node_id')&&!has('action_id')) throw new Error('逻辑节点定位必须绑定 action_id');
+      if (has('occurrence_id')&&!has('logical_node_id')) throw new Error('实例定位必须绑定 logical_node_id');
+      if ((has('action_id')||has('logical_node_id')||has('occurrence_id'))&&!has('attempt')) throw new Error('运行定位链接必须明确 attempt');
+      const plan=['dag_id','plan_id','plan_revision','plan_format'].filter(has);
+      if (plan.length&&plan.length<4) throw new Error('计划定位必须完整提供 dag_id/plan_id/plan_revision/plan_format');
+      if (plan.length===4&&(!has('action_id')||!has('attempt'))) throw new Error('计划定位必须绑定 action_id 与明确 attempt');
+      if (value.plan_format==='v3'&&has('logical_node_id')&&!has('occurrence_id')) throw new Error('v3 实例定位必须提供 occurrence_id');
+    }
     if (value.row_id !== undefined && BigInt(value.row_id) > 18446744073709551615n) throw new Error('行定位值超出 uint64 范围');
     if (value.kind === 'run' && (Object.hasOwn(value, 'node_id') !== Object.hasOwn(value, 'report_digest'))) throw new Error('运行节点必须绑定报告');
     if (['entry', 'params'].some(key => value[key] && (value[key].includes('\\') || value[key].split(':')[0].split('/').some(part => ['', '.', '..'].includes(part))))) throw new Error('路径必须位于项目内');
