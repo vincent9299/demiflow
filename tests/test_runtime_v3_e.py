@@ -313,9 +313,19 @@ class FakeAcquisition:
 
 
 # -- fake upstream lane modules -------------------------------------------
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _mod(name):
     m = types.ModuleType(name)
-    sys.modules[name] = m
+    if not _real_module_available(name):
+        sys.modules[name] = m
     return m
 
 
@@ -458,9 +468,14 @@ for _name, _m in {
     "demiflow.execution.contracts.dataflow": dto,
     "demiflow.execution.contracts.dataflow_errors": errors,
 }.items():
-    sys.modules[_name] = _m
-demiflow.execution.contracts.dataflow = dto
-demiflow.execution.contracts.dataflow_errors = errors
+    if not _real_module_available(_name):
+        sys.modules[_name] = _m
+        setattr(demiflow.execution.contracts, _name.rsplit(".", 1)[1], _m)
+
+if _real_module_available("demiflow.execution.contracts.dataflow"):
+    import importlib
+    dto = importlib.import_module("demiflow.execution.contracts.dataflow")
+    errors = importlib.import_module("demiflow.execution.contracts.dataflow_errors")
 
 from demiflow.execution import dataflow as E  # noqa: E402
 from demiflow.execution import dataflow_scheduler as S  # noqa: E402

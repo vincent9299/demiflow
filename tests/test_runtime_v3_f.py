@@ -178,11 +178,20 @@ def _fake_expand_operation_inputs(operation, *, path, bounds):
     return ()
 
 
+def _real_module_available(name):
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _make_module(name):
     mod = types.ModuleType(name)
     mod.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
-    sys.modules[name] = mod
-    TEST_DOUBLES.append(name)
+    if not _real_module_available(name):
+        sys.modules[name] = mod
+        TEST_DOUBLES.append(name)
     return mod
 
 
@@ -520,10 +529,11 @@ def test_f016(fake_action, monkeypatch):
     import demiflow.execution.graph as graph
     # ray is not installed in this environment; the graph entry imports the Ray
     # executor lazily, so bind a test-domain fake module (recorded as a double).
-    fake_ray = types.ModuleType("demiflow.execution.executors.ray")
-    fake_ray.RayDatasetExecutor = lambda: _FakeExecutor("ray")
-    monkeypatch.setitem(sys.modules, "demiflow.execution.executors.ray", fake_ray)
-    TEST_DOUBLES.append("demiflow.execution.executors.ray")
+    if not _real_module_available("demiflow.execution.executors.ray"):
+        fake_ray = types.ModuleType("demiflow.execution.executors.ray")
+        fake_ray.RayDatasetExecutor = lambda: _FakeExecutor("ray")
+        monkeypatch.setitem(sys.modules, "demiflow.execution.executors.ray", fake_ray)
+        TEST_DOUBLES.append("demiflow.execution.executors.ray")
     STATE.handle = _FakeActionHandle(result_value={"target_rows": {"r0": 2}})
     out = graph.run_ray_graph(_graph_spec())
     assert out == {"target_rows": {"r0": 2}}

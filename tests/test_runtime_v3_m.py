@@ -45,7 +45,20 @@ _SHA256 = __import__('re').compile(r'[0-9a-f]{64}\Z')
 _IDENT = __import__('re').compile(r'[A-Za-z0-9_.:\-]{1,128}\Z')
 
 
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _install_contract_doubles():
+    import importlib
+    if _real_module_available("demiflow.execution.contracts.dataflow"):
+        return (importlib.import_module("demiflow.execution.contracts.dataflow"),
+                importlib.import_module("demiflow.execution.contracts.dataflow_errors"))
     errors = types.ModuleType('demiflow.execution.contracts.dataflow_errors')
     errors.__file__ = '<test-double:demiflow.execution.contracts.dataflow_errors>'
     errors.__test_double__ = True

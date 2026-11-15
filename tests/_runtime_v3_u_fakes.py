@@ -130,7 +130,18 @@ def run_dataset_action(request: ActionRequest) -> Any:
     return RECORD.results.get(request.kind)
 
 
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def install_fakes() -> None:
+    if _real_module_available("demiflow.execution.dataflow_api"):
+        return
     api = types.ModuleType("demiflow.execution.dataflow_api")
     api.make_native_operation = make_native_operation
     api.make_action_request = make_action_request

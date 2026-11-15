@@ -185,7 +185,18 @@ class DataflowError(Exception):
         self.context = dict(context or {})
 
 
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _install_fakes():
+    if _real_module_available("demiflow.execution.contracts.dataflow"):
+        return
     from demiflow.execution.recovery_contract import identity
 
     dataflow = types.ModuleType("demiflow.execution.contracts.dataflow")

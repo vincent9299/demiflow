@@ -36,8 +36,15 @@ class _RayImportBan(importlib.abc.MetaPathFinder):
 
 
 _RAY_BAN = _RayImportBan()
-if not any(isinstance(finder, _RayImportBan) for finder in sys.meta_path):
+
+
+@pytest.fixture(autouse=True)
+def _ray_import_ban():
     sys.meta_path.insert(0, _RAY_BAN)
+    try:
+        yield
+    finally:
+        sys.meta_path.remove(_RAY_BAN)
 
 
 # --- frozen-contract test-domain fakes (C14: spec-bound, test domain only) ---
@@ -238,15 +245,24 @@ class _FakeEngine:
 ENGINE = _FakeEngine()
 
 
+def _real_module_available(name: str) -> bool:
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _install_fake_module(name: str, **attrs) -> types.ModuleType:
     module = types.ModuleType(name)
     module.__file__ = str(TEST_FILE)
     for key, value in attrs.items():
         setattr(module, key, value)
-    sys.modules[name] = module
-    parent, _, child = name.rpartition(".")
-    if parent and parent in sys.modules:
-        setattr(sys.modules[parent], child, module)
+    if not _real_module_available(name):
+        sys.modules[name] = module
+        parent, _, child = name.rpartition(".")
+        if parent and parent in sys.modules:
+            setattr(sys.modules[parent], child, module)
     return module
 
 

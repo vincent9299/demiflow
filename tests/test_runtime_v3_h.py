@@ -28,8 +28,21 @@ import _runtime_v3_h_doubles as D
 
 D.assert_tree()
 df = D.install()
-D.install_fake_ray()
 D.install_fake_seal()
+
+
+@pytest.fixture(autouse=True)
+def _ray_carrier_double(monkeypatch):
+    ray = D.build_fake_ray()
+    monkeypatch.setitem(sys.modules, 'ray', ray)
+    monkeypatch.setitem(sys.modules, 'ray.exceptions', ray.exceptions)
+    yield
+
+# dataflow_hosts defines RayHostEndpoint only when the carrier imports, so bind
+# the declared double for this import alone and unbind before any other lane runs.
+_RAY = D.build_fake_ray()
+sys.modules['ray'] = _RAY
+sys.modules['ray.exceptions'] = _RAY.exceptions
 
 from demiflow.execution import dataflow_authority as AUTH
 from demiflow.execution import dataflow_artifacts as ART
@@ -43,8 +56,19 @@ from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.worker import dataflow_host as WH
 from demiflow.resources.manager import ResourceManager
 
+del sys.modules['ray'], sys.modules['ray.exceptions']
+
 ArtifactRef = df.ArtifactRef
-Bounds = df.Bounds
+_BOUNDS_DEFAULTS = dict(
+    max_nodes=8, max_edges=8, max_partitions=8, max_depth=8,
+    max_control_bytes=1 << 20, max_row_bytes=1 << 20, max_batch_bytes=1 << 20,
+    max_resident_bytes=1 << 20, max_spill_bytes=1 << 20, max_state_bytes=1 << 20,
+    max_pending_events=64, max_open_files=64, max_output_rows=1 << 20, timeout_ms=2000,
+)
+
+
+def Bounds(**overrides):
+    return df.Bounds(**{**_BOUNDS_DEFAULTS, **overrides})
 ControlReply = df.ControlReply
 WorkerEvent = df.WorkerEvent
 codec = sys.modules['demiflow.execution.contracts.dataflow_codec']

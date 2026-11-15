@@ -23,9 +23,20 @@ def assert_tree():
     return demiflow
 
 
+def _real_module_available(name):
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def install():
-    if 'demiflow.execution.contracts.dataflow' in sys.modules:
-        return sys.modules['demiflow.execution.contracts.dataflow']
+    names = ('demiflow.execution.contracts.dataflow',
+             'demiflow.execution.contracts.dataflow_errors',
+             'demiflow.execution.contracts.dataflow_codec')
+    if all(_real_module_available(n) for n in names):
+        return importlib.import_module(names[0])
     df = types.ModuleType('demiflow.execution.contracts.dataflow')
 
     @dataclass(frozen=True)
@@ -218,8 +229,8 @@ def install():
     return df
 
 
-def install_fake_ray():
-    """Spec-bound fake of the external Ray carrier (test_doubles, not a cluster)."""
+def build_fake_ray():
+    """Spec-bound fake of the external Ray carrier; caller scopes the binding."""
     if 'ray' in sys.modules:
         return sys.modules['ray']
     ray = types.ModuleType('ray')
@@ -234,7 +245,6 @@ def install_fake_ray():
     exc = types.ModuleType('ray.exceptions')
     exc.GetTimeoutError = GetTimeoutError; exc.RayActorError = RayActorError
     ray.exceptions = exc
-    sys.modules['ray.exceptions'] = exc
 
     class _RemoteRef:
         def __init__(self, value):
@@ -265,7 +275,6 @@ def install_fake_ray():
     ray.init = lambda *a, **k: None
     ray.__version__ = '0.0-test-double'
     ray._ActorClass = _ActorClass
-    sys.modules['ray'] = ray
     return ray
 
 
@@ -274,8 +283,8 @@ SEAL_STATE = {'sealed': None, 'plan_id': None, 'plan_revision': None, 'program_r
 
 def install_fake_seal():
     """Spec-bound fake of the absent D-lane seal loader (test_doubles)."""
-    if 'demiflow.execution.dataflow_seal' in sys.modules:
-        return sys.modules['demiflow.execution.dataflow_seal']
+    if _real_module_available('demiflow.execution.dataflow_seal'):
+        return importlib.import_module('demiflow.execution.dataflow_seal')
     import hashlib
     import json
     df = sys.modules['demiflow.execution.contracts.dataflow']

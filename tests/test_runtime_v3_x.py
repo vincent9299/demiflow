@@ -114,12 +114,23 @@ _fake_dataflow.__double_spec__ = ("interfaces.pyi frozen DTO field sets; real ow
 _fake_errors.__test_double__ = True
 _fake_errors.__double_spec__ = ("C01 DataflowError(code, message, *, retryable, context); closed code "
                                 "set plus CAPACITY_PENDING per C01 prose (adjudication pending)")
-sys.modules["demiflow.execution.contracts.dataflow"] = _fake_dataflow
-sys.modules["demiflow.execution.contracts.dataflow_errors"] = _fake_errors
-
 import demiflow.execution.contracts as _contracts_pkg  # noqa: E402
-_contracts_pkg.dataflow = _fake_dataflow
-_contracts_pkg.dataflow_errors = _fake_errors
+
+
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
+for _name, _fake in (("demiflow.execution.contracts.dataflow", _fake_dataflow),
+                     ("demiflow.execution.contracts.dataflow_errors", _fake_errors)):
+    if not _real_module_available(_name):
+        sys.modules[_name] = _fake
+        setattr(_contracts_pkg, _name.rsplit(".", 1)[1], _fake)
 
 from demiflow.execution.contracts.exchange import (  # noqa: E402
     InputGate, ProtocolError, check_read_domain, validate_data_ref,

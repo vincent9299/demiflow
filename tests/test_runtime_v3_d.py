@@ -31,9 +31,18 @@ import demiflow  # noqa: E402
 assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE), demiflow.__file__
 
 
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _install_fakes():
-    """Install spec-bound cross-lane fakes (idempotent)."""
-    if "demiflow.execution.contracts.dataflow" in sys.modules:
+    """Install spec-bound cross-lane fakes only where the real module is absent."""
+    if _real_module_available("demiflow.execution.contracts.dataflow"):
         return
     import demiflow.execution.contracts as contracts_pkg
     from demiflow.execution.recovery_contract import identity

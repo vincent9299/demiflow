@@ -156,12 +156,22 @@ def terminal_registry():
     return dict(_TERMINALS)
 
 
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _install_fake_module(name, **attrs):
     mod = types.ModuleType(name)
     mod.__file__ = str(TEST_FILE)  # fakes live in this tree-bound test file
     for key, value in attrs.items():
         setattr(mod, key, value)
-    sys.modules[name] = mod
+    if not _real_module_available(name):
+        sys.modules[name] = mod
     return mod
 
 

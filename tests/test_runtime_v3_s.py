@@ -193,14 +193,24 @@ class DataflowError(Exception):
         super().__init__(f"{code}: {message}")
 
 
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _install(name, **attrs):
     module = types.ModuleType(name)
     for key, value in attrs.items():
         setattr(module, key, value)
-    sys.modules[name] = module
-    parent, _, leaf = name.rpartition(".")
-    if parent in sys.modules:
-        setattr(sys.modules[parent], leaf, module)
+    if not _real_module_available(name):
+        sys.modules[name] = module
+        parent, _, leaf = name.rpartition(".")
+        if parent in sys.modules:
+            setattr(sys.modules[parent], leaf, module)
     return module
 
 

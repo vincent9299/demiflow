@@ -164,7 +164,18 @@ TEST_DOUBLES = frozenset({
 })
 
 
+def _real_module_available(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        return False
+    return True
+
+
 def _install_fake_contracts() -> None:
+    if all(_real_module_available(n) for n in TEST_DOUBLES):
+        return
     dataflow = types.ModuleType("demiflow.execution.contracts.dataflow")
     dataflow.__file__ = _THIS_FILE
     dataflow.__test_double__ = True
