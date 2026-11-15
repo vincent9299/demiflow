@@ -191,13 +191,14 @@ def record_execution_metadata(request, execution):
     if failure is not None:
         diagnostics['failure_type'] = type(failure).__module__ + '.' + type(failure).__qualname__
     if physical is not None:
-        diagnostics['admitted_bounds'] = {'max_row_bytes': physical.bounds.max_row_bytes,
-            'max_batch_bytes': physical.bounds.max_batch_bytes,
-            'max_resident_bytes': physical.bounds.max_resident_bytes,
-            'max_spill_bytes': physical.bounds.max_spill_bytes,
-            'max_output_rows': physical.bounds.max_output_rows,
-            'timeout_ms': physical.bounds.timeout_ms,
-            'max_active_workers': physical.policy.max_active_workers}
+        live_bounds = getattr(execution, '_bounds', physical.bounds)
+        diagnostics['admitted_bounds'] = {'max_row_bytes': live_bounds.max_row_bytes,
+            'max_batch_bytes': live_bounds.max_batch_bytes,
+            'max_resident_bytes': live_bounds.max_resident_bytes,
+            'max_spill_bytes': live_bounds.max_spill_bytes,
+            'max_output_rows': live_bounds.max_output_rows,
+            'timeout_ms': live_bounds.timeout_ms,
+            'max_active_workers': getattr(execution, '_active_worker_limit', physical.policy.max_active_workers)}
     native = getattr(execution, '_native_summary', None)
     if native is not None:
         if execution._acquisition.binding.mode == 'native_search':

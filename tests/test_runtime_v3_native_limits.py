@@ -143,3 +143,35 @@ def test_resume_retains_native_ceilings_and_original_plan_when_option_omitted(tm
             patch.setattr(DataflowExecution, '_prepare_launch', launch)
             assert _mapped().take_all() == [{'n': i+1} for i in range(8)]
     assert observed
+
+
+def test_public_native_admission_deadline_bounds_real_scheduler_retry(tmp_path, monkeypatch):
+    import time
+    from demiflow.execution.dataflow_scheduler import DataflowScheduler
+    retries = []
+    def pending(scheduler, work, **kwargs):
+        retries.append(time.monotonic())
+        raise DataflowError('CAPACITY_PENDING', 'fixture capacity unavailable', retryable=True)
+    monkeypatch.setattr(DataflowScheduler, 'place', pending)
+    with pytest.raises(DataflowError, match='admission deadline'):
+        with RunContext.start(tmp_path/'run'), data.local_execution(
+                native_resources={'admission_timeout_s': .03}):
+            data.from_items([{'n':1}]).take_all()
+    assert len(retries) > 1
+    assert retries[-1] - retries[0] < .5
+
+
+def test_public_native_execution_deadline_does_not_publish_result(tmp_path, monkeypatch):
+    import time
+    original = DataflowExecution.start
+    def start(execution):
+        time.sleep(.03)
+        return original(execution)
+    monkeypatch.setattr(DataflowExecution, 'start', start)
+    with pytest.raises(DataflowError, match='admitted execution timeout'):
+        with RunContext.start(tmp_path/'run') as run, data.local_execution(
+                native_resources={'timeout_s': .02}):
+            try:
+                data.from_items([{'n':1}]).take_all()
+            finally:
+                assert not run.journal.execution_commits('action-1')

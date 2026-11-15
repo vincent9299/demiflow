@@ -166,7 +166,9 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
         assert execution._active_worker_limit == 1
         assert len(pending) <= 1 or not execution._started
         return original_place(execution, pending)
-    with RunContext.resume(ref), data.local_execution(workers=1):
+    with RunContext.resume(ref), data.local_execution(workers=1) as session:
         with monkeypatch.context() as patch:
             patch.setattr(DataflowExecution, '_place_hosts', place)
             assert _three_stage_dataset().take_all() == [{'n': n} for n in range(1, 9)]
+
+        assert session.stats['admitted_bounds']['max_active_workers'] == 1
