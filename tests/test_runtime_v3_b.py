@@ -9,7 +9,9 @@ this worktree (IL012).
 from __future__ import annotations
 
 import json
+import glob
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -457,6 +459,7 @@ class FakeStore:
 class FakeMailbox:
     def __init__(self):
         self.events = []
+        self.inbound = []
         self.closed = False
         self.fail_next = False
 
@@ -469,7 +472,9 @@ class FakeMailbox:
         return ControlReply(operation_id=event.operation_id, status="ok")
 
     def drain(self, *, max_events):
-        return tuple(self.events[:max_events])
+        taken = tuple(self.inbound[:max_events])
+        del self.inbound[:max_events]
+        return taken
 
     def deliver(self, reply):
         pass
@@ -555,17 +560,15 @@ class FakeReader:
 
 
 class FakeChannels:
+    """ChannelSet surface is close() only; consumption is module-level (X lane)."""
+
     def __init__(self, specs, *, credit=True):
         self.specs = specs
         self.closed = False
         self.credit = credit
         self.published = []
         self.routed = []
-        self._inbox = {}
         self.fail_close = False
-
-    def consume(self, channel_id):
-        return list(self._inbox.get(channel_id, ()))
 
     def close(self):
         self.closed = True
@@ -595,6 +598,7 @@ def _install_fakes(monkeypatch, *, kernel_slow=False, kernel_fail_close=False,
     ns.reader_slow = False
     ns.make_kernel_calls = 0
     ns.opened_journal_db = False
+    ns.resolved = []
 
     dto = types.ModuleType("demiflow.execution.contracts.dataflow")
     for name in ("ArtifactRef", "Bounds", "WorkerLease", "SealedExecution", "InputPort",
@@ -701,6 +705,10 @@ def _install_fakes(monkeypatch, *, kernel_slow=False, kernel_fail_close=False,
     def encode_record(record, *, bounds):
         return EncodedRecord(record_id=record.record_id)
 
+    def resolve_record(encoded, *, store, bounds):
+        ns.resolved.append(encoded)
+        return Record(record_id=encoded.record_id)
+
     def publish_segment(records, *, spec, store, operation_id):
         ns.channels.published.extend(records)
         return ArtifactRef()
@@ -712,6 +720,7 @@ def _install_fakes(monkeypatch, *, kernel_slow=False, kernel_fail_close=False,
     channels.snapshot_channels = snapshot_channels
     channels.close_channels = close_channels
     channels.encode_record = encode_record
+    channels.resolve_record = resolve_record
     channels.publish_segment = publish_segment
 
     bridge = types.ModuleType("demiflow.execution.exchange.dataflow_bridge")
@@ -740,16 +749,27 @@ def _install_fakes(monkeypatch, *, kernel_slow=False, kernel_fail_close=False,
         "demiflow.execution.dataflow_models": models,
         "demiflow.execution.dataflow_sinks": sinks,
     }
+    import importlib
+    doubles = []
     for name, module in modules.items():
-        monkeypatch.setitem(sys.modules, name, module)
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            monkeypatch.setitem(sys.modules, name, module)
+            doubles.append(name)
     ns.modules = modules
+    ns.test_doubles = doubles
     return ns
 
 
 @pytest.fixture
 def fakes(monkeypatch):
     _assert_tree_binding()
-    return _install_fakes(monkeypatch)
+    before = set(glob.glob("/tmp/demiflow-worker-cache-*"))
+    ns = _install_fakes(monkeypatch)
+    yield ns
+    for directory in set(glob.glob("/tmp/demiflow-worker-cache-*")) - before:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 def _executor(fakes, assignment=None):
@@ -869,6 +889,34 @@ def test_b005(fakes):
     with pytest.raises(DataflowError) as exc:
         executor2.step(max_records=1, deadline_ms=100)
     assert exc.value.code == "BUDGET_EXCEEDED"
+    # input-channel path uses module-level reserve_credit + resolve_record (no v2 consume)
+    fakes.channel_credit = True
+    in_assignment = WorkerAssignment(inputs=(ExchangeSpec(channel_id="in0"),), source_splits=())
+    ex, _, mb = _executor(fakes, in_assignment)
+    ex.load(in_assignment)
+    ex.start()
+    mb.inbound.append(WorkerEvent(kind="progress", operation_id="i0",
+                                  payload={"channel_id": "in0",
+                                           "encoded": asdict(EncodedRecord(record_id="x0"))}))
+    fakes.resolved.clear()
+    res = ex.step(max_records=4, deadline_ms=500)
+    assert res.processed >= 1
+    assert fakes.resolved  # resolve_record ran only after credit was reserved
+    ex.close()
+    # no credit on the input channel -> paid decode is not executed early
+    fakes.channel_credit = False
+    ex2, _, mb2 = _executor(fakes, in_assignment)
+    ex2.load(in_assignment)
+    ex2.start()
+    mb2.inbound.append(WorkerEvent(kind="progress", operation_id="i1",
+                                   payload={"channel_id": "in0",
+                                            "encoded": asdict(EncodedRecord(record_id="x1"))}))
+    fakes.resolved.clear()
+    with pytest.raises(DataflowError) as exc2:
+        ex2.step(max_records=1, deadline_ms=100)
+    assert exc2.value.code == "BUDGET_EXCEEDED"
+    assert not fakes.resolved
+    ex2.close()
 
 
 def test_b006(fakes):
@@ -960,10 +1008,12 @@ def _v3_launch(fakes, tmp_path, *, assignment=None):
     return {
         "directory": str(tmp_path), "run_id": "run", "scope_id": "action",
         "allocation_id": "alloc", "boot_id": "boot", "controller_epoch": 1,
-        "capabilities": ["cpu"], "grant": _grant(),
+        "capabilities": ["cpu"], "grant": _grant(), "artifact_digest_observed": "d" * 64,
         "dataflow_v3": {"assignment": assignment, "transport": FakeMailbox(),
                         "mailbox": mailbox, "cache": str(tmp_path / "cache"),
                         "entrypoint": "dataflow_worker_v3", "code_pin": "d" * 64,
+                        "limits": {"max_row_bytes": assignment.bounds.max_row_bytes,
+                                   "max_resident_bytes": assignment.bounds.max_resident_bytes},
                         "bounds": asdict(assignment.bounds)},
     }
 
@@ -974,10 +1024,30 @@ def _grant():
             "controller_epoch": 1, "expires_at_ms": int(time.time() * 1000) + 120000}
 
 
-def _runtime(fakes, tmp_path):
+def _runtime(fakes, tmp_path, *, manifest_loader=None):
     from demiflow.execution.worker.runtime import WorkerRuntime
     launch = _v3_launch(fakes, tmp_path)
-    return WorkerRuntime(launch, control=lambda frame: None)
+    return WorkerRuntime(launch, control=lambda frame: None, manifest_loader=manifest_loader)
+
+
+def _manifest_and_ref():
+    from demiflow.execution.contracts import artifact
+    manifest = artifact.build_manifest(
+        run_id="run",
+        platform={"source_digest": "a" * 64, "distribution": "demiurge",
+                  "version": "1.0", "runtime_identity_ref": "runtime-ref"},
+        business={"bundle_digest": "sha256:" + "b" * 64,
+                  "entrypoints": [{"name": "main", "module_key": "p_" + "b" * 24,
+                                   "definition_ref": {"sha256": "c" * 64}}]},
+        config={"resolved_config_digest": "d" * 64, "model_config_refs": []},
+        environment={"requirements_sha256": "e" * 64, "lock_digest": "f" * 64,
+                     "resolution_digest": "0" * 64},
+        protocol_versions={"worker": {"major": 1, "minor": 0},
+                           "exchange": {"major": 1, "minor": 0},
+                           "checkpoint_schema": 1, "state_schema": 1, "resource_protocol": "1.0"},
+        secret_refs=[])
+    ref = {"manifest_id": manifest["manifest_id"], "sha256": artifact.manifest_digest(manifest)}
+    return manifest, ref
 
 
 def test_b011(fakes, tmp_path):
@@ -988,12 +1058,39 @@ def test_b011(fakes, tmp_path):
     # v3 must not open a driver journal database
     assert not (tmp_path / "run.sqlite").exists()
     assert runtime.authority is None
+    assert runtime._limits and runtime._artifact_digest_observed == "d" * 64
+    # missing limits in the sealed payload must fail (no empty-default budget)
+    no_limits = _v3_launch(fakes, tmp_path)
+    del no_limits["dataflow_v3"]["limits"]
+    with pytest.raises(DataflowError) as exc:
+        WorkerRuntime(no_limits, control=lambda frame: None)
+    assert exc.value.code == "INVALID_CONTRACT"
+    # missing code pin observation must fail (no empty-string default)
+    no_pin = _v3_launch(fakes, tmp_path)
+    del no_pin["dataflow_v3"]["code_pin"]
+    no_pin.pop("artifact_digest_observed")
+    with pytest.raises(DataflowError) as exc2:
+        WorkerRuntime(no_pin, control=lambda frame: None)
+    assert exc2.value.code == "CODE_MISMATCH"
 
 
 def test_b012(fakes, tmp_path):
+    from demiflow.execution.contracts.errors import ProtocolError
+    from demiflow.execution.worker.runtime import WorkerRuntime
     runtime = _runtime(fakes, tmp_path)
-    runtime._verify({"manifest_id": "m", "sha256": "s"})
+    # fail-closed: Verify precedes Assign/load; no loader wired -> reject
+    with pytest.raises(ProtocolError) as exc:
+        runtime._verify({"manifest_id": "m", "sha256": "s"})
+    assert exc.value.code == "INVALID_SPEC"
     assert runtime.state == "REGISTERED"
+    # with a real loader the manifest identity + storage digest are verified
+    manifest, ref = _manifest_and_ref()
+    wired = WorkerRuntime(_v3_launch(fakes, tmp_path), control=lambda frame: None,
+                          manifest_loader=lambda r: manifest)
+    wired._verify(ref)  # no raise => identity and digest bound
+    # a tampered storage digest is rejected (verification has real strength)
+    with pytest.raises(ProtocolError):
+        wired._verify({"manifest_id": manifest["manifest_id"], "sha256": "0" * 64})
 
 
 def test_b013(fakes, tmp_path):
@@ -1013,9 +1110,10 @@ def test_b014(fakes, tmp_path):
 
 
 def test_b015(fakes, tmp_path):
-    runtime = _runtime(fakes, tmp_path)
+    manifest, ref = _manifest_and_ref()
+    runtime = _runtime(fakes, tmp_path, manifest_loader=lambda r: manifest)
     receipt = runtime._execute("VerifyArtifactAndCapabilities",
-                               {"artifact_manifest_ref": {"manifest_id": "m", "sha256": "s"},
+                               {"artifact_manifest_ref": ref,
                                 "required_capabilities": ["cpu"]},
                                int(time.time() * 1000))
     assert receipt["kind"] == "Verified"
@@ -1041,12 +1139,25 @@ def test_b017(fakes, tmp_path):
 
 
 def test_b018(fakes, tmp_path):
+    from demiflow.execution.worker.runtime import WorkerRuntime
     runtime = _runtime(fakes, tmp_path)
     runtime.state = "READY"
     runtime._activate({"grant_ref": "g"}, int(time.time() * 1000))
+    # config provided a cache -> no extra owned temp dir is created
+    assert runtime._v3_executor._owned_services_cache is None
     runtime.close()
     assert runtime._v3_executor is None
     runtime.close()
+    # config omits cache -> a dir is created lazily and cleaned on close
+    launch = _v3_launch(fakes, tmp_path)
+    del launch["dataflow_v3"]["cache"]
+    rt2 = WorkerRuntime(launch, control=lambda frame: None)
+    rt2.state = "READY"
+    rt2._activate({"grant_ref": "g"}, int(time.time() * 1000))
+    owned = rt2._v3_executor._owned_services_cache
+    assert owned is not None and owned.exists()
+    rt2.close()
+    assert not owned.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -89,6 +89,7 @@ class DataflowWorkerExecutor:
         self._admit_open = False
         self._closed = False
         self._cache: Path | None = None
+        self._owned_services_cache: Path | None = None
         self._event_sequence = 0
         self._credit_leases: dict = {}
         bounds = services.bounds
@@ -362,10 +363,8 @@ class DataflowWorkerExecutor:
                     events.append(self._event("eoi", payload={"split_id": split_id}))
                 elif poll.status == "pending":
                     blocked = True
-            for spec in self._input_specs:
-                if budget <= 0 or self._services.clock_ms() >= deadline:
-                    break
-                consumed = self._consume_input(spec, budget)
+            if budget > 0 and self._services.clock_ms() < deadline:
+                consumed = self._consume_input(budget)
                 processed += consumed
                 budget -= consumed
             cut_events = self._process_pending_cut()
@@ -389,18 +388,42 @@ class DataflowWorkerExecutor:
             routed = route_record(record, spec=spec, state=self._channels)
             self._publish_routed(routed, spec)
 
-    def _consume_input(self, spec, budget):
-        from ..kernels.dataflow import finish_kernel
-        consumed = 0
-        consume = getattr(self._channels, "consume", None)
-        if consume is None:
+    def _consume_input(self, budget):
+        """Consume inbound input via the frozen v3 module-level channel API.
+
+        Input records arrive on the control mailbox (WorkerControlMailbox.drain);
+        ChannelSet itself only exposes close(). Credit is reserved (X005) before
+        any paid decode (X003 resolve_record) or kernel push, so no credit means
+        no early paid call (B005). Input cut barriers align the pending cut.
+        """
+        from ..contracts import dataflow as df
+        from ..exchange.dataflow_channels import reserve_credit, resolve_record
+        input_channels = {spec.channel_id: spec for spec in self._input_specs}
+        if not input_channels:
             return 0
-        for envelope in consume(spec.channel_id):
+        consumed = 0
+        for event in self._mailbox.drain(max_events=self._max_pending):
+            payload = event.payload or {}
+            channel_id = payload.get("channel_id")
+            if channel_id not in input_channels:
+                continue
+            if event.kind == "cut":
+                with self._control_lock:
+                    self._aligned_inputs.add(channel_id)
+                continue
             if consumed >= budget:
                 break
-            record = envelope.get("record") if isinstance(envelope, dict) else envelope
-            if record is None:
+            encoded_payload = payload.get("encoded")
+            if encoded_payload is None:
                 continue
+            lease = reserve_credit(channel_id, self.assignment.lease.boot_id,
+                                   rows=1, size_bytes=int(encoded_payload.get("encoded_bytes", 0)),
+                                   operation_id=self._next_operation_id("credit"),
+                                   state=self._channels)
+            self._credit_leases[lease.operation_id] = lease
+            encoded = df.EncodedRecord(**encoded_payload)
+            record = resolve_record(encoded, store=self._services.store,
+                                    bounds=self._services.bounds)
             for (occ, partition), kernel in self._kernels.items():
                 for port in self._kernel_specs[occ].inputs:
                     for out in kernel.push(port.name, record):
@@ -585,6 +608,9 @@ class DataflowWorkerExecutor:
         self._readers.clear()
         self._channels = None
         self._cleanup_cache()
+        if self._owned_services_cache is not None:
+            shutil.rmtree(self._owned_services_cache, ignore_errors=True)
+            self._owned_services_cache = None
         try:
             self._mailbox.close()
         except BaseException as exc:

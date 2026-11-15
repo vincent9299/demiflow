@@ -50,13 +50,19 @@ def _build_v3_executor(config, *, control):
     transport = config.get("transport")
     if transport is None:
         transport = control
-    cache = Path(config.get("cache", tempfile.mkdtemp(prefix="demiflow-worker-cache-")))
+    cache_value = config.get("cache")
+    owned_cache = None
+    if cache_value is None:
+        owned_cache = tempfile.mkdtemp(prefix="demiflow-worker-cache-")
+        cache_value = owned_cache
+    cache = Path(cache_value)
     services = make_runtime_services(assignment, transport=transport, cache=cache)
     mailbox = config.get("mailbox")
     if mailbox is None:
         from ..dataflow_hosts import ControlMailbox
         mailbox = ControlMailbox(bounds=services.bounds, check_stop=services.check_stop)
     executor = DataflowWorkerExecutor(services=services, mailbox=mailbox)
+    executor._owned_services_cache = Path(owned_cache) if owned_cache is not None else None
     executor.load(assignment)
     return executor
 
@@ -88,9 +94,18 @@ class WorkerRuntime:
         self._v3_executor = executor if _is_dataflow_executor(executor) else None
         if self._v3:
             # v3 workers never open the driver RunJournal database; limits and
-            # identity come from the sealed launch payload, fence is preserved.
-            self._limits = dict((self._v3_config or {}).get("limits", {}))
-            self._artifact_digest_observed = launch_spec.get("artifact_digest_observed", "")
+            # the code pin come from the sealed launch payload and are mandatory
+            # (no silent empty default — finite-resource premise I08 / code-pin).
+            from ..contracts.dataflow_errors import DataflowError
+            config = self._v3_config or {}
+            limits = config.get("limits")
+            if type(limits) is not dict or not limits:
+                raise DataflowError("INVALID_CONTRACT", "v3 launch payload missing limits")
+            self._limits = dict(limits)
+            digest = launch_spec.get("artifact_digest_observed") or config.get("code_pin")
+            if not digest:
+                raise DataflowError("CODE_MISMATCH", "v3 launch payload missing code pin observation")
+            self._artifact_digest_observed = digest
         else:
             config = RunJournal(self.directory).recovery_identity()
             if config is None or config["run_id"] != self.run_id:
@@ -230,12 +245,8 @@ class WorkerRuntime:
         raise ProtocolError("INVALID_SPEC", "unhandled worker command: " + str(kind))
 
     def _verify(self, ref):
-        if self._v3:
-            # v3 sealed refs/code pin were verified by executor.load (B002);
-            # re-check the control manifest when a loader is wired.
-            if self._manifest_loader is not None:
-                verify_manifest(self._manifest_loader(ref), ref)
-            return
+        # Fail-closed for v2 and v3 alike: VerifyArtifactAndCapabilities runs
+        # before Assign/load, so nothing has been verified yet at this point.
         if self._manifest_loader is None:
             raise ProtocolError("INVALID_SPEC", "manifest loader is not wired")
         verify_manifest(self._manifest_loader(ref), ref)
