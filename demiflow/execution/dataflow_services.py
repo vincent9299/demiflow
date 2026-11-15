@@ -43,6 +43,8 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
     run = action.context
     root = run.directory.with_name(run.directory.name + "-driver-resources")
     state = RunResourceState(run.journal)
+    from .dataflow_devices import device_pool
+    devices = device_pool(policy.provider)
     if policy.provider == "local":
         from .dataflow_capacity import local_capacity
         from ..resources.capacity import LocalCapacityPool
@@ -52,14 +54,14 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
         domain, capacity = local_capacity()
         pool = LocalCapacityPool(domain / "capacity", capacity=capacity)
         unit = ManagedProcessUnit(root / "units")
-        provider = LocalResourceProvider(pool, unit, control=DataflowLocalConnector())
+        provider = LocalResourceProvider(pool, unit, control=DataflowLocalConnector(), device_pool=devices)
     elif policy.provider == "ray_core":
         if not _RAY_AVAILABLE:
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
         from ..resources.ray import RayResourceProvider
         from .dataflow_hosts import DataflowRayConnector
         provider = RayResourceProvider(
-            DataflowRayConnector(command_timeout_s=policy.control_timeout_ms / 1000.0))
+            DataflowRayConnector(command_timeout_s=policy.control_timeout_ms / 1000.0), device_pool=devices)
     else:
         raise DataflowError("INVALID_CONTRACT", "unsupported provider: " + str(policy.provider))
     return ResourceManager(provider, state, bounds=ManagerBounds())
@@ -72,6 +74,8 @@ def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifact
     if policy.provider == "local":
         from .dataflow_capacity import local_capacity
         _, capacity = local_capacity()
+        from .dataflow_devices import gpu_capacity
+        capacity = {**capacity, 'gpu': gpu_capacity('local')}
         hosts = (HostDescriptor(
             host_id="local", provider="local", runtime_revision=revision,
             store_domains=(policy.store_id,),
@@ -95,6 +99,8 @@ def _ray_hosts(policy: RuntimePolicy, revision: str) -> tuple[HostDescriptor, ..
     import ray
     if not ray.is_initialized():
         raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core cluster is not initialized")
+    from .dataflow_devices import gpu_capacity
+    admitted_gpus = gpu_capacity('ray_core')
     hosts = []
     for node in ray.nodes():
         if not node.get("Alive"):
@@ -104,7 +110,8 @@ def _ray_hosts(policy: RuntimePolicy, revision: str) -> tuple[HostDescriptor, ..
             host_id=host_id, provider="ray_core", runtime_revision=revision,
             store_domains=(policy.store_id,),
             logical_resources={"cpu_millis": float(node.get("Resources", {}).get("CPU", 1)) * 1000,
-                               "memory_bytes": float(node.get("Resources", {}).get("memory", 1024 ** 3))},
+                               "memory_bytes": float(node.get("Resources", {}).get("memory", 1024 ** 3)),
+                               "gpu": min(float(node.get("Resources", {}).get("GPU", 0)), admitted_gpus)},
             isolation_capabilities=("cpu-map", "stream")))
     if not hosts:
         raise DataflowError("RESOURCE_INFEASIBLE", "no alive Ray Core host is available")

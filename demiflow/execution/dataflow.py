@@ -382,6 +382,9 @@ class DataflowExecution:
         budget = {"cpu_millis": self._bounds.max_nodes * 1000,
                   "memory_bytes": self._bounds.max_resident_bytes,
                   "max_workers": self._bounds.max_partitions}
+        gpu_budget = int(sum(host.logical_resources.get('gpu', 0) for host in self._services.hosts))
+        if gpu_budget:
+            budget['accelerator_gpu'] = gpu_budget
         self._services.resources.state.open_scope(self._fence(), ResourceScope(
             self._scheduler.scope_id, self._run_id(), {"provider": self._policy.provider},
             self._fence(), budget))

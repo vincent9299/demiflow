@@ -194,6 +194,13 @@ class LocalResourceProvider:
                 self._release_devices(allocation_id, "control-failed:" + allocation_id)
                 return self._observation(scope_id, allocation_id, "FAILED", "FRESH",
                                          effective=effective, conditions=["LAUNCH_FAILED", str(exc)[:256]])
+        # The device authority's actual reservation determines child visibility.
+        # This is CUDA runtime binding, not a claim of kernel/driver isolation.
+        if self._device_pool is not None:
+            placement = self._device_placement(allocation_id)
+            visible = ','.join((placement or {}).get('device_ids', ()))
+            payload['extra_env'] = {**(payload.get('extra_env') or {}),
+                                    'CUDA_VISIBLE_DEVICES': visible}
         try:
             spawned = self.unit.spawn(
                 scope_id, allocation_id, immutable_spec["spec_hash"],
