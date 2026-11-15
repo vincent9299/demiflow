@@ -164,20 +164,54 @@ def admit_action_plan(source, plan, *, action_kind, backend='local', sink_spec=N
     return ActionDecision(action_kind, 'local_pull', 'pull', recovery)
 
 
-def validate_stream_plan(plan):
-    """Preflight the complete native plan before constructing any callable."""
-    from ..data import plan as ops
-    from .plan_facts import operation_capability
+def validate_stream_plan(plan, *, source=None):
+    """Validate all declared inputs through the same v3 compiler, without I/O.
 
-    if not any(ops.is_stream_operation(op) for op in plan.operations):
-        raise ValueError("run_stream requires map_async/batch_map or explicit map streaming options")
-    facts = [operation_capability(op) for op in plan.operations]
-    composition = check_composition(facts, backend="local", driver="stream")
-    if not composition["supported"]:
-        raise ValueError(composition["reason"])
-    for op in plan.operations:
-        if isinstance(op, (ops.MapOp, ops.BoundMapOp)) and op.stream_options is not None:
-            op.stream_options.validate_callable(op.callable)
+    A relational Dataset may have no top-level operations while its PlanInputs
+    contain the stream declaration. Traverse the compiler's actual input ports;
+    neither a second capability table nor an obsolete pull/stream split decides
+    which registered kernels can be composed.
+    """
+    from ..data import plan as ops
+    from ..planning.dataflow_compile import (compile_kernel_spec,
+        expand_relational_inputs, expand_operation_inputs)
+    from ..planning.dataflow_policy import resolve_runtime_policy
+    from .contracts.dataflow_errors import DataflowError
+    from ..errors import UnsupportedExecutionOptionError
+
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    pending, seen = [(source, plan, ())], set()
+    count, edges, streaming = 0, 0, False
+    while pending:
+        current_source, current_plan, path = pending.pop()
+        key = (id(current_source), id(current_plan))
+        if key in seen:
+            continue
+        seen.add(key)
+        if not isinstance(current_plan, ops.LogicalPlan):
+            raise TypeError('stream input requires a LogicalPlan')
+        count += 1 + len(current_plan.operations)
+        if count > bounds.max_nodes:
+            raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds node budget')
+        children = list(expand_relational_inputs(current_source, path=path, bounds=bounds))
+        for operation in current_plan.operations:
+            streaming |= ops.is_stream_operation(operation)
+            if getattr(operation, 'native_options', None) is not None:
+                # Existing mixed backend_options rejection remains fail-closed;
+                # legacy Ray Data tuning cannot silently become a worker policy.
+                raise UnsupportedExecutionOptionError('streaming does not support backend_options')
+            if isinstance(operation, (ops.MapOp, ops.BoundMapOp)) and operation.stream_options is not None:
+                operation.stream_options.validate_callable(operation.callable)
+            compile_kernel_spec(operation, program_ref=None, bounds=bounds)
+            children.extend(expand_operation_inputs(operation, path=path, bounds=bounds))
+            if edges + len(children) > bounds.max_edges:
+                raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds edge budget')
+        edges += len(children)
+        if edges > bounds.max_edges:
+            raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds edge budget')
+        pending.extend((item.source, item.plan, item.path) for item in children)
+    if not streaming:
+        raise ValueError('run_stream requires map_async/batch_map or explicit map streaming options')
 
 
 def stream_residency(facts, limits):

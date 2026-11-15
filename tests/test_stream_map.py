@@ -322,47 +322,50 @@ def test_async_functions_and_hidden_awaitables_are_rejected(data):
 @pytest.mark.parametrize('options', [{'concurrency': 1}, {'queue_depth': 1},
     {'execution': 'inline'}, {'catch': ()}, {'label': 'x'}, {'callable_scope': 'stage'}])
 @pytest.mark.parametrize('action', ['take', 'take_zero', 'take_all', 'count', 'write_lance'])
-def test_every_explicit_option_rejects_lazy_actions_before_reads(data, options, action, tmp_path):
-    reads = []
+def test_every_explicit_option_supports_lazy_actions_without_eager_reads(data, options, action, tmp_path):
+    from _worker_event_fixtures import emit, events
+    import lance
+    path = str(tmp_path / 'reads.jsonl')
     def source():
-        reads.append(True)
+        emit(path, 'read')
         yield {'i': 1}
     plan = data.from_iter(source).map(lambda row: row, **options)
-    with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
-        if action == 'take':
-            plan.take(1)
-        elif action == 'take_zero':
-            plan.take(0)
-        elif action == 'write_lance':
-            plan.write_lance(str(tmp_path / 'out.lance'), schema=pa.schema([('i', pa.int64())]))
-        else:
-            getattr(plan, action)()
-    assert not reads and not (tmp_path / 'out.lance').exists()
+    assert events(path) == []  # Declaration stays lazy on every terminal path.
+    if action == 'take':
+        assert plan.take(1) == [{'i': 1}]
+    elif action == 'take_zero':
+        assert plan.take(0) == []
+    elif action == 'write_lance':
+        plan.write_lance(str(tmp_path / 'out.lance'), schema=pa.schema([('i', pa.int64())]))
+        assert lance.dataset(str(tmp_path / 'out.lance')).to_table().to_pylist() == [{'i': 1}]
+    elif action == 'take_all':
+        assert plan.take_all() == [{'i': 1}]
+    else:
+        assert plan.count() == 1
+    assert [event['event'] for event in events(path)] == ([] if action == 'take_zero' else ['read'])
+    assert (tmp_path / 'out.lance').exists() == (action == 'write_lance')
 
 
-def test_ray_rejects_before_cluster_or_source_access(data, monkeypatch):
-    # Test the actual compiler preflight without installing/starting Ray.
-    # The stub supplies only the optional import; any cluster access still fails.
-    import importlib.util
-    import sys
-    import types
-    from pathlib import Path
-    path = Path(__file__).parents[1] / 'demiflow/execution/executors/ray.py'
-    spec = importlib.util.spec_from_file_location('demiflow.execution.executors._ray_policy_test', path)
-    module = importlib.util.module_from_spec(spec)
-    with monkeypatch.context() as imports:
-        imports.setitem(sys.modules, 'ray', types.ModuleType('ray'))
-        spec.loader.exec_module(module)
-    executor = module.RayDatasetExecutor()
-    def forbidden(*args, **kwargs):
-        raise AssertionError('Ray was contacted')
-    monkeypatch.setattr(executor, '_ensure_ray', forbidden)
-    monkeypatch.setattr(executor, '_build_source', forbidden)
-    local = data.from_items([]).map(lambda row: row, execution='thread')
-    plan = Dataset(IterableSource(forbidden), local._plan, executor)
-    for action in [plan.take_all, plan.run_stream, plan.materialize]:
-        with pytest.raises((UnsupportedExecutionOptionError, NotImplementedError)):
-            action()
+def test_ray_explain_accepts_stream_options_and_rejects_legacy_tuning_before_io(data):
+    # Compile-only preflight: Ray Core execution is tested by the real provider
+    # suite. Valid stream options no longer mean an unsupported Ray Data path.
+    from demiflow.execution.executors.ray import RayDatasetExecutor
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    executor = RayDatasetExecutor()
+    def forbidden():
+        raise AssertionError('source was read during compile-only preflight')
+        yield
+    try:
+        api = DataAPI(executor)
+        plan = api.from_iter(forbidden).map(lambda row: row, execution='thread')
+        for action in ('take_all', 'run_stream', 'materialize'):
+            report = executor.plan(plan._source, plan._plan, action)
+            assert report.supported
+        with pytest.raises(ValueError, match='unsupported'):
+            api.from_iter(forbidden).map(lambda row: row,
+                backend_options={'ray': {'batch_size': 2}})
+    finally:
+        executor.close()
 
 
 def test_prepend_rejects_configured_maps_but_accepts_plain_map(data):
@@ -375,76 +378,138 @@ def test_prepend_rejects_configured_maps_but_accepts_plain_map(data):
 
 
 @pytest.mark.parametrize('kind', ['json', 'lance'])
-def test_checkpoint_bridges_map_only_and_replays_without_calls(data, kind, tmp_path):
-    calls = []
+def test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls(data, kind, tmp_path):
+    from _worker_event_fixtures import emit, events
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    import lance
+    path = str(tmp_path / 'calls.jsonl')
     def transform(row):
-        calls.append(row['i'])
+        emit(path, 'call', i=row['i'])
         return row
     source = data.from_items([{'i': 1}, {'i': 2}]).map(transform, execution='thread', concurrency=2)
+    with pytest.raises(RecoveryContractError, match='retired'):
+        if kind == 'json':
+            source.checkpoint(tmp_path / 'checkpoint.jsonl', version='v1')
+        else:
+            source.checkpoint_lance(str(tmp_path / 'checkpoint.lance'),
+                                    schema=pa.schema([('i', pa.int64())]), fingerprint='v1')
+    assert events(path) == []
+    assert not (tmp_path / 'checkpoint.jsonl').exists() and not (tmp_path / 'checkpoint.lance').exists()
+    # The same native journal now owns both result replay and table receipts.
+    # JSON checkpoint was retired; its replacement is the committed row terminal.
     def save():
         if kind == 'json':
-            return source.checkpoint(tmp_path / 'checkpoint.jsonl', version='v1')
-        return source.checkpoint_lance(str(tmp_path / 'checkpoint.lance'),
-                                       schema=pa.schema([('i', pa.int64())]), fingerprint='v1')
-    assert sorted(save().take_all(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
-    assert len(calls) == 2
-    assert save().count() == 2 and len(calls) == 2
+            return source.take_all()
+        source.write_lance(str(tmp_path / 'native.lance'), mode='create', schema=pa.schema([('i', pa.int64())]))
+        return lance.dataset(str(tmp_path / 'native.lance')).to_table().to_pylist()
+    with pytest.raises(RuntimeError, match='after confirmed result'):
+        with RunContext.start(tmp_path / 'run') as run:
+            assert sorted(save(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+            ref = run.ref
+            commits = run.journal.execution_commits('action-1')
+            assert commits and all(item['status'] == 'acked' for item in commits)
+            raise RuntimeError('after confirmed result')
+    first = events(path)
+    assert sorted(event['i'] for event in first) == [1, 2]
+    with RunContext.resume(ref) as resumed:
+        assert sorted(save(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+        assert resumed.journal.execution_commits('action-1') == commits
+    assert events(path) == first
+    if kind == 'lance':
+        assert lance.dataset(str(tmp_path / 'native.lance')).version == 1
 
 
-def test_stream_sink_checkpoint_accepts_thread_map_policy_change(data, tmp_path):
+def test_stream_native_recovery_preserves_sealed_policy_and_new_run_can_append(data, tmp_path):
     from demiflow.execution.stream_checkpoint import StreamCheckpoint
-    checkpoint = StreamCheckpoint(tmp_path / 'checkpoint.json', identity={'input': 'fixed'})
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    from _worker_event_fixtures import emit, events
+    import lance
+    with pytest.raises(RecoveryContractError, match='retired'):
+        StreamCheckpoint(tmp_path / 'checkpoint.json', identity={'input': 'fixed'})
     schema = pa.schema([('i', pa.int64())])
-    def save(rows, concurrency):
-        return (data.from_items(rows).map(lambda row: row, execution='thread', concurrency=concurrency)
-                .save_lance(str(tmp_path / 'out.lance'), schema=schema, key='i', stage='out', mode='append')
-                .run_stream(checkpoint=checkpoint))
-    first = save([{'i': 1}], 1).outputs['out']
-    assert save([{'i': 1}], 3).outputs['out'] == first
-    last = save([{'i': 2}], 2).outputs['out']
-    assert sorted(data.read_lance(**last).take_all(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+    path = str(tmp_path / 'calls.jsonl')
+    def transform(row):
+        emit(path, 'call', i=row['i'])
+        return row
+    def build(rows, concurrency):
+        return (data.from_items(rows).map(transform, execution='thread', concurrency=concurrency)
+                .save_lance(str(tmp_path / 'out.lance'), schema=schema, key='i', stage='out', mode='append'))
+    with pytest.raises(RecoveryContractError, match='retired'):
+        build([{'i': 1}], 1).run_stream(checkpoint=object())
+    assert events(path) == [] and not (tmp_path / 'out.lance').exists()
+    with pytest.raises(RuntimeError, match='after confirmed result'):
+        with RunContext.start(tmp_path / 'first') as run:
+            first = build([{'i': 1}], 1).run_stream().outputs['out']
+            ref = run.ref
+            raise RuntimeError('after confirmed result')
+    original = events(path)
+    with RunContext.resume(ref):
+        assert build([{'i': 1}], 1).run_stream().outputs['out'] == first
+    assert events(path) == original
+    # A new action may choose another concurrency; historical policy is not rewritten.
+    with RunContext.start(tmp_path / 'next'):
+        last = build([{'i': 2}], 2).run_stream().outputs['out']
+    assert sorted(lance.dataset(**last).to_table().to_pylist(), key=lambda r: r['i']) == [{'i': 1}, {'i': 2}]
+    assert sorted(event['i'] for event in events(path)) == [1, 2]
 
 
 @pytest.mark.parametrize('mode', ['thread', 'process'])
-def test_nested_relations_and_lazy_workers_reject_before_source_access(tmp_path, mode):
+def test_nested_relations_support_stream_options_without_eager_source_access(tmp_path, mode):
     from demiflow import data as public_data
-    reads = []
+    from _worker_event_fixtures import emit, events
+    path = str(tmp_path / 'reads.jsonl')
+    owned = tmp_path / 'owned'
+    owned.mkdir()
     def source():
-        reads.append(True)
+        emit(path, 'read')
         yield {'i': 1}
-    with public_data.local_execution(workers=2, worker_mode=mode, temp_directory=str(tmp_path)):
+    with public_data.local_execution(workers=2, worker_mode=mode, temp_directory=str(owned)):
         plain = public_data.from_iter(source)
         streaming = plain.map(lambda row: row, concurrency=2, execution='thread')
-        actions = [lambda: streaming.join(plain, on='i'), lambda: plain.join(streaming, on='i'),
-                   lambda: streaming.reduce_by_key('i', lambda acc, row: row),
-                   lambda: streaming.group_batches('i'), lambda: streaming.union(plain),
-                   lambda: plain.union(streaming), streaming.take_all, streaming.count]
-        for action in actions:
-            with pytest.raises(UnsupportedExecutionOptionError, match='streaming options'):
-                action()
-    assert reads == [] and not list(tmp_path.iterdir())
+        plans = [streaming.join(plain, on='i'), plain.join(streaming, on='i'),
+                 streaming.reduce_by_key('i', lambda acc, row: row),
+                 streaming.group_batches('i'), streaming.union(plain), plain.union(streaming)]
+        assert events(path) == []
+        expected = [[{'i': 1}], [{'i': 1}], [{'i': 1}],
+                    [{'i': 1, 'items': [{'i': 1}], 'group_index': 0, 'group_last': True}],
+                    [{'i': 1}, {'i': 1}], [{'i': 1}, {'i': 1}]]
+        for plan, rows in zip(plans, expected):
+            assert plan.take_all() == rows
+        assert streaming.take_all() == [{'i': 1}]
+        assert streaming.count() == 1
+    # Reusing the same source in two ports does not execute a second scan.
+    assert len(events(path)) == 8
+    assert not list(owned.iterdir())
 
 
-def test_whole_graph_preflight_precedes_construction_and_source_access(data):
-    events = []
+def test_whole_graph_preflight_precedes_construction_and_source_access(data, tmp_path):
+    from _worker_event_fixtures import emit, events
+    path = str(tmp_path / 'preflight.jsonl')
     class Actor:
         def __init__(self):
-            events.append('construct')
+            emit(path, 'construct')
         def __call__(self, row):
             return row
     def source():
-        events.append('read')
+        emit(path, 'read')
         yield {'i': 1}
     plain = data.from_iter(source)
     native = {'ray': {'compute': {'kind': 'task_pool', 'size': 2}}}
     with pytest.raises(ValueError, match='backend_options'):
         plain.map(Actor, concurrency=2, backend_options=native)
-    for dataset in (plain.map(Actor, execution='thread').limit(1),
-                    plain.map(Actor).map(lambda row: row, backend_options=native)
-                         .map(lambda row: row, execution='thread')):
-        with pytest.raises(ValueError, match='streaming does not support'):
-            dataset.run_stream()
-    assert events == []
+    invalid = (plain.map(Actor).map(lambda row: row, backend_options=native)
+               .map(lambda row: row, execution='thread'))
+    with pytest.raises((ValueError, UnsupportedExecutionOptionError), match='backend_options|Ray Data|native option'):
+        invalid.run_stream()
+    assert events(path) == []
+    # Limit is now supported; it cannot remain an old 'unsupported operation'
+    # negative. Its true source and constructor laziness is checked here.
+    valid = plain.map(Actor, execution='thread').limit(1)
+    assert events(path) == []
+    assert valid.run_stream().emitted == 1
+    assert Counter(event['event'] for event in events(path)) == {'construct': 1, 'read': 1}
 
 
 def test_policy_metrics_and_plan_summary_keep_duplicate_nodes_distinct(data):

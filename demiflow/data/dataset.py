@@ -1090,7 +1090,7 @@ class Dataset:
         if source_batch_size is not None and (type(source_batch_size) is not int or not 1 <= source_batch_size <= 256):
             raise ValueError('source_batch_size must be 1..256')
         from ..execution.capabilities import validate_stream_plan
-        validate_stream_plan(self._plan)
+        validate_stream_plan(self._plan, source=self._source)
         from ..execution.dataflow_api import make_action_request, make_native_operation
         from ..execution.dataflow_stream import run_stream_action
         make_native_operation("run_stream", configuration={"action": "run_stream"}, bindings={})

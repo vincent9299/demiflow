@@ -461,20 +461,19 @@ def is_stream_operation(operation) -> bool:
 
 
 def reject_streaming_map_options(plan, backend):
-    """Reject only at boundaries that genuinely cannot run streaming options.
+    """Known v3 providers/composites share the same streaming map kernels.
 
-    The local executor routes legal streaming maps to delivery/materialize, so
-    its terminals must not pre-reject here. Relational/union/Ray boundaries have
-    no streaming route and still reject before reading sources or opening sinks.
+    Keep the compatibility guard for unknown engines. Public declarations no
+    longer reject a supported map solely because a relational input or Ray Core
+    hosts it; the unified compiler still validates the actual composition.
     """
-    if backend == 'local':
+    if backend in {'local', 'local relational', 'ray', 'ray_core'}:
         return
     if any(isinstance(op, (MapOp, BoundMapOp)) and op.stream_options is not None
            for op in plan.operations):
         from ..errors import UnsupportedExecutionOptionError
         raise UnsupportedExecutionOptionError(
-            f"Dataset.map streaming options are not supported by {backend} lazy execution; "
-            "use local run_stream(), materialize() or checkpoint()"
+            f"Dataset.map streaming options have no declared provider contract for {backend}"
         )
 
 
