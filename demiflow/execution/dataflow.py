@@ -387,6 +387,11 @@ class DataflowExecution:
                 self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure_searches(self._request.source, self._request.plan, graph)
             self._services.journal_service.bind_queue(self._acquisition)
+        self._stream_lance = None
+        if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
+            from .dataflow_stream_lance import NativeStreamLanceService
+            self._stream_lance = NativeStreamLanceService(self)
+            self._services.journal_service._stream_lance = self._stream_lance
         self._prepared = True
         return sealed
 
@@ -415,6 +420,9 @@ class DataflowExecution:
             self._services.journal_service._native_journal().check_recovery()
         queue_owned_recovery = (self._acquisition is not None and
             self._acquisition.can_recover_without_dataflow_cut())
+        if self._stream_lance is not None:
+            self._stream_lance.start()
+            queue_owned_recovery = queue_owned_recovery or self._stream_lance.can_recover_without_cut()
         self._restore_image = (self._checkpoint.recover(sinks=self._sinks)
             if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
@@ -1020,6 +1028,8 @@ class DataflowExecution:
             self._services.journal_service.close(deadline_ms=deadline_ms)
         except DataflowError:
             pass
+        if getattr(self, '_stream_lance', None) is not None:
+            self._stream_lance.close()
         self._endpoints.clear()
         if cleanup_error is not None:
             raise cleanup_error

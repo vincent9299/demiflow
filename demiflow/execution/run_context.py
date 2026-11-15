@@ -317,6 +317,9 @@ class RunContext:
         native_stream=(source_contract=='demiflow.queue.source.v2' or any(
             type(part) is dict and type(part.get('native')) is dict and
             part['native'].get('contract')=='demiflow.queue.enqueue.v2' for part in declaration.get('operations',[])))
+        native_writer = (self.journal.source_binding(action_id + '-stream-lance') is not None
+            and self.journal.source_binding(action_id + '-dataflow-sealed') is not None)
+        native_stream = native_stream or native_writer
         authority=self.journal.source_binding('queue-budget-authority')
         if authority is not None and not native_stream:
             raise RecoveryContractError('Queue task runs cannot also authorize local durable actions; use a separate bounded run')

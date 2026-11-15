@@ -286,7 +286,8 @@ class OperatorKernel:
         from ..dataflow_acquisition_call import AcquisitionCall
         from ..dataflow_producer import ProducerCall
         from ..dataflow_search import NativeSearchCall
-        if type(instance) in (AcquisitionCall, ProducerCall, NativeSearchCall):
+        from ..dataflow_stream_lance import StreamLanceCall
+        if type(instance) in (AcquisitionCall, ProducerCall, NativeSearchCall, StreamLanceCall):
             instance.bind(self._services, self._occurrence)
         from ...data.result_cache import CacheCall
         if isinstance(instance, CacheCall):
@@ -539,6 +540,8 @@ class OperatorKernel:
             self._timer_deadline = None
         if self._calls is not None:
             yield from self._emit(self._calls.finish())
+        if kind == 'SaveLanceOp':
+            self._instance.finish(self._instance.native_call_ordinal)
 
     def _finish_complete(self) -> Iterator[Record]:
         kind = self._spec.kind

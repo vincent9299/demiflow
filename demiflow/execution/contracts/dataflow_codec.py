@@ -118,7 +118,7 @@ _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _QUEUE_STATUSES = frozenset({"record", "pending", "eoi", "confirmed", "unknown"})
 _JOURNAL_OPS = frozenset({
     "lookup", "reserve", "reserve_http_retry", "response", "failed",
-    "references", "media_references", "bind_membership", "stage_image", "offline_lookup",
+    "references", "media_references", "bind_membership", "stage_image", "offline_lookup", "stream_lance",
 })
 _EXECUTION_STATES = frozenset({"preparing", "running", "draining", "succeeded", "failed", "cancelled"})
 

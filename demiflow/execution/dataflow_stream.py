@@ -34,6 +34,8 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
         if handle is None:
             return 0
         execution = handle._execution
+        if getattr(execution, '_stream_lance', None) is not None:
+            stats.outputs = execution._stream_lance.outputs
         total = 0
         for node in execution._graph.nodes:
             counters = [value for (occ, _), value in execution._node_metrics.items()

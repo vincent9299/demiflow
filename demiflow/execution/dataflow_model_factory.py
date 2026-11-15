@@ -49,6 +49,10 @@ def native_model_declaration(operation):
         return CallableSpec.create(PromptFactory, fn_constructor_args=(replace(operation, node_id=None), {}))
     target = getattr(getattr(operation, 'callable', None), 'target', None)
     actor = getattr(target, '__self__', target)
+    from ..data.plan import SaveLanceOp
+    if type(operation) is SaveLanceOp:
+        from .dataflow_stream_lance import StreamLanceFactory, declaration
+        return CallableSpec.create(StreamLanceFactory, fn_constructor_args=(declaration(operation, actor), actor.when))
     from .stream_lookup import LanceLookup
     from ..lance.search import VectorSearch
     if type(actor) is LanceLookup:
