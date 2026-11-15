@@ -72,32 +72,3 @@ def capture_source(action, rows_factory):
     reference = dict(source_id=identity([source_id, fixed]), data=fixed)
     run.journal.set_action_snapshot(run.fence, action.action_id, reference)
     return sink, reference
-
-
-def prefix_rows(action, dataset, *, stage_key, max_rows, max_row_bytes):
-    """Capture a finite prefix under the parent run's existing source protocol.
-
-    The internal capture never enters a public Dataset action. A mutable source
-    head is fixed once, and resume reuses the exact captured rows before skipping
-    the already-published prefix frontier.
-    """
-    from contextlib import closing
-    from itertools import islice
-    from .recovery_identity import plan_identity
-    from .stream_grouping import row_size
-    source = freeze_source(action, dataset._source, path='prefix-' + stage_key)
-    declaration = plan_identity('prefix-input', source, dataset._plan)
-    child_id = action.action_id + '-prefix-' + stage_key
-    action.context.journal.bind_execution_action(action.context.fence, child_id, declaration)
-    child = RunAction(action.context, child_id, declaration)
-    def rows():
-        with closing(dataset._executor._apply_plan(source, dataset._plan)) as stream:
-            for row in islice(stream, max_rows + 1):
-                row_size(row, max_row_bytes)
-                yield row
-    sink, snapshot = capture_source(child, rows)
-    if snapshot['data']['rows'] > max_rows:
-        from .recovery_contract import RecoveryContractError
-        raise RecoveryContractError('Prepend prefix exceeds its declared row bound')
-    child.complete({'kind': 'prefix-input', 'snapshot': snapshot})
-    yield from sink.iter_rows(snapshot['data'])
