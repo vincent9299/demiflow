@@ -39,6 +39,8 @@ def _ray_carrier_double(monkeypatch):
     monkeypatch.setattr(WH, 'WorkerRuntime', FakeRuntime)
     monkeypatch.setattr(HOSTS, '_RAY_AVAILABLE', True)
     monkeypatch.setattr(HOSTS, 'ray', ray, raising=False)
+    monkeypatch.setattr(HOSTS, 'RayActorError', ray.exceptions.RayActorError, raising=False)
+    monkeypatch.setattr(HOSTS, 'GetTimeoutError', ray.exceptions.GetTimeoutError, raising=False)
     yield
 
 # dataflow_hosts defines RayHostEndpoint only when the carrier imports, so bind
@@ -108,7 +110,7 @@ def mk_event(op, kind='progress', alloc='alloc-1', boot='boot-1', payload=None):
     return WorkerEvent(schema='demiflow.dataflow_event.v3', kind=kind, operation_id=oid(op), run_id='run-1',
                        attempt=1, fence='fence-1', allocation_id=alloc, boot_id=boot, plan_revision=1,
                        scope_id='scope-1', controller_epoch=1, payload_ref=None,
-                       payload=payload if payload is not None else {'x': 1})
+                       payload=payload if payload is not None else {'requests': 1})
 
 
 def mk_reply(op, status='ok', payload=None):
@@ -151,6 +153,7 @@ def driver_env(name):
         port = AUTH.DriverArtifactPort(action, bounds=BIG)
         store = RunArtifactStore(root=ctx.directory / '.dataflow-store', store_id='store-1', journal=port, bounds=BIG)
         svc = AUTH.DriverJournalService(action, store=store, bounds=BIG)
+        svc.register_worker(mklease(), ())
         try:
             yield NS(tmp=tmp, ctx=ctx, action=action, store=store, port=port, svc=svc)
         finally:
@@ -159,7 +162,7 @@ def driver_env(name):
 
 
 def dev(ctx, kind, op, payload, fence=None):
-    return WorkerEvent(schema='demiflow.dataflow_event.v3', kind=kind, operation_id=op, run_id=ctx.ref.run_id,
+    return WorkerEvent(schema='demiflow.dataflow_event.v3', kind=kind, operation_id=oid(op), run_id=ctx.ref.run_id,
                        attempt=ctx.attempt, fence=fence or ctx.fence, allocation_id='alloc-1', boot_id='boot-1',
                        plan_revision=0, scope_id='stage-1', controller_epoch=0, payload_ref=None, payload=payload)
 
@@ -186,11 +189,11 @@ class ClientTransport:
         if self._error is not None:
             raise self._error
         return ControlReply(operation_id=event.operation_id, status='ok',
-                            payload=self._replies.get(event.kind, {}), payload_ref=None, error_code=None)
+                            payload={**self._replies.get(event.kind, {}), **({'operation_id': event.operation_id} if 'operation_id' in self._replies.get(event.kind, {}) else {})}, payload_ref=None, error_code=None)
 
 
 def worker_client(replies=None, error=None, expires=None):
-    doc = {'run_id': 'run-1', 'attempt': 1, 'fence': 'fence-1', 'plan_revision': 0, 'controller_epoch': 0}
+    doc = {'run_id': 'run-1', 'attempt': 1, 'fence': 'fence-1', 'plan_revision': 0, 'controller_epoch': 0, 'scope_id': 'scope-1'}
     lease = mklease(expires=expires if expires is not None else int(time.time() * 1000) + 100000)
     t = ClientTransport(GrantStore(doc), replies, error)
     return AUTH.WorkerJournalClient(transport=t, lease=lease, bounds=BIG), t, lease
@@ -388,7 +391,8 @@ def test_h001():
         for forbidden in ('start', 'complete', 'commit', 'start_action', 'complete_action'):
             assert not hasattr(svc, forbidden)
         assert svc._journal is e.ctx.journal
-        assert svc._effects._root.exists()
+        assert not (e.ctx.directory / '.dataflow-effects').exists()
+        assert len(list(e.ctx.directory.rglob('*.sqlite'))) == 1
         with pytest.raises(DataflowError) as ei:
             svc.dispatch(dev(e.ctx, 'commit', 'op-x', {}))
         assert ei.value.code == 'INVALID_CONTRACT'
@@ -401,7 +405,7 @@ def test_h002():
             svc.dispatch(dev(e.ctx, 'drop_table', 'op-1', {}))
         assert ei.value.code == 'INVALID_CONTRACT'
         with pytest.raises(DataflowError) as ei:
-            svc.dispatch(dev(e.ctx, 'reserve', 'op-2', {'amounts': {'x': 1}}, fence='stale'))
+            svc.dispatch(dev(e.ctx, 'reserve', 'op-2', {'amounts': {'requests': 1}}, fence='stale'))
         assert ei.value.code == 'FENCED'
         small = Bounds(max_control_bytes=64, max_pending_events=8)
         svc_small = AUTH.DriverJournalService(e.action, store=e.store, bounds=small)
@@ -412,7 +416,7 @@ def test_h002():
         svc_small.close(deadline_ms=100)
         assert svc._queue.maxsize == BIG.max_pending_events
         for i in range(BIG.max_pending_events * 3):
-            svc.submit(dev(e.ctx, 'reserve', 'b-%d' % i, {'amounts': {'x': 1}}))
+            svc.submit(dev(e.ctx, 'reserve', 'b-%d' % i, {'amounts': {'requests': 1}}))
         time.sleep(0.2)
         assert len(svc._completed) <= BIG.max_pending_events
 
@@ -422,13 +426,14 @@ def test_h003():
         svc = e.svc
 
         def ec(kind, op, eid='eff-1', dig='d' * 64, ref=None):
-            return df.EffectCommand(operation_id=op, kind=kind, effect_id=eid, actor_id='actor-1',
-                                    request_digest=dig, payload_ref=ref, budget={'effect_units': 1})
+            return df.EffectCommand(operation_id=oid(op), kind=kind, effect_id=eid, actor_id='actor-1',
+                                    request_digest=dig, payload_ref=ref, budget={'requests': 1})
 
         assert svc.effect(ec('lookup', 'l'), lease=None).status == 'absent'
         assert svc.effect(ec('reserve', 'r'), lease=None).status == 'reserved'
         assert svc.effect(ec('mark_sent', 's'), lease=None).status == 'sent'
-        assert (e.tmp / 'run' / '.dataflow-effects' / 'eff-1.json').exists()
+        assert svc.effect(ec('lookup', 'after-send'), lease=None).status == 'sent'
+        assert not (e.ctx.directory / '.dataflow-effects').exists()
         ref = e.store.put(iter([b'result']), max_bytes=100, media_type='x')
         assert svc.effect(ec('confirm', 'c', ref=ref), lease=None).status == 'confirmed'
         svc.effect(ec('reserve', 'r2', eid='eff-2'), lease=None)
@@ -444,14 +449,14 @@ def test_h003():
 def test_h004():
     with driver_env('h004') as e:
         svc = e.svc
-        svc.reserve('res-1', {'effect_units': 5}, lease=None)
-        svc.reserve('res-1', {'effect_units': 5}, lease=None)
+        svc.reserve('res-1', {'requests': 5}, lease=None)
+        svc.reserve('res-1', {'requests': 5}, lease=None)
         with pytest.raises(Exception):
-            svc.reserve('res-1', {'effect_units': 9}, lease=None)
+            svc.reserve('res-1', {'requests': 9}, lease=None)
         with pytest.raises(DataflowError):
             svc.reserve('res-2', {}, lease=None)
         with pytest.raises(DataflowError):
-            svc.reserve('res-3', {'effect_units': -1}, lease=None)
+            svc.reserve('res-3', {'requests': -1}, lease=None)
 
 
 def test_h005():
@@ -464,7 +469,7 @@ def test_h005():
 def test_h006():
     replies = {'effect': {'operation_id': 'op-e', 'status': 'unknown', 'result_ref': None, 'receipt_ref': None}}
     client, t, lease = worker_client(replies=replies)
-    cmd = df.EffectCommand(operation_id='op-e', kind='lookup', effect_id='eff-1', actor_id='a',
+    cmd = df.EffectCommand(operation_id=oid('op-e'), kind='lookup', effect_id='eff-1', actor_id='a',
                            request_digest='d' * 64, payload_ref=None, budget={})
     assert client.effect(cmd).status == 'unknown'
     assert t.requests[0].kind == 'effect'
@@ -476,11 +481,11 @@ def test_h006():
 
 def test_h007():
     client, t, lease = worker_client(replies={'reserve': {'operation_id': 'op-r'}})
-    client.reserve('op-r', {'effect_units': 1})
-    assert t.requests[0].kind == 'reserve' and t.requests[0].payload == {'amounts': {'effect_units': 1}}
+    client.reserve(oid('op-r'), {'requests': 1})
+    assert t.requests[0].kind == 'reserve' and t.requests[0].payload == {'amounts': {'requests': 1}}
     client2, t2, _ = worker_client(error=DataflowError('BUDGET_EXCEEDED', 'insufficient'))
     with pytest.raises(DataflowError) as ei:
-        client2.reserve('op-r2', {'effect_units': 1})
+        client2.reserve(oid('op-r2'), {'requests': 1})
     assert ei.value.code == 'BUDGET_EXCEEDED'
 
 
@@ -604,7 +609,7 @@ def test_h014():
     rayhost = df.HostDescriptor(host_id='h', provider='ray_core', runtime_revision='r',
                                 store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
     loc2 = ART.resolve_data_location(ref, host=rayhost, store=store)
-    assert loc2.temporary_locator == 'ray-object://' + ref.digest and loc2.durable_ref == ref
+    assert loc2.temporary_locator is None and loc2.durable_ref == ref  # no fabricated Ray object handle
     with pytest.raises(DataflowError) as ei:
         ART.resolve_data_location(aref('gone'), host=host, store=store)
     assert ei.value.code == 'UNKNOWN_EFFECT'
@@ -616,7 +621,7 @@ def test_h015():
     with driver_env('h015') as e:
         rayh = df.HostDescriptor(host_id='ray-1', provider='ray_core', runtime_revision='r',
                                  store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-        services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST, rayh))
+        services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST, rayh), resources=FakeManager())
         ep = HOSTS.make_host_endpoint(mklease('local'), services=services)
         assert isinstance(ep, HOSTS.LocalHostEndpoint)
         ep2 = HOSTS.make_host_endpoint(mklease('ray-1'), services=services)
@@ -624,10 +629,9 @@ def test_h015():
         with pytest.raises(DataflowError) as ei:
             HOSTS.make_host_endpoint(mklease('nope'), services=services)
         assert ei.value.code == 'INVALID_CONTRACT'
-        spark = df.HostDescriptor(host_id='sp', provider='spark', runtime_revision='r',
-                                  store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
         with pytest.raises(DataflowError):
-            HOSTS.make_host_endpoint(mklease('sp'), services=NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(spark,)))
+            df.HostDescriptor(host_id='sp', provider='spark', runtime_revision='r',
+                store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
 
 
 def test_h016(monkeypatch):
@@ -662,16 +666,26 @@ def test_h016(monkeypatch):
 
 
 def test_h017(monkeypatch):
+    import select
+    from collections import deque
     import demiflow.execution.worker.bootstrap as B
     ep = HOSTS.LocalHostEndpoint.__new__(HOSTS.LocalHostEndpoint)
     ev = mk_event('e')
-    seq = iter([{'type': 'worker_event', 'event': asdict(ev)} for _ in range(5)])
+    payload = json.loads(codec.encode_wire(ev, type_name='WorkerEvent', bounds=BIG))['payload']
+    seq = iter([{'type': 'worker_event', 'event': payload} for _ in range(5)])
     monkeypatch.setattr(B, 'recv_message', lambda sock: next(seq, None))
     ep._sock = NS(settimeout=lambda t: None)
+    ep._services = NS(bounds=BIG, policy=POLICY)
+    ep._events = deque()
+    monkeypatch.setattr(select, 'select', lambda *a: ([ep._sock], [], []))
     got = ep.poll(max_events=3, deadline_ms=100)
     assert len(got) == 3 and got[0].operation_id == ev.operation_id
-    monkeypatch.setattr(B, 'recv_message', lambda sock: None)
+    monkeypatch.setattr(select, 'select', lambda *a: ([], [], []))
     assert ep.poll(max_events=3, deadline_ms=100) == ()
+    monkeypatch.setattr(select, 'select', lambda *a: ([ep._sock], [], []))
+    monkeypatch.setattr(B, 'recv_message', lambda sock: None)
+    with pytest.raises(DataflowError, match='UNKNOWN_EFFECT'):
+        ep.poll(max_events=3, deadline_ms=100)
 
 
 def test_h018():
@@ -723,11 +737,16 @@ def test_h021(monkeypatch):
                                  store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
         services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(rayh,))
         ep = doubled_endpoint(HOSTS.RayHostEndpoint, services)
-        ep._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g'}, {'sha256': oid('pin')})
+        ep._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g', 'scope_id': 'scope-1'}, {'sha256': oid('pin')})
         ep._open_scope = lambda *a: None
         ep._apply = lambda *a: None
         monkeypatch.setattr(WH, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
-        ep.activate(mkassignment())
+        assignment = mkassignment()
+        ep._send_k3 = lambda kind, payload: ep._connector.handled.append(kind) or {}
+        with pytest.raises(DataflowError, match='staged'):
+            ep.activate(assignment)
+        ep.prepare(assignment)
+        ep.activate(assignment)
         assert ep._activated
         assert ep._connector.handled == ['VerifyArtifactAndCapabilities', 'Restore', 'Activate', 'Assign']
 
@@ -748,7 +767,8 @@ def test_h022():
                 raise HOSTS.RayActorError('actor died')
 
         ep._connector = DeadConn()
-        assert ep.poll(max_events=2, deadline_ms=100) == ()
+        with pytest.raises(DataflowError, match='UNKNOWN_EFFECT'):
+            ep.poll(max_events=2, deadline_ms=100)
 
 
 def test_h023():
@@ -776,7 +796,8 @@ def test_h024():
         ep._scope_id = 'scope-1'
         ep._send_k3 = lambda kind, payload: {}
         ep.cancel('actor died', deadline_ms=100)
-        assert ep._closed_flag is True and ep._provider.absent_calls
+        assert not ep._closed_flag and ep._provider.absent_calls == []
+        assert ep.closed()  # only allocator-confirmed exit releases capacity
 
 
 def test_h025():
@@ -807,11 +828,14 @@ def test_h029():
     with driver_env('h029') as e:
         rayh = df.HostDescriptor(host_id='local', provider='ray_core', runtime_revision='r',
                                  store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-        services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(rayh,))
+        resources = FakeManager()
+        services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(rayh,), resources=resources)
         ep = HOSTS.RayHostEndpoint(mklease('local'), services=services)
+        ep2 = HOSTS.RayHostEndpoint(mklease('local'), services=services)
         assert ep._activated is False and ep._scope_id is None
-        assert isinstance(ep._connector, HOSTS.DataflowRayConnector)
-        assert ep._connector._actors == {}
+        assert ep._manager is ep2._manager is resources
+        assert ep._connector is ep2._connector is resources.provider._control
+        assert ep._events is not ep2._events  # mailbox state remains endpoint-local
 
 
 # ===== H026-H027 services =====
@@ -825,7 +849,7 @@ def test_h026():
         assert s1.store.store_id == 'store-1' and s1.hosts[0].host_id == 'local'
         assert isinstance(s1.resources, ResourceManager)
         assert len(list(ctx1.directory.rglob('*.sqlite'))) == 1
-        root1 = s1.journal_service._effects._root
+        root1 = s1.journal_service._journal.directory
         js1 = s1.journal_service
         js1.close(deadline_ms=BIG.timeout_ms)
     tmp2 = newtmp()
@@ -833,13 +857,14 @@ def test_h026():
         a2 = RunAction(ctx2, 'action-b', {'kind': 'literal_empty', 'tag': 'b'})
         s2 = SVC.make_driver_services(a2, policy=POLICY, bounds=BIG)
         assert s2.journal_service is not js1
-        assert s2.journal_service._effects._root != root1
+        assert s2.journal_service._journal.directory != root1
+        assert s2.journal_service._journal is ctx2.journal
         assert s2.journal_service._closed is False
         assert len(list(ctx2.directory.rglob('*.sqlite'))) == 1
         s2.journal_service.close(deadline_ms=BIG.timeout_ms)
 
 
-def test_h027():
+def test_h027(monkeypatch):
     tmp = newtmp()
     with RunContext.start(directory=tmp / 'run', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx:
         action = RunAction(ctx, 'action-a', {'kind': 'literal_empty'})
@@ -853,7 +878,7 @@ def test_h027():
                                           constants_ref=constants_ref)
         bundle_ref = ART.stage_runtime_bundle(sealed_stage, store=s1.store, bounds=BIG)
         grant_doc = {'run_id': ctx.ref.run_id, 'attempt': ctx.attempt, 'fence': ctx.fence,
-                     'plan_revision': 2, 'controller_epoch': ctx.attempt}
+                     'plan_revision': 2, 'controller_epoch': ctx.attempt, 'scope_id': 'scope-1'}
         grant_ref = s1.store.put(iter([json.dumps(grant_doc).encode()]), max_bytes=1 << 20, media_type='application/json')
         lease = df.WorkerLease(allocation_id='alloc-1', boot_id='boot-1', stage_id='action-a', partition_ids=('p0',),
                                host_id='local', endpoint_ref='ep', grant_ref=grant_ref, expires_at_ms=10 ** 13)
@@ -887,6 +912,10 @@ def test_h027():
         cache = newtmp() / 'worker-cache'
         assert not (cache / 'run.sqlite').exists()
         transport = FakeTransport(s1.store)
+        def load_programs(given, *, store, bounds, cache):
+            assert given is assignment and store.store_id == 'store-1'
+            return {oid('occ'): df.LoadedProgram('callable', {'digest': program_ref.digest}, program_ref.digest)}
+        monkeypatch.setattr(SVC, '_load_programs', load_programs)
         rs = SVC.make_runtime_services(assignment, transport=transport, cache=cache)
         assert rs.store.store_id == 'store-1' and rs.constants == {'k': 1}
         occ = hashlib.sha256(b'occ').hexdigest()
@@ -925,12 +954,17 @@ def test_h031():
     assert ref2 == ref
     assert len(list((tmp / 'store' / 'store-1' / 'objects').iterdir())) == 1
 
-    def big():
-        yield b'x' * (1 << 20)
-
-    with pytest.raises(DataflowError) as ei:
-        store.put(big(), max_bytes=BIG.max_spill_bytes + 1, media_type='x')
-    assert ei.value.code == 'BUDGET_EXCEEDED'
+    # The declared ceiling may exceed the allowance; actual staged growth is
+    # charged before writing. Exercise the real authority, not an unmetered port.
+    with driver_env('h031-budget') as e:
+        small = Bounds(max_spill_bytes=64)
+        port = AUTH.DriverArtifactPort(e.action, bounds=small)
+        bounded = RunArtifactStore(root=e.ctx.directory / '.dataflow-store',
+                                   store_id='bounded', journal=port, bounds=small)
+        with pytest.raises(DataflowError) as ei:
+            bounded.put(iter([b'x' * 32, b'y' * 40]), max_bytes=128, media_type='x')
+        assert ei.value.code == 'BUDGET_EXCEEDED'
+        assert not list((bounded.root / 'bounded' / 'staging').iterdir())
 
 
 def test_h032():
@@ -990,18 +1024,18 @@ def test_h036():
     with driver_env('h036') as e:
         svc = e.svc
         ref = e.store.put(iter([b'x']), max_bytes=100, media_type='x')
-        svc.artifact(df.ArtifactCommand(operation_id='p1', kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes), lease=None)
-        rep = svc.artifact(df.ArtifactCommand(operation_id='i1', kind='inspect', ref=ref, owner='owner-1', size_bytes=0), lease=None)
+        svc.artifact(df.ArtifactCommand(operation_id=oid('p1'), kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes), lease=None)
+        rep = svc.artifact(df.ArtifactCommand(operation_id=oid('i1'), kind='inspect', ref=ref, owner='owner-1', size_bytes=0), lease=None)
         assert rep.present is True
-        rep2 = svc.artifact(df.ArtifactCommand(operation_id='i2', kind='inspect', ref=aref('gone'), owner='owner-1', size_bytes=0), lease=None)
+        rep2 = svc.artifact(df.ArtifactCommand(operation_id=oid('i2'), kind='inspect', ref=aref('gone'), owner='owner-1', size_bytes=0), lease=None)
         assert rep2.present is False
         with pytest.raises(DataflowError):
-            svc.artifact(df.ArtifactCommand(operation_id='bad', kind='steal', ref=ref, owner='owner-2', size_bytes=0), lease=None)
+            svc.artifact(df.ArtifactCommand(operation_id=oid('bad'), kind='steal', ref=ref, owner='owner-2', size_bytes=0), lease=None)
 
 
 def test_h037():
     client, t, lease = worker_client(replies={'artifact': {'operation_id': 'a1', 'present': True, 'charged_bytes': 0}})
-    cmd = df.ArtifactCommand(operation_id='a1', kind='pin', ref=aref('x'), owner='o', size_bytes=1)
+    cmd = df.ArtifactCommand(operation_id=oid('a1'), kind='pin', ref=aref('x'), owner='o', size_bytes=1)
     assert client.artifact(cmd).present is True
     assert t.requests[0].kind == 'artifact'
     assert client.artifact(cmd).charged_bytes == 0
@@ -1010,26 +1044,26 @@ def test_h037():
 def test_h056():
     with driver_env('h056') as e:
         svc = e.svc
-        binding = df.QueueBinding(action_id='action-1', source_id=None, mode='native', contract_digest='d' * 64,
-                                  generation=None, pool=None, source_occurrence=None, fetch_occurrence='f', final_occurrence=None)
+        binding = df.QueueBinding(action_id='action-1', source_id=None, mode='raw_fetch', contract_digest='d' * 64,
+                                  generation=None, pool=None, source_occurrence=None, fetch_occurrence=oid('f'), final_occurrence=None)
         with pytest.raises(DataflowError) as ei:
-            svc.queue(df.QueueCommand(operation_id='q1', operation='drop_table', binding=binding, record_id=None, delivery_ref=None, row_ref=None), lease=None)
+            svc.queue(df.QueueCommand(operation_id=oid('q1'), operation='drop_table', binding=binding, record_id=None, delivery_ref=None, row_ref=None), lease=None)
         assert ei.value.code == 'INVALID_CONTRACT'
         with pytest.raises(DataflowError) as ei:
-            svc.queue(df.QueueCommand(operation_id='q2', operation='poll', binding=binding, record_id=None, delivery_ref=None, row_ref=None), lease=None)
+            svc.queue(df.QueueCommand(operation_id=oid('q2'), operation='poll', binding=binding, record_id=None, delivery_ref=None, row_ref=None), lease=None)
         assert ei.value.code == 'INVALID_CONTRACT'
-        native = NS(action_id='action-1', poll=lambda cmd, *, lease: df.QueueReply(operation_id=cmd.operation_id, status='ok', delivery_ref=None, row_ref=None, native_fact_ref=None, retry_after_ms=0))
+        native = NS(action_id='action-1', poll=lambda cmd, *, lease: df.QueueReply(operation_id=cmd.operation_id, status='pending', delivery_ref=None, row_ref=None, native_fact_ref=None, retry_after_ms=0))
         svc.bind_queue(native)
-        rep = svc.queue(df.QueueCommand(operation_id='q3', operation='poll', binding=binding, record_id=None, delivery_ref=None, row_ref=None), lease=None)
-        assert rep.status == 'ok'
+        rep = svc.queue(df.QueueCommand(operation_id=oid('q3'), operation='poll', binding=binding, record_id=None, delivery_ref=None, row_ref=None), lease=None)
+        assert rep.status == 'pending'
 
 
 def test_h057():
-    client, t, lease = worker_client(replies={'queue': {'operation_id': 'q1', 'status': 'ok', 'delivery_ref': None, 'row_ref': None, 'native_fact_ref': None, 'retry_after_ms': 0}})
-    binding = df.QueueBinding(action_id='action-1', source_id=None, mode='native', contract_digest='d' * 64,
-                              generation=None, pool=None, source_occurrence=None, fetch_occurrence='f', final_occurrence=None)
-    cmd = df.QueueCommand(operation_id='q1', operation='finalize', binding=binding, record_id='r1', delivery_ref=None, row_ref=None)
-    assert client.queue(cmd).status == 'ok'
+    client, t, lease = worker_client(replies={'queue': {'operation_id': 'q1', 'status': 'confirmed', 'delivery_ref': None, 'row_ref': None, 'native_fact_ref': None, 'retry_after_ms': 0}})
+    binding = df.QueueBinding(action_id='action-1', source_id=None, mode='raw_fetch', contract_digest='d' * 64,
+                              generation=None, pool=None, source_occurrence=None, fetch_occurrence=oid('f'), final_occurrence=None)
+    cmd = df.QueueCommand(operation_id=oid('q1'), operation='finalize', binding=binding, record_id=oid('r1'), delivery_ref=aref('delivery'), row_ref=aref('row'))
+    assert client.queue(cmd).status == 'confirmed'
     assert t.requests[0].kind == 'queue'
     client2, t2, _ = worker_client(error=DataflowError('UNKNOWN_EFFECT', 'lost'))
     with pytest.raises(DataflowError) as ei:
@@ -1040,17 +1074,17 @@ def test_h057():
 def test_h066():
     with driver_env('h066') as e:
         svc = e.svc
-        assert svc.submit(dev(e.ctx, 'reserve', 's1', {'amounts': {'x': 1}})) is True
-        assert svc.submit(dev(e.ctx, 'reserve', 's1', {'amounts': {'x': 1}})) is True
+        assert svc.submit(dev(e.ctx, 'reserve', 's1', {'amounts': {'requests': 1}})) is True
+        assert svc.submit(dev(e.ctx, 'reserve', 's1', {'amounts': {'requests': 1}})) is True
         assert svc._queue.maxsize == BIG.max_pending_events
         svc.close(deadline_ms=100)
-        assert svc.submit(dev(e.ctx, 'reserve', 's2', {'amounts': {'x': 1}})) is False
+        assert svc.submit(dev(e.ctx, 'reserve', 's2', {'amounts': {'requests': 1}})) is False
 
 
 def test_h067():
     with driver_env('h067') as e:
         svc = e.svc
-        svc.submit(dev(e.ctx, 'reserve', 'p1', {'amounts': {'x': 1}}))
+        svc.submit(dev(e.ctx, 'reserve', 'p1', {'amounts': {'requests': 1}}))
         deadline = time.time() + 2
         replies = ()
         while time.time() < deadline:
@@ -1067,23 +1101,22 @@ def test_h067():
 def test_h068():
     with driver_env('h068') as e:
         svc = e.svc
-        svc.submit(dev(e.ctx, 'reserve', 'c1', {'amounts': {'x': 1}}))
+        svc.submit(dev(e.ctx, 'reserve', 'c1', {'amounts': {'requests': 1}}))
         svc.close(deadline_ms=200)
         assert svc._closed
         svc.close(deadline_ms=200)
-        assert svc.submit(dev(e.ctx, 'reserve', 'c2', {'amounts': {'x': 1}})) is False
+        assert svc.submit(dev(e.ctx, 'reserve', 'c2', {'amounts': {'requests': 1}})) is False
 
 
 def test_h069():
     with driver_env('h069') as e:
         svc = e.svc
-        cmd = df.NativeJournalCommand(operation_id='n1', operation='drop_table', action_id='action-1', node_id='node-1',
-                                      request_key='k', request_ref=None, value_ref=None, reservation=None, options={})
         with pytest.raises(DataflowError) as ei:
-            svc.native_request(cmd, lease=None)
+            cmd = df.NativeJournalCommand(operation_id=oid('n1'), operation='drop_table', action_id='action-1', node_id='node-1',
+                                          request_key='k', request_ref=aref('req'), value_ref=None, reservation=None, options={})
         assert ei.value.code == 'INVALID_CONTRACT'
-        cmd2 = df.NativeJournalCommand(operation_id='n2', operation='lookup', action_id='other', node_id='node-1',
-                                       request_key='k', request_ref=None, value_ref=None, reservation=None, options={})
+        cmd2 = df.NativeJournalCommand(operation_id=oid('n2'), operation='lookup', action_id='other', node_id='node-1',
+                                       request_key='k', request_ref=aref('req'), value_ref=None, reservation=None, options={})
         with pytest.raises(DataflowError) as ei:
             svc.native_request(cmd2, lease=None)
         assert ei.value.code == 'FENCED'
@@ -1091,7 +1124,7 @@ def test_h069():
 
 def test_h070():
     client, t, lease = worker_client(replies={'native_request': {'operation_id': 'n1', 'value': {'ok': True}, 'value_ref': None}})
-    cmd = df.NativeJournalCommand(operation_id='n1', operation='lookup', action_id='action-1', node_id='node-1',
+    cmd = df.NativeJournalCommand(operation_id=oid('n1'), operation='lookup', action_id='action-1', node_id='node-1',
                                   request_key='k', request_ref=aref('req'), value_ref=None, reservation=None, options={})
     assert client.native_request(cmd).value == {'ok': True}
     assert t.requests[0].kind == 'native_request'
@@ -1122,21 +1155,21 @@ def test_h072():
 def test_h073():
     with driver_env('h073') as e:
         ref = e.store.put(iter([b'x']), max_bytes=100, media_type='x')
-        rep = e.port.artifact(df.ArtifactCommand(operation_id='pin-1', kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes))
+        rep = e.port.artifact(df.ArtifactCommand(operation_id=oid('pin-1'), kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes))
         assert rep.present is True
         with pytest.raises(DataflowError):
-            e.port.artifact(df.ArtifactCommand(operation_id='bad', kind='drop', ref=ref, owner='o', size_bytes=0))
+            e.port.artifact(df.ArtifactCommand(operation_id=oid('bad'), kind='drop', ref=ref, owner='o', size_bytes=0))
 
 
 def test_h074():
     with driver_env('h074') as e:
         ref = e.store.put(iter([b'x']), max_bytes=100, media_type='x')
-        cmd = df.ArtifactCommand(operation_id='pin-1', kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes)
+        cmd = df.ArtifactCommand(operation_id=oid('pin-1'), kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes)
         assert AUTH.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
         assert AUTH.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
         with pytest.raises(DataflowError):
-            AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id='x', kind='unknown', ref=ref, owner='o', size_bytes=0), bounds=BIG)
-        rs = AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id='rs-1', kind='reserve_staging', ref=None, owner='o', size_bytes=100), bounds=BIG)
+            AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('x'), kind='unknown', ref=ref, owner='o', size_bytes=0), bounds=BIG)
+        rs = AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('rs-1'), kind='reserve_staging', ref=None, owner='o', size_bytes=100), bounds=BIG)
         assert rs.charged_bytes == 100
 
 
@@ -1478,7 +1511,7 @@ def test_h065():
 def test_h054():
     conn = object.__new__(HOSTS.DataflowRayConnector)
     host = conn.host_class()
-    assert host.remote_options == {'max_restarts': 0, 'max_task_retries': 0}
+    assert host.remote_options == {'max_restarts': 0, 'max_task_retries': 0, 'max_concurrency': 8}
     assert host._cls is WH.HostedDataflowWorker
     host.options(name='n', get_if_exists=True, num_cpus=1, memory=1, num_gpus=0).remote('launch', 'hash', 'boot')
     assert host.remote_calls == [('launch', 'hash', 'boot')]
@@ -1528,12 +1561,12 @@ def test_h076():
         j = e.ctx.journal
         fence = e.ctx.fence
         ref = aref('art-1')
-        j.bind_artifact_owner(fence, ref, owner='owner-1', operation_id='op-1')
-        j.bind_artifact_owner(fence, ref, owner='owner-1', operation_id='op-1')
+        j.bind_artifact_owner(fence, ref, owner='owner-1', operation_id=oid('op-1'))
+        j.bind_artifact_owner(fence, ref, owner='owner-1', operation_id=oid('op-1'))
         owners, _ = j.artifact_owners(ref, limit=10)
         assert owners == ('owner-1',)
         with pytest.raises(Exception):
-            j.bind_artifact_owner(fence, aref('art-2'), owner='owner-1', operation_id='op-1')
+            j.bind_artifact_owner(fence, aref('art-2'), owner='owner-1', operation_id=oid('op-1'))
 
 
 def test_h077():
@@ -1541,10 +1574,10 @@ def test_h077():
         j = e.ctx.journal
         fence = e.ctx.fence
         ref = aref('art-1')
-        j.bind_artifact_owner(fence, ref, owner='o1', operation_id='b1')
-        j.bind_artifact_owner(fence, ref, owner='o2', operation_id='b2')
-        j.release_artifact_owner(fence, ref, owner='o1', operation_id='u1')
-        j.release_artifact_owner(fence, ref, owner='o1', operation_id='u1')
+        j.bind_artifact_owner(fence, ref, owner='o1', operation_id=oid('b1'))
+        j.bind_artifact_owner(fence, ref, owner='o2', operation_id=oid('b2'))
+        j.release_artifact_owner(fence, ref, owner='o1', operation_id=oid('u1'))
+        j.release_artifact_owner(fence, ref, owner='o1', operation_id=oid('u1'))
         owners, _ = j.artifact_owners(ref, limit=10)
         assert owners == ('o2',)
 
@@ -1555,7 +1588,7 @@ def test_h078():
         fence = e.ctx.fence
         ref = aref('art-1')
         for i in range(5):
-            j.bind_artifact_owner(fence, ref, owner='o%d' % i, operation_id='b%d' % i)
+            j.bind_artifact_owner(fence, ref, owner='o%d' % i, operation_id=oid('b%d' % i))
         page1, cur = j.artifact_owners(ref, limit=2)
         assert len(page1) == 2 and cur is not None
         page2, cur2 = j.artifact_owners(ref, limit=2, cursor=cur)
