@@ -26,6 +26,12 @@ OWNER_ENV = "DEMIFLOW_RESOURCE_OWNER_PID"
 OWNER_START_ENV = "DEMIFLOW_RESOURCE_OWNER_START"
 BOOTSTRAP_DEADLINE_ENV = "DEMIFLOW_RESOURCE_BOOTSTRAP_DEADLINE_MS"
 MAX_BOOTSTRAP_S = 300
+_EVIDENCE_FILES = ("identity.json", "process.json", "cleanup.json")
+
+
+def _compact_evidence_ref(scope_id, allocation_id, filename):
+    token = hashlib.sha256(document([scope_id, allocation_id])).hexdigest()
+    return "unit:" + token + "/" + filename
 
 
 def birth(pid):
@@ -117,6 +123,35 @@ class ManagedProcessUnit:
         identifier(scope_id)
         identifier(allocation_id)
         return self.root / scope_id / allocation_id
+
+    def evidence_ref(self, scope_id, allocation_id, filename):
+        """Preserve existing paths; bound long references to the observation ABI."""
+        directory = self.directory(scope_id, allocation_id)
+        if filename not in _EVIDENCE_FILES:
+            raise ResourceError("INVALID_SPEC", "unsupported process unit evidence file")
+        path = str(directory / filename)
+        # validate_observation limits references by string length, not bytes.
+        return path if len(path) <= 256 else _compact_evidence_ref(scope_id, allocation_id, filename)
+
+    def resolve_evidence(self, scope_id, allocation_id, evidence_ref):
+        """Resolve only this allocation's fixed evidence files, without an index.
+
+        Exact historical absolute references remain readable. Neither compact
+        references nor absolute paths grant access to other allocations/files.
+        """
+        directory = self.directory(scope_id, allocation_id)
+        if type(evidence_ref) is str:
+            for filename in _EVIDENCE_FILES:
+                path = directory / filename
+                if evidence_ref not in (str(path), _compact_evidence_ref(scope_id, allocation_id, filename)):
+                    continue
+                try:
+                    if path.resolve() == path:
+                        return path
+                except (OSError, RuntimeError):
+                    pass
+                break
+        raise ResourceError("INVALID_SPEC", "evidence reference does not name this process unit's evidence")
 
     def _read_record(self, path):
         try:
@@ -225,20 +260,20 @@ class ManagedProcessUnit:
         record = self._read_record(directory / "process.json")
         if record is None:
             return {"phase": "REQUESTED", "observation": "FRESH", "identity": None,
-                    "evidence_ref": str(directory / "identity.json")}
+                    "evidence_ref": self.evidence_ref(scope_id, allocation_id, "identity.json")}
         identity = record["identity"]
         pid, start = identity["pid"], identity["start"]
         live = _live(pid, start)
         stopped = unit_stopped(directory / "unit.lock", identity["unit"])
         if live and not stopped:
             return {"phase": "RUNNING", "observation": "FRESH", "identity": identity,
-                    "evidence_ref": str(directory / "process.json")}
+                    "evidence_ref": self.evidence_ref(scope_id, allocation_id, "process.json")}
         if not live and stopped:
             return {"phase": "TERMINATED", "observation": "FRESH", "identity": identity,
-                    "evidence_ref": str(directory / "process.json")}
+                    "evidence_ref": self.evidence_ref(scope_id, allocation_id, "process.json")}
         # PID reused, lock busy, or unreadable proc: unknown is not terminal.
         return {"phase": "RUNNING", "observation": "STALE_UNKNOWN", "identity": identity,
-                "evidence_ref": str(directory / "process.json")}
+                "evidence_ref": self.evidence_ref(scope_id, allocation_id, "process.json")}
 
     def stop(self, scope_id, allocation_id, *, terminate_deadline_ms, process=None):
         directory = self.directory(scope_id, allocation_id)
@@ -281,6 +316,6 @@ class ManagedProcessUnit:
         _save(directory / "cleanup.json", evidence)
         return {
             "confirmed": confirmed,
-            "evidence_ref": str(directory / "cleanup.json"),
+            "evidence_ref": self.evidence_ref(scope_id, allocation_id, "cleanup.json"),
             "identity": identity,
         }

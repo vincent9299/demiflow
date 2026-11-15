@@ -226,6 +226,8 @@ def dispatch(request):
                     raise ForgeError("Version must be a fixed positive integer", code='invalid_request')
                 if isinstance(alias, str) and alias.startswith("run:"):
                     # A run product is pinned to one sealed output version.
+                    if version is not None:
+                        raise ForgeError("Run outputs have one sealed version and cannot select another version", code='invalid_request')
                     value = {"status": "versions", "versions": [], "truncated": False,
                              "total_registered": 0, "reason": "run_output_sealed_version"}
                 else:

@@ -84,6 +84,7 @@ def v3_payload(*, terminal=False):
     sample = json.loads((TREE / 'docs/workbench-demo-alignment-20261114/samples/runtime-v3-wire.json').read_text())
     assert sample['not_runtime_evidence'] is True
     entry, binding = sample['entry'], sample['binding']
+    report_digest = 'd' * 64  # A run's manifest digest is a different identity.
     node = (next(item for item in entry['dag']['nodes']
                  if item['occurrence_id'] == entry['dag']['terminals'][0])
             if terminal else entry['dag']['nodes'][1])
@@ -94,7 +95,7 @@ def v3_payload(*, terminal=False):
                  plan_id=entry['plan_id'], plan_revision=entry['physical']['plan_revision'])
     entry['identity_bridge'] = dict(available=True, bridge=dict(
         schema='demiflow.identity_bridge.v1', action_id=entry['action_id'],
-        dag_id=entry['dag']['dag_id'], report_digest=binding['basis_digest'], entries=[bridge]))
+        dag_id=entry['dag']['dag_id'], report_digest=report_digest, entries=[bridge]))
     entry['node_observations'] = dict(available=True, attempt=binding['attempt'],
                                       **scope, entries=[dict(bridge, availability='observed')])
     row = dict(**scope, occurrence_id=node['occurrence_id'], node_id=report,
@@ -106,7 +107,7 @@ def v3_payload(*, terminal=False):
         snapshot['observations'] = []
         snapshot['outputs'] = [dict(**scope, occurrence_id=node['occurrence_id'],
                                     status='committed', result={'verified': True})]
-    return dict(graph=dict(binding=binding, logical=dict(actions=[entry]), nodes=[], edges=[]),
+    return dict(graph=dict(binding=binding, report_digest=report_digest, logical=dict(actions=[entry]), nodes=[], edges=[]),
                 snapshot=snapshot, occurrence_id=node['occurrence_id'])
 
 
@@ -158,3 +159,21 @@ def test_v3_endpoint_validation_remains_strict():
     model = project(payload, MODEL)
     assert model['nodes'] == []
     assert model['choice']['reason'] == 'v3_endpoint_identity_missing'
+
+
+@pytest.mark.parametrize('digest', [None, 'missing', 'f' * 64, 'manifest'])
+def test_bridge_requires_the_original_report_digest(digest):
+    payload = v3_payload()
+    assert selected_state(payload)['tone'] == 'success'
+    graph = payload['graph']
+    if digest == 'missing':
+        del graph['report_digest']
+    else:
+        graph['report_digest'] = graph['binding']['basis_digest'] if digest == 'manifest' else digest
+    rendered = project(payload, MODEL)
+    card = next(card for card in rendered['nodes']
+                if card['selection']['occurrenceId'] == payload['occurrence_id'])
+    assert card['state'] == {'label': '未桥接 · 无观测关联', 'tone': 'neutral'}
+    details = project(dict(payload, selection=card['selection']),
+                      'console.log(JSON.stringify(P.buildNodeDetails(payload.graph, payload.selection)));')
+    assert details['sourceAvailable'] is False

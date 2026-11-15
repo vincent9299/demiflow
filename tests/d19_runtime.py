@@ -37,6 +37,7 @@ def private_runtime(tree, workspace, evidence):
     state.mkdir(mode=0o700)
     outbox = state / 'transfer/web-outbox'
     outbox.mkdir(parents=True)
+    outbox.parent.chmod(0o700)
     outbox.chmod(0o2770)
     python = Path(sys.executable).resolve()
     files = {}

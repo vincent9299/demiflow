@@ -189,7 +189,12 @@ def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, mon
             graph, physical, pin = load_sealed_dataflow(ex._sealed,
                 action_id=ex._action.action_id, store=services.store, bounds=services.bounds)
             programs = _load_programs(runtime.assignment, store=services.store, bounds=services.bounds)
-            assert set(programs) == set(pin["programs"])
+            owned = {occurrence for stage in runtime.assignment.stages for occurrence in stage.occurrences}
+            unassigned_programs = set(pin["programs"]) - owned
+            assert unassigned_programs, "fixture must include a program owned by another stage"
+            assert set(programs) == set(pin["programs"]).intersection(owned)
+            assert set(programs).isdisjoint(unassigned_programs)
+            runtime = replace(runtime, programs=programs)
             worker = DataflowWorkerExecutor(services=runtime,
                 mailbox=ControlMailbox(bounds=services.bounds, check_stop=lambda: None))
             try:

@@ -233,7 +233,7 @@ class LocalResourceProvider:
         self.pool.bind_identity(allocation_id, identity)
         return self._observation(scope_id, allocation_id, "RUNNING", "FRESH",
                                  identity=identity, effective=effective,
-                                 evidence_ref=spawned["directory"] + "/process.json",
+                                 evidence_ref=self.unit.evidence_ref(scope_id, allocation_id, "process.json"),
                                  placement=self._device_placement(allocation_id))
 
     def inspect(self, scope_id, page_token):
@@ -286,8 +286,12 @@ class LocalResourceProvider:
         evidence = self.unit.stop(scope_id, allocation_id, terminate_deadline_ms=terminate_deadline_ms,
                                   process=process)
         if evidence["confirmed"]:
-            self.pool.release(allocation_id, evidence)
-            self._release_devices(allocation_id, evidence["evidence_ref"])
+            # Internal ledgers retain their historical absolute evidence identity.
+            # Only provider observations need the bounded external reference.
+            ledger_evidence = dict(evidence, evidence_ref=str(self.unit.resolve_evidence(
+                scope_id, allocation_id, evidence["evidence_ref"])))
+            self.pool.release(allocation_id, ledger_evidence)
+            self._release_devices(allocation_id, ledger_evidence["evidence_ref"])
             self._spawned.pop(allocation_id, None)
             return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
                     "evidence_ref": evidence["evidence_ref"], "observed_at_ms": _now_ms()}

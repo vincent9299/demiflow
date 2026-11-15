@@ -350,6 +350,7 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         if diagnostic_bytes+size>128*1024:break
         public_diagnostics.append(diagnostic);diagnostic_bytes+=size
     result = dict(format='demiflow_workbench_graph_v1', binding=binding, status=status,
+                  report_digest=report['digest'] if report is not None else None,
                   freshness=dict(current=fresh,changes=changes),
                   completeness=dict(semantic=semantic,display='clipped' if clipped else 'complete',
                                     total_nodes=total_nodes,total_edges=total_edges,scope_node=node_id),

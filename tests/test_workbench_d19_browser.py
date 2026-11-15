@@ -59,11 +59,17 @@ def _select_flow(page):
 def _run(page):
     page.get_by_role('button', name='运行', exact=True).click()
     expect(page.locator('.wb-run-bar')).to_be_visible()
+    page.wait_for_function("() => /成功|失败|已取消/.test(document.querySelector('.wb-run-bar > .wb-tag')?.textContent || '')",
+                           timeout=120000)
     expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('成功')
 
 
 def _facts(log, endpoint):
-    return [r for r in log['requests'] if endpoint in r['url']]
+    # Registry mode scopes APIs under /api/workspaces/<id>/; compare the exact
+    # final path component so /graph-source cannot stand in for /graph.
+    from urllib.parse import urlsplit
+    name = endpoint.rsplit('/', 1)[-1]
+    return [r for r in log['requests'] if urlsplit(r['url']).path.rsplit('/', 1)[-1] == name]
 
 
 def _is_v3(action):
@@ -225,16 +231,51 @@ def test_ui_d19_sealed_graph_attempts(owned_fixture, browser):
         # selecting a node binds the precise report node + observation bridge
         graph.locator('.wb-node').filter(has_text='normalize_question').click()
         inspector = page.locator('.wb-inspector')
-        expect(inspector).to_contain_text('已绑定报告节点')
-        expect(inspector).to_contain_text('已有观测')
+        selection = page.evaluate('ForgeView.decodeView(location.hash)')
+        assert selection['run_id'] == run_id and selection['attempt'] == shown['attempt']
+        assert selection['report_digest'] == graph_facts['report_digest']
+        assert selection['action_id'] == action['action_id']
+        bridge = action['identity_bridge']['bridge']
+        member = next(item for item in bridge['entries']
+                      if item['logical_node_id'] == selection['logical_node_id']
+                      and item['occurrence_id'] == selection['occurrence_id'])
+        assert member['report_node_id'] == selection['node_id']
+        assert any(node['id'] == selection['node_id']
+                   and (node.get('operator') or {}).get('name') == 'normalize_question'
+                   for node in graph_facts['nodes'])
+        expect(inspector).to_contain_text('执行完成')
+        with page.expect_response(lambda response: '/run-observations?' in response.url) as observed:
+            page.get_by_role('button', name='节点证据', exact=True).click()
+        assert observed.value.status == 200
+        observation_page = observed.value.json()
+        rows = [row for row in observation_page['observations']
+                if row['action_id'] == action['action_id'] and row['node_id'] == selection['node_id']
+                and row['occurrence'] == member['report_occurrence']]
+        assert rows and all(row['state'] == 'succeeded' for row in rows)
+        if fx.execution_format == 'v3':
+            for row in rows:
+                assert row['plan_id'] == action['plan_id']
+                assert row['dag_id'] == action['dag']['dag_id']
+                assert row['plan_revision'] == action['physical']['plan_revision']
+                assert row['occurrence_id'] == selection['occurrence_id']
+        expect(page.locator('.wb-run-detail-body')).to_contain_text('节点关联观测')
+        expect(page.locator('.wb-run-detail-body')).to_contain_text(action['action_id'])
         fx.record(f'v04-sealed-{fx.execution_format}', dict(
             run_id=run_id, attempt=shown['attempt'], action_id=action.get('action_id'),
             is_v3=_is_v3(action), sealed_count=len(actions)))
         fx.shot(page, f'v04-inspector-{fx.execution_format}')
 
-        # counterexample: a historical attempt is read-only over the real API
-        code, value = fx.api('/api/run-context?run_id=' + run_id)
-        assert code == 200 and value['read_only'], value
+        # The context API carries references/facts, not an invented read_only
+        # flag. Read-only configuration belongs to the original graph DTO.
+        parameter_bytes = (root / 'flows/select_a.json').read_bytes()
+        code, value = fx.api('/api/run-context?run_id=' + run_id + '&attempt=' + str(shown['attempt']))
+        assert code == 200, value
+        reference = value['references'][0]
+        assert reference['run_id'] == run_id and reference['attempt'] == shown['attempt']
+        assert reference['seal_digest'] == graph_facts['binding']['basis_digest']
+        assert graph_facts['parameters']['readonly'] is True
+        assert all(not field['writable'] for field in graph_facts['parameters']['fields'])
+        assert (root / 'flows/select_a.json').read_bytes() == parameter_bytes
         # counterexample: unknown / fused CPU is not fabricated into node facts
         expect(inspector).not_to_contain_text('Invalid Date')
         assert not log['errors'], log['errors']
@@ -245,8 +286,13 @@ def test_ui_d19_sealed_graph_attempts(owned_fixture, browser):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize('owned_fixture', [{'need_runtime': True}], indirect=True)
 def test_ui_d19_notebook_to_case(owned_fixture, browser):
+    import re
     fx = owned_fixture
     assert fx.analysis_profile, 'V05 requires the admitted real kernel profile'
+    def finished(cell):
+        status = cell.locator('.analysis-cell-status')
+        expect(status).to_contain_text(re.compile('完成|代码错误|已取消|超时|已结束'), timeout=120000)
+        assert '完成' in status.inner_text(), status.inner_text()
     with fx.open_page(browser) as (page, log):
         page.locator('.function-nav').get_by_role('button', name='数据', exact=True).click()
         page.get_by_label('当前数据表', exact=True).select_option('scores')
@@ -262,7 +308,7 @@ def test_ui_d19_notebook_to_case(owned_fixture, browser):
             'import pyarrow as pa\n'
             'shared_marker = 7\n'
             "rows = source('data').sample(limit=20)['rows']\n"
-            "numbers = publish(pa.Table.from_pylist(rows)).bind('numbers')\n"
+            "numbers = publish(pa.table({k: [r[k] for r in rows] for k in ('case_id', 'score')})).bind('numbers')\n"
             "assert len(rows) == 3 and rows[0]['case_id'] == 'c01'\n"
             'numbers'
         )
@@ -272,9 +318,10 @@ def test_ui_d19_notebook_to_case(owned_fixture, browser):
         with page.expect_response(lambda response: '/analysis-cell-submit' in response.url) as submitted:
             first.locator('.analysis-cell-run').click()
         assert submitted.value.status == 200, submitted.value.text()
-        expect(first.locator('.analysis-cell-status')).to_contain_text('完成', timeout=120000)
+        finished(first)
         assert len(_facts(log, 'analysis-notebook-create')) == 1
         assert len(_facts(log, 'analysis-session-start')) == 1
+        notebook_id = page.get_by_label('选择 Notebook', exact=True).input_value()
         first_payload = json.loads(_facts(log, 'analysis-cell-submit')[0]['body'])
         assert first_payload['source_sha256'] == hashlib.sha256(python_source.encode()).hexdigest()
         assert first_payload['expected_generation'].startswith('g')
@@ -286,13 +333,32 @@ def test_ui_d19_notebook_to_case(owned_fixture, browser):
             'SELECT case_id, score, score * 2 AS doubled FROM numbers ORDER BY case_id')
         sql_cell.get_by_label('结果变量名', exact=True).fill('sql_result')
         sql_cell.locator('.analysis-cell-run').click()
-        expect(sql_cell.locator('.analysis-cell-status')).to_contain_text('完成', timeout=120000)
+        finished(sql_cell)
         sql_payload = json.loads(_facts(log, 'analysis-cell-submit')[-1]['body'])
         assert (sql_payload['session_id'], sql_payload['expected_generation']) == (
             first_payload['session_id'], first_payload['expected_generation'])
         assert len(_facts(log, 'analysis-session-start')) == 1
-        sql_cell.get_by_role('button', name='内联预览前20行（表格/图表）', exact=True).click()
-        chart = sql_cell.locator('.analysis-charts')
+        # SQL results are ephemeral until the user explicitly pins them.
+        with page.expect_response(lambda response: '/analysis-source-from-handle' in response.url) as ephemeral:
+            sql_cell.get_by_role('button', name='内联预览前20行（表格/图表）', exact=True).click()
+        assert ephemeral.value.status == 422, ephemeral.value.text()
+        expect(sql_cell).to_contain_text('requires explicit pin')
+        page.get_by_role('button', name='＋ Python', exact=True).click()
+        pinned_cell = page.locator('.analysis-cell').last
+        pinned_cell.get_by_label('python 单元代码', exact=True).fill('fixed = sql_result.pin()\nfixed')
+        pinned_cell.locator('.analysis-cell-run').click()
+        finished(pinned_cell)
+        with page.expect_response(lambda response: '/analysis-source-from-handle' in response.url) as pinned_source:
+            with page.expect_response(lambda response: '/analysis-case-page' in response.url) as pinned_page:
+                pinned_cell.get_by_role('button', name='内联预览前20行（表格/图表）', exact=True).click()
+        assert pinned_source.value.status == 200, pinned_source.value.text()
+        assert pinned_page.value.status == 200, pinned_page.value.text()
+        fixed_source = pinned_source.value.json()
+        fixed_page = pinned_page.value.json()
+        assert fixed_page['source_snapshot'] == fixed_source['digest']
+        assert len(fixed_page['rows']) == 3
+        assert fixed_page['rows'][0]['case_id'] == 'c01' and fixed_page['rows'][0]['doubled'] == 1.9
+        chart = pinned_cell.locator('.analysis-charts')
         expect(chart.locator('tbody tr')).to_have_count(3)
         expect(chart.locator('tbody tr').first).to_contain_text('c01')
         expect(chart.locator('tbody tr').first).to_contain_text('1.9')
@@ -306,20 +372,32 @@ def test_ui_d19_notebook_to_case(owned_fixture, browser):
         case_cell = page.locator('.analysis-cell').last
         case_cell.get_by_label('python 单元代码', exact=True).fill(
             'assert shared_marker == 7\n'
-            "assert sql_result.to_pandas()['doubled'].tolist() == [1.9, 1.68, 1.44]\n"
-            "case_view(sql_result, fields=[dict(id='case_id', field='case_id', label='Case', role='input', format='text'), "
+            "assert fixed.to_pandas()['doubled'].tolist() == [1.9, 1.68, 1.44]\n"
+            "case_view(fixed, fields=[dict(id='case_id', field='case_id', label='Case', role='input', format='text'), "
             "dict(id='doubled', field='doubled', label='SQL 分数', role='output', format='json')], "
             "questions=[dict(id='note', title='备注', type='text', required=False)])")
         case_cell.locator('.analysis-cell-run').click()
-        expect(case_cell.locator('.analysis-cell-status')).to_contain_text('完成', timeout=120000)
+        finished(case_cell)
         case_cell.get_by_role('button', name='在 Case 工作台查看此描述', exact=True).click()
+        page.get_by_role('button', name='采用 Notebook 输出视图', exact=True).click()
+        expect(page.get_by_label('标注 备注', exact=True)).to_be_visible()
         expect(page.locator('.analysis-case')).to_contain_text('c01')
-        page.get_by_role('button', name='保存视图', exact=True).click()
+        with page.expect_response(lambda response: '/analysis-view-save' in response.url) as view_saved:
+            page.get_by_role('button', name='保存视图', exact=True).click()
+        assert view_saved.value.status == 200, view_saved.value.text()
+        view_id = view_saved.value.json()['id']
+        assert json.loads(_facts(log, 'analysis-view-save')[-1]['body'])['descriptor']['source_snapshot'] == fixed_source['digest']
         expect(page.locator('.case-ui-context')).to_contain_text('已存视图')
         save(page, 'Python 与 SQL 同内核的固定结果已复核')
         saved_target = json.loads(_facts(log, 'analysis-annotations-save')[-1]['body'])['target']
+        assert saved_target['source'] == fixed_source['digest']
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
         page.locator('.function-nav').get_by_role('button', name='数据', exact=True).click()
+        with page.expect_response(lambda response: '/analysis-view?' in response.url
+                                  and 'view_id=' + view_id in response.url) as reopened:
+            page.get_by_label('选择 Case 视图', exact=True).select_option(view_id)
+        assert reopened.value.status == 200, reopened.value.text()
+        assert reopened.value.json()['document']['source_snapshot'] == fixed_source['digest']
         expect(page.get_by_label('标注 备注', exact=True)).to_have_value('Python 与 SQL 同内核的固定结果已复核')
         assert _facts(log, 'analysis-annotation-heads')
         # Genuine protocol negatives use the browser's real session identity.
@@ -330,9 +408,11 @@ def test_ui_d19_notebook_to_case(owned_fixture, browser):
             assert code >= 400, value
         fx.record('v05-runtime', dict(profile=fx.analysis_profile, submissions=[
             json.loads(item['body']) for item in _facts(log, 'analysis-cell-submit')],
-            annotation_target=saved_target, requests=log['requests']))
+            annotation_target=saved_target, fixed_source=fixed_source, fixed_page=fixed_page,
+            view_id=view_id, requests=log['requests']))
         fx.shot(page, 'v05-case-saved-reopened')
         page.get_by_role('button', name='Notebook', exact=True).click()
+        page.get_by_label('选择 Notebook', exact=True).select_option(notebook_id)
         page.get_by_role('button', name='立即停止内核', exact=True).click()
         expect(page.get_by_role('button', name='立即停止内核', exact=True)).to_be_hidden(timeout=120000)
 

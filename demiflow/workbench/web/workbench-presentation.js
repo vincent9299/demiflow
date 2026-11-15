@@ -328,12 +328,12 @@
 
   /* ---- sealed bridge / observation helpers (shared by C02/C04) ----------- */
 
-  function bridgeEntriesFor(entry, identity, binding) {
+  function bridgeEntriesFor(entry, identity, reportDigest) {
     const bridge = entry && entry.identity_bridge;
     if (!isRecord(bridge) || bridge.available !== true || !isRecord(bridge.bridge)) return null;
     const doc = bridge.bridge;
     if (doc.schema !== 'demiflow.identity_bridge.v1' || doc.action_id !== identity.actionId
-        || doc.dag_id !== identity.dagId || doc.report_digest !== binding.basis_digest
+        || doc.dag_id !== identity.dagId || !isSha(reportDigest) || doc.report_digest !== reportDigest
         || !Array.isArray(doc.entries)) return null;
     const seen = new Set();
     for (const item of doc.entries) {
@@ -390,7 +390,7 @@
     const binding = graph.binding;
     return {
       entry, identity, binding,
-      bridgeEntries: bridgeEntriesFor(entry, identity, binding),
+      bridgeEntries: bridgeEntriesFor(entry, identity, graph.report_digest),
       page: observationPageFor(entry, identity),
       terminals: terminalsFor(entry, identity.format),
       nodeMap: nodeMapFor(entry),

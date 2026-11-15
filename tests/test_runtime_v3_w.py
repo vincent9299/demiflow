@@ -1,18 +1,14 @@
 """Lane W acceptance: workbench real graph & history (cards W001-W021).
 
-Every test calls the real production symbol in this worktree. Lanes C (shared
-DTO/codec/error) and D (artifact store / seal) own modules that are not yet merged
-into this isolated tree; when absent, a strict spec-bound test-domain fake
-(mirroring ``interfaces.pyi``) stands in for them. No production fallback exists.
-An in-process assertion binds every loaded demiflow module to this worktree
-(IL012). Injected fakes are recorded in ``TEST_DOUBLES`` so real modules and
-test-domain doubles stay distinguishable in the evidence report; a synthetic
-``__file__`` never impersonates a real file binding.
+DTOs, codecs, stores, seals and journals are the real modules in this worktree.
+Missing implementation modules fail collection; no cross-lane module is fabricated.
+Pure projection tests use small explicitly constructed DTOs. Store integration
+uses real preparation/sealing, while the existing marked DOM harness remains a
+unit-level test double rather than browser or runtime admission evidence.
 """
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -22,7 +18,6 @@ import subprocess
 import sys
 import types
 from contextlib import closing
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -31,422 +26,14 @@ import demiflow
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Modules that may be stood in by a spec-bound test-domain fake when absent.
+# Kept for evidence consumers: this suite no longer installs module doubles.
 TEST_DOUBLES: set[str] = set()
 
 
 def _assert_worktree() -> None:
-    assert Path(demiflow.__file__).resolve().is_relative_to(ROOT)
-    for name, module in list(sys.modules.items()):
-        if not name.startswith("demiflow"):
-            continue
-        path = getattr(module, "__file__", None)
-        if path is None:
-            continue
-        assert Path(path).resolve().is_relative_to(ROOT), f"module outside worktree: {name} -> {path}"
+    from runtime_v3_support import assert_tree_binding
+    assert_tree_binding()
 
-
-# --- Spec-bound test-domain fakes for lane C / D (installed only when absent). ---
-
-_ERROR_CODES = frozenset({
-    "INVALID_CONTRACT", "UNSUPPORTED_CAPABILITY", "RESOURCE_INFEASIBLE", "BUDGET_EXCEEDED",
-    "SOURCE_CHANGED", "CODE_MISMATCH", "FENCED", "CANCELLED", "DEADLINE_EXCEEDED",
-    "CORRUPT_ARTIFACT", "UNKNOWN_EFFECT", "INCOMPATIBLE_HISTORY", "INTERNAL_PROTOCOL",
-})
-_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_IDENT = re.compile(r"[A-Za-z0-9_.:\-]{1,128}\Z")
-
-
-def _build_errors_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.contracts.dataflow_errors")
-
-    class DataflowError(Exception):
-        def __init__(self, code, message, *, retryable=False, context=None):
-            if type(code) is not str or code not in _ERROR_CODES:
-                raise ValueError("unknown dataflow error code: " + repr(code))
-            if type(message) is not str or not 1 <= len(message) <= 2048:
-                raise ValueError("error message must be a bounded nonempty string")
-            if type(retryable) is not bool:
-                raise ValueError("retryable must be a bool")
-            if code == "UNKNOWN_EFFECT" and retryable:
-                raise ValueError("UNKNOWN_EFFECT must not be retryable")
-            self.code = code
-            self.retryable = retryable
-            self.context = dict(context or {})
-            self._message = message
-            super().__init__(code + ": " + message)
-
-    mod.DataflowError = DataflowError
-    mod.DATAFLOW_ERROR_CODES = _ERROR_CODES
-    return mod
-
-
-def _build_dataflow_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.contracts.dataflow")
-    errors = sys.modules["demiflow.execution.contracts.dataflow_errors"]
-    DataflowError = errors.DataflowError
-
-    def _err(message):
-        return DataflowError("INVALID_CONTRACT", message)
-
-    def _sha256(value, label):
-        if type(value) is not str or _SHA256.fullmatch(value) is None:
-            raise _err(label + " must be lowercase sha256 hex")
-        return value
-
-    def _ident(value, label):
-        if type(value) is not str or _IDENT.fullmatch(value) is None:
-            raise _err(label + " must be a bounded identifier")
-        return value
-
-    def _key(value, label):
-        if type(value) is not str or not 1 <= len(value) <= 1024:
-            raise _err(label + " must be a bounded key")
-        if value.startswith("/") or ".." in value.split("/") or "\\" in value or "?" in value \
-                or "#" in value or "@" in value or "://" in value:
-            raise _err(label + " must be a safe relative POSIX key")
-        return value
-
-    @dataclass(frozen=True)
-    class ArtifactRef:
-        digest: str
-        size_bytes: int
-        store_id: str
-        key: str
-        media_type: str
-
-        def __post_init__(self):
-            _sha256(self.digest, "ArtifactRef.digest")
-            if type(self.size_bytes) is not int or self.size_bytes < 0:
-                raise _err("ArtifactRef.size_bytes must be a nonnegative int")
-            _ident(self.store_id, "ArtifactRef.store_id")
-            _key(self.key, "ArtifactRef.key")
-            if type(self.media_type) is not str or not 1 <= len(self.media_type) <= 256:
-                raise _err("ArtifactRef.media_type must be bounded")
-
-    @dataclass(frozen=True)
-    class Bounds:
-        max_nodes: int
-        max_edges: int
-        max_partitions: int
-        max_depth: int
-        max_control_bytes: int
-        max_row_bytes: int
-        max_batch_bytes: int
-        max_resident_bytes: int
-        max_spill_bytes: int
-        max_state_bytes: int
-        max_pending_events: int
-        max_open_files: int
-        max_output_rows: int
-        timeout_ms: int
-
-    @dataclass(frozen=True)
-    class InputPort:
-        name: str
-        requirement: str
-        ordering: str
-        schema_ref: object = None
-
-    @dataclass(frozen=True)
-    class KernelSpec:
-        kind: str
-        implementation_ref: object
-        configuration: dict
-        inputs: tuple
-        state: str
-        effect: str
-        resource_role: str
-        profile: object
-        output_bound_bytes: int
-        mergeable: bool
-
-    @dataclass(frozen=True)
-    class GraphNode:
-        occurrence_id: str
-        semantic_id: str
-        kind: str
-        kernel: KernelSpec
-        program_ref: object
-        shared_token: str
-
-    @dataclass(frozen=True)
-    class GraphEdge:
-        edge_id: str
-        producer: str
-        output_port: str
-        consumer: str
-        input_port: str
-
-    @dataclass(frozen=True)
-    class DataflowGraph:
-        schema: str
-        action_id: str
-        dag_id: str
-        nodes: tuple
-        edges: tuple
-        terminals: tuple
-        sources: tuple
-
-    @dataclass(frozen=True)
-    class SourceSnapshot:
-        source_id: str
-        kind: str
-        immutable_identity: dict
-        finite: bool
-        replay: str
-        manifest_ref: object
-
-    @dataclass(frozen=True)
-    class SourceSplit:
-        split_id: str
-        source_id: str
-        locator: dict
-        start_cursor: dict
-        estimated_bytes: object
-        required_domain: str
-
-    @dataclass(frozen=True)
-    class SourceCursor:
-        split_id: str
-        offset: dict
-        next_sequence: int
-        end_of_input: bool
-        lease_ref: object
-        pending_refs: tuple
-
-    @dataclass(frozen=True)
-    class StageSpec:
-        stage_id: str
-        occurrences: tuple
-        partitions: tuple
-        profile: object
-        replica_min: int
-        replica_target: int
-        replica_max: int
-        resident_bytes: int
-        output_bytes: int
-        state_bytes: int
-        kernel_refs: tuple
-
-    @dataclass(frozen=True)
-    class ExchangeSpec:
-        channel_id: str
-        edge_id: str
-        producer_partitions: tuple
-        consumer_partitions: tuple
-        mode: str
-        routing: str
-        keys: tuple
-        scope_id: object
-        route_epoch: int
-        credit_rows: int
-        credit_bytes: int
-        storage_bytes: int
-        read_domain: str
-        reason: str
-
-    @dataclass(frozen=True)
-    class RuntimePolicy:
-        provider: str
-        durability: str
-        default_partitions: int
-        max_replicas: int
-        fusion: bool
-        checkpoint_rows: int
-        checkpoint_interval_ms: int
-        fairness_quantum_bytes: int
-        control_timeout_ms: int
-        store_id: str
-        required_recovery: str
-
-    @dataclass(frozen=True)
-    class ResidencyPlan:
-        simultaneous_groups: tuple
-        control_reserved_bytes: int
-        consumer_reserved_slots: int
-        required_spill_bytes: int
-
-    @dataclass(frozen=True)
-    class FiniteScope:
-        scope_id: str
-        generation: int
-        membership: tuple
-        completion_condition: str
-
-    @dataclass(frozen=True)
-    class PhysicalDataflow:
-        schema: str
-        dag_id: str
-        plan_id: str
-        plan_revision: int
-        stages: tuple
-        exchanges: tuple
-        residency: ResidencyPlan
-        scopes: tuple
-        sources: tuple
-        splits: tuple
-        policy: RuntimePolicy
-        bounds: Bounds
-        recovery: str
-        limitations: tuple
-        constants_ref: ArtifactRef
-
-    @dataclass(frozen=True)
-    class SealedExecution:
-        logical_ref: ArtifactRef
-        physical_ref: ArtifactRef
-        programs: tuple
-        code_pin_ref: ArtifactRef
-        identity_bridge_ref: ArtifactRef
-        source_refs: tuple
-        constants_ref: ArtifactRef
-
-    @dataclass(frozen=True)
-    class CutRequest:
-        cut_id: str
-        sequence: int
-        plan_revision: int
-        route_epoch: int
-        participants: tuple
-        final: bool
-
-    @dataclass(frozen=True)
-    class CutContribution:
-        cut_id: str
-        participant_id: str
-        boot_id: str
-        sources: tuple
-        operator_states: dict
-        channels: dict
-        buffers: tuple
-        effects: tuple
-        sinks: dict
-        final: bool
-
-    @dataclass(frozen=True)
-    class RecoveryImage:
-        commit_id: str
-        cut: CutRequest
-        contributions: tuple
-        confirmed_sinks: dict
-        source_vector: tuple
-
-    @dataclass(frozen=True)
-    class CapabilityReport:
-        supported: bool
-        reasons: tuple
-        recovery: str
-        required_domains: tuple
-        required_profiles: tuple
-
-    @dataclass(frozen=True)
-    class HistoricalBinding:
-        schema_version: str
-        original_plan_ref: ArtifactRef
-        original_code_pin_ref: ArtifactRef
-        compatible: bool
-        reason: object
-        restore_image: object
-
-    @dataclass(frozen=True)
-    class NodeObservation:
-        occurrence_id: str
-        attempt: int
-        plan_id: str
-        observed: bool
-        metrics: dict
-
-    for name, value in list(locals().items()):
-        if isinstance(value, type) and value.__module__ == mod.__name__ or name in (
-                "ArtifactRef", "Bounds", "InputPort", "KernelSpec", "GraphNode", "GraphEdge",
-                "DataflowGraph", "SourceSnapshot", "SourceSplit", "SourceCursor", "StageSpec",
-                "ExchangeSpec", "RuntimePolicy", "ResidencyPlan", "FiniteScope", "PhysicalDataflow",
-                "SealedExecution", "CutRequest", "CutContribution", "RecoveryImage",
-                "CapabilityReport", "HistoricalBinding", "NodeObservation"):
-            setattr(mod, name, value)
-    return mod
-
-
-def _build_store_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.dataflow_store")
-    errors = sys.modules["demiflow.execution.contracts.dataflow_errors"]
-    DataflowError = errors.DataflowError
-
-    class RunArtifactStore:
-        """Spec-bound run-rooted store fake: root/store_id/objects/<digest>."""
-
-        def __init__(self, *, root, store_id, journal, bounds):
-            self.root = Path(root)
-            self.store_id = store_id
-            self.journal = journal
-            self.bounds = bounds
-
-        def _path(self, ref):
-            return self.root / self.store_id / "objects" / ref.digest
-
-        def put(self, chunks, *, max_bytes, media_type):
-            raise NotImplementedError("test store fake is read-only")
-
-        def read(self, ref, *, max_bytes):
-            path = self._path(ref)
-            if not path.is_file():
-                raise DataflowError("CORRUPT_ARTIFACT", "artifact is missing")
-            raw = path.read_bytes()
-            if len(raw) > max_bytes:
-                raise DataflowError("BUDGET_EXCEEDED", "artifact exceeds the read budget")
-            if hashlib.sha256(raw).hexdigest() != ref.digest:
-                raise DataflowError("CORRUPT_ARTIFACT", "artifact digest differs")
-            yield raw
-
-        def inspect(self, ref):
-            path = self._path(ref)
-            return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == ref.digest
-
-        def retain(self, ref, *, owner):
-            return None
-
-        def release(self, ref, *, owner):
-            return None
-
-    mod.RunArtifactStore = RunArtifactStore
-    return mod
-
-
-def _build_seal_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.dataflow_seal")
-    # Test-domain registry: (directory, action_id) -> (graph, physical, sealed).
-    mod._registry = {}
-
-    def load_dataflow(directory, action_id, *, store, bounds):
-        key = (str(Path(directory).resolve()), action_id)
-        if key not in mod._registry:
-            raise KeyError("no sealed dataflow registered for " + repr(key))
-        return mod._registry[key]
-
-    mod.load_dataflow = load_dataflow
-    return mod
-
-
-def _ensure_cross_lane() -> None:
-    builders = (
-        ("demiflow.execution.contracts.dataflow_errors", _build_errors_module),
-        ("demiflow.execution.contracts.dataflow", _build_dataflow_module),
-        ("demiflow.execution.dataflow_store", _build_store_module),
-        ("demiflow.execution.dataflow_seal", _build_seal_module),
-    )
-    for name, builder in builders:
-        try:
-            importlib.import_module(name)
-        except ImportError:
-            module = builder()
-            sys.modules[name] = module
-            parent_name, attr = name.rsplit(".", 1)
-            setattr(sys.modules[parent_name], attr, module)
-            TEST_DOUBLES.add(name)
-
-
-_ensure_cross_lane()
 
 from demiflow.execution.contracts.dataflow import (  # noqa: E402
     ArtifactRef, Bounds, CapabilityReport, CutContribution, CutRequest, DataflowGraph,
@@ -511,7 +98,7 @@ def bounds(**overrides) -> Bounds:
 
 def kernel(kind="map", *, role="cpu", state="none", effect="pure", inputs=None) -> KernelSpec:
     return KernelSpec(kind=kind, implementation_ref=None, configuration={},
-                      inputs=tuple(inputs if inputs is not None else (InputPort("in", "incremental", "none"),)),
+                      inputs=tuple(inputs if inputs is not None else (InputPort("in", "incremental", "none", None),)),
                       state=state, effect=effect, resource_role=role, profile=profile(),
                       output_bound_bytes=1024 * 1024, mergeable=True)
 
@@ -520,14 +107,14 @@ def make_graph(action_id="a0", *, occurrences=1):
     """A source -> transform chain; ``occurrences`` repeats the transform occurrence."""
     dag_id = sha("dag-" + action_id)
     src_occ = sha("occ-src-" + action_id)
-    nodes = [GraphNode(occurrence_id=src_occ, semantic_id="src", kind="source",
+    nodes = [GraphNode(occurrence_id=src_occ, semantic_id=sha("src"), kind="source",
                        kernel=kernel("read_table", inputs=()), program_ref=None, shared_token="0")]
     edges = []
     transform_occs = []
     for index in range(occurrences):
         occ = sha(f"occ-map-{action_id}-{index}")
         transform_occs.append(occ)
-        nodes.append(GraphNode(occurrence_id=occ, semantic_id="map", kind="transform",
+        nodes.append(GraphNode(occurrence_id=occ, semantic_id=sha("map"), kind="transform",
                                kernel=kernel("map"), program_ref=aref("prog-" + str(index)),
                                shared_token=str(index + 1)))
         edges.append(GraphEdge(edge_id=sha(f"edge-{index}"), producer=src_occ, output_port="out",
@@ -536,6 +123,10 @@ def make_graph(action_id="a0", *, occurrences=1):
                           nodes=tuple(nodes), edges=tuple(edges), terminals=(transform_occs[-1],),
                           sources=(src_occ,))
     return graph, transform_occs
+
+
+def _logical_id(graph, occurrence):
+    return next(node.semantic_id for node in graph.nodes if node.occurrence_id == occurrence)
 
 
 def make_physical(graph, *, recovery="checkpoint", limitations=()):
@@ -894,7 +485,7 @@ def test_w004():
     assert view["schema"] == hist.PLAN_VIEW_SCHEMA
     assert view["binding_level"] == "sealed" and view["status"] == "sealed"
     # Same function at two call sites stays two nodes, never merged.
-    map_nodes = [n for n in view["dag"]["nodes"] if n["logical_node_id"] == "map"]
+    map_nodes = [n for n in view["dag"]["nodes"] if n["logical_node_id"] == sha("map")]
     assert len(map_nodes) == 2
     assert {n["occurrence_id"] for n in map_nodes} == set(occs)
     # Observed occurrence is observed; the other is explicitly not_observed (no inference).
@@ -996,102 +587,93 @@ def test_w006(tmp_path, monkeypatch):
 
 # --- W007 load_sealed_plan v3 ----------------------------------------------
 
-def _register_seal(target, action_id, graph, physical, sealed):
-    seal_mod = sys.modules["demiflow.execution.dataflow_seal"]
-    seal_mod._registry[(str(Path(target).resolve()), action_id)] = (graph, physical, sealed)
-
-
 def test_w007(tmp_path):
+    from demiflow import data
     from demiflow.execution.plan_interpreter import PlanContractError
-    target, journal, fence, run_id = make_journal(tmp_path)
-    graph, _ = make_graph("a0")
-    physical = make_physical(graph)
-    sealed = make_sealed()
-    marker = v3_marker(run_id, "a0", dag_id=graph.dag_id, plan_id=physical.plan_id)
-    journal.bind_source(fence, "a0-dataflow-sealed", marker)
-    _register_seal(target, "a0", graph, physical, sealed)
-    bundle = sealed_plans.load_sealed_plan(target, "a0")
-    assert bundle["version"] == "v3"
-    assert bundle["graph"] is graph and bundle["physical"] is physical and bundle["sealed"] is sealed
-    assert bundle["facts"] == marker
-    # Absent facts -> missing_plan (never a fabricated plan).
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_sealed_plan(target, "missing")
-    assert exc.value.reason == "missing_plan"
-    # Absent journal -> missing_plan.
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_sealed_plan(tmp_path / "absent", "a0")
-    assert exc.value.reason == "missing_plan"
+    from test_runtime_v3_real_seams import prepared
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
+        target = services.action.context.directory
+        action_id = services.action.action_id
+        marker = services.action.context.journal.source_binding(action_id + "-dataflow-sealed")
+        bundle = sealed_plans.load_sealed_plan(target, action_id)
+        assert bundle["version"] == "v3"
+        # Real persisted artifacts decode to equal DTOs, never shared fake objects.
+        assert bundle["graph"] == execution._graph
+        assert bundle["physical"] == execution._physical
+        assert bundle["sealed"] == execution._sealed
+        assert bundle["facts"] == marker
+        # Absent facts -> missing_plan (never a fabricated plan).
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_sealed_plan(target, "missing")
+        assert exc.value.reason == "missing_plan"
+        # Absent journal -> missing_plan.
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_sealed_plan(tmp_path / "absent", action_id)
+        assert exc.value.reason == "missing_plan"
 
 
 # --- W008 load_execution_bindings v3 ---------------------------------------
 
-def write_store_json(target, value):
-    ref, raw = json_ref(value)
-    obj = Path(target) / "run" / "objects" / ref.digest
-    obj.parent.mkdir(parents=True, exist_ok=True)
-    obj.write_bytes(raw)
-    return ref
-
-
-def _v3_bundle(target, graph, physical, bridge_doc):
+def _v3_bundle(store, original, bridge_doc):
     from dataclasses import replace
-    bridge_ref = write_store_json(target, bridge_doc)
-    sealed = replace(make_sealed(), identity_bridge_ref=bridge_ref)
-    return {"version": "v3", "facts": {}, "graph": graph, "physical": physical, "sealed": sealed}
+    raw = json.dumps(bridge_doc).encode("utf-8")
+    bridge_ref = store.put(iter([raw]), max_bytes=4 * 1024 ** 2, media_type="application/json")
+    sealed = replace(original["sealed"], identity_bridge_ref=bridge_ref)
+    return {**original, "sealed": sealed}
 
 
 def test_w008(tmp_path):
+    from demiflow import data
     from demiflow.execution.plan_interpreter import PlanContractError
-    target, journal, fence, run_id = make_journal(tmp_path)
-    graph, _ = make_graph("a0")
-    physical = make_physical(graph)
-    good = {"action_id": "a0", "dag_id": graph.dag_id, "plan_id": physical.plan_id, "entries": []}
-    bundle = _v3_bundle(target, graph, physical, good)
-    result = sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bundle)
-    assert result["version"] == "v3" and result["document"] == good
-    assert result["ref"]["digest"] == bundle["sealed"].identity_bridge_ref.digest
-    # Wrong action_id -> identity_mismatch.
-    bad = _v3_bundle(target, graph, physical, {**good, "action_id": "other"})
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bad)
-    assert exc.value.reason == "identity_mismatch"
-    # Wrong dag_id -> identity_mismatch.
-    bad = _v3_bundle(target, graph, physical, {**good, "dag_id": sha("other-dag")})
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bad)
-    assert exc.value.reason == "identity_mismatch"
-    # v2 driver/worker placement in a v3 bridge -> unsupported_layout, never misread.
-    bad = _v3_bundle(target, graph, physical, {**good, "worker_groups": []})
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bad)
-    assert exc.value.reason == "unsupported_layout"
+    from test_runtime_v3_real_seams import prepared
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
+        target, action_id = services.action.context.directory, services.action.action_id
+        original = sealed_plans.load_sealed_plan(target, action_id)
+        graph, physical = original["graph"], original["physical"]
+        good = {"action_id": action_id, "dag_id": graph.dag_id, "plan_id": physical.plan_id, "entries": []}
+        bundle = _v3_bundle(services.store, original, good)
+        result = sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bundle)
+        assert result["version"] == "v3" and result["document"] == good
+        assert result["ref"]["digest"] == bundle["sealed"].identity_bridge_ref.digest
+        # Wrong action_id -> identity_mismatch.
+        bad = _v3_bundle(services.store, original, {**good, "action_id": "other"})
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bad)
+        assert exc.value.reason == "identity_mismatch"
+        # Wrong dag_id -> identity_mismatch.
+        bad = _v3_bundle(services.store, original, {**good, "dag_id": sha("other-dag")})
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bad)
+        assert exc.value.reason == "identity_mismatch"
+        # v2 driver/worker placement in a v3 bridge -> unsupported_layout, never misread.
+        bad = _v3_bundle(services.store, original, {**good, "worker_groups": []})
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bad)
+        assert exc.value.reason == "unsupported_layout"
 
 
 # --- W009 facts.read_sealed_plan v3 ----------------------------------------
 
 def test_w009(tmp_path):
+    from demiflow import data
     from demiflow.workbench.runs import facts
-    target, journal, fence, run_id = make_journal(tmp_path)
-    graph, _ = make_graph("a0")
-    physical = make_physical(graph)
-    sealed = make_sealed()
-    marker = v3_marker(run_id, "a0", dag_id=graph.dag_id, plan_id=physical.plan_id)
-    journal.bind_source(fence, "a0-dataflow-sealed", marker)
-    _register_seal(target, "a0", graph, physical, sealed)
-    result = facts.read_sealed_plan(target, "a0")
-    assert result["available"] is True and result["version"] == "v3"
-    assert result["dag_id"] == graph.dag_id and result["plan_id"] == physical.plan_id
-    view = result["plan_view"]
-    assert view["schema"] == hist.PLAN_VIEW_SCHEMA
-    assert len(view["dag"]["nodes"]) == len(graph.nodes)
-    assert all(o["observed"] is False for o in view["node_observations"])
-    # Invalid action id -> structured unavailable, never raises.
-    bad = facts.read_sealed_plan(target, "")
-    assert not bad.get("available") and bad["status"] == "unavailable"
-    # No facts -> unavailable.
-    miss = facts.read_sealed_plan(target, "missing")
-    assert not miss.get("available") and miss["status"] == "unavailable"
+    from test_runtime_v3_real_seams import prepared
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
+        target, action_id = services.action.context.directory, services.action.action_id
+        graph, physical = execution._graph, execution._physical
+        result = facts.read_sealed_plan(target, action_id)
+        assert result["available"] is True and result["version"] == "v3"
+        assert result["dag_id"] == graph.dag_id and result["plan_id"] == physical.plan_id
+        view = result["plan_view"]
+        assert view["schema"] == hist.PLAN_VIEW_SCHEMA
+        assert len(view["dag"]["nodes"]) == len(graph.nodes)
+        assert all(o["observed"] is False for o in view["node_observations"])
+        # Invalid action id -> structured unavailable, never raises.
+        bad = facts.read_sealed_plan(target, "")
+        assert not bad.get("available") and bad["status"] == "unavailable"
+        # No facts -> unavailable.
+        miss = facts.read_sealed_plan(target, "missing")
+        assert not miss.get("available") and miss["status"] == "unavailable"
 
 
 # --- W010 facts._physical_summary ------------------------------------------
@@ -1324,7 +906,7 @@ def test_w017(tmp_path, monkeypatch):
     physical = make_physical(graph)
     view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
     bridge = {"available": True, "bridge": {"action_id": "a0", "entries": [
-        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
          "occurrence_id": occs[0], "mode": "execute"}]}}
     entry = {"action_id": "a0", "status": "sealed", "version": "v3",
              "dag": view["dag"], "plan_id": physical.plan_id, "physical": view["physical"],
@@ -1334,7 +916,9 @@ def test_w017(tmp_path, monkeypatch):
             "plan_id": physical.plan_id, "dag_id": graph.dag_id, "plan_revision": physical.plan_revision,
             "availability": "available",
             "observations": [{"action_id": "a0", "node_id": "n0", "occurrence": 0,
-                              "plan_id": physical.plan_id, "state": "succeeded"}]}
+                              "plan_id": physical.plan_id, "state": "succeeded",
+                              "dag_id": graph.dag_id, "plan_revision": physical.plan_revision,
+                              "occurrence_id": occs[0]}]}
     monkeypatch.setattr(run_view, "observations", lambda *a, **k: page)
     model._join_sealed_observations(tmp_path, "r" + "1" * 24, 1, logical_view)
     # The build_plan_view per-occurrence projection is preserved as plan-level authority.
@@ -1356,11 +940,11 @@ def test_u1_edge_identity():
     dag_id = sha("dag-u1")
     src, m0, m1 = sha("occ-src-u1"), sha("occ-map-u1-0"), sha("occ-map-u1-1")
     nodes = (
-        GraphNode(occurrence_id=src, semantic_id="src", kind="source",
+        GraphNode(occurrence_id=src, semantic_id=sha("src"), kind="source",
                   kernel=kernel("read_table", inputs=()), program_ref=None, shared_token="0"),
-        GraphNode(occurrence_id=m0, semantic_id="map", kind="transform",
+        GraphNode(occurrence_id=m0, semantic_id=sha("map"), kind="transform",
                   kernel=kernel("map"), program_ref=None, shared_token="1"),
-        GraphNode(occurrence_id=m1, semantic_id="map", kind="transform",
+        GraphNode(occurrence_id=m1, semantic_id=sha("map"), kind="transform",
                   kernel=kernel("map"), program_ref=None, shared_token="2"),
     )
     e0 = GraphEdge(edge_id=sha("e0"), producer=src, output_port="out", consumer=m0, input_port="in")
@@ -1373,13 +957,13 @@ def test_u1_edge_identity():
     assert len(edges) == 2
     # edge_id, occurrence_id and ports are copied verbatim from the original GraphEdge.
     assert edges[0]["edge_id"] == e0.edge_id
-    assert edges[0]["from"] == {"logical_node_id": "src", "occurrence_id": src, "port": "out"}
-    assert edges[0]["to"] == {"logical_node_id": "map", "occurrence_id": m0, "port": "in"}
+    assert edges[0]["from"] == {"logical_node_id": sha("src"), "occurrence_id": src, "port": "out"}
+    assert edges[0]["to"] == {"logical_node_id": sha("map"), "occurrence_id": m0, "port": "in"}
     assert edges[1]["edge_id"] == e1.edge_id
-    assert edges[1]["from"] == {"logical_node_id": "map", "occurrence_id": m0, "port": "out"}
-    assert edges[1]["to"] == {"logical_node_id": "map", "occurrence_id": m1, "port": "in"}
+    assert edges[1]["from"] == {"logical_node_id": sha("map"), "occurrence_id": m0, "port": "out"}
+    assert edges[1]["to"] == {"logical_node_id": sha("map"), "occurrence_id": m1, "port": "in"}
     # Same-semantic series edge is not a self loop: endpoints differ by occurrence.
-    assert edges[1]["from"]["logical_node_id"] == edges[1]["to"]["logical_node_id"] == "map"
+    assert edges[1]["from"]["logical_node_id"] == edges[1]["to"]["logical_node_id"] == sha("map")
     assert edges[1]["from"]["occurrence_id"] != edges[1]["to"]["occurrence_id"]
     # One node per occurrence; the two "map" occurrences are never merged.
     occs = [n["occurrence_id"] for n in view["dag"]["nodes"]]
@@ -1425,14 +1009,15 @@ def test_u2_observation_scope():
     physical = make_physical(graph)
     plan_id = physical.plan_id
     bridge = {"action_id": "a0", "entries": [
-        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
          "occurrence_id": occs[0], "mode": "execute"}]}
 
     def page(rows, **extra):
         return dict({"format": "demiflow_forge_node_observation_page_v1", "attempt": 1,
                      "action_id": "a0", "availability": "available", "observations": rows}, **extra)
 
-    row = {"action_id": "a0", "node_id": "n0", "occurrence": 0, "plan_id": plan_id, "state": "succeeded"}
+    row = {"action_id": "a0", "node_id": "n0", "occurrence": 0, "plan_id": plan_id, "state": "succeeded",
+           "dag_id": graph.dag_id, "plan_revision": physical.plan_revision, "occurrence_id": occs[0]}
     # Verified v3 scope: a row carrying the matching plan is observed.
     joined = facts.join_node_observations(bridge, page([row], plan_id=plan_id, dag_id=graph.dag_id,
                                                        plan_revision=physical.plan_revision),
@@ -1453,6 +1038,24 @@ def test_u2_observation_scope():
     joined = facts.join_node_observations(bridge, page([other], plan_id=plan_id),
                                           action_id="a0", attempt=1, plan_id=plan_id)
     assert joined[0]["availability"] == "not_in_page"
+    # A complete page wrapper cannot supply missing/different native row scope.
+    scope = dict(plan_id=plan_id, dag_id=graph.dag_id, plan_revision=physical.plan_revision)
+    for name, wrong in (("plan_id", sha("other-plan")), ("dag_id", sha("other-dag")),
+                        ("plan_revision", physical.plan_revision + 1), ("occurrence_id", sha("other-occurrence"))):
+        for candidate in ({key: value for key, value in row.items() if key != name},
+                          {**row, name: wrong}):
+            joined = facts.join_node_observations(bridge, page([candidate], **scope),
+                                                  action_id="a0", attempt=1, **scope)
+            assert joined[0]["availability"] == "not_in_page" and joined[0]["observation"] is None
+    # Conversely, a correct row cannot repair a missing/different page credential.
+    for name, wrong in (("plan_id", sha("other-plan")), ("dag_id", sha("other-dag")),
+                        ("plan_revision", physical.plan_revision + 1)):
+        for wrapper in ({key: value for key, value in scope.items() if key != name},
+                        {**scope, name: wrong}):
+            with pytest.raises(ForgeError) as exc:
+                facts.join_node_observations(bridge, page([row], **wrapper),
+                                              action_id="a0", attempt=1, **scope)
+            assert exc.value.code == "conflict"
     # Legacy (no scope) preserves occurrence-only behaviour.
     joined = facts.join_node_observations(bridge, page([legacy_row]), action_id="a0", attempt=1)
     assert joined[0]["availability"] == "observed"
@@ -1465,7 +1068,7 @@ def test_u2_v3_no_scope_not_promoted(tmp_path, monkeypatch):
     physical = make_physical(graph)
     view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
     bridge = {"available": True, "bridge": {"action_id": "a0", "entries": [
-        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
          "occurrence_id": occs[0], "mode": "execute"}]}}
     entry = {"action_id": "a0", "status": "sealed", "version": "v3", "dag": view["dag"],
              "plan_id": physical.plan_id, "physical": view["physical"],
@@ -1521,15 +1124,24 @@ def test_u3_unique_action_resolution(tmp_path, monkeypatch):
 
 # --- U2 real producer (view.observations) + consumer gate integration -------
 
-def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",)):
-    """Build a real run journal (manifest + native observations) and optional v3 seal.
+def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",), scoped=True):
+    """Prepare a real sealed action and persist native observations in its journal.
 
-    The real view.observations producer reads this run.sqlite. The sealed bundle
-    uses the C14 cross-lane dataflow_seal double only because the real D module is
-    absent in this isolated tree; the marker, journal and readers are real.
+    No worker is executed and no successful run is claimed. The scope-less case
+    writes old rows before sealing; a later seal must never backfill their identity.
     """
+    import time
+    from demiflow import data
     from demiflow.workbench.runs import manager
     from demiflow.forge.platform import content_digest
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.execution.dataflow_api import declare_action_v3, make_action_request
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_services import make_driver_services
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    from test_runtime_v3_real_seams import PreparationOnly
+
     run_id = "r" + "1" * 24
     root = tmp_path
     (Path(root) / "workspace.json").write_text('{"id": "ws-u2"}')
@@ -1539,25 +1151,49 @@ def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",)):
     journal.initialize(dict(run_id=run_id, root=str(Path(root).absolute()),
                             digest=content_digest(dict(run_id=run_id)), object_locations=[]), attempts=True)
     fence = "f" + "1" * 32
-    journal.claim_execution(dict(run_id=run_id, platform_revision=platform_identity(),
-                                 limits=dict(max_control_bytes=8 * 1024 ** 2, max_commits=1024,
-                                             admission_timeout_s=30)), fence)
+    journal.claim_execution(dict(format=1, stream_protocol="aligned-barrier-v2", run_id=run_id,
+                                 platform_revision=platform_identity(), entry_identity=None,
+                                 limits=execution_limits(), limits_explicit=[], started_at=time.time()), fence)
     journal.reserve_nodes([(action_id, node, 0) for node in nodes])
-    journal.observe_nodes([dict(action_id=action_id, node_id=node, occurrence=0,
-                                document=dict(sequence=1, state="succeeded", rows_output=3)) for node in nodes])
+
+    def observe(scope):
+        journal.observe_nodes([dict(action_id=action_id, node_id=node, occurrence=0,
+            document=dict(sequence=1, state="succeeded", rows_output=3, **scope)) for node in nodes])
+
+    if not v3 or not scoped:
+        observe({})
     plan = None
     if v3:
-        graph, occs = make_graph(action_id)
-        physical = make_physical(graph)
-        marker = v3_marker(run_id, action_id, dag_id=graph.dag_id, plan_id=physical.plan_id)
-        journal.bind_source(fence, action_id + "-dataflow-sealed", marker)
-        _register_seal(target, action_id, graph, physical, make_sealed())
-        plan = (graph, physical, occs)
+        dataset = data.from_items([{"x": 1}]).map(lambda row: row)
+        declaration = declare_action_v3(dataset._source, dataset._plan, kind="take",
+                                         arguments={"limit": 1}, sink_declaration=None)
+        with pytest.raises(PreparationOnly):
+            with RunContext.attach(journal) as run:
+                with run.action(declaration, action_id=action_id):
+                    request = make_action_request(dataset._executor, dataset._source, dataset._plan,
+                                                  kind="take", arguments={"limit": 1})
+                    policy, limits = resolve_runtime_policy({}, run.limits, provider="local")
+                    services = make_driver_services(request.action, policy=policy, bounds=limits)
+                    execution = DataflowExecution(request, services=services)
+                    try:
+                        execution.prepare()
+                        graph, physical, sealed = execution._graph, execution._physical, execution._sealed
+                        occs = [node.occurrence_id for node in graph.nodes if node.kind == "transform"]
+                        assert len(occs) == 1
+                        if scoped:
+                            observe(dict(plan_id=physical.plan_id, dag_id=graph.dag_id,
+                                         plan_revision=physical.plan_revision, occurrence_id=occs[0]))
+                        plan = (graph, physical, occs, sealed)
+                    finally:
+                        execution.close()
+                    raise PreparationOnly()
+        loaded = sealed_plans.load_sealed_plan(target, action_id)
+        assert (loaded["graph"], loaded["physical"], loaded["sealed"]) == (graph, physical, sealed)
     return root, run_id, target, journal, fence, plan
 
 
-def _u2_entry(graph, physical, bridge):
-    view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
+def _u2_entry(graph, physical, bridge, sealed):
+    view = hist.build_plan_view(graph, sealed, physical, observations=())
     return {"action_id": "a0", "status": "sealed", "version": "v3", "dag": view["dag"],
             "plan_id": physical.plan_id, "physical": view["physical"],
             "node_observations": view["node_observations"],
@@ -1569,7 +1205,12 @@ def test_u2_producer_page_scope_verified(tmp_path):
     from demiflow.workbench.runs import facts
     from demiflow.workbench.graph import model
     root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=True)
-    graph, physical, occs = plan
+    graph, physical, occs, sealed = plan
+    with closing(sqlite3.connect(journal.path)) as db:
+        native = json.loads(db.execute("SELECT document FROM node_observations WHERE node_id='n0'").fetchone()[0])
+    scope = dict(plan_id=physical.plan_id, dag_id=graph.dag_id,
+                 plan_revision=physical.plan_revision, occurrence_id=occs[0])
+    assert {name: native[name] for name in scope} == scope
     # REAL producer: page and rows carry the sealed v3 plan identity verbatim.
     page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
     assert page["availability"] == "available"
@@ -1579,8 +1220,9 @@ def test_u2_producer_page_scope_verified(tmp_path):
     row = page["observations"][0]
     assert row["plan_id"] == physical.plan_id and row["dag_id"] == graph.dag_id
     assert row["plan_revision"] == physical.plan_revision
+    assert {name: row[name] for name in scope} == scope
     bridge = {"action_id": "a0", "entries": [
-        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
          "occurrence_id": occs[0], "mode": "execute"}]}
     # REAL consumer: exact-match scope verification promotes the observation.
     joined = facts.join_node_observations(bridge, page, action_id="a0", attempt=1,
@@ -1588,7 +1230,7 @@ def test_u2_producer_page_scope_verified(tmp_path):
                                           plan_revision=physical.plan_revision)
     assert joined[0]["availability"] == "observed" and joined[0]["occurrence_id"] == occs[0]
     # REAL model wrapper over the REAL producer (no monkeypatch): credentialed promotion.
-    entry, view = _u2_entry(graph, physical, bridge)
+    entry, view = _u2_entry(graph, physical, bridge, sealed)
     model._join_sealed_observations(root, run_id, 1, {"actions": [entry]})
     obs = entry["node_observations"]
     assert obs["available"] is True and obs["entries"][0]["availability"] == "observed"
@@ -1597,30 +1239,39 @@ def test_u2_producer_page_scope_verified(tmp_path):
     assert entry["plan_node_observations"] is view["node_observations"]
 
 
-def test_u2_producer_scopeless_degrades(tmp_path):
+@pytest.mark.parametrize("v3", [False, True])
+def test_u2_producer_scopeless_degrades(tmp_path, v3):
     from demiflow.workbench.runs import view as run_view
     from demiflow.workbench.runs import facts
     from demiflow.workbench.graph import model
     from demiflow.forge.schema import ForgeError
-    # Real run whose action has NO v3 seal -> real producer emits no plan scope.
-    root, run_id, target, journal, fence, _ = _real_obs_run(tmp_path, v3=False)
+    # Old unscoped rows stay unscoped both without a seal and after a real v3 seal.
+    root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=v3, scoped=False)
+    with closing(sqlite3.connect(journal.path)) as db:
+        original_documents = db.execute("SELECT document FROM node_observations").fetchall()
     page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
     assert page["availability"] == "available"
     assert "plan_id" not in page and "dag_id" not in page and "plan_revision" not in page
-    assert all("plan_id" not in r for r in page["observations"])
-    graph, occs = make_graph("a0")
-    physical = make_physical(graph)
+    assert all(not {"plan_id", "dag_id", "plan_revision", "occurrence_id"}.intersection(r)
+               for r in page["observations"])
+    if plan is not None:
+        graph, physical, occs, sealed = plan
+    else:
+        graph, occs = make_graph("a0")
+        physical, sealed = make_physical(graph), make_sealed()
     bridge = {"action_id": "a0", "entries": [
-        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
          "occurrence_id": occs[0], "mode": "execute"}]}
     # A v3 scope cannot be verified against a scope-less page -> conflict, never promoted.
     with pytest.raises(ForgeError) as exc:
         facts.join_node_observations(bridge, page, action_id="a0", attempt=1, plan_id=physical.plan_id)
     assert exc.value.code == "conflict"
-    entry, view = _u2_entry(graph, physical, bridge)
+    entry, view = _u2_entry(graph, physical, bridge, sealed)
     model._join_sealed_observations(root, run_id, 1, {"actions": [entry]})
     obs = entry["node_observations"]
     assert obs["available"] is False and obs["reason"] == "observation_plan_scope_unverified"
+    with closing(sqlite3.connect(journal.path)) as db:
+        assert db.execute("SELECT document FROM node_observations").fetchall() == original_documents
     assert obs["plan_id"] == physical.plan_id and obs["dag_id"] == graph.dag_id
     assert entry["plan_node_observations"] is view["node_observations"]
 
@@ -1630,13 +1281,13 @@ def test_u2_producer_missing_row_not_in_page(tmp_path):
     from demiflow.workbench.runs import facts
     # Real v3 run observes n0 only; the bridge also references an absent report node.
     root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=True, nodes=("n0",))
-    graph, physical, occs = plan
+    graph, physical, occs, sealed = plan
     page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
     bridge = {"action_id": "a0", "entries": [
-        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
          "occurrence_id": occs[0], "mode": "execute"},
-        {"report_node_id": "n1", "report_occurrence": 0, "logical_node_id": "map",
-         "occurrence_id": sha("occ-n1"), "mode": "execute"}]}
+        {"report_node_id": "n1", "report_occurrence": 0, "logical_node_id": _logical_id(graph, graph.sources[0]),
+         "occurrence_id": graph.sources[0], "mode": "execute"}]}
     joined = facts.join_node_observations(bridge, page, action_id="a0", attempt=1,
                                           plan_id=physical.plan_id, dag_id=graph.dag_id,
                                           plan_revision=physical.plan_revision)
@@ -1749,6 +1400,7 @@ function graphHost() {
 const sha = c => c.repeat(64);
 const PROJECT_ID = 'w' + 'a1'.repeat(16);
 const BINDING = {basis_kind: 'run', workspace_id: PROJECT_ID, basis_digest: sha('b'), run_id: 'run-1', attempt: 1};
+const REPORT_DIGEST = sha('c'); // Report identity is distinct from the run manifest binding.
 const ACTION = 'a0', DAG_ID = sha('8'), PLAN_ID = sha('9');
 const L_SRC = sha('1'), L_MAP = sha('2');
 const O_SRC = sha('3'), O_MAP0 = sha('4'), O_MAP1 = sha('5');
@@ -1814,6 +1466,7 @@ function legacyEntry(over) {
 function runGraph(entry, extra) {
   return Object.assign({
     binding: BINDING,
+    report_digest: REPORT_DIGEST,
     logical: {available: true, action_count: 1, actions: [entry]},
     nodes: [{id: 'n0', api: 'x.y', kind: 'map', fields: {}, source: 'f.py', line: 1}],
     edges: [],
@@ -1824,7 +1477,7 @@ function runGraph(entry, extra) {
 function bridged(occurrences) {
   return {
     identity_bridge: {available: true, bridge: {
-      schema: 'demiflow.identity_bridge.v1', action_id: ACTION, dag_id: DAG_ID, report_digest: BINDING.basis_digest,
+      schema: 'demiflow.identity_bridge.v1', action_id: ACTION, dag_id: DAG_ID, report_digest: REPORT_DIGEST,
       entries: occurrences.map((occ, i) => ({logical_node_id: L_MAP, occurrence_id: occ, report_node_id: 'n' + i, report_occurrence: 0, mode: 'execute'})),
     }},
     node_observations: {available: true, attempt: 1, action_id: ACTION, dag_id: DAG_ID, plan_id: PLAN_ID, plan_revision: 3, has_more: false,
@@ -1943,6 +1596,24 @@ function w020() {
   assert(details.sourceAvailable === true, 'bridged node exposes source');
   assert(details.recoveryRestriction === 'actor_without_hook', 'details carry recovery restriction');
   assert(details.exchanges.length >= 1, 'details carry adjacent v3 exchanges');
+  // A run manifest digest is not the report digest used by the identity bridge.
+  assert(g.report_digest !== g.binding.basis_digest, 'independent report and manifest identities');
+  for (const wrongDigest of [BINDING.basis_digest, sha('d'), undefined]) {
+    const wrongGraph = runGraph(entry, {report_digest: wrongDigest});
+    const wrongModel = P.buildGraphModel(wrongGraph, {choice: P.chooseGraphView(wrongGraph, {})});
+    const wrongCard = wrongModel.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+    assert(wrongCard.state.label === '未桥接 · 无观测关联', 'mismatched or absent report digest refuses observations');
+    assert(P.buildNodeDetails(wrongGraph, wrongCard.selection).sourceAvailable === false,
+      'mismatched or absent report digest refuses source linkage');
+  }
+  const wrongBridgeEntry = sealedEntry(bridged([O_MAP0, O_MAP1]));
+  wrongBridgeEntry.identity_bridge.bridge.report_digest = BINDING.basis_digest;
+  const wrongBridgeGraph = runGraph(wrongBridgeEntry);
+  const wrongBridgeModel = P.buildGraphModel(wrongBridgeGraph, {choice: P.chooseGraphView(wrongBridgeGraph, {})});
+  const wrongBridgeCard = wrongBridgeModel.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  assert(wrongBridgeCard.state.label === '未桥接 · 无观测关联', 'bridge carrying manifest digest is refused');
+  assert(P.buildNodeDetails(wrongBridgeGraph, wrongBridgeCard.selection).sourceAvailable === false,
+    'bridge carrying manifest digest cannot authorize source linkage');
   // Unbridged node must stay honest rather than guess a correspondence.
   const unbridged = P.buildGraphModel(runGraph(sealedEntry()), {choice: {kind: 'sealed', actionId: ACTION, label: '运行封存计划', reason: null}});
   const ucard = unbridged.nodes.find(c => c.selection.occurrenceId === O_MAP0);

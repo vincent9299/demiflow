@@ -36,7 +36,6 @@ import subprocess
 import sys
 import threading
 import time
-import types
 
 import pytest
 
@@ -352,8 +351,12 @@ def _create_real_run(root: Path, producer_tree: Path | None = None) -> dict:
 import json, pathlib, sys, time, subprocess
 import demiflow
 from demiflow.workbench.runs import manager as runs
+from demiflow.workbench.projects import workspace as ws
 tree, root = map(pathlib.Path, sys.argv[1:])
 assert pathlib.Path(demiflow.__file__).resolve().is_relative_to(tree)
+# The historical producer must inspect against its own platform snapshot.
+# This changes only the private workspace's current binding, never old reports.
+ws.bind_platform(root, expected=ws.load_workspace(root)[1]['platform']['digest'])
 prepared = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')
 runs.start(root, prepared['run_id'], expected=prepared['digest'])
 deadline = time.monotonic() + 120
@@ -372,7 +375,16 @@ print(json.dumps(dict(run_id=prepared['run_id'], attempt=run['attempt'], status=
             cwd=root, env={**os.environ, 'PYTHONPATH': str(producer_tree), 'PYTHONDONTWRITEBYTECODE': '1'},
             capture_output=True, text=True, timeout=150)
         assert result.returncode == 0, result.stdout + result.stderr
-        return json.loads(result.stdout.splitlines()[-1])
+        facts = json.loads(result.stdout.splitlines()[-1])
+        from demiflow.workbench.projects import workspace as ws
+        # Explicitly upgrade the same workspace after producing the old run.
+        # Its sealed artifacts remain untouched; all subsequent runs use this tree.
+        ws.bind_platform(root, expected=ws.load_workspace(root)[1]['platform']['digest'])
+        for variant in ('a', 'b'):
+            report = ws.inspect_flow(root, 'flows/questions.py:select',
+                                     params=f'flows/select_{variant}.json')
+            assert report['status'] == 'checked', report
+        return facts
     from demiflow.workbench.runs import manager as runs
     prepared = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')
     runs.start(root, prepared['run_id'], expected=prepared['digest'])
@@ -444,8 +456,10 @@ def owned_fixture(tmp_path, monkeypatch, request):
     producer_tree = Path(legacy_path).resolve() if legacy_path else None
     if producer_tree:
         assert producer_tree != TREE and (producer_tree / 'demiflow').is_dir()
-    run_facts = _create_real_run(root, producer_tree)
-    sealed_actions = _sealed_actions(root, run_facts)
+    # Notebook execution is an independent application; its fixed input tables
+    # do not need a Pipeline run. Keep that unrelated engine out of V05 admission.
+    run_facts = {} if need_runtime else _create_real_run(root, producer_tree)
+    sealed_actions = [] if need_runtime else _sealed_actions(root, run_facts)
     v3_available = any(_is_v3(action) for action in sealed_actions)
     if execution_format == 'v3' and not v3_available:
         pytest.skip('not_run: candidate tree seals no demiflow.dataflow_graph.v3 action; '
@@ -454,7 +468,7 @@ def owned_fixture(tmp_path, monkeypatch, request):
         pytest.skip('not_run: legacy gate needs WORKBENCH_D19_LEGACY_TREE with a real legacy producer; '
                     'the current producer seals v3')
     if execution_format == 'auto':
-        execution_format = 'v3' if v3_available else 'legacy'
+        execution_format = 'analysis' if need_runtime else ('v3' if v3_available else 'legacy')
 
     analysis_config = None
     analysis_profile = None
@@ -518,29 +532,34 @@ def owned_fixture(tmp_path, monkeypatch, request):
         try:
             yield fixture
         finally:
+            if need_runtime:
+                # Complete the real cleanup protocol while this Web authority
+                # is alive, including assertion failures inside the browser.
+                documents = app.analysis.call(project_id, 'documents', dict(kind='notebook', limit=32))
+                for document in documents['items']:
+                    sessions = app.analysis.call(project_id, 'notebook-sessions', dict(notebook_id=document['id']))
+                    for session in sessions['items']:
+                        if session['state'] == 'stopped':
+                            continue
+                        app.analysis.stop_generation(project_id, request_id='d19-cleanup-' + session['id'],
+                                                     session_id=session['id'], generation=session['generation'])
+                        deadline = time.monotonic() + 30
+                        while True:
+                            status = app.analysis.call(project_id, 'session', dict(session_id=session['id']))
+                            if status['state'] == 'stopped':
+                                assert status.get('cleanup_complete') is True, status
+                                break
+                            assert time.monotonic() < deadline, status
+                            time.sleep(.1)
             if driver is not None:
                 driver.__exit__(None, None, None)
 
 
 @contextmanager
 def case_scene(browser, tmp_path, monkeypatch, **options):
-    """Temporary fixture-only selector migration; preserve the other lane's file.
-
-    The two initial waits follow the actual material headings. All original
-    Records, Lance, media, source immutability and helper assertions are retained.
-    """
-    original = TREE / 'tests/test_forge_analysis_case_groups_ui_browser.py'
-    source = original.read_text()
-    old = "get_by_role('heading',name='Case 0',exact=True)"
-    assert source.count(old) >= 2
-    source = source.replace(old, "get_by_role('heading',name='next0.png',exact=True)", 1)
-    source = source.replace(old, "get_by_role('heading',name='红色陶瓷杯',exact=True)", 1)
-    overlay = tmp_path / 'case-scene-overlay.py'
-    overlay.write_text(source)
-    module = types.ModuleType('d19_owned_case_scene')
-    module.__file__ = str(original)
-    exec(compile(source, str(overlay), 'exec'), module.__dict__)
-    with module.scene(browser, tmp_path, monkeypatch, **options) as value:
+    """Use the semantically migrated Records/Lance fixture without an overlay."""
+    from test_forge_analysis_case_groups_ui_browser import scene
+    with scene(browser, tmp_path, monkeypatch, **options) as value:
         yield value
 
 

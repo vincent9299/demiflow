@@ -2,6 +2,8 @@
 
 日期：2026-11-15。依据：[平台总控 (2)](codex://threads/01a1da21-f648-7522-9324-760ac1c7c9af?hostId=remote-ssh-discovered%3Adevbox-codex) 的重新设计，以及隔离树中的设计和 W 路候选源码。**本次修改设计，不修改实现，不打断已在编码的 W 路。**
 
+后续状态说明：下文和 `runtime-wiring.json` 保留设计期要求及当时的 `required_not_verified` 登记；最新实现、真实 W/Runtime/UI 组合及未验范围见 [集成复核记录](FINAL-INTEGRATION-REVIEW-20261115.md)，不以设计登记代替最新验收结论。
+
 产品仍要让用户看懂、配置、运行管道，并分析、比较、评测数据；引擎仍要统一、正确、有界、保护历史。R1 四 tab/D1.9/紧凑上下文，R2 图与代码/检查提交/运行历史，R3 目录版本/Python+SQL/通用输出，R4 筛选/多方案材料/持久评测，R5 单一权威/真实集成/历史保护，均保留。改变的是 R2/R5 的运行事实接线；不因底层统一而另建 Notebook 或 Case 执行中心。
 
 ## 1. 已核对的影响
@@ -53,6 +55,11 @@ flowchart LR
 - 这是**只读展示 DTO 的加字段**。不修改封存 Graph、任何历史字节、dag_id/plan_id/identity bridge，也不把展示 DTO 写回引擎。
 
 ### U2 · W012/W017：本次观测的范围凭据
+
+`graph.report_digest` 显式提供原检查报告的 digest，源码观察时为 null。run 图的
+`GraphBinding.basis_digest` 绑定运行 manifest，不能用它核对 identity bridge 的
+`report_digest`。C09/C02/C04 仅在顶层报告 digest 为合法 64 位 hex 且与原桥一致时
+接纳桥；缺失或错配保持未桥接。此字段不扩展 closed GraphBinding，也不重写历史身份。
 
 复用 `node_observations={available,attempt,has_more,entries,...}` 的既有分页包装。v3 增加 action_id、dag_id、plan_id、plan_revision，且每条 entry 保留 occurrence_id 和报告桥键；W 在服务端只接纳匹配页面身份的观测，不能给旧行补当前 plan_id 冒充已校验。受限页没有该项是 `not_in_page`，不是节点从未运行。
 

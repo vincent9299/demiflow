@@ -530,7 +530,7 @@
     function paintFilterControls(parent){
       const descriptor=state.descriptor,available=primitive();
       const quick=$('div',undefined,'case-ui-query-quick');parent.append(quick);
-      const controls=$('details',undefined,'case-ui-query-controls');controls.open=queryControlsOpen;controls.ontoggle=()=>{queryControlsOpen=controls.open;};controls.append($('summary','配置选样条件'));parent.append(controls);
+      const controls=$('details',undefined,'case-ui-query-controls');controls.open=queryControlsOpen;controls.ontoggle=()=>{if(controls.isConnected&&rail.querySelector('.case-ui-query-controls')===controls)queryControlsOpen=controls.open;};controls.append($('summary','配置选样条件'));parent.append(controls);
       parent.append($('section',undefined,'case-ui-review-filter'));
       const sampleLabel=$('label','样本模式（前 1000 行 / 8 MiB） ');quick.append(sampleLabel);
       const sample=input(state.query_scope==='sample','明确选择样本模式',sampleLabel,1,'checkbox');sample.onchange=()=>{state.query_scope=sample.checked?'sample':'full';pageTicket++;changed();};
@@ -558,7 +558,7 @@
       if(!descriptor.grouping.length)button('配置分组与筛选',()=>{controls.open=true;controls.scrollIntoView({block:'start'});},quick);
       if(descriptor.filters)quick.append($('p','已设筛选条件；展开「配置选样条件」编辑。','muted small'));
       if(page&&!pageIsCurrent())quick.append($('p','筛选或配置草稿尚未应用读取。','case-ui-stale'));
-      button('应用筛选与分组',()=>{queryControlsOpen=false;return load(0);},quick,!connected||sourceTransition);
+      button('应用筛选与分组',()=>{controls.open=false;queryControlsOpen=false;return load(0);},quick,!connected||sourceTransition);
       if(descriptor.filters)button('清除筛选条件',()=>{descriptor.filters=null;state.filter_texts={};editQuery();paintPage();return load(0);},quick);
       controls.append($('h4','筛选'));paintFilters(controls);
       controls.append($('h4','分组字段'));
@@ -589,6 +589,8 @@
       button('上一页',()=>load(state.cursors[state.page_index-1],'back'),paging,!state.page_index||!pageIsCurrent());button('下一页',()=>load(page.next_cursor,'next'),paging,!page.next_cursor||!pageIsCurrent());
     }
     function paintPage(){
+      const currentControls=rail.querySelector('.case-ui-query-controls');
+      if(currentControls)queryControlsOpen=currentControls.open;
       rail.replaceChildren($('h3','分组与筛选'));if(!state||!source){releaseContent();content.replaceChildren($('p','从数据目录选择一张固定版本表。','muted'));review.replaceChildren();paintStatus();return;}
       const railBody=$('div',undefined,'case-ui-rail-body');
       if(unavailableReason){rail.append($('p','固定来源不可用：'+unavailableReason,'error-box'));const key=input(state.current||'','历史 Case 行键',rail,20);button('读取固定来源标注历史',async()=>{if(!(/^(0|[1-9][0-9]{0,19})$/).test(key.value)||BigInt(key.value)>=2n**64n)throw Error('请输入规范的固定行键');row={_rowid:key.value};state.current=key.value;changed();paintContent();await loadReview();},rail,!connected);}

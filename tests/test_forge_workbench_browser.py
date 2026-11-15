@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import os
 from contextlib import contextmanager
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 from playwright.sync_api import expect
@@ -53,6 +54,29 @@ def screenshot(page,name):
     page.screenshot(path=str(path),full_page=True)
 
 
+def source_response_for(node_id):
+    def matches(response):
+        url=urlsplit(response.url)
+        return url.path.endswith('/graph-source') and parse_qs(url.query).get('node_id')==[node_id]
+    return matches
+
+
+def assert_selected_source(page,response,node_id,*,basis_kind,basis_digest=None):
+    """Check public author identity, independent of the renderer's display key."""
+    assert response.status==200,response.text()
+    query=parse_qs(urlsplit(response.url).query)
+    binding=json.loads(query['graph_binding'][0])
+    value=response.json()
+    assert query['node_id']==[node_id] and value['node_id']==node_id
+    assert value['graph_binding']==binding and binding['basis_kind']==basis_kind
+    if basis_digest is not None:
+        assert binding['basis_digest']==basis_digest
+    assert value['read_only'] is True and value['availability']=='available'
+    expect(page.locator('.wb-node.selected')).to_have_count(1)
+    expect(page.locator('.wb-source-body')).to_contain_text(value['path']+':'+str(value['start_line']))
+    return value
+
+
 def test_four_tabs_real_graph_parameters_code_and_layout(isolated,browser):
     with service(isolated,enable_config_write=True,workspace_config_write=True) as app,page_for(browser,app) as (page,errors):
         assert page.locator('.function-nav button').all_text_contents()==['开发','管道','数据','Readme']
@@ -83,7 +107,9 @@ def test_four_tabs_real_graph_parameters_code_and_layout(isolated,browser):
         expect(page.locator('.wb-checks')).to_be_visible()
         expect(page.locator('.wb-check-issues')).to_contain_text('当前配置的接线检查通过')
         expect(page.get_by_role('button',name='重新检查当前配置',exact=True)).to_be_enabled()
-        expect(page.locator('.wb-body')).not_to_be_visible()
+        # UI-D1.9 B05 deliberately retains the same graph and editable inspector
+        # beside check issues, so a diagnostic can locate its original node.
+        expect(page.locator('.wb-body')).to_be_visible()
         for width in (1920,1440,1200,1024,390,320):
             page.set_viewport_size({'width':width,'height':1050})
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
@@ -175,6 +201,12 @@ def test_working_draft_cannot_replace_sealed_run_configuration(isolated,browser)
         page.get_by_label('配置 /arguments/minimum',exact=True).fill('0.123')
         page.get_by_role('button',name='运行记录',exact=True).click()
         page.locator('.wb-run-record').filter(has_text=prepared['run_id'][-10:]).click()
+        # Preparation seals the report and parameters, but has not executed an
+        # action. Its report must not be presented as an execution DAG.
+        expect(page.get_by_role('button',name='当时检查图',exact=True)).to_be_visible()
+        expect(page.locator('.wb-node')).to_have_count(0)
+        expect(page.locator('.wb-graph-notices')).to_contain_text('可切换“当时检查图”')
+        page.get_by_role('button',name='当时检查图',exact=True).click()
         page.locator('.wb-node').filter(has_text='above_threshold').click()
         expect(page.get_by_label('配置 /arguments/minimum',exact=True)).to_have_value(str(original))
         expect(page.get_by_label('配置 /arguments/minimum',exact=True)).to_be_disabled()
@@ -199,10 +231,12 @@ def test_large_source_graph_has_bounded_index_and_local_navigation(isolated,brow
             expected=model.get(isolated,basis_kind='source',entry='flows/unexpanded.py:run',params='flows/unexpanded.json',node_offset=offset)
             page.get_by_role('button',name='下一组节点',exact=True).click()
             expect(page.get_by_label('定位图节点',exact=True).locator('option').first).to_have_attribute('value',expected['node_index']['nodes'][0]['id'])
-        target=expected['node_index']['nodes'][30]['id']
-        page.get_by_label('定位图节点',exact=True).select_option(target)
+        target_node=expected['node_index']['nodes'][30];target=target_node['id']
+        with page.expect_response(source_response_for(target)) as source:
+            page.get_by_label('定位图节点',exact=True).select_option(target)
         expect(page.locator('.wb-node')).to_have_count(1)
-        expect(page.locator('.wb-node.selected')).to_have_attribute('data-node',target)
+        value=assert_selected_source(page,source.value,target,basis_kind='source',basis_digest=expected['binding']['basis_digest'])
+        assert (value['path'],value['start_line'])==(target_node['source'],target_node['line'])
         expect(page.locator('.wb-source-body')).to_contain_text('unknown()')
         expect(page.locator('.wb-basis')).to_contain_text('尚未检查')
         page.get_by_role('button',name='返回全图范围',exact=True).click()
@@ -256,9 +290,10 @@ def test_original_declared_project_without_native_flows_is_usable_and_honest(ori
         expect(page.locator('.wb-inspector')).to_contain_text('输入输出类型、参数语义与执行可用性尚未核验')
         screenshot(page,'original-unconnected-initial-graph')
         page.get_by_role('button',name='检查问题',exact=True).click()
-        expect(page.locator('.wb-inspector')).to_contain_text('unsupported_flow_protocol')
-        expect(page.locator('.wb-inspector')).to_contain_text('能力未支持')
-        expect(page.locator('.wb-inspector')).to_contain_text('原 config → run_pipeline')
+        expect(page.locator('.wb-check-issues')).to_contain_text('unsupported_flow_protocol')
+        expect(page.locator('.wb-check-issues')).to_contain_text('能力未支持')
+        expect(page.locator('.wb-check-issues')).to_contain_text('原 config → run_pipeline')
+        expect(page.locator('.wb-body')).to_be_visible()
         expect(page.get_by_role('button',name='运行',exact=True)).to_be_disabled()
         page.get_by_role('button',name='接入与权限',exact=True).click()
         expect(page.locator('.wb-settings')).to_contain_text('已登记 0 个原生流程')
@@ -283,7 +318,6 @@ def test_original_declared_project_without_native_flows_is_usable_and_honest(ori
 
 def test_hidden_report_node_deep_link_and_large_offline_export_are_bounded(isolated,tmp_path,browser):
     from demiflow.workbench.api import export_report
-    from urllib.parse import urlencode
     (isolated/'flows/many.py').write_text("from demiflow import data\ndef run(*,source,target):\n    d=data.read_lance(source['uri'],version=source['version'])\n"+'    d=d.limit(1)\n'*130+"    return d.write_lance(target['uri'],mode='create',return_receipt=True)\n")
     (isolated/'flows/many.json').write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1',arguments={
         'source':{'kind':'table','alias':'candidates'},'target':{'kind':'output','location_id':'local','relative_uri':'many.lance'}})))
@@ -296,12 +330,17 @@ def test_hidden_report_node_deep_link_and_large_offline_export_are_bounded(isola
         target=dict(v=2,workspace=key,kind='inspection',report_digest=report['digest'],node_id=hidden)
         # Exercise opening a deep link, rather than same-document hash navigation.
         page.goto('about:blank')
-        page.goto(app.origin+'/#'+urlencode(dict(view=json.dumps(target))))
-        expect(page.locator('.wb-node.selected')).to_have_attribute('data-node',hidden)
+        with page.expect_response(source_response_for(hidden)) as source:
+            page.goto(app.origin+'/#'+urlencode(dict(view=json.dumps(target))))
+        value=assert_selected_source(page,source.value,hidden,basis_kind='report',basis_digest=report['digest'])
+        assert (value['path'],value['start_line'])==(report['nodes'][-1]['source'],report['nodes'][-1]['line'])
         assert page.locator('.wb-node').count()<=256
-        assert page.evaluate('ForgeView.decodeView(location.hash).node_id')==hidden
-        page.reload()
-        expect(page.locator('.wb-node.selected')).to_have_attribute('data-node',hidden)
+        assert page.evaluate('ForgeView.decodeView(location.hash)')==target
+        with page.expect_response(source_response_for(hidden)) as reloaded_source:
+            page.reload()
+        assert_selected_source(page,reloaded_source.value,hidden,basis_kind='report',basis_digest=report['digest'])
+        assert page.evaluate('ForgeView.decodeView(location.hash)')==target
+        assert page.locator('.wb-node').count()<=256
         output=tmp_path/'bounded-report.html';export_report(isolated,report['digest'],output)
         page.goto(output.as_uri())
         page.get_by_role('heading',name='接线检查报告',exact=True).wait_for()

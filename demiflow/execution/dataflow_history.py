@@ -38,7 +38,7 @@ from .run_journal import RunJournal
 # Original sealed-plan facts schema for the native v1/v2 chain/graph generation.
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
 # v3 native seal marker bound by seal_dataflow through the same journal slot family.
-from .dataflow_seal import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA
+from .dataflow_seal import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA, _validate_seal_marker
 # The only listed native checkpoint format translated into an in-memory image.
 CHECKPOINT_MANIFEST_SCHEMA = "demiflow.checkpoint_manifest.v1"
 PLAN_VIEW_SCHEMA = "demiflow.plan_view.v3"
@@ -46,10 +46,6 @@ PLAN_VIEW_SCHEMA = "demiflow.plan_view.v3"
 _SEALED_PLAN_KEY = "-sealed-plan"
 _DATAFLOW_SEALED_KEY = "-dataflow-sealed"
 _MAX_SEALED_PLAN_BYTES = 4 * 1024 ** 2
-_MANIFEST_KEYS = frozenset({"schema", "run_id", "action_id", "dag_id", "plan_id",
-                            "logical_ref", "physical_ref", "programs", "code_pin_ref",
-                            "identity_bridge_ref", "source_refs", "constants_ref",
-                            "plan_revision", "graph_digest", "physical_digest"})
 _SEALED_REF_KEYS = ("logical_ref", "physical_ref", "code_pin_ref",
                     "identity_bridge_ref", "constants_ref")
 _CODE_PIN_MEDIA = "application/x-demiflow-code-pin"
@@ -170,14 +166,8 @@ def _engine_run_id(journal):
 
 
 def _load_v3(journal, directory, action_id, marker):
-    if type(marker) is not dict:
-        raise _err("INCOMPATIBLE_HISTORY", "v3 seal marker is not a JSON object")
-    schema = marker.get("schema")
-    if schema != DATAFLOW_SEALED_SCHEMA:
-        raise _err("INCOMPATIBLE_HISTORY",
-                   "unsupported v3 seal schema: " + repr(schema))
-    if set(marker) != _MANIFEST_KEYS:
-        raise _err("INVALID_CONTRACT", "v3 seal marker key set is unsupported")
+    _validate_seal_marker(marker)
+    schema = marker["schema"]
     if marker["run_id"] != _engine_run_id(journal):
         raise _err("INVALID_CONTRACT", "v3 seal run_id differs from the journal recovery identity")
     if marker["action_id"] != action_id:

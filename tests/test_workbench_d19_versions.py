@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 
 import pyarrow as pa
 import pytest
+from playwright.sync_api import expect
 
 from d19_fixtures import owned_fixture
 from test_forge_markdown_reading import browser
@@ -34,6 +35,7 @@ from demiflow.workbench.analysis.arrow_bridge import decoded_batches
 from demiflow.workbench.analysis.materialize import input_chunks
 from demiflow.workbench.worker import operation
 from demiflow.forge.schema import ForgeError
+from demiflow.forge.platform import content_digest
 
 
 def _sha(path) -> str:
@@ -240,7 +242,10 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
         assert historical_response.value.status == 200, historical_response.value.text()
         historical_sample = historical_response.value.json()
         assert historical_sample['binding']['digest'] == v1['binding']
-        assert historical_sample['rows'] == v1['rows']
+        assert len(historical_sample['rows']) == v1['row_count']
+        projected_columns = [name for name in historical_sample['columns'] if name != '_rowid']
+        assert [{name: row[name] for name in projected_columns} for row in historical_sample['rows']] == [
+            {name: row[name] for name in projected_columns} for row in v1['rows']]
         expect(page.locator('.data-source-context')).to_contain_text('v1')
         expect(page.locator('.data-source-context')).to_contain_text('2 行')
         expect(page.locator('.data-source-context')).to_contain_text('5 字段')
@@ -279,12 +284,16 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     # This is a deliberate write counterexample; restore the exact original control
     # bytes afterwards so the read-chain hash invariant below stays meaningful.
     control_original = control_path.read_bytes()
-    ws.attach_table(root, alias, relative_uri=alias + '.lance', version=1,
-                    dataset_id=alias, schema_name=alias, schema_version='1')
-    code, value = _get(fx, 'sample', alias=alias, expected_binding=alias_binding,
-                       version=2, version_binding=v2['binding'], limit=10)
-    assert code >= 400, value
-    control_path.write_bytes(control_original)
+    try:
+        rebound = ws.attach_table(root, alias, relative_uri=alias + '.lance', version=1,
+                                  dataset_id=alias, schema_name=alias, schema_version='1',
+                                  expected=content_digest(json.loads(control_original)))
+        assert rebound['table']['ref']['lance_version'] == 1
+        code, value = _get(fx, 'sample', alias=alias, expected_binding=alias_binding,
+                           version=2, version_binding=v2['binding'], limit=10)
+        assert code >= 400, value
+    finally:
+        control_path.write_bytes(control_original)
 
     # run product is a single sealed version, never a re-versionable history
     run_alias = 'run:' + fx.run_facts['run_id'] + ':target'
@@ -296,13 +305,22 @@ def test_ui_d19_fixed_version_chain(owned_fixture, browser):
     assert code >= 400, value
 
     # -- 10. old locator / old URL stay byte-for-byte compatible --------------
-    old_locator = dict(kind='workspace_table', alias=alias, binding=alias_binding, columns=columns)
+    # The old locator shape still names the current alias's v2 schema; v1's
+    # removed `score` column is not a valid projection of that fixed v2 source.
+    with pytest.raises(ForgeError, match='Source projection differs from its fixed schema'):
+        web_sources.resolve(root, dict(kind='workspace_table', alias=alias,
+                                       binding=alias_binding, columns=v1['columns']))
+    old_locator = dict(kind='workspace_table', alias=alias, binding=alias_binding, columns=v2['columns'])
     old_source = web_sources.resolve(root, old_locator)['source']
     assert old_source['binding'] == alias_binding
     assert old_source['rows'] == v2['row_count']
+    assert [column['name'] for column in old_source['schema']] == v2['columns']
     code, plain = _get(fx, 'sample', alias=alias, expected_binding=alias_binding, limit=100)
     assert code == 200 and plain['binding']['digest'] == alias_binding
-    assert 'version' not in plain and 'version_binding' not in plain
+    # preview.sample already returned the actual fixed version before C4.1.
+    # It must remain v2; only the new version_binding query is absent here.
+    assert plain['version'] == 2 and 'version_binding' not in plain
+    assert plain == current
 
     # -- 11. the original control file never moved ----------------------------
     assert _sha(control_path) == control_baseline, 'tables control file hash changed during version reads'

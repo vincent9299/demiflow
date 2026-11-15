@@ -98,11 +98,28 @@
   const blobs = new Set(),blobSizes=new Map();
   let mediaBytes = 0;
   const staleRequest = () => new DOMException('页面选择已变化', 'AbortError');
-  function pageKind() {
-    const kind = (pendingView || view)?.kind || 'overview';
+  function pageKind(reference = pendingView || view) {
+    const kind = reference?.kind || 'overview';
     return ({development_session:'development',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'flows',run_compare:'flows',runs:'flows',checks:'flows'})[kind] || kind;
   }
   function target(kind, fields = {}) { return V.validateView({v:2, workspace:workspaceId, kind, ...fields}); }
+  // At most four validated locators per registered project. Drafts stay in
+  // their existing Stores; only a confirmed current view is remembered here.
+  function rememberTab() {
+    if (viewState !== 'ready') return;
+    const reference = selection || view;
+    if (!reference || reference.v !== 2 || reference.workspace !== workspaceId) return;
+    const page = pageKind(reference);
+    if (!['development','flows','tables','overview'].includes(page)) return;
+    const saved = projectTabs.get(workspaceId) || {page, views:new Map()};
+    saved.page = page; saved.views.set(page, V.validateView(reference));
+    projectTabs.set(workspaceId, saved);
+  }
+  function tabTarget(page) {
+    const current = selection || view;
+    if (viewState === 'ready' && current?.workspace === workspaceId && pageKind(current) === page) return current;
+    return projectTabs.get(workspaceId)?.views.get(page) || target(page);
+  }
   function revokeImages() { for (const url of blobs) URL.revokeObjectURL(url); blobs.clear();blobSizes.clear(); mediaBytes = 0; }
   async function api(path, query = {}, body, projectId = workspaceId, options = {}) {
     if (offline) throw new Error('离线报告不能读取工作区或重新检查');
@@ -245,6 +262,7 @@
     value = V.validateView(value);
     if (value.workspace !== (value.v === 2 ? workspaceId : context.workspace)) throw new Error('workspace_mismatch：此链接属于另一个工作区');
     if(value.v === 1)value={...value,v:2,workspace:workspaceId};
+    rememberTab();
     readController.abort();readController=new AbortController();
     const epoch = ++viewEpoch; selectionEpoch++; revokeImages();disposeReaders();closeNavigation();updates={};
     pendingView = value; clearSelection(); viewState = 'loading'; main.replaceChildren();main.classList.remove('bound-case-active','original-case-active','original-table-active','workbench-active','data-active','data-notebook-active','data-case-config-active','data-catalog-expanded','data-catalog-collapsed');projectHeading();
@@ -252,7 +270,6 @@
       putHistory(value,historyMode);historyMode='replace';
       main.append($('p','正在读取请求的数据引用…','busy view-loading'));
     }
-    projectTabs.set(workspaceId, pageKind());
     for (const b of nav.querySelectorAll('[data-page]')) {
       const current = b.dataset.page === pageKind();
       b.classList.toggle('active', current);
@@ -289,7 +306,7 @@
       throw err;
     }
   }
-  function navigate(page) { return openView(target(page)); }
+  function navigate(page) { return openView(tabTarget(page)); }
   function syncStatus(message, failed=false) {
     const box=document.getElementById('sync-status');if(!box)return;
     box.className='nav-note'+(failed?' sync-error':'');
@@ -539,7 +556,7 @@
     const bound=context.tables.filter(t=>t.uri===context.workspace.replace(/\/+$/,'')+'/'+path&&t.binding_digest);
     if(bound.length===1)return {label:'查看固定版本表 · '+bound[0].alias,open:async()=>{current();await openTable(bound[0].alias,bound[0].binding_digest);}};
     const refs=project?.tables.filter(t=>t.path===path&&t.status==='available')||[];
-    if(refs.length===1)return {label:'查看数据 · '+path,open:async()=>{current();pendingOriginalPath=path;await navigate('tables');}};
+    if(refs.length===1)return {label:'查看数据 · '+path,open:async()=>{current();pendingOriginalPath=path;await openView(target('tables'));}};
     return null;
   }
   function overview() {
@@ -1223,7 +1240,7 @@
       register:handle=>{mountedHandle=handle;if(isCurrent())workbenchView=handle;else handle.dispose();},
       projectCheckState:()=>({version:checkVersion,active:checksPending>0}),
       continueInput,
-      continueWithResult:async(run,output)=>{continueInput=addResultTable(run,output);await navigate('flows');},
+      continueWithResult:async(run,output)=>{continueInput=addResultTable(run,output);await openView(target('flows'));},
       onContext:fresh=>{if(epoch===viewEpoch&&workspaceId===id&&fresh.workspace_id===id){context=fresh;projectHeading();}},
       rememberView:fields=>{if(epoch!==viewEpoch||workspaceId!==id)return;reference=V.validateView({v:2,workspace:id,...fields});
         if(viewState==='ready'){view=reference;selection=reference;selectionEpoch++;putHistory(reference,'replace');}},
@@ -1329,6 +1346,7 @@
     if(!canLeaveViews())return;
     if(activeWrites)throw new Error('正在提交操作，完成后再切换项目。');
     if(!projectList.some(p=>p.workspace_id===id))throw new Error('此工作区尚未登记');
+    rememberTab();
     clearTimeout(syncTimer);readController.abort();readController=new AbortController();
     document.getElementById('workspace-status').open=false;
     const epoch=++viewEpoch;selectionEpoch++;revokeImages();disposeReaders();closeNavigation();
@@ -1346,7 +1364,7 @@
       context=fresh;
       projectHeading();
       for(const b of nav.querySelectorAll('[data-page]'))b.disabled=false;
-      await openView(requested||target(projectTabs.get(id)||'overview'),{historyMode});
+      await openView(requested||tabTarget(projectTabs.get(id)?.page||'overview'),{historyMode});
       changes=await api('changes');
       lastObserved=new Date();
       await refreshAudit();
