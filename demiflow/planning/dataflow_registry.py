@@ -101,6 +101,7 @@ _SOURCES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("producer", _READERS + "ProducerReader", ("producer_position", "producer_cursor")),
     ("queue_history", _READERS + "HistoryReader", ("claim_ref", "record_index")),
     ("join", _RELATIONAL + "join_partitions", ()),
+    ("exclude_keys", _RELATIONAL + "join_partitions", ()),
     ("reduce", _RELATIONAL + "reduce_partition", ()),
     ("groups", _RELATIONAL + "emit_groups", ()),
     ("union", _RELATIONAL + "union_inputs", ()),

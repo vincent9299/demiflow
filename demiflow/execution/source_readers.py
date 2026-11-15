@@ -500,6 +500,10 @@ class LanceReader(_BaseReader):
         from ..lance.read import _iter_scan, _iter_vector
         from ..lance.storage import open_lance_dataset
 
+        from .lance_key_source import LanceKeySource, key_rows
+        if isinstance(self._plan, LanceKeySource):
+            yield from key_rows(self)
+            return
         exact = replace(self._plan.query, version=self._version)
         batch_rows = max(1, min(256, self._services.bounds.max_batch_bytes // self._services.bounds.max_row_bytes))
         def rows(batch):
@@ -543,6 +547,10 @@ class LanceReader(_BaseReader):
             return None
         fragment_id, row_offset, row = item
         position = {"version": self._version, "fragment_id": fragment_id, "row_offset": row_offset}
+        from .lance_key_source import LanceKeySource
+        if isinstance(self._plan, LanceKeySource):
+            row = dict(row)
+            position["row_id"] = row.pop("_rowid")
         self._fragment_id = fragment_id
         self._row_offset = row_offset + 1
         self._offset = {"version": self._version, "fragment_id": fragment_id,

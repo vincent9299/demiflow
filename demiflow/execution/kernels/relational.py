@@ -77,6 +77,10 @@ def join_partitions(
     services: RuntimeServices,
 ) -> Iterator[Record]:
     """K005: bounded key/reference hash join, no global business ordering."""
+    if spec.kind == 'exclude_keys':
+        from .lance_keys import exclude_keys
+        yield from exclude_keys(left, right, spec=spec, services=services)
+        return
     from .join_spool import join_pairs
     lk = tuple(_cfg(spec, "on"))
     rk = tuple(_cfg(spec, "right_on", list(lk)))

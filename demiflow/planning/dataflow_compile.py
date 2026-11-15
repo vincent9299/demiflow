@@ -196,7 +196,9 @@ def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
                 "options": dict(source.options),
                 "connection_factory": describe(source.connection_factory)}
     if isinstance(source, LanceSource):
-        return {"kind": "lance", "query": describe(source.query)}
+        from ..execution.lance_key_source import LanceKeySource
+        return {"kind": "lance", "query": describe(source.query),
+                **({"key_only": True} if isinstance(source, LanceKeySource) else {})}
     if isinstance(source, MaterializedSource):
         ref = getattr(source.handle, "recovery_reference", None)
         return {"kind": "materialized", "row_count": source.row_count,
@@ -659,7 +661,12 @@ class _Capture:
         kind = _source_kind(source)
         child_indices = []
         for binding in bindings:
-            child = self.capture_chain(binding.source, binding.plan, binding.path)
+            if isinstance(source, KeyedSource) and source.kind == "exclude_keys" and binding.port == "left":
+                from ..execution.lance_key_source import LanceKeySource
+                narrowed = LanceKeySource(replace(binding.source.query, columns=tuple(source.on)))
+                child = self.capture_chain(narrowed, binding.plan, binding.path)
+            else:
+                child = self.capture_chain(binding.source, binding.plan, binding.path)
             child_indices.append((child, binding.port))
         semantic = _source_semantic_facts(source)
         reducer = None
@@ -678,6 +685,11 @@ class _Capture:
             profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
+        if isinstance(source, KeyedSource) and source.kind == "exclude_keys":
+            configuration = _plain(kernel.configuration)
+            configuration.update(lance_key_source=self.nodes[child_indices[0][0]].occurrence_id,
+                                 payload_columns=list(source.left.source.query.columns))
+            kernel = replace(kernel, configuration=configuration)
         index = self._add_node("relational", kernel, semantic, {}, code_identity, None)
         if reducer is not None:
             node = self.nodes[index]
