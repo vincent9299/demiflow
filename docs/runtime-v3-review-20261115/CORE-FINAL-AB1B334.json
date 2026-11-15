@@ -1,0 +1,125 @@
+{
+  "candidate": "ab1b33442685d09257b1ebc46e55fb40262317de",
+  "branch": "engine/gpt-runtime-v3-review-20261115",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115",
+  "suites": [
+    {
+      "label": "原宽数据压力",
+      "tested_head": "ab1b33442685d09257b1ebc46e55fb40262317de",
+      "candidate": "ab1b33442685d09257b1ebc46e55fb40262317de",
+      "command": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "/tmp/demiflow-final-v3-runner.py",
+        "/tmp/demiflow-final-v3-pressure-r4",
+        "tests/test_dataset_large_payload.py"
+      ],
+      "suite": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "5",
+        "time": "275.093",
+        "timestamp": "2026-11-16T07:40:01.810895+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "inputs_count": 1784,
+      "inputs_equal_current": true,
+      "evidence": "/tmp/demiflow-final-v3-pressure-r4-evidence/verification.json",
+      "evidence_sha256": "bddbaebd5d56cdcd50e23f1b12343b064f8991b229dc9b995d4f89f58ded608f",
+      "junit": "/tmp/demiflow-final-v3-pressure-r4.xml",
+      "junit_sha256": "a039fbb75715cc7a52d1f3809fe5c6496bad40f08f0f25503baaa02b8751e3fd",
+      "unchanged_inputs": true,
+      "head_unchanged": true,
+      "clean_after": true
+    },
+    {
+      "label": "原生提交恢复与历史",
+      "tested_head": "ab1b33442685d09257b1ebc46e55fb40262317de",
+      "candidate": "ab1b33442685d09257b1ebc46e55fb40262317de",
+      "command": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "/tmp/demiflow-final-v3-runner.py",
+        "/tmp/demiflow-final-v3-core-ab1",
+        "tests/test_runtime_v3_idle_notification.py",
+        "tests/test_runtime_v3_journal_wakeup.py",
+        "tests/test_runtime_v3_gc_journal_contention.py",
+        "tests/test_runtime_v3_terminal_collection.py",
+        "tests/test_runtime_v3_late_final.py",
+        "tests/test_runtime_v3_finite_finish.py::test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity",
+        "tests/test_runtime_v3_eoi_progress.py::test_final_native_batch_eoi_cut_survives_crash_without_second_request",
+        "tests/test_runtime_v3_fetch_graph.py::test_fetch_recovers_original_native_receipt_across_dataset_cut",
+        "tests/test_runtime_v3_history_protection.py",
+        "tests/test_runtime_v3_acceptance.py::test_disk_gc",
+        "tests/test_runtime_v3_acceptance.py::test_commit_crash_matrix",
+        "tests/test_runtime_v3_acceptance.py::test_model_effect_recovery",
+        "tests/test_runtime_v3_acceptance.py::test_remote_journal",
+        "tests/test_runtime_v3_save_product.py::test_managed_published_before_receipt_admits_only_original_native_recovery"
+      ],
+      "suite": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "55",
+        "time": "416.206",
+        "timestamp": "2026-11-16T07:45:10.699939+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "inputs_count": 1784,
+      "inputs_equal_current": true,
+      "evidence": "/tmp/demiflow-final-v3-core-ab1-evidence/verification.json",
+      "evidence_sha256": "65ca07d0de0cdb2bff1a4b62aef9e7501486f005b98d8492b1765994589c01bc",
+      "junit": "/tmp/demiflow-final-v3-core-ab1.xml",
+      "junit_sha256": "769e9358b910a0085e00c140d22a7debc3c1e82ac402e9ba5fc590465efa55ac",
+      "unchanged_inputs": true,
+      "head_unchanged": true,
+      "clean_after": true
+    },
+    {
+      "label": "原 stream 生命周期与取消",
+      "tested_head": "54f38080a23a2ecd9583fb7c00bfe65cbe9cb876",
+      "candidate": "ab1b33442685d09257b1ebc46e55fb40262317de",
+      "command": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "/tmp/demiflow-final-v3-runner.py",
+        "/tmp/demiflow-final-v3-original-stream-ab1",
+        "tests/test_stream_map.py::test_class_scope_is_lazy_recreated_per_action_and_closed",
+        "tests/test_stream_map.py::test_partial_bound_inputs_and_outputs_keep_original_fields",
+        "tests/test_stream_map.py::test_worker_failures_cleanup_even_partial_start",
+        "tests/test_stream_map.py::test_slow_consumer_bounds_wide_rows_and_inflight_calls",
+        "tests/test_stream_map.py::test_cleanup_failure_still_closes_all_workers_and_native_actors",
+        "tests/test_stream_map.py::test_external_cancel_drains_map_calls_before_action_cleanup",
+        "tests/test_stream_map.py::test_callback_cancellation_never_returns_partial_success",
+        "tests/test_stream_map.py::test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls"
+      ],
+      "suite": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "17",
+        "time": "54.351",
+        "timestamp": "2026-11-16T07:53:32.753311+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "inputs_count": 1784,
+      "inputs_equal_current": true,
+      "evidence": "/tmp/demiflow-final-v3-original-stream-ab1-evidence/verification.json",
+      "evidence_sha256": "a54031e134612a6aa777f9a750ebe7efd54cda28797d0b0cd69d38ff074ddab7",
+      "junit": "/tmp/demiflow-final-v3-original-stream-ab1.xml",
+      "junit_sha256": "1f186a5475eb0f25cdc6af326329326e744bce68673b3447143998ad718c46b4",
+      "unchanged_inputs": true,
+      "head_unchanged": true,
+      "clean_after": true
+    }
+  ],
+  "original_stream_test_identical_to": "2177a2e",
+  "source_scope": "demiflow/ and tests/ remain byte-identical to candidate; final stream tested on docs-only descendant 54f3808",
+  "not_claimed": [
+    "all suites are disjoint",
+    "full process RSS hard bound",
+    "physical GPU or multiple hosts",
+    "whole product root or complete formal performance"
+  ]
+}
