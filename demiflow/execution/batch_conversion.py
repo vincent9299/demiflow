@@ -15,6 +15,14 @@ def _error(message):
     return DataflowError('BUDGET_EXCEEDED', 'batch conversion admission: ' + message)
 
 
+def _builtin_storage(dtype):
+    """Known native storage layouts; never invoke a user extension hook."""
+    import pyarrow as pa
+    known = tuple(getattr(pa, name) for name in ('JsonType', 'UuidType', 'Bool8Type')
+                  if hasattr(pa, name))
+    return dtype.storage_type if type(dtype) in known else None
+
+
 def _binary_size(value):
     if type(value) is bytes or type(value) is str and value.isascii():
         return len(value)
@@ -77,10 +85,11 @@ class _Admission:
         if pa.types.is_null(dtype):
             return
         if isinstance(dtype, pa.BaseExtensionType):
-            if type(dtype) is getattr(pa, 'JsonType', None):
-                # Standard JSON is a declared string layout, not a user
-                # extension hook. Keep its original schema on the real table.
-                self.arrow(column, dtype.storage_type, depth + 1)
+            storage = _builtin_storage(dtype)
+            if storage is not None:
+                # Keep native JSON/UUID/Bool8 declarations, including empty
+                # and null-only typed columns, on the real constructor.
+                self.arrow(column, storage, depth + 1)
                 return
             raise DataflowError('UNSUPPORTED_CAPABILITY',
                 'batch conversion admission cannot bound Arrow extension type ' + str(dtype))
@@ -278,8 +287,9 @@ class _Admission:
         self.visit(depth)
         if value is None:
             return 16
-        if type(dtype) is getattr(pa, 'JsonType', None):
-            return self.typed_boxed(value, dtype.storage_type, depth + 1)
+        storage = _builtin_storage(dtype)
+        if storage is not None:
+            return self.typed_boxed(value, storage, depth + 1)
         if pa.types.is_dictionary(dtype) or pa.types.is_run_end_encoded(dtype):
             return self.typed_boxed(value, dtype.value_type, depth + 1)
         if pa.types.is_string(dtype) or pa.types.is_large_string(dtype) or pa.types.is_string_view(dtype):

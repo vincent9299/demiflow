@@ -291,3 +291,16 @@ def test_public_standard_layout_schema_and_pandas(tmp_path, provider, dtype, val
         batches = list(ds.iter_batches(batch_size=3, batch_format='pandas'))
         assert len(batches) == 1
         pd.testing.assert_frame_equal(batches[0], table.to_pandas())
+
+
+@pytest.mark.parametrize('dtype', [pa.uuid(), pa.bool8()], ids=['uuid', 'bool8'])
+@pytest.mark.parametrize('rows', [[], [{'value': None}]], ids=['empty', 'null'])
+def test_public_builtin_nullable_extension_preserves_schema(tmp_path, provider, dtype, rows):
+    schema = pa.schema([pa.field('value', dtype, nullable=True)],
+                       metadata={b'source': b'nullable-builtin'})
+    expected = pa.Table.from_pylist(rows, schema=schema)
+    with RunContext.start(tmp_path / 'run', limits={'timeout_s': 60}) as run, _local(provider, 4*1024*1024):
+        actual = data.from_arrow(expected).take_batch(1, batch_format='pyarrow')
+        assert actual.equals(expected, check_metadata=True)
+        assert actual.schema.equals(schema, check_metadata=True)
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
