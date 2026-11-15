@@ -355,6 +355,11 @@ class WorkerGraphRunner:
                        'metrics': dict(self._metrics[occ])}
             if usage is not None:
                 payload['prompt_usage'] = usage
+            kernel = self.e._kernels.get((occ, self.partition))
+            if getattr(kernel, 'observations', None) is not None:
+                observed = kernel.observations.snapshot()
+                if observed['count']:
+                    payload['callback_observations'] = observed
             self._send('progress', payload)
         self._dirty_metrics.clear()
         self._metrics_at = time.monotonic()

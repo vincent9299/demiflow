@@ -359,7 +359,7 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
 
 # -- D012 -----------------------------------------------------------------
 def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDataflow,
-                  *, store, identity_bridge=None) -> SealedExecution:
+                  *, store, identity_bridge=None, observation_labels=None) -> SealedExecution:
     if not isinstance(action, RunAction):
         raise DataflowError("INVALID_CONTRACT", "seal_dataflow requires a driver RunAction")
     if not isinstance(graph, DataflowGraph) or not isinstance(physical, PhysicalDataflow):
@@ -417,6 +417,16 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
              "graph_digest": compute_graph_digest(graph),
              "physical_digest": compute_physical_digest(physical)}
     original = context.journal.source_binding(action.action_id + _SEAL_KEY)
+    if observation_labels is not None:
+        labels = dict(observation_labels)
+        if (not set(labels) <= {n.occurrence_id for n in graph.nodes}
+                or any(type(v) is not str or not v for v in labels.values())
+                or len(set(labels.values())) != len(labels)):
+            raise DataflowError('INVALID_CONTRACT', 'observation labels must uniquely name graph occurrences')
+        document(labels, bounds.max_control_bytes)
+        facts['observation_labels'] = labels
+    elif original is not None and 'observation_labels' in original:
+        facts['observation_labels'] = original['observation_labels']
     if original is None:
         # Match the existing artifact/workbench epoch-millisecond contract.
         # This is journal metadata, never part of graph/plan/artifact identity.

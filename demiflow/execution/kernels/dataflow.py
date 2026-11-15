@@ -264,6 +264,7 @@ def invoke_unary(
     instance: CallableInstance,
     services: RuntimeServices,
     schemas=None,
+    observe=None,
 ) -> Iterator[Record]:
     """K002: per-row map/filter/flat_map/column/sample/limit semantics."""
     _check_stop(services)
@@ -277,7 +278,13 @@ def invoke_unary(
         schemas = RecordSchemas(services)
 
     if kind in ("MapOp", "BoundMapOp") and not cfg.get("streaming_map"):
-        result = instance(row)
+        import time
+        started = time.perf_counter_ns()
+        try:
+            result = instance(row)
+        finally:
+            if observe is not None:
+                observe(time.perf_counter_ns() - started)
         if not isinstance(result, Mapping):
             if position.get('queue_delivery_ref'):
                 from ..recovery_contract import RecoveryContractError
@@ -310,14 +317,23 @@ def invoke_unary(
     elif kind in ("MapOp", "BoundMapOp", "AsyncMapOp", "DeduplicateOp", "AgentMapOp", "OperatorLLMMapOp",
                   "prompt", "agent", "fetch", "document", "VectorSearchOp", "SearchWebOp",
                   "RegisterDocumentsOp", "ReadDocumentsOp"):
+        import time
+        started, miss = time.perf_counter_ns(), None
         try:
-            result = _invoke_scoped(instance, row, (record,), spec)
-        except Exception as exc:
-            admitted = set(cfg.get("catch", ()))
-            names = {cls.__module__ + "." + cls.__qualname__ for cls in type(exc).__mro__}
-            if not (admitted & names):
-                raise
-            return
+            try:
+                result = _invoke_scoped(instance, row, (record,), spec)
+            except Exception as exc:
+                admitted = set(cfg.get("catch", ()))
+                names = {cls.__module__ + "." + cls.__qualname__ for cls in type(exc).__mro__}
+                if not (admitted & names):
+                    raise
+                miss = type(exc).__name__
+                return
+            if result is None:
+                miss = 'drop'
+        finally:
+            if observe is not None:
+                observe(time.perf_counter_ns() - started, miss)
         if (position.get('queue_delivery_ref') and position.get('queue_delivery_kind') != 'producer'
                 and not isinstance(result, Mapping)):
             from ..recovery_contract import RecoveryContractError

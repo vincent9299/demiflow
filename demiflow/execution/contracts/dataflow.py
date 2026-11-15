@@ -1734,12 +1734,20 @@ class CompiledDataflow:
     graph: DataflowGraph
     declarations: tuple[ProgramDeclaration, ...]
     report_bindings: tuple[Mapping[str, Json], ...] = ()
+    observation_labels: Mapping[str, str] | None = None
 
     def __post_init__(self):
         if not isinstance(self.graph, DataflowGraph):
             raise _err("CompiledDataflow.graph must be a DataflowGraph")
         object.__setattr__(self, "declarations", _tuple(self.declarations, "CompiledDataflow.declarations", lambda v, l: _is_declaration(v, l)))
         object.__setattr__(self, "report_bindings", tuple(_json_map(v, "report binding") for v in self.report_bindings))
+        if self.observation_labels is not None:
+            labels = _json_map(self.observation_labels, 'observation labels')
+            if (not set(labels) <= {n.occurrence_id for n in self.graph.nodes}
+                    or any(type(v) is not str or not v for v in labels.values())
+                    or len(set(labels.values())) != len(labels)):
+                raise _err('observation labels must uniquely name graph occurrences')
+            object.__setattr__(self, 'observation_labels', labels)
 
 
 def _is_declaration(value, label):

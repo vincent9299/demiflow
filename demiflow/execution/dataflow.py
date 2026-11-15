@@ -365,7 +365,8 @@ class DataflowExecution:
                                   for n in graph.nodes]}, action_id=self._action.action_id,
                         report_digest=checked.report_digest,
                         bindings=[thaw_record_value(b) for b in compiled.report_bindings])
-            sealed = seal_dataflow(self._action, graph, physical, store=self._store, identity_bridge=bridge)
+            sealed = seal_dataflow(self._action, graph, physical, store=self._store, identity_bridge=bridge,
+                                   observation_labels=compiled.observation_labels)
             stage_runtime_bundle(sealed, store=self._store, bounds=self._bounds)
         # Preserve the sealed plan; current execution budgets only intersect
         # its original ceilings. The same store/journal/allocator retain ownership.
@@ -468,6 +469,8 @@ class DataflowExecution:
         self._restore_image = (self._checkpoint.recover(sinks=self._sinks)
             if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
+            from .dataflow_operator_observations import restore_operator_observations
+            restore_operator_observations(self, self._restore_image)
             pub = self._publication(self._restore_image)
             self._terminal_seen = pub["manifest"]["total_rows"]
             self._replay = self._published_records(pub)
@@ -772,6 +775,8 @@ class DataflowExecution:
             self._node_metrics[(occ, partition)] = metrics
             from .dataflow_usage import observe_prompt_usage
             observe_prompt_usage(self, event, payload)
+            from .dataflow_operator_observations import observe_operator
+            observe_operator(self, event, payload)
             key = self._report_keys.get(occ)
             if key is not None:
                 self._checked.progress(key, **{k: metrics[k] - old[k] for k in metrics})

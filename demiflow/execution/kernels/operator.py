@@ -243,6 +243,8 @@ class OperatorKernel:
         if spec.kind not in KERNEL_KINDS:
             raise _err("INVALID_CONTRACT", "unknown kernel kind", kind=spec.kind)
         self._spec = spec
+        from ..dataflow_operator_observations import CallbackObservations
+        self.observations = CallbackObservations()
         self._services = services
         from ..record_schema import RecordSchemas
         self._schemas = RecordSchemas(services)
@@ -508,10 +510,11 @@ class OperatorKernel:
             if self._calls is None:
                 yield from self._emit(preserve_block(invoke_unary(self._spec, record,
                     instance=self._slot_instance(0) if kind in _INSTANCE_KINDS else self._instance,
-                    services=self._services, schemas=self._schemas), record.block_partition))
+                    services=self._services, schemas=self._schemas, observe=self.observations.observe), record.block_partition))
             else:
                 yield from self._emit(self._calls.submit(lambda slot: preserve_block(invoke_unary(self._spec, record,
-                    instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), record.block_partition), scope=self._call_scope, input=record))
+                    instance=self._slot_instance(slot), services=self._services, schemas=self._schemas,
+                    observe=self.observations.observe), record.block_partition), scope=self._call_scope, input=record))
         elif kind in _BATCH_INSTANCE_KINDS:
             yield from self._push_batch(record)
         elif kind in _STREAM_GROUP_KINDS:
@@ -768,6 +771,9 @@ class OperatorKernel:
         if self._task_rows:
             image['task'] = {'batch_rows': self._task_rows, 'input_frontier': self._task_frontier,
                              'ordinal': self._task_ordinal, 'origin': self._task_origin}
+        observed = self.observations.snapshot()
+        if observed['count']:
+            image['callback_observations'] = observed
         raw = state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes)
         limit = self._services.bounds.max_state_bytes
         if limit > 0 and len(raw) > limit:
@@ -843,6 +849,8 @@ class OperatorKernel:
             self._apply_image(image)
 
     def _apply_image(self, image: Mapping[str, Any]) -> None:
+        if 'callback_observations' in image:
+            self.observations.restore(image['callback_observations'])
         if self._task_rows:
             task = image.get('task')
             if not isinstance(task, Mapping) or set(task) != {'batch_rows', 'input_frontier', 'ordinal', 'origin'}:
@@ -906,7 +914,8 @@ class OperatorKernel:
             def compute(slot, input):
                 instance = self._slot_instance(slot)
                 invoke = invoke_batch if type(input) is tuple else invoke_unary
-                return invoke(self._spec, input, instance=instance, services=self._services, schemas=self._schemas)
+                options = {} if type(input) is tuple else {'observe': self.observations.observe}
+                return invoke(self._spec, input, instance=instance, services=self._services, schemas=self._schemas, **options)
             self._calls.restore(inflight, slots=image.get('call_slots'), compute=compute)
         elif inflight:
             raise _err('INCOMPATIBLE_HISTORY', 'Pending calls have no invocation slots')

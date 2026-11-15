@@ -574,6 +574,7 @@ class _Capture:
         from ..execution.checked import current
         self.checked = current()
         self.report_bindings = []
+        self.observation_labels = {}
 
     def _bind_report(self, index, key):
         if key is None or self.checked is None:
@@ -778,6 +779,15 @@ class _Capture:
                 if isinstance(callable_spec, CallableSpec) else {}
             )
             new_index = self._add_node("transform", kernel, semantic, {}, code_identity, None)
+            options = getattr(operation, 'stream_options', None)
+            base = (getattr(options, 'label', None) or getattr(operation, 'label', None)
+                    or getattr(callable_spec, 'name', None) or kernel.kind)
+            label, suffix = base, 1
+            used = set(self.observation_labels.values())
+            while label in used:
+                suffix += 1
+                label = base + '#' + str(suffix)
+            self.observation_labels[self.nodes[new_index].occurrence_id] = label
             if self.checked is not None:
                 self._bind_report(new_index, self.checked.operation_bindings.get(id(operation)))
             self._add_edge(index, "main", new_index, "main")
@@ -873,7 +883,8 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
     )
     validate_graph(graph, bounds=bounds)
     return CompiledDataflow(graph=graph, declarations=declarations,
-                            report_bindings=tuple(capture.report_bindings))
+                            report_bindings=tuple(capture.report_bindings),
+                            observation_labels=capture.observation_labels)
 
 
 def lower_action(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
