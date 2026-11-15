@@ -374,8 +374,8 @@ class _ExecuteActionRecorder:
             recorder.calls.append(entry)
             return handle
 
-        self._module.execute_action = wrapped
         api = importlib.import_module("demiflow.execution.dataflow_api")
+        self._module.execute_action = wrapped
         if getattr(api, "execute_action", None) is self._original:
             self._aliases.append((api, self._original))
             api.execute_action = wrapped

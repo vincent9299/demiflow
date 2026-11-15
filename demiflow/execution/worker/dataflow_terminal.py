@@ -24,6 +24,8 @@ def terminal_scalar(stream, *, spec, services, occurrence_id):
         aggregates = program.value if isinstance(program.value, tuple) else (program.value,)
         states = [a.initial_state() for a in aggregates]
     rows, size, schema = 0, 0, None
+    from ..record_schema import RecordSchemas
+    schemas = RecordSchemas(services)
     stream.flush()
     stream.seek(0)
     try:
@@ -51,7 +53,9 @@ def terminal_scalar(stream, *, spec, services, occurrence_id):
                     state_codec.dumps(states, max_bytes=services.bounds.max_state_bytes)
             else:
                 import pyarrow as pa
-                next_schema = pa.Table.from_pylist([row]).schema
+                next_schema = schemas.read(record.schema_ref)
+                if next_schema is None:
+                    next_schema = pa.Table.from_pylist([row]).schema
                 schema = next_schema if schema is None else pa.unify_schemas([schema, next_schema], promote_options='permissive')
         if kind == 'aggregate':
             values = {a.name: a.finalize_state(state) for a, state in zip(aggregates, states)}

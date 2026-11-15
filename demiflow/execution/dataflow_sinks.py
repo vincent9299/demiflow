@@ -340,7 +340,15 @@ class NativeTerminalSink(_DataflowArtifactSink):
         from .dataflow_handles import _ChunkStream
         from .exchange.dataflow_bridge import _decode_record_document, _decode_payload
         from .contracts.dataflow import thaw_record_value
+        from .record_schema import RecordSchemas
+        schemas = RecordSchemas(store=self._store, bounds=self._bounds)
         batch, size = [], 0
+        schema_ref, schema = None, None
+        def table():
+            result = pa.Table.from_pylist(batch, schema=schema)
+            if size + result.nbytes > self._bounds.max_batch_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')
+            return result
         for partition in manifest['partitions']:
             ref = _artifact_from_json(partition['data_ref'])
             stream = _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes)))
@@ -356,13 +364,15 @@ class NativeTerminalSink(_DataflowArtifactSink):
                         max_bytes=self._bounds.max_row_bytes)), max_bytes=self._bounds.max_row_bytes)
                 else:
                     row = thaw_record_value(record.inline)
-                if batch and (len(batch) >= 256 or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
-                    yield pa.Table.from_pylist(batch)
+                if batch and (record.schema_ref != schema_ref or len(batch) >= 256 or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
+                    yield table()
                     batch, size = [], 0
+                schema_ref = record.schema_ref
+                schema = schemas.read(schema_ref)
                 batch.append(row)
                 size += record.encoded_bytes
         if batch:
-            yield pa.Table.from_pylist(batch)
+            yield table()
 
     def prepare(self, manifest, context):
         result = super().prepare(manifest, context)

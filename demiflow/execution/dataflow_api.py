@@ -177,6 +177,11 @@ def record_execution_metadata(request, execution):
     executor._last_metadata = ExecutionMetadata(source_name=type(request.source).__name__,
         stages=stages, rows_output=execution._confirmed_rows, diagnostics=diagnostics,
         run_ref=request.action.context.ref)
+    if hasattr(executor, '_local_kernel_stats'):
+        executor._local_kernel_stats = {**diagnostics,
+            'status': 'complete' if execution._state == 'succeeded' else execution._state,
+            'rows_output': execution._confirmed_rows,
+            'engine': 'dataflow_v3', 'action_id': request.action.action_id}
 
 
 # -- E016 run_dataset_action ----------------------------------------------
@@ -209,8 +214,18 @@ def run_dataset_action(request: ActionRequest) -> object:
                 raise ValueError("Dataset contains more than the take_all limit")
             return rows
         if request.kind == "take_batch":
-            rows = collect_rows(handle, limit=arguments.get("batch_size", 20), bounds=bounds)
-            return _convert_batch(rows, arguments.get("batch_format", "default"), handle)
+            from .record_schema import RecordSchemas
+            schemas, seen = RecordSchemas(handle.services), []
+            def receive_schema(ref):
+                schema = schemas.read(ref)
+                if not seen:
+                    seen.append(schema)
+                elif schema != seen[0]:
+                    raise DataflowError('INVALID_CONTRACT', 'take_batch cannot mix declared schemas')
+            rows = collect_rows(handle, limit=arguments.get("batch_size", 20), bounds=bounds,
+                                schema_receiver=receive_schema)
+            return _convert_batch(rows, arguments.get("batch_format", "default"), handle,
+                                  schema=seen[0] if seen else None)
         result = handle.result()
         if request.kind == "count":
             return result.scalar

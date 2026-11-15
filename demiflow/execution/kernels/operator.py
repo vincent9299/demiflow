@@ -214,6 +214,8 @@ class OperatorKernel:
             raise _err("INVALID_CONTRACT", "unknown kernel kind", kind=spec.kind)
         self._spec = spec
         self._services = services
+        from ..record_schema import RecordSchemas
+        self._schemas = RecordSchemas(services)
         self._partition_id = partition_id
         self._occurrence = _occurrence(spec)
         self._instance: Any = None
@@ -229,7 +231,7 @@ class OperatorKernel:
         }
         self._port_order = tuple(port.name for port in spec.inputs)
         self._batch: list[Record] = []
-        self._max_batch = int(spec.configuration.get("batch_size") or spec.configuration.get("max_batch") or 256)
+        self._max_batch = int(spec.configuration.get("batch_size") or spec.configuration.get("max_batch") or spec.configuration.get("default_batch_size") or 256)
         self._groups: dict[str, list[dict[str, Any]]] = {}
         self._group_base: dict[str, dict[str, Any]] = {}
         self._timer_deadline: int | None = None
@@ -371,10 +373,10 @@ class OperatorKernel:
             return
         if kind in _UNARY_KINDS or (kind in _MODEL_KINDS and kind not in _BATCH_INSTANCE_KINDS):
             if self._calls is None:
-                yield from self._emit(invoke_unary(self._spec, record, instance=self._instance, services=self._services))
+                yield from self._emit(invoke_unary(self._spec, record, instance=self._instance, services=self._services, schemas=self._schemas))
             else:
                 yield from self._emit(self._calls.submit(lambda slot: invoke_unary(self._spec, record,
-                    instance=self._slot_instance(slot), services=self._services), scope=self._call_scope, input=record))
+                    instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), scope=self._call_scope, input=record))
         elif kind in _BATCH_INSTANCE_KINDS:
             yield from self._push_batch(record)
         elif kind in _STREAM_GROUP_KINDS:
@@ -385,6 +387,9 @@ class OperatorKernel:
             raise _err("INVALID_CONTRACT", "kind does not accept incremental push", kind=kind)
 
     def _push_batch(self, record: Record) -> Iterator[Record]:
+        if self._batch and self._batch[0].schema_ref != record.schema_ref:
+            batch, self._batch = tuple(self._batch), []
+            yield from self._invoke_batch(batch)
         if sum(r.encoded_bytes for r in self._batch) + record.encoded_bytes > self._services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "declared business batch exceeds max_batch_bytes")
         self._batch.append(record)
@@ -395,10 +400,10 @@ class OperatorKernel:
 
     def _invoke_batch(self, batch):
         if self._calls is None:
-            yield from self._emit(invoke_batch(self._spec, batch, instance=self._instance, services=self._services))
+            yield from self._emit(invoke_batch(self._spec, batch, instance=self._instance, services=self._services, schemas=self._schemas))
         else:
             yield from self._emit(self._calls.submit(lambda slot: invoke_batch(self._spec, batch,
-                instance=self._slot_instance(slot), services=self._services), scope=self._call_scope, input=batch))
+                instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), scope=self._call_scope, input=batch))
 
     def _push_stream_group(self, record: Record) -> Iterator[Record]:
         from .dataflow import _group_key, _materialize_row
@@ -642,7 +647,7 @@ class OperatorKernel:
             def compute(slot, input):
                 instance = self._slot_instance(slot)
                 invoke = invoke_batch if type(input) is tuple else invoke_unary
-                return invoke(self._spec, input, instance=instance, services=self._services)
+                return invoke(self._spec, input, instance=instance, services=self._services, schemas=self._schemas)
             self._calls.restore(inflight, slots=image.get('call_slots'), compute=compute)
         elif inflight:
             raise _err('INCOMPATIBLE_HISTORY', 'Pending calls have no invocation slots')

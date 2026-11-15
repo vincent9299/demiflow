@@ -280,6 +280,11 @@ def _validate_record(record):
     if not isinstance(record.source_position, Mapping):
         _fail("INVALID_CONTRACT", "source_position must be a Json mapping")
     _document(thaw_record_value(record.source_position), "source_position")
+    if record.schema_ref is not None:
+        from ..record_schema import SCHEMA_MEDIA_TYPE
+        _validate_artifact_ref(record.schema_ref, 'schema_ref')
+        if record.schema_ref.media_type != SCHEMA_MEDIA_TYPE:
+            _fail('INVALID_CONTRACT', 'schema_ref must use the Arrow schema encoding')
     if record.payload_ref is not None:
         _validate_artifact_ref(record.payload_ref, "payload_ref")
         if record.payload_ref.media_type not in _DATA_MEDIA_TYPES:
@@ -300,6 +305,8 @@ def _encode_record_document(record, *, max_bytes):
     else:
         doc = {"v": _CODEC_VERSION, "sp": record.source_position, "eb": record.encoded_bytes,
                "p": None, "r": _ref_document(record.payload_ref)}
+    if record.schema_ref is not None:
+        doc["s"] = _ref_document(record.schema_ref)
     raw = _codec_dumps(doc)
     if len(raw) > max_bytes:
         _fail("BUDGET_EXCEEDED", "encoded record document exceeds the row byte budget")
@@ -312,8 +319,17 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
     doc = _codec_loads(raw)
     if type(doc) is not dict or doc.get("v") != _CODEC_VERSION:
         _fail("CORRUPT_ARTIFACT", "record document version is unsupported")
-    if set(doc) != {"v", "sp", "eb", "p", "r"}:
+    if set(doc) not in ({"v", "sp", "eb", "p", "r"}, {"v", "sp", "eb", "p", "r", "s"}):
         _fail("CORRUPT_ARTIFACT", "record document key set is unsupported")
+    schema_ref = None
+    if "s" in doc:
+        try:
+            schema_ref = ArtifactRef(**doc["s"])
+        except (TypeError, ValueError) as exc:
+            raise DataflowError("CORRUPT_ARTIFACT", "record schema ref is malformed") from exc
+        from ..record_schema import SCHEMA_MEDIA_TYPE
+        if schema_ref.media_type != SCHEMA_MEDIA_TYPE:
+            _fail("CORRUPT_ARTIFACT", "record schema ref has the wrong encoding")
     if (doc["p"] is None) == (doc["r"] is None):
         _fail("CORRUPT_ARTIFACT", "record document must carry exactly one payload")
     if type(doc["sp"]) is not dict or type(doc["eb"]) is not int or doc["eb"] < 0:
@@ -327,7 +343,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
         if len(_encode_payload(row, max_bytes=max_bytes)) != doc["eb"]:
             _fail("CORRUPT_ARTIFACT", "record document payload size mismatch")
         return Record(record_id=record_id, source_position=doc["sp"], payload_ref=None,
-                      inline=row, encoded_bytes=doc["eb"], sequence=sequence)
+                      inline=row, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref)
     ref_doc = doc["r"]
     if type(ref_doc) is not dict or set(ref_doc) != {"digest", "size_bytes", "store_id", "key", "media_type"}:
         _fail("CORRUPT_ARTIFACT", "record document ref is malformed")
@@ -339,7 +355,7 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
     if doc["eb"] != ref.size_bytes:
         _fail("CORRUPT_ARTIFACT", "record document ref size mismatch")
     return Record(record_id=record_id, source_position=doc["sp"], payload_ref=ref,
-                  inline=None, encoded_bytes=doc["eb"], sequence=sequence)
+                  inline=None, encoded_bytes=doc["eb"], sequence=sequence, schema_ref=schema_ref)
 
 
 # -- X012 ---------------------------------------------------------------------

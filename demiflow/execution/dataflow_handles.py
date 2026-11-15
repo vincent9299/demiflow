@@ -454,7 +454,13 @@ class StoredMaterializedHandle:
         self._check_open()
         return self._iter_rows()
 
-    def _iter_rows(self) -> Iterator["Row"]:
+    def typed_rows(self):
+        self._check_open()
+        return self._iter_rows(with_schema=True)
+
+    def _iter_rows(self, *, with_schema=False) -> Iterator["Row"]:
+        from .record_schema import RecordSchemas
+        schemas = RecordSchemas(store=self._store, bounds=self._store._bounds) if with_schema else None
         count = 0
         for ref in self._blocks:
             stream = _ChunkStream(self._store.read(ref, max_bytes=ref.size_bytes))
@@ -483,7 +489,12 @@ class StoredMaterializedHandle:
                 count += 1
                 if count > self._rows:
                     raise _error("CORRUPT_ARTIFACT", "materialized row count differs")
-                yield row
+                if with_schema:
+                    schema = (schemas.read(record.schema_ref)
+                              if ref.media_type == "application/x-demiflow-records-v3" else None)
+                    yield row, schema
+                else:
+                    yield row
         if count != self._rows:
             raise _error("CORRUPT_ARTIFACT", "materialized row count differs")
 

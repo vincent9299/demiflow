@@ -116,6 +116,23 @@ class InputMaterializedHandle:
         self._check_open()
         return self._iter_rows()
 
+    def typed_rows(self):
+        """Internal reader seam; public rows remain ordinary business values."""
+        self._check_open()
+        if self._format == 'arrow':
+            for table in self._value:
+                for batch in table.to_batches(max_chunksize=1):
+                    yield batch.to_pylist()[0], table.schema
+        elif self._format == 'pandas':
+            import pyarrow as pa
+            for frame in self._value:
+                schema = pa.Schema.from_pandas(frame, preserve_index=False)
+                for index in range(len(frame)):
+                    yield frame.iloc[index:index + 1].to_dict(orient='records')[0], schema
+        else:
+            for row in self._iter_rows():
+                yield row, None
+
     def num_blocks(self) -> int:
         self._check_open()
         return self._num_blocks

@@ -230,7 +230,7 @@ _WIRE_TYPES = {
     )),
     "Record": (Record, (
         ("record_id", _S), ("source_position", _JM), ("payload_ref", _OR), ("inline", ("opt_row",)),
-        ("encoded_bytes", _i()), ("sequence", _i()),
+        ("encoded_bytes", _i()), ("sequence", _i()), ("schema_ref", _OR),
     )),
     "SourcePoll": (SourcePoll, (
         ("status", _e(_POLL_STATUSES)), ("record", _odto("Record")), ("retry_after_ms", _i()),
@@ -613,6 +613,9 @@ def _validate_payload(payload, type_name):
         raise _err(type_name + " payload must be an object")
     fields = entry[1]
     expected = {name for name, _ in fields}
+    if type_name == "Record" and "schema_ref" not in payload:
+        # The optional typed-row sidecar does not rewrite legacy row frames.
+        payload = dict(payload, schema_ref=None)
     if set(payload) != expected:
         raise _err(type_name + " payload key set is not closed: " + str(sorted(set(payload) ^ expected)))
     for name, spec in fields:
@@ -761,7 +764,8 @@ def _construct_payload(payload, type_name):
     cls, fields = entry
     kwargs = {}
     for name, spec in fields:
-        kwargs[name] = _construct_field(payload[name], spec, type_name + "." + name)
+        value = payload.get(name) if type_name == "Record" and name == "schema_ref" else payload[name]
+        kwargs[name] = _construct_field(value, spec, type_name + "." + name)
     return cls(**kwargs)
 
 
@@ -817,6 +821,8 @@ def _project_payload(value, type_name):
     fields = entry[1]
     payload = {}
     for name, spec in fields:
+        if type_name == "Record" and name == "schema_ref" and value.schema_ref is None:
+            continue
         payload[name] = _project_field(getattr(value, name), spec)
     return payload
 

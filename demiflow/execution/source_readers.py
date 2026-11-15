@@ -80,6 +80,9 @@ class _BaseReader:
         self._lease_ref: ArtifactRef | None = None
         self._closed = False
         self._opened = False
+        from .record_schema import RecordSchemas
+        self._schemas = RecordSchemas(services)
+        self._schema_ref = None
 
     # -- lifecycle ---------------------------------------------------------
     def open(self, split: SourceSplit, cursor: SourceCursor | None) -> None:
@@ -140,7 +143,7 @@ class _BaseReader:
         sequence = self._next_sequence
         record_id = identity([self._snapshot.source_id, self._split.split_id, position])
         encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
-        record = Record(record_id, position, None, row, encoded_bytes, sequence)
+        record = Record(record_id, position, None, row, encoded_bytes, sequence, self._schema_ref)
         if self._snapshot.replay != "attempt_only":
             # Keep one bounded in-flight row. Persist it only if a snapshot
             # precedes its downstream acknowledgement, not on every seek read.
@@ -213,6 +216,7 @@ class ItemsReader(_BaseReader):
         plan = _source_plan(self._snapshot, self._services)
         self._start = int(split.locator.get("start", 0))
         self._index = int(self._offset.get("index", self._start))
+        self._typed_rows = False
         if isinstance(plan, ItemsSource):
             count = len(plan.items)
             rows = iter(plan.items)
@@ -220,7 +224,8 @@ class ItemsReader(_BaseReader):
             # A materialized handle may contain many disk blocks: never turn its
             # entire row iterator into a tuple merely to seek to this split.
             count = plan.handle.row_count
-            rows = plan.handle.rows()
+            self._typed_rows = hasattr(plan.handle, 'typed_rows')
+            rows = plan.handle.typed_rows() if self._typed_rows else plan.handle.rows()
         else:
             raise DataflowError("INVALID_CONTRACT", "ItemsReader requires items/materialized source")
         self._end = int(split.locator.get("end", count))
@@ -236,6 +241,9 @@ class ItemsReader(_BaseReader):
             row = next(self._iterator)
         except StopIteration as exc:
             raise DataflowError("SOURCE_CHANGED", "materialized input ended before its sealed row count") from exc
+        if self._typed_rows:
+            row, schema = row
+            self._schema_ref = self._schemas.put(schema)
         position = {"index": self._index}
         self._index += 1
         self._offset = {"index": self._index}
@@ -378,6 +386,7 @@ class FileReader(_BaseReader):
                 for batch in parquet.iter_batches(batch_size=1, columns=columns):
                     if batch.nbytes > self._services.bounds.max_row_bytes:
                         raise DataflowError("BUDGET_EXCEEDED", "Parquet row exceeds max_row_bytes")
+                    self._schema_ref = self._schemas.put(batch.schema)
                     yield from batch.to_pylist()
             return
         if fmt == "images":
@@ -464,17 +473,27 @@ class LanceReader(_BaseReader):
         from ..lance.storage import open_lance_dataset
 
         exact = replace(self._plan.query, version=self._version)
+        batch_rows = max(1, min(256, self._services.bounds.max_batch_bytes // self._services.bounds.max_row_bytes))
+        def rows(batch):
+            if batch.nbytes > self._services.bounds.max_batch_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'Lance decoded batch exceeds max_batch_bytes')
+            self._schema_ref = self._schemas.put(batch.schema)
+            for index in range(batch.num_rows):
+                part = batch.slice(index, 1)
+                if part.nbytes > self._services.bounds.max_row_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'Lance row exceeds max_row_bytes')
+                yield part.to_pylist()[0]
         if isinstance(exact, LanceVectorSearchSpec):
             index = 0
-            for batch in _iter_vector(exact, batch_size=256):
-                for row in batch.to_pylist():
+            for batch in _iter_vector(exact, batch_size=batch_rows):
+                for row in rows(batch):
                     yield 0, index, row
                     index += 1
             return
         if self._global:
             row_offset = 0
-            for batch in _iter_scan(exact, batch_size=256):
-                for row in batch.to_pylist():
+            for batch in _iter_scan(exact, batch_size=batch_rows):
+                for row in rows(batch):
                     yield 0, row_offset, row
                     row_offset += 1
             return
@@ -485,8 +504,8 @@ class LanceReader(_BaseReader):
             if fragment is None:
                 raise DataflowError("SOURCE_CHANGED", f"Lance fragment missing: {fragment_id}")
             row_offset = 0
-            for batch in _iter_scan(exact, batch_size=256, fragments=[fragment]):
-                for row in batch.to_pylist():
+            for batch in _iter_scan(exact, batch_size=batch_rows, fragments=[fragment]):
+                for row in rows(batch):
                     yield fragment_id, row_offset, row
                     row_offset += 1
 

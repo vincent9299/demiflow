@@ -163,6 +163,7 @@ def _output_record(
     row: Mapping[str, Any],
     sequence: int,
     services: RuntimeServices,
+    *, schema_ref=None,
 ) -> Record:
     from ..exchange.dataflow_bridge import _encode_payload
     data = _encode_payload(row, max_bytes=services.bounds.max_row_bytes)
@@ -175,6 +176,7 @@ def _output_record(
         inline=dict(row),
         encoded_bytes=len(data),
         sequence=sequence,
+        schema_ref=schema_ref,
     )
 
 
@@ -258,6 +260,7 @@ def invoke_unary(
     *,
     instance: CallableInstance,
     services: RuntimeServices,
+    schemas=None,
 ) -> Iterator[Record]:
     """K002: per-row map/filter/flat_map/column/sample/limit semantics."""
     _check_stop(services)
@@ -266,6 +269,9 @@ def invoke_unary(
     row = _materialize_row(record, services)
     position = record.source_position
     sequence = record.sequence
+    if schemas is None:
+        from ..record_schema import RecordSchemas
+        schemas = RecordSchemas(services)
 
     if kind in ("MapOp", "BoundMapOp") and not cfg.get("streaming_map"):
         result = instance(row)
@@ -333,14 +339,16 @@ def invoke_unary(
             projected = {column: row[column] for column in columns}
         except KeyError as exc:
             raise _err("INVALID_CONTRACT", "select column missing", field=str(exc)) from exc
-        yield _output_record(record.record_id, position, projected, sequence, services)
+        yield _output_record(record.record_id, position, projected, sequence, services,
+                             schema_ref=schemas.project(record.schema_ref, columns=columns))
     elif kind == "DropColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
         missing = [column for column in columns if column not in row]
         if missing:
             raise _err("INVALID_CONTRACT", "drop column missing", fields=missing)
         kept = {key: value for key, value in row.items() if key not in columns}
-        yield _output_record(record.record_id, position, kept, sequence, services)
+        yield _output_record(record.record_id, position, kept, sequence, services,
+                             schema_ref=schemas.project(record.schema_ref, columns=tuple(kept)))
     elif kind == "RenameColumnsOp":
         names = _cfg(spec, "names")
         if isinstance(names, Mapping):
@@ -353,7 +361,8 @@ def invoke_unary(
             if len(row) != len(targets):
                 raise _err("INVALID_CONTRACT", "rename list length must match schema")
             renamed = dict(zip(targets, row.values()))
-        yield _output_record(record.record_id, position, renamed, sequence, services)
+        yield _output_record(record.record_id, position, renamed, sequence, services,
+                             schema_ref=schemas.project(record.schema_ref, names=tuple(renamed)))
     elif kind == "AddColumnOp":
         column = _cfg(spec, "column")
         batch_format = cfg.get("batch_format", "default")
@@ -379,7 +388,7 @@ def invoke_unary(
 
 
 def _rows_to_batch(
-    rows: list[dict[str, Any]], batch_format: str, services: RuntimeServices
+    rows: list[dict[str, Any]], batch_format: str, services: RuntimeServices, *, schema=None
 ) -> tuple[Any, int]:
     if batch_format in ("default", "numpy"):
         import numpy as np
@@ -389,18 +398,24 @@ def _rows_to_batch(
     if batch_format == "pandas":
         import pandas as pd
 
-        frame = pd.DataFrame(rows)
+        if schema is None:
+            frame = pd.DataFrame(rows)
+        else:
+            import pyarrow as pa
+            frame = pa.Table.from_pylist(rows, schema=schema).to_pandas()
         return frame, int(frame.memory_usage(deep=True).sum())
     if batch_format == "pyarrow":
         import pyarrow as pa
 
-        table = pa.Table.from_pylist(rows)
+        table = pa.Table.from_pylist(rows, schema=schema)
         return table, table.nbytes
     raise _err("UNSUPPORTED_CAPABILITY", "unknown batch_format", format=batch_format)
 
 
-def _batch_to_rows(result: Any, batch_format: str) -> Iterator[dict[str, Any]]:
+def _batch_to_rows(result: Any, batch_format: str, *, on_schema=None) -> Iterator[dict[str, Any]]:
     if isinstance(result, (list, tuple)):
+        if on_schema is not None:
+            on_schema(None)
         # Public map_batches accepts row lists for every input batch format.
         # Iterator outputs remain a lazy stream of batches below.
         for row in result:
@@ -408,6 +423,8 @@ def _batch_to_rows(result: Any, batch_format: str) -> Iterator[dict[str, Any]]:
                 raise _err('INVALID_CONTRACT', 'batch row lists must contain mappings')
             yield dict(row)
     elif isinstance(result, Mapping):
+        if on_schema is not None:
+            on_schema(None)
         lengths = {len(column) for column in result.values()}
         if len(lengths) > 1:
             raise _err("INVALID_CONTRACT", "batch columns must have equal lengths")
@@ -417,10 +434,15 @@ def _batch_to_rows(result: Any, batch_format: str) -> Iterator[dict[str, Any]]:
         for i in range(next(iter(lengths), 0)):
             yield {name: value(column[i]) for name, column in result.items()}
     elif hasattr(result, "to_pylist"):
+        if on_schema is not None:
+            on_schema(result.schema)
         for batch in result.to_batches(max_chunksize=1) if hasattr(result, 'to_batches') else (result,):
             for index in range(batch.num_rows):
                 yield batch.slice(index, 1).to_pylist()[0]
     elif hasattr(result, "iloc"):
+        if on_schema is not None:
+            import pyarrow as pa
+            on_schema(pa.Schema.from_pandas(result, preserve_index=False))
         for index in range(len(result)):
             yield result.iloc[index:index + 1].to_dict(orient='records')[0]
     else:
@@ -428,9 +450,11 @@ def _batch_to_rows(result: Any, batch_format: str) -> Iterator[dict[str, Any]]:
         try:
             for row in iterator:
                 if batch_format == 'rows':
+                    if on_schema is not None:
+                        on_schema(None)
                     yield dict(row)
                 else:
-                    yield from _batch_to_rows(row, batch_format)
+                    yield from _batch_to_rows(row, batch_format, on_schema=on_schema)
         finally:
             close = getattr(iterator, 'close', None)
             if close is not None:
@@ -443,6 +467,7 @@ def invoke_batch(
     *,
     instance: CallableInstance,
     services: RuntimeServices,
+    schemas=None,
 ) -> Iterator[Record]:
     """K003: map_batches (format/zero-copy) and batch_map (max_batch) semantics."""
     _check_stop(services)
@@ -451,11 +476,20 @@ def invoke_batch(
     rows = [_materialize_row(record, services) for record in records]
     input_bytes = sum(_input_row_bytes(record) for record in records)
     budget = _OutputBudget(spec, services)
+    if schemas is None:
+        from ..record_schema import RecordSchemas
+        schemas = RecordSchemas(services)
+    schema = schemas.read(records[0].schema_ref) if records else None
+    if any(record.schema_ref != records[0].schema_ref for record in records):
+        raise _err('INVALID_CONTRACT', 'one business batch cannot mix declared schemas')
+    output_ref = [None]
+    def output_schema(value):
+        output_ref[0] = schemas.put(value)
 
     if kind == "MapBatchesOp":
         batch_format = cfg.get("batch_format", "default")
         zero_copy = bool(cfg.get("zero_copy_batch", False))
-        batch, extra = _rows_to_batch(rows, batch_format, services)
+        batch, extra = _rows_to_batch(rows, batch_format, services, schema=schema)
         # Arrow/pandas cast keeps the source Python rows alive alongside the
         # converted buffers; admit both before invoking the callable (C06/V023).
         if input_bytes + extra > services.bounds.max_batch_bytes:
@@ -466,19 +500,24 @@ def invoke_batch(
                 converted_bytes=extra,
             )
         result = instance(batch)
-        out_rows = _batch_to_rows(result, batch_format)
+        out_rows = _batch_to_rows(result, batch_format, on_schema=output_schema)
     elif kind in ("BatchMapOp", "AddColumnOp", "embedding", "EmbeddingMapOp"):
         if input_bytes > services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "batch exceeds max_batch_bytes", bytes=input_bytes)
         if kind == "AddColumnOp":
             batch_format = cfg.get("batch_format", "default")
-            batch, extra = _rows_to_batch(rows, batch_format, services)
+            batch, extra = _rows_to_batch(rows, batch_format, services, schema=schema)
             if input_bytes + extra > services.bounds.max_batch_bytes:
                 raise _err("BUDGET_EXCEEDED", "add_column coexistence exceeds budget")
             values = _batch_values(instance(batch))
             if len(values) != len(rows):
                 raise _err("INVALID_CONTRACT", "add_column result length must match batch")
             column = _cfg(spec, "column")
+            if schema is not None:
+                import pyarrow as pa
+                fields = [field for field in schema if field.name != column]
+                fields.append(pa.field(column, pa.array(values).type))
+                output_schema(pa.schema(fields, metadata=schema.metadata))
             out_rows = [{**row, column: value} for row, value in zip(rows, values)]
         else:
             result = _invoke_scoped(instance, rows, records, spec)
@@ -498,7 +537,8 @@ def invoke_batch(
                 source = records[-1]
                 record_id = _hash_id([RECORD_DOMAIN, source.record_id, occurrence, index])
                 position = source.source_position
-            out = _output_record(record_id, position, out_row, source.sequence, services)
+            out = _output_record(record_id, position, out_row, source.sequence, services,
+                                 schema_ref=output_ref[0])
             budget.charge(out)
             yield out
     finally:

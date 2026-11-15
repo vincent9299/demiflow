@@ -562,6 +562,7 @@ class Record:
     inline: Row | None
     encoded_bytes: int
     sequence: int
+    schema_ref: ArtifactRef | None = None
 
     def __post_init__(self):
         _sha256(self.record_id, "Record.record_id")
@@ -572,6 +573,7 @@ class Record:
             object.__setattr__(self, "inline", _row(self.inline, "Record.inline"))
         _int(self.encoded_bytes, "Record.encoded_bytes")
         _int(self.sequence, "Record.sequence")
+        _opt_ref(self.schema_ref, "Record.schema_ref")
 
 
 @dataclass(frozen=True)

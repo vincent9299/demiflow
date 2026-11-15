@@ -68,7 +68,7 @@ def _record_row(record: "Record", handle: "ActionHandle") -> "Row":
     raise _error("INVALID_CONTRACT", "record has neither inline nor payload_ref")
 
 
-def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds") -> "list[Row]":
+def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds", schema_receiver=None) -> "list[Row]":
     """Bounded driver collection. limit=0 reads nothing; exceeding a budget fails
     outright (never a truncated success). Reaching the limit closes the subscription
     and keeps already-committed effect facts."""
@@ -86,6 +86,8 @@ def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds
     records = handle.rows()
     try:
         for record in records:
+            if schema_receiver is not None:
+                schema_receiver(record.schema_ref)
             rows.append(_record_row(record, handle))
             total_bytes += record.encoded_bytes
             if len(rows) > bounds.max_output_rows:
@@ -128,7 +130,7 @@ def iterate_rows(handle: "ActionHandle") -> "Iterator[Row]":
     return gen()
 
 
-def _convert_batch(rows: "list[Row]", batch_format: str, handle: "ActionHandle"):
+def _convert_batch(rows: "list[Row]", batch_format: str, handle: "ActionHandle", *, schema=None):
     bounds = handle.bounds
     total = 0
     for row in rows:
@@ -138,11 +140,21 @@ def _convert_batch(rows: "list[Row]", batch_format: str, handle: "ActionHandle")
     if batch_format == "pyarrow":
         import pyarrow as pa
 
-        return pa.Table.from_pylist(rows)
+        result = pa.Table.from_pylist(rows, schema=schema)
+        if total + result.nbytes > bounds.max_batch_bytes:
+            raise _error('BUDGET_EXCEEDED', 'Arrow batch conversion coexistence exceeds byte budget')
+        return result
     if batch_format == "pandas":
         import pandas as pd
 
-        return pd.DataFrame(rows)
+        if schema is None:
+            result = pd.DataFrame(rows)
+        else:
+            import pyarrow as pa
+            result = pa.Table.from_pylist(rows, schema=schema).to_pandas()
+        if total + int(result.memory_usage(deep=True).sum()) > bounds.max_batch_bytes:
+            raise _error('BUDGET_EXCEEDED', 'Pandas batch conversion coexistence exceeds byte budget')
+        return result
     if batch_format in ("default", "numpy"):
         import numpy as np
 
@@ -168,16 +180,32 @@ def iterate_batches(
     size = batch_size if batch_size is not None else _DEFAULT_BATCH_SIZE
 
     def gen():
-        rows_iter = iterate_rows(handle)
+        from .record_schema import RecordSchemas
+        schemas = RecordSchemas(handle.services)
+        rows_iter = handle.rows()
         batch: list = []
+        schema_ref = None
         try:
-            for row in rows_iter:
-                batch.append(row)
+            for record in rows_iter:
+                current_ref = getattr(record, 'schema_ref', None)
+                if batch and current_ref != schema_ref:
+                    if not (drop_last and len(batch) < size):
+                        yield _convert_batch(batch, batch_format, handle, schema=schemas.read(schema_ref))
+                    batch = []
+                schema_ref = current_ref
+                batch.append(_record_row(record, handle))
                 if len(batch) >= size:
-                    yield _convert_batch(batch, batch_format, handle)
+                    yield _convert_batch(batch, batch_format, handle, schema=schemas.read(schema_ref))
                     batch = []
             if batch and not (drop_last and len(batch) < size):
-                yield _convert_batch(batch, batch_format, handle)
+                yield _convert_batch(batch, batch_format, handle, schema=schemas.read(schema_ref))
+        except GeneratorExit:
+            raise
+        except BaseException:
+            handle._cleanup()
+            raise
+        else:
+            handle.close()
         finally:
             rows_iter.close()
 

@@ -703,6 +703,13 @@ class _Capture:
                 continue
             kernel = compile_kernel_spec(operation, program_ref=None, bounds=self.bounds)
             semantic = _operation_semantic_facts(operation)
+            if kernel.kind == 'MapBatchesOp' and not kernel.configuration.get('batch_size'):
+                executor = getattr(self.request.action, '_dataflow_executor', None)
+                local = getattr(executor, '_local_kernel', None)
+                default_batch = getattr(local, 'batch_rows', None) or getattr(executor, '_block_size', None)
+                if default_batch is not None:
+                    kernel = replace(kernel, configuration={**dict(kernel.configuration),
+                        'default_batch_size': int(default_batch)})
             callable_spec = getattr(operation, "callable", None)
             from ..execution.dataflow_model_factory import native_model_declaration
             callable_spec = native_model_declaration(operation) or callable_spec
