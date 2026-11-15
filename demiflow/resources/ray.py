@@ -177,10 +177,12 @@ class RayResourceProvider:
             num_gpus = sum(item["count"] for item in effective["accelerators"])
         name = self._actor_name(allocation_id)
         host = self._control.host_class()
+        placement_options = (self._control.placement_options(allocation_id)
+                             if hasattr(self._control, 'placement_options') else {})
         try:
             actor = host.options(
                 name=name, get_if_exists=True, num_cpus=num_cpus,
-                memory=effective["memory_bytes"], num_gpus=num_gpus,
+                memory=effective["memory_bytes"], num_gpus=num_gpus, **placement_options,
             ).remote(launch_spec, expected_hash, boot_id)
         except Exception as exc:
             self._release_devices(allocation_id, "launch-failed:" + allocation_id)

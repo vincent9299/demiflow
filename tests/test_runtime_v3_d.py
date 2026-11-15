@@ -636,7 +636,7 @@ def make_kernel(*, kind="terminal", configuration=None, implementation_ref=None)
     return KernelSpec(kind=kind, implementation_ref=implementation_ref,
                       configuration=configuration if configuration is not None else {"sink_id": SINK_ID},
                       inputs=(), state="none", effect="journaled", resource_role="cpu",
-                      profile=None, output_bound_bytes=1 << 20, mergeable=False)
+                      profile=ResourceProfile(requests={"cpu_millis": 100, "memory_bytes": 1024}), output_bound_bytes=1 << 20, mergeable=False)
 
 
 def make_graph(action_id=ACTION, *, kinds=("source", "transform", "terminal"), same_semantic=False):
@@ -652,7 +652,7 @@ def make_graph(action_id=ACTION, *, kinds=("source", "transform", "terminal"), s
                             consumer=nodes[i + 1].occurrence_id, input_port="in")
                   for i in range(len(nodes) - 1))
     graph = DataflowGraph(schema="demiflow.dataflow_graph.v3", action_id=action_id,
-                          dag_id="pending", nodes=tuple(nodes), edges=edges,
+                          dag_id="0" * 64, nodes=tuple(nodes), edges=edges,
                           terminals=(nodes[-1].occurrence_id,), sources=(nodes[0].occurrence_id,))
     return replace(graph, dag_id=compute_graph_digest(graph))
 
@@ -664,11 +664,11 @@ def make_physical(action_id, graph, store, *, partitions=("p0", "p1"), with_sour
     constants_ref = store.put(iter([constants_raw]), max_bytes=bounds.max_state_bytes,
                               media_type=seal.CONSTANTS_MEDIA)
     stage = StageSpec(stage_id="stage-0", occurrences=tuple(n.occurrence_id for n in graph.nodes),
-                      partitions=tuple(partitions), profile=None, replica_min=1, replica_target=1,
+                      partitions=tuple(partitions), profile=ResourceProfile(requests={"cpu_millis": 100, "memory_bytes": 1024}), replica_min=1, replica_target=1,
                       replica_max=1, resident_bytes=0, output_bytes=0, state_bytes=0, kernel_refs=())
     exchanges = ()
     if route_epoch:
-        exchanges = (ExchangeSpec(channel_id=identity(["chan"]), edge_id="e",
+        exchanges = (ExchangeSpec(channel_id=identity(["chan"]), edge_id=identity("e"),
                                   producer_partitions=tuple(partitions),
                                   consumer_partitions=tuple(partitions), mode="finite_sealed",
                                   routing="forward", keys=(), scope_id=None, route_epoch=route_epoch,
@@ -678,13 +678,13 @@ def make_physical(action_id, graph, store, *, partitions=("p0", "p1"), with_sour
     if with_sources:
         manifest_ref = store.put(iter([b"{}"]), max_bytes=bounds.max_control_bytes,
                                  media_type=seal.GRAPH_MEDIA)
-        sources = (SourceSnapshot(source_id="src-0", kind="items", immutable_identity={},
+        sources = (SourceSnapshot(source_id=identity("src-0"), kind="items", immutable_identity={},
                                   finite=True, replay="seek", manifest_ref=manifest_ref),)
-        splits = tuple(SourceSplit(split_id="split-" + p, source_id="src-0", locator={},
+        splits = tuple(SourceSplit(split_id=identity("split-" + p), source_id=identity("src-0"), locator={},
                                    start_cursor={}, estimated_bytes=None, required_domain="host")
                        for p in partitions)
     physical = PhysicalDataflow(schema="demiflow.physical_dataflow.v3", dag_id=graph.dag_id,
-                                plan_id="pending", plan_revision=plan_revision, stages=(stage,),
+                                plan_id="0" * 64, plan_revision=plan_revision, stages=(stage,),
                                 exchanges=exchanges, residency=ResidencyPlan((), 0, 0, 0), scopes=(),
                                 sources=sources, splits=splits,
                                 policy=RuntimePolicy(provider="local", durability="durable",
@@ -699,9 +699,10 @@ def make_physical(action_id, graph, store, *, partitions=("p0", "p1"), with_sour
 
 
 def make_record(index, row, bounds):
-    body = {"record_id": "rec-" + str(index), "source_position": {"split": "split-p0", "row": index},
+    body = {"record_id": identity(["rec", index]), "source_position": {"split": "split-p0", "row": index},
             "sequence": index, "inline": row, "payload_ref": None}
-    raw = document(body, bounds.max_row_bytes)
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    raw = _encode_payload(row, max_bytes=bounds.max_row_bytes)
     return Record(record_id=body["record_id"], source_position=body["source_position"],
                   payload_ref=None, inline=row, encoded_bytes=len(raw), sequence=index)
 
@@ -714,11 +715,14 @@ def driver_services(action, physical, store):
 def runtime_services(action, physical, store, *, partition_ids=("p0", "p1")):
     lease = WorkerLease(allocation_id="alloc", boot_id="boot-0", stage_id="stage-0",
                         partition_ids=tuple(partition_ids), host_id="host-0", endpoint_ref="ep",
-                        grant_ref=None, expires_at_ms=0)
+                        grant_ref=store.put(iter([b"{}"]), max_bytes=1024, media_type="application/json"), expires_at_ms=9999999999999)
+    ref = lease.grant_ref
+    from demiflow.execution.contracts.dataflow import SealedExecution
+    sealed = SealedExecution(ref, ref, (), ref, ref, (), ref)
     assignment = WorkerAssignment(schema="demiflow.dataflow_assignment.v3", run_id=action.context.ref.run_id,
                                   action_id=action.action_id, attempt=action.context.attempt,
                                   fence=action.context.fence, plan_id=physical.plan_id,
-                                  plan_revision=physical.plan_revision, lease=lease, sealed=None,
+                                  plan_revision=physical.plan_revision, lease=lease, sealed=sealed,
                                   stages=physical.stages, inputs=(), outputs=(), source_splits=physical.splits,
                                   restore_refs=(), bounds=physical.bounds)
     return RuntimeServices(store=store, journal=None, bounds=physical.bounds, assignment=assignment,
@@ -765,7 +769,7 @@ def env(tmp_path):
 def _code_error(fn, code):
     with pytest.raises(DataflowError) as exc:
         fn()
-    assert exc.value.code == code, (exc.value.code, exc.value.message)
+    assert exc.value.code == code, (exc.value.code, str(exc.value))
 
 
 # --- D001 -------------------------------------------------------------------
@@ -774,7 +778,7 @@ def test_d001(env):
     physical = make_physical(ACTION, graph, env.store)
     coord = ckpt.DataflowCheckpointCoordinator(env.action, physical, store=env.store)
     try:
-        assert coord._participants == ("stage-0:p0", "stage-0:p1")
+        assert coord._participants == (compute_participant_id("stage-0", "p0"), compute_participant_id("stage-0", "p1"))
         # one live driver owner per action
         _code_error(lambda: ckpt.DataflowCheckpointCoordinator(env.action, physical, store=env.store),
                     "INVALID_CONTRACT")
@@ -797,7 +801,7 @@ def test_d002(env):
         # final without EOI evidence is refused
         _code_error(lambda: coord.begin(final=True), "INVALID_CONTRACT")
         cut1 = coord.begin(final=False)
-        assert cut1.sequence == 1 and cut1.participants == ("stage-0:p0", "stage-0:p1")
+        assert cut1.sequence == 1 and cut1.participants == (compute_participant_id("stage-0", "p0"), compute_participant_id("stage-0", "p1"))
         assert cut1.cut_id == identity(["dataflow-cut-v3", ACTION, physical.plan_revision, 0, 1])
         # concurrent begin never reuses a sequence with different members
         cut2 = coord.begin(final=False)
@@ -809,8 +813,8 @@ def test_d002(env):
         eoi = tuple(SourceCursor(split_id=s.split_id, offset={"row": 1}, next_sequence=1,
                                  end_of_input=True, lease_ref=None, pending_refs=())
                     for s in physical.splits)
-        coord.contribute(contribution(cut1, "stage-0:p0", sink_ref=ref0, sources=eoi))
-        coord.contribute(contribution(cut1, "stage-0:p1", sink_ref=ref1, sources=eoi))
+        coord.contribute(contribution(cut1, compute_participant_id("stage-0", "p0"), sink_ref=ref0, sources=eoi))
+        coord.contribute(contribution(cut1, compute_participant_id("stage-0", "p1"), sink_ref=ref1, sources=eoi))
         coord.commit(cut1.cut_id, sinks={SINK_ID: make_adapter(env.action, physical, env.store)})
         final = coord.begin(final=True)
         # begin sequences are monotonic per call (cut_id uniqueness); this is the
@@ -828,20 +832,20 @@ def test_d003(env):
     try:
         cut = coord.begin(final=False)
         ref0 = prepare_partition(env.action, physical, env.store, "p0", [{"x": 1}])
-        coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref0))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref0))
         # first worker ready does NOT complete the cut: second still missing
         _code_error(lambda: coord.commit(cut.cut_id, sinks={SINK_ID: make_adapter(env.action, physical, env.store)}),
                     "INVALID_CONTRACT")
         # same content idempotent; conflicting content rejected
-        coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref0))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref0))
         ref_other = prepare_partition(env.action, physical, env.store, "p0", [{"x": 999}])
-        _code_error(lambda: coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref_other)),
+        _code_error(lambda: coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref_other)),
                     "INVALID_CONTRACT")
         # non-participant refused
         _code_error(lambda: coord.contribute(contribution(cut, "stage-9:p9", sink_ref=ref0)),
                     "INVALID_CONTRACT")
         ref1 = prepare_partition(env.action, physical, env.store, "p1", [{"x": 2}])
-        coord.contribute(contribution(cut, "stage-0:p1", sink_ref=ref1))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p1"), sink_ref=ref1))
         image = coord.commit(cut.cut_id, sinks={SINK_ID: make_adapter(env.action, physical, env.store)})
         assert set(image.confirmed_sinks) == {SINK_ID}
     finally:
@@ -867,8 +871,8 @@ def _commit_child(run_dir, action_id, fault):
         cut = coord.begin(final=True)
         ref0 = prepare_partition(action, physical, store, "p0", [{"x": 1}, {"x": 2}])
         ref1 = prepare_partition(action, physical, store, "p1", [{"x": 3}])
-        coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref0))
-        coord.contribute(contribution(cut, "stage-0:p1", sink_ref=ref1))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref0))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p1"), sink_ref=ref1))
         adapter = make_adapter(action, physical, store)
 
         def crash(name, commit_id):
@@ -924,8 +928,8 @@ def test_d004(env, tmp_path):
         cut = coord.begin(final=True)
         ref0 = prepare_partition(env.action, physical, env.store, "p0", [{"x": 1}])
         ref1 = prepare_partition(env.action, physical, env.store, "p1", [{"x": 2}])
-        coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref0))
-        coord.contribute(contribution(cut, "stage-0:p1", sink_ref=ref1))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref0))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p1"), sink_ref=ref1))
         image = coord.commit(cut.cut_id, sinks={SINK_ID: make_adapter(env.action, physical, env.store)})
         fact = env.run.journal.execution_commit(image.commit_id)
         assert fact["status"] == "acked"
@@ -973,8 +977,8 @@ def test_d005(env):
         cut = coord.begin(final=True)
         ref0 = prepare_partition(env.action, physical, env.store, "p0", [{"x": 1}])
         ref1 = prepare_partition(env.action, physical, env.store, "p1", [{"x": 2}])
-        coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref0))
-        coord.contribute(contribution(cut, "stage-0:p1", sink_ref=ref1))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref0))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p1"), sink_ref=ref1))
         image = coord.commit(cut.cut_id, sinks={SINK_ID: make_adapter(env.action, physical, env.store)})
         # recover returns the complete image, cross-checking the source vector
         again = coord.recover(sinks={SINK_ID: make_adapter(env.action, physical, env.store)})
@@ -1004,7 +1008,7 @@ def test_d006(env):
         # unpublished staging retained under this cut
         staging = env.store.put(iter([b"staging"]), max_bytes=1024, media_type="application/x-test")
         env.store.retain(staging, owner=cut.cut_id)
-        coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref0, buffers=(staging,)))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref0, buffers=(staging,)))
         coord.abort(cut.cut_id, reason="cancel")
         assert not env.store.inspect(staging)      # own staging released
         assert env.store.inspect(published)        # published output preserved
@@ -1021,10 +1025,10 @@ def test_d007(env):
     graph = make_graph()
     physical = make_physical(ACTION, graph, env.store)
     cut = ckpt.CutRequest(cut_id=identity(["cut"]), sequence=3, plan_revision=1, route_epoch=0,
-                          participants=("stage-0:p0",), final=False)
-    cursors = (SourceCursor(split_id="split-p0", offset={"row": 500}, next_sequence=500,
+                          participants=(compute_participant_id("stage-0", "p0"),), final=False)
+    cursors = (SourceCursor(split_id=identity("split-p0"), offset={"row": 500}, next_sequence=500,
                             end_of_input=False, lease_ref=None, pending_refs=()),)
-    image = RecoveryImage(commit_id="c", cut=cut, contributions=(), confirmed_sinks={}, source_vector=cursors)
+    image = RecoveryImage(commit_id=identity("c"), cut=cut, contributions=(), confirmed_sinks={}, source_vector=cursors)
     position = ckpt.source_vector_position(image, action_id=ACTION)
     assert isinstance(position, SourcePosition)
     # ordinal is the cut sequence, NOT the business row offset (no skip-read)
@@ -1032,7 +1036,7 @@ def test_d007(env):
     assert position.source_id == identity(["dataflow-vector", ACTION])
     assert image.source_vector[0].offset == {"row": 500}
     # duplicate split in the vector is refused
-    dup = RecoveryImage(commit_id="c", cut=cut, contributions=(), confirmed_sinks={},
+    dup = RecoveryImage(commit_id=identity("c"), cut=cut, contributions=(), confirmed_sinks={},
                         source_vector=cursors + cursors)
     _code_error(lambda: ckpt.source_vector_position(dup, action_id=ACTION), "SOURCE_CHANGED")
 
@@ -1071,8 +1075,16 @@ def test_d008(env):
         assert getattr(type(adapter), method) is not getattr(Datasink, method)
     # a real durable custom sink is preserved as-is
     durable = _DurableSink()
-    spec = make_kernel(configuration={"sink": durable})
-    assert sinks.make_sink_adapter(spec, services=services) is durable
+    from demiflow.execution.contracts.dataflow import ActionRequest
+    from demiflow.data.plan import LogicalPlan
+    from demiflow.data.sources import ItemsSource
+    request = ActionRequest('write_datasink', ItemsSource(()), LogicalPlan(), {},
+                            durable, (), 'local', env.action)
+    spec = make_kernel(kind='write_datasink')
+    assert sinks.make_native_terminal_sink(spec, request=request, services=services).native is durable
+    # The same native entry rejects a legacy write-only sink before prepare.
+    _code_error(lambda: sinks.make_native_terminal_sink(spec,
+        request=replace(request, sink=_LegacyWriteSink()), services=services), 'INVALID_CONTRACT')
     # legacy write callback cannot impersonate a recoverable sink
     _code_error(lambda: sinks.make_sink_adapter(make_kernel(configuration={"sink": _LegacyWriteSink()}),
                                                 services=services), "INVALID_CONTRACT")
@@ -1102,7 +1114,7 @@ def test_d009(env):
     spec = make_kernel(configuration={"sink_id": SINK_ID, "partition_id": "p0"})
     services = runtime_services(env.action, physical, env.store)
     _code_error(lambda: sinks.prepare_sink_partition(iter([bad]), spec=spec, services=services),
-                "SOURCE_CHANGED")
+                "INVALID_CONTRACT")
     # output row budget enforced
     many = [make_record(i, {"x": i}, bounds) for i in range(bounds.max_output_rows + 1)]
     _code_error(lambda: sinks.prepare_sink_partition(iter(many), spec=spec, services=services),
@@ -1143,8 +1155,8 @@ def test_d011(env):
         cut = coord.begin(final=True)
         ref0 = prepare_partition(env.action, physical, env.store, "p0", [{"x": 1}])
         ref1 = prepare_partition(env.action, physical, env.store, "p1", [{"x": 2}])
-        coord.contribute(contribution(cut, "stage-0:p0", sink_ref=ref0))
-        coord.contribute(contribution(cut, "stage-0:p1", sink_ref=ref1))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p0"), sink_ref=ref0))
+        coord.contribute(contribution(cut, compute_participant_id("stage-0", "p1"), sink_ref=ref1))
         image = coord.commit(cut.cut_id, sinks={SINK_ID: make_adapter(env.action, physical, env.store)})
         # response-lost retry is idempotent (verify-only, no second ACK)
         sinks.ack_source_claims(image, action=env.action)
@@ -1330,7 +1342,7 @@ def test_d017(env):
     node = GraphNode(occurrence_id=identity(["occ-const"]), semantic_id=identity(["sem-const"]),
                      kind="transform", kernel=make_kernel(configuration=config), program_ref=None,
                      shared_token="0")
-    graph = DataflowGraph(schema="demiflow.dataflow_graph.v3", action_id=ACTION, dag_id="d",
+    graph = DataflowGraph(schema="demiflow.dataflow_graph.v3", action_id=ACTION, dag_id=identity("d"),
                           nodes=(node,), edges=(), terminals=(), sources=(node.occurrence_id,))
     ref1 = seal.resolve_execution_constants(graph, action=env.action, store=env.store)
     constants1 = json.loads(b"".join(env.store.read(ref1, max_bytes=bounds.max_state_bytes)))["constants"]
@@ -1350,3 +1362,6 @@ def test_d017(env):
     ref3 = seal.resolve_execution_constants(graph2, action=action2, store=env.store)
     constants3 = json.loads(b"".join(env.store.read(ref3, max_bytes=bounds.max_state_bytes)))["constants"]
     assert constants3 == {}
+from demiflow.resources.contracts import ResourceProfile
+
+from demiflow.execution.contracts.dataflow_codec import compute_participant_id

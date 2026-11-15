@@ -321,6 +321,12 @@ class DataflowWorkerExecutor:
         self._runner.start()
 
     def receive(self, command):
+        if command.get('kind') == 'renew_lease':
+            assignment = self.assignment
+            if any(command.get(key) != getattr(assignment, key) for key in ('run_id', 'attempt', 'fence')):
+                raise _dataflow_error('FENCED', 'Lease renewal belongs to another run/attempt')
+            self._services.journal.renew_lease(command)
+            return
         self._runner.receive(command)
 
     def step(self, *, max_records, deadline_ms):

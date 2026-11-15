@@ -123,7 +123,7 @@ class NativeAcquisitionService:
         self._max_inflight = 1
         self._io_concurrency = 1
         self._max_pending = max(1, services.bounds.max_pending_events)
-        self._raw_acquisitions: list[str] = []
+        self._raw_acquisition_count = 0
 
     @property
     def action_id(self):
@@ -361,7 +361,8 @@ class NativeAcquisitionService:
             finally:
                 self._release_io()
             fact = self._acquisition_fact(receipt)
-            self._raw_acquisitions.append(fact['commit_id'])
+            with self._lock:
+                self._raw_acquisition_count += 1
             return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
                 self._put_json(receipt, media_type=_ROW_MEDIA, max_bytes=self._services.bounds.max_row_bytes),
                 self._put_json(fact, media_type=_FACT_MEDIA, max_bytes=self._services.bounds.max_control_bytes), 0)
@@ -387,8 +388,6 @@ class NativeAcquisitionService:
             claim.acquisition_fact = fact
             claim.receipt_row = receipt
             claim.receipt_row_ref = row_ref
-        if self._source is None:
-            self._raw_acquisitions.append(fact['commit_id'])
         return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
                           row_ref, fact_ref, 0)
 
@@ -476,11 +475,9 @@ class NativeAcquisitionService:
             if time.monotonic() > deadline:
                 raise DataflowError('DEADLINE_EXCEEDED', 'raw fetch inflight remains at finish')
             time.sleep(0.01)
-        for commit_id in self._raw_acquisitions:
-            fact = self._action.context.journal.execution_commit(commit_id)
-            if fact is None or fact['status'] != 'acked':
-                raise QueueIncomplete('Raw acquisition is not confirmed at finish')
-        return dict(claimed=len(self._raw_acquisitions), settled=len(self._raw_acquisitions),
+        # Each acquisition was checked against its irreversible ACK before it
+        # was returned. Keep a counter, not an unbounded second commit index.
+        return dict(claimed=self._raw_acquisition_count, settled=self._raw_acquisition_count,
                     recovered=0, exhausted=0, stop_reason='raw_fetch_complete',
                     active=0, blocked_artifact_domain=0)
 

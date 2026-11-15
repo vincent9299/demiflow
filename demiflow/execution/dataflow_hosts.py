@@ -266,6 +266,7 @@ class _EndpointBase:
             "artifact_digest_observed": code_pin,
             "dataflow_v3": {"entrypoint": "dataflow_worker_v3", "bounds": asdict(assignment.bounds),
                             "limits": dict(run.limits), "code_pin": code_pin,
+                            "host_id": lease.host_id,
                             "cache": str(run.directory / "worker-cache"),
                             "store_root": str(self._services.store.root), "store_id": self._services.store.store_id,
                             "assignment": {"wire": encode_wire(assignment, type_name="WorkerAssignment",
@@ -473,6 +474,13 @@ class DataflowRayConnector(_RayControlConnector):
     def host_class(self):
         from .worker.dataflow_host import HostedDataflowWorker
         return ray.remote(max_restarts=0, max_task_retries=0, max_concurrency=8)(HostedDataflowWorker)
+
+    def placement_options(self, allocation_id):
+        from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+        host_id = self.launch_spec(allocation_id)['dataflow_v3']['host_id']
+        if not host_id.startswith('ray-'):
+            raise DataflowError('INVALID_CONTRACT', 'Worker lacks a verified Ray host')
+        return {'scheduling_strategy': NodeAffinitySchedulingStrategy(host_id[4:], soft=False)}
 
     def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
         ray.get(self._actor(allocation_id).request_cut.remote(request),

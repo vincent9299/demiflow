@@ -200,6 +200,16 @@ class DriverJournalService:
         if self._native is not None and hasattr(self._native, 'register_worker'):
             self._native.register_worker(lease, occurrences)
 
+    def renew_worker(self, lease):
+        self._check_grant()
+        old = self._leases.get(lease.allocation_id)
+        from dataclasses import replace
+        if (old is None or old.expires_at_ms <= _now_ms()
+                or lease.expires_at_ms <= old.expires_at_ms
+                or replace(lease, expires_at_ms=old.expires_at_ms) != old):
+            raise DataflowError('FENCED', 'Cannot renew expired or different worker authority')
+        self._leases[lease.allocation_id] = lease
+
     # -- admission / completion (H066-H068) ---------------------------------
     def submit(self, event: WorkerEvent) -> bool:
         if self._closed:
@@ -303,6 +313,10 @@ class DriverJournalService:
         from .contracts.dataflow import thaw_record_value
         payload = thaw_record_value(event.payload) if event.payload is not None else {}
         try:
+            lease = self._leases.get(event.allocation_id)
+            if (lease is None or lease.boot_id != event.boot_id or lease.expires_at_ms <= _now_ms()):
+                raise DataflowError('FENCED', 'Command has no live worker authority')
+            self._check_grant()
             if event.kind == "effect":
                 reply = self.effect(_effect_command(payload), lease=None)
                 value = {"operation_id": reply.operation_id, "status": reply.status,
@@ -719,6 +733,26 @@ class WorkerJournalClient:
         return self._request("read_configuration", identity(["read-configuration-v3", self._lease.boot_id]), {})
 
     def check_grant(self) -> None:
-        if self._lease.expires_at_ms <= _now_ms():
-            raise DataflowError("FENCED", "worker grant has expired")
+        self.check_lease()
         self._request("check_grant", identity(["check-grant-v3", self._lease.boot_id]), {})
+
+    def check_lease(self):
+        if self._lease.expires_at_ms <= _now_ms():
+            raise DataflowError('FENCED', 'Worker grant has expired')
+
+    def renew_lease(self, command):
+        """A fixed control message, never a worker-requested budget extension."""
+        from dataclasses import replace
+        lease = self._lease
+        expected = {'kind', 'run_id', 'attempt', 'fence', 'allocation_id', 'boot_id', 'expires_at_ms'}
+        if set(command) != expected:
+            raise DataflowError('INVALID_CONTRACT', 'Unsupported lease renewal shape')
+        grant = self._grant()
+        if any(command[key] != grant[key] for key in ('run_id', 'attempt', 'fence')):
+            raise DataflowError('FENCED', 'Lease renewal differs from sealed worker grant')
+        expiry = command['expires_at_ms']
+        if (command['allocation_id'] != lease.allocation_id or command['boot_id'] != lease.boot_id
+                or lease.expires_at_ms <= _now_ms() or type(expiry) is not int
+                or expiry <= lease.expires_at_ms):
+            raise DataflowError('FENCED', 'Stale, foreign or expired lease renewal')
+        self._lease = replace(lease, expires_at_ms=expiry)

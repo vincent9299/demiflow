@@ -273,3 +273,12 @@ class LocalCapacityPool:
                     "active": [self._view(r) for r in active]}
         finally:
             os.close(fd)
+
+    def reservation_view(self, allocation_id):
+        identifier(allocation_id)
+        fd = self._lock()
+        try:
+            record = self._read(allocation_id)
+            return None if record is None else self._view(record)
+        finally:
+            os.close(fd)

@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import time
+from collections.abc import Mapping
 
 from demiflow.execution.contracts.dataflow import (
     ArtifactRef, Bounds, CutRequest, EncodedRecord, ExchangeSpec,
@@ -510,7 +511,7 @@ def reclaim_segments(channels, *, committed, store):
             if channel_doc is None:
                 continue
             for reader_id, value in channel_doc.items():
-                if type(value) is not dict or type(value.get("cursor")) is not int:
+                if not isinstance(value, Mapping) or type(value.get("cursor")) is not int:
                     _fail("INVALID_CONTRACT", "committed channel cursor is malformed")
                 committed_cursors[reader_id] = value["cursor"]
         frontier = committed.cut.sequence

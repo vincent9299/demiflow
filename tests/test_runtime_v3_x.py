@@ -132,6 +132,12 @@ for _name, _fake in (("demiflow.execution.contracts.dataflow", _fake_dataflow),
         sys.modules[_name] = _fake
         setattr(_contracts_pkg, _name.rsplit(".", 1)[1], _fake)
 
+from demiflow.execution.contracts.dataflow import (
+    ArtifactRef, Bounds, Record, EncodedRecord, ExchangeSpec, RoutedRecord,
+    ProducerCompletion, CreditLease, CutRequest, SourceCursor, CutContribution,
+    RecoveryImage, thaw_record_value,
+)
+
 from demiflow.execution.contracts.exchange import (  # noqa: E402
     InputGate, ProtocolError, check_read_domain, validate_data_ref,
 )
@@ -235,7 +241,7 @@ def make_ref_record(row, store, *, sequence=0):
 
 
 def make_cut(cut_id="cut-1", *, sequence=10, plan_revision=1, route_epoch=0, final=False):
-    return CutRequest(cut_id=cut_id, sequence=sequence, plan_revision=plan_revision,
+    return CutRequest(cut_id=identity(cut_id), sequence=sequence, plan_revision=plan_revision,
                       route_epoch=route_epoch, participants=("w0",), final=final)
 
 
@@ -295,7 +301,7 @@ def test_x002():
     assert math.copysign(1.0, resolved.inline["n"][0]) == -1.0
     assert math.copysign(1.0, resolved.inline["p"][0]) == 1.0
     assert resolved.inline["t"] == (1, "x") and type(resolved.inline["t"]) is tuple
-    assert type(resolved.inline["l"]) is list
+    assert type(thaw_record_value(resolved.inline)["l"]) is list
     assert resolved.inline["b"] == b"\x00\xff"
     assert type(resolved.inline["i"]) is int and type(resolved.inline["f"]) is float
     assert math.isnan(resolved.inline["nan"])
@@ -327,7 +333,8 @@ def test_x003():
     assert channels.resolve_record(encoded, store=store, bounds=bounds) == record
     ref_record = make_ref_record({"big": "y" * 128}, store, sequence=5)
     ref_encoded = channels.encode_record(ref_record, bounds=bounds)
-    assert ref_encoded.ref == ref_record.payload_ref
+    assert ref_encoded.ref is None  # the canonical document contains its own durable payload ref
+    assert json.loads(ref_encoded.data)["r"]["digest"] == ref_record.payload_ref.digest
     assert channels.resolve_record(ref_encoded, store=store, bounds=bounds) == ref_record
     # small encoding with a huge declared decode ceiling is rejected before allocation
     huge = EncodedRecord(record_id=record.record_id, encoding=bridge.RECORD_ENCODING,
@@ -353,9 +360,9 @@ def test_x003():
                            media_type=bridge.RECORD_MEDIA_TYPE)
     store.objects[tampered.digest] = b"z" * tampered.size_bytes
     bad_digest = EncodedRecord(record_id=record.record_id, encoding=bridge.RECORD_ENCODING,
-                               data=ref_encoded.data, ref=tampered,
-                               encoded_bytes=len(ref_encoded.data),
-                               decoded_upper_bytes=len(ref_encoded.data), sequence=5)
+                               data=None, ref=tampered,
+                               encoded_bytes=tampered.size_bytes,
+                               decoded_upper_bytes=tampered.size_bytes, sequence=5)
     expect_error("CORRUPT_ARTIFACT", channels.resolve_record, bad_digest, store=store, bounds=bounds)
     # tampered inline document
     flipped = bytearray(encoded.data)
@@ -403,7 +410,7 @@ def test_x004():
     assert [r.reader_id for r in routed] == ["r0", "r1"]
     for r in routed:
         assert r.delivery_id == identity(["dataflow-delivery-v3", record.record_id,
-                                          bspec.edge_id, r.reader_id])
+                                          bspec.edge_id, r.reader_id, 0])
         assert r.record is record
     # target routing
     tspec = make_spec("ch-t", routing="target", keys=("dest",), consumers=("r0", "r1"))
@@ -421,7 +428,7 @@ def test_x004():
     # slow branch does not consume sibling credit
     cstate = channels.open_channels((make_spec("ch-c", consumers=("r0", "r1"),
                                                routing="broadcast"),), services=services)
-    cstate.reserve("ch-c", "r0", rows=64, size_bytes=65536, operation_id="op-r0")
+    cstate.reserve("ch-c", "r0", rows=64, size_bytes=65536, operation_id=identity("op-r0"))
     assert cstate.reader_credit("ch-c", "r1")["rows_left"] == 64
     assert cstate.reader_credit("ch-c", "r0")["rows_left"] == 0
 
@@ -433,24 +440,24 @@ def test_x005():
     state = channels.open_channels((make_spec("ch-a", credit_rows=64, credit_bytes=65536),),
                                    services=services)
     lease = channels.reserve_credit("ch-a", "r0", rows=1, size_bytes=100,
-                                    operation_id="op-1", state=state)
+                                    operation_id=identity("op-1"), state=state)
     assert isinstance(lease, CreditLease) and lease.size_bytes == 100
     again = channels.reserve_credit("ch-a", "r0", rows=1, size_bytes=100,
-                                    operation_id="op-1", state=state)
+                                    operation_id=identity("op-1"), state=state)
     assert again == lease  # idempotent same-content retry
     expect_error("INVALID_CONTRACT", channels.reserve_credit, "ch-a", "r0", rows=2,
-                 size_bytes=100, operation_id="op-1", state=state)
+                 size_bytes=100, operation_id=identity("op-1"), state=state)
     pending = expect_error("CAPACITY_PENDING", channels.reserve_credit, "ch-a", "r0",
-                           rows=1, size_bytes=1, operation_id="op-2", state=state)
+                           rows=1, size_bytes=1, operation_id=identity("op-2"), state=state)
     assert pending.retryable is True
     oversized = expect_error("BUDGET_EXCEEDED", channels.reserve_credit, "ch-a", "r0",
-                             rows=1, size_bytes=200, operation_id="op-3", state=state)
+                             rows=1, size_bytes=200, operation_id=identity("op-3"), state=state)
     assert oversized.retryable is False
     state.release(lease)
     assert state.reader_credit("ch-a", "r0")["bytes_left"] == 100
-    channels.reserve_credit("ch-a", "r0", rows=1, size_bytes=100, operation_id="op-4", state=state)
+    channels.reserve_credit("ch-a", "r0", rows=1, size_bytes=100, operation_id=identity("op-4"), state=state)
     expect_error("INVALID_CONTRACT", channels.reserve_credit, "ch-a", "ghost", rows=1,
-                 size_bytes=1, operation_id="op-5", state=state)
+                 size_bytes=1, operation_id=identity("op-5"), state=state)
 
 
 # -- X006 publish_segment -------------------------------------------------------
@@ -461,7 +468,7 @@ def test_x006():
     spec = make_spec("ch-d", mode="durable_incremental")
     records = tuple(channels.encode_record(make_record({"i": i}, sequence=i), bounds=bounds)
                     for i in range(3))
-    ref = channels.publish_segment(records, spec=spec, store=store, operation_id="pub-1")
+    ref = channels.publish_segment(records, spec=spec, store=store, operation_id=identity("pub-1"))
     assert store.inspect(ref)
     manifest = json.loads(b"".join(store.read(ref, max_bytes=1 << 20)))
     assert manifest["schema"] == "demiflow.segment.v3"
@@ -470,24 +477,24 @@ def test_x006():
         ["dataflow-segment-v3", spec.channel_id, spec.route_epoch,
          list(spec.producer_partitions), 0, 2, manifest["content_digest"]])
     writes = store.physical_writes
-    retry = channels.publish_segment(records, spec=spec, store=store, operation_id="pub-1")
+    retry = channels.publish_segment(records, spec=spec, store=store, operation_id=identity("pub-1"))
     assert retry == ref and store.physical_writes == writes  # lost-response retry: no double charge
-    other = channels.publish_segment(records[:2], spec=spec, store=store, operation_id="pub-2")
+    other = channels.publish_segment(records[:2], spec=spec, store=store, operation_id=identity("pub-2"))
     assert other.digest != ref.digest
     expect_error("INVALID_CONTRACT", channels.publish_segment, (records[1], records[0]),
-                 spec=spec, store=store, operation_id="pub-3")
+                 spec=spec, store=store, operation_id=identity("pub-3"))
     expect_error("INVALID_CONTRACT", channels.publish_segment, (), spec=spec, store=store,
-                 operation_id="pub-4")
+                 operation_id=identity("pub-4"))
     sealed_spec = make_spec("ch-s", mode="finite_sealed", storage_bytes=64, scope_id="scope-1")
     expect_error("BUDGET_EXCEEDED", channels.publish_segment, records, spec=sealed_spec,
-                 store=store, operation_id="pub-5")
+                 store=store, operation_id=identity("pub-5"))
     # crash before publish leaves nothing visible: a failed put never registers
     class CrashingStore(FakeStore):
         def put(self, chunks, *, max_bytes, media_type):
             raise RuntimeError("crash before commit")
     crashing = CrashingStore()
     with pytest.raises(RuntimeError):
-        channels.publish_segment(records, spec=spec, store=crashing, operation_id="pub-6")
+        channels.publish_segment(records, spec=spec, store=crashing, operation_id=identity("pub-6"))
     assert crashing.objects == {}
 
 
@@ -498,14 +505,14 @@ def test_x007():
     bounds = make_bounds()
     manifest = channels.publish_segment(
         (channels.encode_record(make_record({"i": 0}), bounds=bounds),),
-        spec=make_spec(mode="durable_incremental"), store=store, operation_id="m-1")
+        spec=make_spec(mode="durable_incremental"), store=store, operation_id=identity("m-1"))
     empty = channels.publish_segment(
         (channels.encode_record(make_record({"i": 0}), bounds=bounds),),
-        spec=make_spec(mode="durable_incremental"), store=store, operation_id="m-2")
+        spec=make_spec(mode="durable_incremental"), store=store, operation_id=identity("m-2"))
     ok = (ProducerCompletion(partition_id="p0", generation=1, status="succeeded",
                              last_sequence=0, manifest_ref=manifest),
           ProducerCompletion(partition_id="p1", generation=1, status="succeeded",
-                             last_sequence=-1, manifest_ref=empty))
+                             last_sequence=0, manifest_ref=empty))
     ref = channels.seal_scope("scope-1", ok, store=store)
     seal = json.loads(b"".join(store.read(ref, max_bytes=1 << 20)))
     assert seal["status"] == "success" and seal["membership"] == ["p0", "p1"]
@@ -535,7 +542,7 @@ def test_x008():
     for i in range(3):
         encoded = channels.encode_record(make_record({"i": i}, sequence=i), bounds=bounds)
         state.enqueue("ch-a", state.issue_sequence("ch-a"), encoded)
-    lease = state.reserve("ch-a", "r0", rows=1, size_bytes=10, operation_id="lease-1")
+    lease = state.reserve("ch-a", "r0", rows=1, size_bytes=10, operation_id=identity("lease-1"))
     cut = make_cut(sequence=10)
     refs = channels.snapshot_channels(state, cut=cut, store=store)
     assert set(refs) == {"ch-a"}
@@ -545,14 +552,14 @@ def test_x008():
     segment = json.loads(b"".join(store.read(
         channels._ref_from_doc(doc["buffer_segment"]), max_bytes=1 << 20)))
     assert segment["sequence_end"] == 2 < cut.sequence
-    assert doc["leases"][0]["operation_id"] == "lease-1"
+    assert doc["leases"][0]["operation_id"] == identity("lease-1")
     assert state.buffer_items("ch-a")  # live buffer stays intact for the running plane
     # final cut over a fully succeeded sealed scope produces the seal
     sspec = make_spec("ch-s", mode="finite_sealed", storage_bytes=1 << 20, scope_id="scope-1")
     sstate = channels.open_channels((sspec,), services=services)
     encoded = channels.encode_record(make_record({"i": 0}), bounds=bounds)
     sstate.enqueue("ch-s", sstate.issue_sequence("ch-s"), encoded)
-    manifest = channels.publish_segment((encoded,), spec=sspec, store=store, operation_id="m-s")
+    manifest = channels.publish_segment((encoded,), spec=sspec, store=store, operation_id=identity("m-s"))
     sstate.register_completion("ch-s", ProducerCompletion(partition_id="p0", generation=1,
                                                           status="succeeded", last_sequence=0,
                                                           manifest_ref=manifest))
@@ -583,7 +590,7 @@ def test_x009():
         first.append(channels.route_record(record, spec=spec, state=state.routing)[0].reader_id)
         state.enqueue("ch-r", state.issue_sequence("ch-r"),
                       channels.encode_record(record, bounds=bounds))
-    lease = state.reserve("ch-r", "r0", rows=1, size_bytes=10, operation_id="lease-r")
+    lease = state.reserve("ch-r", "r0", rows=1, size_bytes=10, operation_id=identity("lease-r"))
     refs = channels.snapshot_channels(state, cut=make_cut(sequence=20), store=store)
     restored = channels.restore_channels((spec,), refs, services=services)
     assert restored.routing.values()["ch-r"] == 10
@@ -618,16 +625,16 @@ def test_x010():
                                                            sequence=batch * 2 + j), bounds=bounds)
                         for j in range(2))
         ref = channels.publish_segment(records, spec=spec, store=store,
-                                       operation_id="seg-%d" % batch)
+                                       operation_id=identity("seg-%d" % batch))
         state.register_segment("ch-a", ref, seq_end=batch * 2 + 1)
         refs.append(ref)
     cut = make_cut(sequence=50)
     def image(cursors, confirmed=()):
-        contribution = CutContribution(cut_id="cut-1", participant_id="w0", boot_id="b0",
+        contribution = CutContribution(cut_id=cut.cut_id, participant_id="w0", boot_id="b0",
                                        sources=(), operator_states={},
                                        channels={"ch-a": {r: {"cursor": c} for r, c in cursors.items()}},
                                        buffers=(), effects=(), sinks={}, final=False)
-        return RecoveryImage(commit_id="c1", cut=cut, contributions=(contribution,),
+        return RecoveryImage(commit_id=identity("c1"), cut=cut, contributions=(contribution,),
                              confirmed_sinks={str(i): r for i, r in enumerate(confirmed)},
                              source_vector=())
     # unconfirmed cancel: r1 tombstoned live but absent from the committed image
@@ -650,7 +657,7 @@ def test_x010():
         records = (channels.encode_record(make_record({"c": cycle}, sequence=20 + cycle),
                                           bounds=bounds),)
         ref = channels.publish_segment(records, spec=spec, store=store,
-                                       operation_id="orphan-%d" % cycle)
+                                       operation_id=identity("orphan-%d" % cycle))
         state.register_segment("ch-a", ref, seq_end=20 + cycle)
         channels.reclaim_segments(state, committed=image({"r0": 30, "r1": 30},
                                                          confirmed=(refs[2],)), store=store)
@@ -668,7 +675,7 @@ def test_x011(monkeypatch):
         state.enqueue(spec.channel_id, state.issue_sequence(spec.channel_id),
                       channels.encode_record(make_record({"x": 1}), bounds=bounds))
         state.reserve(spec.channel_id, "r0", rows=1, size_bytes=10,
-                      operation_id="op-" + spec.channel_id)
+                      operation_id=identity("op-" + spec.channel_id))
     clock = {"now": 0.0}
     monkeypatch.setattr(channels.time, "monotonic", lambda: clock["now"])
     original_drain = ChannelSetState.drain_buffer
@@ -707,8 +714,8 @@ def test_x012():
                  make_spec(mode="finite_sealed", storage_bytes=0, scope_id="scope-1"))
     expect_error("INVALID_CONTRACT", bridge.to_channel_plan_v1,
                  make_spec(mode="finite_sealed", storage_bytes=4096, scope_id=None))
-    expect_error("INVALID_CONTRACT", bridge.to_channel_plan_v1, make_spec(credit_bytes=0))
-    expect_error("INVALID_CONTRACT", bridge.to_channel_plan_v1, make_spec(consumers=()))
+    expect_error("INVALID_CONTRACT", lambda: bridge.to_channel_plan_v1(make_spec(credit_bytes=0)))
+    expect_error("INVALID_CONTRACT", lambda: bridge.to_channel_plan_v1(make_spec(consumers=())))
     expect_error("INVALID_CONTRACT", bridge.to_channel_plan_v1,
                  make_spec(routing="hash", keys=()))
 
@@ -728,11 +735,11 @@ def test_x013():
         check_read_domain(value, "dom-other")  # cross-domain rejected
     # an ArtifactRef is not a v1 DataRef: missing frozen keys
     assert not {"schema_version", "ref_id", "read_domain"} <= set(ref.__dataclass_fields__)
-    expect_error("INVALID_CONTRACT", bridge.artifact_to_data_ref,
-                 dataclasses.replace(ref, size_bytes=-1), reader_domain="dom-x", owner="ch-a")
+    expect_error("INVALID_CONTRACT", lambda: bridge.artifact_to_data_ref(
+                 dataclasses.replace(ref, size_bytes=-1), reader_domain="dom-x", owner="ch-a"))
     for key in ("/abs/path", "a/../b", "k?query=1", "https://host/k", "user@host:k"):
-        expect_error("INVALID_CONTRACT", bridge.artifact_to_data_ref,
-                     dataclasses.replace(ref, key=key), reader_domain="dom-x", owner="ch-a")
+        expect_error("INVALID_CONTRACT", lambda: bridge.artifact_to_data_ref(
+                     dataclasses.replace(ref, key=key), reader_domain="dom-x", owner="ch-a"))
     expect_error("INVALID_CONTRACT", bridge.artifact_to_data_ref,
                  dataclasses.replace(ref, media_type="application/x-python-pickle"),
                  reader_domain="dom-x", owner="ch-a")
@@ -777,7 +784,7 @@ def test_x015():
     barrier = bridge.cut_to_barrier(request, channel_id="ch-a", sequence=5)
     assert set(barrier) == {"channel_id", "sequence", "checkpoint_id", "epoch", "cut",
                             "topology_revision"}  # no final/participants: D owns the cut
-    assert barrier["checkpoint_id"] == "cut-9" and barrier["epoch"] == 2
+    assert barrier["checkpoint_id"] == request.cut_id and barrier["epoch"] == 2
     assert barrier["cut"]["producer_sequence_bound"] == 5
     assert barrier["topology_revision"] == 3
     gate = InputGate(["ch-a", "ch-b"])
@@ -788,10 +795,10 @@ def test_x015():
                                                                   sequence=5)})
     with pytest.raises(ProtocolError):
         gate.barrier_effect("ch-a")  # pre-cut datum not consumed: BARRIER_OVERTAKE
-    assert not gate.aligned("cut-9")
+    assert not gate.aligned(request.cut_id)
     gate.consume("ch-a")
-    assert gate.aligned("cut-9")  # empty ch-b aligns on the same cut
-    gate.release("cut-9")
+    assert gate.aligned(request.cut_id)  # empty ch-b aligns on the same cut
+    gate.release(request.cut_id)
     assert gate.consume("ch-a")["sequence"] == 6  # post-cut released only after confirmation
     # post-cut data arriving before its barrier is a sequence violation
     gate2 = InputGate(["ch-a"])
@@ -847,12 +854,12 @@ def test_x017():
     expect_error("FENCED", state.issue_sequence, "ch-a")
     # drained leases are returned; undrained data keeps unknown ownership
     drained = ChannelSetState((make_spec("ch-a"),), bounds=make_bounds())
-    lease = drained.reserve("ch-a", "r0", rows=1, size_bytes=10, operation_id="op-d")
+    lease = drained.reserve("ch-a", "r0", rows=1, size_bytes=10, operation_id=identity("op-d"))
     drained.close()
     assert drained.outstanding_leases() == ()
     assert drained.reader_credit("ch-a", "r0")["bytes_left"] == drained.reader_credit("ch-a", "r0")["bytes_total"]
     held = ChannelSetState((make_spec("ch-a"),), bounds=make_bounds())
-    held.reserve("ch-a", "r0", rows=1, size_bytes=10, operation_id="op-h")
+    held.reserve("ch-a", "r0", rows=1, size_bytes=10, operation_id=identity("op-h"))
     held.enqueue("ch-a", held.issue_sequence("ch-a"),
                  channels.encode_record(make_record({"x": 1}), bounds=make_bounds()))
     held.close()
@@ -900,3 +907,5 @@ def test_x019():
     state = ChannelSetState((make_spec("ch-a"),), bounds=make_bounds())
     state.bind_routing(resumed)
     assert state.snapshot_document("ch-a")["routing_ordinal"] == 1602
+# Integrated lanes use the one production error vocabulary.
+from demiflow.execution.contracts.dataflow_errors import DataflowError

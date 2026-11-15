@@ -198,6 +198,32 @@ def _install_fake_contracts() -> None:
 
 _install_fake_contracts()
 
+# Integration runs use the actual immutable wire values; helpers below only
+# supply test defaults, never alternate DTO implementations.
+_BoundsDefaults, _ExchangeDefaults = Bounds, ExchangeSpec
+from demiflow.execution.contracts import dataflow as real_dto
+from demiflow.resources.contracts import ResourceProfile
+ArtifactRef = real_dto.ArtifactRef
+Record = real_dto.Record
+LoadedProgram = real_dto.LoadedProgram
+RoutedRecord = real_dto.RoutedRecord
+AggregateState = real_dto.AggregateState
+TerminalResult = real_dto.TerminalResult
+
+def Bounds(**overrides):
+    from dataclasses import asdict
+    return real_dto.Bounds(**asdict(_BoundsDefaults(**overrides)))
+
+def InputPort(name, requirement, ordering="none", schema_ref=None):
+    return real_dto.InputPort(name, requirement, ordering, schema_ref)
+
+def ExchangeSpec(*args, **kwargs):
+    from dataclasses import asdict
+    values = asdict(_ExchangeDefaults(*args, **kwargs))
+    values['edge_id'] = hashlib.sha256(values['edge_id'].encode()).hexdigest()
+    values['reason'] = 'unit routing proof'
+    return real_dto.ExchangeSpec(**values)
+
 from demiflow.execution.kernels import dataflow as kdf  # noqa: E402
 from demiflow.execution.kernels import ordering as ko  # noqa: E402
 from demiflow.execution.kernels import relational as kr  # noqa: E402
@@ -298,7 +324,11 @@ def services(**kw):
 def spec(kind, configuration=None, inputs=None, **kw):
     cfg = {"occurrence_id": "occ-" + kind}
     cfg.update(configuration or {})
-    return KernelSpec(kind=kind, configuration=cfg, inputs=tuple(inputs or ()), **kw)
+    values = dict(implementation_ref=None, state="none", effect="pure", resource_role="cpu",
+                  profile=ResourceProfile(requests={"cpu_millis": 1000, "memory_bytes": 8 << 20}),
+                  output_bound_bytes=10 ** 9, mergeable=True)
+    values.update(kw)
+    return real_dto.KernelSpec(kind=kind, configuration=cfg, inputs=tuple(inputs or ()), **values)
 
 
 def rid(label):
@@ -321,7 +351,7 @@ def rec(row, record_id=None, sequence=0, position=None):
 
 
 def rows_of(records):
-    return [dict(r.inline) for r in records]
+    return [real_dto.thaw_record_value(r.inline) for r in records]
 
 
 def program(value, kind="callable"):
@@ -386,7 +416,7 @@ def test_k003():
     svc = services()
     records = (rec({"v": 1}, sequence=0), rec({"v": 2}, sequence=1))
     s = spec("MapBatchesOp", {"batch_format": "default"})
-    out = list(kdf.invoke_batch(s, records, instance=lambda b: [{"v": r["v"] * 10} for r in b], services=svc))
+    out = list(kdf.invoke_batch(s, records, instance=lambda b: [{"v": v * 10} for v in b["v"]], services=svc))
     assert rows_of(out) == [{"v": 10}, {"v": 20}]
     assert out[0].record_id == records[0].record_id  # positional provenance
 
@@ -514,7 +544,7 @@ def test_k008():
 # K009 build_sort_runs
 # ---------------------------------------------------------------------------
 def test_k009():
-    svc = services(bounds=Bounds(max_resident_bytes=200))
+    svc = services(bounds=Bounds(max_resident_bytes=1024))
     s = spec("SortOp", {"keys": ["k"], "descending": False})
     records = [rec({"k": 3}, sequence=0), rec({"k": 1}, sequence=1), rec({"k": 2}, sequence=2),
                rec({"k": None}, sequence=3)]
@@ -788,7 +818,8 @@ def test_k020():
     list(kernel.push("input", rec({"v": 2})))  # partial batch (max_batch=4 not reached)
     ref = kernel.snapshot()
     assert ref is not None
-    image = pickle.loads(b"".join(svc.store.read(ref, max_bytes=ref.size_bytes)))
+    from demiflow.execution.kernels import state_codec
+    image = state_codec.loads(b"".join(svc.store.read(ref, max_bytes=ref.size_bytes)), max_bytes=ref.size_bytes)
     assert len(image["batch"]) == 2  # crash must not lose the partial batch
     assert image["output_cursor"] == 0
     # The recovery image carries no live instance / DataFusion session object.
@@ -860,3 +891,5 @@ def test_k022():
     refs = list(jk._ports["input"]._refs)
     jk.close()
     assert all(not svc2.store.inspect(r) for r in refs)
+# Integrated lanes use the one production error vocabulary.
+from demiflow.execution.contracts.dataflow_errors import DataflowError

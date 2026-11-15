@@ -169,6 +169,28 @@ class DataflowExecution:
         return ReadyWork(stage_id=stage.stage_id, partition_id=partition_id,
                          input_refs=(), resident_bytes=resident, operation_id=operation_id)
 
+    def _place_hosts(self, pending):
+        """Plan bounded per-host admission; the ResourceManager still allocates.
+
+        Summing cluster capacity cannot prove that any individual worker fits.
+        Bind each partition to a host whose runtime/store were actually probed.
+        """
+        remaining = {h.host_id: dict(h.logical_resources) for h in self._services.hosts}
+        assigned = {}
+        for stage, work in sorted(pending, key=lambda pair:
+                (pair[0].profile.requests['memory_bytes'], pair[0].profile.requests['cpu_millis']), reverse=True):
+            need = {key: stage.profile.requests[key] for key in ('cpu_millis', 'memory_bytes')}
+            feasible = [host for host, capacity in remaining.items()
+                        if all(need[key] <= capacity.get(key, 0) for key in need)]
+            if not feasible:
+                raise DataflowError('RESOURCE_INFEASIBLE',
+                    'No verified host has capacity for this worker placement')
+            host = max(feasible, key=lambda key: remaining[key]['cpu_millis'])
+            assigned[work.operation_id] = host
+            for key, amount in need.items():
+                remaining[host][key] -= amount
+        return assigned
+
     def _assignment(self, lease: WorkerLease, stage) -> WorkerAssignment:
         partitions = set(stage.partitions)
         inputs = tuple(x for x in self._physical.exchanges if partitions.intersection(x.consumer_partitions))
@@ -354,21 +376,41 @@ class DataflowExecution:
                         if state and state.get("mode") == "nonrecoverable":
                             raise DataflowError("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"],
                                                 context={"occurrence_id": occ})
-        if self._acquisition is not None:
-            self._acquisition.start()
-        # Consumers and control reserve capacity before producers; a partial
-        # allocation still progresses, never all-to-producers (deadlock gate).
-        for stage in self._stage_order():
-            for partition_id in stage.partitions:
-                work = self._initial_work(stage, partition_id)
+        # This runner keeps its participants alive through the same cut. Never
+        # promise phased residency then leave an unstarted participant forever
+        # pending. Check before native acquisition or any business activation.
+        stages = self._stage_order()
+        resident = sum(s.resident_bytes * len(s.partitions) for s in stages)
+        if resident + self._physical.residency.control_reserved_bytes > self._bounds.max_resident_bytes:
+            raise DataflowError('RESOURCE_INFEASIBLE',
+                'Live checkpoint participants exceed resident capacity; increase the bounded capacity')
+        pending = [(stage, self._initial_work(stage, partition))
+                   for stage in stages for partition in stage.partitions]
+        hosts = self._place_hosts(pending)
+        ready = []
+        deadline = time.monotonic() + self._policy.control_timeout_ms / 1000
+        while pending:
+            deferred = []
+            for stage, work in pending:
+                self._check_stop()
                 try:
-                    lease = self._scheduler.place(work, prepare=self._prepare_launch, host_id=self._services.hosts[0].host_id)
+                    lease = self._scheduler.place(work, prepare=self._prepare_launch, host_id=hosts[work.operation_id])
                 except DataflowError as exc:
                     if exc.retryable:
-                        self._scheduler.enqueue(work)
+                        deferred.append((stage, work))
                         continue
                     raise
-                self._activate(lease, stage)
+                ready.append((lease, stage))
+            pending = deferred
+            if pending:
+                if time.monotonic() >= deadline:
+                    raise DataflowError('CAPACITY_PENDING',
+                        'Worker admission deadline exceeded before business activation', retryable=True)
+                time.sleep(min(.01, max(0, deadline - time.monotonic())))
+        if self._acquisition is not None:
+            self._acquisition.start()
+        for lease, stage in ready:
+            self._activate(lease, stage)
         self._started = True
         self._state = "running"
         self._checkpoint_at = time.monotonic()
@@ -397,6 +439,7 @@ class DataflowExecution:
         if type(deadline_ms) is not int or deadline_ms <= 0:
             raise DataflowError("INVALID_CONTRACT", "pump deadline_ms must be a positive int")
         self._check_stop()
+        self._renew_workers()
         deadline = time.monotonic() + deadline_ms / 1000.0
         max_events = self._bounds.max_pending_events
         replies = self._services.journal_service.poll_replies(max_replies=max_events)
@@ -430,6 +473,31 @@ class DataflowExecution:
             time.sleep(min(.002, deadline_ms / 1000))
         return ExecutionStatus(state=self._state, pending_events=self._pending_events,
                                confirmed_rows=self._confirmed_rows)
+
+    def _renew_workers(self):
+        """Extend only a live grant belonging to this still-fenced driver.
+
+        Renewal travels on the existing authenticated control channel. A driver
+        that stops pumping cannot extend authorization, and an expired lease is
+        never resurrected. No business operation is retried by renewal.
+        """
+        from dataclasses import replace
+        from .dataflow_scheduler import lease_ttl_ms
+        now = self._services.clock_ms()
+        ttl = lease_ttl_ms(self._policy)
+        for allocation_id, lease in tuple(self._scheduler.leases.items()):
+            if lease.expires_at_ms - now > ttl // 2:
+                continue
+            if lease.expires_at_ms <= now:
+                raise DataflowError('FENCED', 'Worker authorization expired before driver renewal')
+            renewed = replace(lease, expires_at_ms=now + ttl)
+            endpoint = self._endpoints[allocation_id]
+            endpoint.send_business({'kind': 'renew_lease', 'run_id': self._run_id(),
+                'attempt': self._attempt(), 'fence': self._fence(),
+                'allocation_id': allocation_id, 'boot_id': lease.boot_id,
+                'expires_at_ms': renewed.expires_at_ms})
+            self._services.journal_service.renew_worker(renewed)
+            self._scheduler.leases[allocation_id] = renewed
 
     def _handle_event(self, event):
         from .contracts.dataflow import thaw_record_value

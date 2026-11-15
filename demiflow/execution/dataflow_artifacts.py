@@ -154,6 +154,25 @@ def verify_host_domain(host: "HostDescriptor", *, store: "ArtifactStore",
     identifier(host.host_id)
     if store.store_id not in host.store_domains:
         raise DataflowError("INVALID_CONTRACT", "host cannot reach the store domain")
+    if host.provider == 'ray_core':
+        import ray
+        from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+        if not host.host_id.startswith('ray-'):
+            raise DataflowError('INVALID_CONTRACT', 'Ray host lacks an actual node identity')
+        task = ray.remote(num_cpus=0, max_retries=0)(_probe_read_domain).options(
+            scheduling_strategy=NodeAffinitySchedulingStrategy(host.host_id[4:], soft=False))
+        future = task.remote(str(store.root), store.store_id, _ref_dict(challenge),
+                             bounds.max_control_bytes)
+        try:
+            proof = ray.get(future, timeout=bounds.timeout_ms / 1000)
+        except Exception as exc:
+            ray.cancel(future, force=True)
+            raise DataflowError('RESOURCE_INFEASIBLE',
+                'Ray host cannot prove access to the sealed runtime and durable store') from exc
+        if proof['node_id'] != host.host_id[4:] or proof['runtime_revision'] != host.runtime_revision:
+            raise DataflowError('CODE_MISMATCH', 'Remote host runtime/node differs from its declaration')
+        if proof['digest'] != challenge.digest:
+            raise DataflowError('CORRUPT_ARTIFACT', 'Remote read-domain challenge differs')
     raw = _read_bytes(store, challenge, bounds)
     if hashlib.sha256(raw).hexdigest() != challenge.digest:
         raise DataflowError("INVALID_CONTRACT", "challenge bytes differ from the declared digest")
@@ -165,13 +184,31 @@ def verify_host_domain(host: "HostDescriptor", *, store: "ArtifactStore",
                        challenge_digest=challenge.digest, namespace_digest=namespace_digest, durable=True)
 
 
+def _probe_read_domain(root, store_id, challenge, max_bytes):
+    """Executed on the specified Ray node without creating a run or journal."""
+    import ray
+    from .recovery_identity import platform_identity
+    from .dataflow_store import _no_symlink
+    if challenge['key'] != challenge['digest'] or challenge['size_bytes'] > max_bytes:
+        raise ValueError('Unsupported read-domain challenge')
+    identifier(store_id)
+    identifier(challenge['digest'])
+    path = Path(root) / store_id / 'objects' / challenge['key']
+    _no_symlink(path)
+    with path.open('rb') as stream:
+        raw = stream.read(max_bytes + 1)
+    if len(raw) != challenge['size_bytes']:
+        raise ValueError('Remote challenge size differs')
+    return {'node_id': ray.get_runtime_context().get_node_id(),
+            'runtime_revision': platform_identity(), 'digest': hashlib.sha256(raw).hexdigest()}
+
+
 def resolve_data_location(ref: "ArtifactRef", *, host: "HostDescriptor", store: "ArtifactStore") -> DataLocation:
     identifier(ref.digest)
     if store.store_id not in host.store_domains:
         raise DataflowError("INVALID_CONTRACT", "host cannot reach the artifact domain")
     temporary_locator = None
-    if host.provider == "ray_core":
-        temporary_locator = "ray-object://" + ref.digest
+    # No ray.put occurred. A digest-shaped fake ObjectRef is not a location.
     if not store.inspect(ref):
         raise DataflowError("UNKNOWN_EFFECT", "durable artifact is not readable on this host")
     return DataLocation(domain=store.store_id, temporary_locator=temporary_locator, durable_ref=ref)

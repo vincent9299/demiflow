@@ -174,7 +174,8 @@ def join_partitions(
 
 
 def _group_sort_spec(spec: KernelSpec, on: tuple[str, ...]) -> KernelSpec:
-    configuration = dict(spec.configuration)
+    from ..contracts.dataflow_codec import _thaw_json
+    configuration = _thaw_json(spec.configuration)
     configuration["keys"] = list(on)
     configuration["descending"] = False
     return replace(spec, kind="SortOp", configuration=configuration)

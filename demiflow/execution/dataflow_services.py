@@ -44,12 +44,13 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
     root = run.directory.with_name(run.directory.name + "-driver-resources")
     state = RunResourceState(run.journal)
     if policy.provider == "local":
+        from .dataflow_capacity import local_capacity
         from ..resources.capacity import LocalCapacityPool
         from ..resources.local import LocalResourceProvider
         from ..resources.process_unit import ManagedProcessUnit
         from .dataflow_hosts import DataflowLocalConnector
-        pool = LocalCapacityPool(root / "capacity",
-                                 capacity={"cpu_millis": 8000, "memory_bytes": 8 * 1024 ** 3})
+        domain, capacity = local_capacity()
+        pool = LocalCapacityPool(domain / "capacity", capacity=capacity)
         unit = ManagedProcessUnit(root / "units")
         provider = LocalResourceProvider(pool, unit, control=DataflowLocalConnector())
     elif policy.provider == "ray_core":
@@ -69,10 +70,12 @@ def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifact
     run = action.context
     revision = run.journal.recovery_identity()["platform_revision"]
     if policy.provider == "local":
+        from .dataflow_capacity import local_capacity
+        _, capacity = local_capacity()
         hosts = (HostDescriptor(
             host_id="local", provider="local", runtime_revision=revision,
             store_domains=(policy.store_id,),
-            logical_resources={"cpu_millis": 8000.0, "memory_bytes": float(8 * 1024 ** 3)},
+            logical_resources={key: float(value) for key, value in capacity.items()},
             isolation_capabilities=("cpu-map", "stream")),)
     elif policy.provider == "ray_core":
         hosts = _ray_hosts(policy, revision)
@@ -96,7 +99,7 @@ def _ray_hosts(policy: RuntimePolicy, revision: str) -> tuple[HostDescriptor, ..
     for node in ray.nodes():
         if not node.get("Alive"):
             continue
-        host_id = "ray-" + identity({"node": node["NodeID"]})[:32]
+        host_id = "ray-" + node["NodeID"]
         hosts.append(HostDescriptor(
             host_id=host_id, provider="ray_core", runtime_revision=revision,
             store_domains=(policy.store_id,),
@@ -174,6 +177,9 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
     store = RunArtifactStore(root=shared_store.root, store_id=store_id, journal=journal, bounds=bounds)
     programs = _load_programs(assignment, store=store, bounds=bounds)
     constants = _read_constants(assignment.sealed.constants_ref, store=store, bounds=bounds)
+    def check_stop():
+        transport.check_stop()
+        journal.check_lease()
     return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,
-                           clock_ms=_now_ms, check_stop=transport.check_stop,
+                           clock_ms=_now_ms, check_stop=check_stop,
                            constants=constants, programs=programs)

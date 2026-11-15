@@ -113,6 +113,15 @@ def _validate_tree(value, *, max_bytes):
         elif item is None or kind is bool:
             continue
         else:
+            from ..contracts.array_values import numpy_value, validate_array
+            if numpy_value(item) is not None:
+                try:
+                    validate_array(item)
+                except ValueError as exc:
+                    raise DataflowError('INVALID_CONTRACT', str(exc)) from exc
+                if item.nbytes > max_bytes:
+                    _fail('BUDGET_EXCEEDED', 'NumPy payload exceeds row byte budget')
+                continue
             _fail("INVALID_CONTRACT",
                   "record payload carries a non-data object: " + kind.__name__)
 
@@ -137,6 +146,16 @@ def _encode_value(value):
         return {"t": "tuple", "v": [_encode_value(child) for child in value]}
     if isinstance(value, Mapping):
         return {"t": "map", "v": [[key, _encode_value(value[key])] for key in sorted(value)]}
+    from ..contracts.array_values import numpy_value, validate_array
+    if numpy_value(value) is not None:
+        import numpy as np
+        try:
+            validate_array(value)
+        except ValueError as exc:
+            raise DataflowError('INVALID_CONTRACT', str(exc)) from exc
+        return {'t': 'numpy_scalar' if isinstance(value, np.generic) else 'numpy_array',
+                'dtype': value.dtype.str, 'shape': list(value.shape),
+                'v': base64.b64encode(value.tobytes(order='C')).decode('ascii')}
     _fail("INVALID_CONTRACT", "record payload carries a non-data object: " + kind.__name__)
 
 
@@ -160,6 +179,25 @@ def _decode_value(node):
             return base64.b64decode(value, validate=True)
         except ValueError as exc:
             raise DataflowError("CORRUPT_ARTIFACT", "record codec bytes are not base64") from exc
+    if tag in ('numpy_scalar', 'numpy_array'):
+        import numpy as np
+        import math
+        try:
+            if set(node) != {'t', 'dtype', 'shape', 'v'}:
+                raise ValueError('Malformed NumPy node')
+            dtype, shape = np.dtype(node['dtype']), node['shape']
+            if (dtype.hasobject or dtype.fields is not None or dtype.kind not in 'biufcSUVmM'
+                    or dtype.itemsize <= 0 or type(shape) is not list or len(shape) > 32
+                    or any(type(n) is not int or n < 0 for n in shape)
+                    or tag == 'numpy_scalar' and shape):
+                raise ValueError('Unsupported NumPy dtype/shape')
+            raw = base64.b64decode(node['v'], validate=True)
+            if math.prod(shape) * dtype.itemsize != len(raw):
+                raise ValueError('NumPy shape differs from payload bytes')
+            array = np.frombuffer(raw, dtype=dtype).reshape(shape)
+            return array[()] if tag == 'numpy_scalar' else array
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise DataflowError('CORRUPT_ARTIFACT', 'Invalid NumPy data payload') from exc
     if tag in ("list", "tuple", "map"):
         value = node.get("v")
         if type(value) is not list:

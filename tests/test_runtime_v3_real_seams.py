@@ -354,6 +354,10 @@ def test_driver_control_repeated_reads_and_unread_reply_backpressure(tmp_path):
                                       bounds=replace(services.bounds, max_pending_events=1))
         event = WorkerEvent("demiflow.dataflow_event.v3", "check_grant", identity(["grant", 1]),
             ex._run_id(), ex._attempt(), ex._fence(), "allocation", "boot", 0, "scope", 1, None, {})
+        stage = ex._physical.stages[0]
+        service.register_worker(WorkerLease('allocation', 'boot', stage.stage_id,
+            stage.partitions, 'local', 'endpoint', ex._sealed.code_pin_ref,
+            int(time.time() * 1000) + 60000), stage.occurrences)
         other = replace(event, operation_id=identity(["grant", 2]))
         try:
             assert service.submit(event)

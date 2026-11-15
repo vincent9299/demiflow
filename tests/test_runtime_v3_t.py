@@ -236,6 +236,8 @@ class FakeExecution:
         self.pump_calls += 1
         if self._cancelled:
             state = "cancelled"
+        elif self.request.arguments.get("limit") == 0:
+            state = self._terminal_state
         elif self._infinite:
             state = "running"
         elif self._index < len(self._records):
@@ -394,7 +396,7 @@ def test_t002():
     handle = open_handle(ex)
     assert terminals.collect_rows(handle, limit=None, bounds=make_bounds()) == rows
 
-    ex0 = make_execution(records=[make_record(i) for i in range(3)])
+    ex0 = make_execution(records=[make_record(i) for i in range(3)], arguments={"limit": 0})
     h0 = open_handle(ex0)
     assert terminals.collect_rows(h0, limit=0, bounds=make_bounds()) == []
     assert ex0.subscriptions[0].read_calls == 0  # zero-read
@@ -716,3 +718,5 @@ def test_t015():
     handle.release()
     with pytest.raises(RuntimeError):
         handle.num_blocks()
+# Integrated lanes use the one production error vocabulary.
+from demiflow.execution.contracts.dataflow_errors import DataflowError

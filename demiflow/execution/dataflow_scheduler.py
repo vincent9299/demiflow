@@ -32,6 +32,10 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def lease_ttl_ms(policy):
+    return max(120000, policy.control_timeout_ms * 3)
+
+
 def _grant_bytes(document_value: dict) -> bytes:
     return json.dumps(document_value, sort_keys=True, ensure_ascii=False,
                       separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -133,6 +137,8 @@ class DataflowScheduler:
 
     # -- E011 choose ------------------------------------------------------
     def _feasible(self, work: ReadyWork) -> bool:
+        if work.operation_id in self._allocation_by_operation:
+            return True  # This pending allocation already holds its reservation.
         available = self._resident_budget - self._control_reserved - self._resident_used
         return work.resident_bytes <= available
 
@@ -178,7 +184,7 @@ class DataflowScheduler:
 
     def _grant(self, allocation_id: str, boot_id: str, work: ReadyWork,
                run_id: str, attempt: int, fence: str) -> ArtifactRef:
-        expires_at_ms = _now_ms() + max(120000, self._policy.control_timeout_ms)
+        expires_at_ms = _now_ms() + lease_ttl_ms(self._policy)
         document_value = {
             "grant_id": uuid.uuid4().hex, "run_id": run_id, "attempt": attempt,
             "fence": fence, "scope_id": self.scope_id, "allocation_id": allocation_id,
@@ -218,7 +224,7 @@ class DataflowScheduler:
             grant_ref = self._grant(allocation_id, boot_id, work, run_id, attempt, fence)
             lease = WorkerLease(allocation_id, boot_id, work.stage_id, (work.partition_id,),
                                 host_id or self._policy.provider, allocation_id, grant_ref,
-                                _now_ms() + max(120000, self._policy.control_timeout_ms))
+                                json.loads(self.grants[allocation_id])['expires_at_ms'])
             if prepare is None:
                 raise DataflowError("INVALID_CONTRACT", "placement requires a staged worker launch")
             lease = prepare(lease, stage)

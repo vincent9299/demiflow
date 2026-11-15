@@ -277,6 +277,9 @@ def thaw_record_value(value):
         return tuple(thaw_record_value(item) for item in value)
     if type(value) is list:
         return [thaw_record_value(item) for item in value]
+    from .array_values import numpy_value
+    if numpy_value(value) is not None:
+        return value.copy()
     return value
 
 
@@ -289,6 +292,12 @@ def _freeze_row_value(value, depth: int):
         return _FrozenRowList(_freeze_row_value(v, depth + 1) for v in value)
     if type(value) is tuple:
         return tuple(_freeze_row_value(v, depth + 1) for v in value)
+    from .array_values import numpy_value, freeze_array
+    if numpy_value(value) is not None:
+        try:
+            return freeze_array(value)
+        except ValueError as exc:
+            raise _err(str(exc)) from exc
     return value
 
 
