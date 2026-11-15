@@ -188,18 +188,26 @@ class RunArtifactStore:
         with self._file_state.lock:
             return self._file_state.used
 
+    def _remaining_files_locked(self, maximum):
+        maximum = min(maximum,*self._file_state.limits) if self._file_state.limits else maximum
+        return maximum - self._file_state.used
+
+    def available_file_slots(self, *, maximum=None):
+        """Effective remaining window of every live view; snapshot, not a grant."""
+        maximum = self._bounds.max_open_files if maximum is None else min(maximum,self._bounds.max_open_files)
+        with self._file_state.lock:
+            return max(0,self._remaining_files_locked(maximum))
+
     def require_file_slots(self, count, *, maximum=None):
         maximum = self._bounds.max_open_files if maximum is None else min(maximum,self._bounds.max_open_files)
         with self._file_state.lock:
-            maximum = min(maximum,*self._file_state.limits) if self._file_state.limits else maximum
-            if self._file_state.used + count > maximum:
+            if count > self._remaining_files_locked(maximum):
                 raise DataflowError('BUDGET_EXCEEDED', 'Artifact open file budget is insufficient')
 
     def _acquire_files(self, count):
         with self._file_state.lock:
             limit = self._bounds.max_open_files
-            maximum = min(limit,*self._file_state.limits) if self._file_state.limits else limit
-            if self._file_state.used + count > maximum:
+            if count > self._remaining_files_locked(limit):
                 raise DataflowError('BUDGET_EXCEEDED', 'Artifact open file budget is insufficient')
             self._file_state.used += count
             self._file_state.limits[limit] = self._file_state.limits.get(limit,0)+1

@@ -320,7 +320,7 @@ def merge_sort_runs(
     from ..dataflow_store import RunArtifactStore
     if isinstance(services.store, RunArtifactStore):
         store = services.store
-        available = min(services.bounds.max_open_files,store._bounds.max_open_files) - store.open_file_slots
+        available = store.available_file_slots(maximum=services.bounds.max_open_files)
         # Readers remain open across yield. The immediate downstream consumer
         # may publish through this same store before requesting another row, so
         # the final merge needs the same output window as intermediate spills.

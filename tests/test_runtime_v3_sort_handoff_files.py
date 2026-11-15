@@ -76,3 +76,51 @@ def test_infeasible_final_read_and_output_windows_fail_before_read(tmp_path,monk
                     next(ordering.merge_sort_runs(runs,spec=spec,services=replace(runtime,bounds=store._bounds)))
             assert not calls and store.open_file_slots==1 and descriptors(store)==1
         finally:store._bounds=old
+
+
+def test_final_sort_uses_effective_window_of_other_live_view(tmp_path):
+    from demiflow.execution.dataflow_store import RunArtifactStore
+    with sorted_runs(tmp_path,5) as (runtime,spec,records,runs):
+        store=runtime.store
+        other=RunArtifactStore(root=store.root,store_id=store.store_id,journal=store._journal,
+                               bounds=replace(store._bounds,max_open_files=11))
+        iterator=ordering.merge_sort_runs(runs,spec=spec,services=runtime)
+        try:
+            assert store._bounds.max_open_files==256
+            assert store.open_file_slots==2
+            assert store.available_file_slots()==other.available_file_slots()==9
+            assert store.available_file_slots(maximum=10)==8
+            assert store.available_file_slots(maximum=1)==0
+            seen=[]
+            for record in iterator:
+                assert store.open_file_slots<=6 and descriptors(store)<=6
+                raw=_encode_record_document(record,max_bytes=65536)
+                ref=store.put(iter([raw]),max_bytes=len(raw),media_type='application/vnd.demiflow.record.v3')
+                assert ref.size_bytes==len(raw)
+                expected=records[-1-len(seen)]
+                assert record.record_id==expected.record_id and record.source_position==expected.source_position
+                assert _materialize_row(record,runtime)==_materialize_row(expected,runtime)
+                seen.append(record)
+            assert len(seen)==5
+        finally:iterator.close();other.close()
+        assert store.open_file_slots==1 and store.available_file_slots()==255
+
+
+def test_other_live_view_infeasibility_rejects_before_sort_read(tmp_path,monkeypatch):
+    from demiflow.execution.dataflow_store import RunArtifactStore
+    with sorted_runs(tmp_path,5) as (runtime,spec,records,runs):
+        store=runtime.store
+        other=RunArtifactStore(root=store.root,store_id=store.store_id,journal=store._journal,
+                               bounds=replace(store._bounds,max_open_files=10))
+        called=[]
+        def forbidden(*args,**kwargs):
+            called.append(True)
+            raise AssertionError('Infeasible shared window read input')
+        try:
+            assert store.available_file_slots()==8
+            with monkeypatch.context() as patch:
+                patch.setattr(store,'read',forbidden)
+                with pytest.raises(DataflowError,match='input file slots'):
+                    next(ordering.merge_sort_runs(runs,spec=spec,services=runtime))
+            assert not called and store.open_file_slots==2
+        finally:other.close()

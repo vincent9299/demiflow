@@ -1,0 +1,36 @@
+{
+  "base": "40c7c1830c467ebfcec7c3880541d9872186aa53",
+  "source": {
+    "demiflow/execution/dataflow_store.py": "ce04ffa0688d95768f34c2d228d66df2cb6d4a01a05335fa2c2c5ae7b2939637",
+    "demiflow/execution/kernels/ordering.py": "a88691f69e3999e902530ae602fd9c4df35de6a74612db72b01b5f42976906a8",
+    "tests/test_runtime_v3_sort_handoff_files.py": "0493e1fe47b6e0edaa2fc5e26a69ea76a4da116bc2222bc57dbcff7b62ea3b63"
+  },
+  "xml": "/tmp/demiflow-sort-shared.xml",
+  "xml_sha256": "785cf59cd66cb3a506269abd753d041e54fccab124187d07f0fc26d2af530509",
+  "passed": 17,
+  "cases": [
+    "tests.test_runtime_v3_sort_handoff_files::test_final_merge_immediately_publishes_each_typed_record_with_live_readers[1]",
+    "tests.test_runtime_v3_sort_handoff_files::test_final_merge_immediately_publishes_each_typed_record_with_live_readers[5]",
+    "tests.test_runtime_v3_sort_handoff_files::test_final_merge_immediately_publishes_each_typed_record_with_live_readers[11]",
+    "tests.test_runtime_v3_sort_handoff_files::test_infeasible_final_read_and_output_windows_fail_before_read[1-7]",
+    "tests.test_runtime_v3_sort_handoff_files::test_infeasible_final_read_and_output_windows_fail_before_read[5-9]",
+    "tests.test_runtime_v3_sort_handoff_files::test_final_sort_uses_effective_window_of_other_live_view",
+    "tests.test_runtime_v3_sort_handoff_files::test_other_live_view_infeasibility_rejects_before_sort_read",
+    "tests.test_runtime_v3_artifact_files::test_low_budget_rejects_read_write_scratch_before_any_new_data_file",
+    "tests.test_runtime_v3_artifact_files::test_scratch_and_live_read_are_counted_and_survive_writer_close",
+    "tests.test_runtime_v3_artifact_files::test_views_and_native_owner_share_real_namespace_budget",
+    "tests.test_runtime_v3_artifact_files::test_exception_and_failed_scratch_open_return_reserved_file_windows",
+    "tests.test_runtime_v3_artifact_files::test_live_reader_releases_window_on_corruption_and_generator_end",
+    "tests.test_runtime_v3_artifact_files::test_real_external_sort_fan_in_accounts_for_read_leases_and_output",
+    "tests.test_runtime_v3_artifact_files::test_join_admits_stream_and_external_payload_before_consuming_input",
+    "tests.test_runtime_v3_artifact_files::test_higher_budget_view_cannot_bypass_live_low_budget_reader",
+    "::test_sort_respects_the_effective_live_limit_of_another_store_view[current_policy]",
+    "::test_sort_respects_the_effective_live_limit_of_another_store_view[two_way_control]"
+  ],
+  "independent_counterexample": {
+    "path": "/tmp/demiflow-fd-independent/test_sort_shared_window.py",
+    "sha256": "780aa9bcc247893e43bc388aa2b81c4029c7d01feb17c2f38cb8168488abaf79",
+    "before": "1 failed current policy, 1 passed forced two-way control",
+    "after": "both unchanged arms passed"
+  }
+}
