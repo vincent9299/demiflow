@@ -22,12 +22,15 @@ class LocalKernelOptions:
     memory_bytes: int = 256 * 1024 * 1024
     temp_directory: str | None = None
     native_resources: Any = None
+    worker_mode_explicit: bool = True
 
     def __post_init__(self):
         for name in ("workers", "partitions", "batch_rows", "memory_bytes"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise ValueError(f"local_execution {name} must be a positive integer")
+        if type(self.worker_mode_explicit) is not bool:
+            raise ValueError("worker_mode_explicit must be boolean")
         if self.worker_mode not in {"thread", "process"}:
             raise ValueError("worker_mode must be thread or process")
         if self.partitions > 256:
@@ -121,7 +124,7 @@ class LocalExecutionSession:
 
 
 @contextmanager
-def local_execution(*, workers=4, worker_mode="process", partitions=None,
+def local_execution(*, workers=4, worker_mode=None, partitions=None,
                     batch_rows=8192, memory_bytes=256 * 1024 * 1024,
                     temp_directory=None, native_resources=None, unified_chain=True,
                     unified_queue_chain=True):
@@ -152,8 +155,10 @@ def local_execution(*, workers=4, worker_mode="process", partitions=None,
     from .executors.local import LocalDatasetExecutor
     if _current_executor.get() is not None:
         raise ValueError("local_execution cannot replace a bound Pipeline or nested executor")
-    options = LocalKernelOptions(workers, worker_mode, workers * 4 if partitions is None else partitions,
-                                 batch_rows, memory_bytes, temp_directory, native_resources)
+    options = LocalKernelOptions(workers, "process" if worker_mode is None else worker_mode,
+                                 workers * 4 if partitions is None else partitions,
+                                 batch_rows, memory_bytes, temp_directory, native_resources,
+                                 worker_mode_explicit=worker_mode is not None)
     try:
         import cloudpickle  # noqa: F401
     except ImportError as exc:

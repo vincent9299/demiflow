@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+from contextvars import copy_context
 import time
 from collections import deque
 from dataclasses import asdict
@@ -71,6 +72,8 @@ class WorkerGraphRunner:
             import ray
             host = ray.util.get_node_ip_address()
         self._peer = PeerBuffers(bounds=self.bounds, host=host)
+        from ...resources.capacity import track_owned_thread
+        track_owned_thread(self._peer._thread)
         self._queue_finalizer = None
         self._terminal_rows = 0
         self._producer_expansion = {}
@@ -184,8 +187,10 @@ class WorkerGraphRunner:
             if edge.producer not in self.e._node_specs:
                 self._send('eoi', {'scope': 'input_satisfied', 'edge_id': edge_id,
                                    'consumer_partition': self.partition})
-        self._thread = threading.Thread(target=self._run, name='dataflow-business', daemon=True)
+        self._thread = threading.Thread(target=copy_context().run, args=(self._run,), name='dataflow-business', daemon=True)
         self._thread.start()
+        from ...resources.capacity import track_owned_thread
+        track_owned_thread(self._thread)
 
     def wake(self):
         with self._condition:

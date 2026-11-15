@@ -435,6 +435,4 @@ class DataflowWorkerExecutor:
         except BaseException as exc:
             errors.append(exc)
         if errors:
-            original = errors[0]
-            raise _dataflow_error("INTERNAL_PROTOCOL", "worker cleanup failed",
-                                  context={"failures": len(errors)}) from original
+            raise BaseExceptionGroup("worker cleanup failed", errors)

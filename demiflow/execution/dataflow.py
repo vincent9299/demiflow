@@ -331,7 +331,7 @@ class DataflowExecution:
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
             graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,
-                                            bounds=self._bounds)
+                                            bounds=self._bounds, worker_mode=self._policy.worker_mode)
             if producer is not None:
                 self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
             snapshots, splits = [], []
@@ -1068,6 +1068,7 @@ class DataflowExecution:
         self._closed = True
         deadline_ms = self._policy.control_timeout_ms
         cleanup_error = None
+        physical_closed = not self._scope_open
         # Finish actor aclose and reader teardown while the driver journal is
         # still reachable. Physical termination remains the final fallback.
         for endpoint in self._endpoints.values():
@@ -1079,8 +1080,12 @@ class DataflowExecution:
         if self._scope_open and self._scheduler is not None:
             try:
                 self._scheduler.close(deadline_ms=deadline_ms)
+                physical_closed = True
             except Exception as exc:
-                cleanup_error = exc
+                if cleanup_error is None:
+                    cleanup_error = exc
+                else:
+                    cleanup_error.add_note("Physical cleanup also failed: " + str(exc))
         if self._channels is not None:
             close_channels(self._channels, reason="execution_close", deadline_ms=deadline_ms)
             self._channels = None
@@ -1102,6 +1107,9 @@ class DataflowExecution:
         self._endpoints.clear()
         self._active_worker_allocations.clear()
         self._current_worker_observations.clear()
+        if physical_closed:
+            from .dataflow_thread_programs import owner, release
+            release(owner(self._action))
         if cleanup_error is not None:
             raise cleanup_error
 

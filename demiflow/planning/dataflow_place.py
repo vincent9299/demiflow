@@ -757,6 +757,8 @@ def compile_physical_dataflow(
     stages = _refine_source_partitions(graph, stages, splits, policy, bounds)
     from .dataflow_fusion import fuse_single_worker_pipeline
     stages = fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds)
+    from .dataflow_thread_fusion import fuse_thread_suffix
+    stages = fuse_thread_suffix(graph, stages, policy=policy, bounds=bounds)
     stages = select_fusion_groups(graph, stages, policy=policy)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges, residency = _select_budgeted_residency(

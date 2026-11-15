@@ -5,6 +5,7 @@ import asyncio
 import concurrent.futures
 import inspect
 import threading
+from contextvars import copy_context
 import time
 
 from ..contracts.dataflow_errors import DataflowError
@@ -24,7 +25,10 @@ class _AsyncWorkPool(concurrent.futures.ThreadPoolExecutor):
         self._active_lock = threading.Lock()
 
     def submit(self, fn, /, *args, **kwargs):
-        future = super().submit(fn, *args, **kwargs)
+        future = super().submit(copy_context().run, fn, *args, **kwargs)
+        from ...resources.capacity import track_owned_thread
+        for thread in tuple(self._threads):
+            track_owned_thread(thread)
         with self._active_lock:
             self._active.add(future)
         def done(completed):
@@ -64,11 +68,21 @@ class AsyncInstance:
         self._stop_called = False
         self._close_called = False
         self._closed = False
+        self._owner_task = None
+        self._owner_release = None
+        self._lifecycle_failure = None
 
     def __getattr__(self, name):
         return getattr(self.target, name)
 
     def resolve(self, value, *, closing=False):
+        if not closing:
+            try:
+                self.check_lifecycle()
+            except BaseException:
+                if inspect.iscoroutine(value):
+                    value.close()
+                raise
         if not inspect.isawaitable(value):
             return value
         if self.loop is None:
@@ -77,9 +91,11 @@ class AsyncInstance:
                     self.loop = asyncio.new_event_loop()
                     self._async_work = _AsyncWorkPool()
                     self.loop.set_default_executor(self._async_work)
-                    self.thread = threading.Thread(target=self.loop.run_forever,
+                    self.thread = threading.Thread(target=copy_context().run, args=(self.loop.run_forever,),
                                                    name="demiflow-operator-loop", daemon=True)
                     self.thread.start()
+                    from ...resources.capacity import track_owned_thread
+                    track_owned_thread(self.thread)
         async def wait():
             task = asyncio.current_task()
             if not closing:
@@ -130,9 +146,30 @@ class AsyncInstance:
         self._started = True
         hook = getattr(self.owner, "astart", None)
         if hook is not None:
-            self.resolve(hook())
+            async def start_owner():
+                started = asyncio.Event()
+                self._owner_release = asyncio.Event()
+                async def lifetime():
+                    try:
+                        result = hook()
+                        if inspect.isawaitable(result):
+                            await result
+                        started.set()
+                        await self._owner_release.wait()
+                    except BaseException as exc:
+                        self._lifecycle_failure = exc
+                        started.set()
+                self._owner_task = asyncio.create_task(lifetime())
+                await started.wait()
+                self.check_lifecycle()
+            self.resolve(start_owner())
+
+    def check_lifecycle(self):
+        if self._lifecycle_failure is not None:
+            raise self._lifecycle_failure
 
     def __call__(self, value):
+        self.check_lifecycle()
         if self._stopping.is_set():
             raise DataflowError("CANCELLED", "operator is stopping")
         result = self.target(value)
@@ -152,6 +189,7 @@ class AsyncInstance:
         async def cancel_pending():
             tasks = (asyncio.all_tasks() if background else set(self._tasks))
             tasks.discard(asyncio.current_task())
+            tasks.discard(self._owner_task)
             for task in tasks:
                 # Repeated cancellation would interrupt the very finally block
                 # whose completion makes it safe to release actor resources.
@@ -193,6 +231,11 @@ class AsyncInstance:
                     first_error = first_error or exc
         finally:
             if self.loop is not None:
+                if self._owner_task is not None:
+                    async def end_owner():
+                        self._owner_release.set()
+                        await self._owner_task
+                    self.resolve(end_owner(), closing=True)
                 self._drain(background=True)
                 self._async_work.drain(self.timeout)
                 self.loop.call_soon_threadsafe(self.loop.stop)

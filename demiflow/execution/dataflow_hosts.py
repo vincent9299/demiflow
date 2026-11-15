@@ -447,6 +447,9 @@ def make_host_endpoint(lease: "WorkerLease", *, services: "DriverServices"):
     if host is None:
         raise DataflowError("INVALID_CONTRACT", "lease host is not a declared driver host")
     if host.provider == "local":
+        if services.policy.worker_mode == "thread":
+            from .dataflow_thread_host import ThreadHostEndpoint
+            return ThreadHostEndpoint(lease, services=services)
         return LocalHostEndpoint(lease, services=services)
     if host.provider == "ray_core":
         if not _RAY_AVAILABLE:

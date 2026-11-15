@@ -5,12 +5,41 @@ This is physical admission for one machine domain, not the RunJournal
 cumulative cost ledger. Ray placement is charged by Ray Core, never here.
 """
 import fcntl
+from contextvars import ContextVar
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import time
 
 from .contracts import ResourceError, document, identifier, spec_hash
+
+_thread_tracker = ContextVar("demiflow_owned_threads", default=None)
+
+
+def track_owned_thread(thread):
+    tracker = _thread_tracker.get()
+    if tracker is not None:
+        tracker(thread)
+
+
+_thread_envelope = ContextVar("demiflow_allocation_envelope", default=None)
+
+
+@contextmanager
+def allocation_envelope(value, *, track_thread=None):
+    """An admitted same-process host slice, without changing process env."""
+    if type(value) is not dict or set(value) != _ENVELOPE_KEYS:
+        raise ResourceError("INVALID_SPEC", "thread envelope has an unsupported shape")
+    document(value, 4096)
+    token = _thread_envelope.set(dict(value))
+    tracker_token = _thread_tracker.set(track_thread)
+    try:
+        yield
+    finally:
+        _thread_envelope.reset(token)
+        _thread_tracker.reset(tracker_token)
+
 
 ENVELOPE_ENV = "DEMIFLOW_RESOURCE_ENVELOPE"
 MAX_ACTIVE_RECORDS = 1024
@@ -54,6 +83,9 @@ def inherited_envelope():
     malformed fails closed: a managed worker must not silently fall back to
     whole-machine defaults and double-charge the deployment domain.
     """
+    current = _thread_envelope.get()
+    if current is not None:
+        return dict(current)
     value = os.environ.get(ENVELOPE_ENV)
     if value is None:
         return None

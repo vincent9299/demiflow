@@ -223,6 +223,10 @@ def resolve_action_runtime(request: ActionRequest):
         options['max_active_workers'] = workers
     if local is not None:
         options['memory_bytes'] = local.memory_bytes
+    from .dataflow_thread_programs import select_worker_mode
+    mode = select_worker_mode(request, local)
+    if mode is not None:
+        options['worker_mode'] = mode
     run = request.action.context
     limits = dict(run.limits)
     explicit = set(run.explicit_limits)

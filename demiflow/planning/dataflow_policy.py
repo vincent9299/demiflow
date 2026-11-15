@@ -46,7 +46,8 @@ _INT_BUDGET_OPTIONS = frozenset(_BOUNDS_DEFAULTS) | {
     "fairness_quantum_bytes", "control_timeout_ms", "memory_bytes",
 }
 _SCALE_OPTIONS = frozenset({"default_partitions", "max_replicas", "max_active_workers"})
-_STR_OPTIONS = {"durability": _DURABILITY, "required_recovery": _RECOVERY}
+_STR_OPTIONS = {"durability": _DURABILITY, "required_recovery": _RECOVERY,
+                "worker_mode": frozenset({"process", "thread"})}
 _BOOL_OPTIONS = frozenset({"fusion"})
 _FREE_STR_OPTIONS = frozenset({"store_id"})
 _OPTION_KEYS = (
@@ -164,6 +165,9 @@ def resolve_runtime_policy(
         if "control_timeout_ms" in options else _POLICY_DEFAULTS["control_timeout_ms"]
     )
 
+    mode = options.get("worker_mode", "process")
+    if mode == "thread" and provider != "local":
+        raise _reject("thread worker mode requires the local provider")
     policy = RuntimePolicy(
         provider=provider,
         durability=durability,
@@ -176,6 +180,7 @@ def resolve_runtime_policy(
         control_timeout_ms=control_timeout,
         store_id=store_id,
         required_recovery=required_recovery,
+        worker_mode="thread" if mode == "thread" else None,
         max_active_workers=(_tighten(options["max_active_workers"], bounds.max_partitions, "max_active_workers")
                             if "max_active_workers" in options else None),
     )

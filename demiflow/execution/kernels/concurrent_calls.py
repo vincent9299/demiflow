@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from contextvars import ContextVar
 import queue
 import threading
+from contextvars import copy_context
 import time
 
 from ..contracts.dataflow_errors import DataflowError
@@ -70,7 +71,10 @@ class ConcurrentCalls:
                 finally:
                     INVOCATION_SCOPE.reset(token)
                     send(_END)
-        future = self.pool.submit(run)
+        future = self.pool.submit(copy_context().run, run)
+        from ...resources.capacity import track_owned_thread
+        for thread in tuple(self.pool._threads):
+            track_owned_thread(thread)
         self.jobs.append((slot, output, future, metadata))
 
     def snapshot(self):

@@ -253,7 +253,7 @@ _WIRE_TYPES = {
         ("max_replicas", _i(1)), ("fusion", _B), ("checkpoint_rows", _i(1)), ("checkpoint_interval_ms", _i(1)),
         ("fairness_quantum_bytes", _i(1)), ("control_timeout_ms", _i(1)), ("store_id", _I),
         ("required_recovery", _e(_RECOVERIES)),
-        ("max_active_workers", _oi(1)),
+        ("max_active_workers", _oi(1)), ("worker_mode", _ot(16)),
         ("native_limits", _OJM),
     )),
     "ResidencyPlan": (ResidencyPlan, (
@@ -624,6 +624,8 @@ def _validate_payload(payload, type_name):
         payload = dict(payload, block_partition=None)
     if type_name == "RuntimePolicy" and "max_active_workers" not in payload:
         payload = dict(payload, max_active_workers=None)
+    if type_name == "RuntimePolicy" and "worker_mode" not in payload:
+        payload = dict(payload, worker_mode=None)
     if type_name in ("RuntimePolicy", "WorkerAssignment") and "native_limits" not in payload:
         payload = dict(payload, native_limits=None)
     if set(payload) != expected:
@@ -774,7 +776,7 @@ def _construct_payload(payload, type_name):
     cls, fields = entry
     kwargs = {}
     for name, spec in fields:
-        optional = (type_name, name) in {("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers"), ("RuntimePolicy", "native_limits"), ("WorkerAssignment", "native_limits")}
+        optional = (type_name, name) in {("Record", "schema_ref"), ("Record", "block_partition"), ("RuntimePolicy", "max_active_workers"), ("RuntimePolicy", "native_limits"), ("RuntimePolicy", "worker_mode"), ("WorkerAssignment", "native_limits")}
         value = payload.get(name) if optional else payload[name]
         kwargs[name] = _construct_field(value, spec, type_name + "." + name)
     return cls(**kwargs)
@@ -834,7 +836,7 @@ def _project_payload(value, type_name):
     for name, spec in fields:
         if type_name == "Record" and name in ("schema_ref", "block_partition") and getattr(value, name) is None:
             continue
-        if type_name == "RuntimePolicy" and name in ("max_active_workers", "native_limits") and getattr(value, name) is None:
+        if type_name == "RuntimePolicy" and name in ("max_active_workers", "native_limits", "worker_mode") and getattr(value, name) is None:
             continue
         if type_name == "WorkerAssignment" and name == "native_limits" and value.native_limits is None:
             continue
@@ -1012,7 +1014,7 @@ def _identity_project(value):
         return {
             field.name: _identity_project(getattr(value, field.name))
             for field in dataclasses.fields(value)
-            if not (isinstance(value, RuntimePolicy) and field.name in ("max_active_workers", "native_limits")
+            if not (isinstance(value, RuntimePolicy) and field.name in ("max_active_workers", "native_limits", "worker_mode")
                     and getattr(value, field.name) is None)
             and not (isinstance(value, WorkerAssignment) and field.name == "native_limits"
                      and value.native_limits is None)

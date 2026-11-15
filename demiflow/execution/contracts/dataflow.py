@@ -725,6 +725,7 @@ class RuntimePolicy:
     required_recovery: Recovery
     max_active_workers: int | None = None
     native_limits: Mapping[str, Json] | None = None
+    worker_mode: Literal["thread"] | None = None
 
     def __post_init__(self):
         _enum(self.provider, "RuntimePolicy.provider", _PROVIDERS)
@@ -738,6 +739,10 @@ class RuntimePolicy:
         _int(self.control_timeout_ms, "RuntimePolicy.control_timeout_ms", minimum=1)
         _ident(self.store_id, "RuntimePolicy.store_id")
         _enum(self.required_recovery, "RuntimePolicy.required_recovery", _RECOVERIES)
+        if self.worker_mode is not None:
+            _enum(self.worker_mode, "RuntimePolicy.worker_mode", frozenset({"thread"}))
+            if self.provider != "local":
+                raise _err("thread worker mode requires the local provider")
         if self.max_active_workers is not None:
             _int(self.max_active_workers, "RuntimePolicy.max_active_workers", minimum=1)
         if self.native_limits is not None:

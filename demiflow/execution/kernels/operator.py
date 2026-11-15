@@ -390,9 +390,15 @@ class OperatorKernel:
 
     @property
     def checkpoint_ready(self):
+        for instance in self._instances:
+            if instance is not None:
+                instance.check_lifecycle()
         return not self.pending_calls or self.can_snapshot_pending
 
     def poll(self):
+        for instance in self._instances:
+            if instance is not None:
+                instance.check_lifecycle()
         if self._batch and self._batch_deadline is not None and self._services.clock_ms() >= self._batch_deadline:
             expected = self._batch_membership.expected(self._batch_ordinal) if self._batch_membership else None
             if expected is None:
@@ -906,31 +912,31 @@ class OperatorKernel:
         if self._calls is not None:
             self._calls.close(timeout=min(30, self._services.bounds.timeout_ms / 1000))
         self._closed = True
-        first_error: BaseException | None = None
+        errors = []
         for instance in self._instances:
             if instance is None:
                 continue
             try:
                 _close_instance(instance)
             except BaseException as exc:
-                first_error = first_error or exc
+                errors.append(exc)
         self._instances.clear()
         self._instance = None
         for port in self._ports.values():
             try:
                 port.release()
             except BaseException as exc:
-                if first_error is None:
-                    first_error = exc
+                errors.append(exc)
         for ref in self._spool_owner_refs:
             try:
                 self._services.store.release(ref, owner=_SPOOL_OWNER)
             except BaseException as exc:
-                if first_error is None:
-                    first_error = exc
+                errors.append(exc)
         self._spool_owner_refs = []
-        if first_error is not None:
-            raise first_error
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("operator cleanup failed", errors)
 
     def _require_started(self) -> None:
         if self._closed:

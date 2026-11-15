@@ -54,7 +54,12 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
         domain, capacity = local_capacity()
         pool = LocalCapacityPool(domain / "capacity", capacity=capacity)
         unit = ManagedProcessUnit(root / "units")
-        provider = LocalResourceProvider(pool, unit, control=DataflowLocalConnector(), device_pool=devices)
+        if policy.worker_mode == "thread":
+            from ..resources.thread import ThreadResourceProvider
+            from .dataflow_thread_host import DataflowThreadConnector
+            provider = ThreadResourceProvider(pool, root / "thread-units", control=DataflowThreadConnector())
+        else:
+            provider = LocalResourceProvider(pool, unit, control=DataflowLocalConnector(), device_pool=devices)
     elif policy.provider == "ray_core":
         if not _RAY_AVAILABLE:
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
@@ -75,7 +80,7 @@ def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifact
         from .dataflow_capacity import local_capacity
         _, capacity = local_capacity()
         from .dataflow_devices import gpu_capacity
-        capacity = {**capacity, 'gpu': gpu_capacity('local')}
+        capacity = {**capacity, 'gpu': 0 if policy.worker_mode == 'thread' else gpu_capacity('local')}
         hosts = (HostDescriptor(
             host_id="local", provider="local", runtime_revision=revision,
             store_domains=(policy.store_id,),
@@ -127,6 +132,11 @@ def make_driver_services(action: "RunAction", *, policy: RuntimePolicy, bounds: 
     port = DriverArtifactPort(action, bounds=bounds)
     store = RunArtifactStore(root=run.directory / ".dataflow-store", store_id=policy.store_id,
                              journal=port, bounds=bounds)
+    if action.replaying and run.journal.source_binding(action.action_id + "-dataflow-sealed") is not None:
+        from dataclasses import replace
+        from .dataflow_seal import load_dataflow
+        _, physical, _ = load_dataflow(run.directory, action.action_id, store=store, bounds=bounds)
+        policy = replace(policy, worker_mode=physical.policy.worker_mode)
     resources = _driver_resources(action, policy)
     hosts = _driver_hosts(action, policy, store, bounds)
     journal_service = DriverJournalService(action, store=store, bounds=bounds)
@@ -162,6 +172,8 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
     from .recovery_identity import platform_identity
     if pin.get("platform_revision") != platform_identity():
         raise DataflowError("CODE_MISMATCH", "Worker platform code differs from the sealed revision")
+    if physical.policy.worker_mode == "thread":
+        cache = None  # Never mutate sys.path/module namespaces in the hosting process.
     programs = _VerifiedPrograms()
     programs.native_limits = physical.policy.native_limits
     owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
@@ -170,7 +182,9 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
             continue
         programs[node.occurrence_id] = verify_dataflow_program(
             node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
-            store=store, bounds=bounds, cache=cache)
+            store=store, bounds=bounds, cache=cache,
+            live_binding={"run_id": assignment.run_id, "action_id": assignment.action_id,
+                          "attempt": assignment.attempt, "fence": assignment.fence})
     return programs
 
 
