@@ -215,20 +215,40 @@ def _join_sealed_observations(root, run_id, attempt, logical_view):
         if entry.get('status') != 'sealed' or not bridge or not bridge.get('available'):
             continue
         action_id = entry['action_id']
+        # A v3 entry already carries the build_plan_view per-occurrence projection
+        # (observed/not_observed, never inferred). Keep it as the plan-level authority
+        # so the attempt-scoped bridge join below never replaces or re-derives it.
+        if entry.get('version') == 'v3' and 'node_observations' in entry:
+            entry['plan_node_observations'] = entry['node_observations']
+        v3 = entry.get('version') == 'v3'
+        scope = (dict(plan_id=entry['plan_id'], dag_id=entry['dag']['dag_id'],
+                      plan_revision=entry['physical']['plan_revision']) if v3 else {})
         try:
             page = run_view.observations(root, run_id, attempt=attempt, action_id=action_id, limit=64)
             if page.get('availability') == 'unsupported':
                 entry['node_observations'] = dict(available=False, reason='historical_observation_contract')
                 continue
-            joined = facts.join_node_observations(bridge['bridge'], page, action_id=action_id, attempt=attempt)
-            entry['node_observations'] = dict(
+            joined = facts.join_node_observations(bridge['bridge'], page, action_id=action_id, attempt=attempt, **scope)
+            wrapper = dict(
                 available=True, attempt=attempt, has_more=bool(page.get('has_more')),
                 entries=[dict(logical_node_id=e['logical_node_id'], occurrence_id=e['occurrence_id'],
                               report_node_id=e['report_node_id'], report_occurrence=e['report_occurrence'],
                               availability=e['availability']) for e in joined])
+            if v3:
+                # This-run scope credentials: the server verified the page belongs to
+                # this sealed action/dag/plan/revision before promoting any observation.
+                wrapper.update(action_id=action_id, dag_id=scope['dag_id'],
+                               plan_id=scope['plan_id'], plan_revision=scope['plan_revision'])
+            entry['node_observations'] = wrapper
             bounded_json(entry, facts.ACTION_BYTES)
         except ForgeError as exc:
-            entry['node_observations'] = dict(available=False, reason='observation_page_unavailable', detail=str(exc)[:512])
+            unavailable = dict(available=False,
+                               reason='observation_plan_scope_unverified' if v3 else 'observation_page_unavailable',
+                               detail=str(exc)[:512])
+            if v3:
+                unavailable.update(action_id=action_id, dag_id=scope['dag_id'],
+                                   plan_id=scope['plan_id'], plan_revision=scope['plan_revision'])
+            entry['node_observations'] = unavailable
 
 
 def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
@@ -286,6 +306,11 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         if basis_kind == 'run':
             from demiflow.workbench.runs import facts
             logical_view = facts.overlay_sealed(root, run_id, logical_view, report_digest=report['digest'])
+            # Surface which sealed projection versions are present (v3 standard
+            # plan-view vs historical v1/v2) without re-deriving any v3 field as v1.
+            logical_view['sealed_versions'] = sorted({
+                e.get('version', 'v1') for e in logical_view.get('actions', [])
+                if e.get('binding_level') == 'sealed'})
             _join_sealed_observations(root, run_id, attempt, logical_view)
     binding = dict(workspace_id=key, basis_kind=basis_kind, basis_digest=digest, entry=entry,
                    params=params, run_id=run_id, attempt=attempt)
@@ -406,6 +431,35 @@ def _resolve_bridge_node(target, report, logical_node_id, occurrence_id):
     raise ForgeError('Execution node is not bridged to a sealed report node', code='not_found')
 
 
+def _resolve_bridge_action(target, report, logical_node_id, occurrence_id):
+    """Return the unique sealed action that owns a logical/occurrence pair.
+
+    Source/code provenance must bind to the action that actually contains the
+    selected occurrence, never the first v3 action encountered while traversing
+    the report. Ambiguous membership (several actions) requires an explicit
+    occurrence; an unbridged pair is not_found. Never guesses.
+    """
+    from demiflow.workbench.runs import facts
+    actions = set()
+    for action_id in report.get('actions', []):
+        if type(action_id) is not str:
+            continue
+        sealed = facts.read_sealed_plan(target, action_id)
+        if not sealed.get('available'):
+            continue
+        bridge = facts.read_identity_bridge(target, action_id, dag_id=sealed['dag_id'], report_digest=report['digest'])
+        if not bridge.get('available'):
+            continue
+        for entry in bridge['bridge']['entries']:
+            if entry['logical_node_id'] == logical_node_id and (occurrence_id is None or entry['occurrence_id'] == occurrence_id):
+                actions.add(action_id)
+    if len(actions) == 1:
+        return next(iter(actions))
+    if len(actions) > 1:
+        raise ForgeError('Logical node belongs to several sealed actions; select an occurrence', code='conflict')
+    raise ForgeError('Execution node is not bridged to a sealed report node', code='not_found')
+
+
 def bound_source(root, binding, node_id, *, include_parameters=True, logical_node_id=None, occurrence_id=None):
     """Read one immutable node's provenance without rechecking the project.
 
@@ -433,6 +487,7 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
                 raise ForgeError('Parameters changed while reading node configuration',code='conflict')
         return dict(binding=current,nodes=[node],sources=observed['sources'],parameters=parameters)
     key = ws.workspace_id(root, control)
+    sealed_code_pin_ref = None
     if binding['basis_kind'] == 'report':
         report = ws.load_report(root, binding['basis_digest'])
         digest = report['digest']
@@ -445,6 +500,17 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
         digest = value['manifest']['digest']
         if logical_node_id is not None:
             node_id = _resolve_bridge_node(target, report, logical_node_id, occurrence_id)
+        # Surface the original v3 sealed code identity (never current source) from
+        # the unique sealed action that owns the selected occurrence — not the first
+        # v3 action traversed. v3 fields are read, not recomputed; an unbridged node
+        # is not_found above, so source provenance is never guessed.
+        from demiflow.workbench.runs import facts
+        sealed_code_pin_ref = None
+        if logical_node_id is not None:
+            owner = _resolve_bridge_action(target, report, logical_node_id, occurrence_id)
+            sealed = facts.read_sealed_plan(target, owner)
+            if sealed.get('available') and sealed.get('version') == 'v3':
+                sealed_code_pin_ref = sealed['plan_view'].get('code_pin_ref')
     evidence = report.get('binding', {})
     observed = dict(workspace_id=key, basis_kind=binding['basis_kind'], basis_digest=digest,
                     entry=report.get('entry', evidence.get('entry')), params=evidence.get('parameter_path'),
@@ -455,5 +521,6 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
         raise ForgeError('Node is outside this graph', code='not_found')
     from demiflow.workbench.graph.parameters import public_model
     return dict(binding=observed, nodes=[node], sources=evidence.get('sources', {}),
+                sealed_code_pin_ref=sealed_code_pin_ref,
                 parameters=public_model(root, control, observed['entry'], observed['params'], [node],
                                         readonly=True, sealed=evidence.get('parameters', {})))

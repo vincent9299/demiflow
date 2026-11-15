@@ -215,7 +215,9 @@
     function logicalEntry(){
       const view=data().graph?.logical;
       if(!view?.available||!view.actions.length)return null;
-      return view.actions.find(a=>a.action_id===logicalAction)||view.actions[0];
+      const entry=view.actions.find(a=>a.action_id===logicalAction)||view.actions[0];
+      if(entry.status==='sealed'&&entry.version==='v3'&&!entry.dag)return null;
+      return entry;
     }
     function toggleGraphKind(){
       graphKind=graphKind==='logical'?'declared':'logical';
@@ -275,9 +277,9 @@
           $('p','code：'+(error.code||'unknown')),$('p','reason：'+(error.reason||'未提供')),$('p','retriable：'+(error.retriable?'true':'false')));
         graphHost.replaceChildren(box);return;
       }
-      const dag=entry.dag,sealed=entry.status==='sealed';
+      const dag=entry.dag,sealed=entry.status==='sealed',v3=sealed&&entry.version==='v3';
       graphTitle.textContent=(sealed?'运行封存计划（E2）':'声明图投影（E2）')+' · '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
-      logicalBar.append($('span','结构校验通过 · '+dag.schema_version,'wb-tag'));
+      logicalBar.append($('span',(sealed?'封存计划结构 · ':'声明投影结构（未执行）· ')+dag.schema_version,'wb-tag'));
       if(sealed){
         const sealedAt=entry.sealed_at!=null&&Number.isFinite(Number(entry.sealed_at))?new Date(Number(entry.sealed_at)).toISOString():'未提供';
         logicalBar.append($('span','已绑定本次执行计划','wb-tag'),
@@ -288,6 +290,15 @@
       }else{
         logicalBar.append($('span','未绑定本次执行计划','wb-tag'),$('span','声明图 dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
         if(entry.fallback)logicalBar.append($('span','声明投影（非运行封存计划）','wb-tag'));
+      }
+      if(v3&&entry.physical){
+        const phys=entry.physical,exchanges=phys.exchanges||[],limitations=phys.limitations||[];
+        const modes=[...new Set(exchanges.map(x=>x.mode))];
+        logicalBar.append($('span','恢复级别 '+String(phys.recovery??'未提供'),'wb-caption'),
+          $('span','交换通道 '+exchanges.length+(modes.length?' · '+modes.join('/'):''),'wb-caption'),
+          $('span','恢复限制 '+limitations.length+' 项','wb-caption'));
+        if(limitations.length)logicalBar.append($('p','恢复限制：'+limitations.join('；'),'wb-caption'));
+        if(entry.recovery_restriction)logicalBar.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。','wb-caption'));
       }
       const labels={};for(const n of graph.nodes)labels[n.id]=n.operator?.name||n.api.split(/[.:]/).at(-1)||n.kind;
       logicalView.update(dag,entry.node_map,labels,logicalSelected,entry.binding_level||(sealed?'sealed':'declared'));
@@ -323,20 +334,35 @@
       logicalSelected=id;logicalView.select(id);
       if(!group.length)return;
       const node=group[0];
+      const v3=sealed&&entry.version==='v3';
+      const obsLabelFor=occ=>{
+        const obs=entry.node_observations;
+        if(Array.isArray(obs)){
+          const row=obs.find(o=>o.occurrence_id===occ);
+          if(!row)return '未提供观测信息';
+          return row.availability==='observed'?'已有观测':'本次封存计划未见观测（不代表整个运行无观测）';
+        }
+        return observationLabel(entry,id,occ);
+      };
+      const stageFor=occ=>sealed&&entry.physical&&entry.physical.stages?entry.physical.stages[v3?occ:id]:null;
       const box=details((sealed?'执行逻辑节点（E2）· ':'声明逻辑节点（E2）· ')+id.slice(0,12),inspector);box.open=true;
       const facts=$('dl',undefined,'details');
       const rows=[['op_kind',node.op_kind],['输入端口',node.input_ports.join(', ')||'无'],['输出端口',node.output_ports.join(', ')||'无'],['出现次数',String(group.length)],['operator_spec_ref',node.operator_spec_ref||'未绑定（只读投影）']];
-      const stage=sealed&&entry.physical&&entry.physical.stages?entry.physical.stages[id]:null;
+      const stage=stageFor(node.occurrence_id);
       if(sealed){
         if(bridge){
           rows.push(['执行节点桥','已绑定报告节点（源码与参数按报告节点对应）']);
-          rows.push(['节点观测',group.length===1?observationLabel(entry,id,group[0].occurrence_id):'按出现分别对应（见下方）']);
+          rows.push(['节点观测',group.length===1?obsLabelFor(group[0].occurrence_id):'按出现分别对应（见下方）']);
         }else{
           const ib=entry.identity_bridge||{};
           rows.push(['执行节点桥','尚无节点身份桥'+(ib.reason?'（'+ib.reason+'）':'')]);
-          rows.push(['节点观测','未桥接，无法对应执行观测']);
+          rows.push(['节点观测',v3?obsLabelFor(node.occurrence_id):'未桥接，无法对应执行观测']);
         }
-        if(stage)rows.push(['分区数',String(stage.partition_count)],['worker 角色',stage.role||'未分配'],['stage_id',String(stage.stage_id).slice(0,16)]);
+        if(stage){
+          rows.push(['分区数',String(stage.partition_count)],['stage_id',String(stage.stage_id).slice(0,16)]);
+          if(v3)rows.push(['副本目标',String(stage.replica_target??'未提供')],['资源画像',stage.profile&&stage.profile.requests?Object.entries(stage.profile.requests).map(([k,v])=>k+'='+v).join(', '):'未提供']);
+          else rows.push(['worker 角色',stage.role||'未分配']);
+        }
       }else rows.push(['声明节点',declared||'未映射']);
       for(const[label,value]of rows)facts.append($('dt',label),$('dd',value));
       box.append(facts);
@@ -348,7 +374,7 @@
             const picker=$('div',undefined,'wb-inline-actions');box.append(picker);
             for(const occ of group){
               const be=bridgeEntryFor(entry,id,occ.occurrence_id);
-              const label='出现 '+String(occ.occurrence_id).slice(0,8)+(be?' · '+observationLabel(entry,id,occ.occurrence_id):' · 未桥接');
+              const label='出现 '+String(occ.occurrence_id).slice(0,8)+(be?' · '+obsLabelFor(occ.occurrence_id):' · 未桥接');
               button(label,()=>{
                 if(!be){message('该出现尚无节点身份桥，无法对应执行节点。','error-box');return;}
                 const rid=be.report_node_id;
@@ -361,9 +387,17 @@
           const ib=entry.identity_bridge||{};
           box.append($('p',ib.detail||'该 action 尚无节点身份桥；封存计划仍可查看，执行节点与报告观测的对应不猜测。','wb-caption'));
         }
-        if(stage)raw('stage.budgets',stage.budgets,box);
-        if(entry.recovery_restriction)box.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。已完成的结果仍可读取。','wb-caption'));
-        if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,recovery_restriction:entry.recovery_restriction||null,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
+        if(v3){
+          if(stage){raw('stage.profile',stage.profile,box);raw('stage.replicas',{replica_min:stage.replica_min,replica_target:stage.replica_target,replica_max:stage.replica_max,resident_bytes:stage.resident_bytes,output_bytes:stage.output_bytes,state_bytes:stage.state_bytes},box);}
+          if(group.length>1)raw('stages_by_occurrence',Object.fromEntries(group.map(occ=>[occ.occurrence_id,stageFor(occ.occurrence_id)])),box);
+          if(Array.isArray(entry.plan_node_observations))raw('plan_node_observations',entry.plan_node_observations,box);
+          if(entry.recovery_restriction)box.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。已完成的结果仍可读取。','wb-caption'));
+          if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,recovery_restriction:entry.recovery_restriction||null,limitations:entry.physical.limitations,exchanges:entry.physical.exchanges,policy:entry.physical.policy,residency:entry.physical.residency},box);
+        }else{
+          if(stage)raw('stage.budgets',stage.budgets,box);
+          if(entry.recovery_restriction)box.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。已完成的结果仍可读取。','wb-caption'));
+          if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,recovery_restriction:entry.recovery_restriction||null,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
+        }
       }
       if(entry.dag.shared_ancestors.some(s=>s.logical_node_id===id))box.append($('p','共享祖先 / 复用：该逻辑节点被多个消费方共享。','wb-caption'));
       raw('traits',node.traits,box);raw('occurrence_id',group.map(n=>n.occurrence_id),box);

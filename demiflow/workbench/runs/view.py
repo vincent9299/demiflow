@@ -73,7 +73,7 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
         except (ValueError,KeyError,TypeError,RecursionError) as exc:
             raise ObservationResetRequired('cursor_invalid') from exc
     try:
-        _,connection=_connect(root,run_id)
+        target,connection=_connect(root,run_id)
     except (OSError,ForgeError) as exc:
         if cursor:raise ObservationResetRequired('history_unavailable') from exc
         raise
@@ -103,10 +103,32 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
         revision,count,_=_observation_revision(db,attempt)
         if decoded is not None and decoded['observation_revision']!=revision:
             raise ObservationResetRequired('observations_changed')
+        from demiflow.workbench.runs import facts
+        plan_scope_cache={}
+        def plan_scope(action):
+            """U2/W012: v3 sealed plan identity only; legacy/unreadable -> None (never backfilled)."""
+            if action not in plan_scope_cache:
+                sealed=facts.read_sealed_plan(target,action)
+                plan_scope_cache[action]=(dict(plan_id=sealed['plan_id'],dag_id=sealed['dag_id'],
+                                               plan_revision=sealed['plan_view']['plan_revision'])
+                                          if sealed.get('available') and sealed.get('version')=='v3' else None)
+            return plan_scope_cache[action]
+        if action_id is not None:
+            page_scope=plan_scope(action_id)
+        else:
+            # No queried action: one page scope only if the whole filtered observation
+            # set belongs to a single action (bounded probe, never a guessed identity).
+            scope_clauses=['attempt=?'];scope_values=[attempt]
+            if node_id is not None:scope_clauses.append('node_id=?');scope_values.append(node_id)
+            distinct=db.execute('SELECT DISTINCT action_id FROM node_observations WHERE '+
+                                ' AND '.join(scope_clauses)+' LIMIT 2',scope_values).fetchall()
+            page_scope=plan_scope(distinct[0][0]) if len(distinct)==1 else None
         result=dict(format='demiflow_forge_node_observation_page_v1',run_id=run_id,attempt=attempt,
                     node_id=node_id,action_id=action_id,binding=binding,observation_revision=revision,
                     observations=[],availability='available',scope='correlated_node_observations',
                     cursor=None,has_more=False,coverage='one_page_at_observation_revision',attempt_observation_count=count)
+        if page_scope is not None:
+            result.update(page_scope)
         clauses=['attempt=?'];values=[attempt]
         for key,value in [('node_id',node_id),('action_id',action_id)]:
             if value is not None:clauses.append(key+'=?');values.append(value)
@@ -123,6 +145,9 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
             if document['sequence']!=sequence:
                 raise ForgeError('Observation document differs from its native sequence')
             row=dict(document,action_id=action,node_id=node,occurrence=occurrence,sequence=sequence)
+            row_scope=plan_scope(action)
+            if row_scope is not None:
+                row.update(row_scope)
             size=len(bounded_json(row,16384))+1
             if len(rows)==limit or used+size>96*1024:
                 result['has_more']=True;break

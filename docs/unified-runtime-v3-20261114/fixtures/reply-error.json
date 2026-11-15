@@ -1,0 +1,11 @@
+{
+  "schema": "demiflow.runtime_wire.v3",
+  "type": "ControlReply",
+  "payload": {
+    "operation_id": "6df24c372c044a0fd8d05774ee70449d7a035d99b3bc3b570a0bf5b22556a904",
+    "status": "error",
+    "payload": null,
+    "payload_ref": null,
+    "error_code": "BUDGET_EXCEEDED"
+  }
+}

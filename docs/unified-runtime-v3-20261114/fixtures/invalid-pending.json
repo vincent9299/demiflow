@@ -1,0 +1,9 @@
+{
+  "schema": "demiflow.runtime_wire.v3",
+  "type": "SourcePoll",
+  "payload": {
+    "status": "pending",
+    "record": null,
+    "retry_after_ms": 0
+  }
+}

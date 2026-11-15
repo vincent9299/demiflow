@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/opt/conda/bin/python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "docs/unified-runtime-v3-20261114/tools",
+    "-p",
+    "test_design_tools.py",
+    "-v"
+  ],
+  "exit_code": 0,
+  "passed": 27,
+  "kind": "design_tool_tests_only",
+  "runtime_tests_run": false,
+  "log_sha256": "6ffb825b83c3e4696cd9263ecd44600ac40b3b393dcb96f3a12b8e513074a9b1"
+}

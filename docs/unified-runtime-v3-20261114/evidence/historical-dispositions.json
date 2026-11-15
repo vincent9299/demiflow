@@ -1,0 +1,269 @@
+{
+  "source": "review-integration-20261114/qwen-repair-evidence/known-failures.json",
+  "cases": [
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options0]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options1]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options2]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options3]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options4]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take-options5]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options0]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options1]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options2]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options3]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options4]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_zero-options5]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options0]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options1]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options2]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options3]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options4]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[take_all-options5]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options0]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options1]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options2]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options3]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options4]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[count-options5]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options0]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options1]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options2]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options3]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options4]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_every_explicit_option_rejects_lazy_actions_before_reads[write_lance-options5]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_checkpoint_bridges_map_only_and_replays_without_calls[json]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_checkpoint_bridges_map_only_and_replays_without_calls[lance]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_stream_sink_checkpoint_accepts_thread_map_policy_change",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_nested_relations_and_lazy_workers_reject_before_source_access[thread]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_nested_relations_and_lazy_workers_reject_before_source_access[process]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[schema]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_stream_map.py::test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers[writer]",
+      "historical_class": "old_contract_expectation",
+      "required": "explicit old/new assertion map with rationale; no blanket deselect",
+      "owner": "U/L/Y/V"
+    },
+    {
+      "nodeid": "tests/test_bound_result_cache.py::test_unbound_async_none_and_list_keep_map_semantics",
+      "historical_class": "preexisting_real_defect",
+      "required": "retain original and fix; no xfail/delete",
+      "owner": "M/T/V"
+    },
+    {
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[None-False]",
+      "historical_class": "preexisting_real_defect",
+      "required": "retain original and fix; no xfail/delete",
+      "owner": "M/T/V"
+    },
+    {
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer1-False]",
+      "historical_class": "preexisting_real_defect",
+      "required": "retain original and fix; no xfail/delete",
+      "owner": "M/T/V"
+    },
+    {
+      "nodeid": "tests/test_bound_result_cache.py::test_only_computation_result_is_shared[answer2-False]",
+      "historical_class": "preexisting_real_defect",
+      "required": "retain original and fix; no xfail/delete",
+      "owner": "M/T/V"
+    },
+    {
+      "nodeid": "tests/test_bound_result_cache.py::test_shared_wait_cancellation_and_actor_hooks",
+      "historical_class": "preexisting_real_defect",
+      "required": "retain original and fix; no xfail/delete",
+      "owner": "M/T/V"
+    },
+    {
+      "nodeid": "tests/test_async_materialize.py::test_async_materialize_spills_reuses_and_writes",
+      "historical_class": "preexisting_real_defect",
+      "required": "retain original and fix; no xfail/delete",
+      "owner": "M/T/V"
+    },
+    {
+      "nodeid": "tests/test_async_materialize.py::test_wide_rows_spill_before_row_limit_and_restore_individually",
+      "historical_class": "preexisting_real_defect",
+      "required": "retain original and fix; no xfail/delete",
+      "owner": "M/T/V"
+    }
+  ]
+}

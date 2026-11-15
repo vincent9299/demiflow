@@ -431,34 +431,50 @@ class CheckedExecution:
         """Return structural positions matched to report observation keys.
 
         Each item is ``{role, program_index, report_node_id, report_occurrence,
-        mode}``.  Only real matched items are returned; this reads the existing
-        context bindings, never re-matches or adds occurrences.  ``role`` is
-        source/operation/terminal; ``program_index`` is a non-negative int only
-        for operations, None otherwise; ``mode`` is execute/reuse.
+        mode, input_ports, output_ports, source_token}``.  Only real matched
+        items are returned; this reads the existing context bindings, never
+        re-matches or adds occurrences.  ``role`` is source/operation/terminal;
+        ``program_index`` is a non-negative int only for operations, None
+        otherwise; ``mode`` is execute/reuse.  ``input_ports``/``output_ports``
+        are the real structural ports of the matched role and ``source_token``
+        is the matched source's report identity (None for non-sources); the v3
+        occurrence/semantic identity is supplied by the sealed graph through the
+        identity bridge, never recomputed here from the report occurrence.
         """
+        ports = {"source": ([], ["out"]), "operation": (["in"], ["out"]),
+                 "terminal": (["in"], [])}
         result = []
         source_key = self.source_bindings.get(id(source))
         if source_key is not None:
             obs = self.observations.get(tuple(source_key))
             mode = "reuse" if obs and obs.get("state") == "reused" else "execute"
+            input_ports, output_ports = ports["source"]
             result.append({"role": "source", "program_index": None,
                            "report_node_id": source_key[1],
-                           "report_occurrence": source_key[2], "mode": mode})
+                           "report_occurrence": source_key[2], "mode": mode,
+                           "input_ports": list(input_ports), "output_ports": list(output_ports),
+                           "source_token": source_key[1]})
         for index, op in enumerate(plan.operations):
             op_key = self.operation_bindings.get(id(op))
             if op_key is not None:
                 obs = self.observations.get(tuple(op_key))
                 mode = "reuse" if obs and obs.get("state") == "reused" else "execute"
+                input_ports, output_ports = ports["operation"]
                 result.append({"role": "operation", "program_index": index,
                                "report_node_id": op_key[1],
-                               "report_occurrence": op_key[2], "mode": mode})
+                               "report_occurrence": op_key[2], "mode": mode,
+                               "input_ports": list(input_ports), "output_ports": list(output_ports),
+                               "source_token": None})
         terminal_key = (action_id, action_id, 0)
         if terminal_key in self.observations:
             obs = self.observations[terminal_key]
             mode = "reuse" if obs.get("state") == "reused" else "execute"
+            input_ports, output_ports = ports["terminal"]
             result.append({"role": "terminal", "program_index": None,
                            "report_node_id": action_id,
-                           "report_occurrence": 0, "mode": mode})
+                           "report_occurrence": 0, "mode": mode,
+                           "input_ports": list(input_ports), "output_ports": list(output_ports),
+                           "source_token": None})
         return tuple(result)
 
     @contextmanager
@@ -485,9 +501,13 @@ class CheckedExecution:
         elif len(parents) != 1:
             raise RuntimeContractError('Action must consume one Dataset')
         self._match(identity)
+        driver_route = None
         if parents:
             source, plan = self.plan(source, plan, parents[0])
+            driver_route = check_composition([operation_facts(op) for op in plan.operations])['driver']
         intent = {'kind': kind}
+        if driver_route is not None:
+            intent['driver_route'] = driver_route
         reused_receipt = None
         if spec is not None:
             from ..lance.model import LanceWriteSpec

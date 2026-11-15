@@ -66,8 +66,9 @@
     function select(id){selected=id;for(const[key,value]of elements){value.group.classList.toggle('selected',key===id);value.group.setAttribute('aria-pressed',String(key===id));}}
     function update(dag,nodeMap,labels,selectedId,basis) {
       if(!host.contains(canvas))host.replaceChildren(canvas);
-      canvas.setAttribute('aria-label',(basis==='sealed'||basis==='executed')?'运行封存计划（E2）':'声明图投影（E2）');
-      current=dag;canvas.replaceChildren();elements.clear();
+      const sealedBasis=basis==='sealed'||basis==='executed';
+      canvas.setAttribute('aria-label',sealedBasis?'运行封存计划（E2）':'声明图投影（E2）');
+      current=dag;selected=null;canvas.replaceChildren();elements.clear();
       const occurrences=new Map();
       for(const node of dag.nodes){if(!occurrences.has(node.logical_node_id))occurrences.set(node.logical_node_id,[]);occurrences.get(node.logical_node_id).push(node);}
       const ids=[...occurrences.keys()],shared=new Set(dag.shared_ancestors.map(s=>s.logical_node_id));
@@ -89,9 +90,11 @@
         const declared=nodeMap[id],label=(declared&&labels[declared])||node.op_kind;
         const ports=(node.input_ports.join(',')||'—')+' → '+(node.output_ports.join(',')||'—');
         const badge=(shared.has(id)?'共享':'')+(group.length>1?(shared.has(id)?' · ':'')+'×'+group.length+' 次出现':'');
-        const element=svg('g',{class:'wb-node'+(shared.has(id)?' wb-node-shared':''),'data-node':id,transform:`translate(${pos.x} ${pos.y})`,tabindex:0,role:'button','aria-label':label+' · '+node.op_kind+' · 端口 '+ports});
+        const traits=node.traits||null;
+        const traitHint=traits?[traits.resource_role,traits.effect,traits.state].filter(Boolean).join(' · '):'';
+        const element=svg('g',{class:'wb-node'+(shared.has(id)?' wb-node-shared':''),'data-node':id,transform:`translate(${pos.x} ${pos.y})`,tabindex:0,role:'button','aria-label':label+' · '+node.op_kind+' · 端口 '+ports+(traitHint?' · 画像 '+traitHint:'')});
         element.append(svg('rect',{width:192,height:94,rx:9}),svg('text',{x:13,y:22,class:'wb-node-kind'},node.op_kind),svg('text',{x:13,y:47,class:'wb-node-title'},String(label).slice(0,24)),svg('text',{x:13,y:65,class:'wb-node-ports'},ports),svg('text',{x:13,y:82,class:'wb-node-state'},badge||id.slice(0,12)));
-        element.append(svg('title',{},'logical_node_id '+id+'\noccurrence '+group.map(n=>n.occurrence_id).join(', ')));
+        element.append(svg('title',{},'logical_node_id '+id+'\noccurrence '+group.map(n=>n.occurrence_id).join(', ')+(node.shared_token?'\nshared_token '+node.shared_token:'')+(traitHint?'\n资源画像 '+traitHint:'')+(sealedBasis?'\n物理 stage/profile/exchange 与恢复限制见节点详情':'')));
         const activate=()=>{select(id);onSelect(id,declared);};element.onclick=activate;element.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}};
         elements.set(id,{group:element});canvas.append(element);}
       select(selectedId);readable();
