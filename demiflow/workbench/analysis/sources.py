@@ -22,8 +22,13 @@ def locator(value):
         c.reject("A source needs a fixed table locator")
     kind = c.one_of(value.get("kind"), {"workspace_table", "project_table"}, "external source locator")
     if kind == "workspace_table":
-        c.fields(value, {"kind", "alias", "binding", "columns"}, label="workspace fixed source")
+        c.fields(value, {"kind", "alias", "binding", "columns"}, {"version", "alias_binding"}, label="workspace fixed source")
         c.text(value["alias"], "registered source alias", 128)
+        if ("version" in value) != ("alias_binding" in value):
+            c.reject("Historical source version and alias binding must be provided together")
+        if "version" in value:
+            c.integer(value["version"], "fixed source version", 2**63 - 1, 1)
+            c.sha(value["alias_binding"], "source alias binding")
     else:
         c.fields(value, {"kind", "id", "discovery", "version", "binding", "columns"}, label="recognized project fixed source")
         c.identity(value["id"], "declared source ID"); c.sha(value["discovery"])

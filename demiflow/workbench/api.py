@@ -65,12 +65,12 @@ GET_FIELDS = {
     'run-source': ({'run_id', 'path'}, set()),
     'run-evidence': ({'run_id', 'reference'}, set()),
     'parameters': ({'path'}, set()), 'source': ({'path'}, {'expected_sha256'}),
-    'table': ({'alias'}, {'expected_binding'}),
+    'table': ({'alias'}, {'expected_binding', 'version', 'version_binding'}),
     'table-versions': ({'alias'}, {'expected_binding', 'version'}),
-    'table-profile': ({'alias','expected_binding','columns'},set()),
-    'sample': ({'alias'}, {'columns', 'offset', 'limit', 'row_id', 'match', 'expected_binding'}),
-    'media': ({'alias', 'row_id'}, {'field', 'field_path', 'expected_binding'}),
-    'table-evidence': ({'alias', 'row_id', 'field_path'}, {'expected_binding'}),
+    'table-profile': ({'alias','expected_binding','columns'},{'version', 'version_binding'}),
+    'sample': ({'alias'}, {'columns', 'offset', 'limit', 'row_id', 'match', 'expected_binding', 'version', 'version_binding'}),
+    'media': ({'alias', 'row_id'}, {'field', 'field_path', 'expected_binding', 'version', 'version_binding'}),
+    'table-evidence': ({'alias', 'row_id', 'field_path'}, {'expected_binding', 'version', 'version_binding'}),
     'report': ({'digest'}, set()), 'diff': ({'left', 'right'}, set()),
 }
 POST_FIELDS = {
@@ -483,6 +483,13 @@ class Handler(BaseHTTPRequestHandler):
                     raise ForgeError('Invalid JSON query field: ' + key, code='invalid_request')
         if name == 'media' and (('field' in query) == ('field_path' in query)):
             raise ForgeError('Media requires one field or field_path', code='invalid_request')
+        if name in {'table', 'sample', 'table-profile', 'media', 'table-evidence'}:
+            if ('version' in query) != ('version_binding' in query):
+                raise ForgeError('Historical version and version_binding must be provided together', code='invalid_request')
+            if 'version_binding' in query and not re.fullmatch(r'[0-9a-f]{64}', query['version_binding']):
+                raise ForgeError('Invalid version binding digest', code='invalid_request')
+            if 'version' in query and 'expected_binding' not in query:
+                raise ForgeError('Historical reads require expected_binding', code='invalid_request')
         return query
 
     def _body(self, name):
@@ -700,12 +707,16 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path == "/api/source":
                     value = api.source_text(root, query["path"], expected_sha256=query.get("expected_sha256"))
                 elif url.path == "/api/table":
-                    value = api.describe_table(root, query["alias"], expected_binding=query.get("expected_binding"))
+                    value = api.describe_table(root, query["alias"], expected_binding=query.get("expected_binding"),
+                                               version=int(query["version"]) if "version" in query else None,
+                                               version_binding=query.get("version_binding"))
                 elif url.path == "/api/table-versions":
                     value = api.table_versions(root, query["alias"], expected_binding=query.get("expected_binding"),
                                                version=int(query["version"]) if "version" in query else None)
                 elif url.path=="/api/table-profile":
-                    value=api.profile_table(root,query["alias"],expected_binding=query["expected_binding"],columns=query["columns"])
+                    value=api.profile_table(root,query["alias"],expected_binding=query["expected_binding"],columns=query["columns"],
+                                            version=int(query["version"]) if "version" in query else None,
+                                            version_binding=query.get("version_binding"))
                 elif url.path=="/api/project-table-profile":
                     value=api.project_profile(root,query["id"],expected=query["expected"],version=int(query["version"]),binding=query["binding"],columns=query["columns"])
                 elif url.path == "/api/report":
@@ -723,6 +734,8 @@ class Handler(BaseHTTPRequestHandler):
                         row_id=int(query["row_id"]) if "row_id" in query else None,
                         match=match,
                         expected_binding=query.get("expected_binding"),
+                        version=int(query["version"]) if "version" in query else None,
+                        version_binding=query.get("version_binding"),
                     )
                 elif url.path in {"/api/media", '/api/table-evidence'}:
                     value = (api.table_media if url.path == '/api/media' else api.table_evidence)(
@@ -731,6 +744,8 @@ class Handler(BaseHTTPRequestHandler):
                         row_id=int(query["row_id"]),
                         **({'field_path': query['field_path']} if 'field_path' in query else {'field': query['field']}),
                         expected_binding=query.get("expected_binding"),
+                        version=int(query["version"]) if "version" in query else None,
+                        version_binding=query.get("version_binding"),
                     )
                     if url.path == '/api/media':
                         self._send(base64.b64decode(value["data"]), mime=value["mime"], binding=value["binding"]["digest"])

@@ -121,7 +121,7 @@ def dispatch(request):
         elif op=="table_profile":
             from demiflow.workbench.analysis.catalog_profile import profile
             from demiflow.workbench.analysis import contracts
-            contracts.fields(args,{"kind","columns"},{"alias","expected_binding","identity","expected","version","binding"},label="catalog profile")
+            contracts.fields(args,{"kind","columns"},{"alias","expected_binding","identity","expected","version","binding","version_binding"},label="catalog profile")
             value=profile(root,**args)
         elif op == 'metadata':
             value = preview.snapshot_metadata(root, args['version'])
@@ -201,6 +201,23 @@ def dispatch(request):
             binding = preview_binding(root, control, uri)
             if expected is not None and expected != binding["digest"]:
                 raise ForgeError("Preview binding changed; reopen the table explicitly", code='conflict')
+            if op != "table_versions":
+                version = args.pop("version", None)
+                version_binding = args.pop("version_binding", None)
+                if version is not None or version_binding is not None:
+                    if version is None or version_binding is None:
+                        raise ForgeError("Historical version and version binding must be provided together", code='invalid_request')
+                    if type(version) is not int or version < 1:
+                        raise ForgeError("Version must be a fixed positive integer", code='invalid_request')
+                    if type(version_binding) is not str or not re.fullmatch(r"[0-9a-f]{64}", version_binding):
+                        raise ForgeError("Invalid version binding digest", code='invalid_request')
+                    if expected is None:
+                        raise ForgeError("Historical reads require the current alias binding", code='invalid_request')
+                    from demiflow.workbench.analysis.catalog_versions import resolve_version
+                    resolution = resolve_version(root, alias=alias, expected_binding=expected,
+                                                 version=version, expected_version_binding=version_binding)
+                    wire = resolution.to_wire()
+                    control, ref, binding = wire["reference"], resolution.ref, wire["binding"]
             if op == "table_versions":
                 version = args.pop("version", None)
                 if args:
@@ -224,7 +241,11 @@ def dispatch(request):
                     if version is not None:
                         if not any(item.lance_version == version for item in registered):
                             raise ForgeError("Version is not a registered version of this table", code='invalid_request')
-                        value["selected"] = {"version": version, "metadata": preview.describe_table(uri, version)}
+                        from demiflow.workbench.analysis.catalog_versions import resolve_version
+                        resolution = resolve_version(root, alias=alias,
+                                                     expected_binding=expected if expected is not None else binding["digest"],
+                                                     version=version)
+                        value["selected"] = resolution.to_wire()
             elif op == "table":
                 if args:
                     raise ValueError("Unknown table description arguments")

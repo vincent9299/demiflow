@@ -41,7 +41,11 @@ def _snapshot(metadata, value):
 def resolve(root, value):
     value = locator(value)
     if value["kind"] == "workspace_table":
-        description = ws.describe_table(root, value["alias"], expected_binding=value["binding"])
+        if "version" in value:
+            description = ws.describe_table(root, value["alias"], expected_binding=value["alias_binding"],
+                                            version=value["version"], version_binding=value["binding"])
+        else:
+            description = ws.describe_table(root, value["alias"], expected_binding=value["binding"])
         if description["binding"]["digest"] != value["binding"]:
             c.reject("Registered source binding changed", code="conflict")
         metadata = description["metadata"]
@@ -66,7 +70,11 @@ def verify(root, *, locator: dict, source, target):
         c.reject("This external source has no registered unique-field Case proof", code="operation_rejected")
     arguments = dict(columns=[], row_id=int(target["case_key"]))
     if locator["kind"] == "workspace_table":
-        result = ws.sample_table(root, locator["alias"], expected_binding=locator["binding"], **arguments)
+        if "version" in locator:
+            result = ws.sample_table(root, locator["alias"], expected_binding=locator["alias_binding"],
+                                     version=locator["version"], version_binding=locator["binding"], **arguments)
+        else:
+            result = ws.sample_table(root, locator["alias"], expected_binding=locator["binding"], **arguments)
     else:
         result = ws.project_sample(root, locator["id"], expected=locator["discovery"],
             version=locator["version"], binding=locator["binding"], **arguments)

@@ -777,10 +777,13 @@ def preview_binding(root, control, uri):
     return {**value, "alias": control["alias"], "digest": content_digest(value)}
 
 
-def describe_table(root, alias, *, expected_binding=None):
+def describe_table(root, alias, *, expected_binding=None, version=None, version_binding=None):
     from demiflow.workbench.worker import operation
 
-    return operation("table", root, alias=alias, expected_binding=expected_binding)
+    arguments = dict(alias=alias, expected_binding=expected_binding)
+    if version is not None or version_binding is not None:
+        arguments.update(version=version, version_binding=version_binding)
+    return operation("table", root, **arguments)
 
 
 def table_versions(root, alias, *, expected_binding=None, version=None):
@@ -988,13 +991,11 @@ def project_check_status(root):
 
 def sample_table(
     root, alias, *, columns=None, offset=0, limit=20, row_id=None, match=None,
-    expected_binding=None,
+    expected_binding=None, version=None, version_binding=None,
 ):
     from demiflow.workbench.worker import operation
 
-    return operation(
-        "sample",
-        root,
+    arguments = dict(
         alias=alias,
         columns=columns,
         offset=offset,
@@ -1003,11 +1004,17 @@ def sample_table(
         match=match,
         expected_binding=expected_binding,
     )
+    if version is not None or version_binding is not None:
+        arguments.update(version=version, version_binding=version_binding)
+    return operation("sample", root, **arguments)
 
 
-def profile_table(root,alias,*,expected_binding,columns):
+def profile_table(root,alias,*,expected_binding,columns,version=None,version_binding=None):
     from demiflow.workbench.worker import operation
-    return operation('table_profile',root,kind='workspace_table',alias=alias,expected_binding=expected_binding,columns=columns)
+    arguments=dict(kind='workspace_table',alias=alias,expected_binding=expected_binding,columns=columns)
+    if version is not None or version_binding is not None:
+        arguments.update(version=version,version_binding=version_binding)
+    return operation('table_profile',root,**arguments)
 
 
 def project_profile(root,identity,*,expected,version,binding,columns):
@@ -1015,21 +1022,26 @@ def project_profile(root,identity,*,expected,version,binding,columns):
     return operation('table_profile',root,kind='project_table',identity=identity,expected=expected,version=version,binding=binding,columns=columns)
 
 
-def table_media(root, alias, *, row_id, field=None, field_path=None, expected_binding=None):
+def table_media(root, alias, *, row_id, field=None, field_path=None, expected_binding=None, version=None, version_binding=None):
     from demiflow.workbench.worker import operation
 
     if (field is None) == (field_path is None):
         raise ForgeError('Media requires exactly one field or field_path', code='invalid_request')
-    return operation('media', root, alias=alias, row_id=row_id,
+    arguments = dict(alias=alias, row_id=row_id,
                      **({'field': field} if field is not None else {'field_path': field_path}),
                      expected_binding=expected_binding)
+    if version is not None or version_binding is not None:
+        arguments.update(version=version, version_binding=version_binding)
+    return operation('media', root, **arguments)
 
 
-def table_evidence(root, alias, *, row_id, field_path, expected_binding=None):
+def table_evidence(root, alias, *, row_id, field_path, expected_binding=None, version=None, version_binding=None):
     from demiflow.workbench.worker import operation
 
-    return operation('table_evidence', root, alias=alias, row_id=row_id,
-                     field_path=field_path, expected_binding=expected_binding)
+    arguments = dict(alias=alias, row_id=row_id, field_path=field_path, expected_binding=expected_binding)
+    if version is not None or version_binding is not None:
+        arguments.update(version=version, version_binding=version_binding)
+    return operation('table_evidence', root, **arguments)
 
 
 def _inspect_flow(root, entry, *, params, save=True, limits=None):
