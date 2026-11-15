@@ -45,6 +45,53 @@ def participants_for(physical, stages):
                  if s.stage_id in stages for p in s.partitions)
 
 
+def pack_finite_phases(physical, *, fits, prior=None):
+    """Admit independent ready cohorts together under the existing envelope.
+
+    Cohorts/ports come only from the sealed physical plan. This is placement of
+    that plan, not a new graph or persistent authority. On recovery, keep the
+    original unfinished active cohort exactly; completed workers never restart.
+    """
+    groups = list(finite_phases(physical))
+    owners = {p: s.stage_id for s in physical.stages for p in s.partitions}
+    dependencies = {s.stage_id: set() for s in physical.stages}
+    for edge in physical.exchanges:
+        producer, consumer = owners[edge.producer_partitions[0]], owners[edge.consumer_partitions[0]]
+        if producer != consumer:
+            dependencies[consumer].add(producer)
+    completed = set(prior['completed_stages']) if prior is not None else set()
+    active = tuple(prior['active_stages']) if prior is not None else ()
+    if prior is not None and prior['phase_complete']:
+        completed.update(active)
+        active = ()
+    result = []
+    accounted = set(completed) | set(active)
+    for group in groups:
+        overlap = set(group) & accounted
+        if overlap and overlap != set(group):
+            raise DataflowError('CORRUPT_ARTIFACT', 'history splits an inseparable resident cohort')
+    groups = [group for group in groups if not set(group) <= accounted]
+    if active:
+        if any(dependencies[s] - set(active) - completed for s in active) or not fits(active):
+            raise DataflowError('RESOURCE_INFEASIBLE', 'original active cohort cannot resume within admitted capacity')
+        result.append(active)
+        completed.update(active)
+    while groups:
+        ready = [g for g in groups if all(not dependencies[s] - set(g) - completed for s in g)]
+        if not ready:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'finite placement has no ready cohort')
+        selected = ()
+        for group in ready:
+            if fits(selected + group):
+                selected += group
+        if not selected:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'ready cohort exceeds admitted host or resident capacity')
+        result.append(selected)
+        completed.update(selected)
+        groups = [g for g in groups if not set(g) <= completed]
+    return tuple(result)
+
+
 def validate_recovered_residency(physical, cut, contributions, residency, *, facts, artifacts, current_commit):
     """Every inherited contribution must be an unchanged earlier ACKed fact.
 

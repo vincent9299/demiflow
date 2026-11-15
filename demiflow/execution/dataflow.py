@@ -537,8 +537,20 @@ class DataflowExecution:
         self._checkpoint_at = time.monotonic()
 
     def _configure_phases(self):
-        from .dataflow_residency import finite_phases
+        from .dataflow_residency import pack_finite_phases
         stages = self._stage_order()
+        def phase_fits(phase):
+            group = [s for s in stages if s.stage_id in phase]
+            memory = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in group)
+            if memory + self._physical.residency.control_reserved_bytes > self._bounds.max_resident_bytes:
+                return False
+            try:
+                self._place_hosts([(s, self._initial_work(s, p)) for s in group for p in s.partitions])
+            except DataflowError as exc:
+                if exc.code != 'RESOURCE_INFEASIBLE':
+                    raise
+                return False
+            return True
         pending = [(stage, self._initial_work(stage, partition))
                    for stage in stages for partition in stage.partitions]
         resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in stages)
@@ -566,7 +578,7 @@ class DataflowExecution:
             # has reached EOI. Admit that prefix's existing finite phase first.
             needs_prefix = any(n.kernel.kind == 'StreamPrependOp' for n in self._graph.nodes)
             self._phases = ((tuple(s.stage_id for s in stages),) if fits and prior is None and not needs_prefix
-                            else finite_phases(self._physical))
+                            else pack_finite_phases(self._physical, fits=phase_fits, prior=prior))
         # Preflight EVERY phase before business side effects.
         for phase in self._phases:
             group = [s for s in stages if s.stage_id in phase]
@@ -958,7 +970,7 @@ class DataflowExecution:
                 self._cut = self._checkpoint.begin(final=final,
                     participants=participants_for(self._physical, self._phases[self._phase_index]),
                     residency=durable.metadata(phase_done))
-            elif len(self._phases) > 1:
+            elif len(self._phases) > 1 or self._completed_stages:
                 from .dataflow_residency import SCHEMA, participants_for
                 from .dataflow_sinks import _artifact_json
                 residency = {'schema': SCHEMA,
