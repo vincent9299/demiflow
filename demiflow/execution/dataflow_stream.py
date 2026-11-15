@@ -10,7 +10,6 @@ from .dataflow import execute_action
 from .kernels.async_instance import AsyncInstance
 from .request_limits import ServiceStopped
 from .stream import StreamStats
-from ..planning.dataflow_policy import resolve_runtime_policy
 
 
 def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
@@ -23,7 +22,8 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
     for hook in (on_progress, on_drain):
         if hook is not None and not callable(hook):
             raise TypeError('stream hooks must be callable')
-    policy, bounds = resolve_runtime_policy({}, request.action.context.limits, provider=request.provider)
+    from .dataflow_api import resolve_action_runtime
+    policy, bounds = resolve_action_runtime(request)
     callbacks = AsyncInstance(lambda value: value,
         SimpleNamespace(bounds=bounds, check_stop=request.action.context.check_stop))
     stats, handle, failure = StreamStats(), None, None

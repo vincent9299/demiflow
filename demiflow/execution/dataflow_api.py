@@ -184,8 +184,8 @@ def record_execution_metadata(request, execution):
             'engine': 'dataflow_v3', 'action_id': request.action.action_id}
 
 
-# -- E016 run_dataset_action ----------------------------------------------
-def run_dataset_action(request: ActionRequest) -> object:
+def resolve_action_runtime(request: ActionRequest):
+    """Use the same public execution envelope for every terminal, including streams."""
     executor = getattr(request.action, '_dataflow_executor', None)
     local = getattr(executor, '_local_kernel', None)
     options = {}
@@ -195,8 +195,13 @@ def run_dataset_action(request: ActionRequest) -> object:
     if local is not None:
         options['memory_bytes'] = local.memory_bytes
     run = request.action.context
-    policy, bounds = resolve_runtime_policy(options, run.limits, provider=request.provider,
-                                           explicit_limits=tuple(run.explicit_limits))
+    return resolve_runtime_policy(options, run.limits, provider=request.provider,
+                                  explicit_limits=tuple(run.explicit_limits))
+
+
+# -- E016 run_dataset_action ----------------------------------------------
+def run_dataset_action(request: ActionRequest) -> object:
+    policy, bounds = resolve_action_runtime(request)
     handle = execute_action(request, policy=policy, bounds=bounds)
     from .dataflow_terminals import (collect_rows, iterate_rows, iterate_batches,
                                      materialized_handle, write_result, inspect_result,
