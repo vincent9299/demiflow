@@ -9,6 +9,8 @@ from demiflow import data
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from tests.test_local_relational import _oracle_join, assert_same_rows
+from _worker_event_fixtures import emit, events
+from test_dataset_native import sealed_plan
 
 
 def _slow_map(row):
@@ -31,9 +33,11 @@ def test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order(tmp_path
             assert len({pid for pid,_ in workers}) > 1 and all(pid != os.getpid() for pid,_ in workers)
         else:
             assert {pid for pid,_ in workers} == {os.getpid()}
-        assert local.stats['peak_pending_tasks'] <= 6
-        assert local.stats['engine'] == 'datafusion'
-        assert any(s['name']=='datafusion' for s in local.stats['stages'])
+        # Actual admitted worker residency is a different counter from retired
+        # task-future prefetch. Assert the true capacity bound, never alias them.
+        assert 0 < local.stats['peak_active_workers'] <= 3
+        assert local.stats['engine'] == 'dataflow_v3'
+        assert {'MapOp', 'FilterOp', 'reduce'} <= {s['name'] for s in local.stats['stages']}
     assert list(tmp_path.iterdir()) == []
 
 
@@ -60,9 +64,15 @@ def test_join_fold_fusion_retains_hidden_key_and_unfuses_after_map():
     for change in [False,True]:
         expected=build(DataAPI(),change).take_all()
         with data.local_execution(workers=2,worker_mode='thread',batch_rows=2,partitions=3) as local:
-            assert build(data,change).take_all()==expected
-            stages=[s['name'] for s in local.stats['stages']]
-            assert stages.count('datafusion') == (2 if change else 1)
+            result = build(data,change)
+            assert result.take_all()==expected
+            graph, _, _ = sealed_plan(result)
+            kinds = [node.kernel.kind for node in graph.nodes]
+            assert kinds.count('join') == kinds.count('reduce') == 1
+            assert kinds.count('MapOp') == int(change)
+            assert {'join', 'reduce'} <= {stage['name'] for stage in local.stats['stages']}
+            if change:
+                assert kinds.index('join') < kinds.index('MapOp') < kinds.index('reduce')
 
 
 def test_group_batches_and_initial_state_are_isolated():
@@ -86,27 +96,34 @@ def test_narrow_chain_batch_boundaries_and_limit_match_serial():
     expected=chain(DataAPI())
     with data.local_execution(workers=2,worker_mode='thread',batch_rows=7) as local:
         assert chain(data)==expected
-        assert local.stats['peak_pending_tasks']<=4
+        assert 0 < local.stats['peak_active_workers'] <= 2
 
 
 @pytest.mark.parametrize('mode',['thread','process'])
 def test_failure_and_early_consumer_close_cleanup_owned_work(tmp_path,mode):
-    calls=[]
+    path = str(tmp_path / 'reads.jsonl')
+    owned = tmp_path / 'owned'; owned.mkdir()
     def source():
         for n in range(10000):
-            calls.append(n); yield {'id':n}
-    with data.local_execution(workers=2,worker_mode=mode,batch_rows=5,temp_directory=str(tmp_path)) as local:
+            emit(path, 'read', n=n)
+            yield {'id':n}
+    with data.local_execution(workers=2,worker_mode=mode,batch_rows=5,temp_directory=str(owned)) as local:
         assert len(data.from_iter(source).map(lambda r:r).take(1))==1
-        assert len(calls)<=25
+        assert len(events(path)) <= 25
         assert local.stats['status']=='closed_early'
-        assert list(tmp_path.iterdir())==[]
-        def fail(row):
-            if row['id']==9: raise ValueError('worker failure')
-            return row
-        with pytest.raises(ValueError,match='worker failure'):
-            data.range(20).map(fail).reduce_by_key('id',lambda a,r:r).take_all()
-        assert local.stats['status']=='failed'
-        assert list(tmp_path.iterdir())==[]
+        assert list(owned.iterdir())==[]
+    def fail(row):
+        if row['id']==9: raise ValueError('worker failure')
+        return row
+    # Let the genuine failed action leave its RunContext. Swallowing it inside
+    # that scope would separately request a false successful run completion.
+    with pytest.raises(ValueError,match='worker failure'):
+        with data.local_execution(workers=2,worker_mode=mode,batch_rows=5,temp_directory=str(owned)) as local:
+            try:
+                data.range(20).map(fail).reduce_by_key('id',lambda a,r:r).take_all()
+            finally:
+                assert local.stats['status']=='failed'
+    assert list(owned.iterdir())==[]
 
 
 def test_lance_fixed_version_narrow_columns_and_normal_writer(tmp_path):
@@ -121,21 +138,28 @@ def test_lance_fixed_version_narrow_columns_and_normal_writer(tmp_path):
                                               'values':(a or {}).get('values',[])+[r['value']]})
         result.write_lance(out,mode='overwrite',schema=pa.schema([('k',pa.int64()),('sum',pa.int64()),('values',pa.list_(pa.int64()))]))
         assert local.stats['status']=='complete'
-        assert local.stats['engine']=='datafusion'
-        assert any(s['name']=='datafusion' for s in local.stats['stages'])
+        assert local.stats['engine']=='dataflow_v3'
+        assert any(s['name']=='reduce' for s in local.stats['stages'])
     assert lance.dataset(out).to_table().to_pylist()==[{'k':k,'sum':sum(range(k,80,3)), 'values':list(range(k,80,3))} for k in range(3)]
 
 
-def test_bloom_filter_is_only_a_prefilter_and_does_not_move_across_udf(tmp_path,monkeypatch):
-    from demiflow.execution import local_tasks as kernel
-    # Worst-case false positives: exact join must still reject every wrong key.
-    monkeypatch.setattr(kernel,'_may_match',lambda value,bitmap:True)
+def test_hash_prefilter_cannot_replace_exact_keys_or_move_across_udf(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from demiflow.execution.kernels import join_spool as kernel
+    # The retired bloom hook is gone. Collide every real spool hash prefix,
+    # forcing the current key-only index to prove equality after the UDF.
+    hashed = []
+    def collide(value):
+        hashed.append(value)
+        return SimpleNamespace(digest=lambda: b'\0' * 32)
+    monkeypatch.setattr(kernel, 'hashlib', SimpleNamespace(sha256=collide))
     with data.local_execution(workers=2,worker_mode='thread',batch_rows=3,partitions=5) as local:
         left=data.range(50).map(lambda r:{'k':r['id']+100,'value':r['id']})
         right=data.from_items([{'k':103},{'k':117}])
-        assert left.join(right,on='k').take_all()==[{'k':103,'value':3},{'k':117,'value':17}]
-        assert local.stats['engine']=='datafusion'
-        assert any(s['name']=='datafusion' for s in local.stats['stages'])
+        assert_same_rows(left.join(right,on='k').take_all(), [{'k':103,'value':3},{'k':117,'value':17}])
+        assert local.stats['engine']=='dataflow_v3'
+        assert any(s['name']=='join' for s in local.stats['stages'])
+    assert len(hashed) == 52  # The real worker used the injected collision path.
 
 
 def test_context_and_configuration_do_not_silently_change_existing_execution():
@@ -143,8 +167,10 @@ def test_context_and_configuration_do_not_silently_change_existing_execution():
     assert ordinary._executor._local_kernel is None
     with data.local_execution(workers=2,worker_mode='thread'):
         d=data.range(10).map(lambda r:r)
-        with pytest.raises(ValueError,match='same local_execution'):
-            d.join(ordinary,on='id')
+        result = d.join(ordinary,on='id')
+        assert d._executor is not ordinary._executor
+        assert result._source.left.source is d._source and result._source.right.source is ordinary._source
+        assert result.take_all() == [{'id': 0}]
         with pytest.raises(ValueError,match='nested'):
             with data.local_execution(): pass
     with pytest.raises(RuntimeError,match='closed'):
@@ -154,16 +180,20 @@ def test_context_and_configuration_do_not_silently_change_existing_execution():
     assert data.range(1)._executor._local_kernel is None
 
 
-def test_unsupported_child_plan_fails_before_any_callback(tmp_path):
-    called=[]
-    with data.local_execution(workers=2,worker_mode='thread',temp_directory=str(tmp_path)):
+def test_supported_shuffled_child_plan_is_lazy_and_keeps_distinct_sources(tmp_path):
+    path = str(tmp_path / 'reads.jsonl')
+    owned = tmp_path / 'owned'; owned.mkdir()
+    with data.local_execution(workers=2,worker_mode='thread',temp_directory=str(owned)):
         def source():
-            called.append('scan'); yield {'k':1}
+            emit(path, 'read')
+            yield {'k':1}
         left=data.from_iter(source)
         right=data.from_iter(source).random_shuffle()
-        with pytest.raises(NotImplementedError,match='RandomShuffleOp'):
-            left.join(right,on='k').take_all()
-    assert not called and not list(tmp_path.iterdir())
+        plan = left.join(right,on='k')
+        assert events(path) == []
+        assert plan.take_all() == [{'k': 1}]
+    assert len(events(path)) == 2  # Equal factories are two distinct declarations.
+    assert not list(owned.iterdir())
 
 
 def test_worker_exception_cannot_publish_partial_lance_output(tmp_path):
@@ -173,8 +203,8 @@ def test_worker_exception_cannot_publish_partial_lance_output(tmp_path):
     def fail(row):
         if row['id']==9: raise RuntimeError('do not commit')
         return row
-    with data.local_execution(workers=2,worker_mode='process',batch_rows=4):
-        with pytest.raises(RuntimeError,match='do not commit'):
+    with pytest.raises(RuntimeError,match='do not commit'):
+        with data.local_execution(workers=2,worker_mode='process',batch_rows=4):
             data.range(20).map(fail).write_lance(uri,mode='overwrite',schema=pa.schema([('id',pa.int64())]))
     assert lance.dataset(uri).version==1
     assert lance.dataset(uri).to_table().to_pylist()==[{'id':999}]

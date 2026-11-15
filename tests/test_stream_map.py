@@ -67,7 +67,7 @@ def test_thread_map_allows_async_consumer_to_release_other_workers(data):
     assert stats.emitted == 3
 
 
-def test_default_map_remains_lazy_and_single_inline_stream_stage(data):
+def test_default_map_remains_lazy_and_single_inline_stream_stage(data, tmp_path):
     def transform(row, *, value):
         return {'i': row['i'] + value}
 
@@ -76,14 +76,21 @@ def test_default_map_remains_lazy_and_single_inline_stream_stage(data):
         {'i': i + 2} for i in range(4)]
     with pytest.raises(ValueError, match='explicit map'):
         source.map(transform, fn_kwargs={'value': 2}).run_stream()
-    seen = []
-    main_thread = threading.get_ident()
+    from _worker_event_fixtures import emit, events
+    path = str(tmp_path / 'inline-calls.jsonl')
     def record(row):
-        assert threading.get_ident() == main_thread
-        seen.append(row['i'])
+        emit(path, 'call', i=row['i'], tid=threading.get_native_id())
         return row
-    stats = source.map_async(lambda row: row).map(record).run_stream()
-    assert seen == list(range(4))
+    pipeline = source.map_async(lambda row: row).map(record)
+    assert events(path) == []
+    stats = pipeline.run_stream()
+    observed = events(path)
+    assert [event['i'] for event in observed] == list(range(4))
+    assert len({(event['pid'], event['tid']) for event in observed}) == 1
+    # Inline means the actual owning runner, not the process which declared it.
+    facts = pipeline.execution_metadata().diagnostics
+    assert {(event['pid'], event['tid']) for event in observed} <= {
+        (worker['worker_process_id'], worker['runner_thread_id']) for worker in facts['workers']}
     assert next(q for q in stats.metrics['queues'] if q['stage'] == 'record')['capacity'] == 1
 
 
@@ -640,44 +647,87 @@ def test_external_cancel_drains_map_calls_before_action_cleanup(data):
 
 @pytest.mark.parametrize('execution', ['inline', 'thread'])
 @pytest.mark.parametrize('count', [1, 1000])
-def test_callback_cancellation_never_returns_partial_success(data, execution, count):
-    events = []
+def test_callback_cancellation_never_returns_partial_success(data, execution, count, tmp_path):
+    from _worker_event_fixtures import emit, events
+    from demiflow.execution.run_context import RunContext
+    path = str(tmp_path / 'cancel-calls.jsonl')
     class Cancel:
         def __call__(self, row):
+            emit(path, 'call', i=row['i'])
             raise asyncio.CancelledError('callback cancelled')
         async def aclose(self):
-            events.append('close')
-    with pytest.raises(asyncio.CancelledError):
-        (data.from_iter(lambda: ({'i': i} for i in range(count)))
-         .map(Cancel, execution=execution, catch=(Exception,)).materialize())
-    assert events == ['close'] and not data._executor._spill_paths
+            emit(path, 'close')
+    with pytest.raises(asyncio.CancelledError, match='callback cancelled'):
+        with RunContext.start(tmp_path / 'run') as run:
+            (data.from_iter(lambda: ({'i': i} for i in range(count)))
+             .map(Cancel, execution=execution, catch=(Exception,)).materialize())
+    observed = events(path)
+    assert [event['event'] for event in observed] == ['call', 'close']
+    assert observed[0]['i'] == 0
+    # No successful result and no retained physical worker, even for a large
+    # unconsumed suffix. A driver list cannot observe process-owned close hooks.
+    import sqlite3, json
+    with sqlite3.connect(tmp_path / 'run' / 'run.sqlite') as db:
+        allocations = [json.loads(row[0]) for row in db.execute('SELECT document FROM resource_allocations')]
+        assert allocations and all(row['cleanup'] == 'CONFIRMED' for row in allocations)
+        assert db.execute("SELECT count(*) FROM runtime_commits WHERE status='acked'").fetchone()[0] == 0
+    assert not data._executor._spill_paths
 
 
 @pytest.mark.parametrize('failure', ['schema', 'writer'])
-def test_lance_checkpoint_writer_failure_joins_stream_and_closes_workers(data, tmp_path, monkeypatch, failure):
-    from demiflow.errors import InvalidLanceRequest
-    import importlib
-    checkpoint = importlib.import_module('demiflow.lance.checkpoint')
-    events = []
+def test_native_lance_writer_failure_joins_stream_and_closes_workers(data, tmp_path, monkeypatch, failure):
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.run_context import RunContext
+    from _worker_event_fixtures import emit, events
+    import lance
+    import sqlite3, json
+    path = str(tmp_path / 'close-calls.jsonl')
     class Work:
         def __call__(self, row):
             time.sleep(.001)
             return {'i': row['i'], 'extra': True} if failure == 'schema' else row
         async def aclose(self):
-            events.append('close')
-    if failure == 'writer':
-        class FailedWriter:
-            def write_dataset(self, reader, *args, **kwargs):
-                reader.read_next_batch()
-                raise OSError('storage fixture full')
-        monkeypatch.setattr(checkpoint, 'require_lance', lambda: FailedWriter())
+            emit(path, 'close')
     plan = (data.from_iter(lambda: ({'i': i} for i in range(400)))
             .map(Work, concurrency=2, execution='thread', callable_scope='worker'))
     uri = tmp_path / 'failed.lance'
-    with pytest.raises(InvalidLanceRequest if failure == 'schema' else OSError):
+    # Retired checkpoint remains an explicit negative before any user work.
+    with pytest.raises(RecoveryContractError, match='retired'):
         plan.checkpoint_lance(str(uri), schema=pa.schema([('i', pa.int64())]),
                               fingerprint='failure', max_rows_per_batch=1)
-    assert events and len(events) <= 2
-    assert not uri.exists() and checkpoint.read_checkpoint_record(str(uri)) is None
+    assert events(path) == [] and not uri.exists()
+    lance.write_dataset(pa.table({'i': [-1]}), str(uri))
+    original = LanceSink.prepare
+    consumed = []
+    if failure == 'writer':
+        def failing_prepare(sink, blocks, context):
+            def fail_after_original_batch():
+                for block in blocks:
+                    consumed.append(block.num_rows)
+                    yield block
+                    raise OSError('storage fixture full')
+            # Real sink staging opens/writes its IPC file, then the controlled
+            # storage failure interrupts it. Original coordinator owns abort.
+            return original(sink, fail_after_original_batch(), context)
+        monkeypatch.setattr(LanceSink, 'prepare', failing_prepare)
+    with pytest.raises(ValueError if failure == 'schema' else OSError,
+                       match='undeclared fields: extra' if failure == 'schema' else 'storage fixture full'):
+        with RunContext.start(tmp_path / 'run'):
+            plan.write_lance(str(uri), schema=pa.schema([('i', pa.int64())]), mode='overwrite')
+    assert events(path) and len(events(path)) <= 2
+    assert all(event['event'] == 'close' for event in events(path))
+    if failure == 'writer':
+        assert consumed and sum(consumed) > 0
+    assert lance.dataset(str(uri)).version == 1
+    assert lance.dataset(str(uri)).to_table().to_pylist() == [{'i': -1}]
+    with sqlite3.connect(tmp_path / 'run' / 'run.sqlite') as db:
+        allocations = [json.loads(row[0]) for row in db.execute('SELECT document FROM resource_allocations')]
+        assert allocations and all(row['cleanup'] == 'CONFIRMED' for row in allocations)
+        acked = [json.loads(row[0]) for row in db.execute(
+            "SELECT prepared FROM runtime_commits WHERE status='acked'")]
+        # Intermediate cuts may persist worker output, but none may publish a
+        # native table version after this failure.
+        assert all(item['sinks']['write_lance'].get('native') is None for item in acked)
     assert not any(t.name == 'demiflow-lance-checkpoint-bridge' or t.name.startswith('demiflow-stream-')
                    for t in threading.enumerate())
