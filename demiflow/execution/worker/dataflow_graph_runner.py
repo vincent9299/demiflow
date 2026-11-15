@@ -371,17 +371,26 @@ class WorkerGraphRunner:
             quiet = (not self._queue and (not self._credits or self._parkable_credits())
                      and all(k.checkpoint_ready for k in self.e._kernels.values())
                      and (not self._park_mode or not any(k.pending_calls for k in self.e._kernels.values())))
-        if done and quiet and not any(k.pending_calls for k in self.e._kernels.values()) and not self._done_sent:
+            notify_done = (done and quiet and not self._done_sent
+                           and not any(k.pending_calls for k in self.e._kernels.values()))
+            notify_idle = quiet and (self._paused or done) and not self._idle_sent
+            # Reserve this frontier before publishing. A pause/resume/input
+            # arriving during mailbox backpressure invalidates it under this
+            # same lock; never overwrite that invalidation after send returns.
+            # Keep the actual sends outside the lock so control stays live.
+            if notify_done:
+                self._done_sent = True
+            if notify_idle:
+                self._idle_sent = True
+        if notify_done:
             from ..dataflow_checkpoint import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
                                                            for r in self.e._readers.values()],
                 'pruned_splits': [s.split_id for s in self.e.assignment.source_splits
                     if s.split_id in self._finished_splits and not self.e._readers[s.split_id]._eoi]})
-            self._done_sent = True
-        if quiet and (self._paused or done) and not self._idle_sent:
+        if notify_idle:
             self._flush_metrics()
             self._send('idle', {'done': done})
-            self._idle_sent = True
         if self._cut is not None and quiet and (self._paused or done):
             from ..contracts.dataflow_codec import encode_wire
             contribution = self.snapshot(self._cut)
