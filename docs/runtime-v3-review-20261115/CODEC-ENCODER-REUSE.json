@@ -1,0 +1,261 @@
+{
+  "baseline": "e304640",
+  "candidate_head": "d693dbfcdb87b6ddda2d26b23cb8af312d660008",
+  "results": [
+    {
+      "case": "narrow_wrapper",
+      "iterations": 10000,
+      "baseline_s": 0.1391345113515854,
+      "candidate_s": 0.041278496384620667,
+      "speedup": 3.3706293479096643,
+      "samples": {
+        "baseline": [
+          0.13649750500917435,
+          0.1370599865913391,
+          0.1912614367902279,
+          0.1391345113515854,
+          0.139252670109272
+        ],
+        "candidate": [
+          0.04054604098200798,
+          0.041278496384620667,
+          0.049775488674640656,
+          0.04051785171031952,
+          0.04136442020535469
+        ]
+      },
+      "wire_sha256": "84d3386aba0016096ae4c287dccf1e154b4bf7273364fac190517d84432757b5"
+    },
+    {
+      "case": "narrow_encode",
+      "iterations": 10000,
+      "baseline_s": 0.26813019439578056,
+      "candidate_s": 0.1624203808605671,
+      "speedup": 1.650840817975683,
+      "samples": {
+        "baseline": [
+          0.2603123188018799,
+          0.2742084115743637,
+          0.2645769752562046,
+          0.27143997699022293,
+          0.26813019439578056
+        ],
+        "candidate": [
+          0.1624203808605671,
+          0.17853614687919617,
+          0.16203618794679642,
+          0.16215641424059868,
+          0.17339376360177994
+        ]
+      },
+      "wire_sha256": "84d3386aba0016096ae4c287dccf1e154b4bf7273364fac190517d84432757b5"
+    },
+    {
+      "case": "narrow_decode",
+      "iterations": 10000,
+      "baseline_s": 0.5968718752264977,
+      "candidate_s": 0.4784197211265564,
+      "speedup": 1.2475904501198585,
+      "samples": {
+        "baseline": [
+          0.5971961282193661,
+          0.5956965573132038,
+          0.5981069728732109,
+          0.5968718752264977,
+          0.5844440013170242
+        ],
+        "candidate": [
+          0.49949993193149567,
+          0.49437127634882927,
+          0.47713688760995865,
+          0.4784197211265564,
+          0.46149005740880966
+        ]
+      },
+      "wire_sha256": "84d3386aba0016096ae4c287dccf1e154b4bf7273364fac190517d84432757b5"
+    },
+    {
+      "case": "wide_wrapper",
+      "iterations": 100,
+      "baseline_s": 0.0018861889839172363,
+      "candidate_s": 0.0009183324873447418,
+      "speedup": 2.053928190399695,
+      "samples": {
+        "baseline": [
+          0.002071831375360489,
+          0.0018557831645011902,
+          0.0018861889839172363,
+          0.0019398778676986694,
+          0.0018796399235725403
+        ],
+        "candidate": [
+          0.000942479819059372,
+          0.0009150877594947815,
+          0.0009204782545566559,
+          0.0009183324873447418,
+          0.0008895732462406158
+        ]
+      },
+      "wire_sha256": "a04c596e8b59fcc34d10a5bb5042b5db2a3dadff4896b19dc68a81fa3cf2cd72"
+    },
+    {
+      "case": "wide_encode",
+      "iterations": 100,
+      "baseline_s": 0.05191647633910179,
+      "candidate_s": 0.05101306363940239,
+      "speedup": 1.0177094382349858,
+      "samples": {
+        "baseline": [
+          0.05318549647927284,
+          0.052159328013658524,
+          0.05191647633910179,
+          0.05115702375769615,
+          0.05094820633530617
+        ],
+        "candidate": [
+          0.052707571536302567,
+          0.05127551034092903,
+          0.05003649368882179,
+          0.05027324706315994,
+          0.05101306363940239
+        ]
+      },
+      "wire_sha256": "a04c596e8b59fcc34d10a5bb5042b5db2a3dadff4896b19dc68a81fa3cf2cd72"
+    },
+    {
+      "case": "wide_decode",
+      "iterations": 100,
+      "baseline_s": 0.07675545290112495,
+      "candidate_s": 0.07519613206386566,
+      "speedup": 1.0207367160312837,
+      "samples": {
+        "baseline": [
+          0.07692857086658478,
+          0.07600615173578262,
+          0.07675545290112495,
+          0.07666872814297676,
+          0.0770852118730545
+        ],
+        "candidate": [
+          0.07581999152898788,
+          0.07519613206386566,
+          0.0751105360686779,
+          0.07571079581975937,
+          0.07472944259643555
+        ]
+      },
+      "wire_sha256": "a04c596e8b59fcc34d10a5bb5042b5db2a3dadff4896b19dc68a81fa3cf2cd72"
+    }
+  ],
+  "tests": {
+    "junit_path": "/tmp/demiflow-codec-encoder.xml",
+    "junit_sha256": "256d391ad730563ebfc7cf4ae621fc4b7b5413277331633cc399519fd2d1ed8a",
+    "passed": 93,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 35.7,
+    "nodeids": [
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[None]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[True]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[False]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[0]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[1]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-1]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[115792089237316195423570985008687907853269984665640564039457584007913129639936]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-115792089237316195423570985008687907853269984665640564039457584007913129639936]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-0.0]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[0.0]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[nan]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[inf]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[-inf]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[\\u4e2d\\u6587\\xe9\\n\\x00\"\\U0001f600]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[value14]",
+      "tests.test_runtime_v3_codec_encoder::test_encoder_is_byte_exact_for_scalars_and_immutable_containers[value15]",
+      "tests.test_runtime_v3_codec_encoder::test_exact_integer_fast_path_does_not_call_subclass_string_overrides",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-False-False]",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-False-True]",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-True-False]",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[False-True-True]",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-False-False]",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-False-True]",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-True-False]",
+      "tests.test_runtime_v3_codec_encoder::test_original_record_wire_with_optional_schema_block_and_payload_reference[True-True-True]",
+      "tests.test_runtime_v3_codec_encoder::test_shared_encoder_has_no_cross_thread_traversal_or_value_cache",
+      "tests.test_runtime_v3_codec_cost::test_transfer_bytes_equal_original_canonical_codec[row0]",
+      "tests.test_runtime_v3_codec_cost::test_transfer_bytes_equal_original_canonical_codec[row1]",
+      "tests.test_runtime_v3_codec_cost::test_transfer_bytes_equal_original_canonical_codec[row2]",
+      "tests.test_runtime_v3_codec_cost::test_canonical_and_budget_rejection_still_run",
+      "tests.test_runtime_v3_x::test_x001",
+      "tests.test_runtime_v3_x::test_x002",
+      "tests.test_runtime_v3_x::test_x003",
+      "tests.test_runtime_v3_x::test_x004",
+      "tests.test_runtime_v3_x::test_x005",
+      "tests.test_runtime_v3_x::test_x006",
+      "tests.test_runtime_v3_x::test_x007",
+      "tests.test_runtime_v3_x::test_x008",
+      "tests.test_runtime_v3_x::test_x009",
+      "tests.test_runtime_v3_x::test_x010",
+      "tests.test_runtime_v3_x::test_x011",
+      "tests.test_runtime_v3_x::test_x012",
+      "tests.test_runtime_v3_x::test_x013",
+      "tests.test_runtime_v3_x::test_x014",
+      "tests.test_runtime_v3_x::test_x015",
+      "tests.test_runtime_v3_x::test_x016",
+      "tests.test_runtime_v3_x::test_x017",
+      "tests.test_runtime_v3_x::test_x018",
+      "tests.test_runtime_v3_x::test_x019",
+      "tests.test_runtime_v3_scalar_values::test_data_scalar_codec_preserves_type_and_freezes_sets",
+      "tests.test_runtime_v3_scalar_values::test_public_scalar_materialization_and_committed_replay[items]",
+      "tests.test_runtime_v3_scalar_values::test_public_scalar_materialization_and_committed_replay[lance]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value0]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value1]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value2]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value3]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value4]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value5]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value6]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value7]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value8]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value9]",
+      "tests.test_runtime_v3_scalar_values::test_scalar_boundary_roundtrip[value10]",
+      "tests.test_runtime_v3_scalar_values::test_new_scalar_domains_are_bounded_and_untrusted_objects_are_refused",
+      "tests.test_runtime_v3_scalar_values::test_set_encoding_is_order_independent_and_preserves_nan_members",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node0]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node1]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node2]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node3]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node4]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node5]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node6]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node7]",
+      "tests.test_runtime_v3_scalar_values::test_corrupt_data_only_nodes_are_rejected[node8]",
+      "tests.test_runtime_v3_scalar_values::test_named_zone_offset_and_payload_depth_cannot_silently_change",
+      "tests.test_runtime_v3_scalar_values::test_existing_primitive_payload_and_semantic_identity_bytes_stay_frozen",
+      "tests.test_runtime_v3_array_values::test_array_codec_fidelity_detachment_and_bounds",
+      "tests.test_runtime_v3_array_values::test_public_numpy_batch_exchange_materialize_and_committed_replay",
+      "tests.test_runtime_v3_finite_borrow::test_borrow_original_members_preserves_routes_typed_rows_and_owned_pins[forward]",
+      "tests.test_runtime_v3_finite_borrow::test_borrow_original_members_preserves_routes_typed_rows_and_owned_pins[rebalance]",
+      "tests.test_runtime_v3_finite_borrow::test_borrow_original_members_preserves_routes_typed_rows_and_owned_pins[broadcast]",
+      "tests.test_runtime_v3_finite_borrow::test_borrow_original_members_preserves_routes_typed_rows_and_owned_pins[hash]",
+      "tests.test_runtime_v3_finite_borrow::test_borrow_original_members_preserves_routes_typed_rows_and_owned_pins[target]",
+      "tests.test_runtime_v3_finite_borrow::test_old_owned_prefix_and_pending_snapshot_remain_readable_in_order",
+      "tests.test_runtime_v3_finite_borrow::test_full_scan_rejects_every_member_before_any_reference_is_returned[route]",
+      "tests.test_runtime_v3_finite_borrow::test_full_scan_rejects_every_member_before_any_reference_is_returned[unselected_payload]",
+      "tests.test_runtime_v3_finite_borrow::test_full_scan_rejects_every_member_before_any_reference_is_returned[count]",
+      "tests.test_runtime_v3_finite_borrow::test_full_scan_rejects_every_member_before_any_reference_is_returned[membership]",
+      "tests.test_runtime_v3_finite_borrow::test_full_scan_rejects_every_member_before_any_reference_is_returned[digest]",
+      "tests.test_runtime_v3_finite_borrow::test_full_scan_rejects_every_member_before_any_reference_is_returned[truncated]",
+      "tests.test_runtime_v3_finite_borrow::test_reread_reauthenticates_original_bytes_and_respects_original_limits",
+      "tests.test_runtime_v3_finite_borrow::test_public_typed_sort_borrows_without_second_payload_copy",
+      "tests.test_runtime_v3_finite_borrow::test_external_row_and_empty_member_keep_original_payload_and_bounds"
+    ]
+  },
+  "source_sha256": {
+    "demiflow/execution/exchange/dataflow_bridge.py": "03b9f7207925c0d24796781955743b1e6e463bc54dccc7885986c8fa02320b28",
+    "tests/test_runtime_v3_codec_encoder.py": "f1871d2ee39fed626837dd78cfac84789d7e6f8be43527ee092e1a30b6c57a15",
+    "tests/runtime_v3_codec_benchmark.py": "23facb0ae7ed76fced6f7b6539f1c63f13c31e4e522f6f7da6a1c24e0753f31a"
+  },
+  "production_diff_base": "d693dbfcdb87b6ddda2d26b23cb8af312d660008",
+  "benchmark_command": "PYTHONPATH=$PWD:$PWD/tests /yzp/zhaozy/yangzepeng/0905/env/bin/python -B tests/runtime_v3_codec_benchmark.py",
+  "test_command": "PYTHONPATH=$PWD:$PWD/tests DEMIFLOW_RESOURCE_ROOT=/tmp/demiflow-codec-encoder-capacity /yzp/zhaozy/yangzepeng/0905/env/bin/python -B -m pytest tests/test_runtime_v3_codec_encoder.py tests/test_runtime_v3_codec_cost.py tests/test_runtime_v3_x.py tests/test_runtime_v3_scalar_values.py tests/test_runtime_v3_array_values.py tests/test_runtime_v3_finite_borrow.py -q --basetemp=/tmp/demiflow-codec-encoder --junitxml=/tmp/demiflow-codec-encoder.xml"
+}

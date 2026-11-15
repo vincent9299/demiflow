@@ -277,10 +277,23 @@ def _codec_json_default(value):
     raise TypeError('Object of type ' + type(value).__name__ + ' is not JSON serializable')
 
 
+# JSONEncoder keeps per-call traversal/circular state in iterencode locals.
+# Reusing its immutable options avoids rebuilding an encoder for every small
+# provenance field. Never cache user values or change historical float bytes.
+_CODEC_ENCODER = json.JSONEncoder(sort_keys=True, ensure_ascii=False,
+    separators=(",", ":"), allow_nan=True, default=_codec_json_default)
+_RECORD_PREFIXES = {key: ('"' + key + '":').encode('ascii')
+                    for key in ('bp', 'eb', 'p', 'r', 's', 'sp', 'v')}
+
+
 def _codec_dumps(value):
-    return json.dumps(value, sort_keys=True, ensure_ascii=False,
-                      separators=(",", ":"), allow_nan=True,
-                      default=_codec_json_default).encode("utf-8")
+    if value is None:
+        return b'null'
+    if type(value) is bool:
+        return b'true' if value else b'false'
+    if type(value) is int:
+        return str(value).encode('ascii')
+    return _CODEC_ENCODER.encode(value).encode("utf-8")
 
 
 def _codec_loads(raw):
@@ -392,7 +405,9 @@ def _record_document_bytes(doc, *, payload_raw, max_bytes):
     parts, size = [b'{'], 2
     for index, key in enumerate(sorted(doc)):
         value = payload_raw if key == 'p' and payload_raw is not None else _codec_dumps(doc[key])
-        prefix = _codec_dumps(key) + b':'
+        prefix = _RECORD_PREFIXES.get(key)
+        if prefix is None:
+            prefix = _codec_dumps(key) + b':'
         size += len(prefix) + len(value) + bool(index)
         if size > max_bytes:
             _fail('BUDGET_EXCEEDED', 'encoded record document exceeds the row byte budget')
