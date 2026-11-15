@@ -104,6 +104,10 @@ class DataflowExecution:
         self._by_partition = {}
         self._deliveries = {}
         self._finite_completions = {}
+        self._finite_seals = {}
+        self._phases = ()
+        self._phase_index = 0
+        self._completed_stages = set()
         self._satisfied_consumers = {}
         self._terminal_queue = deque()
         self._terminal_seen = 0
@@ -181,6 +185,8 @@ class DataflowExecution:
         for stage, work in sorted(pending, key=lambda pair:
                 (pair[0].profile.requests['memory_bytes'], pair[0].profile.requests['cpu_millis']), reverse=True):
             need = {key: stage.profile.requests[key] for key in ('cpu_millis', 'memory_bytes')}
+            from ..planning.dataflow_place import _gpu_count
+            need['gpu'] = _gpu_count(stage.profile)
             feasible = [host for host, capacity in remaining.items()
                         if all(need[key] <= capacity.get(key, 0) for key in need)]
             if not feasible:
@@ -189,7 +195,7 @@ class DataflowExecution:
             host = max(feasible, key=lambda key: remaining[key]['cpu_millis'])
             assigned[work.operation_id] = host
             for key, amount in need.items():
-                remaining[host][key] -= amount
+                remaining[host][key] = remaining[host].get(key, 0) - amount
         return assigned
 
     def _assignment(self, lease: WorkerLease, stage) -> WorkerAssignment:
@@ -221,7 +227,11 @@ class DataflowExecution:
             lease = replace(lease, grant_ref=staged)
         self._services.journal_service.register_worker(lease, stage.occurrences)
         endpoint = make_host_endpoint(lease, services=self._services)
-        endpoint._recovery_image = self._restore_image
+        from .dataflow_residency import participants_for
+        owns_image = self._restore_image is not None and any(
+            c.participant_id in participants_for(self._physical, (stage.stage_id,))
+            for c in self._restore_image.contributions)
+        endpoint._recovery_image = self._restore_image if owns_image else None
         endpoint.prepare(self._assignment(lease, stage))
         self._endpoints[lease.allocation_id] = endpoint
         return lease
@@ -397,7 +407,15 @@ class DataflowExecution:
             # A completed final result is safe to read without recreating actors.
             from .kernels import state_codec
             transforms = {n.occurrence_id for n in self._graph.nodes if n.kind == "transform"}
+            from .dataflow_residency import participants_for
+            residency = self._checkpoint.residency or {}
+            retired = set(residency.get('completed_stages', ()))
+            if residency.get('phase_complete'):
+                retired.update(residency['active_stages'])
+            retired_ids = set(participants_for(self._physical, retired))
             for contribution in self._restore_image.contributions:
+                if contribution.participant_id in retired_ids:
+                    continue  # Its original ACKed output is restored, not its actor.
                 for occ, ref in contribution.operator_states.items():
                     if occ not in transforms or ref is None:
                         continue
@@ -410,11 +428,52 @@ class DataflowExecution:
         # This runner keeps its participants alive through the same cut. Never
         # promise phased residency then leave an unstarted participant forever
         # pending. Check before native acquisition or any business activation.
+        self._configure_phases()
+        if self._acquisition is not None:
+            self._acquisition._restore_image = self._restore_image
+            self._acquisition.start()
+        self._launch_phase()
+        self._started = True
+        self._state = "running"
+        self._checkpoint_at = time.monotonic()
+
+    def _configure_phases(self):
+        from .dataflow_residency import finite_phases
         stages = self._stage_order()
+        pending = [(stage, self._initial_work(stage, partition))
+                   for stage in stages for partition in stage.partitions]
         resident = sum(s.resident_bytes * len(s.partitions) for s in stages)
-        if resident + self._physical.residency.control_reserved_bytes > self._bounds.max_resident_bytes:
-            raise DataflowError('RESOURCE_INFEASIBLE',
-                'Live checkpoint participants exceed resident capacity; increase the bounded capacity')
+        fits = resident + self._physical.residency.control_reserved_bytes <= self._bounds.max_resident_bytes
+        if fits:
+            try:
+                self._place_hosts(pending)
+            except DataflowError as exc:
+                if exc.code != 'RESOURCE_INFEASIBLE':
+                    raise
+                fits = False
+        prior = self._checkpoint.residency
+        self._phases = ((tuple(s.stage_id for s in stages),) if fits and prior is None
+                        else finite_phases(self._physical))
+        # Preflight EVERY phase before business side effects.
+        for phase in self._phases:
+            group = [s for s in stages if s.stage_id in phase]
+            resident = sum(s.resident_bytes * len(s.partitions) for s in group)
+            if resident + self._physical.residency.control_reserved_bytes > self._bounds.max_resident_bytes:
+                raise DataflowError('RESOURCE_INFEASIBLE', 'streaming-connected stage group exceeds resident capacity')
+            self._place_hosts([(s, self._initial_work(s, p)) for s in group for p in s.partitions])
+        if prior is not None:
+            self._completed_stages = set(prior['completed_stages'])
+            if prior['phase_complete']:
+                self._completed_stages.update(prior['active_stages'])
+            self._finite_seals = {key: ArtifactRef(**ref) for key, ref in prior['finite_seals'].items()}
+            self._phase_index = next((i for i, group in enumerate(self._phases)
+                if not set(group) <= self._completed_stages), len(self._phases))
+            if self._phase_index == len(self._phases):
+                raise DataflowError('CORRUPT_ARTIFACT', 'completed residency lacks final publication')
+
+    def _launch_phase(self):
+        phase = self._phases[self._phase_index]
+        stages = [s for s in self._stage_order() if s.stage_id in phase]
         pending = [(stage, self._initial_work(stage, partition))
                    for stage in stages for partition in stage.partitions]
         hosts = self._place_hosts(pending)
@@ -435,17 +494,51 @@ class DataflowExecution:
             pending = deferred
             if pending:
                 if time.monotonic() >= deadline:
-                    raise DataflowError('CAPACITY_PENDING',
-                        'Worker admission deadline exceeded before business activation', retryable=True)
+                    raise DataflowError('CAPACITY_PENDING', 'Worker admission deadline exceeded before business activation', retryable=True)
                 time.sleep(min(.01, max(0, deadline - time.monotonic())))
-        if self._acquisition is not None:
-            self._acquisition._restore_image = self._restore_image
-            self._acquisition.start()
         for lease, stage in ready:
             self._activate(lease, stage)
-        self._started = True
-        self._state = "running"
-        self._checkpoint_at = time.monotonic()
+        for spec in self._physical.exchanges:
+            seal = self._finite_seals.get(spec.channel_id)
+            if seal is not None:
+                self._deliver_finite(spec, seal)
+
+    def _deliver_finite(self, spec, seal):
+        from .dataflow_sinks import _artifact_json
+        from .recovery_contract import identity
+        for partition in spec.consumer_partitions:
+            target = self._by_partition.get(partition)
+            if target is None:
+                continue  # Unstarted stage has no observation or contribution.
+            delivery = identity([seal.digest, partition, 'scope-delivery'])
+            if delivery in self._deliveries:
+                continue
+            self._deliveries[delivery] = (None, target)
+            self._idle.discard(target._allocation_id)
+            target.send_business({'kind': 'finite_input', 'edge_id': spec.edge_id,
+                                  'seal_ref': _artifact_json(seal), 'delivery_id': delivery})
+
+    def _retire_phase(self, image):
+        # ACK is durable before any live participant disappears. The original
+        # contribution keeps its original cut/boot in every subsequent carrier.
+        receipt = image.confirmed_sinks[self._request.kind]
+        for operation_id in tuple(self._scheduler._inflight):
+            self._scheduler.complete(operation_id, receipt_ref=receipt)
+        for endpoint in self._endpoints.values():
+            endpoint.drain(deadline_ms=self._policy.control_timeout_ms)
+        for stage_id in self._phases[self._phase_index]:
+            self._scheduler.drain(stage_id, deadline_ms=self._policy.control_timeout_ms)
+        self._completed_stages.update(self._phases[self._phase_index])
+        self._phase_index += 1
+        self._endpoints.clear()
+        self._by_partition.clear()
+        self._lease_by_operation.clear()
+        self._idle.clear()
+        self._done.clear()
+        self._cut = None
+        self._contributions.clear()
+        self._checkpoint_requested = False
+        self._launch_phase()
 
     # -- E005 pump --------------------------------------------------------
     def _validate_event(self, event: WorkerEvent) -> None:
@@ -600,7 +693,9 @@ class DataflowExecution:
                 done.add(consumer)
                 if set(spec.consumer_partitions) <= done:
                     for producer in spec.producer_partitions:
-                        target = self._by_partition[producer]
+                        target = self._by_partition.get(producer)
+                        if target is None:
+                            continue  # A finite producer was already durably retired.
                         self._idle.discard(target._allocation_id)
                         target.send_business({"kind": "close_output", "edge_id": spec.edge_id})
             elif payload["scope"] == "finite":
@@ -622,13 +717,8 @@ class DataflowExecution:
                 members[producer] = completion
                 if set(members) == set(spec.producer_partitions):
                     seal = seal_scope(spec.scope_id, tuple(members.values()), store=self._store)
-                    for partition in spec.consumer_partitions:
-                        target = self._by_partition[partition]
-                        delivery = identity([seal.digest, partition, "scope-delivery"])
-                        self._deliveries[delivery] = (None, target)
-                        self._idle.discard(target._allocation_id)
-                        target.send_business({"kind": "finite_input", "edge_id": spec.edge_id,
-                                              "seal_ref": _artifact_json(seal), "delivery_id": delivery})
+                    self._finite_seals[spec.channel_id] = seal
+                    self._deliver_finite(spec, seal)
             elif payload["scope"] == "edge":
                 spec = next(x for x in self._physical.exchanges if x.edge_id == payload["edge_id"])
                 if payload["producer_partition"] not in lease.partition_ids:
@@ -690,7 +780,22 @@ class DataflowExecution:
         if (self._cut is None and all_workers and not self._deliveries
                 and all_workers <= self._idle and (self._stopping or self._checkpoint_requested or all_workers <= self._done)):
             self._source_exhausted = self._checkpoint._sources_exhausted()
-            self._cut = self._checkpoint.begin(final=all_workers <= self._done and self._checkpoint.inputs_complete())
+            phase_done = all_workers <= self._done
+            final = (phase_done and self._phase_index == len(self._phases) - 1
+                     and self._checkpoint.inputs_complete())
+            if len(self._phases) > 1:
+                from .dataflow_residency import SCHEMA, participants_for
+                from .dataflow_sinks import _artifact_json
+                residency = {'schema': SCHEMA,
+                    'active_stages': list(self._phases[self._phase_index]),
+                    'completed_stages': sorted(self._completed_stages),
+                    'phase_complete': phase_done,
+                    'finite_seals': {key: _artifact_json(ref) for key, ref in self._finite_seals.items()}}
+                self._cut = self._checkpoint.begin(final=final,
+                    participants=participants_for(self._physical, self._phases[self._phase_index]),
+                    residency=residency)
+            else:
+                self._cut = self._checkpoint.begin(final=final)
             for endpoint in self._endpoints.values():
                 endpoint.request_cut(self._cut)
         if self._cut is not None and set(self._cut.participants) <= self._contributions.keys():
@@ -709,7 +814,9 @@ class DataflowExecution:
             for endpoint in self._endpoints.values():
                 endpoint.send_business({"kind": "receipt", "cut_id": self._cut.cut_id,
                                         "commit_id": image.commit_id})
-            if self._stopping or all_workers <= self._done:
+            if all_workers <= self._done and self._phase_index < len(self._phases) - 1:
+                self._retire_phase(image)
+            elif self._stopping or all_workers <= self._done:
                 self._set_result(image)
             else:
                 self._cut = None

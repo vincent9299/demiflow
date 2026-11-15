@@ -396,8 +396,8 @@ def solve_residency(
         producer_ids.add(prod)
         consumer_ids.add(cons)
         if exchange.mode == _MEMORY_MODE:
-            # A memory edge cannot be drained safely; its endpoints must be
-            # simultaneously resident.
+            # A memory edge requires simultaneous residency. Runtime additionally
+            # proves whether durable boundaries can be retired safely.
             union(prod, cons)
 
     order = {stage.stage_id: i for i, stage in enumerate(stages)}
@@ -427,25 +427,23 @@ def solve_residency(
     if required_spill > bounds.max_spill_bytes:
         raise _error("BUDGET_EXCEEDED", "durable channel storage exceeds the spill budget", spill_bytes=required_spill)
 
-    cpu_needed = memory_needed = gpu_needed = 0
-    isolation: set[str] = set()
-    for stage in stages:
-        requests = stage.profile.requests
-        cpu_needed += requests["cpu_millis"] * stage.replica_target
-        memory_needed += requests["memory_bytes"] * stage.replica_target
-        gpu_needed += _gpu_count(stage.profile) * stage.replica_target
-        isolation.update(_isolation_tokens(stage.profile))
     cpu_capacity = sum(host.logical_resources.get(
         "cpu_millis", host.logical_resources.get("cpu", 0.0) * 1000) for host in hosts)
     memory_capacity = sum(host.logical_resources.get("memory_bytes", 0.0) for host in hosts)
     gpu_capacity = sum(host.logical_resources.get("gpu", 0.0) for host in hosts)
-    if cpu_needed > cpu_capacity:
-        raise _error("RESOURCE_INFEASIBLE", "insufficient CPU capacity", cpu_millis=cpu_needed)
-    if memory_needed > memory_capacity:
-        raise _error("RESOURCE_INFEASIBLE", "insufficient host memory", memory_bytes=memory_needed)
-    if gpu_needed > gpu_capacity:
-        # A GPU requirement never silently degrades to a CPU success.
-        raise _error("RESOURCE_INFEASIBLE", "insufficient GPU capacity", gpu=gpu_needed)
+    isolation: set[str] = set()
+    for group in ordered_components:
+        cpu_needed = sum(s.profile.requests["cpu_millis"] * s.replica_target for s in group)
+        memory_needed = sum(s.profile.requests["memory_bytes"] * s.replica_target for s in group)
+        gpu_needed = sum(_gpu_count(s.profile) * s.replica_target for s in group)
+        for stage in group:
+            isolation.update(_isolation_tokens(stage.profile))
+        if cpu_needed > cpu_capacity:
+            raise _error("RESOURCE_INFEASIBLE", "insufficient CPU capacity for resident group", cpu_millis=cpu_needed)
+        if memory_needed > memory_capacity:
+            raise _error("RESOURCE_INFEASIBLE", "insufficient host memory for resident group", memory_bytes=memory_needed)
+        if gpu_needed > gpu_capacity:
+            raise _error("RESOURCE_INFEASIBLE", "insufficient GPU capacity", gpu=gpu_needed)
     supported_isolation: set[str] = set()
     for host in hosts:
         supported_isolation.update(host.isolation_capabilities)

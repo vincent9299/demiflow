@@ -526,6 +526,8 @@ class WorkerGraphRunner:
             raise DataflowError('FENCED', 'finite scope seal differs from physical membership')
         edge = next(e for e in self.e._graph.edges if e.edge_id == spec.edge_id)
         for member in seal['producers']:
+            if (spec.edge_id, member['partition_id']) in self._finished_inputs:
+                continue
             data = ArtifactRef(**member['manifest_ref'])
             if data.size_bytes > spec.storage_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite producer exceeds storage reservation')

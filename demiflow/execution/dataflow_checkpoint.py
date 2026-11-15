@@ -143,7 +143,7 @@ def _validate_ref(ref, *, what: str) -> None:
 
 
 class _PendingCut:
-    __slots__ = ("request", "contributions", "digests", "boots", "aborted")
+    __slots__ = ("request", "contributions", "digests", "boots", "aborted", "residency", "inherited")
 
     def __init__(self, request: CutRequest):
         self.request = request
@@ -151,6 +151,8 @@ class _PendingCut:
         self.digests: dict[str, str] = {}
         self.boots: dict[str, str] = {}
         self.aborted = False
+        self.residency = None
+        self.inherited = ()
 
 
 class DataflowCheckpointCoordinator:
@@ -165,7 +167,7 @@ class DataflowCheckpointCoordinator:
     __slots__ = ("_action", "_physical", "_store", "_commit", "_artifacts",
                  "_participants", "_route_epoch", "_lock", "_sequence",
                  "_pending", "_last_acked_sequence", "_source_eoi", "_operator_complete", "_closed",
-                 "_fence", "_owner_key", "__weakref__")
+                 "_fence", "_owner_key", "residency", "_last_image", "__weakref__")
 
     def __init__(self, action: RunAction, physical: PhysicalDataflow, *, store) -> None:
         if not isinstance(action, RunAction):
@@ -209,6 +211,8 @@ class DataflowCheckpointCoordinator:
         self._operator_complete = set()
         self._closed = False
         self._fence = context.fence
+        self.residency = None
+        self._last_image = None
 
     # -- internal helpers -------------------------------------------------
     def _check_open(self) -> None:
@@ -266,7 +270,7 @@ class DataflowCheckpointCoordinator:
                    for s in self._physical.splits)
 
     # -- D002 -------------------------------------------------------------
-    def begin(self, *, final: bool) -> CutRequest:
+    def begin(self, *, final: bool, participants=None, residency=None) -> CutRequest:
         with self._lock:
             self._check_open()
             if type(final) is not bool:
@@ -276,14 +280,26 @@ class DataflowCheckpointCoordinator:
                                     "final cut requires end-of-input evidence for every source")
             if len(self._pending) >= _MAX_PENDING_CUTS:
                 raise DataflowError("BUDGET_EXCEEDED", "Too many pending cuts")
+            selected = self._participants if participants is None else tuple(participants)
+            if not selected or len(set(selected)) != len(selected) or not set(selected) <= set(self._participants):
+                raise DataflowError("INVALID_CONTRACT", "invalid active cut participant set")
+            if selected != self._participants and residency is None:
+                raise DataflowError("INVALID_CONTRACT", "partial participants require a residency proof")
             sequence = self._sequence + 1
             cut_id = identity(["dataflow-cut-v3", self._action.action_id,
                                self._physical.plan_revision, self._route_epoch, sequence])
             request = CutRequest(cut_id=cut_id, sequence=sequence,
                                  plan_revision=self._physical.plan_revision,
                                  route_epoch=self._route_epoch,
-                                 participants=self._participants, final=final)
-            self._pending[cut_id] = _PendingCut(request)
+                                 participants=selected, final=final)
+            pending = _PendingCut(request)
+            if residency is not None:
+                document(residency, self._physical.bounds.max_state_bytes)
+                import copy
+                pending.residency = copy.deepcopy(residency)
+                pending.inherited = tuple(c for c in self._last_image.contributions
+                    if c.participant_id not in selected) if self._last_image is not None else ()
+            self._pending[cut_id] = pending
             self._sequence = sequence
             return request
 
@@ -296,7 +312,7 @@ class DataflowCheckpointCoordinator:
             pending = self._pending.get(contribution.cut_id)
             if pending is None or pending.aborted:
                 raise DataflowError("INVALID_CONTRACT", "Contribution for an unknown or aborted cut")
-            if contribution.participant_id not in self._participants:
+            if contribution.participant_id not in pending.request.participants:
                 raise DataflowError("INVALID_CONTRACT", "Contribution from a non-participant")
             if type(contribution.boot_id) is not str or not contribution.boot_id:
                 raise DataflowError("FENCED", "Contribution must carry the current boot identity")
@@ -348,11 +364,14 @@ class DataflowCheckpointCoordinator:
             if pending is None or pending.aborted:
                 raise DataflowError("INVALID_CONTRACT", "commit of an unknown or aborted cut")
             request = pending.request
-            missing = [p for p in self._participants if p not in pending.contributions]
+            missing = [p for p in request.participants if p not in pending.contributions]
             if missing:
                 raise DataflowError("INVALID_CONTRACT",
                                     "cut is incomplete; missing participants: " + ",".join(sorted(missing)))
-            contributions = tuple(pending.contributions[p] for p in self._participants)
+            fresh = tuple(pending.contributions[p] for p in request.participants)
+            contributions = pending.inherited + fresh
+            if request.final and {c.participant_id for c in contributions} != set(self._participants):
+                raise DataflowError("INVALID_CONTRACT", "final cut lacks actual contributions from every stage")
             if request.final:
                 for contribution in contributions:
                     for cursor in contribution.sources:
@@ -370,9 +389,11 @@ class DataflowCheckpointCoordinator:
                 "cut": _cut_json(request),
                 "contributions": [_contribution_json(c) for c in contributions],
             }}
+            if pending.residency is not None:
+                states[_CUT_STATE_KEY]["residency"] = pending.residency
             outputs = {}
             for sink_id, sink in sinks.items():
-                refs = tuple(c.sinks[sink_id] for c in contributions if sink_id in c.sinks)
+                refs = tuple(c.sinks[sink_id] for c in fresh if sink_id in c.sinks)
                 manifest = combine_prepared_sinks(refs, sink_id=sink_id, services=self._driver_services())
                 outputs[sink_id] = (sink, {**manifest, "final": request.final})
             if not outputs:
@@ -396,6 +417,8 @@ class DataflowCheckpointCoordinator:
             self._record_eoi(contributions)
             del self._pending[cut_id]
             self._last_acked_sequence = request.sequence
+            self.residency = pending.residency
+            self._last_image = image
             return image
 
     def _driver_services(self):
@@ -459,8 +482,15 @@ class DataflowCheckpointCoordinator:
             cut = _cut_from_json(carrier["cut"])
             contributions = tuple(_contribution_from_json(c) for c in carrier["contributions"])
             vector = tuple(_cursor_from_json(c) for c in carrier[SOURCE_VECTOR_KEY])
-            if set(c.participant_id for c in contributions) != set(self._participants):
-                raise DataflowError("CORRUPT_ARTIFACT", "Recovered cut participant set differs")
+            residency = carrier.get("residency")
+            if residency is None:
+                if set(c.participant_id for c in contributions) != set(self._participants):
+                    raise DataflowError("CORRUPT_ARTIFACT", "Recovered cut participant set differs")
+            else:
+                from .dataflow_residency import validate_recovered_residency
+                validate_recovered_residency(self._physical, cut, contributions, residency,
+                    facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"])
+            self.residency = residency
             merged = self._merge_source_vector(contributions)
             if merged != vector:
                 raise DataflowError("SOURCE_CHANGED", "Recovered source vector disagrees with contributions")
@@ -478,6 +508,7 @@ class DataflowCheckpointCoordinator:
             self._record_eoi(contributions)
             self._sequence = max(self._sequence, cut.sequence)
             self._last_acked_sequence = cut.sequence
+            self._last_image = image
             return image
 
     def _recover_historical(self, sinks) -> RecoveryImage:

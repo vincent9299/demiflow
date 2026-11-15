@@ -4,9 +4,8 @@ Lane E (E009-E014). The scheduler consumes the sealed ``PhysicalDataflow``
 layout (residency/scopes) and never invents a second physical ledger: every
 placement, retirement and exit proof flows through the single ResourceManager
 instance the driver hands in. Ready work, leases and resident reservations are
-all bounded; there is no unbounded queue. Transient resident occupancy is
-returned on completion while cumulative cost is never refunded, and a physical
-slot is only reusable after confirmed exit evidence.
+all bounded; there is no unbounded queue. Resident occupancy is returned only after confirmed physical exit; cumulative
+cost is never refunded. A completion receipt alone cannot free a worker slot.
 """
 from __future__ import annotations
 
@@ -76,6 +75,8 @@ class DataflowScheduler:
         self._lease_stage: dict[str, str] = {}
         self._inflight: dict[str, ReadyWork] = {}
         self._resident_used = 0
+        self._resident_by_allocation = {}
+        self._retirements = {}
         self._cumulative_cost = 0
         self._completed: set[str] = set()
         self._receipts: dict[str, ArtifactRef] = {}
@@ -235,13 +236,14 @@ class DataflowScheduler:
                 placement=None, reservation_group=work.stage_id)
             desired = (*self._requests.values(), request)
             accepted = self._resources.apply(self._context(uuid.uuid4().hex),
-                                             ResourcePlan(self.scope_id, desired, ()))
+                                             ResourcePlan(self.scope_id, desired, tuple(self._retirements.values())))
             self._desired_revision = accepted["desired_revision"]
             self._requests[allocation_id] = request
             self._allocation_by_operation[work.operation_id] = allocation_id
             self.leases[allocation_id] = lease
             self._lease_stage[allocation_id] = work.stage_id
             self._resident_used += work.resident_bytes
+            self._resident_by_allocation[allocation_id] = work.resident_bytes
             self._cumulative_cost += work.resident_bytes
         lease = self.leases[allocation_id]
         self._resources.reconcile_once(fence,
@@ -291,8 +293,8 @@ class DataflowScheduler:
         self._completed.add(operation_id)
         self._receipts[operation_id] = receipt_ref
         del self._inflight[operation_id]
-        # Transient resident occupancy is returned; cumulative cost is not.
-        self._resident_used -= work.resident_bytes
+        # Completion is not process exit. Keep its resident reservation until
+        # ResourceManager confirms physical cleanup during drain.
 
     # -- E014 drain -------------------------------------------------------
     def _release_lease(self, allocation_id: str, *, deadline_ms: int, reason: str) -> bool:
@@ -302,13 +304,21 @@ class DataflowScheduler:
         release = ReleaseSpec(allocation_id, "DRAINED", "drain-" + allocation_id,
                               max(1, deadline_ms), reason)
         desired = tuple(request for key, request in self._requests.items() if key != allocation_id)
-        accepted = self._resources.apply(context, ResourcePlan(self.scope_id, desired, (release,)))
+        self._retirements[allocation_id] = release
+        accepted = self._resources.apply(context, ResourcePlan(self.scope_id, desired, tuple(self._retirements.values())))
         self._requests.pop(allocation_id, None)
         self._desired_revision = accepted["desired_revision"]
-        self._resources.reconcile_once(fence, time.monotonic() + deadline_ms / 1000.0, 16)
-        snapshot = self._resources.get(self.scope_id)
-        observation = next((a for a in snapshot["allocations"] if a["allocation_id"] == allocation_id), None)
-        return observation is not None and observation.get("cleanup") == "CONFIRMED"
+        deadline = time.monotonic() + deadline_ms / 1000.0
+        while True:
+            self._resources.reconcile_once(fence, deadline, 16)
+            snapshot = self._resources.get(self.scope_id)
+            observation = next((a for a in snapshot["allocations"] if a["allocation_id"] == allocation_id), None)
+            if observation is not None and observation.get("cleanup") == "CONFIRMED":
+                self._resident_used -= self._resident_by_allocation.pop(allocation_id, 0)
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(min(.01, max(0, deadline - time.monotonic())))
 
     def drain(self, stage_id: str, *, deadline_ms: int) -> None:
         if stage_id not in self._stages:
