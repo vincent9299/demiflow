@@ -265,6 +265,35 @@ class FakeStore:
         self.retained = []
         self._n = 0
 
+    def scratch(self, *, max_bytes, max_io_bytes):
+        # Kernel-unit scratch adapter; real RunJournal ownership/recovery is
+        # exercised separately by test_runtime_v3_join_spool.
+        import io
+        class Scratch:
+            def __init__(self):
+                self.file = io.BytesIO()
+                self.size = 0
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.file.close()
+            def write_at(self, offset, raw):
+                assert offset <= self.size and len(raw) <= max_io_bytes
+                if offset + len(raw) > max_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'scratch budget')
+                self.file.seek(offset)
+                self.file.write(raw)
+                self.size = max(self.size, offset + len(raw))
+            def append(self, raw):
+                offset = self.size
+                self.write_at(offset, raw)
+                return offset
+            def read_at(self, offset, count):
+                assert count <= max_io_bytes and offset + count <= self.size
+                self.file.seek(offset)
+                return self.file.read(count)
+        return Scratch()
+
     def put(self, chunks, *, max_bytes, media_type):
         buf = bytearray()
         for chunk in chunks:

@@ -180,9 +180,10 @@ def _output_record(
 class _OutputBudget:
     """Pre-yield output row/byte admission; never truncates (C06)."""
 
-    def __init__(self, spec: KernelSpec, services: RuntimeServices) -> None:
+    def __init__(self, spec: KernelSpec, services: RuntimeServices, *, streaming=False) -> None:
         self._max_rows = services.bounds.max_output_rows
         self._max_bytes = spec.output_bound_bytes
+        self._streaming = streaming
         self._rows = 0
         self._bytes = 0
 
@@ -191,8 +192,12 @@ class _OutputBudget:
         self._bytes += record.encoded_bytes
         if self._max_rows > 0 and self._rows > self._max_rows:
             raise _err("BUDGET_EXCEEDED", "output row budget exceeded", rows=self._rows)
-        if self._max_bytes > 0 and self._bytes > self._max_bytes:
-            raise _err("BUDGET_EXCEEDED", "output byte budget exceeded", bytes=self._bytes)
+        # Finite relational scopes stream successive rows through bounded
+        # channels; their resident output allowance is not a lifetime byte cap.
+        # UDF expansion/batches retain the cumulative per-invocation allowance.
+        admitted = record.encoded_bytes if self._streaming else self._bytes
+        if self._max_bytes > 0 and admitted > self._max_bytes:
+            raise _err("BUDGET_EXCEEDED", "output byte budget exceeded", bytes=admitted)
 
 
 def _single_row_batch(

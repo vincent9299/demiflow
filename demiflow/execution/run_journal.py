@@ -768,6 +768,27 @@ class RunJournal:
             db.execute('DELETE FROM artifact_owner WHERE digest=? AND store_id=? AND key=? AND owner=?',
                        (digest, store_id, key, owner))
 
+    def release_materialized_owner(self, ref, *, owner, pin_operation_id):
+        """Drop one driver's handle pin after its execution scope has ended.
+
+        This consumes only the exact original pin capability. It cannot publish,
+        refund storage, delete objects or mutate another owner's/historical pin.
+        Worker artifact commands continue to require the live execution fence.
+        """
+        from .recovery_contract import identifier, RecoveryContractError
+        digest, store_id, key = self._artifact_ref_key(ref)
+        identifier(owner)
+        identifier(pin_operation_id)
+        with self._transaction() as db:
+            row = db.execute('SELECT operation_id FROM artifact_owner WHERE digest=? AND store_id=? AND key=? AND owner=?',
+                (digest, store_id, key, owner)).fetchone()
+            if row is None:
+                return
+            if row[0] != pin_operation_id:
+                raise RecoveryContractError('Materialized release does not own the original pin')
+            db.execute('DELETE FROM artifact_owner WHERE digest=? AND store_id=? AND key=? AND owner=? AND operation_id=?',
+                (digest, store_id, key, owner, pin_operation_id))
+
     def artifact_owners(self, ref, *, limit, cursor=None):
         """Bounded keyset page of pins for one ref; a failed page raises, never empty."""
         from .recovery_contract import identifier, RecoveryContractError

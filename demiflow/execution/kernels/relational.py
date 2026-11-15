@@ -1,11 +1,9 @@
 """Bounded relational kernels (lane K): join, reduce, union, groups.
 
-K005 joins same-key partitions through a restricted DataFusion hash join over a
-streaming Arrow reader: a type-tagged key token column preserves exact typed
-equality and SQL NULL gives the platform's null-no-match rule, while a pickle
-payload column carries the full business row. Duplicate-key multiplicity is kept
-(no dedup) and skew cartesian amplification fails on the output budget. No extra
-global sort is added (C06 ruling).
+K005 uses a bounded key/reference hash index over one journal-owned scratch
+file. Business payloads are encoded once and hydrated only for matches; spilled
+hash repartitioning relinks offsets and does not copy payloads. Duplicate-key
+multiplicity and null-no-match semantics are preserved without global sorting.
 
 K006/K008 group via the bounded external sort in ``ordering`` (contiguous groups
 are required by reduce/group_batches, unlike ordinary join output order), fold a
@@ -17,7 +15,6 @@ from __future__ import annotations
 import copy
 import itertools
 import pickle
-import tempfile
 from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from typing import Any
@@ -72,35 +69,6 @@ def _merge_row(
     return out
 
 
-def _join_reader(
-    records: Iterator[Record],
-    fields: tuple[str, ...],
-    services: RuntimeServices,
-    batch_rows: int,
-):
-    import pyarrow as pa
-
-    schema = pa.schema([("k", pa.string()), ("p", pa.binary())])
-
-    def batches() -> Iterator[Any]:
-        batch: list[dict[str, Any]] = []
-        emitted = False
-        for record in records:
-            _check_stop(services)
-            row = _materialize_row(record, services)
-            null_key = any(row[field] is None for field in fields)
-            token = None if null_key else _group_key(row, fields)
-            batch.append({"k": token, "p": _dumps_row(row)})
-            if len(batch) >= batch_rows:
-                emitted = True
-                yield pa.RecordBatch.from_pylist(batch, schema=schema)
-                batch = []
-        if batch or not emitted:
-            yield pa.RecordBatch.from_pylist(batch, schema=schema)
-
-    return pa.RecordBatchReader.from_batches(schema, batches())
-
-
 def join_partitions(
     left: Iterator[Record],
     right: Iterator[Record],
@@ -108,10 +76,8 @@ def join_partitions(
     spec: KernelSpec,
     services: RuntimeServices,
 ) -> Iterator[Record]:
-    """K005: restricted DataFusion join; null/duplicate/skew semantics, no sort."""
-    import pyarrow.dataset as ds
-    from datafusion import RuntimeEnvBuilder, SessionConfig, SessionContext
-
+    """K005: bounded key/reference hash join, no global business ordering."""
+    from .join_spool import join_pairs
     lk = tuple(_cfg(spec, "on"))
     rk = tuple(_cfg(spec, "right_on", list(lk)))
     how = "anti" if spec.kind == "exclude_keys" else _cfg(spec, "how", "inner")
@@ -120,80 +86,22 @@ def join_partitions(
         raise _err("INVALID_CONTRACT", "join keys must have equal nonzero length")
     if how not in ("inner", "left", "semi", "anti"):
         raise _err("INVALID_CONTRACT", "unsupported join type", how=how)
-
-    bounds = services.bounds
-    batch_rows = min(8192, max(1, bounds.max_batch_bytes // max(1, bounds.max_row_bytes)))
-    occurrence = _occurrence(spec)
-    budget = _OutputBudget(spec, services)
-    sequence = 0
-
-    # DataFusion cannot plan a DatasetExec with zero fragments. Resolve empty
-    # sides using the same row/identity/output contract before constructing it.
-    empty = object()
-    first_left = next(left, empty)
-    if first_left is empty:
-        return
-    left = itertools.chain((first_left,), left)
-    first_right = next(right, empty)
-    if first_right is empty:
-        if how in ('left', 'anti'):
-            for row_index, source_record in enumerate(left):
-                _check_stop(services)
-                row = _materialize_row(source_record, services)
-                _group_key(row, lk)
-                record_id = _hash_id([RECORD_DOMAIN, occurrence, 'join', row_index])
-                out = _output_record(record_id, {'join_index': row_index}, row, row_index, services)
-                budget.charge(out)
-                yield out
-        return
-    right = itertools.chain((first_right,), right)
-
-    with tempfile.TemporaryDirectory(prefix="demiflow-join-") as spill:
-        config = (
-            SessionConfig()
-            .with_target_partitions(1)
-            .with_batch_size(batch_rows)
-            .set("datafusion.optimizer.prefer_hash_join", "true")
-        )
-        context = SessionContext(
-            config,
-            RuntimeEnvBuilder()
-            .with_fair_spill_pool(bounds.max_resident_bytes)
-            .with_disk_manager_specified(spill),
-        )
-        left_reader = _join_reader(left, lk, services, batch_rows)
-        right_reader = _join_reader(right, rk, services, batch_rows)
-        context.register_dataset("l", ds.dataset(left_reader, schema=left_reader.schema))
-        context.register_dataset("r", ds.dataset(right_reader, schema=right_reader.schema))
-        if how == "inner":
-            sql = "SELECT l.p AS lp, r.p AS rp FROM l JOIN r ON l.k = r.k"
-        elif how == "left":
-            sql = "SELECT l.p AS lp, r.p AS rp FROM l LEFT JOIN r ON l.k = r.k"
-        elif how == "semi":
-            sql = "SELECT l.p AS lp FROM l LEFT SEMI JOIN r ON l.k = r.k"
-        else:
-            sql = "SELECT l.p AS lp FROM l LEFT ANTI JOIN r ON l.k = r.k"
-
-        for native in context.sql(sql).execute_stream():
-            table = native.to_pyarrow().to_pydict()
-            lp = table["lp"]
-            rp = table.get("rp")
-            for index in range(len(lp)):
-                _check_stop(services)
-                left_row = _loads_row(lp[index])
-                if how in ("semi", "anti"):
-                    out_row = left_row
-                else:
-                    right_payload = rp[index] if rp is not None else None
-                    if right_payload is None:
-                        out_row = left_row
-                    else:
-                        out_row = _merge_row(left_row, _loads_row(right_payload), lk, rk, suffix)
-                record_id = _hash_id([RECORD_DOMAIN, occurrence, "join", sequence])
-                out = _output_record(record_id, {"join_index": sequence}, out_row, sequence, services)
-                budget.charge(out)
-                sequence += 1
-                yield out
+    occurrence, budget = _occurrence(spec), _OutputBudget(spec, services, streaming=True)
+    pairs = join_pairs(iter(left), iter(right), left_keys=lk, right_keys=rk,
+                       how=how, services=services)
+    try:
+        for sequence, (left_record, right_record) in enumerate(pairs):
+            _check_stop(services)
+            left_row = _materialize_row(left_record, services)
+            out_row = (left_row if right_record is None else _merge_row(left_row,
+                _materialize_row(right_record, services), lk, rk, suffix))
+            record_id = _hash_id([RECORD_DOMAIN, occurrence, "join", sequence])
+            out = _output_record(record_id, {"join_index": sequence}, out_row, sequence,
+                services, schema_ref=left_record.schema_ref if how in ('semi', 'anti') else None)
+            budget.charge(out)
+            yield out
+    finally:
+        pairs.close()
 
 
 def _group_sort_spec(spec: KernelSpec, on: tuple[str, ...]) -> KernelSpec:
@@ -208,7 +116,11 @@ def _ordered_group_rows(
     records: Iterator[Record], on: tuple[str, ...], spec: KernelSpec, services: RuntimeServices
 ) -> Iterator[tuple[str, dict[str, Any], Record]]:
     sort_spec = _group_sort_spec(spec, on)
-    runs = build_sort_runs(records, spec=sort_spec, services=services)
+    def keyed_records():
+        for record in records:
+            _group_key(_materialize_row(record, services), on)
+            yield record
+    runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services)
     for record in merge_sort_runs(runs, spec=sort_spec, services=services):
         row = _materialize_row(record, services)
         yield _group_key(row, on), row, record
@@ -246,7 +158,7 @@ def reduce_partition(
     if not callable(reducer):
         raise _err("INVALID_CONTRACT", "reducer program must be callable")
     occurrence = _occurrence(spec)
-    budget = _OutputBudget(spec, services)
+    budget = _OutputBudget(spec, services, streaming=True)
     max_state = services.bounds.max_state_bytes
     sequence = 0
 
@@ -277,7 +189,7 @@ def union_inputs(
     inputs: tuple[Iterator[Record], ...], *, spec: KernelSpec, services: RuntimeServices
 ) -> Iterator[Record]:
     """K007: port-order concatenation; shared reference is not business dedup."""
-    budget = _OutputBudget(spec, services)
+    budget = _OutputBudget(spec, services, streaming=True)
     for source in inputs:
         iterator = iter(source)
         try:
@@ -301,7 +213,7 @@ def emit_groups(
     if not on or max_rows < 1 or output in on or output in ("group_index", "group_last"):
         raise _err("INVALID_CONTRACT", "invalid grouping fields or max_rows")
     occurrence = _occurrence(spec)
-    budget = _OutputBudget(spec, services)
+    budget = _OutputBudget(spec, services, streaming=True)
     sequence = 0
 
     ordered = _ordered_group_rows(records, on, spec, services)

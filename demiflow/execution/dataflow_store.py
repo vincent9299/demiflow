@@ -89,6 +89,11 @@ class RunArtifactStore:
     def _staging_operation(self) -> str:
         return secrets.token_hex(32)
 
+    def scratch(self, *, max_bytes, max_io_bytes):
+        """Borrow bounded random-access scratch from this store's authority."""
+        from .dataflow_scratch import KernelScratch
+        return KernelScratch(self, max_bytes=max_bytes, max_io_bytes=max_io_bytes)
+
     def put(self, chunks: Iterator[bytes], *, max_bytes: int, media_type: str) -> ArtifactRef:
         if self._readonly:
             raise DataflowError("FENCED", "historical artifact store is read-only")
@@ -254,6 +259,12 @@ class RunArtifactStore:
         operation_id = hashlib.sha256(("unpin:" + _pin_identity(ref, owner)).encode()).hexdigest()
         self._journal.artifact(ArtifactCommand(operation_id=operation_id, kind="unpin", ref=ref,
                                                owner=owner, size_bytes=ref.size_bytes))
+
+    def release_materialized(self, ref, *, owner):
+        if self._readonly:
+            raise DataflowError('FENCED', 'Historical artifact store is read-only')
+        self._object_path(ref)
+        self._journal.release_materialized(ref, owner=owner)
 
 
 def _pin_identity(ref: ArtifactRef, owner: str) -> str:

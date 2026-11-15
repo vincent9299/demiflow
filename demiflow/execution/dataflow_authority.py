@@ -203,6 +203,18 @@ class DriverArtifactPort:
     def artifact(self, command: ArtifactCommand) -> ArtifactReply:
         return apply_artifact_command(self._action, command, bounds=self._bounds)
 
+    def release_materialized(self, ref, *, owner):
+        # This method is deliberately absent from the worker RPC vocabulary.
+        # Only a driver-created handle retains this port and its random owner.
+        import hashlib
+        from .dataflow_store import _pin_identity
+        prefix = self._action.action_id + '-'
+        suffix = owner[len(prefix):] if isinstance(owner, str) and owner.startswith(prefix) else ''
+        if len(suffix) != 32 or any(char not in '0123456789abcdef' for char in suffix):
+            raise DataflowError('FENCED', 'Only this action\'s materialized handle may release its pin')
+        operation = hashlib.sha256(('pin:' + _pin_identity(ref, owner)).encode()).hexdigest()
+        self._action.context.journal.release_materialized_owner(ref, owner=owner, pin_operation_id=operation)
+
 
 class DriverJournalService:
     """Bounded driver-side journal authority (H001-H004, H036, H056, H066-H069, H075)."""

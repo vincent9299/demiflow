@@ -502,14 +502,10 @@ class StoredMaterializedHandle:
         with self._lock:
             if self._released:
                 return
+            if self._owner is not None:
+                release = getattr(self._store, 'release_materialized', self._store.release)
+                for ref in (self._manifest_ref, *self._blocks):
+                    release(ref, owner=self._owner)
+            # An unknown/failed unpin remains retryable. Immutable data and
+            # committed owners remain intact throughout a partial release.
             self._released = True
-        if self._owner is None:
-            return
-        errors: list[BaseException] = []
-        for ref in (self._manifest_ref, *self._blocks):
-            try:
-                self._store.release(ref, owner=self._owner)
-            except Exception as exc:
-                errors.append(exc)
-        if errors:
-            raise errors[0]
