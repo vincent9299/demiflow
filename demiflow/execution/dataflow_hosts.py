@@ -67,7 +67,7 @@ class ControlMailbox:
                 if waiter.digest != digest:
                     raise DataflowError("INVALID_CONTRACT", "operation id reused with a different payload")
             else:
-                while len(self._pending) >= self._max:
+                while len(self._pending) >= self._max or len(self._outbox) >= self._max:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise DataflowError("BUDGET_EXCEEDED", "control mailbox pending ceiling reached")
@@ -96,6 +96,21 @@ class ControlMailbox:
                     del self._pending[event.operation_id]
                     self._condition.notify_all()
 
+    def send(self, event):
+        # Notifications share the bounded outbox but never wait for a journal RPC.
+        deadline = time.monotonic() + self._bounds.timeout_ms / 1000
+        with self._condition:
+            while len(self._outbox) >= self._max:
+                self._check_stop()
+                remaining = deadline - time.monotonic()
+                if self._closed or remaining <= 0:
+                    raise DataflowError("DEADLINE_EXCEEDED", "worker notification backpressure deadline")
+                self._condition.wait(min(.05, remaining))
+            if self._closed:
+                raise DataflowError("CANCELLED", "control mailbox closed")
+            self._outbox.append(event)
+            self._condition.notify_all()
+
     def drain(self, *, max_events: int) -> tuple["WorkerEvent", ...]:
         if max_events < 1:
             raise DataflowError("INVALID_CONTRACT", "drain max_events must be positive")
@@ -104,6 +119,7 @@ class ControlMailbox:
             batch = []
             while self._outbox and len(batch) < limit:
                 batch.append(self._outbox.popleft())
+            self._condition.notify_all()
             return tuple(batch)
 
     def deliver(self, reply: "ControlReply") -> None:
@@ -158,7 +174,10 @@ class DataflowLocalConnector(LocalControlConnector):
 
     def stage(self, allocation_id, launch_spec):
         from .contracts.dataflow import Bounds
-        self._bounds_by_allocation[allocation_id] = Bounds(**launch_spec["dataflow_v3"]["bounds"])
+        config = launch_spec.get("dataflow_v3")
+        if not isinstance(config, dict) or not isinstance(config.get("bounds"), dict):
+            raise DataflowError("INVALID_CONTRACT", "v3 launch requires explicit bounds")
+        self._bounds_by_allocation[allocation_id] = Bounds(**config["bounds"])
         super().stage(allocation_id, launch_spec)
 
     def spawn_payload(self, allocation_id: str) -> dict:
@@ -166,7 +185,16 @@ class DataflowLocalConnector(LocalControlConnector):
         v3 = launch_spec.get("dataflow_v3")
         if type(v3) is not dict or v3.get("entrypoint") != "dataflow_worker_v3":
             raise DataflowError("INVALID_CONTRACT", "v3 local launch requires the dataflow_worker_v3 entrypoint")
-        return super().spawn_payload(allocation_id)
+        payload = super().spawn_payload(allocation_id)
+        # A workbench driver runs from a sealed snapshot under Python -I.
+        # sys.path edits are not inherited by subprocesses: pin the exact
+        # loaded runtime ahead of editable installs or the caller's PYTHONPATH.
+        import os
+        from pathlib import Path
+        root = str(Path(__file__).resolve().parents[2])
+        inherited = os.environ.get("PYTHONPATH", "")
+        payload["extra_env"]["PYTHONPATH"] = root + (os.pathsep + inherited if inherited else "")
+        return payload
 
     def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
         from .worker.bootstrap import send_message
@@ -191,6 +219,7 @@ class _EndpointBase:
         self._boot_id = lease.boot_id
         self._activated = False
         self._closed_flag = False
+        self._cleanup_completed = False
         self._grant = None
         self._model = None
         self._manager = services.resources
@@ -203,7 +232,8 @@ class _EndpointBase:
     def _build_launch(self, assignment: "WorkerAssignment") -> tuple[dict, dict, dict]:
         run = self._services.action.context
         lease = self._lease
-        scope_id = "df-" + assignment.plan_id
+        from .contracts.dataflow_codec import runtime_scope_id
+        scope_id = runtime_scope_id(assignment.plan_id, assignment.attempt)
         raw = b"".join(self._services.store.read(lease.grant_ref,
                         max_bytes=assignment.bounds.max_control_bytes))
         grant = json.loads(raw)
@@ -228,6 +258,9 @@ class _EndpointBase:
                             "assignment": {"wire": encode_wire(assignment, type_name="WorkerAssignment",
                                                    bounds=assignment.bounds).decode("utf-8")}},
         }
+        if getattr(self, "_recovery_image", None) is not None:
+            launch_spec["dataflow_v3"]["recovery_image_wire"] = encode_wire(self._recovery_image,
+                type_name="RecoveryImage", bounds=assignment.bounds).decode()
         return launch_spec, grant, manifest_ref
 
     def prepare(self, assignment: "WorkerAssignment") -> None:
@@ -256,6 +289,23 @@ class _EndpointBase:
                 "controller_epoch": run.attempt, "authority_ref": self._grant["grant_id"],
                 "allocation_id": self._allocation_id, "boot_id": self._boot_id, "payload": payload}
 
+    def send_business(self, command):
+        if hasattr(self, "_sock"):
+            from .worker.bootstrap import send_message
+            send_message(self._sock, {"type": "dataflow_command", "command": command})
+        else:
+            ray.get(self._connector._actor(self._allocation_id).receive.remote(command),
+                    timeout=self._services.policy.control_timeout_ms / 1000)
+
+    def _early_event(self, event):
+        self._check_event_identity(event)
+        if event.kind in ("data", "ack", "idle", "terminal", "eoi", "cut", "failure", "closed", "progress"):
+            if len(self._events) >= self._services.bounds.max_pending_events:
+                raise DataflowError("BUDGET_EXCEEDED", "activation event queue exceeds bound")
+            self._events.append(event)
+        else:
+            self.deliver_reply(self._services.journal_service.dispatch(event))
+
     def request_cut(self, request: "CutRequest") -> None:
         if not self._activated:
             raise DataflowError("FENCED", "cut requested before activation")
@@ -266,6 +316,12 @@ class _EndpointBase:
             return
         self._cuts[request.cut_id] = request
         self._connector.request_cut(self._allocation_id, request)
+
+    def drain(self, *, deadline_ms: int) -> None:
+        if self._cleanup_completed or not self._activated:
+            return
+        self._send_k3("Drain", {"reason": "execution_close",
+                                "deadline_ms": deadline_ms})
 
     def cancel(self, reason: str, *, deadline_ms: int) -> None:
         try:
@@ -325,36 +381,46 @@ class LocalHostEndpoint(_EndpointBase):
         from .worker.bootstrap import recv_message, send_message
         envelope = self._k3_envelope(kind, payload)
         send_message(self._sock, envelope)
+        deadline = time.monotonic() + self._services.policy.control_timeout_ms / 1000
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DataflowError("DEADLINE_EXCEEDED", "Local worker control command timed out")
+            import select
+            if not select.select([self._sock], [], [], min(.05, remaining))[0]:
+                continue
             message = recv_message(self._sock)
             if message is None:
                 raise DataflowError("UNKNOWN_EFFECT", "local worker closed before responding")
             if message.get("response_to") == envelope["operation_id"]:
                 if "error" in message:
                     raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(message["error"]))
+                if kind in ("Drain", "Quiesce", "Cancel"):
+                    self._cleanup_completed = True
                 return message["receipt"]
             if message.get("type") == "worker_event":
                 event = _event_from_dict(message["event"], bounds=self._services.bounds)
-                self._check_event_identity(event)
-                reply = self._services.journal_service.dispatch(event)
-                self.deliver_reply(reply)
+                self._early_event(event)
             if message.get("kind") in ("Register", "Ready", "Heartbeat"):
                 self._model.handle(message, now_ms=int(time.time() * 1000))
 
-    def poll(self, *, max_events: int, deadline_ms: int) -> tuple["WorkerEvent", ...]:
-        import socket as _socket
+    def poll(self, *, max_events: int, deadline_ms: int):
+        import select
         from .worker.bootstrap import recv_message
-        self._sock.settimeout(deadline_ms / 1000.0)
         events = []
-        for _ in range(max_events):
-            try:
-                frame = recv_message(self._sock)
-            except (_socket.timeout, OSError):
-                break
+        while self._events and len(events) < max_events:
+            events.append(self._events.popleft())
+        # Wait before reading a frame; a timeout halfway through a frame must
+        # never discard its prefix and corrupt the next message boundary.
+        self._sock.settimeout(self._services.policy.control_timeout_ms / 1000)
+        while len(events) < max_events and select.select([self._sock], [], [], 0)[0]:
+            frame = recv_message(self._sock)
             if frame is None:
-                break
+                raise DataflowError("UNKNOWN_EFFECT", "worker connection closed during execution")
             if frame.get("type") == "worker_event":
                 events.append(_event_from_dict(frame["event"], bounds=self._services.bounds))
+            elif "error" in frame:
+                raise DataflowError("INTERNAL_PROTOCOL", "worker control failed: " + str(frame["error"]))
         return tuple(events)
 
     def deliver_reply(self, reply: "ControlReply") -> None:
@@ -440,17 +506,23 @@ class RayHostEndpoint(_EndpointBase):
             if time.monotonic() >= deadline:
                 raise DataflowError("DEADLINE_EXCEEDED", "Ray worker control command timed out")
             for event in self._connector.pull(self._allocation_id, limit=self._services.bounds.max_pending_events):
-                self._check_event_identity(event)
-                self.deliver_reply(self._services.journal_service.dispatch(event))
+                self._early_event(event)
         if "error" in result:
             raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(result["error"]))
+        if kind in ("Drain", "Quiesce", "Cancel"):
+            self._cleanup_completed = True
         return result.get("receipt")
 
-    def poll(self, *, max_events: int, deadline_ms: int) -> tuple["WorkerEvent", ...]:
-        try:
-            return tuple(self._connector.pull(self._allocation_id, limit=max_events))
-        except (RayActorError, GetTimeoutError):
-            return ()
+    def poll(self, *, max_events: int, deadline_ms: int):
+        events = []
+        while self._events and len(events) < max_events:
+            events.append(self._events.popleft())
+        if len(events) < max_events:
+            try:
+                events.extend(self._connector.pull(self._allocation_id, limit=max_events - len(events)))
+            except (RayActorError, GetTimeoutError) as exc:
+                raise DataflowError("UNKNOWN_EFFECT", "Ray worker became unreachable") from exc
+        return tuple(events)
 
     def deliver_reply(self, reply: "ControlReply") -> None:
         self._connector.deliver_control_reply(self._allocation_id, reply)

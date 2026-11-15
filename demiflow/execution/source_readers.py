@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import json
 import pickle
 import itertools
 from collections import deque
@@ -74,6 +75,7 @@ class _BaseReader:
         self._eoi = False
         self._pending: tuple[ArtifactRef, ...] = ()
         self._replay_pending = deque()
+        self._pending_record = None
         self._lease_ref: ArtifactRef | None = None
         self._closed = False
         self._opened = False
@@ -128,6 +130,7 @@ class _BaseReader:
             return SourcePoll("eoi", None, 0)
         # Pulling again confirms the previous record reached the ordered output.
         self._pending = ()
+        self._pending_record = None
         result = self._advance()
         if result is None:
             self._eoi = True
@@ -136,28 +139,40 @@ class _BaseReader:
         sequence = self._next_sequence
         record_id = identity([self._snapshot.source_id, self._split.split_id, position])
         encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
-        if self._snapshot.replay == "attempt_only":
-            record = Record(record_id, position, None, row, encoded_bytes, sequence)
-            self._pending = ()
-        else:
-            inline = Record(record_id, position, None, row, encoded_bytes, sequence)
-            ref = spool_record(inline, split_id=self._split.split_id, sequence=sequence,
-                               store=self._services.store, bounds=self._services.bounds)
-            record = Record(record_id, position, ref, None, ref.size_bytes, sequence)
-            from .exchange.dataflow_bridge import _encode_record_document
-            from .recovery_contract import document
-            pending = document({"record_id": record_id, "sequence": sequence,
-                "document": _encode_record_document(record,
-                    max_bytes=self._services.bounds.max_row_bytes).decode("utf-8")},
-                self._services.bounds.max_control_bytes)
-            pending_ref = self._services.store.put(iter((pending,)), max_bytes=len(pending),
-                media_type="application/vnd.demiflow.source-pending.v3")
-            self._pending = (pending_ref,)
+        record = Record(record_id, position, None, row, encoded_bytes, sequence)
+        if self._snapshot.replay != "attempt_only":
+            # Keep one bounded in-flight row. Persist it only if a snapshot
+            # precedes its downstream acknowledgement, not on every seek read.
+            self._pending_record = record
         self._next_sequence += 1
         return SourcePoll("record", record, 0)
 
+    def acknowledge_output(self) -> None:
+        """A quiescent cut has captured every already-published record downstream.
+
+        Cursor admission may precede publication. Pending transfer documents are
+        retained until this acknowledgement; queue claim references stay owned
+        by the native queue settlement protocol.
+        """
+        self._check_open()
+        self._pending_record = None
+        self._pending = tuple(ref for ref in self._pending
+            if ref.media_type != "application/vnd.demiflow.source-pending.v3")
+
     def snapshot(self) -> SourceCursor:
         self._check_open()
+        if self._pending_record is not None:
+            from .exchange.dataflow_bridge import _encode_record_document
+            from .recovery_contract import document
+            record = self._pending_record
+            raw = document({"record_id": record.record_id, "sequence": record.sequence,
+                "document": _encode_record_document(record,
+                    max_bytes=self._services.bounds.max_row_bytes).decode()},
+                self._services.bounds.max_control_bytes)
+            ref = self._services.store.put(iter([raw]), max_bytes=len(raw),
+                media_type="application/vnd.demiflow.source-pending.v3")
+            self._pending = (ref,)
+            self._pending_record = None
         return SourceCursor(
             split_id=self._split.split_id, offset=dict(self._offset),
             next_sequence=self._next_sequence, end_of_input=self._eoi,
@@ -266,11 +281,15 @@ class FileReader(_BaseReader):
         self._paths = tuple(plan.paths)
         self._format = plan.format
         self._options = dict(plan.options)
-        self._file_index = int(self._offset.get("file_index", 0))
+        self._file_start = int(split.locator.get("file_index", 0))
+        self._file_stop = min(len(self._paths), self._file_start + 1)
+        self._file_index = int(self._offset.get("file_index", self._file_start))
+        if not self._file_start <= self._file_index <= self._file_stop:
+            raise DataflowError("INVALID_CONTRACT", "file cursor outside assigned split")
         self._record_index = int(self._offset.get("record_index", 0))
         self._iter: Iterator[Any] | None = None
         self._stream: Any = None
-        if self._paths and not self._offset.get("empty"):
+        if self._file_index < self._file_stop and not split.locator.get("empty"):
             self._open_file(skip=self._record_index)
 
     def _open_file(self, *, skip: int) -> None:
@@ -285,7 +304,35 @@ class FileReader(_BaseReader):
     def _file_rows(self, path: str) -> Iterator[Any]:
         fmt = self._format
         options = self._options
-        if fmt in ("json", "jsonl", "records"):
+        if fmt in ("json", "jsonl"):
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rb") as stream:
+                prefix = stream.read(1)
+                while prefix and prefix.isspace():
+                    prefix = stream.read(1)
+                stream.seek(0)
+                if prefix == b"[":
+                    import ijson
+                    rows = ijson.items(stream, options.get("item_prefix") or "item", use_float=True)
+                else:
+                    def lines():
+                        while True:
+                            line = stream.readline(self._services.bounds.max_row_bytes + 1)
+                            if not line:
+                                return
+                            if len(line) > self._services.bounds.max_row_bytes:
+                                raise DataflowError("BUDGET_EXCEEDED", "JSON line exceeds max_row_bytes")
+                            if line.strip():
+                                yield json.loads(line)
+                    rows = lines()
+                for row in rows:
+                    if not isinstance(row, dict):
+                        raise DataflowError("INVALID_CONTRACT", "JSON Dataset requires object rows")
+                    if options.get("include_paths"):
+                        row = {**row, "path": path}
+                    yield row
+            return
+        if fmt == "records":
             from ..data.records import iter_file_records
 
             record_format = "json" if fmt == "json" else ("text" if fmt == "text" else "jsonl")
@@ -320,8 +367,13 @@ class FileReader(_BaseReader):
             import pyarrow.parquet as pq
 
             columns = options.get("columns")
-            table = pq.read_table(path, columns=columns)
-            yield from table.to_pylist()
+            with pq.ParquetFile(path) as parquet:
+                # One row per decoded batch bounds conversion independently of
+                # row-group size; oversize rows are rejected before publication.
+                for batch in parquet.iter_batches(batch_size=1, columns=columns):
+                    if batch.nbytes > self._services.bounds.max_row_bytes:
+                        raise DataflowError("BUDGET_EXCEEDED", "Parquet row exceeds max_row_bytes")
+                    yield from batch.to_pylist()
             return
         if fmt == "images":
             yield from self._image_rows(path)
@@ -346,10 +398,14 @@ class FileReader(_BaseReader):
                 self._stream.close()
             finally:
                 self._stream = None
+        if self._iter is not None:
+            close = getattr(self._iter, "close", None)
+            if close is not None:
+                close()
         self._iter = None
 
     def _advance(self) -> tuple[Any, dict[str, Any]] | None:
-        while self._file_index < len(self._paths):
+        while self._file_index < self._file_stop:
             if self._iter is None:
                 self._open_file(skip=0)
             row = next(self._iter, None)
@@ -385,11 +441,13 @@ class LanceReader(_BaseReader):
         self._fragment_id = target_fragment
         self._row_offset = target_offset
         if target_fragment or target_offset:
-            for fragment_id, row_offset, _row in self._rows:
-                if fragment_id == target_fragment and row_offset == target_offset:
-                    self._fragment_id = fragment_id
-                    self._row_offset = row_offset
-                    break
+            # Offset denotes the next unread row. Keep the matching row and
+            # advance into the following fragment when the saved fragment ended.
+            order = {fragment: index for index, fragment in enumerate(self._fragment_ids)}
+            target_index = order.get(target_fragment, 0)
+            self._rows = itertools.dropwhile(
+                lambda item: (order.get(item[0], 0), item[1]) < (target_index, target_offset),
+                self._rows)
 
     def _iter_rows(self) -> Iterator[tuple[int, int, Any]]:
         from dataclasses import replace
@@ -400,9 +458,11 @@ class LanceReader(_BaseReader):
 
         exact = replace(self._plan.query, version=self._version)
         if isinstance(exact, LanceVectorSearchSpec):
+            index = 0
             for batch in _iter_vector(exact, batch_size=256):
-                for index, row in enumerate(batch.to_pylist()):
+                for row in batch.to_pylist():
                     yield 0, index, row
+                    index += 1
             return
         if self._global:
             row_offset = 0

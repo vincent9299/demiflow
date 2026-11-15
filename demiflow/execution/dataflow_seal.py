@@ -126,8 +126,19 @@ def _code_identity_from_value(kind: str, value):
         if kind == "source":
             return plan_code_pin(LogicalPlan(()), source=value)
         if kind == "aggregate":
-            return plan_code_pin(LogicalPlan((MapOp(callable=CallableSpec.create(value)),)))
+            from ..data.aggregate import AggregateFnV2
+            aggregates = value if isinstance(value, tuple) else (value,)
+            if not aggregates or any(not isinstance(a, AggregateFnV2) for a in aggregates):
+                raise DataflowError("INVALID_CONTRACT", "aggregate program must declare AggregateFnV2")
+            return {"aggregates": [
+                {"configuration": describe(vars(a)), "methods": [plan_code_pin(LogicalPlan((MapOp(
+                    callable=CallableSpec.create(getattr(type(a), method))),)))
+                    for method in ("aggregate_partial", "aggregate_block", "merge_states", "combine", "finalize_state", "finalize")]}
+                for a in aggregates]}
         if kind == "sink":
+            from ..lance.model import LanceWriteSpec
+            if isinstance(value, LanceWriteSpec):
+                return {"sink": "demiflow.lance.spec", "declaration": value.to_dict()}
             if not isinstance(value, Datasink):
                 raise DataflowError("INVALID_CONTRACT", "Terminal sink program is not a Datasink")
             try:
@@ -295,7 +306,7 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
 
 # -- D012 -----------------------------------------------------------------
 def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDataflow,
-                  *, store) -> SealedExecution:
+                  *, store, identity_bridge=None) -> SealedExecution:
     if not isinstance(action, RunAction):
         raise DataflowError("INVALID_CONTRACT", "seal_dataflow requires a driver RunAction")
     if not isinstance(graph, DataflowGraph) or not isinstance(physical, PhysicalDataflow):
@@ -327,13 +338,16 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
                              "platform_revision": context.journal.recovery_identity()["platform_revision"],
                              "programs": code_pin}, bounds.max_control_bytes)
     code_pin_ref = store.put(iter([code_pin_raw]), max_bytes=bounds.max_control_bytes, media_type=CODE_PIN_MEDIA)
-    # No report bindings have been supplied at this seam. Execution occurrence
-    # IDs are not report node IDs, and a graph digest is not a report digest.
-    # Keep a bounded, explicit absence fact until the checked-execution producer
-    # is connected; never manufacture a bridge that looks validated.
-    bridge = {"schema": "demiflow.identity_bridge_unavailable.v3",
-              "action_id": action.action_id, "dag_id": graph.dag_id,
-              "available": False, "reason": "checked_report_binding_missing"}
+    bridge = identity_bridge
+    if bridge is None:
+        bridge = {"schema": "demiflow.identity_bridge_unavailable.v3",
+                  "action_id": action.action_id, "dag_id": graph.dag_id, "plan_id": physical.plan_id,
+                  "available": False, "reason": "checked_report_binding_missing"}
+    else:
+        if bridge.get("action_id") != action.action_id or bridge.get("dag_id") != graph.dag_id:
+            raise DataflowError("INVALID_CONTRACT", "report bridge differs from executed graph")
+        from .identity_bridge import seal_identity_bridge
+        seal_identity_bridge(context, action, bridge)
     bridge_raw = document(bridge, bounds.max_control_bytes)
     identity_bridge_ref = store.put(iter([bridge_raw]), max_bytes=bounds.max_control_bytes, media_type=BRIDGE_MEDIA)
     source_refs = tuple(s.manifest_ref for s in physical.sources if s.manifest_ref is not None)

@@ -144,7 +144,7 @@ class FakeEngine:
             raise self.error
         return self.report
 
-    def build_input_handle(self, value, *, format, bounds=None):
+    def build_input_handle(self, value, *, format, bounds=None, override_num_blocks=None):
         self.input_calls.append((format, value, bounds))
         if self.error is not None:
             raise self.error

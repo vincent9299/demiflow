@@ -597,8 +597,8 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
             "traits": {"state": node.kernel.state, "effect": node.kernel.effect,
                        "resource_role": node.kernel.resource_role, "mergeable": node.kernel.mergeable},
         })
-    edges = [{"from": {"logical_node_id": _semantic(graph, edge.producer), "port": edge.output_port},
-              "to": {"logical_node_id": _semantic(graph, edge.consumer), "port": edge.input_port}}
+    edges = [{"from": {"logical_node_id": _semantic(graph, edge.producer), "occurrence_id": edge.producer, "port": edge.output_port},
+              "to": {"logical_node_id": _semantic(graph, edge.consumer), "occurrence_id": edge.consumer, "port": edge.input_port}}
              for edge in graph.edges]
     shared = _shared_ancestors(graph)
     dag = {"schema_version": graph.schema, "dag_id": graph.dag_id, "action_id": graph.action_id,
@@ -673,9 +673,8 @@ def _shared_ancestors(graph):
     shared = []
     seen = set()
     for node in graph.nodes:
-        if len(consumers.get(node.occurrence_id, ())) > 1 and node.semantic_id not in seen:
-            shared.append({"logical_node_id": node.semantic_id})
-            seen.add(node.semantic_id)
+        if len(consumers.get(node.occurrence_id, ())) > 1:
+            shared.append({"logical_node_id": node.semantic_id, "occurrence_id": node.occurrence_id})
     return shared
 
 

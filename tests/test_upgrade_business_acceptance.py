@@ -751,19 +751,31 @@ def test_workbench_normal_flow_real_worker(tmp_path, pidfds):
     assert observed['graph'] is not None
     assert observed['graph']['binding']['run_id'] == observed['run_id']
     assert observed['graph']['completeness']['total_nodes'] > 0
-    # F1 sealed-plan facts are sealed by the chain compile seam (proven for the
-    # chain entry in scenario 2). The workbench delivery-only write_lance entry does
-    # not yet reach that seam on current disk (the P3/L2 integration boundary,
-    # reported to C/B); full F1-via-workbench acceptance runs on the merged version.
-    # The reader returns a structured per-action result either way: available with a
-    # logical DAG, or a precise unavailable reason — never a crash or a guess.
+    # New runs must display their executed v3 graph and a complete identity
+    # bridge; a declared projection or an unavailable result is not acceptance.
     assert observed['sealed'], 'no sealed-plan reader results for the run actions'
     for action_id, sealed in observed['sealed'].items():
         assert sealed.get('action_id') == action_id
-        if sealed.get('available'):
-            assert sealed['logical_dag']['nodes']
-        else:
-            assert sealed.get('status') == 'unavailable' and sealed.get('reason')
+        assert sealed.get('available') is True, sealed
+        assert sealed['version'] == 'v3'
+        dag = sealed['plan_view']['dag']
+        assert dag['nodes']
+        from demiflow.execution.run_journal import RunJournal
+        import json
+        journal = RunJournal(observed['target'])
+        bridge_ref = journal.source_binding(action_id + '-identity-bridge')
+        assert bridge_ref is not None
+        bridge = json.loads((observed['target'] / bridge_ref['path']).read_text())
+        assert bridge['dag_id'] == sealed['dag_id']
+        assert {e['occurrence_id'] for e in bridge['entries']} == {n['occurrence_id'] for n in dag['nodes']}
+        report_ids = {n['id'] for n in observed['graph']['nodes']}
+        assert {e['report_node_id'] for e in bridge['entries']} <= report_ids
+        with journal._connection() as db:
+            docs = [json.loads(row[0]) for row in db.execute(
+                'SELECT document FROM node_observations WHERE attempt=? AND action_id=?',
+                (observed['attempt'], action_id))]
+        assert len(docs) >= len(bridge['entries'])
+        assert all(d['rows_output'] is not None and d['state'] == 'succeeded' for d in docs)
     # Real resource state after success: capacity released, single control database.
     assert observed['evidence']['capacity_charged'] in (None, {'cpu_millis': 0, 'memory_bytes': 0})
 

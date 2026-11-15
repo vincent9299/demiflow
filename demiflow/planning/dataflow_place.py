@@ -125,6 +125,7 @@ def _replica_bounds(node, partitions: int, policy: RuntimePolicy) -> tuple[int, 
         kernel.state != "none"
         or kernel.effect != "pure"
         or node.kind == "terminal"
+        or kernel.kind in {"LimitOp", "RandomizeBlockOrderOp"}
         or _is_multi_input(node)
     )
     if pinned:
@@ -157,7 +158,7 @@ def partition_stages(
         stages.append(StageSpec(
             stage_id=stage_id,
             occurrences=(occ,),
-            partitions=_partition_ids(stage_id, count),
+            partitions=_partition_ids(stage_id, replica_target),
             profile=kernel.profile,
             replica_min=replica_min,
             replica_target=replica_target,
@@ -282,13 +283,16 @@ def _input_port(node, port_name: str):
     return None
 
 
-def _routing(node):
+def _routing(node, input_port="main"):
     kind = node.kernel.kind
     config = node.kernel.configuration
     if kind == "broadcast":
         return "broadcast", ()
-    if kind in {"join", "repartition", "repartition_hash"}:
-        keys = config.get("keys") or ("key",)
+    if kind in {"join", "reduce", "groups", "repartition", "repartition_hash"}:
+        keys = (config.get("right_on") if kind == "join" and input_port == "right" else None)
+        keys = keys or config.get("on") or config.get("keys")
+        if not keys:
+            raise _error("INVALID_CONTRACT", "hash exchange requires the declared business keys")
         return "hash", tuple(str(key) for key in keys)
     if kind in {"random_shuffle", "rebalance", "repartition_rebalance"}:
         return "rebalance", ()
@@ -320,7 +324,7 @@ def plan_exchanges(
             mode = "durable_incremental"
         else:
             mode = _MEMORY_MODE
-        routing, keys = _routing(consumer_node)
+        routing, keys = _routing(consumer_node, edge.input_port)
         if routing == "forward" and producer_stage.partitions != consumer_stage.partitions:
             routing = "rebalance"
         scope_id = "scope-" + edge.edge_id if mode == "finite_sealed" else None

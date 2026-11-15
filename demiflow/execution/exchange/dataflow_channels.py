@@ -178,7 +178,7 @@ def route_record(record, *, spec, state):
     The ordinal is drawn once per call for every routing kind so a resumed run
     continues the same rebalance/target suffix. Hash keys use the versioned
     stable codec digest (never Python hash); broadcast delivers to every reader
-    with a per-(record, edge, reader) delivery identity. The record is gated
+    with a per-(record, edge, reader, ordinal) delivery identity. The record is gated
     through the shared codec (X002 encoding) against the channel byte window
     and framed through the frozen K4 envelope validator (X014) before routing.
     """
@@ -239,7 +239,7 @@ def route_record(record, *, spec, state):
         targets = consumers
     return tuple(RoutedRecord(reader_id=target,
                               delivery_id=identity(["dataflow-delivery-v3", record.record_id,
-                                                    spec.edge_id, target]),
+                                                    spec.edge_id, target, ordinal]),
                               record=record)
                  for target in targets)
 

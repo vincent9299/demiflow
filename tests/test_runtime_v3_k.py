@@ -308,7 +308,8 @@ def rid(label):
 
 
 def rec(row, record_id=None, sequence=0, position=None):
-    data = pickle.dumps(dict(row), protocol=pickle.HIGHEST_PROTOCOL)
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    data = _encode_payload(dict(row), max_bytes=1 << 24)
     return Record(
         record_id=record_id or rid(repr((row, sequence))),
         source_position=dict(position or {"split_id": "s0", "index": sequence}),
@@ -534,13 +535,13 @@ def test_k009():
 # ---------------------------------------------------------------------------
 def test_k010():
     store = FakeStore()
-    svc = services(store=store, bounds=Bounds(max_resident_bytes=120, max_open_files=2))
+    svc = services(store=store, bounds=Bounds(max_resident_bytes=1024, max_open_files=2))
     s = spec("SortOp", {"keys": ["k"]})
-    records = [rec({"k": i}, sequence=i) for i in [5, 3, 8, 1, 9, 2, 7]]
+    records = [rec({"k": i}, sequence=i) for i in range(24, -1, -1)]
     runs = ko.build_sort_runs(iter(records), spec=s, services=svc)
     assert len(runs) > 2  # forces multi-pass with fan_in=2
     merged = rows_of(ko.merge_sort_runs(runs, spec=s, services=svc))
-    assert [r["k"] for r in merged] == [1, 2, 3, 5, 7, 8, 9]
+    assert [r["k"] for r in merged] == list(range(25))
     # Caller-owned input runs survive; owned intermediates are released.
     assert all(store.inspect(r) for r in runs)
     assert store.released

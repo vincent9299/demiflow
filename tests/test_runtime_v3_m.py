@@ -26,6 +26,8 @@ from types import MappingProxyType
 from typing import Mapping, Protocol
 
 import pytest
+from test_runtime_v3_c import make as make_contract
+from demiflow.execution.contracts.dataflow import thaw_record_value
 
 # --- in-process worktree assertion (IL012) ----------------------------------
 TREE = Path(__file__).resolve().parents[1]
@@ -663,7 +665,7 @@ def make_services(*, limits=None, programs=None, action_id='action-1', fence='fe
     port = FakeDriverJournal(store, limits=limits)
     services = RuntimeServices(
         store=store, journal=port, bounds=make_bounds(),
-        assignment=WorkerAssignment(action_id=action_id, fence=fence),
+        assignment=make_contract("WorkerAssignment", action_id=action_id, fence=fence, bounds=make_bounds()),
         clock_ms=lambda: 0, check_stop=lambda: None, constants={},
         programs=programs or {})
     return services, store, port
@@ -979,16 +981,16 @@ def test_m006(tmp_path):
                       output_bound_bytes=1024, mergeable=False)
     kernel = models.bind_cached_map(spec, services=services)
     kernel.start()
-    record = Record(record_id='r0', source_position={}, payload_ref=None,
+    record = Record(record_id=identity(['record', 0]), source_position={}, payload_ref=None,
                     inline={'n': 1}, encoded_bytes=8, sequence=0)
     out = list(kernel.push('in', record))
-    assert out[0].inline == {'n': 1, 'answer': [1, 2]}  # list result fidelity
+    assert thaw_record_value(out[0].inline) == {'n': 1, 'answer': [1, 2]}  # list result fidelity
     # second read reuses the shared result without recomputation
-    out2 = list(kernel.push('in', Record(record_id='r1', source_position={}, payload_ref=None,
+    out2 = list(kernel.push('in', Record(record_id=identity(['record', 1]), source_position={}, payload_ref=None,
                                          inline={'n': 1}, encoded_bytes=8, sequence=1)))
-    assert out2[0].inline == {'n': 1, 'answer': [1, 2]}
+    assert thaw_record_value(out2[0].inline) == {'n': 1, 'answer': [1, 2]}
     assert calls == [1]
-    none_out = list(kernel.push('in', Record(record_id='r2', source_position={}, payload_ref=None,
+    none_out = list(kernel.push('in', Record(record_id=identity(['record', 2]), source_position={}, payload_ref=None,
                                              inline={'n': 0}, encoded_bytes=8, sequence=2)))
     assert none_out[0].inline == {'n': 0, 'answer': None}  # None result fidelity
     # cache Path/lock are coordination resources, not business state

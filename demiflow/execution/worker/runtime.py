@@ -235,7 +235,7 @@ class WorkerRuntime:
         if kind == "Assign":
             self.plan_revision = apply_assignment(self.plan_revision, payload["assignment"])
             self.assignment = payload["assignment"]
-            self._v3_ensure_executor()
+            self._v3_ensure_executor().run()
             return {"kind": "Assigned", "plan_revision": self.plan_revision}
         if kind == "CheckpointRequest":
             executor = self._v3_ensure_executor()
@@ -274,6 +274,10 @@ class WorkerRuntime:
         if self._v3:
             executor = self._v3_ensure_executor()
             image = (self._v3_config or {}).get("recovery_image")
+            if (self._v3_config or {}).get("recovery_image_wire") is not None:
+                from ..contracts.dataflow_codec import decode_wire
+                image = decode_wire(self._v3_config["recovery_image_wire"].encode(),
+                    type_name="RecoveryImage", bounds=executor._services.bounds)
             executor.restore(image)
             return [ref["sha256"] for ref in state_refs]
         artifacts = StateArtifacts(_ReadContext(self.directory, self._limits))

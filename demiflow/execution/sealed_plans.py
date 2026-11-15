@@ -203,8 +203,12 @@ def _load_bindings_v3(directory, action_id, sealed_plan):
              "identity_mismatch", "v3 bindings action_id differs from the sealed plan")
     _require(doc.get("dag_id") == graph.dag_id,
              "identity_mismatch", "v3 bindings dag_id differs from the sealed graph")
-    _require(doc.get("plan_id") == physical.plan_id,
-             "identity_mismatch", "v3 bindings plan_id differs from the sealed plan")
+    # The v1 identity bridge maps report occurrences to the logical DAG;
+    # physical placement is bound by the enclosing sealed manifest and digest.
+    # Unavailable v3 bridge documents additionally carry their physical id.
+    if doc.get("schema") != "demiflow.identity_bridge.v1":
+        _require(doc.get("plan_id") == physical.plan_id,
+                 "identity_mismatch", "v3 bindings plan_id differs from the sealed plan")
     _require("worker_groups" not in doc and "driver" not in doc,
              "unsupported_layout", "v3 bindings must not carry v2 driver/worker placement")
     return {"ref": _ref_json(ref), "document": doc, "version": "v3"}

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import pickle
+from . import state_codec
+from .async_instance import AsyncInstance
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -50,7 +52,7 @@ from .dataflow import (
 IMAGE_VERSION = "demiflow-kernel-image-v3"
 IMAGE_MEDIA_TYPE = "application/x-demiflow-kernel-image-v3"
 _SPOOL_OWNER = "kernel-spool"
-_INSTANCE_KINDS = _UNARY_KINDS | _BATCH_KINDS | _MODEL_KINDS | _STREAM_GROUP_KINDS
+_INSTANCE_KINDS = frozenset({"MapOp", "FlatMapOp", "BoundMapOp", "FilterOp", "AddColumnOp"}) | _BATCH_KINDS | _MODEL_KINDS
 _BATCH_INSTANCE_KINDS = _BATCH_KINDS | {"EmbeddingMapOp", "RegisterDocumentsBatchOp", "SaveLanceOp"}
 
 
@@ -71,11 +73,25 @@ def _resolve_instance(spec: KernelSpec, services: RuntimeServices) -> Any:
     from demiflow.data.plan import CallableSpec
     declaration = program.value
     if isinstance(declaration, CallableSpec):
+        if spec.kind == "BoundMapOp":
+            from demiflow.data.plan import BoundMapOp
+            op = BoundMapOp(callable=declaration, inputs=dict(spec.configuration["inputs"]),
+                            output=spec.configuration.get("output"),
+                            outputs=spec.configuration.get("outputs"))
+            return _FieldCallable(op)
         instance = declaration.instantiate()
         if declaration.call_args or declaration.call_kwargs:
             return _BoundCallable(instance, declaration.call_args, dict(declaration.call_kwargs))
         return instance
     return declaration
+
+
+from demiflow.data.plan import BoundCallable
+
+
+class _FieldCallable(BoundCallable):
+    def __getattr__(self, name):
+        return getattr(self._fn, name)
 
 
 class _BoundCallable:
@@ -91,6 +107,9 @@ class _BoundCallable:
 
 
 def _run_astart(instance: Any) -> None:
+    if isinstance(instance, AsyncInstance):
+        instance.start()
+        return
     astart = getattr(instance, "astart", None)
     if astart is None:
         return
@@ -106,6 +125,9 @@ def _run_astart(instance: Any) -> None:
 
 def _close_instance(instance: Any) -> None:
     if instance is None:
+        return
+    if isinstance(instance, AsyncInstance):
+        instance.close()
         return
     aclose = getattr(instance, "aclose", None)
     if aclose is not None:
@@ -146,7 +168,7 @@ class _SpoolPort:
     def _flush(self) -> None:
         if not self._pending:
             return
-        raw = pickle.dumps(self._pending, protocol=pickle.HIGHEST_PROTOCOL)
+        raw = state_codec.dumps(self._pending, max_bytes=self._services.bounds.max_batch_bytes)
         if self._bytes + len(raw) > self._services.bounds.max_spill_bytes:
             raise _err("BUDGET_EXCEEDED", "input spool exceeds max_spill_bytes", port=self.name)
         ref = self._services.store.put(iter([raw]), max_bytes=len(raw), media_type=RECORD_MEDIA_TYPE)
@@ -161,7 +183,7 @@ class _SpoolPort:
     def records(self) -> Iterator[Record]:
         for ref in self._refs:
             data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes))
-            yield from pickle.loads(data)
+            yield from state_codec.loads(data, max_bytes=self._services.bounds.max_batch_bytes)
         yield from self._pending
 
     def release(self) -> None:
@@ -203,11 +225,11 @@ class OperatorKernel:
         self._ports: dict[str, _SpoolPort] = {
             port.name: _SpoolPort(port.name, services, self._segment_rows)
             for port in spec.inputs
-            if port.requirement == "finite_complete"
+            if port.requirement == "finite_complete" or spec.kind == "union"
         }
         self._port_order = tuple(port.name for port in spec.inputs)
         self._batch: list[Record] = []
-        self._max_batch = int(spec.configuration.get("max_batch", self._segment_rows))
+        self._max_batch = int(spec.configuration.get("batch_size") or spec.configuration.get("max_batch") or 256)
         self._groups: dict[str, list[dict[str, Any]]] = {}
         self._group_base: dict[str, dict[str, Any]] = {}
         self._timer_deadline: int | None = None
@@ -225,7 +247,8 @@ class OperatorKernel:
         self._validate_profile()
         try:
             if self._spec.kind in _INSTANCE_KINDS:
-                self._instance = _resolve_instance(self._spec, self._services)
+                self._instance = AsyncInstance(_resolve_instance(self._spec, self._services),
+                                               self._services, timeout=self._spec.configuration.get("hard_timeout"))
                 _run_astart(self._instance)
             if self._image is not None:
                 self._apply_image(self._image)
@@ -240,7 +263,8 @@ class OperatorKernel:
         if not isinstance(requests, Mapping):
             raise _err("INVALID_CONTRACT", "kernel profile must declare requests")
         role = self._spec.resource_role
-        if role == "gpu" and not any("gpu" in str(key).lower() for key in requests):
+        if role == "gpu" and not any(a.get("type") == "gpu" and a.get("count", 0) > 0
+                                    for a in requests.get("accelerators", ())):
             raise _err("RESOURCE_INFEASIBLE", "gpu role requires a gpu resource request")
 
     def _cleanup_on_failure(self) -> None:
@@ -263,6 +287,8 @@ class OperatorKernel:
         if port in self._ports:
             self._ports[port].push(record)
             return iter(())
+        if kind == "LimitOp" and self._emitted >= self._spec.configuration["limit"]:
+            return
         if kind in _UNARY_KINDS or (kind in _MODEL_KINDS and kind not in _BATCH_INSTANCE_KINDS):
             yield from self._emit(invoke_unary(self._spec, record, instance=self._instance, services=self._services))
         elif kind in _BATCH_INSTANCE_KINDS:
@@ -275,6 +301,8 @@ class OperatorKernel:
             raise _err("INVALID_CONTRACT", "kind does not accept incremental push", kind=kind)
 
     def _push_batch(self, record: Record) -> Iterator[Record]:
+        if sum(r.encoded_bytes for r in self._batch) + record.encoded_bytes > self._services.bounds.max_batch_bytes:
+            raise _err("BUDGET_EXCEEDED", "declared business batch exceeds max_batch_bytes")
         self._batch.append(record)
         if len(self._batch) >= self._max_batch:
             batch = tuple(self._batch)
@@ -415,27 +443,44 @@ class OperatorKernel:
             "output_cursor": self._emitted,
             "aggregate_state": self.aggregate_state,
         }
-        raw = pickle.dumps(image, protocol=pickle.HIGHEST_PROTOCOL)
+        raw = state_codec.dumps(image, max_bytes=self._services.bounds.max_state_bytes)
         limit = self._services.bounds.max_state_bytes
         if limit > 0 and len(raw) > limit:
             raise _err("BUDGET_EXCEEDED", "kernel recovery image exceeds max_state_bytes")
         return self._services.store.put(iter([raw]), max_bytes=len(raw), media_type=IMAGE_MEDIA_TYPE)
 
+    def _state_owner(self):
+        import functools
+        import inspect
+        owner = self._instance.target if isinstance(self._instance, AsyncInstance) else self._instance
+        while isinstance(owner, (_BoundCallable, _FieldCallable, functools.partial)):
+            if isinstance(owner, _BoundCallable):
+                owner = owner._instance
+            elif isinstance(owner, _FieldCallable):
+                owner = owner._fn
+            else:
+                owner = owner.func
+        return owner.__self__ if inspect.ismethod(owner) else owner
+
     def _snapshot_state(self) -> Any:
-        state = self._spec.state
-        if state == "none":
+        if self._instance is None or self._spec.state == "none":
             return None
-        if state == "auto_json":
-            getter = getattr(self._instance, "__demiflow_state__", None)
-            value = getter() if getter is not None else getattr(self._instance, "state", None)
-            _canonical(value)
-            return {"mode": "auto_json", "value": value}
-        if state == "adapter":
-            snapshot = getattr(self._instance, "__demiflow_snapshot__", None)
-            if snapshot is None:
-                raise _err("INVALID_CONTRACT", "adapter instance lacks __demiflow_snapshot__")
-            return {"mode": "adapter", "value": snapshot()}
-        raise _err("INVALID_CONTRACT", "unknown state mode", state=state)
+        owner = self._state_owner()
+        from ..operator_policy import classify_operator_state, snapshot_auto_state
+        policy = classify_operator_state(owner, phase="instance")
+        snapshot = getattr(owner, "__demiflow_snapshot__", None)
+        if snapshot is not None:
+            return {"mode": "adapter", "value": self._instance.resolve(snapshot())}
+        if policy.mode == "function":
+            return None
+        if policy.mode == "hooks":
+            return {"mode": "hooks", "value": self._instance.resolve(owner.snapshot_state())}
+        if policy.mode == "auto_json":
+            return {"mode": "plain_json", "value": snapshot_auto_state(
+                owner, max_bytes=self._services.bounds.max_state_bytes)}
+        # Runtime resources are allowed during the current attempt; the image
+        # explicitly forbids restoring a lost cross-row state. No fields vanish.
+        return {"mode": "nonrecoverable", "reason": policy.reason or "state adapter missing"}
 
     # -- K021 restore -------------------------------------------------------
     def restore(self, ref: ArtifactRef | None) -> None:
@@ -447,7 +492,7 @@ class OperatorKernel:
             return
         limit = self._services.bounds.max_state_bytes
         data = b"".join(self._services.store.read(ref, max_bytes=limit if limit > 0 else ref.size_bytes))
-        image = pickle.loads(data)
+        image = state_codec.loads(data, max_bytes=limit)
         if image.get("schema_version") != IMAGE_VERSION:
             raise _err("INCOMPATIBLE_HISTORY", "kernel image schema mismatch")
         if image.get("kind") != self._spec.kind or image.get("occurrence_id") != self._occurrence:
@@ -470,7 +515,7 @@ class OperatorKernel:
         self._group_base = {key: dict(value) for key, value in image["group_base"].items()}
         self._timer_deadline = image["timer_deadline"]
         self._emitted = int(image["output_cursor"])
-        self._skip = int(image["output_cursor"])
+        self._skip = 0  # input cursors already resume after the committed prefix
         self.aggregate_state = image["aggregate_state"]
         self._restore_state(image["state"])
 
@@ -478,17 +523,20 @@ class OperatorKernel:
         if state is None:
             return
         mode = state["mode"]
-        if mode == "auto_json":
-            setter = getattr(self._instance, "__demiflow_restore__", None)
-            if setter is not None:
-                setter(state["value"])
-            elif self._instance is not None:
-                self._instance.state = state["value"]
-        elif mode == "adapter":
-            restore = getattr(self._instance, "__demiflow_restore__", None)
+        owner = self._state_owner()
+        if mode == "nonrecoverable":
+            raise _err("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"])
+        if mode == "plain_json":
+            from ..operator_policy import restore_auto_state
+            restore_auto_state(owner, state["value"], max_bytes=self._services.bounds.max_state_bytes)
+        elif mode in ("adapter", "hooks", "auto_json"):
+            name = "restore_state" if mode == "hooks" else "__demiflow_restore__"
+            restore = getattr(owner, name, None)
             if restore is None:
-                raise _err("INVALID_CONTRACT", "adapter instance lacks __demiflow_restore__")
-            restore(state["value"])
+                raise _err("INCOMPATIBLE_HISTORY", "actor restore adapter is absent")
+            self._instance.resolve(restore(state["value"]))
+        else:
+            raise _err("INCOMPATIBLE_HISTORY", "unknown actor state image mode")
 
     # -- K022 close ---------------------------------------------------------
     def close(self) -> None:

@@ -69,11 +69,13 @@
       const sealedBasis=basis==='sealed'||basis==='executed';
       canvas.setAttribute('aria-label',sealedBasis?'运行封存计划（E2）':'声明图投影（E2）');
       current=dag;selected=null;canvas.replaceChildren();elements.clear();
+      const occurrenceView=dag.schema_version==='demiflow.dataflow_graph.v3';
+      const displayKey=node=>occurrenceView?node.occurrence_id:node.logical_node_id;
       const occurrences=new Map();
-      for(const node of dag.nodes){if(!occurrences.has(node.logical_node_id))occurrences.set(node.logical_node_id,[]);occurrences.get(node.logical_node_id).push(node);}
-      const ids=[...occurrences.keys()],shared=new Set(dag.shared_ancestors.map(s=>s.logical_node_id));
+      for(const node of dag.nodes){const key=displayKey(node);if(!occurrences.has(key))occurrences.set(key,[]);occurrences.get(key).push(node);}
+      const ids=[...occurrences.keys()],shared=new Set(dag.shared_ancestors.map(displayKey));
       const levels=new Map(ids.map(id=>[id,0])),incoming=new Map(ids.map(id=>[id,0])),outgoing=new Map();
-      for(const edge of dag.edges){const a=edge.from.logical_node_id,b=edge.to.logical_node_id;if(!occurrences.has(a)||!occurrences.has(b))continue;incoming.set(b,incoming.get(b)+1);if(!outgoing.has(a))outgoing.set(a,[]);outgoing.get(a).push(b);}
+      for(const edge of dag.edges){const a=displayKey(edge.from),b=displayKey(edge.to);if(!occurrences.has(a)||!occurrences.has(b))continue;incoming.set(b,incoming.get(b)+1);if(!outgoing.has(a))outgoing.set(a,[]);outgoing.get(a).push(b);}
       const queue=ids.filter(id=>incoming.get(id)===0);let visited=0;
       while(queue.length){const id=queue.shift();visited++;for(const to of outgoing.get(id)||[]){levels.set(to,Math.max(levels.get(to),levels.get(id)+1));incoming.set(to,incoming.get(to)-1);if(incoming.get(to)===0)queue.push(to);}}
       if(visited<ids.length)for(const id of ids)if(incoming.get(id)>0)levels.set(id,0);
@@ -82,7 +84,7 @@
       width=Math.max(440,(Math.max(0,...levels.values())+1)*224+8);height=Math.max(150,Math.max(1,...counts.values())*122+20);
       canvas.setAttribute('viewBox',`0 0 ${width} ${height}`);
       const markerId='wb-logical-arrow-'+Math.random().toString(16).slice(2),defs=svg('defs'),marker=svg('marker',{id:markerId,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto'});marker.append(svg('path',{d:'M0 0 L10 5 L0 10z',fill:'#8e9eb8'}));defs.append(marker);canvas.append(defs);
-      for(const edge of dag.edges){const a=positions.get(edge.from.logical_node_id),b=positions.get(edge.to.logical_node_id);if(!a||!b)continue;
+      for(const edge of dag.edges){const a=positions.get(displayKey(edge.from)),b=positions.get(displayKey(edge.to));if(!a||!b)continue;
         const path=svg('path',{d:`M${a.x+192} ${a.y+46} C${a.x+212} ${a.y+46},${b.x-20} ${b.y+46},${b.x} ${b.y+46}`,class:'wb-edge wb-edge-data','marker-end':'url(#'+markerId+')'});
         path.append(svg('title',{},'逻辑数据流 · 端口 '+edge.from.port+' → '+edge.to.port));canvas.append(path);
         canvas.append(svg('text',{x:(a.x+192+b.x)/2,y:(a.y+b.y)/2+38,class:'wb-edge-port'},edge.from.port+'→'+edge.to.port));}
@@ -94,7 +96,7 @@
         const traitHint=traits?[traits.resource_role,traits.effect,traits.state].filter(Boolean).join(' · '):'';
         const element=svg('g',{class:'wb-node'+(shared.has(id)?' wb-node-shared':''),'data-node':id,transform:`translate(${pos.x} ${pos.y})`,tabindex:0,role:'button','aria-label':label+' · '+node.op_kind+' · 端口 '+ports+(traitHint?' · 画像 '+traitHint:'')});
         element.append(svg('rect',{width:192,height:94,rx:9}),svg('text',{x:13,y:22,class:'wb-node-kind'},node.op_kind),svg('text',{x:13,y:47,class:'wb-node-title'},String(label).slice(0,24)),svg('text',{x:13,y:65,class:'wb-node-ports'},ports),svg('text',{x:13,y:82,class:'wb-node-state'},badge||id.slice(0,12)));
-        element.append(svg('title',{},'logical_node_id '+id+'\noccurrence '+group.map(n=>n.occurrence_id).join(', ')+(node.shared_token?'\nshared_token '+node.shared_token:'')+(traitHint?'\n资源画像 '+traitHint:'')+(sealedBasis?'\n物理 stage/profile/exchange 与恢复限制见节点详情':'')));
+        element.append(svg('title',{},'logical_node_id '+node.logical_node_id+'\noccurrence '+group.map(n=>n.occurrence_id).join(', ')+(node.shared_token?'\nshared_token '+node.shared_token:'')+(traitHint?'\n资源画像 '+traitHint:'')+(sealedBasis?'\n物理 stage/profile/exchange 与恢复限制见节点详情':'')));
         const activate=()=>{select(id);onSelect(id,declared);};element.onclick=activate;element.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();activate();}};
         elements.set(id,{group:element});canvas.append(element);}
       select(selectedId);readable();

@@ -162,7 +162,7 @@ class DataflowCheckpointCoordinator:
 
     __slots__ = ("_action", "_physical", "_store", "_commit", "_artifacts",
                  "_participants", "_route_epoch", "_lock", "_sequence",
-                 "_pending", "_last_acked_sequence", "_source_eoi", "_closed",
+                 "_pending", "_last_acked_sequence", "_source_eoi", "_operator_complete", "_closed",
                  "_fence", "_owner_key", "__weakref__")
 
     def __init__(self, action: RunAction, physical: PhysicalDataflow, *, store) -> None:
@@ -204,6 +204,7 @@ class DataflowCheckpointCoordinator:
         self._pending: dict[str, _PendingCut] = {}
         self._last_acked_sequence = 0
         self._source_eoi: dict[str, bool] = {}
+        self._operator_complete = set()
         self._closed = False
         self._fence = context.fence
 
@@ -239,13 +240,36 @@ class DataflowCheckpointCoordinator:
             return True
         return all(self._source_eoi.get(split, False) for split in splits)
 
+    def observe_source_eoi(self, cursors):
+        """Driver has authenticated the worker and exact split ownership first."""
+        declared = {s.split_id for s in self._physical.splits}
+        with self._lock:
+            self._check_open()
+            for cursor in cursors:
+                if cursor.split_id not in declared:
+                    raise DataflowError("FENCED", "EOI names an undeclared source split")
+                if cursor.end_of_input:
+                    self._source_eoi[cursor.split_id] = True
+
+    def observe_input_satisfied(self, split_ids):
+        """Driver proved every outgoing path was closed by a sealed limit."""
+        declared = {s.split_id for s in self._physical.splits}
+        if not set(split_ids) <= declared:
+            raise DataflowError("FENCED", "input completion names undeclared splits")
+        self._operator_complete = getattr(self, "_operator_complete", set()) | set(split_ids)
+
+    def inputs_complete(self):
+        closed = getattr(self, "_operator_complete", set())
+        return all(self._source_eoi.get(s.split_id, False) or s.split_id in closed
+                   for s in self._physical.splits)
+
     # -- D002 -------------------------------------------------------------
     def begin(self, *, final: bool) -> CutRequest:
         with self._lock:
             self._check_open()
             if type(final) is not bool:
                 raise DataflowError("INVALID_CONTRACT", "final must be a bool")
-            if final and not self._sources_exhausted():
+            if final and not self.inputs_complete():
                 raise DataflowError("INVALID_CONTRACT",
                                     "final cut requires end-of-input evidence for every source")
             if len(self._pending) >= _MAX_PENDING_CUTS:
@@ -330,8 +354,8 @@ class DataflowCheckpointCoordinator:
             if request.final:
                 for contribution in contributions:
                     for cursor in contribution.sources:
-                        if not cursor.end_of_input and cursor.split_id in {
-                                s.split_id for s in self._physical.splits}:
+                        if (not cursor.end_of_input and cursor.split_id not in self._operator_complete
+                                and cursor.split_id in {s.split_id for s in self._physical.splits}):
                             raise DataflowError("INVALID_CONTRACT",
                                                 "final cut committed without full source EOI")
             source_vector = self._merge_source_vector(contributions)
@@ -348,7 +372,7 @@ class DataflowCheckpointCoordinator:
             for sink_id, sink in sinks.items():
                 refs = tuple(c.sinks[sink_id] for c in contributions if sink_id in c.sinks)
                 manifest = combine_prepared_sinks(refs, sink_id=sink_id, services=self._driver_services())
-                outputs[sink_id] = (sink, manifest)
+                outputs[sink_id] = (sink, {**manifest, "final": request.final})
             if not outputs:
                 raise DataflowError("INVALID_CONTRACT", "A commit requires at least one sink")
             try:

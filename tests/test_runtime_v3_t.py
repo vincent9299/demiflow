@@ -431,8 +431,9 @@ def test_t002():
 # --- T003 iterate_rows -----------------------------------------------------
 def test_t003():
     store = FakeStore()
-    payload = pickle.dumps({"id": 9, "tag": "ref"}, protocol=4)
-    ref = store.put(iter([payload]), max_bytes=len(payload) + 1, media_type="application/x-pickle")
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    payload = _encode_payload({"id": 9, "tag": "ref"}, max_bytes=1 << 20)
+    ref = store.put(iter([payload]), max_bytes=len(payload) + 1, media_type="application/vnd.demiflow.record.v3")
     records = [make_record(0, row={"id": 0}), make_record(1, payload_ref=ref)]
     ex = make_execution(records=records, store=store)
     handle = open_handle(ex)

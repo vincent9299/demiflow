@@ -971,7 +971,8 @@ def _task_setup(tmp_path):
 def test_s031(tmp_path):
     assert_worktree()
     store, plan, snap, split, services = _task_setup(tmp_path)
-    assert snap.kind == "task"
+    assert snap.kind == "datasource"  # new seals use the canonical source kind
+    assert ds._canonical_kind("task") == "datasource"  # old seals remain readable
     assert snap.replay == "attempt_only" and snap.finite is False  # None identity not faked recoverable
     reader = sr.TaskReader(snap, services=services)
     assert reader._opened is False

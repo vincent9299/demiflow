@@ -78,12 +78,14 @@ def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds
         if limit > bounds.max_output_rows:
             raise _error("BUDGET_EXCEEDED", "take limit exceeds the output row budget")
     if limit == 0:
+        handle.result()
         handle.close()
         return []
     rows: list = []
     total_bytes = 0
+    records = handle.rows()
     try:
-        for record in handle.rows():
+        for record in records:
             rows.append(_record_row(record, handle))
             total_bytes += record.encoded_bytes
             if len(rows) > bounds.max_output_rows:
@@ -91,10 +93,14 @@ def collect_rows(handle: "ActionHandle", *, limit: "int | None", bounds: "Bounds
             if total_bytes > bounds.max_resident_bytes:
                 raise _error("BUDGET_EXCEEDED", "collected bytes exceed the driver resident budget")
             if limit is not None and len(rows) >= limit:
+                if hasattr(handle._execution, "satisfy_terminal"):
+                    handle._execution.satisfy_terminal()
+                    handle.result()
                 break
     except BaseException:
         handle._cleanup()  # cancel producers without masking the active failure
         raise
+    records.close()
     handle.close()
     return rows
 
@@ -178,7 +184,7 @@ def materialized_handle(result: "TerminalResult", *, execution: "DataflowExecuti
     """Wrap a sealed result as a re-readable handle; each handle owns an independent
     pin so release never drops another owner's reference, and reads never re-run the
     source/model."""
-    owner = execution.services.action.action_id + ":" + uuid.uuid4().hex
+    owner = execution.services.action.action_id + "-" + uuid.uuid4().hex
     return StoredMaterializedHandle(result, store=execution.services.store, owner=owner)
 
 
@@ -195,7 +201,11 @@ def write_result(result: "TerminalResult", *, kind: str) -> "WriteResult":
         if result.completion == "cancelled":
             raise _error("CANCELLED", "write cancelled before commit")
         raise _error("UNKNOWN_EFFECT", "write result is not confirmed complete", retryable=False)
-    return validate_write_result(result.write_result)
+    checked = validate_write_result(result.write_result)
+    if kind == "write_lance":
+        from ..lance.model import LanceWriteReceipt
+        return LanceWriteReceipt.from_dict(checked.metadata["native_receipt"]["data"])
+    return checked
 
 
 def _columns_from_schema(schema):
@@ -217,7 +227,8 @@ def inspect_result(handle: "ActionHandle", *, kind: str) -> object:
     if kind not in _INSPECT_KINDS:
         raise _error("INVALID_CONTRACT", "unsupported inspect kind", context={"kind": kind})
     result = handle.result()
-    scalar = result.scalar
+    from .contracts.dataflow import thaw_record_value
+    scalar = thaw_record_value(result.scalar)
     if kind in ("schema", "columns"):
         if scalar is None:
             # Unknown schema: fetch_if_missing was applied when the action compiled.
@@ -225,6 +236,10 @@ def inspect_result(handle: "ActionHandle", *, kind: str) -> object:
             return None
         if kind == "columns":
             return _columns_from_schema(scalar)
+        if isinstance(scalar, dict) and 'arrow_schema' in scalar:
+            import base64
+            import pyarrow as pa
+            return pa.ipc.read_schema(pa.BufferReader(base64.b64decode(scalar['arrow_schema'])))
         return scalar
     if kind == "size_bytes":
         return scalar

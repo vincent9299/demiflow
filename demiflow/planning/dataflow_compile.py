@@ -69,7 +69,7 @@ _TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
     "EmbeddingMapOp": ("adapter", "journaled", "remote_api", False),
     "StreamGroupBatchesOp": ("auto_json", "pure", "cpu", False),
     "StreamPrependOp": ("none", "pure", "cpu", False),
-    "LimitOp": ("none", "pure", "cpu", True),
+    "LimitOp": ("none", "pure", "cpu", False),
     "SelectColumnsOp": ("none", "pure", "cpu", True),
     "DropColumnsOp": ("none", "pure", "cpu", True),
     "RenameColumnsOp": ("none", "pure", "cpu", True),
@@ -243,13 +243,34 @@ def _source_kind(source: SourcePlan) -> str:
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
 
 
-def _default_profile(operation: LogicalOp | None) -> ResourceProfile:
-    requests = {"cpu_millis": 1000, "memory_bytes": 64 * 1024 * 1024}
+def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none") -> ResourceProfile:
+    # The run memory budget covers admitted data, separately from process RSS.
+    # Reserve the same working set used by physical residency, not a fixed
+    # per-stage 64 MiB allowance multiplied by pipeline length.
+    working_set = bounds.max_batch_bytes + bounds.max_row_bytes
+    if state != "none":
+        working_set += bounds.max_state_bytes
+    requests = {"cpu_millis": 1000, "memory_bytes": working_set}
     native = getattr(operation, "native_options", None) if operation is not None else None
     resources = getattr(native, "worker_resources", None) or {}
     if isinstance(resources, Mapping):
-        if "memory" in resources and type(resources["memory"]) is int:
-            requests["memory_bytes"] = max(1, resources["memory"])
+        import math
+        if "memory_bytes" in resources:
+            if resources["memory_bytes"] < working_set:
+                raise _error("RESOURCE_INFEASIBLE", "worker memory request is below the admitted working set")
+            requests["memory_bytes"] = resources["memory_bytes"]
+        if "cpu" in resources:
+            if resources["cpu"] <= 0:
+                raise _error("RESOURCE_INFEASIBLE", "workers require a positive CPU reservation")
+            requests["cpu_millis"] = math.ceil(resources["cpu"] * 1000)
+        if resources.get("gpu", 0):
+            gpu = resources["gpu"]
+            if not float(gpu).is_integer():
+                raise _error("UNSUPPORTED_CAPABILITY", "fractional GPU sharing is not declared by the device authority")
+            requests["accelerators"] = [{"type": "gpu", "count": int(gpu)}]
+        if resources.get("custom_resources"):
+            requests["custom"] = {key: {"amount": math.ceil(value * 1000), "unit": "milli"}
+                                  for key, value in resources["custom_resources"].items()}
     return ResourceProfile(requests=requests)
 
 
@@ -283,14 +304,30 @@ def compile_kernel_spec(
     if traits is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator traits are not registered: " + kind)
     state, effect, role, mergeable = traits
+    declaration = getattr(operation, "callable", None)
+    if isinstance(declaration, CallableSpec):
+        import functools
+        from ..execution.operator_policy import classify_operator_state
+        target = declaration.target
+        while isinstance(target, functools.partial):
+            target = target.func
+        policy = classify_operator_state(target, phase="declaration")
+        state = {"function": "none", "factory": "auto_json", "auto_json": "auto_json",
+                 "hooks": "adapter", "unsupported": "nonrecoverable"}[policy.mode]
+        if state != "none":
+            mergeable = False
     # Semantic descriptions are for identity, not executable parameters. The
     # kernel consumes the declared field values (e.g. columns, seed, limit).
     configuration = {
-        field.name: _plain(getattr(operation, field.name))
+        field.name: ([c.__module__ + "." + c.__qualname__ for c in operation.catch]
+                     if field.name == "catch" else _plain(getattr(operation, field.name)))
         for field in fields(operation)
         if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
     }
     inputs = tuple(_input_port(name, kind) for name in definition.inputs)
+    profile = _default_profile(operation, bounds=bounds, state=state)
+    if profile.requests.get("accelerators"):
+        role, mergeable = "gpu", False
     return KernelSpec(
         kind=kind,
         implementation_ref=program_ref,
@@ -299,7 +336,7 @@ def compile_kernel_spec(
         state=state,
         effect=effect,
         resource_role=role,
-        profile=_default_profile(operation),
+        profile=profile,
         output_bound_bytes=bounds.max_row_bytes,
         mergeable=mergeable,
     )
@@ -312,7 +349,7 @@ def expand_relational_inputs(
     if len(path) > bounds.max_depth:
         raise _error("BUDGET_EXCEEDED", "relational input path exceeds depth budget")
     if isinstance(source, KeyedSource):
-        if source.kind == "join":
+        if source.kind in ("join", "exclude_keys"):
             if source.right is None:
                 raise _error("INVALID_CONTRACT", "join requires a right input")
             bindings = (
@@ -484,6 +521,18 @@ class _Capture:
         self.alias_source: dict[int, int] = {}
         self.alias_op: dict[tuple[int, int], int] = {}
         self.visiting: set[int] = set()
+        from ..execution.checked import current
+        self.checked = current()
+        self.report_bindings = []
+
+    def _bind_report(self, index, key):
+        if key is None or self.checked is None:
+            return
+        node = self.nodes[index]
+        observation = self.checked.observations.get(tuple(key), {})
+        self.report_bindings.append({"report_node_id": key[1], "report_occurrence": key[2],
+            "occurrence_id": node.occurrence_id, "logical_node_id": node.semantic_id,
+            "mode": "reuse" if observation.get("state") == "reused" else "execute"})
 
     def _check_node_budget(self) -> None:
         if len(self.nodes) >= self.bounds.max_nodes:
@@ -532,6 +581,8 @@ class _Capture:
                 index = self._capture_relational(source, path)
             else:
                 index = self._capture_leaf(source, path)
+            if self.checked is not None:
+                self._bind_report(index, self.checked.source_bindings.get(id(source)))
             self.alias_source[key] = index
             return index
         finally:
@@ -545,7 +596,7 @@ class _Capture:
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=(),
             state="none", effect="pure", resource_role="io",
-            profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
+            profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("source", kernel, semantic, {}, {"source_kind": kind}, None)
@@ -567,7 +618,7 @@ class _Capture:
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=inputs,
             state="none", effect="pure", resource_role="cpu",
-            profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
+            profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("relational", kernel, semantic, {}, {}, None)
@@ -595,6 +646,8 @@ class _Capture:
                 if isinstance(callable_spec, CallableSpec) else {}
             )
             new_index = self._add_node("transform", kernel, semantic, {}, code_identity, None)
+            if self.checked is not None:
+                self._bind_report(new_index, self.checked.operation_bindings.get(id(operation)))
             self._add_edge(index, "main", new_index, "main")
             if isinstance(callable_spec, CallableSpec):
                 self.declarations.append((new_index, ProgramDeclaration(
@@ -619,12 +672,19 @@ class _Capture:
             kind=request.kind, implementation_ref=None, configuration=_plain(semantic),
             inputs=(_input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",
-            profile=_default_profile(None), output_bound_bytes=self.bounds.max_row_bytes,
+            profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("terminal", kernel, semantic, dict(request.arguments), {}, None)
+        if self.checked is not None:
+            key = (request.action.action_id, request.action.action_id, 0)
+            if key in self.checked.observations:
+                self._bind_report(index, key)
         self._add_edge(producer, "main", index, "main")
         programs = list(request.programs)
+        if request.kind == "aggregate":
+            programs = [ActionProgram(name="aggregates", kind="aggregate",
+                                      value=tuple(p.value for p in programs))]
         if request.sink is not None:
             programs.append(ActionProgram(name="sink", kind="sink", value=request.sink))
         for program in programs:
@@ -680,7 +740,8 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
         terminals=graph.terminals, sources=graph.sources,
     )
     validate_graph(graph, bounds=bounds)
-    return CompiledDataflow(graph=graph, declarations=declarations)
+    return CompiledDataflow(graph=graph, declarations=declarations,
+                            report_bindings=tuple(capture.report_bindings))
 
 
 def lower_action(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
@@ -688,6 +749,6 @@ def lower_action(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
     definition = terminal_registry().get(request.kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
-    if request.kind in {"write_datasink", "write_lance", "write_file"} and request.sink is None:
+    if request.kind == "write_datasink" and request.sink is None:
         raise _error("INVALID_CONTRACT", "write terminal requires a registered sink declaration")
     return capture_graph(request, bounds=bounds)

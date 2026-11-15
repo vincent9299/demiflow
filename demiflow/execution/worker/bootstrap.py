@@ -117,11 +117,18 @@ def _run_v3_worker(launch_spec, sock):
                 except queue.Empty:
                     continue
                 try:
+                    if message.get("type") == "dataflow_command":
+                        runtime._v3_ensure_executor().receive(message["command"])
+                        continue
                     if message.get("type") == "cut_request":
                         request = decode_wire(message["wire"].encode(), type_name="CutRequest", bounds=bounds)
                         runtime._v3_ensure_executor().request_cut(request)
                         continue
                     receipt = runtime.handle(message, now_ms=int(time.time() * 1000))
+                    if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                        # Acknowledgment means lifecycle cleanup finished. The
+                        # main socket loop still services journal RPCs meanwhile.
+                        runtime.close()
                     send({"response_to": message["operation_id"], "receipt": receipt})
                     if message["kind"] == "Restore":
                         runtime.ready(message["payload"]["assignment_ref"])

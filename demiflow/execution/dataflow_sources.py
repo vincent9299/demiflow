@@ -94,7 +94,9 @@ def _source_facts(source: SourcePlan) -> dict[str, Any]:
         return {"kind": "LanceSource", "query": source.query.to_dict()}
     if isinstance(source, MaterializedSource):
         return {"kind": "MaterializedSource", "row_count": source.row_count,
-                "handle_digest": _content_digest(source.handle)}
+                "handle_digest": (_json_digest(source.handle.recovery_reference)
+                                  if getattr(source.handle, "recovery_reference", None) is not None
+                                  else _content_digest(source.handle))}
     if isinstance(source, IterableSource):
         return {"kind": "IterableSource", "factory": _factory_identity(source.factory)}
     if isinstance(source, DatasourceSource):

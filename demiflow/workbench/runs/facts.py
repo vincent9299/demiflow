@@ -332,6 +332,8 @@ def _sealed_entry(result, *, bridge=None):
         entry['recovery_restriction'] = result['recovery_restriction']
     if bridge is not None and bridge.get('available'):
         entry['node_map'] = _bridge_node_map(bridge['bridge']['entries'])
+        if result.get('version') == 'v3':
+            entry['node_map'].update({e['occurrence_id']: e['report_node_id'] for e in bridge['bridge']['entries']})
         entry['identity_bridge'] = bridge
     else:
         entry['identity_bridge'] = bridge if bridge is not None else _bridge_unavailable(NO_BRIDGE, NO_BRIDGE_DETAIL)

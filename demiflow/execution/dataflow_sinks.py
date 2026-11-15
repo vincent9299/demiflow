@@ -292,7 +292,8 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
         total_rows += manifest["rows"]
         total_bytes += manifest["bytes"]
         partitions[partition_id] = {"partition_id": partition_id, "rows": manifest["rows"],
-                                    "bytes": manifest["bytes"], "data_ref": manifest["data_ref"]}
+                                    "bytes": manifest["bytes"], "data_ref": manifest["data_ref"],
+                                    "scalar": manifest.get("scalar")}
     combined = {"schema": _COMBINED_SCHEMA, "sink_id": sink_id,
                 "partitions": [partitions[k] for k in sorted(partitions)],
                 "total_rows": total_rows, "total_bytes": total_bytes, "columns": columns}
@@ -323,3 +324,90 @@ def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
     position = source_vector_position(image, action_id=action.action_id)
     if fact["intent"]["position"] != position.to_dict():
         raise DataflowError("SOURCE_CHANGED", "Confirmed source frontier differs from the committed position")
+
+class NativeTerminalSink(_DataflowArtifactSink):
+    """Bind a published result manifest and a native destination to one commit.
+
+    Staging streams bounded Arrow batches from worker-produced data. Native
+    prepare/inspect/commit/abort retain all destination CAS and recovery rules.
+    """
+    def __init__(self, *, native, **kwargs):
+        super().__init__(**kwargs)
+        self.native = native
+
+    def _blocks(self, manifest):
+        import pyarrow as pa
+        from .dataflow_handles import _ChunkStream
+        from .exchange.dataflow_bridge import _decode_record_document, _decode_payload
+        from .contracts.dataflow import thaw_record_value
+        batch, size = [], 0
+        for partition in manifest['partitions']:
+            ref = _artifact_from_json(partition['data_ref'])
+            stream = _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes)))
+            while True:
+                line = stream.readline(self._bounds.max_row_bytes + 1)
+                if not line:
+                    break
+                item = json.loads(line)
+                record = _decode_record_document(item['document'].encode(), record_id=item['record_id'],
+                    sequence=item['sequence'], max_bytes=self._bounds.max_row_bytes)
+                if record.inline is None:
+                    row = _decode_payload(b''.join(self._store.read(record.payload_ref,
+                        max_bytes=self._bounds.max_row_bytes)), max_bytes=self._bounds.max_row_bytes)
+                else:
+                    row = thaw_record_value(record.inline)
+                if batch and (len(batch) >= 256 or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
+                    yield pa.Table.from_pylist(batch)
+                    batch, size = [], 0
+                batch.append(row)
+                size += record.encoded_bytes
+        if batch:
+            yield pa.Table.from_pylist(batch)
+
+    def prepare(self, manifest, context):
+        result = super().prepare(manifest, context)
+        # An intermediate cut commits the durable result prefix, while the
+        # external destination publishes exactly once when all inputs finish.
+        result['native'] = (self.native.prepare(self._blocks(manifest), context)
+                            if manifest.get('final', True) else None)
+        return result
+
+    def inspect(self, prepared, context):
+        artifact = super().inspect(prepared, context)
+        if prepared['native'] is None:
+            return artifact
+        native = self.native.inspect(prepared['native'], context)
+        if native is None or artifact is None:
+            return None
+        return {**artifact, 'data': {**artifact['data'], 'native_receipt': native}}
+
+    def commit(self, prepared, context):
+        if prepared['native'] is None:
+            return super().commit(prepared, context)
+        native = self.native.inspect(prepared['native'], context)
+        if native is None:
+            native = self.native.commit(prepared['native'], context)
+        artifact = super().commit(prepared, context)
+        return {**artifact, 'data': {**artifact['data'], 'native_receipt': native}}
+
+    def abort(self, prepared, context):
+        if prepared['native'] is not None:
+            self.native.abort(prepared['native'], context)
+        super().abort(prepared, context)
+
+
+def make_native_terminal_sink(spec, *, request, services):
+    if request.kind == 'write_lance':
+        from .lance_sink import LanceSink
+        from ..lance.model import LanceWriteSpec
+        declaration = next((p.value for p in request.programs if p.name == 'write_lance'), None)
+        if not isinstance(declaration, LanceWriteSpec):
+            raise DataflowError('INVALID_CONTRACT', 'write_lance requires its sealed LanceWriteSpec')
+        native = LanceSink(services.action, declaration)
+    elif request.kind == 'write_datasink':
+        native = request.sink
+        _require_durable(native)
+    else:
+        raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')
+    return NativeTerminalSink(native=native, sink_id=request.kind, store=services.store,
+        action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))

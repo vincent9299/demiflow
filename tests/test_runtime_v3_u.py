@@ -78,7 +78,18 @@ def _bind():
 
 
 @pytest.fixture(autouse=True)
-def _reset_record():
+def _reset_record(monkeypatch):
+    # This gate proves public delegation only. Scope recording call boundaries
+    # to each test, keeping real DTOs and modules installed for other gates.
+    import _runtime_v3_u_fakes as recording
+    from demiflow.execution import dataflow_api
+    real_make = dataflow_api.make_action_request
+    def request(*args, **kwargs):
+        recorded = recording.make_action_request(*args, **kwargs)
+        return real_make(*args, **kwargs) if kwargs.get("kind") == "run_stream" else recorded
+    monkeypatch.setattr(dataflow_api, "make_action_request", request)
+    for name in ("make_native_operation", "run_dataset_action"):
+        monkeypatch.setattr(dataflow_api, name, getattr(recording, name))
     RECORD.reset()
     yield
     RECORD.reset()

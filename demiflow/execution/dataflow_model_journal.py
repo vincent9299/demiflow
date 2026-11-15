@@ -131,7 +131,8 @@ class RemotePromptJournal:
             if reply.value is not None:
                 raise DataflowError('INTERNAL_PROTOCOL', 'Native journal reply carries both value and value_ref')
             return self._read(reply.value_ref)
-        return reply.value
+        from .contracts.dataflow_codec import _thaw_json
+        return _thaw_json(reply.value)
 
     # -- the nine narrow methods ----------------------------------------------
     def lookup(self, request: Mapping) -> Mapping | None:

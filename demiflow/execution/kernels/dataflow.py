@@ -261,6 +261,29 @@ def invoke_unary(
             close = getattr(iterator, "close", None)
             if close is not None:
                 close()
+    elif kind in ("AsyncMapOp", "DeduplicateOp", "AgentMapOp", "OperatorLLMMapOp",
+                  "prompt", "agent", "fetch", "document", "VectorSearchOp", "SearchWebOp",
+                  "RegisterDocumentsOp", "ReadDocumentsOp"):
+        try:
+            result = instance(row)
+        except Exception as exc:
+            admitted = set(cfg.get("catch", ()))
+            names = {cls.__module__ + "." + cls.__qualname__ for cls in type(exc).__mro__}
+            if not (admitted & names):
+                raise
+            return
+        if result is None:
+            return
+        rows = (result,) if isinstance(result, Mapping) else result
+        budget = _OutputBudget(spec, services)
+        for index, out_row in enumerate(rows):
+            _check_stop(services)
+            if not isinstance(out_row, Mapping):
+                raise _err("INVALID_CONTRACT", "async map must return row, rows or None")
+            child = record.record_id if index == 0 else _hash_id([RECORD_DOMAIN, record.record_id, _occurrence(spec), index])
+            out = _output_record(child, position, out_row, sequence, services)
+            budget.charge(out)
+            yield out
     elif kind == "LimitOp":
         yield record
     elif kind == "SelectColumnsOp":
@@ -317,8 +340,11 @@ def invoke_unary(
 def _rows_to_batch(
     rows: list[dict[str, Any]], batch_format: str, services: RuntimeServices
 ) -> tuple[Any, int]:
-    if batch_format == "default":
-        return rows, sum(_row_bytes(row) for row in rows)
+    if batch_format in ("default", "numpy"):
+        import numpy as np
+        columns = rows[0].keys() if rows else ()
+        batch = {name: np.asarray([row[name] for row in rows]) for name in columns}
+        return batch, sum(v.nbytes for v in batch.values())
     if batch_format == "pandas":
         import pandas as pd
 
@@ -333,8 +359,14 @@ def _rows_to_batch(
 
 
 def _batch_to_rows(result: Any, batch_format: str) -> list[dict[str, Any]]:
-    if batch_format == "default":
-        return [dict(row) for row in result]
+    if isinstance(result, Mapping):
+        lengths = {len(column) for column in result.values()}
+        if len(lengths) > 1:
+            raise _err("INVALID_CONTRACT", "batch columns must have equal lengths")
+        import numpy as np
+        def value(item):
+            return item.item() if isinstance(item, np.generic) else item.tolist() if isinstance(item, np.ndarray) else item
+        return [{name: value(column[i]) for name, column in result.items()} for i in range(next(iter(lengths), 0))]
     if hasattr(result, "to_pylist"):
         return [dict(row) for row in result.to_pylist()]
     if hasattr(result, "to_dict"):
@@ -370,10 +402,6 @@ def invoke_batch(
                 input_bytes=input_bytes,
                 converted_bytes=extra,
             )
-        if zero_copy and batch_format == "pyarrow":
-            import pyarrow as pa
-
-            batch = pa.Table.from_pylist(rows)
         result = instance(batch)
         out_rows = _batch_to_rows(result, batch_format)
     elif kind in ("BatchMapOp", "AddColumnOp"):

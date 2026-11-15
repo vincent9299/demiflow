@@ -1074,23 +1074,38 @@ def test_b011(fakes, tmp_path):
     assert exc2.value.code == "CODE_MISMATCH"
 
 
-def test_b012(fakes, tmp_path):
-    from demiflow.execution.contracts.errors import ProtocolError
+def _real_launch(tmp_path, assignment):
+    return {"directory": str(tmp_path), "run_id": "run", "scope_id": "action",
+        "allocation_id": "alloc", "boot_id": "boot", "controller_epoch": 1,
+        "capabilities": ["cpu"], "grant": _grant(),
+        "dataflow_v3": {"assignment": assignment, "limits": {"max_row_bytes": 1024},
+            "code_pin": assignment.sealed.code_pin_ref.digest if assignment is not None else "d" * 64,
+            "bounds": asdict(assignment.bounds) if assignment is not None else asdict(Bounds()),
+            "store_root": str(tmp_path / "store"), "store_id": "test-store"}}
+
+
+def test_b012(tmp_path, monkeypatch):
+    from demiflow import data
+    from test_runtime_v3_real_seams import prepared, reader_services
     from demiflow.execution.worker.runtime import WorkerRuntime
-    runtime = _runtime(fakes, tmp_path)
-    # fail-closed: Verify precedes Assign/load; no loader wired -> reject
-    with pytest.raises(ProtocolError) as exc:
-        runtime._verify({"manifest_id": "m", "sha256": "s"})
-    assert exc.value.code == "INVALID_SPEC"
-    assert runtime.state == "REGISTERED"
-    # with a real loader the manifest identity + storage digest are verified
-    manifest, ref = _manifest_and_ref()
-    wired = WorkerRuntime(_v3_launch(fakes, tmp_path), control=lambda frame: None,
-                          manifest_loader=lambda r: manifest)
-    wired._verify(ref)  # no raise => identity and digest bound
-    # a tampered storage digest is rejected (verification has real strength)
-    with pytest.raises(ProtocolError):
-        wired._verify({"manifest_id": manifest["manifest_id"], "sha256": "0" * 64})
+    from demiflow.execution.contracts.dataflow_errors import DataflowError as Error
+    from demiflow.execution.contracts.errors import ProtocolError
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
+        assignment = reader_services(ex, services).assignment
+        runtime = WorkerRuntime(_real_launch(tmp_path, assignment))
+        loaded = []
+        monkeypatch.setattr(runtime, '_v3_ensure_executor', lambda: loaded.append(assignment))
+        pin = assignment.sealed.code_pin_ref.digest
+        runtime._verify({"manifest_id": pin, "sha256": pin})
+        assert loaded == [assignment] and runtime.authority is None
+        with pytest.raises(Error) as exc:
+            runtime._verify({"manifest_id": pin, "sha256": "0" * 64})
+        assert exc.value.code == "CODE_MISMATCH" and loaded == [assignment]
+        # Preserve the native v2 fail-closed loader boundary as well.
+        runtime._v3 = False
+        with pytest.raises(ProtocolError) as exc:
+            runtime._verify({"manifest_id": pin, "sha256": pin})
+        assert exc.value.code == "INVALID_SPEC"
 
 
 def test_b013(fakes, tmp_path):
@@ -1109,15 +1124,21 @@ def test_b014(fakes, tmp_path):
     assert runtime.authority is None
 
 
-def test_b015(fakes, tmp_path):
-    manifest, ref = _manifest_and_ref()
-    runtime = _runtime(fakes, tmp_path, manifest_loader=lambda r: manifest)
-    receipt = runtime._execute("VerifyArtifactAndCapabilities",
-                               {"artifact_manifest_ref": ref,
-                                "required_capabilities": ["cpu"]},
-                               int(time.time() * 1000))
-    assert receipt["kind"] == "Verified"
-    assert runtime.state == "VERIFIED"
+def test_b015(tmp_path, monkeypatch):
+    from demiflow import data
+    from test_runtime_v3_real_seams import prepared, reader_services
+    from demiflow.execution.worker.runtime import WorkerRuntime
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
+        assignment = reader_services(ex, services).assignment
+        runtime = WorkerRuntime(_real_launch(tmp_path, assignment))
+        loaded = []
+        monkeypatch.setattr(runtime, '_v3_ensure_executor', lambda: loaded.append(assignment))
+        pin = assignment.sealed.code_pin_ref.digest
+        receipt = runtime._execute("VerifyArtifactAndCapabilities",
+            {"artifact_manifest_ref": {"manifest_id": pin, "sha256": pin},
+             "required_capabilities": ["cpu"]}, int(time.time() * 1000))
+        assert receipt["kind"] == "Verified" and runtime.state == "VERIFIED"
+        assert loaded == [assignment] and runtime.authority is None
 
 
 def test_b016(fakes, tmp_path):
@@ -1178,10 +1199,11 @@ def test_b019(fakes, tmp_path):
     assert exc2.value.code == "CODE_MISMATCH"
 
 
-def test_b020(fakes, tmp_path):
+def test_b020(tmp_path):
     from demiflow.execution.worker.bootstrap import _run_v3_worker
-    launch = _v3_launch(fakes, tmp_path)
+    launch = _real_launch(tmp_path, None)
     driver_sock, child_sock = socket.socketpair()
+    driver_sock.settimeout(5)  # bootstrap failure must fail, never hang the suite
     result = {}
 
     def worker():
@@ -1207,5 +1229,6 @@ def test_b020(fakes, tmp_path):
     assert reply["response_to"] == cancel["operation_id"]
     thread.join(timeout=5)
     driver_sock.close()
+    assert not thread.is_alive()
     assert "error" not in result, result.get("error")
     assert result["runtime"].state == "RETIRED"

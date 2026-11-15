@@ -36,6 +36,9 @@ def _ray_carrier_double(monkeypatch):
     ray = D.build_fake_ray()
     monkeypatch.setitem(sys.modules, 'ray', ray)
     monkeypatch.setitem(sys.modules, 'ray.exceptions', ray.exceptions)
+    monkeypatch.setattr(WH, 'WorkerRuntime', FakeRuntime)
+    monkeypatch.setattr(HOSTS, '_RAY_AVAILABLE', True)
+    monkeypatch.setattr(HOSTS, 'ray', ray, raising=False)
     yield
 
 # dataflow_hosts defines RayHostEndpoint only when the carrier imports, so bind
@@ -258,6 +261,9 @@ class FakeState:
 class FakeManager:
     def __init__(self, phase='TERMINATED'):
         self.phase = phase
+        self.state = FakeState()
+        self.provider = FakeProvider()
+        self.provider._control = FakeConn()
 
     def apply(self, *a):
         pass
@@ -266,7 +272,8 @@ class FakeManager:
         pass
 
     def get(self, scope):
-        return {'allocations': [{'phase': self.phase}]}
+        return {'allocations': [{'allocation_id': 'alloc-1', 'phase': self.phase,
+                                 'cleanup': 'CONFIRMED' if self.phase == 'TERMINATED' else 'NONE'}]}
 
 
 class FakeModel:
@@ -334,14 +341,15 @@ class FakeRuntime:
             self._v3_executor.close()
 
 
-WH.WorkerRuntime = FakeRuntime
+
 
 
 def mklaunch():
     return {'directory': '/tmp', 'run_id': 'run-1', 'scope_id': 'action-1', 'allocation_id': 'alloc-1',
             'boot_id': 'boot-1', 'controller_epoch': 1,
             'dataflow_v3': {'bounds': dict(vars(BIG)), 'limits': {'max_requests': 1}, 'code_pin': oid('pin'),
-                            'grant': {'grant_id': 'grant-1'}}}
+                            'grant': {'grant_id': 'grant-1', 'scope_id': 'action-1'},
+                            'store_root': str(newtmp() / 'store'), 'store_id': 'store-1'}}
 
 
 def mkassignment():
@@ -359,11 +367,13 @@ def new_worker():
 
 def doubled_endpoint(cls, services, phase='TERMINATED'):
     ep = cls.__new__(cls)
+    if not hasattr(services, 'resources'):
+        services.resources = FakeManager(phase)
     HOSTS._EndpointBase.__init__(ep, mklease('local'), services=services)
     ep._connector = FakeConn()
     ep._provider = FakeProvider()
     ep._state = FakeState()
-    ep._manager = FakeManager(phase)
+    ep._manager = services.resources
     ep._model = FakeModel()
     ep._sock = NS(settimeout=lambda t: None)
     ep._argv = ('x',)
@@ -626,32 +636,29 @@ def test_h016(monkeypatch):
     with driver_env('h016') as e:
         services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST,))
         ep = doubled_endpoint(HOSTS.LocalHostEndpoint, services)
+        assignment = mkassignment()
         calls = []
-        ep._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g'}, {'sha256': oid('pin')})
-        ep._open_scope = lambda *a: None
-        ep._apply = lambda *a: None
+        ep._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g', 'scope_id': 'action-1'}, {'sha256': oid('pin')})
         ep._send_k3 = lambda kind, payload: calls.append(kind) or {}
         monkeypatch.setattr(B, 'recv_message', lambda sock: {'kind': 'Register'})
         monkeypatch.setattr(W, 'WorkerProtocolModel', FakeModel)
         monkeypatch.setattr(WH, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
-        ep.activate(mkassignment())
-        assert ep._activated and calls == ['VerifyArtifactAndCapabilities', 'Restore', 'Activate', 'Assign']
+        ep._connector.driver_socks = {'alloc-1': ep._sock}
+        with pytest.raises(DataflowError, match='staged'):
+            ep.activate(assignment)
+        ep.prepare(assignment)
         assert ep._connector.staged
+        assert ep._manager is services.resources  # one allocator, staged before spawn
+        ep.activate(assignment)
+        assert ep._activated and calls == ['VerifyArtifactAndCapabilities', 'Restore', 'Activate', 'Assign']
         ep2 = doubled_endpoint(HOSTS.LocalHostEndpoint, services)
-        ep2._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g'}, {'sha256': oid('pin')})
-        ep2._open_scope = lambda *a: None
-
-        def fail_apply(*a):
-            raise DataflowError('RESOURCE_INFEASIBLE', 'spawn failed')
-
-        ep2._apply = fail_apply
-        ep2._send_k3 = lambda kind, payload: {}
+        ep2._build_launch = ep._build_launch
+        def fail_stage(*a):
+            raise DataflowError('RESOURCE_INFEASIBLE', 'spawn preparation failed')
+        ep2._connector.stage = fail_stage
         with pytest.raises(DataflowError):
-            ep2.activate(mkassignment())
-        assert not ep2._activated
-        ep2._scope_id = 'action-1'
-        ep2.cancel('fail', deadline_ms=100)
-        assert ep2._closed_flag and ep2._provider.absent_calls
+            ep2.prepare(assignment)
+        assert not ep2._activated and not ep2._provider.absent_calls
 
 
 def test_h017(monkeypatch):
@@ -688,18 +695,16 @@ def test_h018():
 def test_h019():
     with driver_env('h019') as e:
         services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST,))
-        ep = doubled_endpoint(HOSTS.LocalHostEndpoint, services)
+        ep = doubled_endpoint(HOSTS.LocalHostEndpoint, services, phase='RUNNING')
         ep._scope_id = 'scope-1'
-        ep._send_k3 = lambda kind, payload: {}
+        sent = []
+        ep._send_k3 = lambda kind, payload: sent.append((kind, payload)) or {}
         ep.cancel('done', deadline_ms=100)
-        assert ep._closed_flag is True
-        assert ep._provider.absent_calls == [{'scope_id': 'scope-1', 'allocation_id': 'alloc-1'}]
-        ep2 = doubled_endpoint(HOSTS.LocalHostEndpoint, services)
-        ep2._provider = FakeProvider(cleanup='NONE')
-        ep2._scope_id = 'scope-1'
-        ep2._send_k3 = lambda kind, payload: {}
-        ep2.cancel('kill', deadline_ms=100)
-        assert ep2._closed_flag is False
+        assert sent[0][0] == 'Cancel' and sent[0][1]['reason'] == 'done'
+        assert not ep.closed()  # cancel receipt alone cannot free physical capacity
+        assert ep._provider.absent_calls == []  # cleanup belongs to the driver allocator
+        ep._manager.phase = 'TERMINATED'
+        assert ep.closed()  # observed CONFIRMED, not an optimistic endpoint flag
 
 
 def test_h020():
@@ -788,13 +793,14 @@ def test_h025():
 
 def test_h028():
     with driver_env('h028') as e:
-        services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST,))
+        resources = FakeManager()
+        services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST,), resources=resources)
         ep = HOSTS.LocalHostEndpoint(mklease('local'), services=services)
-        assert ep._connector._pending == {}
-        assert ep._activated is False and ep._scope_id is None
         ep2 = HOSTS.LocalHostEndpoint(mklease('local'), services=services)
-        assert ep2._connector is not ep._connector
-        assert ep2._manager is not ep._manager
+        assert not ep._activated and ep._scope_id is None
+        assert ep2._manager is ep._manager is resources
+        assert ep2._connector is ep._connector is resources.provider._control
+        assert ep2._events is not ep._events and ep2._cuts is not ep._cuts
 
 
 def test_h029():
@@ -1154,8 +1160,9 @@ def test_h075():
 def test_h038():
     w = new_worker()
     assert w.identity() == {'spec_hash': 'spec-1', 'boot_id': 'boot-1'}
-    evs = w.pull_events(10)
-    assert len(evs) == 1 and evs[0].kind == 'ready' and evs[0].payload['k3_kind'] == 'Register'
+    assert w.pull_events(10) == ()  # K3 lifecycle is not a scheduling-ready event
+    evs = w.pull_control(10)
+    assert len(evs) == 1 and evs[0]['kind'] == 'Register'
     assert not hasattr(w, '_journal')
 
 
@@ -1172,8 +1179,9 @@ def test_h040():
         w._runtime._control({'kind': 'Heartbeat', 'operation_id': oid('hb%d' % i), 'run_id': 'run-1',
                              'controller_epoch': 1, 'allocation_id': 'alloc-1', 'boot_id': 'boot-1',
                              'scope_id': 'action-1', 'payload': {}})
-    assert len(w.poll(max_events=3, deadline_ms=100)) == 3
-    assert len(w.poll(max_events=10, deadline_ms=100)) == 3
+    assert len(w.pull_control(3)) == 3
+    assert len(w.pull_control(10)) == 3
+    assert w.poll(max_events=3, deadline_ms=100) == ()
 
 
 def test_h041():
@@ -1205,18 +1213,20 @@ def test_h043():
 
 
 def test_h044():
-    ctrl = WH.make_worker_control_assignment(mkassignment(), grant={'grant_id': 'grant-1'},
+    ctrl = WH.make_worker_control_assignment(mkassignment(), grant={'grant_id': 'grant-1', 'scope_id': 'action-1'},
                                              manifest_ref={'manifest_id': oid('pin'), 'sha256': oid('pin')},
                                              ready_deadline_ms=60000)
     assert ctrl['schema_version'] == 'demiflow.worker_assignment.v1'
     assert ctrl['stages'] == ['stage-a', 'stage-b']
-    assert ctrl['partitions'] == ['p0', 'p1']
+    from demiflow.execution.recovery_contract import identity
+    assert ctrl['partitions'] == [identity(['dataflow-k3-partition-v3', p]) for p in ('p0', 'p1')]
+    assert mkassignment().lease.partition_ids == ('p0', 'p1')
     assert ctrl['channels'] == {'inputs': [{'channel_id': 'in-0'}], 'outputs': ['out-0', 'out-1']}
     assert ctrl['grant_ref'] == 'grant-1' and ctrl['controller_epoch'] == 1
     assert ctrl['plan_revision'] == 2 and ctrl['expected_plan_revision'] == 2
     assert ctrl['restore_point'] == {'checkpoint_id': oid('cp')}
     a2 = NS(**{**mkassignment().__dict__, 'restore_refs': ()})
-    assert WH.make_worker_control_assignment(a2, grant={'grant_id': 'g'}, manifest_ref={'manifest_id': 'm', 'sha256': 'm'}, ready_deadline_ms=1)['restore_point'] is None
+    assert WH.make_worker_control_assignment(a2, grant={'grant_id': 'g', 'scope_id': 'action-1'}, manifest_ref={'manifest_id': 'm', 'sha256': 'm'}, ready_deadline_ms=1)['restore_point'] is None
 
 
 def test_h049():
@@ -1244,9 +1254,10 @@ def test_h051():
         w._runtime._control({'kind': 'Heartbeat', 'operation_id': oid('e%d' % i), 'run_id': 'run-1',
                              'controller_epoch': 1, 'allocation_id': 'alloc-1', 'boot_id': 'boot-1',
                              'scope_id': 'action-1', 'payload': {}})
-    assert len(w.pull_events(3)) == 3
+    assert len(w.pull_control(3)) == 3
+    assert w.pull_events(3) == ()
     with pytest.raises(DataflowError):
-        w.pull_events(0)
+        w.pull_control(0)
 
 
 def test_h052():
@@ -1481,14 +1492,13 @@ def test_h055():
     assert 'extra_env' in payload and 'extra_pass_fds' in payload
     c.abort('alloc-1')
     assert 'alloc-1' not in c._pending and 'alloc-1' not in c._staged
-    c.stage('alloc-2', {'directory': '/tmp', 'dataflow_v3': {'entrypoint': 'wrong'}})
+    c.stage('alloc-2', {'directory': '/tmp', 'dataflow_v3': {'entrypoint': 'wrong', 'bounds': dict(vars(BIG))}})
     with pytest.raises(DataflowError) as ei:
         c.spawn_payload('alloc-2')
     assert ei.value.code == 'INVALID_CONTRACT'
     c.abort('alloc-2')
-    c.stage('alloc-3', {'directory': '/tmp'})
     with pytest.raises(DataflowError):
-        c.spawn_payload('alloc-3')
+        c.stage('alloc-3', {'directory': '/tmp'})
     c.abort('alloc-3')
 
 

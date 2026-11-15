@@ -551,6 +551,8 @@ class RuntimeV3Fixture:
         target: subprocess.Popen | None = None
         deadline = time.time() + self.bounds.get("timeout_ms", 30000) / 1000.0
         while time.time() < deadline:
+            if not any(proc.poll() is None for proc in self._children):
+                break  # exited children cannot reach a future boundary
             for proc in self._children:
                 if proc.poll() is None and marker.exists():
                     target = proc

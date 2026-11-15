@@ -93,7 +93,15 @@ def make_native_operation(kind: str, configuration: Mapping[str, object], *,
     operation = NativeOperation(kind=kind, configuration=config, bindings=binds, factory=factory)
     # Pure config/identity preflight: reports configuration errors before any
     # run, without constructing a journal, network client or model instance.
-    build_model_factory(operation, program_ref=None, bounds=_PREFLIGHT_BOUNDS)
+    from ..planning.dataflow_registry import operator_registry
+    # Public declarations may lower to an existing typed op. Validate their
+    # names here; only the compiler with the full typed declaration builds the
+    # model spec (a prompt name alone cannot reconstruct a PromptPack).
+    aliases = {"embeddings": "embedding", "fetch": "raw_fetch", "enqueue": "queue_produce",
+               "ack_queue": "queue_ack", "lookup": "lance_lookup", "prepend": "stream_prepend",
+               "read_object": "read_local_object", "admit": "deduplicate"}
+    if aliases.get(kind, kind) not in operator_registry() and kind not in {"cache", "run_stream"}:
+        raise DataflowError("UNSUPPORTED_CAPABILITY", "unknown native operation: " + kind)
     return operation
 
 
@@ -173,8 +181,13 @@ def run_dataset_action(request: ActionRequest) -> object:
             rows = collect_rows(handle, limit=arguments.get("batch_size", 20), bounds=bounds)
             return _convert_batch(rows, arguments.get("batch_format", "default"), handle)
         result = handle.result()
-        if request.kind in {"count", "aggregate"}:
+        if request.kind == "count":
             return result.scalar
+        if request.kind == "aggregate":
+            import base64
+            from .kernels import state_codec
+            return state_codec.loads(base64.b64decode(result.scalar["typed_result"]),
+                                     max_bytes=bounds.max_state_bytes)
         if request.kind == "materialize":
             return materialized_handle(result, execution=handle._execution)
         if request.kind in {"write_datasink", "write_lance", "write_file"}:

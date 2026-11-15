@@ -74,8 +74,6 @@ class DataflowWorkerExecutor:
         self._restored_cursors: dict = {}
         self._restored_states: dict = {}
         self._pending_cuts: deque = deque()
-        self._active_cut: "CutRequest | None" = None
-        self._aligned_inputs: set = set()
         self._snapshot_contributions: dict = {}
         self._receipts: dict = {}
         self._released_cuts: set = set()
@@ -91,7 +89,6 @@ class DataflowWorkerExecutor:
         self._cache: Path | None = None
         self._owned_services_cache: Path | None = None
         self._event_sequence = 0
-        self._credit_leases: dict = {}
         bounds = services.bounds
         self._max_pending = max(1, int(bounds.max_pending_events))
         self._max_inflight = max(1, int(bounds.max_pending_events))
@@ -103,6 +100,7 @@ class DataflowWorkerExecutor:
     def _identity(self):
         assignment = self.assignment
         lease = assignment.lease
+        from ..contracts.dataflow_codec import runtime_scope_id
         return {
             "run_id": assignment.run_id,
             "attempt": assignment.attempt,
@@ -110,7 +108,7 @@ class DataflowWorkerExecutor:
             "allocation_id": lease.allocation_id,
             "boot_id": lease.boot_id,
             "plan_revision": assignment.plan_revision,
-            "scope_id": assignment.action_id,
+            "scope_id": runtime_scope_id(assignment.plan_id, assignment.attempt),
             "controller_epoch": assignment.attempt,
         }
 
@@ -252,8 +250,6 @@ class DataflowWorkerExecutor:
             for contribution in image.contributions:
                 if contribution.participant_id not in participants:
                     continue
-                if contribution.boot_id != self.assignment.lease.boot_id:
-                    raise _dataflow_error("FENCED", "contribution boot differs from current boot")
                 for cursor in contribution.sources:
                     cursors[cursor.split_id] = cursor
                 for occ, ref in contribution.operator_states.items():
@@ -265,7 +261,8 @@ class DataflowWorkerExecutor:
                     if ref is None:
                         raise _dataflow_error("INVALID_CONTRACT", "missing buffer/channel ref",
                                               context={"channel_id": channel_id})
-                    channel_refs[channel_id] = ref
+                    from ..contracts.dataflow import ArtifactRef
+                    channel_refs[channel_id] = ArtifactRef(**dict(ref))
                 for ref in contribution.buffers:
                     if ref is None:
                         raise _dataflow_error("INVALID_CONTRACT", "missing buffer ref cannot restore")
@@ -289,6 +286,8 @@ class DataflowWorkerExecutor:
             self._check_grant()
             assignment = self.assignment
             for occ, spec in self._kernel_specs.items():
+                if self._node_specs[occ].kind in ("source", "terminal"):
+                    continue
                 for partition in assignment.lease.partition_ids:
                     kernel = make_kernel(spec, services=self._services, partition_id=partition)
                     kernel.start()
@@ -314,219 +313,30 @@ class DataflowWorkerExecutor:
                                                services=self._services)
             self._admit_open = True
             self._state = "started"
+            from .dataflow_graph_runner import WorkerGraphRunner
+            self._runner = WorkerGraphRunner(self)
 
-    # ---- B005 step ----
-    def step(self, *, max_records: int, deadline_ms: int) -> "WorkerStep":
-        from ..contracts import dataflow as df
-        from ..exchange.dataflow_channels import reserve_credit, route_record
-        from ..kernels.dataflow import finish_kernel
-        if max_records <= 0 or deadline_ms <= 0:
-            raise _dataflow_error("INVALID_CONTRACT", "step budgets must be positive")
-        with self._control_lock:
-            if self._closed or self._state == "closed":
-                raise _dataflow_error("CANCELLED", "executor is closed")
-            if self._cancel_event.is_set():
-                return df.WorkerStep(processed=0, blocked=False, end_of_input=True,
-                                     events=(self._event("closed", payload={"reason": self._cancel_reason}),))
-            if self._state != "started":
-                raise _dataflow_error("FENCED", "business input requires activation",
-                                      context={"state": self._state})
-            self._business_active = True
-        events = []
-        processed = 0
-        blocked = False
-        end_of_input = False
-        deadline = self._services.clock_ms() + deadline_ms
-        try:
-            self._check_grant()
-            budget = max_records
-            for split_id, reader in self._readers.items():
-                if budget <= 0 or self._services.clock_ms() >= deadline:
-                    break
-                poll = reader.next_record()
-                if poll.status == "record" and poll.record is not None:
-                    self._route_source_record(poll.record, split_id)
-                    processed += 1
-                    budget -= 1
-                elif poll.status == "eoi":
-                    end_of_input = True
-                    events.append(self._event("eoi", payload={"split_id": split_id}))
-                elif poll.status == "pending":
-                    blocked = True
-            if budget > 0 and self._services.clock_ms() < deadline:
-                consumed = self._consume_input(budget)
-                processed += consumed
-                budget -= consumed
-            cut_events = self._process_pending_cut()
-            events.extend(cut_events)
-            if self._all_sources_eoi() and not self._pending_cuts:
-                end_of_input = True
-        finally:
-            with self._control_lock:
-                self._business_active = False
-        return df.WorkerStep(processed=processed, blocked=blocked,
-                             end_of_input=end_of_input, events=tuple(events))
+    def run(self):
+        """Begin business work only after the host accepts its K3 assignment."""
+        self._runner.start()
 
-    def _route_source_record(self, record, split_id):
-        from ..exchange.dataflow_channels import reserve_credit, route_record
-        for spec in self._output_specs:
-            lease = reserve_credit(spec.channel_id, self.assignment.lease.boot_id,
-                                   rows=1, size_bytes=int(record.encoded_bytes),
-                                   operation_id=self._next_operation_id("credit"),
-                                   state=self._channels)
-            self._credit_leases[lease.operation_id] = lease
-            routed = route_record(record, spec=spec, state=self._channels)
-            self._publish_routed(routed, spec)
+    def receive(self, command):
+        self._runner.receive(command)
 
-    def _consume_input(self, budget):
-        """Consume inbound input via the frozen v3 module-level channel API.
-
-        Input records arrive on the control mailbox (WorkerControlMailbox.drain);
-        ChannelSet itself only exposes close(). Credit is reserved (X005) before
-        any paid decode (X003 resolve_record) or kernel push, so no credit means
-        no early paid call (B005). Input cut barriers align the pending cut.
-        """
-        from ..contracts import dataflow as df
-        from ..exchange.dataflow_channels import reserve_credit, resolve_record
-        input_channels = {spec.channel_id: spec for spec in self._input_specs}
-        if not input_channels:
-            return 0
-        consumed = 0
-        for event in self._mailbox.drain(max_events=self._max_pending):
-            payload = event.payload or {}
-            channel_id = payload.get("channel_id")
-            if channel_id not in input_channels:
-                continue
-            if event.kind == "cut":
-                with self._control_lock:
-                    self._aligned_inputs.add(channel_id)
-                continue
-            if consumed >= budget:
-                break
-            encoded_payload = payload.get("encoded")
-            if encoded_payload is None:
-                continue
-            lease = reserve_credit(channel_id, self.assignment.lease.boot_id,
-                                   rows=1, size_bytes=int(encoded_payload.get("encoded_bytes", 0)),
-                                   operation_id=self._next_operation_id("credit"),
-                                   state=self._channels)
-            self._credit_leases[lease.operation_id] = lease
-            encoded = df.EncodedRecord(**encoded_payload)
-            record = resolve_record(encoded, store=self._services.store,
-                                    bounds=self._services.bounds)
-            for (occ, partition), kernel in self._kernels.items():
-                for port in self._kernel_specs[occ].inputs:
-                    for out in kernel.push(port.name, record):
-                        self._route_source_record(out, partition)
-            consumed += 1
-        return consumed
-
-    def _publish_routed(self, routed, spec):
-        from ..exchange.dataflow_channels import encode_record, publish_segment
-        encoded = tuple(encode_record(item.record, bounds=self._services.bounds) for item in routed)
-        if encoded:
-            publish_segment(encoded, spec=spec, store=self._services.store,
-                            operation_id=self._next_operation_id("publish"))
-
-    def _all_sources_eoi(self):
-        if not self._readers:
-            return False
-        return all(getattr(reader, "_eoi", False) for reader in self._readers.values())
-
-    def _process_pending_cut(self):
-        events = []
-        with self._control_lock:
-            request = self._active_cut
-        if request is None:
-            return events
-        if self._inputs_aligned(request):
-            contribution = self.snapshot(request)
-            events.append(self._event("cut", payload={"cut_id": request.cut_id,
-                                                      "participant_id": contribution.participant_id}))
-            self._emit(events[-1])
-            with self._control_lock:
-                self._active_cut = None
-                self._aligned_inputs.clear()
-        return events
-
-    def _inputs_aligned(self, request):
-        if not self._input_specs:
-            return True
-        return all(spec.channel_id in self._aligned_inputs for spec in self._input_specs)
+    def step(self, *, max_records, deadline_ms):
+        return self._runner.step(max_records=max_records, deadline_ms=deadline_ms)
 
     # ---- B006 request_cut ----
-    def request_cut(self, request: "CutRequest") -> None:
-        from ..exchange.dataflow_bridge import cut_to_barrier
-        with self._control_lock:
-            if self._state not in ("started", "restored", "loaded"):
-                raise _dataflow_error("FENCED", "cut requires an active executor",
-                                      context={"state": self._state})
-            if not request.cut_id:
-                raise _dataflow_error("INVALID_CONTRACT", "cut_id must be driver-produced")
-            if request.final:
-                raise _dataflow_error("INVALID_CONTRACT", "worker cannot originate a final cut")
-            participants = set(self._participant_ids())
-            if not participants.issubset(set(request.participants)):
-                raise _dataflow_error("INVALID_CONTRACT", "cut participants exclude this worker",
-                                      context={"cut_id": request.cut_id})
-            if request.plan_revision != self.assignment.plan_revision:
-                raise _dataflow_error("FENCED", "cut plan_revision differs from assignment")
-            if len(self._pending_cuts) >= self._max_pending:
-                raise _dataflow_error("BUDGET_EXCEEDED", "pending cut ledger is full")
-            self._pending_cuts.append(request)
-            self._active_cut = request
-            self._aligned_inputs.clear()
-            sequence = request.sequence
-            for spec in self._output_specs:
-                barrier = cut_to_barrier(request, channel_id=spec.channel_id, sequence=sequence)
-                self._emit(self._event("cut", payload=barrier,
-                                       operation_id=_operation_id(request.cut_id, spec.channel_id)))
-            if not self._input_specs:
-                self._aligned_inputs.update(spec.channel_id for spec in self._output_specs)
+    def request_cut(self, request):
+        if request.plan_revision != self.assignment.plan_revision:
+            raise _dataflow_error("FENCED", "cut revision differs from assignment")
+        if not set(self._participant_ids()).issubset(request.participants):
+            raise _dataflow_error("INVALID_CONTRACT", "cut excludes current participant")
+        self._runner.receive({"kind": "cut", "request": request})
 
     # ---- B007 snapshot ----
-    def snapshot(self, request: "CutRequest") -> "CutContribution":
-        from ..contracts import dataflow as df
-        from ..dataflow_models import snapshot_actor_state
-        from ..dataflow_sinks import prepare_sink_partition
-        from ..exchange.dataflow_channels import snapshot_channels
-        with self._control_lock:
-            if self._active_cut is None or self._active_cut.cut_id != request.cut_id:
-                raise _dataflow_error("INVALID_CONTRACT", "snapshot requires an aligned active cut",
-                                      context={"cut_id": request.cut_id})
-            if self._business_active:
-                raise _dataflow_error("INVALID_CONTRACT", "snapshot must run at a business barrier")
-        if not self._inputs_aligned(request):
-            raise _dataflow_error("INVALID_CONTRACT", "inputs are not aligned for cut")
-        sources = tuple(reader.snapshot() for reader in self._readers.values())
-        operator_states = {}
-        for (occ, partition), kernel in self._kernels.items():
-            ref = kernel.snapshot()
-            instance = getattr(kernel, "instance", None)
-            if instance is not None and self._kernel_specs[occ].state != "none":
-                ref = snapshot_actor_state(instance, services=self._services) or ref
-            if ref is not None:
-                operator_states[occ + ":" + partition] = ref
-        channels = snapshot_channels(self._channels, cut=request, store=self._services.store)
-        buffers = tuple(ref for ref in channels.values() if ref is not None)
-        if any(ref is None for ref in channels.values()):
-            raise _dataflow_error("INVALID_CONTRACT", "unaligned buffer cannot be sealed")
-        sinks = {}
-        for (occ, partition), kernel in self._kernels.items():
-            spec = self._kernel_specs[occ]
-            if spec.kind == "terminal":
-                prepared = prepare_sink_partition(iter(()), spec=spec, services=self._services)
-                sinks[occ + ":" + partition] = prepared
-                self._prepared_sinks[occ + ":" + partition] = prepared
-        participant = self._participant_ids()[0]
-        contribution = df.CutContribution(
-            cut_id=request.cut_id, participant_id=participant,
-            boot_id=self.assignment.lease.boot_id, sources=sources,
-            operator_states=operator_states, channels=channels, buffers=buffers,
-            effects=tuple(self._effect_refs), sinks=sinks, final=False)
-        with self._control_lock:
-            self._snapshot_contributions[request.cut_id] = contribution
-        return contribution
+    def snapshot(self, request):
+        return self._runner.snapshot(request)
 
     # ---- B008 accept_receipt ----
     def accept_receipt(self, commit_id: str, *, cut_id: str) -> None:
@@ -546,8 +356,6 @@ class DataflowWorkerExecutor:
                                       context={"cut_id": cut_id})
             self._receipts[cut_id] = commit_id
             self._released_cuts.add(cut_id)
-            for operation_id, lease in list(self._credit_leases.items()):
-                self._credit_leases.pop(operation_id, None)
             self._snapshot_contributions.pop(cut_id, None)
 
     # ---- B009 cancel ----
@@ -560,11 +368,15 @@ class DataflowWorkerExecutor:
             self._cancel_reason = reason
             self._admit_open = False
             self._cancel_event.set()
+            if hasattr(self, "_runner"):
+                self._runner.wake()
             if self._state in ("started", "restored", "loaded"):
                 self._state = "draining"
 
     # ---- B010 close ----
     def close(self) -> None:
+        if hasattr(self, "_runner"):
+            self._runner.close()
         from ..exchange.dataflow_channels import close_channels
         with self._control_lock:
             if self._closed:

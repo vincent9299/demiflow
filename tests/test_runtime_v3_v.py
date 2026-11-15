@@ -112,7 +112,7 @@ def test_v002():
         # A scenario whose owning lane has not delivered is recorded not_run
         # with lane attribution — never a skip counted as pass.
         with pytest.raises(NotRunError) as exc:
-            fx.run("no_ray_data")
+            fx.run("api_matrix")  # this harness is explicitly still incomplete
         assert exc.value.code == "NOT_RUN"
         assert fx.not_run_records, "not_run must be recorded in the ledger"
         record = fx.not_run_records[-1]
@@ -135,6 +135,7 @@ def test_v002():
     fake_name = "demiflow.execution.dataflow"
     fake = types.ModuleType(fake_name)
     fake.__file__ = str(s.WORKTREE / "demiflow/execution/dataflow.py")  # not on disk
+    original_module = sys.modules.get(fake_name)
     sys.modules[fake_name] = fake
     try:
         with pytest.raises(NotRunError) as exc:
@@ -143,7 +144,10 @@ def test_v002():
         entry = next(m for m in missing if m["module"] == fake_name)
         assert entry["reason"].startswith("test_double")
     finally:
-        del sys.modules[fake_name]
+        if original_module is None:
+            del sys.modules[fake_name]
+        else:
+            sys.modules[fake_name] = original_module
         fx2.close()
 
 

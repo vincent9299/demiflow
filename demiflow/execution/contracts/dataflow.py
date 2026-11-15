@@ -70,7 +70,7 @@ _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown
 _EFFECT_STATUSES = frozenset({"absent", "reserved", "sent", "confirmed", "unknown", "unsent"})
 _EVENT_KINDS = frozenset({
     "ready", "progress", "cut", "effect", "artifact", "reserve", "read_action",
-    "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed",
+    "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal",
 })
 _COMPLETIONS = frozenset({"source_exhausted", "terminal_satisfied", "cancelled", "incomplete"})
 _PRODUCER_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
@@ -1000,7 +1000,7 @@ class EffectReply:
 @dataclass(frozen=True)
 class WorkerEvent:
     schema: Literal["demiflow.dataflow_event.v3"]
-    kind: Literal["ready", "progress", "cut", "effect", "artifact", "reserve", "read_action", "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed"]
+    kind: Literal["ready", "progress", "cut", "effect", "artifact", "reserve", "read_action", "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal"]
     operation_id: str
     run_id: str
     attempt: int
@@ -1647,11 +1647,13 @@ class ProgramDeclaration:
 class CompiledDataflow:
     graph: DataflowGraph
     declarations: tuple[ProgramDeclaration, ...]
+    report_bindings: tuple[Mapping[str, Json], ...] = ()
 
     def __post_init__(self):
         if not isinstance(self.graph, DataflowGraph):
             raise _err("CompiledDataflow.graph must be a DataflowGraph")
         object.__setattr__(self, "declarations", _tuple(self.declarations, "CompiledDataflow.declarations", lambda v, l: _is_declaration(v, l)))
+        object.__setattr__(self, "report_bindings", tuple(_json_map(v, "report binding") for v in self.report_bindings))
 
 
 def _is_declaration(value, label):

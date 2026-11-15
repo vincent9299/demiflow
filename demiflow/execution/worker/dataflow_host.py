@@ -157,6 +157,8 @@ class HostedDataflowWorker:
             return {"receipt": None}
         try:
             receipt = self._runtime.handle(message, now_ms=int(time.time() * 1000))
+            if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                self._runtime.close()
         except ProtocolError as exc:
             return {"error": exc.to_dict()}
         except DataflowError as exc:
@@ -190,6 +192,9 @@ class HostedDataflowWorker:
         if executor is None:
             raise DataflowError("FENCED", "worker executor is not assigned")
         executor.request_cut(request)
+
+    def receive(self, command):
+        self._runtime._v3_ensure_executor().receive(command)
 
     def deliver_receipt(self, receipt: dict) -> None:
         if receipt.get("boot_id") not in (None, self._boot_id):

@@ -105,7 +105,7 @@ _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown
 _EFFECT_STATUSES = frozenset({"absent", "reserved", "sent", "confirmed", "unknown", "unsent"})
 _EVENT_KINDS = frozenset({
     "ready", "progress", "cut", "effect", "artifact", "reserve", "read_action",
-    "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed",
+    "read_configuration", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal",
 })
 _COMPLETIONS = frozenset({"source_exhausted", "terminal_satisfied", "cancelled", "incomplete"})
 _PRODUCER_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})
@@ -720,6 +720,8 @@ def _construct_field(value, spec, label):
         return None if value is None else _construct_payload(value, "ArtifactRef")
     if kind == "refs":
         return tuple(_construct_payload(v, "ArtifactRef") for v in value)
+    if kind == "refmap":
+        return {k: _construct_payload(v, "ArtifactRef") for k, v in value.items()}
     if kind == "dto":
         return _construct_payload(value, spec[1])
     if kind == "opt_dto":
@@ -1041,3 +1043,10 @@ def compute_participant_id(stage_id: str, partition_id: str) -> str:
     _ident(stage_id, "participant stage")
     _ident(partition_id, "participant partition")
     return _canonical_sha(["dataflow-participant-v3", stage_id, partition_id])
+
+
+def runtime_scope_id(plan_id: str, attempt: int) -> str:
+    """Resource authority is attempt-scoped; semantic plan identity is unchanged."""
+    if type(attempt) is not int or attempt < 1:
+        raise _err("runtime scope needs a positive attempt")
+    return "df-" + plan_id + ("-a" + str(attempt) if attempt > 1 else "")

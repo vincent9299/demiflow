@@ -205,7 +205,7 @@ class RuntimeActionHandle:
                 with self._lock:
                     self._finished = True
                 self._release_subscription()
-            else:
+            elif not self._finished:
                 self._cleanup()
 
     def result(self) -> "TerminalResult":
@@ -301,13 +301,17 @@ class _ChunkStream:
         del self._buf[:n]
         return data
 
-    def readline(self) -> bytes:
+    def readline(self, max_bytes: int) -> bytes:
         while True:
             index = self._buf.find(b"\n")
             if index >= 0:
+                if index + 1 > max_bytes:
+                    raise DataflowError("BUDGET_EXCEEDED", "stored record frame exceeds its bound")
                 data = bytes(self._buf[: index + 1])
                 del self._buf[: index + 1]
                 return data
+            if len(self._buf) > max_bytes:
+                raise DataflowError("BUDGET_EXCEEDED", "stored record frame exceeds its bound")
             if not self._pull():
                 data = bytes(self._buf)
                 self._buf.clear()
@@ -371,6 +375,11 @@ class StoredMaterializedHandle:
             manifest = json.loads(raw)
         except (ValueError, UnicodeDecodeError) as exc:
             raise _error("CORRUPT_ARTIFACT", "manifest is not valid JSON") from exc
+        if isinstance(manifest, dict) and manifest.get("schema") == "demiflow.dataflow_sink_publication.v3":
+            manifest = {"schema": MANIFEST_SCHEMA,
+                        "blocks": [p["data_ref"] for p in manifest["manifest"]["partitions"]],
+                        "rows": manifest["manifest"]["total_rows"],
+                        "columns": manifest["manifest"]["columns"]}
         if not isinstance(manifest, dict) or manifest.get("schema") != MANIFEST_SCHEMA:
             raise _error("CORRUPT_ARTIFACT", "unknown materialized manifest schema")
         if not isinstance(manifest.get("blocks"), list):
@@ -383,6 +392,33 @@ class StoredMaterializedHandle:
     def _check_open(self) -> None:
         if self._released:
             raise RuntimeError(_RELEASED_MESSAGE)
+
+    def __getstate__(self):
+        # Sealed source programs contain immutable location facts, never the
+        # driver's live journal, pin authority or locks.
+        self._check_open()
+        return {"root": self._store.root, "store_id": self._store.store_id,
+                "bounds": self._store._bounds, "manifest": self._manifest_ref,
+                "blocks": self._blocks, "rows": self._rows, "schema": self._schema}
+
+    def __setstate__(self, state):
+        from .dataflow_store import RunArtifactStore
+        self._store = RunArtifactStore(root=state["root"], store_id=state["store_id"],
+            journal=None, bounds=state["bounds"], readonly=True)
+        self._manifest_ref, self._blocks = state["manifest"], state["blocks"]
+        self._rows, self._schema = state["rows"], state["schema"]
+        self._owner, self._released, self._lock = None, False, threading.Lock()
+
+    @property
+    def row_count(self):
+        self._check_open()
+        return self._rows
+
+    @property
+    def recovery_reference(self):
+        self._check_open()
+        from dataclasses import asdict
+        return {"schema": "demiflow.materialized-source.v3", "manifest": asdict(self._manifest_ref)}
 
     def num_blocks(self) -> int:
         self._check_open()
@@ -398,7 +434,24 @@ class StoredMaterializedHandle:
             stream = _ChunkStream(self._store.read(ref, max_bytes=ref.size_bytes))
             while True:
                 try:
-                    row = pickle.load(stream)
+                    if ref.media_type == "application/x-demiflow-records-v3":
+                        line = stream.readline(self._store._bounds.max_row_bytes + 1)
+                        if not line:
+                            break
+                        item = json.loads(line)
+                        from .exchange.dataflow_bridge import _decode_record_document
+                        from .contracts.dataflow import thaw_record_value
+                        record = _decode_record_document(item["document"].encode(),
+                            record_id=item["record_id"], sequence=item["sequence"], max_bytes=len(line))
+                        if record.inline is None:
+                            from .exchange.dataflow_bridge import _decode_payload
+                            ceiling = self._store._bounds.max_row_bytes
+                            row = _decode_payload(b"".join(self._store.read(record.payload_ref,
+                                max_bytes=ceiling)), max_bytes=ceiling)
+                        else:
+                            row = thaw_record_value(record.inline)
+                    else:
+                        row = pickle.load(stream)
                 except EOFError:
                     break
                 count += 1
@@ -413,6 +466,8 @@ class StoredMaterializedHandle:
             if self._released:
                 return
             self._released = True
+        if self._owner is None:
+            return
         errors: list[BaseException] = []
         for ref in (self._manifest_ref, *self._blocks):
             try:

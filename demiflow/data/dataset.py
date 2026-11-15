@@ -1085,39 +1085,24 @@ class Dataset:
         if checkpoint is not None:
             from ..execution.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Explicit checkpoint mode is retired; use RunContext recovery')
-        checkpoint_facts = checkpoint
-        arguments = dict(on_progress=on_progress, on_drain=on_drain, log_every=log_every,
-                         cancellation=cancellation, queue_factory=queue_factory,
-                         stall_timeout=stall_timeout, stop_file=stop_file,
-                         source_batch_size=source_batch_size, checkpoint=checkpoint_facts)
-        # Before action(): payload-fact computation raises TypeError for backend_options, masking this ValueError.
+        if queue_factory is not None:
+            from ..errors import UnsupportedExecutionOptionError
+            raise UnsupportedExecutionOptionError('worker exchange queues are owned by the unified engine')
+        if source_batch_size is not None and (type(source_batch_size) is not int or not 1 <= source_batch_size <= 256):
+            raise ValueError('source_batch_size must be 1..256')
         from ..execution.capabilities import validate_stream_plan
         validate_stream_plan(self._plan)
-        from ..execution.dataflow_api import make_native_operation
+        from ..execution.dataflow_api import make_action_request, make_native_operation
+        from ..execution.dataflow_stream import run_stream_action
         make_native_operation("run_stream", configuration={"action": "run_stream"}, bindings={})
+        arguments = dict(log_every=log_every, stall_timeout=stall_timeout,
+                         stop_file=str(stop_file) if stop_file is not None else None,
+                         source_batch_size=source_batch_size)
         with action("run_stream", self._source, self._plan, arguments=arguments) as checked:
-            from ..execution.queue_execution import queue_source
-            from ..execution.queue_producer import producer_actor
-            source = checked.source
-            stage_limits = None
-            if queue_source(source) is None and producer_actor(checked.plan) is None:
-                from ..execution.run_context import current_action
-                from ..execution.source_snapshot import freeze_source
-                from ..execution.native_plan import root_stage_limits
-                active = current_action()
-                source = freeze_source(active, source)
-                layout, placement = self._executor._bind_plan(active, source, checked.plan,
-                                                              action_kind='run_stream')
-                if placement.backend != 'local_stream' or placement.recovery != 'delivery_only':
-                    raise RuntimeError('run_stream requires its sealed delivery layout')
-                stage_limits = root_stage_limits(placement)
-            stats = self._run_stream(
-                source=source, plan=checked.plan, stage_limits=stage_limits,
-                on_progress=on_progress, on_drain=on_drain, log_every=log_every,
-                cancellation=cancellation, queue_factory=queue_factory,
-                stall_timeout=stall_timeout, stop_file=stop_file,
-                source_batch_size=source_batch_size, checkpoint=checkpoint,
-            )
+            request = make_action_request(self._executor, checked.source, checked.plan,
+                                          kind="run_stream", arguments=arguments)
+            stats = run_stream_action(request, on_progress=on_progress, on_drain=on_drain,
+                log_every=log_every, cancellation=cancellation, stall_timeout=stall_timeout, stop_file=stop_file)
             checked.streamed(stats)
             return stats
 
@@ -2214,8 +2199,8 @@ class Dataset:
                     "aggregate", self._source, self._plan, self._executor,
                     aggregate_count=len(aggs),
                 ) as observer:
-            programs = tuple(ActionProgram(name=aggregate.name, kind="aggregate", value=aggregate)
-                             for aggregate in aggs)
+            programs = tuple(ActionProgram(name="aggregate-" + str(index), kind="aggregate", value=aggregate)
+                             for index, aggregate in enumerate(aggs))
             request = make_action_request(self._executor, checked.source, checked.plan,
                                           kind="aggregate", arguments={"names": names},
                                           programs=programs)

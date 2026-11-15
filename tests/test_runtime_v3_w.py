@@ -631,70 +631,73 @@ def v3_marker(run_id, action_id="a0", *, dag_id=None, plan_id=None):
             "physical_ref": ref_json(aref("physical")), "programs": [ref_json(aref("program"))],
             "code_pin_ref": ref_json(aref("code-pin")), "identity_bridge_ref": ref_json(aref("bridge")),
             "source_refs": [ref_json(aref("source"))], "constants_ref": ref_json(aref("constants")),
-            "sealed_at": 1700000000}
+            "plan_revision": 0, "graph_digest": sha("graph"), "physical_digest": sha("physical")}
 
 
 # --- W001 load_execution_version -------------------------------------------
 
 def test_w001(tmp_path):
-    target, journal, fence, run_id = make_journal(tmp_path)
-    action_id = "a0"
-    # v3 happy path: journal-pointed marker binds by its original version.
-    journal.bind_source(fence, action_id + "-dataflow-sealed", v3_marker(run_id, action_id))
-    binding = hist.load_execution_version(target, action_id, max_bytes=1024 * 1024)
-    assert isinstance(binding, HistoricalBinding)
-    assert binding.schema_version == hist.DATAFLOW_SEALED_SCHEMA
-    assert binding.compatible is True and binding.reason is None
-    assert binding.original_plan_ref.digest == sha("physical")
-    assert binding.original_code_pin_ref.digest == sha("code-pin")
-    assert binding.restore_image is None
-    # Neither v3 nor v1 facts -> incompatible history, never a fabricated projection.
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, "missing", max_bytes=1024 * 1024)
-    assert exc.value.code == "INCOMPATIBLE_HISTORY"
-    # Both v3 and v1 facts bound -> invalid contract.
-    journal.bind_source(fence, "both-dataflow-sealed", v3_marker(run_id, "both"))
-    journal.bind_source(fence, "both-sealed-plan", {"schema": hist.SEALED_PLAN_FACTS_SCHEMA})
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, "both", max_bytes=1024 * 1024)
-    assert exc.value.code == "INVALID_CONTRACT"
-    # Future/unknown v3 schema -> incompatible history.
-    future = v3_marker(run_id, "future")
-    future["schema"] = "demiflow.dataflow_sealed.v99"
-    journal.bind_source(fence, "future-dataflow-sealed", future)
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, "future", max_bytes=1024 * 1024)
-    assert exc.value.code == "INCOMPATIBLE_HISTORY"
-    # Wrong action_id inside the marker -> invalid contract.
-    wrong = v3_marker(run_id, "wrong")
-    wrong["action_id"] = "other"
-    journal.bind_source(fence, "wrong-dataflow-sealed", wrong)
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, "wrong", max_bytes=1024 * 1024)
-    assert exc.value.code == "INVALID_CONTRACT"
-    # Bad digest in a sealed ref -> invalid contract (closed artifact reference).
-    bad = v3_marker(run_id, "bad")
-    bad["code_pin_ref"]["digest"] = "not-a-digest"
-    journal.bind_source(fence, "bad-dataflow-sealed", bad)
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, "bad", max_bytes=1024 * 1024)
-    assert exc.value.code == "INVALID_CONTRACT"
-    # Invalid action_id and max_bytes guards.
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, "bad id!", max_bytes=1024)
-    assert exc.value.code == "INVALID_CONTRACT"
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, action_id, max_bytes=-1)
-    assert exc.value.code == "INVALID_CONTRACT"
-    # Absent journal -> incompatible history.
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(tmp_path / "absent", action_id, max_bytes=1024)
-    assert exc.value.code == "INCOMPATIBLE_HISTORY"
-    # v1/v2 unknown schema -> incompatible history (original version validation).
-    journal.bind_source(fence, "old-sealed-plan", {"schema": "demiflow.sealed_plan_facts.v99"})
-    with pytest.raises(DataflowError) as exc:
-        hist.load_execution_version(target, "old", max_bytes=1024 * 1024)
-    assert exc.value.code == "INCOMPATIBLE_HISTORY"
+    from demiflow import data
+    from test_runtime_v3_real_seams import prepared
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
+        target = services.action.context.directory
+        journal, fence = services.action.context.journal, services.action.context.fence
+        run_id, action_id = services.action.context.ref.run_id, services.action.action_id
+        # v3 happy path: journal-pointed marker binds by its original version.
+        binding = hist.load_execution_version(target, action_id, max_bytes=1024 * 1024)
+        assert isinstance(binding, HistoricalBinding)
+        assert binding.schema_version == hist.DATAFLOW_SEALED_SCHEMA
+        assert binding.compatible is True and binding.reason is None
+        assert binding.original_plan_ref.digest == ex._sealed.physical_ref.digest
+        assert binding.original_code_pin_ref.digest == ex._sealed.code_pin_ref.digest
+        assert binding.restore_image is None
+        # Neither v3 nor v1 facts -> incompatible history, never a fabricated projection.
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, "missing", max_bytes=1024 * 1024)
+        assert exc.value.code == "INCOMPATIBLE_HISTORY"
+        # Both v3 and v1 facts bound -> invalid contract.
+        journal.bind_source(fence, "both-dataflow-sealed", v3_marker(run_id, "both"))
+        journal.bind_source(fence, "both-sealed-plan", {"schema": hist.SEALED_PLAN_FACTS_SCHEMA})
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, "both", max_bytes=1024 * 1024)
+        assert exc.value.code == "INVALID_CONTRACT"
+        # Future/unknown v3 schema -> incompatible history.
+        future = v3_marker(run_id, "future")
+        future["schema"] = "demiflow.dataflow_sealed.v99"
+        journal.bind_source(fence, "future-dataflow-sealed", future)
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, "future", max_bytes=1024 * 1024)
+        assert exc.value.code == "INCOMPATIBLE_HISTORY"
+        # Wrong action_id inside the marker -> invalid contract.
+        wrong = v3_marker(run_id, "wrong")
+        wrong["action_id"] = "other"
+        journal.bind_source(fence, "wrong-dataflow-sealed", wrong)
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, "wrong", max_bytes=1024 * 1024)
+        assert exc.value.code == "INVALID_CONTRACT"
+        # Bad digest in a sealed ref -> invalid contract (closed artifact reference).
+        bad = v3_marker(run_id, "bad")
+        bad["code_pin_ref"]["digest"] = "not-a-digest"
+        journal.bind_source(fence, "bad-dataflow-sealed", bad)
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, "bad", max_bytes=1024 * 1024)
+        assert exc.value.code == "INVALID_CONTRACT"
+        # Invalid action_id and max_bytes guards.
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, "bad id!", max_bytes=1024)
+        assert exc.value.code == "INVALID_CONTRACT"
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, action_id, max_bytes=-1)
+        assert exc.value.code == "INVALID_CONTRACT"
+        # Absent journal -> incompatible history.
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(tmp_path / "absent", action_id, max_bytes=1024)
+        assert exc.value.code == "INCOMPATIBLE_HISTORY"
+        # v1/v2 unknown schema -> incompatible history (original version validation).
+        journal.bind_source(fence, "old-sealed-plan", {"schema": "demiflow.sealed_plan_facts.v99"})
+        with pytest.raises(DataflowError) as exc:
+            hist.load_execution_version(target, "old", max_bytes=1024 * 1024)
+        assert exc.value.code == "INCOMPATIBLE_HISTORY"
 
 
 # --- W002 validate_resume_compatibility ------------------------------------
@@ -706,40 +709,55 @@ def _v3_binding(plan_recovery="checkpoint"):
 
 
 def test_w002():
+    from dataclasses import replace
+    from demiflow.execution.contracts.dataflow_codec import encode_wire, compute_physical_digest
     store = MemoryStore()
-    code_ref = aref("code-pin")
-    store.add(code_ref, b"code")
+    code_ref, code_raw = json_ref({"platform_revision": "engine-x"})
+    store.add(code_ref, code_raw)
 
-    def bind(plan_value):
-        plan_ref, raw = json_ref(plan_value)
+    def bind(plan_value, *, image=True):
+        policy = RuntimePolicy(provider="local", durability="durable", default_partitions=1,
+            max_replicas=1, fusion=False, checkpoint_rows=10, checkpoint_interval_ms=1000,
+            fairness_quantum_bytes=1024, control_timeout_ms=1000, store_id="run",
+            required_recovery=plan_value["recovery"])
+        splits = tuple(SourceSplit(source_id=sha("source"), split_id=sha(str(i)), locator={},
+            start_cursor={}, estimated_bytes=None, required_domain=s["required_domain"])
+            for i, s in enumerate(plan_value["splits"]))
+        physical = PhysicalDataflow(schema="demiflow.physical_dataflow.v3", dag_id=sha("dag"),
+            plan_id="0" * 64, plan_revision=0, stages=(), exchanges=(),
+            residency=ResidencyPlan(simultaneous_groups=(), control_reserved_bytes=1,
+                consumer_reserved_slots=1, required_spill_bytes=0), scopes=(), sources=(), splits=splits,
+            policy=policy, bounds=bounds(), recovery=plan_value["recovery"], limitations=(),
+            constants_ref=aref("constants"))
+        physical = replace(physical, plan_id=compute_physical_digest(physical))
+        raw = encode_wire(physical, type_name="PhysicalDataflow", bounds=bounds())
+        digest = hashlib.sha256(raw).hexdigest()
+        plan_ref = ArtifactRef(digest, len(raw), "run", digest, "application/json")
         store.add(plan_ref, raw)
-        return HistoricalBinding(schema_version=hist.DATAFLOW_SEALED_SCHEMA,
-                                 original_plan_ref=plan_ref, original_code_pin_ref=code_ref,
-                                 compatible=True, reason=None, restore_image=None)
+        cut = CutRequest(sha("cut"), 1, 0, 0, (), True)
+        restore = RecoveryImage(sha("commit"), cut, (), {}, ()) if image else None
+        return HistoricalBinding(hist.DATAFLOW_SEALED_SCHEMA, plan_ref, code_ref, True, None, restore)
 
-    binding = bind({"recovery": "checkpoint",
-                    "splits": [{"required_domain": "local"}, {"required_domain": "durable"}]})
+    binding = bind({"recovery": "checkpoint", "splits": [{"required_domain": "local"}, {"required_domain": "durable"}]})
     report = hist.validate_resume_compatibility(binding, current_runtime="engine-x", store=store)
-    assert isinstance(report, CapabilityReport)
-    assert report.supported is True and report.reasons == ()
-    assert report.recovery == "checkpoint"
-    assert report.required_domains == ("durable", "local")
-    # attempt_only -> unsupported with a concrete reason, never a fabricated graph.
-    report = hist.validate_resume_compatibility(bind({"recovery": "attempt_only", "splits": []}),
-                                                current_runtime="engine-x", store=store)
-    assert report.supported is False and report.recovery == "attempt_only"
-    assert any("attempt_only" in r for r in report.reasons)
-    # delivery_only -> unsupported.
-    report = hist.validate_resume_compatibility(bind({"recovery": "delivery_only", "splits": []}),
-                                                current_runtime="engine-x", store=store)
-    assert report.supported is False and any("delivery_only" in r for r in report.reasons)
-    # Missing original code pin -> unsupported, original reference preserved.
+    assert isinstance(report, CapabilityReport) and report.supported and report.reasons == ()
+    assert report.recovery == "checkpoint" and report.required_domains == ("durable", "local")
+    absent = bind({"recovery": "checkpoint", "splits": []}, image=False)
+    report = hist.validate_resume_compatibility(absent, current_runtime="engine-x", store=store)
+    assert not report.supported and any("journal-proven" in r for r in report.reasons)
+    drift = hist.validate_resume_compatibility(binding, current_runtime="other-engine", store=store)
+    assert not drift.supported and any("platform code differs" in r for r in drift.reasons)
+    for recovery in ("attempt_only", "delivery_only"):
+        report = hist.validate_resume_compatibility(bind({"recovery": recovery, "splits": []}),
+                                                    current_runtime="engine-x", store=store)
+        assert not report.supported and report.recovery == recovery
+        assert any(recovery in r for r in report.reasons)
     store.objects.pop(code_ref.digest)
     binding = bind({"recovery": "checkpoint", "splits": []})
     report = hist.validate_resume_compatibility(binding, current_runtime="engine-x", store=store)
-    assert report.supported is False and any("code pin" in r for r in report.reasons)
+    assert not report.supported and any("code pin" in r for r in report.reasons)
     assert binding.original_code_pin_ref == code_ref
-    store.add(code_ref, b"code")
+    store.add(code_ref, code_raw)
     # Incompatible binding -> unsupported carrying its reason.
     plan_ref, raw = json_ref({"recovery": "checkpoint", "splits": []})
     store.add(plan_ref, raw)

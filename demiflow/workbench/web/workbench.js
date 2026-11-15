@@ -321,7 +321,10 @@
     function chooseLogicalNode(id,declared){
       const entry=logicalEntry();
       const projected=entry&&(entry.status==='projected'||entry.status==='sealed');
-      const group=projected?entry.dag.nodes.filter(n=>n.logical_node_id===id):[];
+      const displayId=id;
+      const occurrenceView=entry?.version==='v3';
+      const group=projected?entry.dag.nodes.filter(n=>(occurrenceView?n.occurrence_id:n.logical_node_id)===id):[];
+      if(occurrenceView&&group.length)id=group[0].logical_node_id;
       const sealed=projected&&entry.status==='sealed';
       const bridge=sealed&&entry.identity_bridge&&entry.identity_bridge.available?entry.identity_bridge:null;
       let reportId=declared||null;
@@ -331,7 +334,7 @@
         return;
       }
       if(reportId)chooseNode(reportId,{logical_node_id:id,occurrence_id:group[0]?.occurrence_id??null});
-      logicalSelected=id;logicalView.select(id);
+      logicalSelected=displayId;logicalView.select(displayId);
       if(!group.length)return;
       const node=group[0];
       const v3=sealed&&entry.version==='v3';
@@ -399,7 +402,7 @@
           if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,recovery_restriction:entry.recovery_restriction||null,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
         }
       }
-      if(entry.dag.shared_ancestors.some(s=>s.logical_node_id===id))box.append($('p','共享祖先 / 复用：该逻辑节点被多个消费方共享。','wb-caption'));
+      if(entry.dag.shared_ancestors.some(s=>occurrenceView?s.occurrence_id===displayId:s.logical_node_id===id))box.append($('p','共享祖先 / 复用：该逻辑节点被多个消费方共享。','wb-caption'));
       raw('traits',node.traits,box);raw('occurrence_id',group.map(n=>n.occurrence_id),box);
       inspector.prepend(box);
     }
