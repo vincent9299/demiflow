@@ -123,6 +123,7 @@ class DataflowExecution:
         self._completed_stages = set()
         self._durable_residency = None
         self._satisfied_consumers = {}
+        self._terminal_stop_sources = {}
         self._terminal_queue = deque()
         self._terminal_seen = 0
         self._idle = set()
@@ -164,9 +165,15 @@ class DataflowExecution:
         self._stopping = True
         self._checkpoint_deferred.clear()
         self._idle.clear()
-        for endpoint in self._endpoints.values():
+        for allocation_id, endpoint in self._endpoints.items():
             endpoint.send_business({"kind": "pause"})
             endpoint.send_business({"kind": "satisfy"})
+            # This is permission to stop this live source owner, not proof that
+            # its input was exhausted. A prefix cut must remain non-final.
+            lease = self._scheduler.leases[allocation_id]
+            self._terminal_stop_sources[allocation_id] = (
+                lease.boot_id, self._attempt(), self._fence(), self._physical.plan_revision,
+                frozenset(split.split_id for split in endpoint._assignment.source_splits))
 
     # -- helpers ----------------------------------------------------------
     def _fence(self) -> str:
@@ -975,10 +982,16 @@ class DataflowExecution:
                 pruned = set(payload.get("pruned_splits", ()))
                 if not pruned <= allowed:
                     raise DataflowError("FENCED", "pruned input differs from source assignment")
+                completed = set()
                 for split in assignment.source_splits:
-                    if split.split_id in pruned and not self._source_demand_satisfied(split.source_id):
+                    if split.split_id not in pruned:
+                        continue
+                    if self._terminal_stop_authorized(event, split.split_id):
+                        continue  # Driver demand permits a prefix, never an EOI fact.
+                    if not self._source_demand_satisfied(split.source_id):
                         raise DataflowError("FENCED", "source stop lacks downstream completion proof")
-                self._checkpoint.observe_input_satisfied(pruned)
+                    completed.add(split.split_id)
+                self._checkpoint.observe_input_satisfied(completed)
                 self._checkpoint.observe_source_eoi(cursors)
                 self._done.add(event.allocation_id)
         elif event.kind == "idle":
@@ -993,6 +1006,12 @@ class DataflowExecution:
                 raise DataflowError("FENCED", "cut contribution differs from worker assignment")
             self._checkpoint.contribute(contribution)
             self._contributions[contribution.participant_id] = contribution
+
+    def _terminal_stop_authorized(self, event, split_id):
+        authorized = self._terminal_stop_sources.get(event.allocation_id)
+        return (authorized is not None
+                and authorized[:4] == (event.boot_id, event.attempt, event.fence, event.plan_revision)
+                and split_id in authorized[4])
 
     def _source_demand_satisfied(self, occurrence):
         outgoing = [edge for edge in self._graph.edges if edge.producer == occurrence]
