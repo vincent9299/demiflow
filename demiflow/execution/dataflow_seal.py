@@ -17,6 +17,7 @@ import secrets
 from dataclasses import replace
 from pathlib import Path
 from collections.abc import Mapping
+from time import time_ns
 
 from ..data.datasink import Datasink
 from ..data.plan import CallableSpec, LogicalPlan, MapOp
@@ -381,6 +382,15 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
              "constants_ref": _artifact_json(constants_ref),
              "graph_digest": compute_graph_digest(graph),
              "physical_digest": compute_physical_digest(physical)}
+    original = context.journal.source_binding(action.action_id + _SEAL_KEY)
+    if original is None:
+        # Match the existing artifact/workbench epoch-millisecond contract.
+        # This is journal metadata, never part of graph/plan/artifact identity.
+        facts["sealed_at"] = time_ns() // 1_000_000
+    elif type(original) is dict and "sealed_at" in original:
+        facts["sealed_at"] = original["sealed_at"]
+    # Older v3 seals omitted the timestamp. Re-sealing must preserve that exact
+    # fact rather than inventing a time or rewriting immutable history.
     # The immutable journal fact is written last: a failed seal never starts a worker,
     # and a differing re-seal of the same action is refused by the native binding.
     try:
