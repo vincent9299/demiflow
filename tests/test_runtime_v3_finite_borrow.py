@@ -120,6 +120,23 @@ def test_old_owned_prefix_and_pending_snapshot_remain_readable_in_order(tmp_path
             with pytest.raises(DataflowError):_SpoolPort('input',svc,4).restore({**image,key:value})
 
 
+@pytest.mark.parametrize('routing', ['forward', 'rebalance', 'broadcast', 'hash', 'target'])
+def test_canonical_finite_payload_cannot_bypass_provenance_validation(tmp_path, routing):
+    from demiflow.execution.exchange.dataflow_bridge import _codec_dumps
+    with store_fixture(tmp_path) as (_, store, _):
+        svc, spec = fixture(store, routing=routing)
+        def edit(part, items):
+            if part != 'p1':
+                return
+            for item in items:
+                payload = json.loads(item['document'])
+                payload['sp']['parent_record_ids'] = ['invalid-parent-digest']
+                item['document'] = _codec_dumps(payload).decode()
+        seal, _, _ = make_seal(svc, spec, edit=edit)
+        with pytest.raises(DataflowError, match='parent_record_id'):
+            validate_finite_members(svc, seal, spec, target='c0')
+
+
 @pytest.mark.parametrize('fault',['route','unselected_payload','count','membership','digest','truncated'])
 def test_full_scan_rejects_every_member_before_any_reference_is_returned(tmp_path,fault):
     with store_fixture(tmp_path) as (_,store,_):

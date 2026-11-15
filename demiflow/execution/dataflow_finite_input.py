@@ -10,7 +10,7 @@ from .contracts.dataflow import ArtifactRef
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_handles import _ChunkStream
 from .dataflow_segments import block_chunks, block_totals
-from .exchange.dataflow_bridge import _decode_record_document
+from .exchange.dataflow_bridge import _decode_record_document, _validate_record
 
 _FIELDS = {'schema', 'seal_ref', 'manifest_ref', 'edge_id', 'producer', 'target',
            'rows', 'bytes', 'total_rows', 'total_bytes'}
@@ -81,6 +81,7 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes):
                 _fail('finite record frame or target differs from channel')
             record = _decode_record_document(item['document'].encode(), record_id=item['record_id'],
                 sequence=item['sequence'], max_bytes=services.bounds.max_row_bytes)
+            _validate_record(record)
             if record.encoded_bytes > services.bounds.max_row_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite payload exceeds max_row_bytes')
             if record.payload_ref is not None:
