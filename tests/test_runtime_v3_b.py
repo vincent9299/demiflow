@@ -1,1207 +1,554 @@
-"""Lane B unit contracts for the unified v3 worker runtime (gate G-B).
+"""B001–B020 against real sealed DTOs, journal RPC and the unified graph runner.
 
-Each test calls the real production symbol. Upstream lanes that have not landed
-in this isolated tree are replaced by strict, spec-bound test-domain fakes
-installed in sys.modules; production code keeps plain lazy imports (no fallback).
-Every test process asserts that demiflow and its loaded submodules come from
-this worktree (IL012).
+Only the network/provider boundary is in-process: leases are registered with the
+real driver service and worker commands go through its real dispatch. No mirror
+DTOs, sys.modules replacement, fake compiler/store/kernel or private second DB.
+Actual host allocation/Local/Ray end-to-end coverage lives in the integration gates.
 """
-from __future__ import annotations
-
+from contextlib import contextmanager
+from dataclasses import asdict, replace
 import json
-import glob
-import os
-import shutil
+from pathlib import Path
 import socket
-import subprocess
-import sys
 import threading
 import time
-import types
+from types import SimpleNamespace
 import uuid
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
 
 import pytest
+
+from demiflow import data
+from demiflow.execution.contracts.dataflow import (
+    CutRequest, RecoveryImage, WorkerLease, thaw_record_value,
+)
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow_codec import runtime_scope_id, encode_wire
+from demiflow.execution.dataflow_hosts import ControlMailbox
+from demiflow.execution.dataflow_services import make_runtime_services
+from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
+from demiflow.execution.worker.runtime import WorkerRuntime
+from test_runtime_v3_real_seams import prepared
 
 TREE = Path(__file__).resolve().parents[1]
 
 
 def _assert_tree_binding():
     import demiflow
-    assert Path(demiflow.__file__).resolve().is_relative_to(TREE), demiflow.__file__
-    for name, module in list(sys.modules.items()):
-        if name == "demiflow" or name.startswith("demiflow."):
-            file = getattr(module, "__file__", None)
-            if file:
-                assert Path(file).resolve().is_relative_to(TREE), (name, file)
+    assert Path(demiflow.__file__).resolve().is_relative_to(TREE)
 
 
-_assert_tree_binding()
+def _increment(row):
+    return {'x': row['x'] + 1}
 
 
-# ---------------------------------------------------------------------------
-# Spec-bound frozen DTOs (mirrors interfaces.pyi field sets).
-# ---------------------------------------------------------------------------
-@dataclass(frozen=True)
-class ArtifactRef:
-    digest: str = "d" * 64
-    size_bytes: int = 1
-    store_id: str = "store"
-    key: str = "k"
-    media_type: str = "application/json"
-
-
-@dataclass(frozen=True)
-class Bounds:
-    max_nodes: int = 4096
-    max_edges: int = 16384
-    max_partitions: int = 4096
-    max_depth: int = 64
-    max_control_bytes: int = 1 << 20
-    max_row_bytes: int = 1 << 20
-    max_batch_bytes: int = 1 << 22
-    max_resident_bytes: int = 1 << 24
-    max_spill_bytes: int = 1 << 24
-    max_state_bytes: int = 1 << 22
-    max_pending_events: int = 64
-    max_open_files: int = 256
-    max_output_rows: int = 1 << 20
-    timeout_ms: int = 5000
-
-
-@dataclass(frozen=True)
-class WorkerLease:
-    allocation_id: str = "alloc"
-    boot_id: str = "boot"
-    stage_id: str = "s0"
-    partition_ids: tuple = ("p0",)
-    host_id: str = "host"
-    endpoint_ref: str = "ep"
-    grant_ref: ArtifactRef = field(default_factory=ArtifactRef)
-    expires_at_ms: int = 1 << 40
-
-
-@dataclass(frozen=True)
-class SealedExecution:
-    logical_ref: ArtifactRef = field(default_factory=ArtifactRef)
-    physical_ref: ArtifactRef = field(default_factory=ArtifactRef)
-    programs: tuple = ()
-    code_pin_ref: ArtifactRef = field(default_factory=ArtifactRef)
-    identity_bridge_ref: ArtifactRef = field(default_factory=ArtifactRef)
-    source_refs: tuple = ()
-    constants_ref: ArtifactRef = field(default_factory=ArtifactRef)
-
-
-@dataclass(frozen=True)
-class InputPort:
-    name: str = "in"
-    requirement: str = "incremental"
-    ordering: str = "none"
-    schema_ref: object = None
-
-
-@dataclass(frozen=True)
-class KernelSpec:
-    kind: str = "map"
-    implementation_ref: object = None
-    configuration: dict = field(default_factory=dict)
-    inputs: tuple = (InputPort(),)
-    state: str = "none"
-    effect: str = "pure"
-    resource_role: str = "cpu"
-    profile: object = None
-    output_bound_bytes: int = 1 << 20
-    mergeable: bool = True
-
-
-@dataclass(frozen=True)
-class GraphNode:
-    occurrence_id: str = "occ0"
-    semantic_id: str = "sem0"
-    kind: str = "transform"
-    kernel: KernelSpec = field(default_factory=KernelSpec)
-    program_ref: object = None
-    shared_token: str = "0"
-
-
-@dataclass(frozen=True)
-class GraphEdge:
-    edge_id: str = "e0"
-    producer: str = "occ0"
-    output_port: str = "out"
-    consumer: str = "occ1"
-    input_port: str = "in"
-
-
-@dataclass(frozen=True)
-class DataflowGraph:
-    schema: str = "demiflow.dataflow_graph.v3"
-    action_id: str = "action"
-    dag_id: str = "dag"
-    nodes: tuple = (GraphNode(),)
-    edges: tuple = ()
-    terminals: tuple = ()
-    sources: tuple = ("occ0",)
-
-
-@dataclass(frozen=True)
-class SourceSnapshot:
-    source_id: str = "occ0"
-    kind: str = "items"
-    immutable_identity: dict = field(default_factory=dict)
-    finite: bool = True
-    replay: str = "seek"
-    manifest_ref: object = None
-
-
-@dataclass(frozen=True)
-class SourceSplit:
-    split_id: str = "split0"
-    source_id: str = "occ0"
-    locator: dict = field(default_factory=dict)
-    start_cursor: dict = field(default_factory=dict)
-    estimated_bytes: object = None
-    required_domain: str = "local"
-
-
-@dataclass(frozen=True)
-class StageSpec:
-    stage_id: str = "s0"
-    occurrences: tuple = ("occ0",)
-    partitions: tuple = ("p0",)
-    profile: object = None
-    replica_min: int = 1
-    replica_target: int = 1
-    replica_max: int = 1
-    resident_bytes: int = 1024
-    output_bytes: int = 1024
-    state_bytes: int = 1024
-    kernel_refs: tuple = ()
-
-
-@dataclass(frozen=True)
-class ExchangeSpec:
-    channel_id: str = "ch0"
-    edge_id: str = "e0"
-    producer_partitions: tuple = ("p0",)
-    consumer_partitions: tuple = ("p0",)
-    mode: str = "memory_incremental"
-    routing: str = "forward"
-    keys: tuple = ()
-    scope_id: object = None
-    route_epoch: int = 0
-    credit_rows: int = 16
-    credit_bytes: int = 1 << 20
-    storage_bytes: int = 1 << 22
-    read_domain: str = "local"
-    reason: str = "test"
-
-
-@dataclass(frozen=True)
-class ResidencyPlan:
-    simultaneous_groups: tuple = ()
-    control_reserved_bytes: int = 1024
-    consumer_reserved_slots: int = 1
-    required_spill_bytes: int = 1024
-
-
-@dataclass(frozen=True)
-class FiniteScope:
-    scope_id: str = "scope"
-    generation: int = 0
-    membership: tuple = ()
-    completion_condition: str = "input_eoi"
-
-
-@dataclass(frozen=True)
-class RuntimePolicy:
-    provider: str = "local"
-    durability: str = "ephemeral"
-    default_partitions: int = 1
-    max_replicas: int = 1
-    fusion: bool = True
-    checkpoint_rows: int = 1024
-    checkpoint_interval_ms: int = 1000
-    fairness_quantum_bytes: int = 1 << 16
-    control_timeout_ms: int = 1000
-    store_id: str = "store"
-    required_recovery: str = "attempt_only"
-
-
-@dataclass(frozen=True)
-class PhysicalDataflow:
-    schema: str = "demiflow.physical_dataflow.v3"
-    dag_id: str = "dag"
-    plan_id: str = "plan"
-    plan_revision: int = 1
-    stages: tuple = (StageSpec(),)
-    exchanges: tuple = ()
-    residency: ResidencyPlan = field(default_factory=ResidencyPlan)
-    scopes: tuple = ()
-    sources: tuple = (SourceSnapshot(),)
-    splits: tuple = (SourceSplit(),)
-    policy: RuntimePolicy = field(default_factory=RuntimePolicy)
-    bounds: Bounds = field(default_factory=Bounds)
-    recovery: str = "attempt_only"
-    limitations: tuple = ()
-    constants_ref: ArtifactRef = field(default_factory=ArtifactRef)
-
-
-@dataclass(frozen=True)
-class WorkerAssignment:
-    schema: str = "demiflow.dataflow_assignment.v3"
-    run_id: str = "run"
-    action_id: str = "action"
-    attempt: int = 1
-    fence: str = "fence"
-    plan_id: str = "plan"
-    plan_revision: int = 1
-    lease: WorkerLease = field(default_factory=WorkerLease)
-    sealed: SealedExecution = field(default_factory=SealedExecution)
-    stages: tuple = (StageSpec(),)
-    inputs: tuple = ()
-    outputs: tuple = (ExchangeSpec(),)
-    source_splits: tuple = (SourceSplit(),)
-    restore_refs: tuple = ()
-    bounds: Bounds = field(default_factory=Bounds)
-
-
-@dataclass(frozen=True)
-class SourceCursor:
-    split_id: str = "split0"
-    offset: dict = field(default_factory=dict)
-    next_sequence: int = 0
-    end_of_input: bool = False
-    lease_ref: object = None
-    pending_refs: tuple = ()
-
-
-@dataclass(frozen=True)
-class Record:
-    record_id: str = "r0"
-    source_position: dict = field(default_factory=dict)
-    payload_ref: object = None
-    inline: object = None
-    encoded_bytes: int = 8
-    sequence: int = 0
-
-
-@dataclass(frozen=True)
-class SourcePoll:
-    status: str = "record"
-    record: object = None
-    retry_after_ms: int = 0
-
-
-@dataclass(frozen=True)
-class CutRequest:
-    cut_id: str = "cut0"
-    sequence: int = 1
-    plan_revision: int = 1
-    route_epoch: int = 0
-    participants: tuple = ("s0:p0",)
-    final: bool = False
-
-
-@dataclass(frozen=True)
-class CutContribution:
-    cut_id: str = "cut0"
-    participant_id: str = "s0:p0"
-    boot_id: str = "boot"
-    sources: tuple = ()
-    operator_states: dict = field(default_factory=dict)
-    channels: dict = field(default_factory=dict)
-    buffers: tuple = ()
-    effects: tuple = ()
-    sinks: dict = field(default_factory=dict)
-    final: bool = False
-
-
-@dataclass(frozen=True)
-class RecoveryImage:
-    commit_id: str = "commit"
-    cut: CutRequest = field(default_factory=CutRequest)
-    contributions: tuple = ()
-    confirmed_sinks: dict = field(default_factory=dict)
-    source_vector: tuple = ()
-
-
-@dataclass(frozen=True)
-class WorkerEvent:
-    schema: str = "demiflow.dataflow_event.v3"
-    kind: str = "progress"
-    operation_id: str = "op"
-    run_id: str = "run"
-    attempt: int = 1
-    fence: str = "fence"
-    allocation_id: str = "alloc"
-    boot_id: str = "boot"
-    plan_revision: int = 1
-    scope_id: str = "action"
-    controller_epoch: int = 1
-    payload_ref: object = None
-    payload: object = None
-
-
-@dataclass(frozen=True)
-class ControlReply:
-    operation_id: str = "op"
-    status: str = "ok"
-    payload: object = None
-    payload_ref: object = None
-    error_code: object = None
-
-
-@dataclass(frozen=True)
-class CreditLease:
-    operation_id: str = "op"
-    channel_id: str = "ch0"
-    reader_id: str = "boot"
-    rows: int = 1
-    size_bytes: int = 8
-
-
-@dataclass(frozen=True)
-class RoutedRecord:
-    reader_id: str = "boot"
-    delivery_id: str = "d0"
-    record: Record = field(default_factory=Record)
-
-
-@dataclass(frozen=True)
-class EncodedRecord:
-    record_id: str = "r0"
-    encoding: str = "json"
-    data: object = None
-    ref: object = None
-    encoded_bytes: int = 8
-    decoded_upper_bytes: int = 64
-    sequence: int = 0
-
-
-@dataclass(frozen=True)
-class LoadedProgram:
-    kind: str = "callable"
-    value: object = None
-    digest: str = "d" * 64
-
-
-@dataclass(frozen=True)
-class WorkerStep:
-    processed: int = 0
-    blocked: bool = False
-    end_of_input: bool = False
-    events: tuple = ()
-
-
-class DataflowError(Exception):
-    def __init__(self, code, message, *, retryable=False, context=None):
-        super().__init__(message)
-        self.code = code
-        self.retryable = retryable
-        self.context = context or {}
-
-
-# ---------------------------------------------------------------------------
-# Test-domain fakes for upstream lanes (strict frozen signatures).
-# ---------------------------------------------------------------------------
-class FakeJournal:
-    def __init__(self):
-        self.grant_checks = 0
-        self.opened_db = False
-
-    def check_grant(self):
-        self.grant_checks += 1
-
-    def native_request(self, command):
-        raise AssertionError("not used in unit scope")
-
-    def queue(self, command):
-        raise AssertionError("not used in unit scope")
-
-    def effect(self, command):
-        raise AssertionError("not used in unit scope")
-
-    def artifact(self, command):
-        raise AssertionError("not used in unit scope")
-
-    def reserve(self, operation_id, amounts):
-        pass
-
-    def read_action(self, action_id):
-        return {}
-
-    def read_configuration(self):
-        return {}
-
-
-class FakeStore:
-    def __init__(self):
-        self.objects = {}
-
-    def put(self, chunks, *, max_bytes, media_type):
-        return ArtifactRef()
-
-    def read(self, ref, *, max_bytes):
-        yield b"{}"
-
-    def inspect(self, ref):
-        return True
-
-    def retain(self, ref, *, owner):
-        pass
-
-    def release(self, ref, *, owner):
-        pass
-
-
-class FakeMailbox:
-    def __init__(self):
-        self.events = []
-        self.inbound = []
-        self.closed = False
-        self.fail_next = False
+class DirectTransport:
+    """A network boundary adapter; every authority decision stays native."""
+    def __init__(self, driver):
+        self.store, self.service = driver.store, driver.journal_service
+        self.requests = []
 
     def request(self, event, *, deadline_ms):
-        self.events.append(event)
-        if self.fail_next:
-            self.fail_next = False
-            return ControlReply(operation_id=event.operation_id, status="error",
-                                error_code="INTERNAL_PROTOCOL")
-        return ControlReply(operation_id=event.operation_id, status="ok")
+        self.requests.append(event)
+        return self.service.dispatch(event)
 
-    def drain(self, *, max_events):
-        taken = tuple(self.inbound[:max_events])
-        del self.inbound[:max_events]
-        return taken
+    def check_stop(self):
+        self.service._action.context.check_stop()
 
-    def deliver(self, reply):
-        pass
 
-    def close(self):
-        self.closed = True
-
-
-class FakeKernel:
-    instances = 0
-
-    def __init__(self, spec, *, partition_id, slow=False, fail_close=False):
-        FakeKernel.instances += 1
-        self.spec = spec
-        self.partition_id = partition_id
-        self.started = False
-        self.closed = False
-        self.aclosed = False
-        self.slow = slow
-        self.fail_close = fail_close
-        self.instance = None
-        self.pushed = []
-        self._state_ref = None
-
-    def start(self):
-        self.started = True
-
-    def push(self, port, record):
-        self.pushed.append((port, record))
-        if self.slow:
-            time.sleep(0.2)
-        yield record
-
-    def finish(self, port):
-        return iter(())
-
-    def snapshot(self):
-        return self._state_ref
-
-    def restore(self, ref):
-        self._state_ref = ref
-
-    def close(self):
-        self.closed = True
-        if self.fail_close:
-            raise RuntimeError("kernel close failed")
-
-    def aclose(self):
-        self.aclosed = True
-
-
-class FakeReader:
-    def __init__(self, snapshot, split, *, cursor, records=(), eoi_after=True, slow=False):
-        self.snapshot_obj = snapshot
-        self.split = split
-        self.cursor = cursor
-        self._records = list(records)
-        self._index = 0
-        self._eoi = False
-        self.closed = False
-        self.eoi_after = eoi_after
-        self.slow = slow
-
-    def open(self, split, cursor):
-        pass
-
-    def next_record(self):
-        if self.slow:
-            time.sleep(0.3)
-        if self._index < len(self._records):
-            record = self._records[self._index]
-            self._index += 1
-            return SourcePoll(status="record", record=record)
-        self._eoi = True
-        return SourcePoll(status="eoi")
-
-    def snapshot(self):
-        return SourceCursor(split_id=self.split.split_id, next_sequence=self._index,
-                            end_of_input=self._eoi)
-
-    def close(self):
-        self.closed = True
-
-
-class FakeChannels:
-    """ChannelSet surface is close() only; consumption is module-level (X lane)."""
-
-    def __init__(self, specs, *, credit=True):
-        self.specs = specs
-        self.closed = False
-        self.credit = credit
-        self.published = []
-        self.routed = []
-        self.fail_close = False
-
-    def close(self):
-        self.closed = True
-        if self.fail_close:
-            raise RuntimeError("channel close failed")
-
-
-def _make_services(assignment, *, mailbox=None):
-    journal = FakeJournal()
-    store = FakeStore()
-    services = types.SimpleNamespace(
-        store=store, journal=journal, bounds=assignment.bounds, assignment=assignment,
-        clock_ms=lambda: int(time.time() * 1000), check_stop=lambda: None,
-        constants={}, programs={})
-    return services
-
-
-def _install_fakes(monkeypatch, *, kernel_slow=False, kernel_fail_close=False,
-                   channel_credit=True, channel_fail_close=False, records=()):
-    """Install spec-bound fake upstream modules; return a control namespace."""
-    ns = types.SimpleNamespace()
-    ns.kernel_slow = kernel_slow
-    ns.kernel_fail_close = kernel_fail_close
-    ns.channel_credit = channel_credit
-    ns.channel_fail_close = channel_fail_close
-    ns.records = records
-    ns.reader_slow = False
-    ns.make_kernel_calls = 0
-    ns.opened_journal_db = False
-    ns.resolved = []
-
-    dto = types.ModuleType("demiflow.execution.contracts.dataflow")
-    for name in ("ArtifactRef", "Bounds", "WorkerLease", "SealedExecution", "InputPort",
-                 "KernelSpec", "GraphNode", "GraphEdge", "DataflowGraph", "SourceSnapshot",
-                 "SourceSplit", "StageSpec", "ExchangeSpec", "ResidencyPlan", "FiniteScope",
-                 "RuntimePolicy", "PhysicalDataflow", "WorkerAssignment", "SourceCursor",
-                 "Record", "SourcePoll", "CutRequest", "CutContribution", "RecoveryImage",
-                 "WorkerEvent", "ControlReply", "CreditLease", "RoutedRecord", "EncodedRecord",
-                 "LoadedProgram", "WorkerStep"):
-        setattr(dto, name, globals()[name])
-    errors = types.ModuleType("demiflow.execution.contracts.dataflow_errors")
-    errors.DataflowError = DataflowError
-    codec = types.ModuleType("demiflow.execution.contracts.dataflow_codec")
-    codec.encode_wire = lambda value, *, type_name, bounds: json.dumps(asdict(value)).encode()
-    codec.decode_wire = lambda raw, *, type_name, bounds: WorkerAssignment(**json.loads(raw))
-
-    seal = types.ModuleType("demiflow.execution.dataflow_seal")
-    ns.graph = DataflowGraph()
-    ns.physical = PhysicalDataflow()
-    ns.sealed = SealedExecution()
-
-    def load_dataflow(directory, action_id, *, store, bounds):
-        return ns.graph, ns.physical, ns.sealed
-
-    def verify_dataflow_program(ref, *, expected_pin, store, bounds):
-        if expected_pin.get("code_pin") != ns.sealed.code_pin_ref.digest:
-            raise DataflowError("CODE_MISMATCH", "pin mismatch")
-        return LoadedProgram()
-
-    seal.load_dataflow = load_dataflow
-    seal.verify_dataflow_program = verify_dataflow_program
-
-    artifacts = types.ModuleType("demiflow.execution.dataflow_artifacts")
-    ns.bundle_dir = None
-
-    def fetch_runtime_bundle(ref, *, cache, store, bounds):
-        Path(cache).mkdir(parents=True, exist_ok=True)
-        ns.bundle_dir = Path(cache)
-        return Path(cache)
-
-    artifacts.fetch_runtime_bundle = fetch_runtime_bundle
-
-    services_mod = types.ModuleType("demiflow.execution.dataflow_services")
-
-    def make_runtime_services(assignment, *, transport, cache):
-        return _make_services(assignment)
-
-    services_mod.make_runtime_services = make_runtime_services
-
-    hosts = types.ModuleType("demiflow.execution.dataflow_hosts")
-
-    class ControlMailbox(FakeMailbox):
-        def __init__(self, *, bounds, check_stop):
-            super().__init__()
-
-    hosts.ControlMailbox = ControlMailbox
-
-    kernels = types.ModuleType("demiflow.execution.kernels.dataflow")
-
-    def make_kernel(spec, *, services, partition_id):
-        ns.make_kernel_calls += 1
-        return FakeKernel(spec, partition_id=partition_id, slow=ns.kernel_slow,
-                          fail_close=ns.kernel_fail_close)
-
-    kernels.make_kernel = make_kernel
-    kernels.invoke_unary = lambda spec, record, *, instance, services: iter((record,))
-    kernels.invoke_batch = lambda spec, records, *, instance, services: iter(records)
-    kernels.finish_kernel = lambda kernel, *, port, services: iter(())
-
-    sources = types.ModuleType("demiflow.execution.dataflow_sources")
-
-    def open_source_reader(snapshot, split, *, cursor, services):
-        return FakeReader(snapshot, split, cursor=cursor, records=ns.records, slow=ns.reader_slow)
-
-    sources.open_source_reader = open_source_reader
-
-    channels = types.ModuleType("demiflow.execution.exchange.dataflow_channels")
-    ns.channels = None
-
-    def open_channels(specs, *, services):
-        ns.channels = FakeChannels(specs, credit=ns.channel_credit)
-        ns.channels.fail_close = ns.channel_fail_close
-        return ns.channels
-
-    def restore_channels(specs, refs, *, services):
-        ns.channels = FakeChannels(specs, credit=ns.channel_credit)
-        return ns.channels
-
-    def route_record(record, *, spec, state):
-        state.routed.append(record)
-        return (RoutedRecord(record=record),)
-
-    def reserve_credit(channel_id, reader_id, *, rows, size_bytes, operation_id, state):
-        if not state.credit:
-            raise DataflowError("BUDGET_EXCEEDED", "no credit")
-        return CreditLease(operation_id=operation_id, channel_id=channel_id, reader_id=reader_id)
-
-    def snapshot_channels(channels, *, cut, store):
-        return {spec.channel_id: ArtifactRef() for spec in channels.specs}
-
-    def close_channels(channels, *, reason, deadline_ms):
-        channels.close()
-
-    def encode_record(record, *, bounds):
-        return EncodedRecord(record_id=record.record_id)
-
-    def resolve_record(encoded, *, store, bounds):
-        ns.resolved.append(encoded)
-        return Record(record_id=encoded.record_id)
-
-    def publish_segment(records, *, spec, store, operation_id):
-        ns.channels.published.extend(records)
-        return ArtifactRef()
-
-    channels.open_channels = open_channels
-    channels.restore_channels = restore_channels
-    channels.route_record = route_record
-    channels.reserve_credit = reserve_credit
-    channels.snapshot_channels = snapshot_channels
-    channels.close_channels = close_channels
-    channels.encode_record = encode_record
-    channels.resolve_record = resolve_record
-    channels.publish_segment = publish_segment
-
-    bridge = types.ModuleType("demiflow.execution.exchange.dataflow_bridge")
-    bridge.cut_to_barrier = lambda request, *, channel_id, sequence: {
-        "cut_id": request.cut_id, "channel_id": channel_id, "sequence": sequence}
-
-    models = types.ModuleType("demiflow.execution.dataflow_models")
-    models.restore_actor_state = lambda instance, *, ref, services: None
-    models.snapshot_actor_state = lambda instance, *, services: ArtifactRef()
-
-    sinks = types.ModuleType("demiflow.execution.dataflow_sinks")
-    sinks.prepare_sink_partition = lambda records, *, spec, services: ArtifactRef()
-
-    modules = {
-        "demiflow.execution.contracts.dataflow": dto,
-        "demiflow.execution.contracts.dataflow_errors": errors,
-        "demiflow.execution.contracts.dataflow_codec": codec,
-        "demiflow.execution.dataflow_seal": seal,
-        "demiflow.execution.dataflow_artifacts": artifacts,
-        "demiflow.execution.dataflow_services": services_mod,
-        "demiflow.execution.dataflow_hosts": hosts,
-        "demiflow.execution.kernels.dataflow": kernels,
-        "demiflow.execution.dataflow_sources": sources,
-        "demiflow.execution.exchange.dataflow_channels": channels,
-        "demiflow.execution.exchange.dataflow_bridge": bridge,
-        "demiflow.execution.dataflow_models": models,
-        "demiflow.execution.dataflow_sinks": sinks,
-    }
-    import importlib
-    doubles = []
-    for name, module in modules.items():
-        try:
-            importlib.import_module(name)
-        except ImportError:
-            monkeypatch.setitem(sys.modules, name, module)
-            doubles.append(name)
-    ns.modules = modules
-    ns.test_doubles = doubles
-    return ns
-
-
-@pytest.fixture
-def fakes(monkeypatch):
+@contextmanager
+def worker_env(tmp_path, *, rows=None):
     _assert_tree_binding()
-    before = set(glob.glob("/tmp/demiflow-worker-cache-*"))
-    ns = _install_fakes(monkeypatch)
-    yield ns
-    for directory in set(glob.glob("/tmp/demiflow-worker-cache-*")) - before:
-        shutil.rmtree(directory, ignore_errors=True)
+    ds = data.from_items([{'x': 1}, {'x': 2}] if rows is None else rows).map(_increment)
+    workers = []
+    with prepared(tmp_path, ds) as (execution, driver):
+        def make(kind='source', *, load=True):
+            nodes = {n.occurrence_id: n for n in execution._graph.nodes}
+            stage = next(s for s in execution._physical.stages
+                         if any(nodes[o].kind == kind for o in s.occurrences))
+            serial = len(workers)
+            grant = {'grant_id': 'b-grant-' + str(serial),
+                'run_id': execution._action.context.ref.run_id,
+                'attempt': execution._action.context.attempt, 'fence': execution._action.context.fence,
+                'scope_id': runtime_scope_id(execution._physical.plan_id, execution._action.context.attempt),
+                'allocation_id': 'b-alloc-' + str(serial), 'boot_id': 'b-boot-' + str(serial),
+                'controller_epoch': execution._action.context.attempt,
+                'plan_revision': execution._physical.plan_revision,
+                'expires_at_ms': int(time.time() * 1000) + 60000}
+            raw = document(grant)
+            grant_ref = driver.store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
+            lease = WorkerLease(grant['allocation_id'], grant['boot_id'], stage.stage_id,
+                stage.partitions, 'local', 'in-process-test-boundary', grant_ref, grant['expires_at_ms'])
+            assignment = execution._assignment(lease, stage)
+            driver.journal_service.register_worker(lease, stage.occurrences)
+            transport = DirectTransport(driver)
+            services = make_runtime_services(assignment, transport=transport, cache=tmp_path / 'services-cache')
+            mailbox = ControlMailbox(bounds=services.bounds, check_stop=services.check_stop)
+            worker = DataflowWorkerExecutor(services=services, mailbox=mailbox)
+            item = SimpleNamespace(worker=worker, services=services, mailbox=mailbox,
+                                   assignment=assignment, transport=transport, grant=grant)
+            workers.append(item)
+            if load:
+                worker.load(assignment)
+            return item
+        try:
+            yield SimpleNamespace(make=make, execution=execution, driver=driver, workers=workers)
+        finally:
+            for item in workers:
+                item.worker.close()
 
 
-def _executor(fakes, assignment=None):
-    from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
-    assignment = assignment or WorkerAssignment()
-    services = _make_services(assignment)
-    mailbox = FakeMailbox()
-    executor = DataflowWorkerExecutor(services=services, mailbox=mailbox)
-    return executor, services, mailbox
+def _cut(item, *, final=False, sequence=0):
+    return CutRequest(identity(['B-cut', sequence]), sequence, item.assignment.plan_revision,
+                      0, item.worker._participant_ids(), final)
 
 
-# ---------------------------------------------------------------------------
-# B001-B010 DataflowWorkerExecutor
-# ---------------------------------------------------------------------------
-def test_b001(fakes):
-    from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
-    assignment = WorkerAssignment()
-    services = _make_services(assignment)
-    mailbox = FakeMailbox()
-    executor = DataflowWorkerExecutor(services=services, mailbox=mailbox)
-    assert executor.assignment is None
-    assert executor._state == "constructed"
-    assert fakes.make_kernel_calls == 0
-    assert services.journal.opened_db is False
-    assert executor._kernels == {} and executor._readers == {}
+def _events(item):
+    return item.mailbox.drain(max_events=item.services.bounds.max_pending_events)
 
 
-def test_b002(fakes):
-    from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    assert executor._state == "loaded"
-    assert executor.assignment is not None
-    # stale boot fails before business (services bound to the live boot)
-    other = WorkerAssignment(lease=WorkerLease(boot_id="stale"))
-    fresh, _, _ = _executor(fakes)
-    with pytest.raises(DataflowError) as exc:
-        fresh.load(other)
-    assert exc.value.code == "FENCED"
-    # wrong code pin fails before business
-    fakes.sealed = SealedExecution(code_pin_ref=ArtifactRef(digest="f" * 64))
-    bad, _, _ = _executor(fakes)
-    with pytest.raises(DataflowError) as exc2:
-        bad.load(WorkerAssignment())
-    assert exc2.value.code == "CODE_MISMATCH"
+def _launch(item, tmp_path, *, cache=True):
+    config = {'assignment': item.assignment, 'transport': item.transport,
+              'mailbox': ControlMailbox(bounds=item.services.bounds, check_stop=item.services.check_stop),
+              'entrypoint': 'dataflow_worker_v3', 'code_pin': item.assignment.sealed.code_pin_ref.digest,
+              'limits': {'max_row_bytes': item.services.bounds.max_row_bytes,
+                         'max_resident_bytes': item.services.bounds.max_resident_bytes},
+              'bounds': asdict(item.services.bounds)}
+    if cache:
+        config['cache'] = str(tmp_path / 'runtime-cache')
+    return {'directory': str(tmp_path), 'run_id': item.assignment.run_id,
+            'scope_id': item.grant['scope_id'], 'allocation_id': item.grant['allocation_id'],
+            'boot_id': item.grant['boot_id'], 'controller_epoch': item.grant['controller_epoch'],
+            'capabilities': ['cpu'], 'grant': {k: v for k, v in item.grant.items() if k != 'plan_revision'},
+            'artifact_digest_observed': item.assignment.sealed.code_pin_ref.digest, 'dataflow_v3': config}
 
 
-def test_b003(fakes):
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    contribution = CutContribution(
-        participant_id="s0:p0", boot_id="boot",
-        sources=(SourceCursor(split_id="split0"),),
-        operator_states={"occ0": ArtifactRef()},
-        channels={"ch0": ArtifactRef()}, buffers=(ArtifactRef(),))
-    image = RecoveryImage(contributions=(contribution,))
-    executor.restore(image)
-    assert executor._state == "restored"
-    assert "split0" in executor._restored_cursors
-    # missing buffer ref rejected
-    executor2, _, _ = _executor(fakes)
-    executor2.load(WorkerAssignment())
-    bad = CutContribution(participant_id="s0:p0", boot_id="boot",
-                          channels={"ch0": None}, buffers=(None,))
-    with pytest.raises(DataflowError) as exc:
-        executor2.restore(RecoveryImage(contributions=(bad,)))
-    assert exc.value.code == "INVALID_CONTRACT"
+def _activate(runtime, item):
+    pin = item.assignment.sealed.code_pin_ref.digest
+    runtime._execute('VerifyArtifactAndCapabilities',
+        {'artifact_manifest_ref': {'manifest_id': pin, 'sha256': pin}, 'required_capabilities': ['cpu']},
+        int(time.time() * 1000))
+    runtime._execute('Restore', {'state_refs': []}, int(time.time() * 1000))
+    runtime._execute('Activate', {'grant_ref': item.grant['grant_id']}, int(time.time() * 1000))
 
 
-def test_b004(fakes):
-    fakes.records = (Record(record_id="r0"), Record(record_id="r1"))
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    # no activation -> no source read
-    with pytest.raises(DataflowError) as exc:
-        executor.step(max_records=1, deadline_ms=100)
-    assert exc.value.code == "FENCED"
-    executor.start()
-    assert executor._state == "started"
-    assert fakes.make_kernel_calls >= 1
-    assert all(k.started for k in executor._kernels.values())
-    # slow business read must not block control cancel (lock released in business)
-    fakes.reader_slow = True
-    fakes.records = (Record(record_id="slow"),)
-    slow_exec, _, _ = _executor(fakes)
-    slow_exec.load(WorkerAssignment())
-    slow_exec.start()
-    done = threading.Event()
-
-    def run_step():
-        slow_exec.step(max_records=1, deadline_ms=1000)
-        done.set()
-
-    thread = threading.Thread(target=run_step)
-    thread.start()
-    time.sleep(0.05)
-    start = time.monotonic()
-    slow_exec.cancel("test", deadline_ms=100)
-    assert time.monotonic() - start < 0.15
-    thread.join(timeout=2)
-    slow_exec.close()
+def test_b001(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        assert item.worker.assignment is None and item.worker._state == 'constructed'
+        assert not item.worker._kernels and not item.worker._readers
+        assert not hasattr(item.services.journal, '_connection')
+        item.worker.cancel('before-load', deadline_ms=100)
+        item.worker.close()
+        item.worker.close()
+        with pytest.raises(DataflowError, match='FENCED'):
+            item.worker.step(max_records=1, deadline_ms=100)
 
 
-def test_b005(fakes):
-    fakes.records = (Record(record_id="r0"),)
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    executor.start()
-    result = executor.step(max_records=4, deadline_ms=500)
-    assert result.processed >= 1
-    assert fakes.channels.published
-    # no credit -> paid call not executed early
-    fakes.channel_credit = False
-    executor2, _, _ = _executor(fakes)
-    executor2.load(WorkerAssignment())
-    executor2.start()
-    with pytest.raises(DataflowError) as exc:
-        executor2.step(max_records=1, deadline_ms=100)
-    assert exc.value.code == "BUDGET_EXCEEDED"
-    # input-channel path uses module-level reserve_credit + resolve_record (no v2 consume)
-    fakes.channel_credit = True
-    in_assignment = WorkerAssignment(inputs=(ExchangeSpec(channel_id="in0"),), source_splits=())
-    ex, _, mb = _executor(fakes, in_assignment)
-    ex.load(in_assignment)
-    ex.start()
-    mb.inbound.append(WorkerEvent(kind="progress", operation_id="i0",
-                                  payload={"channel_id": "in0",
-                                           "encoded": asdict(EncodedRecord(record_id="x0"))}))
-    fakes.resolved.clear()
-    res = ex.step(max_records=4, deadline_ms=500)
-    assert res.processed >= 1
-    assert fakes.resolved  # resolve_record ran only after credit was reserved
-    ex.close()
-    # no credit on the input channel -> paid decode is not executed early
-    fakes.channel_credit = False
-    ex2, _, mb2 = _executor(fakes, in_assignment)
-    ex2.load(in_assignment)
-    ex2.start()
-    mb2.inbound.append(WorkerEvent(kind="progress", operation_id="i1",
-                                   payload={"channel_id": "in0",
-                                            "encoded": asdict(EncodedRecord(record_id="x1"))}))
-    fakes.resolved.clear()
-    with pytest.raises(DataflowError) as exc2:
-        ex2.step(max_records=1, deadline_ms=100)
-    assert exc2.value.code == "BUDGET_EXCEEDED"
-    assert not fakes.resolved
-    ex2.close()
+def test_b002(tmp_path, monkeypatch):
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        def forbidden(*args, **kwargs):
+            raise AssertionError('worker opened the driver DB')
+        with monkeypatch.context() as patch:
+            patch.setattr('demiflow.execution.dataflow_seal.RunJournal', forbidden)
+            item.worker.load(item.assignment)
+        assert item.worker._state == 'loaded' and not item.worker._readers
+        stale = env.make(load=False)
+        with pytest.raises(DataflowError, match='FENCED'):
+            stale.worker.load(replace(stale.assignment, lease=replace(stale.assignment.lease, boot_id='wrong-boot')))
+        wrong_plan = env.make(load=False)
+        with pytest.raises(DataflowError, match='FENCED'):
+            wrong_plan.worker.load(replace(wrong_plan.assignment, plan_id='f' * 64))
+        bad = env.make(load=False)
+        pin_ref = bad.assignment.sealed.code_pin_ref
+        pin = json.loads(b''.join(env.driver.store.read(pin_ref, max_bytes=env.driver.bounds.max_control_bytes)))
+        pin['programs'] = {}
+        raw = document(pin)
+        wrong_pin = env.driver.store.put(iter([raw]), max_bytes=len(raw), media_type=pin_ref.media_type)
+        assignment = replace(bad.assignment, sealed=replace(bad.assignment.sealed, code_pin_ref=wrong_pin))
+        with pytest.raises(DataflowError, match='CODE_MISMATCH'):
+            bad.worker.load(assignment)
+        assert not bad.worker._readers and not bad.worker._kernels
 
 
-def test_b006(fakes):
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    executor.start()
-    request = CutRequest(cut_id="driver-cut", participants=("s0:p0",))
-    executor.request_cut(request)
-    assert executor._active_cut.cut_id == "driver-cut"
-    barriers = [e for e in mailbox.events if e.kind == "cut"]
-    assert barriers
-    # worker cannot originate final cut
-    with pytest.raises(DataflowError) as exc:
-        executor.request_cut(CutRequest(cut_id="x", participants=("s0:p0",), final=True))
-    assert exc.value.code == "INVALID_CONTRACT"
-    # cut_id must be driver-produced
-    with pytest.raises(DataflowError):
-        executor.request_cut(CutRequest(cut_id="", participants=("s0:p0",)))
+def test_b003(tmp_path):
+    with worker_env(tmp_path) as env:
+        old = env.make()
+        old.worker.start()
+        cut = _cut(old)
+        contribution = old.worker.snapshot(cut)
+        image = RecoveryImage(identity('B-commit'), cut, (contribution,), {}, contribution.sources)
+        resumed = env.make()
+        resumed.worker.restore(image)
+        assert resumed.worker._state == 'restored'
+        assert set(resumed.worker._restored_cursors) == {s.split_id for s in contribution.sources}
+        assert resumed.worker._restored_states == dict(contribution.operator_states)
+        resumed.worker.start()
+        resumed.worker.run()
+        resumed.worker.cancel('restored', deadline_ms=100)
+        with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
+            replace(contribution, buffers=(None,))
+        with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
+            replace(contribution, channels={'invalid-channel': None})
 
 
-def test_b007(fakes):
-    fakes.records = (Record(record_id="r0"),)
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    executor.start()
-    request = CutRequest(cut_id="cut0", participants=("s0:p0",))
-    executor.request_cut(request)
-    contribution = executor.snapshot(request)
-    assert contribution.final is False
-    assert contribution.participant_id == "s0:p0"
-    assert contribution.boot_id == "boot"
-    assert contribution.buffers
-    # empty input side still contributes a cursor
-    assert isinstance(contribution.sources, tuple)
+def test_b004(tmp_path, monkeypatch):
+    with worker_env(tmp_path) as env:
+        item = env.make()
+        with pytest.raises(DataflowError, match='FENCED'):
+            item.worker.step(max_records=1, deadline_ms=100)
+        item.worker.start()
+        reader = next(iter(item.worker._readers.values()))
+        entered, release = threading.Event(), threading.Event()
+        original = reader.next_record
+        def slow_read():
+            entered.set()
+            assert release.wait(3)
+            return original()
+        monkeypatch.setattr(reader, 'next_record', slow_read)
+        errors = []
+        def step():
+            try:
+                item.worker.step(max_records=1, deadline_ms=1000)
+            except DataflowError as exc:
+                errors.append(exc)
+        thread = threading.Thread(target=step)
+        thread.start()
+        try:
+            assert entered.wait(2)
+            start = time.monotonic()
+            item.worker.cancel('during-source-read', deadline_ms=100)
+            assert time.monotonic() - start < .15
+        finally:
+            release.set()
+            thread.join(3)
+        assert not thread.is_alive()
+        assert errors and errors[0].code == 'CANCELLED'
+        before = reader.snapshot()
+        assert item.worker.step(max_records=1, deadline_ms=100).end_of_input
+        assert reader.snapshot() == before
 
 
-def test_b008(fakes):
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    executor.start()
-    request = CutRequest(cut_id="cut0", participants=("s0:p0",))
-    executor.request_cut(request)
-    executor.snapshot(request)
-    executor.accept_receipt("commit-1", cut_id="cut0")
-    # duplicate receipt is idempotent (no second release)
-    executor.accept_receipt("commit-1", cut_id="cut0")
-    # wrong cut rejected
-    with pytest.raises(DataflowError) as exc:
-        executor.accept_receipt("commit-2", cut_id="unknown")
-    assert exc.value.code == "INVALID_CONTRACT"
+def test_b005(tmp_path, monkeypatch):
+    from demiflow.execution.exchange.dataflow_channels import reserve_credit
+    with worker_env(tmp_path) as env:
+        producer, consumer = env.make(), env.make('transform')
+        producer.worker.start()
+        consumer.worker.start()
+        spec = producer.assignment.outputs[0]
+        grant = reserve_credit(spec.channel_id, spec.consumer_partitions[0], rows=spec.credit_rows,
+            size_bytes=0, operation_id=identity('B-exhaust-credit'), state=producer.worker._channels)
+        errors, finished = [], threading.Event()
+        def step():
+            try:
+                producer.worker.step(max_records=1, deadline_ms=1000)
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+        thread = threading.Thread(target=step)
+        thread.start()
+        try:
+            assert not finished.wait(.1)
+            assert not [e for e in _events(producer) if e.kind == 'data']
+            assert all(not k.pending_calls for k in consumer.worker._kernels.values())
+        finally:
+            producer.worker._channels.release(grant)
+            thread.join(3)
+        assert not thread.is_alive() and not errors
+        event = next(e for e in _events(producer) if e.kind == 'data')
+        payload = thaw_record_value(event.payload)
+        import demiflow.execution.worker.dataflow_graph_runner as runner_module
+        original_read = runner_module.read_peer
+        decoded = []
+        def read_peer(*args, **kwargs):
+            decoded.append(True)
+            return original_read(*args, **kwargs)
+        monkeypatch.setattr(runner_module, 'read_peer', read_peer)
+        with pytest.raises(DataflowError, match='FENCED'):
+            consumer.worker._runner._receive_data(dict(payload, producer_partition='foreign'))
+        assert not decoded
+        consumer.worker.receive(dict(payload, kind='data'))
+        assert consumer.worker.step(max_records=1, deadline_ms=1000).processed >= 1
+        assert decoded
+        ack = next(e for e in _events(consumer) if e.kind == 'ack')
+        producer.worker.receive(dict(thaw_record_value(ack.payload), kind='ack'))
+        assert not producer.worker._runner._credits
 
 
-def test_b009(fakes):
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    executor.start()
-    executor._effect_refs.append(ArtifactRef())
-    executor.cancel("user", deadline_ms=100)
-    assert executor._state == "draining"
-    assert executor._cancel_event.is_set()
-    assert executor._effect_refs  # sent effects preserved
-    result = executor.step(max_records=1, deadline_ms=100)
-    assert result.end_of_input is True
+def test_b006(tmp_path):
+    with worker_env(tmp_path, rows=[]) as env:
+        item = env.make()
+        item.worker.start()
+        item.worker.step(max_records=1, deadline_ms=100)
+        assert not [e for e in _events(item) if e.kind == 'cut']
+        cut = _cut(item, final=True)  # final is a driver request, not a worker decision.
+        with pytest.raises(DataflowError, match='FENCED'):
+            item.worker.request_cut(replace(cut, plan_revision=cut.plan_revision + 1))
+        with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
+            item.worker.request_cut(replace(cut, participants=()))
+        item.worker.request_cut(cut)
+        item.worker.step(max_records=1, deadline_ms=100)
+        assert any(e.kind == 'cut' for e in _events(item))
+        with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
+            replace(cut, cut_id='')
 
 
-def test_b010(fakes):
-    fakes.kernel_fail_close = True
-    executor, services, mailbox = _executor(fakes)
-    executor.load(WorkerAssignment())
-    executor.start()
-    kernels = list(executor._kernels.values())
-    readers = list(executor._readers.values())
-    with pytest.raises(DataflowError):
-        executor.close()
-    # one owner close failure still closes the rest
-    assert all(k.closed for k in kernels)
-    assert all(r.closed for r in readers)
-    assert mailbox.closed
-    # idempotent second close
-    executor.close()
+def test_b007(tmp_path):
+    with worker_env(tmp_path, rows=[]) as env:
+        item = env.make()
+        item.worker.start()
+        cut = _cut(item)
+        contribution = item.worker.snapshot(cut)
+        assert not contribution.final and contribution.participant_id in cut.participants
+        assert contribution.boot_id == item.assignment.lease.boot_id
+        assert contribution.buffers and contribution.operator_states
+        assert contribution.sources and all(s.next_sequence == 0 for s in contribution.sources)
+        for ref in contribution.buffers:
+            assert env.driver.store.inspect(ref)
 
 
-# ---------------------------------------------------------------------------
-# B011-B018 WorkerRuntime v3 path
-# ---------------------------------------------------------------------------
-def _v3_launch(fakes, tmp_path, *, assignment=None):
-    assignment = assignment or WorkerAssignment()
-    mailbox = FakeMailbox()
-    return {
-        "directory": str(tmp_path), "run_id": "run", "scope_id": "action",
-        "allocation_id": "alloc", "boot_id": "boot", "controller_epoch": 1,
-        "capabilities": ["cpu"], "grant": _grant(), "artifact_digest_observed": "d" * 64,
-        "dataflow_v3": {"assignment": assignment, "transport": FakeMailbox(),
-                        "mailbox": mailbox, "cache": str(tmp_path / "cache"),
-                        "entrypoint": "dataflow_worker_v3", "code_pin": "d" * 64,
-                        "limits": {"max_row_bytes": assignment.bounds.max_row_bytes,
-                                   "max_resident_bytes": assignment.bounds.max_resident_bytes},
-                        "bounds": asdict(assignment.bounds)},
-    }
+def test_b008(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make()
+        item.worker.start()
+        cut = _cut(item)
+        item.worker.snapshot(cut)
+        item.worker.accept_receipt(identity('B-receipt'), cut_id=cut.cut_id)
+        item.worker.accept_receipt(identity('B-receipt'), cut_id=cut.cut_id)
+        assert cut.cut_id not in item.worker._snapshot_contributions
+        with pytest.raises(DataflowError, match='conflicting receipt'):
+            item.worker.accept_receipt(identity('B-conflict'), cut_id=cut.cut_id)
+        with pytest.raises(DataflowError, match='unknown cut'):
+            item.worker.accept_receipt(identity('B-receipt'), cut_id=identity('unknown'))
 
 
-def _grant():
-    return {"grant_id": "g", "run_id": "run", "attempt": 1, "fence": "fence",
-            "scope_id": "action", "allocation_id": "alloc", "boot_id": "boot",
-            "controller_epoch": 1, "expires_at_ms": int(time.time() * 1000) + 120000}
+def test_b009(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make()
+        item.worker.start()
+        ref = env.driver.store.put(iter([b'unknown-effect']), max_bytes=14, media_type='application/octet-stream')
+        item.worker._effect_refs.append(ref)
+        before = {k: r.snapshot() for k, r in item.worker._readers.items()}
+        item.worker.cancel('user', deadline_ms=100)
+        assert item.worker._state == 'draining' and item.worker._cancel_event.is_set()
+        assert item.worker.step(max_records=1, deadline_ms=100).end_of_input
+        assert item.worker._effect_refs == [ref]
+        assert {k: r.snapshot() for k, r in item.worker._readers.items()} == before
 
 
-def _runtime(fakes, tmp_path, *, manifest_loader=None):
-    from demiflow.execution.worker.runtime import WorkerRuntime
-    launch = _v3_launch(fakes, tmp_path)
-    return WorkerRuntime(launch, control=lambda frame: None, manifest_loader=manifest_loader)
+def test_b010(tmp_path, monkeypatch):
+    with worker_env(tmp_path) as env:
+        source, item = env.make(), env.make('transform')
+        source.worker.start()
+        item.worker.start()
+        kernel = next(iter(item.worker._kernels.values()))
+        # A real acquired reader is moved into this executor solely to exercise
+        # close fan-out after another owned resource fails; no business execution.
+        item.worker._readers.update(source.worker._readers)
+        source.worker._readers.clear()
+        readers = list(item.worker._readers.values())
+        closed = []
+        for reader in readers:
+            close = reader.close
+            def observed(close=close):
+                closed.append(True)
+                close()
+            monkeypatch.setattr(reader, 'close', observed)
+        original = kernel.close
+        def broken_close():
+            original()
+            raise RuntimeError('owned kernel close failed')
+        monkeypatch.setattr(kernel, 'close', broken_close)
+        with pytest.raises(DataflowError, match='cleanup failed'):
+            item.worker.close()
+        assert len(closed) == len(readers) > 0 and item.mailbox._closed
+        assert not item.worker._readers and not item.worker._kernels
+        item.worker.close()
 
 
-def _manifest_and_ref():
-    from demiflow.execution.contracts import artifact
-    manifest = artifact.build_manifest(
-        run_id="run",
-        platform={"source_digest": "a" * 64, "distribution": "demiurge",
-                  "version": "1.0", "runtime_identity_ref": "runtime-ref"},
-        business={"bundle_digest": "sha256:" + "b" * 64,
-                  "entrypoints": [{"name": "main", "module_key": "p_" + "b" * 24,
-                                   "definition_ref": {"sha256": "c" * 64}}]},
-        config={"resolved_config_digest": "d" * 64, "model_config_refs": []},
-        environment={"requirements_sha256": "e" * 64, "lock_digest": "f" * 64,
-                     "resolution_digest": "0" * 64},
-        protocol_versions={"worker": {"major": 1, "minor": 0},
-                           "exchange": {"major": 1, "minor": 0},
-                           "checkpoint_schema": 1, "state_schema": 1, "resource_protocol": "1.0"},
-        secret_refs=[])
-    ref = {"manifest_id": manifest["manifest_id"], "sha256": artifact.manifest_digest(manifest)}
-    return manifest, ref
-
-
-def test_b011(fakes, tmp_path):
-    from demiflow.execution.worker.runtime import WorkerRuntime
-    runtime = _runtime(fakes, tmp_path)
-    assert runtime._v3 is True
-    assert runtime.state == "REGISTERED"
-    # v3 must not open a driver journal database
-    assert not (tmp_path / "run.sqlite").exists()
-    assert runtime.authority is None
-    assert runtime._limits and runtime._artifact_digest_observed == "d" * 64
-    # missing limits in the sealed payload must fail (no empty-default budget)
-    no_limits = _v3_launch(fakes, tmp_path)
-    del no_limits["dataflow_v3"]["limits"]
-    with pytest.raises(DataflowError) as exc:
-        WorkerRuntime(no_limits, control=lambda frame: None)
-    assert exc.value.code == "INVALID_CONTRACT"
-    # missing code pin observation must fail (no empty-string default)
-    no_pin = _v3_launch(fakes, tmp_path)
-    del no_pin["dataflow_v3"]["code_pin"]
-    no_pin.pop("artifact_digest_observed")
-    with pytest.raises(DataflowError) as exc2:
-        WorkerRuntime(no_pin, control=lambda frame: None)
-    assert exc2.value.code == "CODE_MISMATCH"
-
-
-def _real_launch(tmp_path, assignment):
-    return {"directory": str(tmp_path), "run_id": "run", "scope_id": "action",
-        "allocation_id": "alloc", "boot_id": "boot", "controller_epoch": 1,
-        "capabilities": ["cpu"], "grant": _grant(),
-        "dataflow_v3": {"assignment": assignment, "limits": {"max_row_bytes": 1024},
-            "code_pin": assignment.sealed.code_pin_ref.digest if assignment is not None else "d" * 64,
-            "bounds": asdict(assignment.bounds) if assignment is not None else asdict(Bounds()),
-            "store_root": str(tmp_path / "store"), "store_id": "test-store"}}
+def test_b011(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        launch = _launch(item, tmp_path)
+        runtime = WorkerRuntime(launch)
+        assert runtime._v3 and runtime.state == 'REGISTERED' and runtime.authority is None
+        assert runtime._v3_executor is None and runtime._limits
+        no_limits = dict(launch, dataflow_v3=dict(launch['dataflow_v3']))
+        del no_limits['dataflow_v3']['limits']
+        with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
+            WorkerRuntime(no_limits)
+        no_pin = dict(launch, dataflow_v3=dict(launch['dataflow_v3']))
+        del no_pin['artifact_digest_observed']
+        del no_pin['dataflow_v3']['code_pin']
+        with pytest.raises(DataflowError, match='CODE_MISMATCH'):
+            WorkerRuntime(no_pin)
+        runtime.close()
 
 
 def test_b012(tmp_path, monkeypatch):
-    from demiflow import data
-    from test_runtime_v3_real_seams import prepared, reader_services
-    from demiflow.execution.worker.runtime import WorkerRuntime
-    from demiflow.execution.contracts.dataflow_errors import DataflowError as Error
     from demiflow.execution.contracts.errors import ProtocolError
-    with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
-        assignment = reader_services(ex, services).assignment
-        runtime = WorkerRuntime(_real_launch(tmp_path, assignment))
-        loaded = []
-        monkeypatch.setattr(runtime, '_v3_ensure_executor', lambda: loaded.append(assignment))
-        pin = assignment.sealed.code_pin_ref.digest
-        runtime._verify({"manifest_id": pin, "sha256": pin})
-        assert loaded == [assignment] and runtime.authority is None
-        with pytest.raises(Error) as exc:
-            runtime._verify({"manifest_id": pin, "sha256": "0" * 64})
-        assert exc.value.code == "CODE_MISMATCH" and loaded == [assignment]
-        # Preserve the native v2 fail-closed loader boundary as well.
-        runtime._v3 = False
-        with pytest.raises(ProtocolError) as exc:
-            runtime._verify({"manifest_id": pin, "sha256": pin})
-        assert exc.value.code == "INVALID_SPEC"
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        runtime = WorkerRuntime(_launch(item, tmp_path))
+        pin = item.assignment.sealed.code_pin_ref.digest
+        try:
+            with pytest.raises(DataflowError, match='CODE_MISMATCH'):
+                runtime._verify({'manifest_id': pin, 'sha256': '0' * 64})
+            assert runtime._v3_executor is None
+            def forbidden(*args, **kwargs):
+                raise AssertionError('worker constructed a driver journal')
+            with monkeypatch.context() as patch:
+                patch.setattr('demiflow.execution.dataflow_seal.RunJournal', forbidden)
+                runtime._verify({'manifest_id': pin, 'sha256': pin})
+            assert runtime._v3_executor._state == 'loaded' and runtime.authority is None
+            runtime._v3 = False
+            with pytest.raises(ProtocolError) as exc:
+                runtime._verify({'manifest_id': pin, 'sha256': pin})
+            assert exc.value.code == 'INVALID_SPEC'
+        finally:
+            runtime._v3 = True
+            runtime.close()
 
 
-def test_b013(fakes, tmp_path):
-    runtime = _runtime(fakes, tmp_path)
-    runtime.state = "VERIFIED"
-    checksums = runtime._restore([{"state_id": "s", "sha256": "abc", "path": "p", "bytes": 1}])
-    assert checksums == ["abc"]
-    assert runtime._v3_executor is not None
+def test_b013(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        runtime = WorkerRuntime(_launch(item, tmp_path))
+        try:
+            checksums = runtime._restore([{'sha256': 'a' * 64}])
+            assert checksums == ['a' * 64]
+            assert runtime._v3_executor._state == 'restored' and not runtime._v3_executor._readers
+        finally:
+            runtime.close()
 
 
-def test_b014(fakes, tmp_path):
-    runtime = _runtime(fakes, tmp_path)
-    runtime.state = "READY"
-    runtime._activate({"grant_ref": "g"}, int(time.time() * 1000))
-    assert runtime._v3_executor._state == "started"
-    assert runtime.authority is None
+def test_b014(tmp_path):
+    from demiflow.execution.contracts.errors import ProtocolError
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        runtime = WorkerRuntime(_launch(item, tmp_path))
+        try:
+            with pytest.raises(ProtocolError) as error:
+                runtime._activate({'grant_ref': 'wrong-grant'}, int(time.time() * 1000))
+            assert error.value.code == 'GRANT_REVOKED' and runtime._v3_executor is None
+            _activate(runtime, item)
+            assert runtime.state == 'ACTIVATED' and runtime._v3_executor._state == 'started'
+            assert runtime.authority is None and runtime._v3_executor._runner._thread is None
+        finally:
+            runtime.close()
 
 
-def test_b015(tmp_path, monkeypatch):
-    from demiflow import data
-    from test_runtime_v3_real_seams import prepared, reader_services
-    from demiflow.execution.worker.runtime import WorkerRuntime
-    with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
-        assignment = reader_services(ex, services).assignment
-        runtime = WorkerRuntime(_real_launch(tmp_path, assignment))
-        loaded = []
-        monkeypatch.setattr(runtime, '_v3_ensure_executor', lambda: loaded.append(assignment))
-        pin = assignment.sealed.code_pin_ref.digest
-        receipt = runtime._execute("VerifyArtifactAndCapabilities",
-            {"artifact_manifest_ref": {"manifest_id": pin, "sha256": pin},
-             "required_capabilities": ["cpu"]}, int(time.time() * 1000))
-        assert receipt["kind"] == "Verified" and runtime.state == "VERIFIED"
-        assert loaded == [assignment] and runtime.authority is None
+def test_b015(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        launch = _launch(item, tmp_path)
+        launch['dataflow_v3']['assignment'] = {'wire': encode_wire(item.assignment,
+            type_name='WorkerAssignment', bounds=item.services.bounds).decode()}
+        runtime = WorkerRuntime(launch)
+        try:
+            pin = item.assignment.sealed.code_pin_ref.digest
+            receipt = runtime._execute('VerifyArtifactAndCapabilities',
+                {'artifact_manifest_ref': {'manifest_id': pin, 'sha256': pin},
+                 'required_capabilities': ['cpu']}, int(time.time() * 1000))
+            assert receipt['kind'] == 'Verified' and runtime.state == 'VERIFIED'
+            assert runtime._v3_executor.assignment == item.assignment and runtime.authority is None
+        finally:
+            runtime.close()
 
 
-def test_b016(fakes, tmp_path):
-    runtime = _runtime(fakes, tmp_path)
-    runtime.state = "READY"
-    runtime._activate({"grant_ref": "g"}, int(time.time() * 1000))
-    runtime.state = "ACTIVATED"
-    runtime._drain({"reason": "done", "deadline_ms": 100})
-    assert runtime._admit_open is False
-    assert runtime._v3_executor._state == "draining"
+def test_b016(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        runtime = WorkerRuntime(_launch(item, tmp_path))
+        try:
+            _activate(runtime, item)
+            runtime._drain({'reason': 'done', 'deadline_ms': 100})
+            assert not runtime._admit_open and runtime._v3_executor._state == 'draining'
+            assert runtime._v3_executor.step(max_records=1, deadline_ms=100).end_of_input
+        finally:
+            runtime.close()
 
 
-def test_b017(fakes, tmp_path):
-    runtime = _runtime(fakes, tmp_path)
-    runtime.state = "READY"
-    runtime._activate({"grant_ref": "g"}, int(time.time() * 1000))
-    runtime._cancel({"reason": "stop", "deadline_ms": 100})
-    assert runtime._v3_executor._cancel_event.is_set()
+def test_b017(tmp_path):
+    from demiflow.execution.contracts.errors import ProtocolError
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        fresh = WorkerRuntime(_launch(item, tmp_path))
+        fresh._execute('Cancel', {'reason': 'before-activation', 'deadline_ms': 100}, int(time.time() * 1000))
+        assert fresh.state == 'RETIRED' and fresh._v3_executor is None and not fresh._admit_open
+        with pytest.raises(ProtocolError):
+            fresh._execute('Activate', {'grant_ref': item.grant['grant_id']}, int(time.time() * 1000))
+        fresh.close()
+        runtime = WorkerRuntime(_launch(item, tmp_path))
+        try:
+            _activate(runtime, item)
+            runtime._cancel({'reason': 'stop', 'deadline_ms': 100})
+            assert runtime._v3_executor._cancel_event.is_set()
+            assert runtime._v3_executor.step(max_records=1, deadline_ms=100).processed == 0
+        finally:
+            runtime.close()
 
 
-def test_b018(fakes, tmp_path):
-    from demiflow.execution.worker.runtime import WorkerRuntime
-    runtime = _runtime(fakes, tmp_path)
-    runtime.state = "READY"
-    runtime._activate({"grant_ref": "g"}, int(time.time() * 1000))
-    # config provided a cache -> no extra owned temp dir is created
-    assert runtime._v3_executor._owned_services_cache is None
-    runtime.close()
-    assert runtime._v3_executor is None
-    runtime.close()
-    # config omits cache -> a dir is created lazily and cleaned on close
-    launch = _v3_launch(fakes, tmp_path)
-    del launch["dataflow_v3"]["cache"]
-    rt2 = WorkerRuntime(launch, control=lambda frame: None)
-    rt2.state = "READY"
-    rt2._activate({"grant_ref": "g"}, int(time.time() * 1000))
-    owned = rt2._v3_executor._owned_services_cache
-    assert owned is not None and owned.exists()
-    rt2.close()
-    assert not owned.exists()
+def test_b018(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make(load=False)
+        for cache in (True, False):
+            launch = _launch(item, tmp_path, cache=cache)
+            if cache:
+                # A by-value source may never need to create a code cache. Seed
+                # this assignment's existing private cache to test real cleanup.
+                configured = Path(launch['dataflow_v3']['cache'])
+                prior = configured / item.assignment.lease.allocation_id
+                prior.mkdir(parents=True)
+                (prior / 'owned').write_text('this assignment')
+                sibling = configured / 'another-allocation'
+                sibling.mkdir()
+                (sibling / 'protected').write_text('another owner')
+            runtime = WorkerRuntime(launch)
+            try:
+                _activate(runtime, item)
+                owned = runtime._v3_executor._owned_services_cache
+                assert owned is not None and owned.exists()
+                if cache:
+                    assert owned == configured / item.assignment.lease.allocation_id
+            finally:
+                runtime.close()
+            assert runtime._v3_executor is None and not owned.exists()
+            if cache:
+                assert (sibling / 'protected').read_text() == 'another owner'
+            runtime.close()
 
 
-# ---------------------------------------------------------------------------
-# B019-B020 bootstrap v3 entry
-# ---------------------------------------------------------------------------
-def test_b019(fakes, tmp_path):
+def test_b019():
     from demiflow.execution.worker.bootstrap import _validate_v3_launch
-    good = {"dataflow_v3": {"entrypoint": "dataflow_worker_v3", "code_pin": "d" * 64,
-                            "assignment": {}}}
+    good = {'dataflow_v3': {'entrypoint': 'dataflow_worker_v3', 'code_pin': 'd' * 64, 'assignment': {}}}
     _validate_v3_launch(good)
-    with pytest.raises(DataflowError) as exc:
-        _validate_v3_launch({"dataflow_v3": {"entrypoint": "wrong", "code_pin": "d" * 64,
-                                             "assignment": {}}})
-    assert exc.value.code == "INVALID_CONTRACT"
-    with pytest.raises(DataflowError) as exc2:
-        _validate_v3_launch({"dataflow_v3": {"entrypoint": "dataflow_worker_v3",
-                                             "code_pin": "short", "assignment": {}}})
-    assert exc2.value.code == "CODE_MISMATCH"
+    with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
+        _validate_v3_launch({'dataflow_v3': dict(good['dataflow_v3'], entrypoint='wrong')})
+    with pytest.raises(DataflowError, match='CODE_MISMATCH'):
+        _validate_v3_launch({'dataflow_v3': dict(good['dataflow_v3'], code_pin='short')})
+
+
+def _bootstrap_launch(tmp_path):
+    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    _, bounds = resolve_runtime_policy({}, execution_limits(), provider='local')
+    # No assignment is decoded for Register -> Cancel before Verify/Activate.
+    grant = {'grant_id': 'g', 'run_id': 'run', 'attempt': 1, 'fence': 'fence',
+             'scope_id': 'action', 'allocation_id': 'alloc', 'boot_id': 'boot',
+             'controller_epoch': 1, 'expires_at_ms': int(time.time() * 1000) + 60000}
+    return {'directory': str(tmp_path), 'run_id': 'run', 'scope_id': 'action',
+        'allocation_id': 'alloc', 'boot_id': 'boot', 'controller_epoch': 1,
+        'capabilities': ['cpu'], 'grant': grant,
+        'dataflow_v3': {'assignment': None, 'limits': {'max_row_bytes': 1024},
+            'code_pin': 'd' * 64, 'bounds': asdict(bounds), 'store_root': str(tmp_path / 'store'), 'store_id': 'test-store'}}
 
 
 def test_b020(tmp_path):
     from demiflow.execution.worker.bootstrap import _run_v3_worker
-    launch = _real_launch(tmp_path, None)
+    launch = _bootstrap_launch(tmp_path)
     driver_sock, child_sock = socket.socketpair()
     driver_sock.settimeout(5)  # bootstrap failure must fail, never hang the suite
     result = {}

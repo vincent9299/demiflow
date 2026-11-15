@@ -331,7 +331,16 @@ class DataflowWorkerExecutor:
         self._runner.receive(command)
 
     def step(self, *, max_records, deadline_ms):
-        return self._runner.step(max_records=max_records, deadline_ms=deadline_ms)
+        # Control may cancel while a business call runs; never hold its lock
+        # across user code, and never read input before activation/after cancel.
+        with self._control_lock:
+            if self._state not in ('started', 'draining') or not hasattr(self, '_runner'):
+                raise _dataflow_error('FENCED', 'business step requires activation')
+            if self._cancel_event.is_set():
+                from ..contracts.dataflow import WorkerStep
+                return WorkerStep(processed=0, blocked=False, end_of_input=True, events=())
+            runner = self._runner
+        return runner.step(max_records=max_records, deadline_ms=deadline_ms)
 
     # ---- B006 request_cut ----
     def request_cut(self, request):
