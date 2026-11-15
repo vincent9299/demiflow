@@ -42,8 +42,10 @@ class _Column:
 
 
 class _Admission:
-    def __init__(self, rows, bounds):
-        self.maximum = min(bounds.max_batch_bytes, bounds.max_resident_bytes)
+    def __init__(self, rows, bounds, reserved_bytes=0):
+        if type(reserved_bytes) is not int or reserved_bytes < 0:
+            raise DataflowError('INVALID_CONTRACT', 'conversion reserve must be a nonnegative integer')
+        self.maximum = min(bounds.max_batch_bytes, bounds.max_resident_bytes - reserved_bytes)
         self.depth = min(16, bounds.max_depth)
         self.max_types = bounds.max_nodes
         self.types = self.visits = 0
@@ -148,15 +150,28 @@ class _Admission:
         if any(test(dtype) for test in (pa.types.is_string, pa.types.is_large_string,
                                        pa.types.is_binary, pa.types.is_large_binary)):
             width = 8 if pa.types.is_large_string(dtype) or pa.types.is_large_binary(dtype) else 4
-            self.buffer((n + 1) * width)
-            size = 0
+            self.buffer(((max(32, n) if n else 0) + 1) * width)
+            size = capacity = peak = 0
             for value in column.values():
                 self.visit(depth)
                 if value is None:
                     continue
                 size += _binary_size(value)
-                self.check(self.builder + size)
-            self.buffer(size)
+                if size > capacity:
+                    # Pinned Arrow BufferBuilder::GrowByFactor doubles the
+                    # previous capacity or uses this larger request, then
+                    # aligns to 64 bytes. A large first value is not rounded
+                    # up to a power of two. Old/new coexist during realloc.
+                    grown = ((max(size, 2 * capacity) + 63) // 64) * 64
+                    peak = max(peak, capacity + grown)
+                    capacity = grown
+                self.check(self.builder + peak)
+            compact = ((size + 63) // 64) * 64
+            if compact < capacity:
+                peak = max(peak, capacity + compact)
+            self.buffers += compact
+            self.builder += peak
+            self.check(self.builder)
             return
         if pa.types.is_struct(dtype):
             for index, field in enumerate(dtype):
@@ -342,14 +357,14 @@ class _Admission:
             visit(value)
 
 
-def admit_batch_conversion(rows, batch_format, *, schema, bounds):
+def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes=0):
     """Return the existing window after proving constructor workspace fits.
 
     Type inference (only when no schema was declared) creates type metadata from
     an admitted pointer list, never an Arrow/NumPy payload array. Known schemas
     remain unchanged and are passed directly to the actual constructor.
     """
-    admission = _Admission(rows, bounds)
+    admission = _Admission(rows, bounds, reserved_bytes)
     n = len(rows)
     fmt = 'numpy' if batch_format == 'default' else batch_format
     if fmt == 'list':

@@ -306,3 +306,21 @@ def test_public_builtin_nullable_extension_preserves_schema(tmp_path, provider, 
         assert actual.equals(expected, check_metadata=True)
         assert actual.schema.equals(schema, check_metadata=True)
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+
+
+def test_conversion_retained_reader_uses_resident_room_before_constructor(monkeypatch):
+    rows = [{'value': 'a' * 6000}, {'value': 'b' * 6000}]
+    handle = _handle(32 * 1024)
+    handle.bounds = replace(handle.bounds, max_resident_bytes=48 * 1024)
+    handle.conversion_reserve = lambda: 20 * 1024
+    calls = []
+    with monkeypatch.context() as scoped:
+        _forbid_constructor(scoped, 'pyarrow', calls)
+        with pytest.raises(DataflowError, match='conversion admission'):
+            _convert_batch(rows, 'pyarrow', handle)
+    assert not calls
+    # Release the already-accounted read window; the original 32KiB batch
+    # budget is sufficient. No batch size, values, schema or budget is changed.
+    handle.conversion_reserve = lambda: 0
+    actual = _convert_batch(rows, 'pyarrow', handle)
+    assert actual.to_pylist() == rows
