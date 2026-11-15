@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 import queue
+import socket
 import threading
 import time
 from pathlib import Path
@@ -255,10 +256,56 @@ class DriverJournalService:
         self._native_reserve_lock = threading.Lock()
         self._workers: list[threading.Thread] = []
         self._stop = threading.Event()
-        for index in range(min(_MAX_SERVICE_WORKERS, max(1, bounds.max_pending_events))):
-            worker = threading.Thread(target=self._serve, name="dataflow-journal-%d" % index, daemon=True)
-            worker.start()
-            self._workers.append(worker)
+        # Two fixed control descriptors, owned by this service (not artifact
+        # handles). A single readiness byte announces the original reply queue;
+        # it never carries or acknowledges a result.
+        self._reply_reader = self._reply_writer = None
+        try:
+            self._reply_reader, self._reply_writer = socket.socketpair()
+            self._reply_reader.setblocking(False)
+            self._reply_writer.setblocking(False)
+            for index in range(min(_MAX_SERVICE_WORKERS, max(1, bounds.max_pending_events))):
+                worker = threading.Thread(target=self._serve, name="dataflow-journal-%d" % index, daemon=True)
+                worker.start()
+                self._workers.append(worker)
+        except BaseException:
+            with self._lock:
+                self._closed = True
+                self._close_reply_waitable_locked()
+            self._stop.set()
+            deadline = time.monotonic() + min(1, bounds.timeout_ms / 1000)
+            for worker in self._workers:
+                worker.join(timeout=max(0, deadline - time.monotonic()))
+            raise
+
+    def reply_waitable(self):
+        """Borrow a readiness descriptor; only poll_replies may drain it."""
+        with self._lock:
+            return None if self._closed else self._reply_reader
+
+    def _notify_reply_locked(self):
+        if self._reply_writer is not None:
+            try:
+                self._reply_writer.send(b'\0')
+            except BlockingIOError:
+                pass  # An already readable notifier is sufficient.
+
+    def _drain_reply_waitable_locked(self):
+        if self._reply_reader is not None:
+            try:
+                self._reply_reader.recv(1)
+            except BlockingIOError:
+                pass
+
+    def _close_reply_waitable_locked(self):
+        reader, writer = self._reply_reader, self._reply_writer
+        self._reply_reader = self._reply_writer = None
+        try:
+            if reader is not None:
+                reader.close()
+        finally:
+            if writer is not None:
+                writer.close()
 
     def register_worker(self, lease, occurrences):
         if len(self._leases) >= self._bounds.max_partitions and lease.allocation_id not in self._leases:
@@ -340,6 +387,10 @@ class DriverJournalService:
             del self._completed[:max_replies]
             for completed in batch:
                 self._pending_payloads.pop(completed.reply.operation_id, None)
+            # Partial drains keep the same byte readable. Emptying and draining
+            # share the append lock, so a subsequent completion must rearm it.
+            if not self._completed:
+                self._drain_reply_waitable_locked()
         return tuple(batch)
 
     def close(self, *, deadline_ms: int) -> None:
@@ -349,6 +400,7 @@ class DriverJournalService:
             if self._closed:
                 return
             self._closed = True
+            self._close_reply_waitable_locked()
         self._stop.set()
         deadline = time.monotonic() + deadline_ms / 1000.0
         for worker in self._workers:
@@ -409,7 +461,10 @@ class DriverJournalService:
             with self._lock:
                 self._inflight.pop(event.operation_id, None)
                 if not self._closed:
+                    was_empty = not self._completed
                     self._completed.append(completed)
+                    if was_empty:
+                        self._notify_reply_locked()
             self._queue.task_done()
 
     # -- validation + fixed dispatch (H002) ---------------------------------

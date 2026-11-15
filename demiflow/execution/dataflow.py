@@ -754,8 +754,14 @@ class DataflowExecution:
             if self._policy.provider == 'local' and sockets and all(sock is not None for sock in sockets):
                 # The same driver still owns every read and control reply.
                 # Wait for readiness instead of sleeping through a newly
-                # produced row or RPC. The timeout also polls journal replies;
-                # this introduces no extra connection, thread or busy loop.
+                # produced row or RPC. Journal replies can finish while no
+                # worker can make progress.
+                # Their readiness wakes this same driver; results still come
+                # exclusively from the original bounded poll_replies queue.
+                reply_waitable = getattr(self._services.journal_service, 'reply_waitable', None)
+                notifier = reply_waitable() if reply_waitable is not None else None
+                if notifier is not None:
+                    sockets.append(notifier)
                 import select
                 select.select(sockets, [], [], pause)
             else:
