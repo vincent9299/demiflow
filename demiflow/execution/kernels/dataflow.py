@@ -109,14 +109,11 @@ def _key_token(value: Any) -> Any:
     if isinstance(value, Mapping):
         items = sorted(value.items(), key=lambda kv: _canonical(_key_token(kv[0])))
         return ["d", [[_key_token(k), _key_token(v)] for k, v in items]]
-    raise _err("INVALID_CONTRACT", "unsupported key value type", type=type(value).__name__)
+    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
 
 
 def _group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
-    try:
-        return _canonical([_key_token(row[field]) for field in fields])
-    except KeyError as exc:
-        raise _err("INVALID_CONTRACT", "group/join key field missing", field=str(exc)) from exc
+    return _canonical([_key_token(row[field]) for field in fields])
 
 
 def _dumps_row(row: Mapping[str, Any]) -> bytes:
@@ -335,10 +332,7 @@ def invoke_unary(
         yield record
     elif kind == "SelectColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
-        try:
-            projected = {column: row[column] for column in columns}
-        except KeyError as exc:
-            raise _err("INVALID_CONTRACT", "select column missing", field=str(exc)) from exc
+        projected = {column: row[column] for column in columns}
         yield _output_record(record.record_id, position, projected, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, columns=columns))
     elif kind == "DropColumnsOp":

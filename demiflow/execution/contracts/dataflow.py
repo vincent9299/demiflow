@@ -1214,7 +1214,8 @@ class ProducerCompletion:
         _ident(self.partition_id, "ProducerCompletion.partition_id")
         _int(self.generation, "ProducerCompletion.generation")
         _enum(self.status, "ProducerCompletion.status", _PRODUCER_STATUSES)
-        _int(self.last_sequence, "ProducerCompletion.last_sequence")
+        # No record was emitted by an empty producer: its last index is -1.
+        _int(self.last_sequence, "ProducerCompletion.last_sequence", minimum=-1)
         _ref(self.manifest_ref, "ProducerCompletion.manifest_ref")
 
 

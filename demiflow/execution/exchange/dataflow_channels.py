@@ -214,10 +214,9 @@ def route_record(record, *, spec, state):
             _fail("INVALID_CONTRACT", "hash routing needs declared keys")
         if record.inline is None:
             _fail("INVALID_CONTRACT", "hash routing needs inline key values")
-        try:
-            values = [record.inline[key] for key in spec.keys]
-        except KeyError as exc:
-            raise DataflowError("INVALID_CONTRACT", "record is missing a hash key") from exc
+        # A missing declared business column is a KeyError, just as it is in
+        # the join/reducer kernel; it is not a malformed channel contract.
+        values = [record.inline[key] for key in spec.keys]
         _validate_tree(values, max_bytes=window)
         raw = _codec_dumps([_encode_value(value) for value in values])
         digest = hashlib.sha256(RECORD_ENCODING.encode("utf-8") + b"\x00" + raw).digest()

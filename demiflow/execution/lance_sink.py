@@ -59,7 +59,14 @@ class LanceSink(Datasink):
                     schema = schema or block.schema
                     block_schema = self.spec.schema or block.schema
                     if block.schema != block_schema:
+                        if set(block.schema.names) == set(block_schema.names):
+                            # Column order is supplied by the declared schema;
+                            # row dictionaries may have canonicalized key order.
+                            block = block.select(block_schema.names)
+                        retained = block.get_total_buffer_size()
                         block = block.cast(block_schema)
+                        if retained + block.get_total_buffer_size() > self.run.limits['max_batch_bytes']:
+                            raise RecoveryContractError('Lance cast coexistence exceeds batch budget')
                     writer = pa.ipc.new_stream(stream, block_schema)
                     if isinstance(block, pa.RecordBatch):
                         writer.write_batch(block)

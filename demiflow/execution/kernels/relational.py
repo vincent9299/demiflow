@@ -67,7 +67,7 @@ def _merge_row(
             continue
         dest = key if key not in out else key + suffix
         if dest in out:
-            raise _err("INVALID_CONTRACT", "join column collision", column=dest)
+            raise ValueError('join column collision: ' + dest)
         out[dest] = value
     return out
 
@@ -84,16 +84,18 @@ def _join_reader(
 
     def batches() -> Iterator[Any]:
         batch: list[dict[str, Any]] = []
+        emitted = False
         for record in records:
             _check_stop(services)
             row = _materialize_row(record, services)
-            null_key = any(row.get(field) is None for field in fields)
+            null_key = any(row[field] is None for field in fields)
             token = None if null_key else _group_key(row, fields)
             batch.append({"k": token, "p": _dumps_row(row)})
             if len(batch) >= batch_rows:
+                emitted = True
                 yield pa.RecordBatch.from_pylist(batch, schema=schema)
                 batch = []
-        if batch:
+        if batch or not emitted:
             yield pa.RecordBatch.from_pylist(batch, schema=schema)
 
     return pa.RecordBatchReader.from_batches(schema, batches())
@@ -124,6 +126,27 @@ def join_partitions(
     occurrence = _occurrence(spec)
     budget = _OutputBudget(spec, services)
     sequence = 0
+
+    # DataFusion cannot plan a DatasetExec with zero fragments. Resolve empty
+    # sides using the same row/identity/output contract before constructing it.
+    empty = object()
+    first_left = next(left, empty)
+    if first_left is empty:
+        return
+    left = itertools.chain((first_left,), left)
+    first_right = next(right, empty)
+    if first_right is empty:
+        if how in ('left', 'anti'):
+            for row_index, source_record in enumerate(left):
+                _check_stop(services)
+                row = _materialize_row(source_record, services)
+                _group_key(row, lk)
+                record_id = _hash_id([RECORD_DOMAIN, occurrence, 'join', row_index])
+                out = _output_record(record_id, {'join_index': row_index}, row, row_index, services)
+                budget.charge(out)
+                yield out
+        return
+    right = itertools.chain((first_right,), right)
 
     with tempfile.TemporaryDirectory(prefix="demiflow-join-") as spill:
         config = (

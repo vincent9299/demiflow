@@ -345,7 +345,20 @@ def plan_exchanges(
             read_domain=policy.store_id,
             reason=f"{mode}/{routing}:requirement={port.requirement},ordering={port.ordering}",
         ))
-    return tuple(exchanges)
+    return _share_exchange_storage(tuple(exchanges), bounds)
+
+
+def _share_exchange_storage(exchanges, bounds):
+    """Divide the one run ceiling; each edge cannot reserve the whole pool."""
+    durable = [edge for edge in exchanges if edge.mode in _DURABLE_MODES]
+    if not durable or sum(edge.storage_bytes for edge in durable) <= bounds.max_spill_bytes:
+        return exchanges
+    share = bounds.max_spill_bytes // len(durable)
+    if share < 1:
+        raise _error('BUDGET_EXCEEDED', 'spill budget cannot admit every durable edge')
+    return tuple(replace(edge, storage_bytes=min(edge.storage_bytes, share),
+                         credit_bytes=min(edge.credit_bytes, share))
+                 if edge.mode in _DURABLE_MODES else edge for edge in exchanges)
 
 
 def _partition_owner(stages: tuple[StageSpec, ...]) -> dict[str, StageSpec]:
@@ -700,6 +713,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                           storage_bytes=min(bounds.max_spill_bytes, e.credit_bytes * 8),
                           reason="durable_incremental:resident_budget_requires_checkpointed_parking;" + e.reason)
                          if e in candidates else e for e in exchanges)
+        upgraded = _share_exchange_storage(upgraded, bounds)
         return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds)
 
 

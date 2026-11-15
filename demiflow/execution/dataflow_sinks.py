@@ -369,6 +369,14 @@ class NativeTerminalSink(_DataflowArtifactSink):
                     batch, size = [], 0
                 schema_ref = record.schema_ref
                 schema = schemas.read(schema_ref)
+                declared = getattr(getattr(self.native, 'spec', None), 'schema', None)
+                if schema is None and declared is not None:
+                    extra = set(row) - set(declared.names)
+                    if extra:
+                        raise ValueError('Lance output has undeclared fields: ' + ', '.join(sorted(extra)))
+                    # An unmatched join may omit right-side fields. A declared
+                    # nullable target supplies their type even on the first row.
+                    schema = declared
                 batch.append(row)
                 size += record.encoded_bytes
         if batch:

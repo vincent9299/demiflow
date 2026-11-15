@@ -340,7 +340,7 @@ _WIRE_TYPES = {
     )),
     "ProducerCompletion": (ProducerCompletion, (
         ("partition_id", _I), ("generation", _i()), ("status", _e(_PRODUCER_STATUSES)),
-        ("last_sequence", _i()), ("manifest_ref", _R),
+        ("last_sequence", _i(-1)), ("manifest_ref", _R),
     )),
     "CreditLease": (CreditLease, (
         ("operation_id", _S), ("channel_id", _I), ("reader_id", _I), ("rows", _i()), ("size_bytes", _i()),
