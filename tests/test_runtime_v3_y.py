@@ -608,22 +608,31 @@ def test_y023(executor, source, plan):
 
 
 def test_y024(executor, source, plan):
-    # No hosted coordinators -> empty usage; materialize does not fabricate usage.
-    assert executor.operator_llm_usage() == {}
+    from demiflow.operator_llm.model import OperatorLLMUsage
+    empty = OperatorLLMUsage().to_dict()
+    # Every stable usage dimension is present and zero before actual execution.
+    assert executor.operator_llm_usage() == empty
     ENGINE.next_result = FakeResultHandle("materialize")
     executor.materialize(source, plan)
-    assert executor.operator_llm_usage() == {}
+    assert executor.operator_llm_usage() == empty
 
     class _Coordinator:
         def __init__(self, usage):
             self._usage = usage
-
         def usage(self):
-            return types.SimpleNamespace(to_dict=lambda: dict(self._usage))
+            return self._usage
 
-    executor._prompt_coordinators["a"] = _Coordinator({"calls": 2, "tokens": 10})
-    executor._prompt_coordinators["b"] = _Coordinator({"calls": 1, "tokens": 5})
-    assert executor.operator_llm_usage() == {"calls": 3, "tokens": 15}
+    first = OperatorLLMUsage(2, 3, 3, 2, 1, 10, 8)
+    second = OperatorLLMUsage(1, 2, 2, 1, 1, 5, 4)
+    observed = OperatorLLMUsage(4, 4, 4, 4, 0, 20, 16).to_dict()
+    executor._prompt_coordinators["a"] = _Coordinator(first)
+    executor._prompt_coordinators["b"] = _Coordinator(second)
+    executor._dataflow_prompt_usage = observed.copy()
+    expected = {key: value + second.to_dict()[key] + observed[key]
+                for key, value in first.to_dict().items()}
+    assert executor.operator_llm_usage() == expected
+    assert executor.operator_llm_usage() == expected
+    assert executor._dataflow_prompt_usage == observed
 
 
 def test_y025(executor, source, plan):

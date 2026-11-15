@@ -1543,17 +1543,31 @@ def test_m025(prompt_server):
 
 
 # --- M026 create_async_operator_llm_client factory --------------------------
-def test_m026(prompt_server):
+def test_m026(prompt_server, tmp_path):
     services, store, port = make_services()
     remote, action = make_journal(services)
     pack = parse_prompt_pack(PACK)
     model = pack.prompt_definitions['enrich'].model
     client = create_async_operator_llm_client(model, None, native_journal=remote)
     assert isinstance(client, AsyncOperatorLLMClient) and client.journal is remote
-    # offline / codex paths declare their own capability and refuse the injection
-    for option in ('offline_store', 'offline_dir', 'codex_exec'):
+    # Offline data now uses the same verified native port, never a worker-owned
+    # database or a paid HTTP request. Codex still owns a different capability.
+    from demiflow.execution.dataflow_offline import RemoteOfflinePromptClient
+    before = list(port.commands)
+    for options in ({'offline_store': {'path': str(tmp_path / 'offline.sqlite')}},
+                    {'offline_dir': str(tmp_path / 'offline')}):
+        offline = create_async_operator_llm_client(model, options, native_journal=remote)
+        assert isinstance(offline, RemoteOfflinePromptClient) and offline.journal is remote
+        assert offline.options == options and not list(tmp_path.iterdir())
+        asyncio.run(offline.aclose())
+        with pytest.raises(ValueError, match='verified native worker port'):
+            create_async_operator_llm_client(model, options, native_journal=object())
+    assert port.commands == before and prompt_server['requests'] == []
+    for options in ({'codex_exec': {}}, {'offline_dir': 'x', 'offline_store': {}},
+                    {'offline_store': {}, 'sqlite_journal': {'path': 'not-owned'}},
+                    {'offline_dir': 'x', 'http_error_retry': {'max_retries': 1}}):
         with pytest.raises(ValueError):
-            create_async_operator_llm_client(model, {option: {}}, native_journal=remote)
+            create_async_operator_llm_client(model, options, native_journal=remote)
     # without injection the original construction path is unchanged
     plain = create_async_operator_llm_client(model)
     assert plain.journal is None

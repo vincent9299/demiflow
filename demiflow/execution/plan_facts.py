@@ -192,7 +192,14 @@ def operation_facts(operation):
     elif kind == "sample":
         arguments.update(fraction=operation.fraction, seed=operation.seed)
     elif kind == "sort":
-        arguments.update(key=list(operation.keys), descending=list(operation.descending),
+        descending = operation.descending
+        if type(descending) not in (bool, tuple):
+            raise RuntimeContractError("Sort directions must be a bool or tuple of bools")
+        directions = ([descending] * len(operation.keys) if type(descending) is bool
+                      else list(descending))
+        if len(directions) != len(operation.keys) or any(type(v) is not bool for v in directions):
+            raise RuntimeContractError("Sort directions must match the declared keys")
+        arguments.update(key=list(operation.keys), descending=directions,
                          boundaries=list(operation.boundaries) if operation.boundaries is not None else None)
     elif kind == "repartition":
         arguments.update(num_blocks=operation.num_blocks,

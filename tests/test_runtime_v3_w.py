@@ -648,6 +648,27 @@ def test_w001(tmp_path):
         assert binding.original_plan_ref.digest == ex._sealed.physical_ref.digest
         assert binding.original_code_pin_ref.digest == ex._sealed.code_pin_ref.digest
         assert binding.restore_image is None
+        original_marker = journal.source_binding(action_id + "-dataflow-sealed")
+        assert type(original_marker['sealed_at']) is int
+        # Historical markers without optional UI metadata retain original ids;
+        # current markers accept only the producer's two bounded metadata fields.
+        historical = {key: value for key, value in original_marker.items()
+                      if key not in {'sealed_at', 'observation_labels'}}
+        old_binding = hist._load_v3(journal, target, action_id, historical)
+        assert old_binding.original_plan_ref == binding.original_plan_ref
+        occurrences = [node.occurrence_id for node in ex._graph.nodes]
+        valid = dict(original_marker, observation_labels={occurrences[0]: 'source'})
+        assert hist._load_v3(journal, target, action_id, valid).original_plan_ref == binding.original_plan_ref
+        invalid = [dict(original_marker, sealed_at=value) for value in (True, -1, 'now')]
+        invalid += [dict(original_marker, observation_labels=labels) for labels in
+                    ([], {'outside-original-graph': 'x'}, {occurrences[0]: ''},
+                     {occurrences[0]: True}, {key: 'duplicate' for key in occurrences})]
+        invalid.append(dict(original_marker, future_metadata={}))
+        for marker in invalid:
+            with pytest.raises(DataflowError) as exc:
+                hist._load_v3(journal, target, action_id, marker)
+            assert exc.value.code == 'INVALID_CONTRACT'
+        assert journal.source_binding(action_id + "-dataflow-sealed") == original_marker
         # Neither v3 nor v1 facts -> incompatible history, never a fabricated projection.
         with pytest.raises(DataflowError) as exc:
             hist.load_execution_version(target, "missing", max_bytes=1024 * 1024)

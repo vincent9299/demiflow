@@ -176,8 +176,10 @@ def _load_v3(journal, directory, action_id, marker):
     if schema != DATAFLOW_SEALED_SCHEMA:
         raise _err("INCOMPATIBLE_HISTORY",
                    "unsupported v3 seal schema: " + repr(schema))
-    if set(marker) != _MANIFEST_KEYS:
+    if not _MANIFEST_KEYS <= set(marker) <= _MANIFEST_KEYS | {"sealed_at", "observation_labels"}:
         raise _err("INVALID_CONTRACT", "v3 seal marker key set is unsupported")
+    if "sealed_at" in marker and (type(marker["sealed_at"]) is not int or marker["sealed_at"] < 0):
+        raise _err("INVALID_CONTRACT", "v3 seal timestamp must be nonnegative epoch milliseconds")
     if marker["run_id"] != _engine_run_id(journal):
         raise _err("INVALID_CONTRACT", "v3 seal run_id differs from the journal recovery identity")
     if marker["action_id"] != action_id:
@@ -198,6 +200,18 @@ def _load_v3(journal, directory, action_id, marker):
     from .dataflow_seal import load_sealed_dataflow
     store, bounds = _v3_read_store(directory, store_id=sealed.physical_ref.store_id)
     graph, physical, _ = load_sealed_dataflow(sealed, action_id=action_id, store=store, bounds=bounds)
+    if "observation_labels" in marker:
+        labels = marker["observation_labels"]
+        if (type(labels) is not dict
+                or not set(labels) <= {node.occurrence_id for node in graph.nodes}
+                or any(type(value) is not str or not value for value in labels.values())
+                or len(set(labels.values())) != len(labels)):
+            raise _err("INVALID_CONTRACT", "v3 observation labels must uniquely name original occurrences")
+        from .recovery_contract import document
+        try:
+            document(labels, bounds.max_control_bytes)
+        except RecoveryContractError as exc:
+            raise _err("INVALID_CONTRACT", "v3 observation labels exceed their original control budget") from exc
     if (graph.dag_id != marker["dag_id"] or physical.plan_id != marker["plan_id"]
             or graph.dag_id != marker["graph_digest"] or physical.plan_id != marker["physical_digest"]
             or physical.plan_revision != marker["plan_revision"]):

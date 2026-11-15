@@ -353,13 +353,14 @@ class StoredMaterializedHandle:
     """
 
     def __init__(
-        self, result: "TerminalResult", *, store: "ArtifactStore", owner: str
+        self, result: "TerminalResult", *, store: "ArtifactStore", owner: str, bounds: "Bounds"
     ) -> None:
         if result.result_ref is None:
             raise _error("INVALID_CONTRACT", "materialized result has no stored manifest")
         if not result.complete:
             raise _error("INVALID_CONTRACT", "cannot materialize an incomplete result")
         self._store = store
+        self._bounds = bounds
         self._owner = owner
         self._manifest_ref = result.result_ref
         self._lock = threading.Lock()
@@ -381,7 +382,7 @@ class StoredMaterializedHandle:
                 raise _error("CORRUPT_ARTIFACT", "manifest row count differs from result")
             from .dataflow_segments import tree_refs
             for block in blocks:
-                for ref in tree_refs(store, block, store._bounds):
+                for ref in tree_refs(store, block, self._bounds):
                     store.retain(ref, owner=owner)
                     pinned_tree_count += 1
             self._blocks = blocks
@@ -390,14 +391,14 @@ class StoredMaterializedHandle:
             if manifest.get('schema_ref') is not None:
                 from .record_schema import RecordSchemas
                 self._declared_schema_ref = _artifact_ref(manifest['schema_ref'])
-                self._declared_schema = RecordSchemas(store=store, bounds=store._bounds).read(self._declared_schema_ref)
+                self._declared_schema = RecordSchemas(store=store, bounds=self._bounds).read(self._declared_schema_ref)
                 store.retain(self._declared_schema_ref, owner=owner)
                 pinned.append(self._declared_schema_ref)
         except Exception:
             from itertools import islice
             from .dataflow_segments import tree_refs
             try:
-                for ref in islice((ref for block in blocks for ref in tree_refs(store, block, store._bounds)), pinned_tree_count):
+                for ref in islice((ref for block in blocks for ref in tree_refs(store, block, self._bounds)), pinned_tree_count):
                     store.release(ref, owner=owner)
             except Exception:
                 pass
@@ -409,6 +410,8 @@ class StoredMaterializedHandle:
             raise
 
     def _read_manifest(self) -> dict:
+        if self._manifest_ref.size_bytes > self._bounds.max_control_bytes:
+            raise _error("BUDGET_EXCEEDED", "materialized manifest exceeds its original control budget")
         chunks = self._store.read(
             self._manifest_ref, max_bytes=self._manifest_ref.size_bytes
         )
@@ -444,7 +447,7 @@ class StoredMaterializedHandle:
         # driver's live journal, pin authority or locks.
         self._check_open()
         state = {"root": self._store.root, "store_id": self._store.store_id,
-                "bounds": self._store._bounds, "manifest": self._manifest_ref,
+                "bounds": self._bounds, "manifest": self._manifest_ref,
                 "blocks": self._blocks, "rows": self._rows, "schema": self._schema}
         if self._declared_schema_ref is not None:
             state['schema_ref'] = self._declared_schema_ref
@@ -454,12 +457,13 @@ class StoredMaterializedHandle:
         from .dataflow_store import RunArtifactStore
         self._store = RunArtifactStore(root=state["root"], store_id=state["store_id"],
             journal=None, bounds=state["bounds"], readonly=True)
+        self._bounds = state["bounds"]
         self._manifest_ref, self._blocks = state["manifest"], state["blocks"]
         self._rows, self._schema = state["rows"], state["schema"]
         from .record_schema import RecordSchemas
         self._declared_schema_ref = state.get('schema_ref')
         self._declared_schema = RecordSchemas(store=self._store,
-            bounds=self._store._bounds).read(self._declared_schema_ref)
+            bounds=self._bounds).read(self._declared_schema_ref)
         self._owner, self._released, self._lock = None, False, threading.Lock()
 
     @property
@@ -492,16 +496,16 @@ class StoredMaterializedHandle:
 
     def _iter_rows(self, *, with_schema=False) -> Iterator["Row"]:
         from .record_schema import RecordSchemas
-        schemas = RecordSchemas(store=self._store, bounds=self._store._bounds) if with_schema else None
+        schemas = RecordSchemas(store=self._store, bounds=self._bounds) if with_schema else None
         count = 0
         from .dataflow_segments import segment_refs
         for ref in (leaf for block in self._blocks
-                    for leaf in segment_refs(self._store, block, self._store._bounds)):
+                    for leaf in segment_refs(self._store, block, self._bounds)):
             stream = _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes)))
             while True:
                 try:
                     if ref.media_type == "application/x-demiflow-records-v3":
-                        line = stream.readline(self._store._bounds.max_row_bytes + 1)
+                        line = stream.readline(self._bounds.max_row_bytes + 1)
                         if not line:
                             break
                         item = json.loads(line)
@@ -511,7 +515,7 @@ class StoredMaterializedHandle:
                             record_id=item["record_id"], sequence=item["sequence"], max_bytes=len(line))
                         if record.inline is None:
                             from .exchange.dataflow_bridge import _decode_payload
-                            ceiling = self._store._bounds.max_row_bytes
+                            ceiling = self._bounds.max_row_bytes
                             row = _decode_payload(b"".join(self._store.read(record.payload_ref,
                                 max_bytes=ceiling)), max_bytes=ceiling)
                         else:
@@ -540,7 +544,7 @@ class StoredMaterializedHandle:
                 release = getattr(self._store, 'release_materialized', self._store.release)
                 from .dataflow_segments import tree_refs
                 for block in self._blocks:
-                    for ref in tree_refs(self._store, block, self._store._bounds):
+                    for ref in tree_refs(self._store, block, self._bounds):
                         release(ref, owner=self._owner)
                 release(self._manifest_ref, owner=self._owner)
                 if self._declared_schema_ref is not None:

@@ -670,7 +670,10 @@ def test_t012():
     store = FakeStore()
     rows = [{"id": i} for i in range(3)]
     result, manifest_ref, block_refs = build_materialized(store, rows)
-    handle = handles.StoredMaterializedHandle(result, store=store, owner="owner-a")
+    bounds = make_bounds()
+    assert not hasattr(store, '_bounds')  # ArtifactStore does not publish private policy state.
+    handle = handles.StoredMaterializedHandle(result, store=store, owner="owner-a", bounds=bounds)
+    assert handle._bounds is bounds
     assert handle.num_blocks() == 1
     assert store.is_pinned(manifest_ref, "owner-a")
     assert all(store.is_pinned(r, "owner-a") for r in block_refs)
@@ -683,9 +686,19 @@ def test_t012():
     bad_result = TerminalResult(kind="materialize", rows=0, scalar=None, result_ref=bad_ref,
                                 write_result=None, complete=True, completion="source_exhausted")
     with pytest.raises(DataflowError) as ei:
-        handles.StoredMaterializedHandle(bad_result, store=store2, owner="owner-b")
+        handles.StoredMaterializedHandle(bad_result, store=store2, owner="owner-b", bounds=make_bounds())
     assert ei.value.code == "CORRUPT_ARTIFACT"
     assert not store2.is_pinned(bad_ref, "owner-b")
+
+    # The caller's original budget is used even for a protocol-only store.
+    store3 = FakeStore()
+    large_result, large_manifest, _ = build_materialized(store3, rows)
+    before_reads = store3.reads
+    with pytest.raises(DataflowError) as exc:
+        handles.StoredMaterializedHandle(large_result, store=store3, owner='small',
+            bounds=make_bounds(max_control_bytes=large_manifest.size_bytes - 1))
+    assert exc.value.code == 'BUDGET_EXCEEDED'
+    assert store3.reads == before_reads and not store3.is_pinned(large_manifest, 'small')
 
 
 # --- T013 StoredMaterializedHandle.rows ------------------------------------
@@ -694,7 +707,7 @@ def test_t013():
     rows = [{"t": (1, 2), "b": b"\x00\xff", "n": None, "f": -0.0, "l": [1, 2, 3]},
             {"t": (3,), "b": b"", "n": None, "f": 3.14159, "l": []}]
     result, _, _ = build_materialized(store, rows, num_blocks=2)
-    handle = handles.StoredMaterializedHandle(result, store=store, owner="o")
+    handle = handles.StoredMaterializedHandle(result, store=store, owner="o", bounds=make_bounds())
     got = list(handle.rows())
     assert got == rows
     assert got[0]["t"] == (1, 2) and isinstance(got[0]["b"], bytes)
@@ -708,8 +721,8 @@ def test_t014():
     store = FakeStore()
     rows = [{"id": i} for i in range(2)]
     result, manifest_ref, block_refs = build_materialized(store, rows)
-    a = handles.StoredMaterializedHandle(result, store=store, owner="owner-a")
-    b = handles.StoredMaterializedHandle(result, store=store, owner="owner-b")
+    a = handles.StoredMaterializedHandle(result, store=store, owner="owner-a", bounds=make_bounds())
+    b = handles.StoredMaterializedHandle(result, store=store, owner="owner-b", bounds=make_bounds())
     a.release()
     a.release()  # idempotent
     # owner-b still holds its pins and the data survives
@@ -727,7 +740,7 @@ def test_t015():
     store = FakeStore()
     rows = [{"id": i} for i in range(6)]
     result, _, block_refs = build_materialized(store, rows, num_blocks=3)
-    handle = handles.StoredMaterializedHandle(result, store=store, owner="o")
+    handle = handles.StoredMaterializedHandle(result, store=store, owner="o", bounds=make_bounds())
     assert handle.num_blocks() == len(block_refs) == 3
     handle.release()
     with pytest.raises(RuntimeError):

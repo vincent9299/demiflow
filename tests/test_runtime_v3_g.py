@@ -355,8 +355,19 @@ def test_g011():
     assert legacy["kind"] == "map"
     assert legacy["arguments"]["inputs"] is None
 
+    for direction in (False, True, (False, True)):
+        keys = ("x", "y")
+        facts = operation_facts(ops.SortOp(keys=keys, descending=direction))
+        expected = [direction] * len(keys) if type(direction) is bool else list(direction)
+        assert facts["kind"] == "sort"
+        assert facts["arguments"] == {"key": list(keys), "descending": expected, "boundaries": None}
+    class UnknownOp(LogicalOp):
+        pass
     with pytest.raises(RuntimeContractError):
-        operation_facts(ops.SortOp(keys=("x",)))  # unknown legacy kind still refused
+        operation_facts(UnknownOp())  # only registered capabilities acquire facts
+    for direction in ((True,), (True, 1)):
+        with pytest.raises(RuntimeContractError):
+            operation_facts(ops.SortOp(keys=("x", "y"), descending=direction))
 
     nodes, edges, actions = _enumeration_1025()
     with pytest.raises(ValueError):

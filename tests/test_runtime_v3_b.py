@@ -357,12 +357,14 @@ def test_b010(tmp_path, monkeypatch):
                 close()
             monkeypatch.setattr(reader, 'close', observed)
         original = kernel.close
+        cleanup_error = RuntimeError('owned kernel close failed')
         def broken_close():
             original()
-            raise RuntimeError('owned kernel close failed')
+            raise cleanup_error
         monkeypatch.setattr(kernel, 'close', broken_close)
-        with pytest.raises(DataflowError, match='cleanup failed'):
+        with pytest.raises(ExceptionGroup, match='cleanup failed') as raised:
             item.worker.close()
+        assert raised.value.exceptions == (cleanup_error,)
         assert len(closed) == len(readers) > 0 and item.mailbox._closed
         assert not item.worker._readers and not item.worker._kernels
         item.worker.close()

@@ -222,7 +222,8 @@ def materialized_handle(result: "TerminalResult", *, execution: "DataflowExecuti
     pin so release never drops another owner's reference, and reads never re-run the
     source/model."""
     owner = execution.services.action.action_id + "-" + uuid.uuid4().hex
-    return StoredMaterializedHandle(result, store=execution.services.store, owner=owner)
+    return StoredMaterializedHandle(result, store=execution.services.store, owner=owner,
+                                    bounds=execution.services.bounds)
 
 
 def write_result(result: "TerminalResult", *, kind: str) -> "WriteResult":

@@ -593,24 +593,24 @@ def test_l023(ex, engine):
 # L024 operator_llm_usage — read hosted facts, no recompute.
 # --------------------------------------------------------------------------- #
 def test_l024(ex, engine):
-    class _Usage:
-        def __init__(self, values):
-            self._values = values
-
-        def to_dict(self):
-            return dict(self._values)
-
+    from demiflow.operator_llm.model import OperatorLLMUsage
     class _Coordinator:
-        def __init__(self, values):
-            self._values = values
-
+        def __init__(self, usage):
+            self._usage = usage
         def usage(self):
-            return _Usage(self._values)
+            return self._usage
 
-    ex._prompt_coordinators['node-a'] = _Coordinator({'requests': 2, 'tokens': 5})
-    ex._prompt_coordinators['node-b'] = _Coordinator({'requests': 3, 'tokens': 7})
-    totals = ex.operator_llm_usage()
-    assert totals == {'requests': 5, 'tokens': 12}
+    first = OperatorLLMUsage(2, 3, 3, 2, 1, 5, 7)
+    second = OperatorLLMUsage(3, 4, 4, 3, 1, 7, 11)
+    observed = OperatorLLMUsage(1, 2, 2, 1, 1, 13, 17).to_dict()
+    ex._prompt_coordinators['node-a'] = _Coordinator(first)
+    ex._prompt_coordinators['node-b'] = _Coordinator(second)
+    ex._dataflow_prompt_usage = observed.copy()
+    expected = {key: value + second.to_dict()[key] + observed[key]
+                for key, value in first.to_dict().items()}
+    assert ex.operator_llm_usage() == expected
+    assert ex.operator_llm_usage() == expected  # reading metrics is not accounting again
+    assert ex._dataflow_prompt_usage == observed
     assert engine.execute_calls == [], 'usage must not recompute or impose a budget'
     assert engine.requests == []
     _assert_retired_absent()
