@@ -1,3 +1,5 @@
+> 此文保存最初集成基线的审查结果，下面的“未接通”等描述是当时事实。当前修复及验收进展请先读 [CURRENT-STATUS.md](CURRENT-STATUS.md)；历史记录不覆盖为新结论。
+
 # DemiFlow v3：按原始意图审查及隔离修复记录
 
 > 本文保留初次审查时的基线结论。继续实施已打通真实 Dataset 主链路和部分原生模型链路；当前证据与未关闭项见 [CORE-PROGRESS.md](CORE-PROGRESS.md) 与 [NATIVE-PROGRESS.md](NATIVE-PROGRESS.md)。下文“完全未接通”不能再当作最新状态；整体尚未最终验收仍成立。
