@@ -185,8 +185,20 @@ class DriverArtifactPort:
     def __init__(self, action: "RunAction", *, bounds: "Bounds"):
         self._action = action
         self._bounds = bounds
+        if action.context.journal.pending_dataflow_gc():
+            from .dataflow_gc import recover_published_gc
+            result = recover_published_gc(action.context.journal, action.context.fence)
+            if result['blocked']:
+                raise DataflowError('UNKNOWN_EFFECT', result['blocked'])
         from .dataflow_staging import recover_staging
         self.recovery = recover_staging(action, bounds=bounds)
+
+    def bind_store_lease(self, inode, *, fresh):
+        return self._action.context.journal.bind_dataflow_gc_protocol(
+            self._action.context.fence, inode, fresh=fresh)
+
+    def store_protocol(self):
+        return self._action.context.journal.dataflow_gc_protocol()
 
     def reserve(self, operation_id: str, amounts: Mapping[str, int]) -> None:
         from .dataflow_store import ARTIFACT_STAGING_BUDGET
@@ -359,6 +371,13 @@ class DriverJournalService:
             close = getattr(self._native, "close", None)
             if callable(close):
                 close()
+
+    def physically_stopped(self):
+        """A stop request or empty inflight dictionary is not thread exit proof."""
+        native = getattr(getattr(self, '_native', None), 'native_journal', None)
+        thread = getattr(native, '_batch_thread', None)
+        return (self._closed and all(not worker.is_alive() for worker in self._workers)
+                and not (thread is not None and thread.is_alive()))
 
     def bind_queue(self, service: object) -> None:
         if self._closed:
@@ -593,6 +612,10 @@ class DriverJournalService:
                     raise
                 run._native_prompt_journal = journal
             journal.stores.update(getattr(self._action, 'object_sinks', {}))
+            if getattr(journal, '_dataflow_object_lease', None) is None:
+                from .dataflow_object_lease import ObjectLease
+                journal._dataflow_object_lease = ObjectLease(self._store.root,
+                    expected=self._store._lease_identity)
             return journal
 
     def _native_request(self, command: NativeJournalCommand):

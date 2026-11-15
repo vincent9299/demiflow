@@ -132,20 +132,26 @@ def make_driver_services(action: "RunAction", *, policy: RuntimePolicy, bounds: 
     port = DriverArtifactPort(action, bounds=bounds)
     store = RunArtifactStore(root=run.directory / ".dataflow-store", store_id=policy.store_id,
                              journal=port, bounds=bounds)
-    if action.replaying and run.journal.source_binding(action.action_id + "-dataflow-sealed") is not None:
-        from dataclasses import replace
-        from .dataflow_seal import load_dataflow
-        _, physical, _ = load_dataflow(run.directory, action.action_id, store=store, bounds=bounds)
-        policy = replace(policy, worker_mode=physical.policy.worker_mode)
-    resources = _driver_resources(action, policy)
-    hosts = _driver_hosts(action, policy, store, bounds)
-    journal_service = DriverJournalService(action, store=store, bounds=bounds)
+    journal_service = None
     try:
+        if action.replaying and run.journal.source_binding(action.action_id + "-dataflow-sealed") is not None:
+            from dataclasses import replace
+            from .dataflow_seal import load_dataflow
+            _, physical, _ = load_dataflow(run.directory, action.action_id, store=store, bounds=bounds)
+            policy = replace(policy, worker_mode=physical.policy.worker_mode)
+        resources = _driver_resources(action, policy)
+        hosts = _driver_hosts(action, policy, store, bounds)
+        journal_service = DriverJournalService(action, store=store, bounds=bounds)
         return DriverServices(action=action, journal_service=journal_service, store=store,
                               resources=resources, policy=policy, bounds=bounds, hosts=hosts,
                               clock_ms=_now_ms)
-    except BaseException:
-        journal_service.close(deadline_ms=bounds.timeout_ms)
+    except BaseException as failure:
+        try:
+            if journal_service is not None:
+                journal_service.close(deadline_ms=bounds.timeout_ms)
+            store.close()
+        except BaseException as cleanup:
+            failure.add_note('Driver store cleanup failed: ' + str(cleanup))
         raise
 
 
@@ -203,17 +209,24 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
     if store_id != shared_store.store_id:
         raise DataflowError("INVALID_CONTRACT", "assignment artifacts belong to another store domain")
     store = RunArtifactStore(root=shared_store.root, store_id=store_id, journal=journal, bounds=bounds)
-    programs = _load_programs(assignment, store=store, bounds=bounds, cache=cache)
-    constants = _read_constants(assignment.sealed.constants_ref, store=store, bounds=bounds)
-    from .dataflow_native_limits import NativeBudgetGuard, intersect_native_limits
-    limits = intersect_native_limits(getattr(programs, "native_limits", None), assignment.native_limits)
-    if limits is not None:
-        constants['native_limits'] = limits
-    guard = NativeBudgetGuard(limits)
-    def check_stop():
-        guard.check()
-        transport.check_stop()
-        journal.check_lease()
-    return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,
-                           clock_ms=_now_ms, check_stop=check_stop,
-                           constants=constants, programs=programs)
+    try:
+        programs = _load_programs(assignment, store=store, bounds=bounds, cache=cache)
+        constants = _read_constants(assignment.sealed.constants_ref, store=store, bounds=bounds)
+        from .dataflow_native_limits import NativeBudgetGuard, intersect_native_limits
+        limits = intersect_native_limits(getattr(programs, "native_limits", None), assignment.native_limits)
+        if limits is not None:
+            constants['native_limits'] = limits
+        guard = NativeBudgetGuard(limits)
+        def check_stop():
+            guard.check()
+            transport.check_stop()
+            journal.check_lease()
+        return RuntimeServices(store=store, journal=journal, bounds=bounds, assignment=assignment,
+                               clock_ms=_now_ms, check_stop=check_stop,
+                               constants=constants, programs=programs)
+    except BaseException as failure:
+        try:
+            store.close()
+        except BaseException as cleanup:
+            failure.add_note('Worker store cleanup failed: ' + str(cleanup))
+        raise

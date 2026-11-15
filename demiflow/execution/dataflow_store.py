@@ -52,6 +52,7 @@ class RunArtifactStore:
         if not root.is_absolute():
             raise DataflowError("INVALID_CONTRACT", "artifact store root must be absolute")
         _no_symlink(root)
+        fresh = not root.exists()
         if not readonly:
             root.mkdir(parents=True, exist_ok=True)
         if not root.is_dir():
@@ -62,13 +63,71 @@ class RunArtifactStore:
         self.store_id = store_id
         self._journal = journal
         self._bounds = bounds
+        self._writer_lease = None
+        self._writer_closed = False
+        from .dataflow_object_lease import protocol_identity
+        self._lease_identity = protocol_identity(root)
+        self._protocol_required = self._lease_identity is not None
+        original_protocol = getattr(journal, 'store_protocol', lambda: None)()
+        if original_protocol is not None:
+            original = tuple(original_protocol[:2])
+            if original_protocol[2] and self._lease_identity != original:
+                raise DataflowError('FENCED', 'Published object header differs from original journal')
+            self._lease_identity = original
+            self._protocol_required = bool(original_protocol[2])
+        if not readonly and journal is not None:
+            from .dataflow_object_lease import ObjectLease, held_exclusive, record_protocol
+            bind = getattr(journal, 'bind_store_lease', None)
+            if bind is not None:
+                import fcntl
+                created = False
+                if self._lease_identity is not None:
+                    self._writer_lease = ObjectLease(root, expected=self._lease_identity)
+                else:
+                    try:
+                        self._writer_lease = ObjectLease(root, create=True, exclusive=True)
+                        created = True
+                    except FileExistsError:
+                        self._writer_lease = ObjectLease(root)
+                try:
+                    if created:
+                        with held_exclusive(self._writer_lease):
+                            if fresh:
+                                record_protocol(root, self._writer_lease.identity)
+                            eligible = bind(self._writer_lease.identity, fresh=fresh)
+                        fcntl.flock(self._writer_lease.fd, fcntl.LOCK_SH)
+                    else:
+                        eligible = bind(self._writer_lease.identity, fresh=fresh)
+                    if eligible and protocol_identity(root) != self._writer_lease.identity:
+                        raise DataflowError('FENCED', 'Registered store protocol header is missing or changed')
+                    self._protocol_required = eligible or self._protocol_required
+                except BaseException:
+                    self.close()
+                    raise
+            else:
+                try:
+                    self._writer_lease = ObjectLease(root, expected=self._lease_identity)
+                except FileNotFoundError:
+                    if self._lease_identity is not None:
+                        raise DataflowError('FENCED', 'Registered published object lease is missing')
+                    pass  # Historical/non-native test stores are not GC eligible.
+            if self._writer_lease is not None:
+                if (self._lease_identity is not None and
+                        self._lease_identity != self._writer_lease.identity):
+                    self.close()
+                    raise DataflowError('FENCED', 'Published object lease identity changed')
+                self._lease_identity = self._writer_lease.identity
         self._objects = root / store_id / _OBJECTS
         self._staging = root / store_id / _STAGING
-        if not readonly:
-            self._objects.mkdir(parents=True, exist_ok=True)
-            self._staging.mkdir(parents=True, exist_ok=True)
-        _no_symlink(self._objects)
-        _no_symlink(self._staging)
+        try:
+            if not readonly:
+                self._objects.mkdir(parents=True, exist_ok=True)
+                self._staging.mkdir(parents=True, exist_ok=True)
+            _no_symlink(self._objects)
+            _no_symlink(self._staging)
+        except BaseException:
+            self.close()
+            raise
 
     @property
     def root(self) -> Path:
@@ -95,6 +154,13 @@ class RunArtifactStore:
         return KernelScratch(self, max_bytes=max_bytes, max_io_bytes=max_io_bytes)
 
     def put(self, chunks: Iterator[bytes], *, max_bytes: int, media_type: str) -> ArtifactRef:
+        from .dataflow_object_lease import shared_access
+        if self._writer_closed:
+            raise DataflowError('FENCED', 'Artifact writer scope is closed')
+        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+            return self._put(chunks, max_bytes=max_bytes, media_type=media_type)
+
+    def _put(self, chunks, *, max_bytes, media_type):
         if self._readonly:
             raise DataflowError("FENCED", "historical artifact store is read-only")
         if type(max_bytes) is not int or max_bytes <= 0:
@@ -195,6 +261,12 @@ class RunArtifactStore:
                 lease.close()
 
     def read(self, ref: ArtifactRef, *, max_bytes: int) -> Iterator[bytes]:
+        from .dataflow_object_lease import shared_access
+        # This lease covers the generator's actual FD lifetime, including yield.
+        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+            yield from self._read(ref, max_bytes=max_bytes)
+
+    def _read(self, ref, *, max_bytes):
         if type(max_bytes) is not int or max_bytes <= 0:
             raise DataflowError("INVALID_CONTRACT", "max_bytes must be a positive int")
         if ref.size_bytes > max_bytes:
@@ -228,6 +300,11 @@ class RunArtifactStore:
             stream.close()
 
     def inspect(self, ref: ArtifactRef) -> bool:
+        from .dataflow_object_lease import shared_access
+        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+            return self._inspect(ref)
+
+    def _inspect(self, ref):
         path = self._object_path(ref)
         try:
             stat = path.stat()
@@ -242,6 +319,13 @@ class RunArtifactStore:
         return True
 
     def retain(self, ref: ArtifactRef, *, owner: str) -> None:
+        from .dataflow_object_lease import shared_access
+        with shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
+            if not self._inspect(ref):
+                raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
+            self._retain(ref, owner=owner)
+
+    def _retain(self, ref, *, owner):
         if self._readonly:
             raise DataflowError("FENCED", "historical artifact store is read-only")
         from .contracts.dataflow import ArtifactCommand
@@ -266,6 +350,19 @@ class RunArtifactStore:
             raise DataflowError('FENCED', 'Historical artifact store is read-only')
         self._object_path(ref)
         self._journal.release_materialized(ref, owner=owner)
+
+    def close(self):
+        # Read-only/result handles may still read explicitly rooted history.
+        # New publications require a new active store owner.
+        self._writer_closed = True
+        lease, self._writer_lease = self._writer_lease, None
+        if lease is not None:
+            lease.close()
+
+    def __del__(self):
+        lease = getattr(self, '_writer_lease', None)
+        if lease is not None:
+            lease.close()
 
 
 def _pin_identity(ref: ArtifactRef, owner: str) -> str:

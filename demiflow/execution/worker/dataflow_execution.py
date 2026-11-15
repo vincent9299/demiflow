@@ -449,6 +449,9 @@ class DataflowWorkerExecutor:
         self._readers.clear()
         self._channels = None
         self._cleanup_cache()
+        close_store = getattr(self._services.store, 'close', None)
+        if close_store is not None:
+            close_store()
         if self._owned_services_cache is not None:
             shutil.rmtree(self._owned_services_cache, ignore_errors=True)
             self._owned_services_cache = None

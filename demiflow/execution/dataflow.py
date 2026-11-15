@@ -1243,6 +1243,17 @@ class DataflowExecution:
             pass
         if getattr(self, '_stream_lance', None) is not None:
             self._stream_lance.close()
+        stopped = getattr(self._services.journal_service, 'physically_stopped', lambda: False)()
+        if physical_closed and stopped:
+            self._store.close()
+            from .dataflow_gc import collect_published_orphans, defer_run_gc
+            if getattr(self._action.context, '_native_prompt_journal', None) is not None:
+                defer_run_gc(self._action.context, self._bounds)
+                self._published_gc = {'removed':0,'bytes':0,'blocked':'Deferred until original native journal closes'}
+            else:
+                self._published_gc = collect_published_orphans(self._action, bounds=self._bounds)
+        else:
+            self._action.context._published_gc_guard_failed = True
         self._endpoints.clear()
         self._active_worker_allocations.clear()
         self._current_worker_observations.clear()

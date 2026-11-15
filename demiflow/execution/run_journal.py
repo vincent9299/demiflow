@@ -211,6 +211,9 @@ class RunJournal:
           CREATE TABLE IF NOT EXISTS runtime_dataflow_recovery (singleton INTEGER PRIMARY KEY CHECK(singleton=1), cursor TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_dataflow_staging (reservation_id TEXT PRIMARY KEY, store_id TEXT NOT NULL, device INTEGER NOT NULL, inode INTEGER NOT NULL, initial_bytes INTEGER NOT NULL, publication TEXT);
           CREATE TABLE IF NOT EXISTS runtime_dataflow_objects (store_id TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY(store_id,digest));
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_gc_protocol (singleton INTEGER PRIMARY KEY CHECK(singleton=1), device INTEGER NOT NULL, inode INTEGER NOT NULL, eligible INTEGER NOT NULL);
+          CREATE TABLE IF NOT EXISTS runtime_dataflow_gc (gc_id TEXT PRIMARY KEY, store_id TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL, charge_id TEXT NOT NULL, device INTEGER NOT NULL, inode INTEGER NOT NULL, status TEXT NOT NULL);
+          CREATE UNIQUE INDEX IF NOT EXISTS runtime_dataflow_gc_pending ON runtime_dataflow_gc(store_id,digest) WHERE status!='done';
           CREATE TABLE IF NOT EXISTS runtime_dataflow_settlements (reservation_id TEXT PRIMARY KEY, store_id TEXT, digest TEXT, bytes INTEGER NOT NULL, charged INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_artifacts (path TEXT PRIMARY KEY, commit_id TEXT, protected INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0);
           CREATE TABLE IF NOT EXISTS runtime_object_roots (root_id TEXT PRIMARY KEY, logical_root TEXT UNIQUE NOT NULL, physical_root TEXT NOT NULL, run_id TEXT NOT NULL);
@@ -228,6 +231,9 @@ class RunJournal:
                                  ('reference_commit_id', 'TEXT')):
             if name not in columns:
                 db.execute('ALTER TABLE runtime_artifacts ADD COLUMN ' + name + ' ' + definition)
+        object_columns = {r[1] for r in db.execute('PRAGMA table_info(runtime_dataflow_objects)')}
+        if 'charge_id' not in object_columns:
+            db.execute('ALTER TABLE runtime_dataflow_objects ADD COLUMN charge_id TEXT')
         db.executescript("""
           CREATE TABLE IF NOT EXISTS runtime_storage (singleton INTEGER PRIMARY KEY CHECK(singleton=1), items INTEGER NOT NULL, bytes INTEGER NOT NULL, object_bytes INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_reservation_count (singleton INTEGER PRIMARY KEY CHECK(singleton=1), items INTEGER NOT NULL);
@@ -261,7 +267,10 @@ class RunJournal:
 
     @contextmanager
     def _transaction(self):
-        with self._connection(write=True) as db:
+        from .dataflow_object_lease import shared_access
+        protocol = self.dataflow_gc_protocol() if self.path.exists() else None
+        with shared_access(self.directory / '.dataflow-store', protocol[:2] if protocol else None,
+                           require_protocol=bool(protocol and protocol[2])), self._connection(write=True) as db:
             with db:
                 db.execute('BEGIN IMMEDIATE')
                 if self.attempt is not None:
@@ -675,6 +684,7 @@ class RunJournal:
 
     @contextmanager
     def publication_guard(self, fence):
+        self._reconcile_published_gc(fence)
         with self._publication_lease():
             with self.execution_guard(fence):
                 pass
@@ -682,7 +692,17 @@ class RunJournal:
 
     def claim_execution(self, configuration, fence):
         with self._publication_lease(configuration['limits'].get('admission_timeout_s', 30)):
-            return self._claim_execution(configuration, fence)
+            attempt = self._claim_execution(configuration, fence)
+        self._reconcile_published_gc(fence)
+        return attempt
+
+    def _reconcile_published_gc(self, fence):
+        from .dataflow_object_lease import exclusive_here
+        if not exclusive_here(self.directory / '.dataflow-store') and self.pending_dataflow_gc():
+            from .dataflow_gc import recover_published_gc
+            result = recover_published_gc(self, fence)
+            if result.get('blocked'):
+                raise ExecutionConflict('Published artifact reconciliation is still owned or unknown: ' + result['blocked'])
 
     def _claim_execution(self, configuration, fence):
         from .recovery_contract import document, identifier, RecoveryContractError
@@ -710,7 +730,12 @@ class RunJournal:
         admitted between the ownership check and the external write.
         """
         from .recovery_contract import RecoveryContractError
+        from .dataflow_object_lease import exclusive_here
+        self._reconcile_published_gc(fence)
         with self._transaction() as db:
+            if (not exclusive_here(self.directory / '.dataflow-store') and
+                    db.execute("SELECT 1 FROM runtime_dataflow_gc WHERE status!='done' LIMIT 1").fetchone()):
+                raise ExecutionConflict('Published artifact reconciliation must finish before publication')
             row = db.execute('SELECT attempt,fence FROM runtime_owner').fetchone()
             state = json.loads(db.execute('SELECT document FROM execution_state').fetchone()[0])
             if row is None or row != (state['attempt'], fence):
@@ -807,6 +832,90 @@ class RunJournal:
                                   (digest, store_id, key, cursor, limit + 1)).fetchall()
         owners = tuple(row[0] for row in rows[:limit])
         return owners, owners[-1] if len(rows) > limit else None
+
+    def bind_dataflow_gc_protocol(self, fence, inode, *, fresh):
+        """Only a namespace born under the physical lease protocol is eligible."""
+        from .recovery_contract import RecoveryContractError
+        with self.execution_guard(fence) as db:
+            old = db.execute('SELECT device,inode,eligible FROM runtime_dataflow_gc_protocol').fetchone()
+            if old is not None:
+                if old[:2] != tuple(inode):
+                    raise RecoveryContractError('Published object lease was replaced')
+                return bool(old[2])
+            legacy = db.execute('SELECT 1 FROM runtime_dataflow_objects LIMIT 1').fetchone()
+            legacy = legacy or db.execute('SELECT 1 FROM runtime_dataflow_staging LIMIT 1').fetchone()
+            eligible = bool(fresh and not legacy)
+            db.execute('INSERT INTO runtime_dataflow_gc_protocol VALUES (1,?,?,?)', (*inode, int(eligible)))
+            return eligible
+
+    def dataflow_gc_protocol(self):
+        with self._connection() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_dataflow_gc_protocol'").fetchone():
+                return None
+            return db.execute('SELECT device,inode,eligible FROM runtime_dataflow_gc_protocol').fetchone()
+
+    def pending_dataflow_gc(self):
+        with self._connection() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_dataflow_gc'").fetchone():
+                return False
+            return db.execute("SELECT 1 FROM runtime_dataflow_gc WHERE status!='done' LIMIT 1").fetchone() is not None
+
+    def dataflow_gc_intents(self, *, limit=64):
+        if type(limit) is not int or not 1 <= limit <= 64:
+            raise ValueError('GC intent page exceeds budget')
+        with self._connection() as db:
+            rows = db.execute("SELECT gc_id,store_id,digest,bytes,charge_id,device,inode,status FROM runtime_dataflow_gc WHERE status!='done' ORDER BY gc_id LIMIT ?", (limit,)).fetchall()
+        names = ('gc_id','store_id','digest','bytes','charge_id','device','inode','status')
+        return [dict(zip(names, row)) for row in rows]
+
+    def prepare_dataflow_gc(self, fence, *, store_id, digest, size, charge_id, inode):
+        from .recovery_contract import identity, RecoveryContractError
+        from .dataflow_object_lease import exclusive_here
+        if not exclusive_here(self.directory / '.dataflow-store'):
+            raise RecoveryContractError('GC requires the original exclusive physical lease')
+        gc_id = identity(['dataflow-published-gc-v1', store_id, digest, charge_id])
+        with self.execution_guard(fence) as db:
+            obj = db.execute('SELECT bytes,charge_id FROM runtime_dataflow_objects WHERE store_id=? AND digest=?', (store_id,digest)).fetchone()
+            if obj != (size, charge_id):
+                raise RecoveryContractError('GC does not own this object allocation')
+            if db.execute('SELECT 1 FROM artifact_owner WHERE store_id=? AND digest=? LIMIT 1', (store_id,digest)).fetchone():
+                raise RecoveryContractError('GC object still has an owner')
+            if db.execute('SELECT count(*) FROM runtime_dataflow_gc').fetchone()[0] >= 100000:
+                raise RecoveryContractError('GC journal count exceeds budget')
+            db.execute('INSERT OR IGNORE INTO runtime_dataflow_gc VALUES (?,?,?,?,?,?,?,?)',
+                (gc_id,store_id,digest,size,charge_id,*inode,'prepared'))
+        return gc_id
+
+    def confirm_dataflow_gc_quarantine(self, fence, gc_id):
+        with self.execution_guard(fence) as db:
+            db.execute("UPDATE runtime_dataflow_gc SET status='quarantined' WHERE gc_id=? AND status='prepared'", (gc_id,))
+
+    def finish_dataflow_gc(self, fence, gc_id):
+        """Debit exactly the original allocation once; old RPC receipts stay immutable."""
+        from .recovery_contract import RecoveryContractError
+        from .dataflow_object_lease import exclusive_here
+        if not exclusive_here(self.directory / '.dataflow-store'):
+            raise RecoveryContractError('GC refund requires exclusive physical reconciliation')
+        with self.execution_guard(fence) as db:
+            row = db.execute('SELECT store_id,digest,bytes,charge_id,status FROM runtime_dataflow_gc WHERE gc_id=?', (gc_id,)).fetchone()
+            if row is None or row[4] not in ('quarantined','done'):
+                raise RecoveryContractError('GC lacks verified physical quarantine')
+            if row[4] == 'done':
+                return 0
+            from .dataflow_gc import gc_paths
+            target, quarantine = gc_paths(self, dict(gc_id=gc_id, store_id=row[0], digest=row[1]))
+            if target.exists() or quarantine.exists():
+                raise RecoveryContractError('GC physical removal is not confirmed')
+            store_id,digest,size,charge_id,_ = row
+            obj = db.execute('SELECT bytes,charge_id FROM runtime_dataflow_objects WHERE store_id=? AND digest=?', (store_id,digest)).fetchone()
+            charge = db.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?", (charge_id,)).fetchone()
+            if obj != (size,charge_id) or charge != (size,):
+                raise RecoveryContractError('GC allocation charge changed')
+            db.execute("UPDATE runtime_reservations SET amount=0 WHERE name='artifact_staging_bytes' AND reservation_id=?", (charge_id,))
+            db.execute("UPDATE runtime_budgets SET consumed=consumed-? WHERE name='artifact_staging_bytes'", (size,))
+            db.execute('DELETE FROM runtime_dataflow_objects WHERE store_id=? AND digest=?', (store_id,digest))
+            db.execute("UPDATE runtime_dataflow_gc SET status='done' WHERE gc_id=?", (gc_id,))
+            return size
 
     def bind_execution_action(self, fence, action_id, declaration):
         from .recovery_contract import document, identifier, RecoveryContractError
@@ -1193,7 +1302,7 @@ class RunJournal:
                 raise RecoveryContractError('Immutable artifact size changed')
             charged = 0 if prior else size
             if digest:
-                db.execute('INSERT OR IGNORE INTO runtime_dataflow_objects VALUES (?,?,?)', (store_id, digest, size))
+                db.execute('INSERT OR IGNORE INTO runtime_dataflow_objects(store_id,digest,bytes,charge_id) VALUES (?,?,?,?)', (store_id, digest, size, reservation_id))
             db.execute("UPDATE runtime_budgets SET consumed=consumed-? WHERE name='artifact_staging_bytes'",
                        (reservation[0] - charged,))
             db.execute("UPDATE runtime_reservations SET amount=? WHERE name='artifact_staging_bytes' AND reservation_id=?",
