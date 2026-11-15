@@ -267,9 +267,20 @@ def _decode_value(node, _depth=0, _count=None):
     _fail("CORRUPT_ARTIFACT", "record codec tag is unsupported")
 
 
+def _codec_json_default(value):
+    # Tagged payloads already contain ordinary JSON leaves. Only immutable
+    # control mappings need conversion; traversing/copying every scalar again
+    # multiplies encoding cost at every transport and spill boundary. JSON's
+    # tuple handling preserves the same historical array bytes.
+    if isinstance(value, Mapping):
+        return dict(value)
+    raise TypeError('Object of type ' + type(value).__name__ + ' is not JSON serializable')
+
+
 def _codec_dumps(value):
-    return json.dumps(thaw_record_value(value), sort_keys=True, ensure_ascii=False,
-                      separators=(",", ":"), allow_nan=True).encode("utf-8")
+    return json.dumps(value, sort_keys=True, ensure_ascii=False,
+                      separators=(",", ":"), allow_nan=True,
+                      default=_codec_json_default).encode("utf-8")
 
 
 def _codec_loads(raw):
@@ -353,11 +364,15 @@ def _validate_record(record):
 def _encode_record_document(record, *, max_bytes):
     """Self-contained transfer document: provenance sidecar + exactly one payload."""
     if record.inline is not None:
-        payload_raw = _encode_payload(record.inline, max_bytes=max_bytes)
+        _validate_tree(record.inline, max_bytes=max_bytes)
+        payload = _encode_value(record.inline)
+        payload_raw = _codec_dumps(payload)
+        if len(payload_raw) > max_bytes:
+            _fail("BUDGET_EXCEEDED", "encoded record exceeds the row byte budget")
         if record.encoded_bytes != len(payload_raw):
             _fail("INVALID_CONTRACT", "record encoded_bytes misreports the inline payload size")
         doc = {"v": _CODEC_VERSION, "sp": record.source_position, "eb": record.encoded_bytes,
-               "p": _codec_loads(payload_raw), "r": None}
+               "p": payload, "r": None}
     else:
         doc = {"v": _CODEC_VERSION, "sp": record.source_position, "eb": record.encoded_bytes,
                "p": None, "r": _ref_document(record.payload_ref)}
