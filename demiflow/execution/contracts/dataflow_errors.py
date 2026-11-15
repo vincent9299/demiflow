@@ -164,8 +164,22 @@ class DataflowError(Exception):
             (self.code, self._message, self.retryable, _thaw(self.context)),
         )
 
-from ..recovery_contract import RecoveryContractError
+from ..recovery_contract import RecoveryContractError, UnresolvedCommit
 
 
 class DataflowRecoveryError(DataflowError, RecoveryContractError):
     """A native recovery rejection, preserving both old and v3 catch surfaces."""
+
+
+def _reconstruct_unresolved(message, context):
+    return DataflowUnresolvedCommit(message, context=context)
+
+
+class DataflowUnresolvedCommit(DataflowError, UnresolvedCommit):
+    """Unknown native publication: catchable by both APIs, never retryable."""
+
+    def __init__(self, message, *, context=None):
+        super().__init__('UNKNOWN_EFFECT', message, retryable=False, context=context)
+
+    def __reduce__(self):
+        return _reconstruct_unresolved, (self._message, _thaw(self.context))

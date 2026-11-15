@@ -439,6 +439,11 @@ class NativeTerminalSink(_DataflowArtifactSink):
         if prepared['native'] is None:
             return artifact
         native = self.native.inspect(prepared['native'], context)
+        if native is None and artifact is not None:
+            # The exact original rows receipt is written only after native
+            # commit returned. It cannot prove that external publication;
+            # neither may recovery replay that ambiguous invocation.
+            raise UnresolvedCommit('Sink publication returned without matching native inspect evidence')
         if native is None or artifact is None:
             return None
         return {**artifact, 'data': {**artifact['data'], 'native_receipt': native}}

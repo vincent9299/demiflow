@@ -34,31 +34,56 @@ class FormalSink(Datasink):
 
 
 def test_formal_sink_reuses_receipt_without_legacy_callbacks_or_recomputation(tmp_path):
+    calls=tmp_path/'source-calls'
+    def observed(row):
+        with calls.open('a') as stream: stream.write('row\n')
+        return row
+    def source(): return data.from_items([{'x':1},{'x':1}]).map(observed)
     with pytest.raises(RuntimeError, match='later'):
         with RunContext.start(tmp_path / 'run') as run:
             reference = run.ref
-            assert data.from_items([{'x': 1}, {'x': 1}]).write_datasink(FormalSink()) is None
+            assert source().write_datasink(FormalSink()) is None
             raise RuntimeError('later')
     class NeverPrepare(FormalSink):
         def prepare(self, blocks, context):
             pytest.fail('a committed native sink must not reconsume its input')
     with RunContext.resume(reference):
-        data.from_items([{'x': 1}, {'x': 1}]).write_datasink(NeverPrepare())
+        source().write_datasink(NeverPrepare())
     fact = RunJournal(reference.directory).execution_commits('action-1')[0]
     assert fact['status'] == 'acked'
-    assert fact['receipts']['output']['data']['written_rows'] == 2
+    receipt=fact['receipts']['write_datasink']['data']['native_receipt']
+    assert receipt['sink_id']=='output' and receipt['commit_id']==fact['commit_id']
+    assert receipt['status']=='committed' and receipt['data']['written_rows']==2
+    assert calls.read_text().splitlines()==['row','row']
 
 
 def test_lying_commit_without_inspect_proof_cannot_advance(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    calls=tmp_path/'commits'; inputs=tmp_path/'inputs'
+    def observed(row):
+        with inputs.open('a') as stream: stream.write('row\n')
+        return row
     class LyingSink(FormalSink):
         def commit(self, prepared, context):
+            with calls.open('a') as stream: stream.write('commit\n')
             return {'commit_id': context.commit_id, 'sink_id': 'output', 'status': 'committed',
                     'data': {'written_rows': 1}}
-    with pytest.raises(UnresolvedCommit, match='inspect evidence'):
-        with RunContext.start(tmp_path / 'run'):
-            data.from_items([{'x': 1}]).write_datasink(LyingSink())
+    def execute(): data.from_items([{'x':1}]).map(observed).write_datasink(LyingSink())
+    with pytest.raises(UnresolvedCommit, match='inspect evidence') as first:
+        with RunContext.start(tmp_path / 'run') as run:
+            reference=run.ref
+            execute()
+    assert isinstance(first.value,DataflowError)
+    assert first.value.code=='UNKNOWN_EFFECT' and not first.value.retryable
     fact = RunJournal(tmp_path / 'run').execution_commits('action-1')[0]
     assert fact['status'] == 'prepared' and not fact['receipts']
+    with pytest.raises(UnresolvedCommit,match='inspect evidence') as resumed:
+        with RunContext.resume(reference): execute()
+    assert isinstance(resumed.value,DataflowError)
+    assert resumed.value.code=='UNKNOWN_EFFECT' and not resumed.value.retryable
+    assert RunJournal(tmp_path/'run').execution_commits('action-1')[0]==fact
+    assert calls.read_text().splitlines()==['commit']
+    assert inputs.read_text().splitlines()==['row']
 
 
 def test_pipeline_reuses_launcher_scope_and_bad_return_cannot_succeed(tmp_path):
@@ -100,17 +125,23 @@ def test_checker_rejects_the_same_retired_checkpoint_before_execution(tmp_path):
 
 
 def test_plain_python_stream_admission_precedes_source_and_actor_calls(tmp_path):
-    calls = []
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    calls=tmp_path/'worker-calls'
     def source():
-        calls.append('source')
+        with calls.open('a') as stream: stream.write('source\n')
         yield {'id': 1}
-    async def convert(row):
-        calls.append('actor')
-        return row
-    with pytest.raises(RecoveryContractError, match='admission limit'):
-        with RunContext.start(tmp_path / 'run'):
-            data.from_iter(source).map_async(convert, concurrency=65).materialize()
-    assert calls == []
+    class Convert:
+        def __init__(self):
+            with calls.open('a') as stream: stream.write('construct\n')
+        async def __call__(self,row):
+            with calls.open('a') as stream: stream.write('actor\n')
+            return row
+    with pytest.raises(DataflowError,match='RESOURCE_INFEASIBLE'):
+        with RunContext.start(tmp_path/'run',limits={'memory_bytes':64*1024,
+                'max_batch_bytes':8192,'max_row_bytes':4096,'max_state_bytes':8192}):
+            data.from_iter(source).map_async(Convert,concurrency=8,queue_depth=1).materialize()
+    assert not calls.exists()
+    assert RunJournal(tmp_path/'run').execution_commits('action-1')==[]
     assert not list((tmp_path / 'run').rglob('*.pkl'))
 
 

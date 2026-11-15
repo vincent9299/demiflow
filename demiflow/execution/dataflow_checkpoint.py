@@ -27,10 +27,11 @@ from .contracts.dataflow import (
 )
 from .contracts.dataflow_errors import DataflowError
 from .recovery_contract import (
-    MAX_SINKS, MAX_STATES, RecoveryContractError, SourcePosition, document,
+    MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document,
     identifier, identity,
 )
 from .run_context import RunAction
+from .run_journal import ExecutionBudgetExceeded
 from .state_artifacts import StateArtifacts
 
 # Reserved vector slot named by ARCHITECTURE §6. It is nested inside the
@@ -403,6 +404,13 @@ class DataflowCheckpointCoordinator:
             try:
                 fact = self._commit.commit(request.sequence, outputs=outputs,
                                            position=position, states=states, acknowledge=None)
+            except UnresolvedCommit as exc:
+                from .contracts.dataflow_errors import DataflowUnresolvedCommit
+                if isinstance(exc, DataflowUnresolvedCommit):
+                    raise
+                raise DataflowUnresolvedCommit(str(exc)) from exc
+            except ExecutionBudgetExceeded:
+                raise
             except RecoveryContractError as exc:
                 raise DataflowError("INVALID_CONTRACT", str(exc)) from exc
             confirmed = {}
@@ -464,6 +472,13 @@ class DataflowCheckpointCoordinator:
                 return self._recover_historical(sinks)
             try:
                 self._commit.recover(sinks, acknowledge=None)
+            except UnresolvedCommit as exc:
+                from .contracts.dataflow_errors import DataflowUnresolvedCommit
+                if isinstance(exc, DataflowUnresolvedCommit):
+                    raise
+                raise DataflowUnresolvedCommit(str(exc)) from exc
+            except ExecutionBudgetExceeded:
+                raise
             except RecoveryContractError as exc:
                 from .contracts.dataflow_errors import DataflowRecoveryError
                 raise DataflowRecoveryError("UNKNOWN_EFFECT", str(exc)) from exc
