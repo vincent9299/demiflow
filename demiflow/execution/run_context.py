@@ -320,7 +320,11 @@ class RunContext:
         authority=self.journal.source_binding('queue-budget-authority')
         if authority is not None and not native_stream:
             raise RecoveryContractError('Queue task runs cannot also authorize local durable actions; use a separate bounded run')
-        if old is not None and (declaration.get('kind') in {'write_file', 'delivery'} or
+        native_file = (declaration.get('kind') == 'write_file'
+            and self.journal.source_binding(action_id + '-file-target') is not None
+            and self.journal.source_binding(action_id + '-dataflow-sealed') is not None)
+        if old is not None and (declaration.get('kind') == 'delivery' or
+                declaration.get('kind') == 'write_file' and not native_file or
                 declaration.get('kind')=='run_stream' and not native_stream or
                 declaration.get('kind') == 'write_table' and not self.journal.execution_commits(action_id)
                 and not self._create_target_was_absent(action_id, declaration)):

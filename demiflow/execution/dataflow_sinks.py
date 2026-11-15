@@ -448,6 +448,9 @@ def make_native_terminal_sink(spec, *, request, services):
                             action.action_id + '-create-target-absent', binding)
                 else:
                     raise LanceWriteConflict('Create target already exists')
+    elif request.kind == 'write_file':
+        from .file_sink import FileSink
+        native = FileSink(services.action, request.arguments)
     elif request.kind == 'write_datasink':
         native = request.sink
         from .queue_sinks import QueueResultSink

@@ -337,7 +337,7 @@ class DataflowExecution:
         from .dataflow_sinks import make_sink_adapter
         for node in graph.nodes:
             if node.kind == "terminal":
-                if self._request.kind in ("write_lance", "write_datasink"):
+                if self._request.kind in ("write_lance", "write_datasink", "write_file"):
                     from .dataflow_sinks import make_native_terminal_sink
                     self._sinks[node.kernel.kind] = make_native_terminal_sink(node.kernel,
                         request=self._request, services=self._services)
@@ -910,7 +910,7 @@ class DataflowExecution:
         self._source_exhausted = image.cut.final and all(c.end_of_input
             for contribution in image.contributions for c in contribution.sources)
         write = None
-        if self._request.kind in ("write_lance", "write_datasink"):
+        if self._request.kind in ("write_lance", "write_datasink", "write_file"):
             from ..data.datasink import WriteResult
             fact = self._action.context.journal.execution_commit(image.commit_id)
             receipt_data = fact["receipts"][self._request.kind]["data"]
