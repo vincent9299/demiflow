@@ -372,19 +372,23 @@ class RunArtifactStore:
             finally:
                 lease.close()
 
-    def read(self, ref: ArtifactRef, *, max_bytes: int) -> Iterator[bytes]:
+    def read(self, ref: ArtifactRef, *, max_bytes: int, chunk_bytes: int | None = None) -> Iterator[bytes]:
         from .dataflow_object_lease import shared_access
         # This lease covers the generator's actual FD lifetime, including yield.
         with self.file_slots(self.READ_FILES), shared_access(self._root, self._lease_identity, require_protocol=self._protocol_required):
-            yield from self._read(ref, max_bytes=max_bytes)
+            yield from self._read(ref, max_bytes=max_bytes, chunk_bytes=chunk_bytes)
 
-    def _read(self, ref, *, max_bytes):
+    def _read(self, ref, *, max_bytes, chunk_bytes=None):
         if type(max_bytes) is not int or max_bytes <= 0:
             raise DataflowError("INVALID_CONTRACT", "max_bytes must be a positive int")
         if ref.size_bytes > max_bytes:
             raise DataflowError("BUDGET_EXCEEDED", "artifact is larger than max_bytes")
         path = self._object_path(ref)
-        chunk_bytes = min(_MAX_CHUNK_BYTES, max(1, self._bounds.max_row_bytes))
+        maximum_chunk = min(_MAX_CHUNK_BYTES, max(1, self._bounds.max_row_bytes))
+        if chunk_bytes is None:
+            chunk_bytes = maximum_chunk
+        elif type(chunk_bytes) is not int or not 1 <= chunk_bytes <= maximum_chunk:
+            raise DataflowError('INVALID_CONTRACT', 'read chunk_bytes must be within the original chunk bound')
         try:
             stat = path.stat()
         except FileNotFoundError:

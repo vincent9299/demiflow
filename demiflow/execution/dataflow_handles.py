@@ -177,8 +177,21 @@ class RuntimeActionHandle:
         self._read_admission, self._read_count = admit, read_count
 
     def read_buffer_reserve(self):
-        from .dataflow_replay import read_buffer_reserve
-        return read_buffer_reserve(self._bounds)
+        return getattr(self._subscription, 'buffered_bytes', 0)
+
+    def conversion_reserve(self):
+        """Live read buffers plus the bounded read window not yet consumed.
+
+        Include the current yield conservatively: a schema boundary converts
+        the prior batch while its first following Record is still in the caller.
+        A completed collector has already closed this subscription.
+        """
+        if self._closed:
+            return 0
+        sizes = getattr(self, '_conversion_read_sizes', ())
+        consumed = max(0, self._yielded_rows - getattr(self, '_conversion_read_start', self._yielded_rows))
+        retained = sum(sizes[max(0, min(len(sizes), consumed) - 1):])
+        return self.read_buffer_reserve() + retained
 
     def _admit_collection(self, size, pending_rows, pending_bytes):
         kind = getattr(self.request, 'kind', None)
@@ -188,11 +201,11 @@ class RuntimeActionHandle:
         arguments = self.request.arguments
         maximum = (arguments.get('limit') if kind in {'take', 'take_all'}
                    else arguments.get('batch_size', 20))
-        if kind == 'take_all' and maximum is not None and count >= maximum:
+        if size is not None and kind == 'take_all' and maximum is not None and count >= maximum:
             raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
-        if count >= self._bounds.max_output_rows:
+        if size is not None and count >= self._bounds.max_output_rows:
             raise _error('BUDGET_EXCEEDED', 'collected rows exceed the output row budget')
-        if (self._yielded_bytes + pending_bytes + size + self.read_buffer_reserve()
+        if (self._yielded_bytes + pending_bytes + (size or 0) + self.read_buffer_reserve()
                 > self._bounds.max_resident_bytes):
             raise _error('BUDGET_EXCEEDED', 'collected bytes exceed the driver resident budget')
 
@@ -210,12 +223,23 @@ class RuntimeActionHandle:
             self._admit_collection(size, pending_rows, pending_bytes)
             if self._read_admission is not None:
                 self._read_admission(size, pending_rows, pending_bytes)
+        def workspace(pending_rows, pending_bytes):
+            # No next business row is claimed: EOF/frame assembly must not
+            # consume a row slot or turn an exact take_all limit into overflow.
+            self._admit_collection(None, pending_rows, pending_bytes)
+            if self._read_admission is not None:
+                self._read_admission(0, pending_rows, pending_bytes)
         read = getattr(self._subscription, 'read_admitted', None)
         try:
             if read is not None:
                 bounded = kind in {'take', 'take_all', 'take_batch'} or self._read_admission is not None
-                return read(max_records=maximum, deadline_ms=0, admit=admit if bounded else None)
-            return self._subscription.read(max_records=maximum, deadline_ms=0)
+                records = read(max_records=maximum, deadline_ms=0, admit=admit if bounded else None,
+                               admit_workspace=workspace if bounded else None)
+            else:
+                records = self._subscription.read(max_records=maximum, deadline_ms=0)
+            self._conversion_read_start = self._yielded_rows
+            self._conversion_read_sizes = tuple(record.encoded_bytes for record in records)
+            return records
         except BaseException as exc:
             # An admission/decode error is as authoritative as a worker failure;
             # a cancelled peer's late ACK/close error must not replace it.

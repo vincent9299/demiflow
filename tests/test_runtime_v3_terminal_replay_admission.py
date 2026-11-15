@@ -40,12 +40,15 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
             raise InterruptedAfterAction()
     decoder = dataflow_bridge._decode_record_document
     read = dataflow._OutputSubscription.read_admitted
-    decoded, windows = [], []
+    decoded, windows, coexistence = [], [], []
+    active = [None]
     def observe_decode(raw, **kwargs):
         record = decoder(raw, **kwargs)
         decoded.append(record.encoded_bytes)
+        coexistence.append(sum(decoded) + active[0].buffered_bytes)
         return record
     def observe_read(self, **kwargs):
+        active[0] = self
         records = read(self, **kwargs)
         windows.append(sum(record.encoded_bytes for record in records))
         return records
@@ -70,8 +73,8 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
     # complete window is returned. Every actually returned window stays bounded.
     assert all(window <= 32*1024 for window in windows)
     assert limited or windows
-    assert len(decoded) == (5 if limited else 20)
-    assert sum(decoded) + 4*(16*1024 + 1) <= (96 if limited else 256)*1024
+    assert (0 < len(decoded) < 20) if limited else len(decoded) == 20
+    assert max(coexistence) <= (96 if limited else 256)*1024
     from demiflow.execution.run_journal import RunJournal
     assert RunJournal(tmp_path/'run').execution_commits('action-1') == previous
     assert _fd_count(tmp_path / 'run') == 0

@@ -1294,69 +1294,95 @@ class _OutputSubscription:
     def read(self, *, max_records, deadline_ms):
         return self.read_admitted(max_records=max_records, deadline_ms=deadline_ms)
 
-    def read_admitted(self, *, max_records, deadline_ms, admit=None):
+    @property
+    def buffered_bytes(self):
+        replay = self.execution._replay
+        retained = replay.buffered_bytes if replay is not None else 0
+        return max(retained, getattr(self, '_working_bytes', 0))
+
+    def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None):
         from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH
         from .exchange.dataflow_bridge import _decode_record_document
-        from .dataflow_replay import record_encoded_bytes, read_buffer_reserve
+        from .dataflow_replay import record_encoded_bytes
         e = self.execution
         records = []
-        byte_window = min(e._bounds.max_batch_bytes,
-                          e._bounds.max_resident_bytes - read_buffer_reserve(e._bounds))
-        admitted = 0
-        payload_bytes = 0
-        while not self.closed and e._replay is not None and len(records) < max_records:
-            try:
-                raw, record_id, sequence, size = e._replay.peek()
-            except StopIteration:
-                e._replay.close()
-                e._replay = None
-                break
-            if admit is not None:
-                admit(size, len(records), payload_bytes)
-            required = max(len(raw), size)
-            if records and admitted + required > byte_window:
-                break
-            if required > byte_window:
-                raise DataflowError('BUDGET_EXCEEDED', 'terminal replay row exceeds admitted read window')
-            records.append(_decode_record_document(raw, record_id=record_id,
-                sequence=sequence, max_bytes=e._bounds.max_row_bytes))
-            admitted += required
-            payload_bytes += size
-            e._replay.pop()
-        from itertools import islice
-        # Keep the ACKed prefix before all newly produced records, including
-        # when its next frame belongs to a later bounded read window.
-        while not self.closed and e._replay is None and e._terminal_queue and len(records) < max_records:
-            batch, size, endpoint = [], 0, None
-            for payload in islice(e._terminal_queue, min(MAX_PEER_BATCH, max_records - len(records))):
-                peer = payload['peer']
-                owner = (peer['host'], peer['port'], peer['token'])
-                if endpoint is not None and owner != endpoint:
+        byte_window = min(e._bounds.max_batch_bytes, e._bounds.max_resident_bytes)
+        admitted = payload_bytes = 0
+
+        def workspace(size):
+            self._working_bytes = size
+            if payload_bytes + size > e._bounds.max_resident_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'terminal read workspace exceeds resident budget')
+            if admit_workspace is not None:
+                admit_workspace(len(records), payload_bytes)
+
+        try:
+            while not self.closed and e._replay is not None and len(records) < max_records:
+                try:
+                    raw, record_id, sequence, size = e._replay.peek(check_workspace=workspace)
+                except StopIteration:
+                    e._replay.close()
+                    e._replay = None
                     break
-                if (records or batch) and admitted + size + peer['bytes'] > byte_window:
+                required = max(len(raw), size)
+                if records and admitted + required > byte_window:
                     break
-                if peer['bytes'] > byte_window:
-                    raise DataflowError('BUDGET_EXCEEDED', 'terminal row exceeds admitted read window')
-                endpoint = owner
-                batch.append(payload)
-                size += peer['bytes']
-            if not batch:
-                break
-            frames = read_peer_many(tuple(item['peer'] for item in batch), bounds=e._bounds)
-            try:
-                for payload, raw in zip(batch, frames):
-                    size = record_encoded_bytes(raw, maximum=e._bounds.max_row_bytes)
-                    if admit is not None:
-                        admit(size, len(records), payload_bytes)
-                    records.append(_decode_record_document(raw, record_id=payload['record_id'],
-                        sequence=payload['sequence'], max_bytes=e._bounds.max_row_bytes))
-                    e._terminal_queue.popleft()
-                    e._ack(payload['delivery_id'])
-                    admitted += payload['peer']['bytes']
-                    payload_bytes += size
-            finally:
-                frames.close()
-        return tuple(records)
+                if required > byte_window:
+                    raise DataflowError('BUDGET_EXCEEDED', 'terminal replay row exceeds admitted read window')
+                # Existing raw frame, the typed decode/canonical re-encode
+                # workspace and the original leased chunk remain simultaneous.
+                workspace(e._replay.buffered_bytes + 2 * len(raw) + size)
+                if admit is not None:
+                    admit(size, len(records), payload_bytes)
+                records.append(_decode_record_document(raw, record_id=record_id,
+                    sequence=sequence, max_bytes=e._bounds.max_row_bytes))
+                admitted += required
+                payload_bytes += size
+                e._replay.pop()
+                del raw
+            from itertools import islice
+            # A historical prefix stays before all newly produced records.
+            while not self.closed and e._replay is None and e._terminal_queue and len(records) < max_records:
+                batch, size, endpoint = [], 0, None
+                for payload in islice(e._terminal_queue, min(MAX_PEER_BATCH, max_records - len(records))):
+                    peer = payload['peer']
+                    owner = (peer['host'], peer['port'], peer['token'])
+                    if endpoint is not None and owner != endpoint:
+                        break
+                    if (records or batch) and admitted + size + peer['bytes'] > byte_window:
+                        break
+                    if peer['bytes'] > byte_window:
+                        raise DataflowError('BUDGET_EXCEEDED', 'terminal row exceeds admitted read window')
+                    endpoint = owner
+                    batch.append(payload)
+                    size += peer['bytes']
+                if not batch:
+                    break
+                largest = max(item['peer']['bytes'] for item in batch)
+                # read_peer_many retains its prior frame while _read builds a
+                # bytearray, recv fragment and returned bytes for the next one.
+                receive_bytes = 3 * largest + min(65536, largest) + 256
+                workspace(receive_bytes)  # before opening/receiving payload data
+                frames = read_peer_many(tuple(item['peer'] for item in batch), bounds=e._bounds)
+                try:
+                    for payload in batch:
+                        workspace(receive_bytes)
+                        raw = next(frames)
+                        size = record_encoded_bytes(raw, maximum=e._bounds.max_row_bytes)
+                        if admit is not None:
+                            admit(size, len(records), payload_bytes)
+                        records.append(_decode_record_document(raw, record_id=payload['record_id'],
+                            sequence=payload['sequence'], max_bytes=e._bounds.max_row_bytes))
+                        e._terminal_queue.popleft()
+                        e._ack(payload['delivery_id'])
+                        admitted += payload['peer']['bytes']
+                        payload_bytes += size
+                        del raw
+                finally:
+                    frames.close()
+            return tuple(records)
+        finally:
+            self._working_bytes = 0
 
     def close(self):
         if self.closed:
