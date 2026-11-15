@@ -114,7 +114,13 @@ def test_source_stop_during_final_artifact_inspection_does_not_ack(channel,tmp_p
     def inspection(self,prepared):
         original(self,prepared)
         if not fired:fired.append(True);stop.touch()
-    monkeypatch.setattr(QueueResultSink,'verify_acquisition',inspection)
+    from demiflow.execution.dataflow import DataflowExecution
+    start = DataflowExecution.start
+    def activate(self):
+        self.prepare()
+        monkeypatch.setattr(QueueResultSink, 'verify_acquisition', inspection)
+        return start(self)
+    monkeypatch.setattr(DataflowExecution, 'start', activate)
     with origin_server() as (url,calls):
         p=seed(channel,tmp_path,url)
         with pytest.raises(QueueIncomplete):worker(channel,tmp_path/'objects',stop=str(stop))

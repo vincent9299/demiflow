@@ -1,0 +1,191 @@
+{
+  "baseline": {
+    "head": "362d8528c27ae60a0d6ae0ccc986a0ff93847de8",
+    "failed": 306,
+    "passed": 253
+  },
+  "diagnostic": {
+    "failed": 334,
+    "passed": 225,
+    "test_phase_deadline_s": 15
+  },
+  "baseline_failed_now_passed": [
+    "tests/test_runtime_v3_h.py::test_h034",
+    "tests/test_runtime_v3_h.py::test_h035",
+    "tests/test_runtime_v3_h.py::test_h059",
+    "tests/test_runtime_v3_s.py::test_s033",
+    "tests/test_runtime_v3_s.py::test_s034"
+  ],
+  "new_failures": [
+    {
+      "nodeid": "tests/test_runtime_v3_b.py::test_b012",
+      "message": "TypeError: 'WorkerAssignment' object is not subscriptable",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_b.py::test_b015",
+      "message": "TypeError: 'WorkerAssignment' object is not subscriptable",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_b.py::test_b020",
+      "message": "TimeoutError: REVIEW_DIAGNOSTIC_TIMEOUT: tests/test_runtime_v3_b.py::test_b020 call exceeded 15 seconds",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h016",
+      "message": "AttributeError: 'types.SimpleNamespace' object has no attribute 'resources'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h018",
+      "message": "AttributeError: 'types.SimpleNamespace' object has no attribute 'resources'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h019",
+      "message": "AttributeError: 'types.SimpleNamespace' object has no attribute 'resources'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h020",
+      "message": "AttributeError: 'types.SimpleNamespace' object has no attribute 'resources'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h028",
+      "message": "AttributeError: 'types.SimpleNamespace' object has no attribute 'resources'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h038",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h039",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h040",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h041",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h042",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h043",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h044",
+      "message": "KeyError: 'scope_id'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h049",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h050",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h051",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h052",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h053",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h060",
+      "message": "KeyError: 'store_root'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h055",
+      "message": "KeyError: 'bounds'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_h.py::test_h058",
+      "message": "AttributeError: 'types.SimpleNamespace' object has no attribute 'resources'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_k.py::test_k006",
+      "message": "demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: record encoded_bytes misreports the inline payload size",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_k.py::test_k010",
+      "message": "demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: record encoded_bytes misreports the inline payload size",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_l.py::test_l002",
+      "message": "TypeError: FakeEngine.build_input_handle() got an unexpected keyword argument 'override_num_blocks'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_l.py::test_l005",
+      "message": "TypeError: FakeEngine.build_input_handle() got an unexpected keyword argument 'override_num_blocks'",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_s.py::test_s031",
+      "message": "AssertionError: assert 'datasource' == 'task'\n  \n  - task\n  + datasource",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_t.py::test_t003",
+      "message": "demiflow.execution.contracts.dataflow_errors.DataflowError: CORRUPT_ARTIFACT: record codec bytes are not valid Json",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_v.py::test_v002",
+      "message": "demiflow.execution.contracts.dataflow_errors.DataflowError: INTERNAL_PROTOCOL: worker command failed: {'code': 'INVALID_CONTRACT', 'message': 'INVALID_CONTRACT: unknown kernel kind'}",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_v.py::test_v003",
+      "message": "TimeoutError: REVIEW_DIAGNOSTIC_TIMEOUT: tests/test_runtime_v3_v.py::test_v003 call exceeded 15 seconds",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_w.py::test_w001",
+      "message": "demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: v3 seal marker key set is unsupported",
+      "status": "requires_assertion_migration_or_code_fix"
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_w.py::test_w002",
+      "message": "AssertionError: assert (False is True)\n +  where False = CapabilityReport(supported=False, reasons=('original physical plan invalid: INVALID_CONTRACT', 'original platform code...mable guarantee; unfinished work cannot continue'), recovery='attempt_only', required_domains=(), required_profiles=()).supported",
+      "status": "requires_assertion_migration_or_code_fix"
+    }
+  ],
+  "timeouts": [
+    "tests/test_runtime_v3_b.py::test_b020",
+    "tests/test_runtime_v3_v.py::test_v003"
+  ],
+  "accepted_as_regression_free": false
+}

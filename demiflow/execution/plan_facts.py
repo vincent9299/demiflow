@@ -3,6 +3,7 @@
 No expected report, candidate callback, property or repr participates in these
 descriptions. Unknown operation subclasses do not inherit checked authority.
 """
+from collections.abc import Mapping
 from dataclasses import fields
 import inspect
 
@@ -77,6 +78,13 @@ def source_facts(source):
 
 
 def operation_capability(operation):
+    from ..data.dataflow_operation import NativeOperation
+    if isinstance(operation, NativeOperation):
+        from ..planning.dataflow_registry import operator_registry
+        definition = operator_registry().get(operation.kind)
+        kind = operation.kind if definition is not None else "unknown"
+        return {"kind": kind, "driver": "stream", "native_options": False,
+                "stream_options": False, "bound": False, "native": True}
     kinds = {
         ops.MapOp: "map", ops.BoundMapOp: "map", ops.FilterOp: "filter",
         ops.FlatMapOp: "flat_map", ops.MapBatchesOp: "map_batches",
@@ -112,8 +120,33 @@ def _catch_facts(catch):
     return sorted(exc.__module__ + "." + exc.__qualname__ for exc in catch)
 
 
+def _thaw_json(value):
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
+def _native_operation_facts(operation):
+    """Lazy v3 native declaration projection; never instantiates the factory."""
+    from ..planning.dataflow_registry import operator_registry
+    from .recovery_identity import describe
+    definition = operator_registry().get(operation.kind)
+    if definition is None:
+        raise RuntimeContractError("Unknown native operation kind: " + operation.kind)
+    return {"kind": operation.kind, "driver": "stream", "native_options": False,
+            "stream_options": False, "bound": False, "native": True,
+            "arguments": {"configuration": _thaw_json(operation.configuration),
+                          "bindings": _thaw_json(operation.bindings)},
+            "code_identity": {"factory": describe(operation.factory)}}
+
+
 def operation_facts(operation):
     """Read complete supported operation parameters independently of a report."""
+    from ..data.dataflow_operation import NativeOperation
+    if isinstance(operation, NativeOperation):
+        return _native_operation_facts(operation)
     fact = operation_capability(operation)
     kind, arguments = fact["kind"], {}
     # operation_capability is the single admission authority: a kind it refuses
@@ -205,7 +238,11 @@ def operation_facts(operation):
         elif type(target) is LanceLookup:
             domain = {'native': lookup_facts(target), 'reserved_bytes': 8 * 1024**2 + 2 * target.max_bytes}
         elif type(target) is PromptActor:
-            native = prompt_facts(target)
+            if type(operation) is ops.AgentMapOp:
+                from ..operator_llm.flow_contract import agent_facts
+                native = agent_facts(target, operation.environment)
+            else:
+                native = prompt_facts(target)
             options = native['options'] or {}
             token_bytes = 0
             if native['token_budget'] and native['token_budget']['unit'] == 'tokens':

@@ -17,6 +17,12 @@ def describe(value, depth=0):
         raise RecoveryContractError("Plan identity exceeds depth budget")
     if value is None or type(value) in (str, int, float, bool):
         return value
+    from enum import Enum
+    if isinstance(value, Enum):
+        # Previously unsupported typed declaration; retain enum type as well as
+        # its value. Existing native prompt JSON identities never enter here.
+        return {'enum': type(value).__module__ + '.' + type(value).__qualname__,
+                'value': describe(value.value, depth + 1)}
     if type(value) is bytes:
         return {"bytes_sha256": hashlib.sha256(value).hexdigest(), "bytes": len(value)}
     if type(value) in (tuple, list):
@@ -31,6 +37,8 @@ def describe(value, depth=0):
             return {"items": len(value), "sha256": digest.hexdigest()}
         return [describe(v, depth + 1) for v in value]
     if type(value) is dict:
+        return {str(k): describe(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, types.MappingProxyType):
         return {str(k): describe(v, depth + 1) for k, v in value.items()}
     if type(value) in (set, frozenset):
         # Canonicalize only unordered value identities, never Dataset rows.
@@ -104,6 +112,13 @@ def describe(value, depth=0):
     # Arrow schemas are declarations; Arrow buffers/data are never encoded here.
     if type(value).__module__.startswith("pyarrow") and type(value).__name__ == "Schema":
         return {"arrow_schema": value.serialize().to_pybytes().hex()}
+    # Nested native prompts were previously unrepresentable (live runtime).
+    # Reuse their guarded native facts; existing operation identities are unchanged.
+    from ..operator_llm.runtime import PromptActor
+    if type(value) is PromptActor:
+        from ..operator_llm.flow_contract import prompt_facts, agent_facts
+        return {'native_prompt': prompt_facts(value) if value.environment is None
+                else agent_facts(value, value.environment)}
     if callable(value):
         # C04 identity rule 1: a plain callable's config/constructor args/
         # initial_state must not disappear for lack of hooks. Instance data
@@ -211,6 +226,9 @@ def operation_identity(operation):
         return describe(operation)
     native = fact.get('native')
     if native is None:
+        if type(operation) is ops.OperatorLLMMapOp:
+            # UUID node coordinates are execution ownership, not prompt semantics.
+            return {'model_map': fact['arguments']}
         return describe(operation)
     names = ('concurrency', 'queue_depth', 'catch', 'hard_timeout', 'execution')
     if specialized:

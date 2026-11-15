@@ -23,7 +23,8 @@ _JOURNAL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 
 
 async def _journal_io(fn, *args):
-    future = asyncio.get_running_loop().run_in_executor(_JOURNAL_EXECUTOR, fn, *args)
+    from contextvars import copy_context
+    future = asyncio.get_running_loop().run_in_executor(_JOURNAL_EXECUTOR, copy_context().run, fn, *args)
     try:
         return await asyncio.shield(future)
     except asyncio.CancelledError:
@@ -233,7 +234,7 @@ def create_operator_llm_client(model: PromptModel):
 
 class AsyncOperatorLLMClient:
     """Async HTTP with optional durable request/response journaling."""
-    def __init__(self, model: PromptModel, options=None, max_requests=None) -> None:
+    def __init__(self, model: PromptModel, options=None, max_requests=None, *, native_journal=None) -> None:
         import httpx
         from urllib.parse import quote
         from .journal import PromptJournal
@@ -280,10 +281,28 @@ class AsyncOperatorLLMClient:
             journal_options=dict(self.options['sqlite_journal'])
             durable_limit=journal_options.pop('max_requests',max_requests)
             self.journal = SQLitePromptJournal(**journal_options, max_requests=durable_limit)
+        if native_journal is not None:
+            # Capability-verified remote native journal is assembled before the
+            # http_error_retry guard. A private write journal must not silently
+            # dual-write with native recovery; it stays as read-only history.
+            from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+            if not isinstance(native_journal, RemotePromptJournal):
+                raise ValueError('native_journal must be a capability-verified RemotePromptJournal')
+            if self.journal is not None:
+                raise ValueError('Native remote journal cannot coexist with a private prompt journal; '
+                                 'keep the private journal as read-only history')
+            if native_journal.read_only or type(native_journal.limit) is not int or native_journal.limit < 0:
+                raise ValueError('Native remote journal must be writable with finite nonnegative max_requests')
+            self.journal = native_journal
         if self.options.get('http_error_retry'):
             from .sqlite_journal import SQLitePromptJournal
-            if (not isinstance(self.journal, SQLitePromptJournal) or self.journal.read_only
-                    or type(self.journal.limit) is not int or self.journal.limit < 0):
+            journal = self.journal
+            verified = isinstance(journal, SQLitePromptJournal)
+            if not verified and journal is not None:
+                from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+                verified = isinstance(journal, RemotePromptJournal)
+            if (not verified or journal.read_only
+                    or type(journal.limit) is not int or journal.limit < 0):
                 raise ValueError('HTTP error retry requires a writable SQLite journal with finite nonnegative max_requests')
         names=(() if model.transport == 'diffusers' else
                tuple(name for name in (model.base_url_env,model.api_key_env) if name))
@@ -810,18 +829,24 @@ class AsyncOperatorLLMClient:
                     await pool.aclose()
 
 
-def create_async_operator_llm_client(model: PromptModel, options=None, max_requests=None):
+def create_async_operator_llm_client(model: PromptModel, options=None, max_requests=None, *, native_journal=None):
     from .http_options import validate_prompt_options
     validate_prompt_options(options)
     if options and 'codex_agent' in options:
         raise ValueError('codex_agent transport requires agentmap_async with runtime=codex')
     if options and 'codex_exec' in options:
+        if native_journal is not None:
+            raise ValueError('Codex exec declares its own journal capability; native_journal is not accepted')
         from .codex_exec import CodexExecPromptClient
         return CodexExecPromptClient(model, options, max_requests)
     if options and 'offline_store' in options:
+        if native_journal is not None:
+            raise ValueError('Offline store declares its own journal capability; native_journal is not accepted')
         from .sqlite_offline import SQLiteOfflinePromptClient
         return SQLiteOfflinePromptClient(model, options)
     if options and 'offline_dir' in options:
+        if native_journal is not None:
+            raise ValueError('Offline dir declares its own journal capability; native_journal is not accepted')
         from .offline import OfflinePromptClient
         return OfflinePromptClient(model, options)
-    return AsyncOperatorLLMClient(model,options,max_requests)
+    return AsyncOperatorLLMClient(model,options,max_requests, native_journal=native_journal)

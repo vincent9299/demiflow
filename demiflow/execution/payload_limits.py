@@ -93,7 +93,7 @@ def stream_limits(facts, limits, source_batch_size=1, *, retained_rows=0):
 
 
 @contextmanager
-def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None):
+def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None, physical_dataflow=False):
     limits = dict(run.limits)
     if owner_limits is not None:
         for name in PAYLOAD_FIELDS:
@@ -106,7 +106,10 @@ def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None):
             ceiling=min(queued.config.limits.max_payload_bytes,queued.config.limits.max_result_bytes)
             limits['max_row_bytes']=min(limits['max_row_bytes'],ceiling)
             limits['max_batch_bytes']=min(limits['max_batch_bytes'],ceiling)
-    if plan is not None:
+    # The unified physical plan admits each worker/edge profile. Applying the
+    # former folded single-stream residency model here both invents a second
+    # topology and rejects valid combinations (e.g. async model -> sort).
+    if plan is not None and not physical_dataflow:
         from ..data.plan import is_stream_operation
         if any(is_stream_operation(op) for op in plan.operations):
             from .plan_facts import operation_facts

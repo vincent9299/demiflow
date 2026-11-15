@@ -383,56 +383,6 @@ def _make_worker(stage: _Stage, q_in: asyncio.Queue, q_out,
 
     async def worker():
         st = stats.stage(name)
-        if stage.prefix is not None:
-            from .stream_grouping import row_size
-            op = stage.prefix
-            adapter = stage.buffer_adapter
-            skip = 0
-            if adapter is not None:
-                skip, _exhausted = adapter.take_prefix()
-            # The prefix is a subprogram of this action. Calling its public
-            # terminal would create a nested action and a second settlement.
-            prefix_dataset = op.source_dataset
-            from .run_context import current_action
-            if current_action() is not None and stage.scope_id is not None:
-                from .source_snapshot import prefix_rows
-                prefix = iter(prefix_rows(current_action(), prefix_dataset, stage_key=stage.scope_id,
-                    max_rows=op.max_rows, max_row_bytes=op.max_row_bytes))
-            else:
-                prefix = iter(prefix_dataset._executor._apply_plan(prefix_dataset._source, prefix_dataset._plan))
-            reader_context = contextvars.copy_context()
-            # next(default) avoids propagating StopIteration through a Future.
-            def advance():
-                return next(prefix, SENTINEL)
-            async def read_one():
-                task = asyncio.create_task(asyncio.to_thread(reader_context.run, advance))
-                try:
-                    return await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    await task
-                    raise
-            try:
-                count = 0
-                while True:
-                    row = await read_one()
-                    if row is SENTINEL:
-                        if adapter is not None:
-                            adapter.prefix_exhausted = True
-                        break
-                    if count >= op.max_rows:
-                        raise ValueError('prepend source exceeds max_rows')
-                    row_size(row, op.max_row_bytes)
-                    count += 1
-                    if count <= skip:
-                        # Already emitted in a prior committed cut; do not republish.
-                        continue
-                    await _emit(row, st)
-                    if adapter is not None:
-                        adapter.prefix_position = count
-            finally:
-                close = getattr(prefix, 'close', None)
-                if close is not None:
-                    await asyncio.to_thread(reader_context.run, close)
         if stage.max_batch is not None:
             return await batch_worker(st)   # 攒批级：走批循环
         while True:

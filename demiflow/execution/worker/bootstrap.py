@@ -14,7 +14,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from ..artifacts import read
@@ -67,6 +69,113 @@ def _manifest_loader(directory):
     return load
 
 
+def _run_v3_worker(launch_spec, sock):
+    """One socket reader serves replies while the command thread verifies/restores.
+
+    A command may need the driver journal port. Reading its reply on the same
+    command thread would deadlock or steal another command's frame. The socket
+    loop therefore owns all reads and the bounded mailbox correlates replies.
+    """
+    import queue
+    import select
+    from ..contracts.dataflow import Bounds
+    from ..contracts.dataflow_codec import encode_wire, decode_wire
+    from ..contracts.dataflow_errors import DataflowError
+    from ..dataflow_hosts import ControlMailbox
+    from ..dataflow_store import RunArtifactStore
+    from .runtime import WorkerRuntime
+
+    config = dict(launch_spec["dataflow_v3"])
+    bounds = Bounds(**config["bounds"])
+    stop = threading.Event()
+    send_lock = threading.Lock()
+
+    def check_stop():
+        if stop.is_set():
+            raise DataflowError("CANCELLED", "worker host is stopping")
+
+    def send(frame):
+        with send_lock:
+            send_message(sock, frame)
+
+    mailbox = ControlMailbox(bounds=bounds, check_stop=check_stop)
+    mailbox.check_stop = check_stop
+    # The initial store only reads the authenticated grant; RuntimeServices
+    # replaces it with the worker journal port before any write is admitted.
+    mailbox.store = RunArtifactStore(root=Path(config["store_root"]),
+        store_id=config["store_id"], journal=None, bounds=bounds)
+    config.update(transport=mailbox, mailbox=mailbox)
+    launch_spec = dict(launch_spec, dataflow_v3=config)
+    runtime = WorkerRuntime(launch_spec, control=send)
+    commands = queue.Queue(maxsize=bounds.max_pending_events)
+
+    def serve_commands():
+        try:
+            while not stop.is_set():
+                try:
+                    message = commands.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                try:
+                    if message.get("type") == "dataflow_command":
+                        runtime._v3_ensure_executor().receive(message["command"])
+                        continue
+                    if message.get("type") == "cut_request":
+                        request = decode_wire(message["wire"].encode(), type_name="CutRequest", bounds=bounds)
+                        runtime._v3_ensure_executor().request_cut(request)
+                        continue
+                    receipt = runtime.handle(message, now_ms=int(time.time() * 1000))
+                    if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                        # Acknowledgment means lifecycle cleanup finished. The
+                        # main socket loop still services journal RPCs meanwhile.
+                        runtime.close()
+                    send({"response_to": message["operation_id"], "receipt": receipt})
+                    if message["kind"] == "Restore":
+                        runtime.ready(message["payload"]["assignment_ref"])
+                    if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                        stop.set()
+                except (ProtocolError, DataflowError) as exc:
+                    error = exc.to_dict() if isinstance(exc, ProtocolError) else {"code": exc.code, "message": str(exc)}
+                    send({"response_to": message.get("operation_id"), "error": error})
+                except BaseException as exc:
+                    from ..dataflow_failures import failure_payload
+                    send({"response_to": message.get("operation_id"), "error": failure_payload(exc)})
+                finally:
+                    commands.task_done()
+        finally:
+            stop.set()
+
+    runtime.register()
+    command_thread = threading.Thread(target=serve_commands, name="dataflow-commands", daemon=True)
+    command_thread.start()
+    try:
+        while not stop.is_set():
+            for event in mailbox.drain(max_events=bounds.max_pending_events):
+                frame = json.loads(encode_wire(event, type_name="WorkerEvent", bounds=bounds))
+                send({"type": "worker_event", "event": frame["payload"]})
+            if not select.select([sock], [], [], 0.01)[0]:
+                continue
+            message = recv_message(sock)
+            if message is None:
+                break
+            if message.get("type") == "control_reply":
+                reply = decode_wire(message["wire"].encode(), type_name="ControlReply", bounds=bounds)
+                mailbox.deliver(reply)
+            else:
+                try:
+                    commands.put_nowait(message)
+                except queue.Full:
+                    raise DataflowError("BUDGET_EXCEEDED", "worker command queue is full")
+    finally:
+        stop.set()
+        mailbox.close()
+        command_thread.join(timeout=bounds.timeout_ms / 1000)
+        if not command_thread.is_alive():
+            runtime.close()
+        sock.close()
+    return runtime
+
+
 def run_worker(launch_spec, sock):
     import threading
 
@@ -74,6 +183,8 @@ def run_worker(launch_spec, sock):
     from .execution import WorkerChainExecutor
     from .queue_transform import QueueTransformExecutor, TRANSFORM_REQUEST_SCHEMA
     from .runtime import WorkerRuntime
+    if "dataflow_v3" in launch_spec:
+        return _run_v3_worker(launch_spec, sock)
     send_lock = threading.Lock()
 
     def send(frame):
@@ -125,6 +236,22 @@ def run_worker(launch_spec, sock):
     return runtime
 
 
+def _validate_v3_launch(launch_spec):
+    """Fail before business on a wrong entrypoint or malformed code pin (B019)."""
+    from ..contracts.dataflow_errors import DataflowError
+    v3 = launch_spec.get("dataflow_v3")
+    if not isinstance(v3, dict):
+        raise DataflowError("INVALID_CONTRACT", "v3 launch payload is missing")
+    if v3.get("entrypoint") != "dataflow_worker_v3":
+        raise DataflowError("INVALID_CONTRACT", "unsupported v3 worker entrypoint",
+                            context={"entrypoint": str(v3.get("entrypoint"))})
+    pin = v3.get("code_pin")
+    if not isinstance(pin, str) or len(pin) != 64:
+        raise DataflowError("CODE_MISMATCH", "v3 code pin must be a 64-hex digest")
+    if "assignment" not in v3:
+        raise DataflowError("INVALID_CONTRACT", "v3 assignment artifact is missing")
+
+
 def main():
     launch_path = os.environ[LAUNCH_ENV]
     control_fd = int(os.environ[CONTROL_FD_ENV])
@@ -133,6 +260,8 @@ def main():
         raise RecoveryContractError("Worker launch spec exceeds byte budget")
     launch_spec = json.loads(raw)
     Path(launch_path).unlink(missing_ok=True)
+    if "dataflow_v3" in launch_spec:
+        _validate_v3_launch(launch_spec)
     run_worker(launch_spec, socket.socket(fileno=control_fd))
 
 

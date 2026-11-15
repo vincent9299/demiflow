@@ -1,0 +1,22 @@
+{"public_golden_passed": false, "error": "INTERNAL_PROTOCOL: worker command failed: {'code': 'INVALID_CONTRACT', 'message': 'INVALID_CONTRACT: unknown kernel kind'}", "type": "DataflowError", "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115", "run_directory": "/tmp/demiflow-gpt-public-golden-w6dt_fg1"}
+Traceback (most recent call last):
+  File "/tmp/demiflow-gpt-runtime-v3-review-20261115/public_golden_probe.py", line 12, in <module>
+    actual=data.from_items([{'n':0},{'n':1},{'n':2}]).map(lambda r:{'answer':r['n']+1}).take(3)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/demiflow/data/dataset.py", line 2061, in take
+    rows = run_dataset_action(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/demiflow/execution/dataflow_api.py", line 151, in run_dataset_action
+    handle = execute_action(request, policy=policy, bounds=bounds)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/demiflow/execution/dataflow.py", line 57, in execute_action
+    execution.start()
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/demiflow/execution/dataflow.py", line 257, in start
+    self._activate(lease, stage)
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/demiflow/execution/dataflow.py", line 169, in _activate
+    endpoint.activate(self._assignment(lease, stage))
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/demiflow/execution/dataflow_hosts.py", line 319, in activate
+    self._send_k3("Activate", {"grant_ref": grant["grant_id"], "controller_epoch": run.attempt,
+  File "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/demiflow/execution/dataflow_hosts.py", line 334, in _send_k3
+    raise DataflowError("INTERNAL_PROTOCOL", "worker command failed: " + str(message["error"]))
+demiflow.execution.contracts.dataflow_errors.DataflowError: INTERNAL_PROTOCOL: worker command failed: {'code': 'INVALID_CONTRACT', 'message': 'INVALID_CONTRACT: unknown kernel kind'}

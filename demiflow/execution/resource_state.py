@@ -549,6 +549,13 @@ class RunResourceState:
                             merged["observed_at_ms"], document(merged).decode(), entry["allocation_id"]))
                 if merged["phase"] == "RUNNING" or terminal:
                     self._finish_intents(db, scope_id, entry["allocation_id"], "ensure_present")
+                elif kind == 'observation' and merged['observation'] == 'FRESH' and merged['phase'] == 'PENDING':
+                    # The provider returned: its I/O claim no longer needs the
+                    # crash lease. Retry capacity with bounded backoff before
+                    # the (often equal-length) provision deadline expires.
+                    db.execute("UPDATE resource_intents SET claimed_until_ms=? "
+                               "WHERE allocation_id=? AND kind='ensure_present' AND status='claimed'",
+                               (int(time.time() * 1000) + min(100, self.claim_lease_ms), entry['allocation_id']))
                 if merged["cleanup"] == "CONFIRMED":
                     self._finish_intents(db, scope_id, entry["allocation_id"], "ensure_absent")
                 self._emit_event(db, scope_id, kind, allocation_id=entry["allocation_id"],

@@ -1,0 +1,874 @@
+"""Nine frozen source readers (lane S, C04).
+
+Each reader owns its snapshot, split, next-read cursor, read-but-not-sent refs
+and a bounded decoder/FD. ``next_record`` advances at most one bounded record;
+``snapshot`` reports the next read position plus pending refs (the sent frontier
+lives in the channel, never here). QueueReader only talks to the driver queue
+service port and never ACKs on close.
+"""
+from __future__ import annotations
+
+import csv
+import gzip
+import json
+import pickle
+import itertools
+from collections import deque
+from pathlib import Path
+from typing import Any, Iterator, Mapping
+
+from ..data.sources import (
+    DatasourceSource,
+    FileSource,
+    ItemsSource,
+    IterableSource,
+    LanceSource,
+    MaterializedSource,
+    RangeSource,
+    SqlSource,
+)
+from .contracts.dataflow import (
+    ArtifactRef,
+    QueueBinding,
+    QueueCommand,
+    Record,
+    RuntimeServices,
+    SourceCursor,
+    SourcePoll,
+    SourceSnapshot,
+    SourceSplit,
+)
+from .contracts.dataflow_errors import DataflowError
+from .dataflow_sources import spool_record
+from .contracts.dataflow import thaw_record_value
+from .recovery_contract import identity
+
+_RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
+
+
+def _load_row(ref: ArtifactRef, store: Any, max_bytes: int) -> Any:
+    raw = b"".join(store.read(ref, max_bytes=max_bytes))
+    from .exchange.dataflow_bridge import _decode_payload
+    return _decode_payload(raw, max_bytes=max_bytes)
+
+
+def _source_plan(snapshot: SourceSnapshot, services: RuntimeServices) -> Any:
+    program = services.programs.get(snapshot.source_id)
+    if program is None:
+        raise DataflowError("INVALID_CONTRACT", "no verified source program for this occurrence")
+    return program.value
+
+
+def _encoded_size(row: Any, *, max_bytes: int) -> int:
+    from .exchange.dataflow_bridge import _encode_payload
+    return len(_encode_payload(row, max_bytes=max_bytes))
+
+
+class _BaseReader:
+    """Shared cursor/sequence/pending bookkeeping; subclasses read one row at a time."""
+
+    def __init__(self, snapshot: SourceSnapshot, *, services: RuntimeServices) -> None:
+        self._snapshot = snapshot
+        self._services = services
+        self._split: SourceSplit | None = None
+        self._offset: dict[str, Any] = {}
+        self._next_sequence = 0
+        self._eoi = False
+        self._pending: tuple[ArtifactRef, ...] = ()
+        self._replay_pending = deque()
+        self._pending_record = None
+        self._lease_ref: ArtifactRef | None = None
+        self._closed = False
+        self._opened = False
+
+    # -- lifecycle ---------------------------------------------------------
+    def open(self, split: SourceSplit, cursor: SourceCursor | None) -> None:
+        if self._opened:
+            raise DataflowError("INVALID_CONTRACT", "reader is already open")
+        if split.source_id != self._snapshot.source_id:
+            raise DataflowError("INVALID_CONTRACT", "split belongs to another source")
+        if split.split_id != identity([self._snapshot.source_id, thaw_record_value(split.locator)]):
+            raise DataflowError("INVALID_CONTRACT", "split_id does not match its locator")
+        if cursor is not None:
+            if cursor.split_id != split.split_id:
+                raise DataflowError("INVALID_CONTRACT", "cursor belongs to another split")
+            if self._snapshot.replay == "attempt_only":
+                raise DataflowError("INVALID_CONTRACT", "attempt_only source cannot resume from a cursor")
+            self._offset = thaw_record_value(cursor.offset)
+            self._next_sequence = cursor.next_sequence
+            self._eoi = cursor.end_of_input
+            self._pending = tuple(cursor.pending_refs)
+            self._replay_pending.extend(cursor.pending_refs)
+            self._lease_ref = cursor.lease_ref
+        else:
+            self._offset = dict(split.start_cursor)
+            self._next_sequence = 0
+            self._eoi = False
+            self._pending = ()
+            self._lease_ref = None
+        self._split = split
+        self._setup(split)
+        self._opened = True
+
+    def next_record(self) -> SourcePoll:
+        self._check_open()
+        if self._replay_pending:
+            from .exchange.dataflow_bridge import _decode_record_document
+            import json
+            ref = self._replay_pending.popleft()
+            if ref.media_type != "application/vnd.demiflow.source-pending.v3":
+                raise DataflowError("INCOMPATIBLE_HISTORY", "pending source record lacks provenance")
+            raw = b"".join(self._services.store.read(ref, max_bytes=self._services.bounds.max_control_bytes))
+            saved = json.loads(raw)
+            record = _decode_record_document(saved["document"].encode("utf-8"),
+                record_id=saved["record_id"], sequence=saved["sequence"],
+                max_bytes=self._services.bounds.max_row_bytes)
+            # Retain the replayed item until the next successful pull confirms
+            # ordered publication, just as on the original attempt.
+            self._pending = (ref, *self._replay_pending)
+            return SourcePoll("record", record, 0)
+        if self._eoi:
+            return SourcePoll("eoi", None, 0)
+        # Pulling again confirms the previous record reached the ordered output.
+        self._pending = ()
+        self._pending_record = None
+        result = self._advance()
+        if result is None:
+            self._eoi = True
+            return SourcePoll("eoi", None, 0)
+        row, position = result
+        sequence = self._next_sequence
+        record_id = identity([self._snapshot.source_id, self._split.split_id, position])
+        encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
+        record = Record(record_id, position, None, row, encoded_bytes, sequence)
+        if self._snapshot.replay != "attempt_only":
+            # Keep one bounded in-flight row. Persist it only if a snapshot
+            # precedes its downstream acknowledgement, not on every seek read.
+            self._pending_record = record
+        self._next_sequence += 1
+        return SourcePoll("record", record, 0)
+
+    def acknowledge_output(self) -> None:
+        """A quiescent cut has captured every already-published record downstream.
+
+        Cursor admission may precede publication. Pending transfer documents are
+        retained until this acknowledgement; queue claim references stay owned
+        by the native queue settlement protocol.
+        """
+        self._check_open()
+        self._pending_record = None
+        self._pending = tuple(ref for ref in self._pending
+            if ref.media_type != "application/vnd.demiflow.source-pending.v3")
+
+    def snapshot(self) -> SourceCursor:
+        self._check_open()
+        if self._pending_record is not None:
+            from .exchange.dataflow_bridge import _encode_record_document
+            from .recovery_contract import document
+            record = self._pending_record
+            raw = document({"record_id": record.record_id, "sequence": record.sequence,
+                "document": _encode_record_document(record,
+                    max_bytes=self._services.bounds.max_row_bytes).decode()},
+                self._services.bounds.max_control_bytes)
+            ref = self._services.store.put(iter([raw]), max_bytes=len(raw),
+                media_type="application/vnd.demiflow.source-pending.v3")
+            self._pending = (ref,)
+            self._pending_record = None
+        return SourceCursor(
+            split_id=self._split.split_id, offset=dict(self._offset),
+            next_sequence=self._next_sequence, end_of_input=self._eoi,
+            lease_ref=self._lease_ref, pending_refs=self._pending,
+        )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._teardown()
+        finally:
+            self._pending = ()
+
+    # -- hooks -------------------------------------------------------------
+    def _setup(self, split: SourceSplit) -> None:
+        raise NotImplementedError
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        raise NotImplementedError
+
+    def _teardown(self) -> None:
+        return None
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise DataflowError("CANCELLED", "reader is closed")
+        if not self._opened:
+            raise DataflowError("INVALID_CONTRACT", "reader is not open")
+
+
+class ItemsReader(_BaseReader):
+    """Materialized list or Arrow/numpy/pandas block read by reference and index."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        self._start = int(split.locator.get("start", 0))
+        self._index = int(self._offset.get("index", self._start))
+        if isinstance(plan, ItemsSource):
+            count = len(plan.items)
+            rows = iter(plan.items)
+        elif isinstance(plan, MaterializedSource):
+            # A materialized handle may contain many disk blocks: never turn its
+            # entire row iterator into a tuple merely to seek to this split.
+            count = plan.handle.row_count
+            rows = plan.handle.rows()
+        else:
+            raise DataflowError("INVALID_CONTRACT", "ItemsReader requires items/materialized source")
+        self._end = int(split.locator.get("end", count))
+        if not self._start <= self._index <= self._end <= count:
+            raise DataflowError("INVALID_CONTRACT", "items cursor outside split range")
+        self._rows = rows
+        self._iterator = itertools.islice(rows, self._index, self._end)
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        if self._index >= self._end:
+            return None
+        try:
+            row = next(self._iterator)
+        except StopIteration as exc:
+            raise DataflowError("SOURCE_CHANGED", "materialized input ended before its sealed row count") from exc
+        position = {"index": self._index}
+        self._index += 1
+        self._offset = {"index": self._index}
+        return row, position
+
+    def _teardown(self) -> None:
+        close = getattr(self._rows, "close", None)
+        if close is not None:
+            close()
+
+
+class RangeReader(_BaseReader):
+    """Range shard determined by split start/end; no full expansion."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        if not isinstance(plan, RangeSource):
+            raise DataflowError("INVALID_CONTRACT", "RangeReader requires a range source")
+        self._start = int(split.locator.get("start", 0))
+        self._end = int(split.locator.get("end", plan.count))
+        value = int(self._offset.get("next", self._start))
+        if value < self._start or value > self._end:
+            raise DataflowError("INVALID_CONTRACT", "range cursor outside split range")
+        self._value = value
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        if self._value >= self._end:
+            return None
+        position = {"next": self._value}
+        row = {"id": self._value}
+        self._value += 1
+        self._offset = {"next": self._value}
+        return row, position
+
+
+class FileReader(_BaseReader):
+    """Fixed file manifest with a per-format bounded decoder and one open FD."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        if not isinstance(plan, FileSource):
+            raise DataflowError("INVALID_CONTRACT", "FileReader requires a file source")
+        self._plan = plan
+        self._paths = tuple(plan.paths)
+        self._format = plan.format
+        self._options = dict(plan.options)
+        self._file_start = int(split.locator.get("file_index", 0))
+        self._file_stop = min(len(self._paths), self._file_start + 1)
+        self._file_index = int(self._offset.get("file_index", self._file_start))
+        if not self._file_start <= self._file_index <= self._file_stop:
+            raise DataflowError("INVALID_CONTRACT", "file cursor outside assigned split")
+        self._record_index = int(self._offset.get("record_index", 0))
+        self._iter: Iterator[Any] | None = None
+        self._stream: Any = None
+        if self._file_index < self._file_stop and not split.locator.get("empty"):
+            self._open_file(skip=self._record_index)
+
+    def _open_file(self, *, skip: int) -> None:
+        self._close_stream()
+        path = self._paths[self._file_index]
+        self._iter = self._file_rows(path)
+        for _ in range(skip):
+            if next(self._iter, None) is None:
+                break
+        self._record_index = skip
+
+    def _file_rows(self, path: str) -> Iterator[Any]:
+        fmt = self._format
+        options = self._options
+        if fmt in ("json", "jsonl"):
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rb") as stream:
+                prefix = stream.read(1)
+                while prefix and prefix.isspace():
+                    prefix = stream.read(1)
+                stream.seek(0)
+                if prefix == b"[":
+                    import ijson
+                    rows = ijson.items(stream, options.get("item_prefix") or "item", use_float=True)
+                else:
+                    def lines():
+                        while True:
+                            line = stream.readline(self._services.bounds.max_row_bytes + 1)
+                            if not line:
+                                return
+                            if len(line) > self._services.bounds.max_row_bytes:
+                                raise DataflowError("BUDGET_EXCEEDED", "JSON line exceeds max_row_bytes")
+                            if line.strip():
+                                yield json.loads(line)
+                    rows = lines()
+                for row in rows:
+                    if not isinstance(row, dict):
+                        raise DataflowError("INVALID_CONTRACT", "JSON Dataset requires object rows")
+                    if options.get("include_paths"):
+                        row = {**row, "path": path}
+                    yield row
+            return
+        if fmt == "records":
+            from ..data.records import iter_file_records
+
+            record_format = "json" if fmt == "json" else ("text" if fmt == "text" else "jsonl")
+            if fmt == "records":
+                record_format = options.get("format", "jsonl")
+            yield from iter_file_records(
+                path, format=record_format, item_prefix=options.get("item_prefix"),
+                max_records=options.get("max_records"), missing=options.get("missing", "error"),
+            )
+            return
+        if fmt == "text":
+            encoding = str(options.get("encoding", "utf-8"))
+            drop_empty = bool(options.get("drop_empty_lines", True))
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rt", encoding=encoding) as stream:
+                for line in stream:
+                    text = line.rstrip("\n")
+                    if text or not drop_empty:
+                        yield {"text": text}
+            return
+        if fmt == "binary_files":
+            include_paths = bool(options.get("include_paths", False))
+            maximum = self._services.bounds.max_row_bytes
+            with open(path, 'rb') as stream:
+                data = stream.read(maximum + 1)
+            if len(data) > maximum:
+                raise DataflowError('BUDGET_EXCEEDED', 'Binary file exceeds max_row_bytes')
+            yield {'bytes': data, **({'path': path} if include_paths else {})}
+            return
+        if fmt == "csv":
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rt", newline="", encoding="utf-8") as stream:
+                yield from csv.DictReader(stream)
+            return
+        if fmt == "parquet":
+            import pyarrow.parquet as pq
+
+            columns = options.get("columns")
+            with pq.ParquetFile(path) as parquet:
+                # One row per decoded batch bounds conversion independently of
+                # row-group size; oversize rows are rejected before publication.
+                for batch in parquet.iter_batches(batch_size=1, columns=columns):
+                    if batch.nbytes > self._services.bounds.max_row_bytes:
+                        raise DataflowError("BUDGET_EXCEEDED", "Parquet row exceeds max_row_bytes")
+                    yield from batch.to_pylist()
+            return
+        if fmt == "images":
+            yield from self._image_rows(path)
+            return
+        raise DataflowError("UNSUPPORTED_CAPABILITY", f"unsupported file format: {fmt}")
+
+    def _image_rows(self, path: str) -> Iterator[Any]:
+        from PIL import Image
+
+        max_pixels = int(self._options.get("max_pixels", 64 * 1024 * 1024))
+        with Image.open(path) as image:
+            width, height = image.size
+            if width * height > max_pixels:
+                raise DataflowError("BUDGET_EXCEEDED", "image exceeds decode pixel budget")
+            if width * height * max(4, len(image.getbands())) > self._services.bounds.max_row_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'Decoded image exceeds max_row_bytes')
+            image.load()
+            yield {"path": path, "width": width, "height": height, "mode": image.mode,
+                   "bytes": image.tobytes()}
+
+    def _close_stream(self) -> None:
+        if self._stream is not None:
+            try:
+                self._stream.close()
+            finally:
+                self._stream = None
+        if self._iter is not None:
+            close = getattr(self._iter, "close", None)
+            if close is not None:
+                close()
+        self._iter = None
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        while self._file_index < self._file_stop:
+            if self._iter is None:
+                self._open_file(skip=0)
+            row = next(self._iter, None)
+            if row is not None:
+                position = {"file_index": self._file_index, "record_index": self._record_index}
+                self._record_index += 1
+                self._offset = {"file_index": self._file_index, "record_index": self._record_index}
+                return row, position
+            self._close_stream()
+            self._file_index += 1
+            self._record_index = 0
+            self._offset = {"file_index": self._file_index, "record_index": 0}
+        return None
+
+    def _teardown(self) -> None:
+        self._close_stream()
+
+
+class LanceReader(_BaseReader):
+    """Fixed-version fragment/row offset; projection/filter/search keep original semantics."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        if not isinstance(plan, LanceSource):
+            raise DataflowError("INVALID_CONTRACT", "LanceReader requires a Lance source")
+        self._plan = plan
+        self._version = int(self._offset.get("version", self._snapshot.immutable_identity["version"]))
+        self._fragment_ids = tuple(split.locator.get("fragment_ids", ()))
+        self._global = bool(split.locator.get("global_query", False))
+        self._rows = self._iter_rows()
+        target_fragment = int(self._offset.get("fragment_id", 0))
+        target_offset = int(self._offset.get("row_offset", 0))
+        self._fragment_id = target_fragment
+        self._row_offset = target_offset
+        if target_fragment or target_offset:
+            # Offset denotes the next unread row. Keep the matching row and
+            # advance into the following fragment when the saved fragment ended.
+            order = {fragment: index for index, fragment in enumerate(self._fragment_ids)}
+            target_index = order.get(target_fragment, 0)
+            self._rows = itertools.dropwhile(
+                lambda item: (order.get(item[0], 0), item[1]) < (target_index, target_offset),
+                self._rows)
+
+    def _iter_rows(self) -> Iterator[tuple[int, int, Any]]:
+        from dataclasses import replace
+
+        from ..lance.model import LanceVectorSearchSpec
+        from ..lance.read import _iter_scan, _iter_vector
+        from ..lance.storage import open_lance_dataset
+
+        exact = replace(self._plan.query, version=self._version)
+        if isinstance(exact, LanceVectorSearchSpec):
+            index = 0
+            for batch in _iter_vector(exact, batch_size=256):
+                for row in batch.to_pylist():
+                    yield 0, index, row
+                    index += 1
+            return
+        if self._global:
+            row_offset = 0
+            for batch in _iter_scan(exact, batch_size=256):
+                for row in batch.to_pylist():
+                    yield 0, row_offset, row
+                    row_offset += 1
+            return
+        dataset = open_lance_dataset(exact.uri, self._version, exact.storage_options)
+        by_id = {int(fragment.fragment_id): fragment for fragment in dataset.get_fragments()}
+        for fragment_id in self._fragment_ids:
+            fragment = by_id.get(fragment_id)
+            if fragment is None:
+                raise DataflowError("SOURCE_CHANGED", f"Lance fragment missing: {fragment_id}")
+            row_offset = 0
+            for batch in _iter_scan(exact, batch_size=256, fragments=[fragment]):
+                for row in batch.to_pylist():
+                    yield fragment_id, row_offset, row
+                    row_offset += 1
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        item = next(self._rows, None)
+        if item is None:
+            return None
+        fragment_id, row_offset, row = item
+        position = {"version": self._version, "fragment_id": fragment_id, "row_offset": row_offset}
+        self._fragment_id = fragment_id
+        self._row_offset = row_offset + 1
+        self._offset = {"version": self._version, "fragment_id": fragment_id,
+                        "row_offset": row_offset + 1}
+        return row, position
+
+
+class SqlReader(_BaseReader):
+    """Fixed snapshot + stable keyset; otherwise the snapshot declares durable spool."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        if not isinstance(plan, SqlSource):
+            raise DataflowError("INVALID_CONTRACT", "SqlReader requires a SQL source")
+        self._plan = plan
+        self._snapshot_id = self._offset.get("snapshot_id")
+        self._keyset = self._snapshot.immutable_identity.get("keyset")
+        self._last_key = self._offset.get("last_key")
+        self._connection = None
+        self._cursor = None
+        self._columns: tuple[str, ...] = ()
+        self._spooled: Iterator[Any] | None = None
+        self._spool_index = 0
+        if self._snapshot.replay == "durable_spool":
+            self._open_spool()
+        else:
+            self._open_cursor()
+
+    def _open_spool(self) -> None:
+        from .dataflow_handles import _ChunkStream
+        from .exchange.dataflow_bridge import _encode_payload, _decode_payload
+        store, bounds = self._services.store, self._services.bounds
+        spool = self._offset.get("spool")
+        media_type = "application/vnd.demiflow.sql-rows.v3+ndjson"
+        if spool is None:
+            def chunks():
+                rows = self._capture()
+                try:
+                    for row in rows:
+                        self._services.check_stop()
+                        yield _encode_payload(row, max_bytes=bounds.max_row_bytes) + b'\n'
+                finally:
+                    rows.close()
+            # put reserves the disk allowance before the generator queries SQL.
+            # It charges only published bytes and releases a failed capture.
+            ref = store.put(chunks(), max_bytes=bounds.max_spill_bytes, media_type=media_type)
+            self._offset = {**self._offset, "spool": {
+                "digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
+                "key": ref.key, "media_type": ref.media_type}}
+        else:
+            ref = ArtifactRef(**dict(spool))
+        self._spool_index = int(self._offset.get("last_key") or 0)
+        if ref.media_type == "application/vnd.demiflow.sql-spool.v3":
+            # Already sealed legacy images keep their identity. Admit their
+            # whole-object format before decoding; new captures never use it.
+            raw = b''.join(store.read(ref, max_bytes=bounds.max_batch_bytes))
+            self._spooled = iter(pickle.loads(raw))
+        elif ref.media_type == media_type:
+            stream = _ChunkStream(store.read(ref, max_bytes=bounds.max_spill_bytes))
+            def rows():
+                try:
+                    while True:
+                        raw = stream.readline(bounds.max_row_bytes + 1)
+                        if not raw:
+                            return
+                        if not raw.endswith(b'\n'):
+                            raise DataflowError('CORRUPT_ARTIFACT', 'SQL spool row is incomplete')
+                        yield _decode_payload(raw[:-1], max_bytes=bounds.max_row_bytes)
+                finally:
+                    stream.close()
+            self._spooled = rows()
+        else:
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Unknown SQL spool encoding')
+        for _ in range(self._spool_index):
+            try:
+                next(self._spooled)
+            except StopIteration:
+                raise DataflowError('CORRUPT_ARTIFACT', 'SQL cursor exceeds its sealed spool')
+
+    def _connect(self) -> Any:
+        return self._plan.connection_factory()
+
+    def _capture(self) -> Iterator[Any]:
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            params = self._plan.options.get("sql_params") or ()
+            cursor.execute(self._plan.sql, params)
+            names = tuple(item[0] for item in cursor.description)
+            for values in cursor:
+                yield dict(zip(names, values))
+        finally:
+            connection.close()
+
+    def _open_cursor(self) -> None:
+        self._connection = self._connect()
+        self._cursor = self._connection.cursor()
+        params = self._plan.options.get("sql_params") or ()
+        if self._keyset and self._last_key is not None:
+            column = self._keyset[0]
+            sql = f"SELECT * FROM ({self._plan.sql}) AS _snapshot WHERE {column} > ? ORDER BY {column}"
+            self._cursor.execute(sql, (*params, self._last_key))
+        else:
+            self._cursor.execute(self._plan.sql, params)
+        self._columns = tuple(item[0] for item in self._cursor.description)
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        if self._spooled is not None:
+            try:
+                row = next(self._spooled)
+            except StopIteration:
+                return None
+            position = {"snapshot_id": self._snapshot_id, "partition": "0",
+                        "last_key": self._spool_index}
+            self._spool_index += 1
+            self._offset = {**self._offset, "last_key": self._spool_index}
+            return row, position
+        values = self._cursor.fetchone()
+        if values is None:
+            return None
+        row = dict(zip(self._columns, values))
+        last_key = row.get(self._keyset[0]) if self._keyset else None
+        position = {"snapshot_id": self._snapshot_id, "partition": "0", "last_key": last_key}
+        self._last_key = last_key
+        self._offset = dict(position)
+        return row, position
+
+    def _teardown(self) -> None:
+        if self._spooled is not None:
+            close = getattr(self._spooled, 'close', None)
+            if close is not None:
+                close()
+            self._spooled = None
+        if self._cursor is not None:
+            try:
+                self._cursor.close()
+            finally:
+                self._cursor = None
+        if self._connection is not None:
+            try:
+                self._connection.close()
+            finally:
+                self._connection = None
+
+
+class TaskReader(_BaseReader):
+    """Bounded execution of an existing Datasource/ReadTask with a declared cursor."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        if not isinstance(plan, DatasourceSource):
+            raise DataflowError("INVALID_CONTRACT", "TaskReader requires a datasource source")
+        self._plan = plan
+        task_index = int(split.locator.get("task_index", 0))
+        tasks = plan.datasource.get_read_tasks(1)
+        if split.locator.get("empty"):
+            self._rows = iter(())
+        else:
+            if task_index >= len(tasks):
+                raise DataflowError("INVALID_CONTRACT", "task index outside datasource plan")
+            self._rows = self._task_rows(tasks[task_index])
+        self._index = int(self._offset.get("index", 0))
+        for _ in range(self._index):
+            if next(self._rows, None) is None:
+                break
+
+    def _task_rows(self, task: Any) -> Iterator[Any]:
+        for block in task.read_fn():
+            yield from _block_rows(block)
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        row = next(self._rows, None)
+        if row is None:
+            return None
+        position = {"index": self._index}
+        self._index += 1
+        self._offset = {"index": self._index}
+        return row, position
+
+
+class IteratorReader(_BaseReader):
+    """Zero-arg iterator factory invoked on the worker; one-shot unless re-openable."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        if not isinstance(plan, IterableSource):
+            raise DataflowError("INVALID_CONTRACT", "IteratorReader requires an iterable source")
+        _precheck_factory(plan.factory)
+        self._iterator = iter(plan.factory())
+        self._index = int(self._offset.get("index", 0))
+        self._generator_closed = False
+        for _ in range(self._index):
+            if next(self._iterator, None) is None:
+                break
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        row = next(self._iterator, None)
+        if row is None:
+            return None
+        position = {"index": self._index}
+        self._index += 1
+        self._offset = {"index": self._index}
+        return row, position
+
+    def _teardown(self) -> None:
+        if not self._generator_closed:
+            self._generator_closed = True
+            close = getattr(self._iterator, "close", None)
+            if callable(close):
+                close()
+
+
+def _precheck_factory(factory: Any) -> None:
+    closure = getattr(factory, "__closure__", None) or ()
+    for cell in closure:
+        try:
+            value = cell.cell_contents
+        except ValueError:
+            continue
+        module = type(value).__module__
+        if module.startswith("demiflow.execution.executors") or hasattr(value, "_executor"):
+            raise DataflowError(
+                "INVALID_CONTRACT",
+                "iterator factory captures a live executor; move construction into the worker",
+            )
+
+
+class QueueReader(_BaseReader):
+    """Claims only through the driver queue service port; close never ACKs."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        facts = self._services.journal.read_configuration()
+        self._binding = QueueBinding(**dict(facts['queue_binding']))
+        if (self._binding.action_id != self._services.assignment.action_id or
+                self._binding.source_occurrence != self._snapshot.source_id):
+            raise DataflowError('FENCED', 'Queue reader differs from the driver-sealed source')
+        self._record_index = int(self._offset.get("record_index", 0))
+        self._claim_ref = self._offset.get("claim_ref", "")
+        self._delivery_ref: ArtifactRef | None = None
+
+    def next_record(self) -> SourcePoll:
+        self._check_open()
+        if self._eoi:
+            return SourcePoll("eoi", None, 0)
+        self._pending = ()
+        from .dataflow_queue import queue_service_request
+
+        operation_id = identity([
+            self._binding.action_id, self._snapshot.source_id, self._record_index,
+            self._claim_ref, "poll",
+        ])
+        command = QueueCommand(
+            operation_id=operation_id, operation="poll", binding=self._binding,
+            record_id=None, delivery_ref=None, row_ref=None,
+        )
+        reply = queue_service_request(command, services=self._services)
+        if reply.status == "pending":
+            return SourcePoll("pending", None, max(1, reply.retry_after_ms))
+        if reply.status == "eoi":
+            self._eoi = True
+            return SourcePoll("eoi", None, 0)
+        if reply.status != "record" or reply.row_ref is None:
+            raise DataflowError("INTERNAL_PROTOCOL", f"unexpected queue reply: {reply.status}")
+        import json
+        from dataclasses import asdict
+        if reply.delivery_ref is None:
+            raise DataflowError('FENCED', 'Queue delivery lacks native ownership')
+        row = json.loads(b''.join(self._services.store.read(reply.row_ref,
+                         max_bytes=self._services.bounds.max_row_bytes)))
+        position = {"claim_ref": reply.delivery_ref.key,
+                    "queue_delivery_ref": json.dumps(asdict(reply.delivery_ref), sort_keys=True),
+                    "record_index": self._record_index}
+        sequence = self._next_sequence
+        record_id = identity([self._snapshot.source_id, self._split.split_id, position])
+        record = Record(record_id, position, None, row,
+                        _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes), sequence)
+        self._delivery_ref = reply.delivery_ref
+        self._claim_ref = position["claim_ref"]
+        self._record_index += 1
+        self._next_sequence += 1
+        self._offset = {"claim_ref": self._claim_ref, "record_index": self._record_index}
+        self._pending_record = record
+        self._lease_ref = reply.delivery_ref
+        return SourcePoll("record", record, 0)
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        raise DataflowError("INTERNAL_PROTOCOL", "QueueReader uses its own poll loop")
+
+
+class ProducerReader(QueueReader):
+    """Fixed native source enumeration; transformations run in graph workers."""
+
+    def _setup(self, split):
+        super()._setup(split)
+        self._offset.setdefault('record_index', self._record_index)
+
+    def next_record(self):
+        from dataclasses import replace
+        import json
+        poll = super().next_record()
+        if poll.status != 'record':
+            return poll
+        descriptor = json.loads(b''.join(self._services.store.read(self._delivery_ref,
+            max_bytes=self._services.bounds.max_control_bytes)))
+        self._offset.update(producer_position=descriptor['position'] + 1,
+                            producer_cursor=descriptor['next_cursor'])
+        position = thaw_record_value(poll.record.source_position)
+        position.update(queue_delivery_kind='producer', producer_unit=descriptor['position'])
+        record = replace(poll.record, record_id=descriptor['occurrence'], source_position=position)
+        self._pending_record = record
+        return SourcePoll('record', record, 0)
+
+
+class HistoryReader(_BaseReader):
+    """Fixed historical queue/legacy/document receipts, read-only; no claim or fetch."""
+
+    def _setup(self, split: SourceSplit) -> None:
+        plan = _source_plan(self._snapshot, self._services)
+        if not isinstance(plan, DatasourceSource):
+            raise DataflowError("INVALID_CONTRACT", "HistoryReader requires a history datasource")
+        self._plan = plan
+        task_index = int(split.locator.get("task_index", 0))
+        if split.locator.get("empty"):
+            self._rows = iter(())
+        else:
+            tasks = plan.datasource.get_read_tasks(1)
+            if task_index >= len(tasks):
+                raise DataflowError("INVALID_CONTRACT", "history task index outside plan")
+            self._rows = self._task_rows(tasks[task_index])
+        self._index = int(self._offset.get("index", 0))
+        for _ in range(self._index):
+            if next(self._rows, None) is None:
+                break
+
+    def _task_rows(self, task: Any) -> Iterator[Any]:
+        for block in task.read_fn():
+            yield from _block_rows(block)
+
+    def _advance(self) -> tuple[Any, dict[str, Any]] | None:
+        row = next(self._rows, None)
+        if row is None:
+            return None
+        position = {"index": self._index}
+        self._index += 1
+        self._offset = {"index": self._index}
+        return row, position
+
+
+def _block_rows(block: Any) -> Iterator[Any]:
+    if isinstance(block, Mapping):
+        names = tuple(block)
+        if not names:
+            return
+        columns = [block[name] for name in names]
+        lengths = {len(column) for column in columns}
+        if len(lengths) != 1:
+            raise DataflowError("INVALID_CONTRACT", "block columns must have equal lengths")
+        for index in range(lengths.pop()):
+            yield {name: column[index] for name, column in zip(names, columns)}
+        return
+    if hasattr(block, "to_pylist"):
+        yield from block.to_pylist()
+        return
+    if hasattr(block, "to_dict"):
+        yield from block.to_dict(orient="records")
+        return
+    if isinstance(block, (list, tuple)):
+        yield from block
+        return
+    yield block
+
+
+__all__ = [
+    "ItemsReader", "RangeReader", "FileReader", "LanceReader", "SqlReader",
+    "TaskReader", "IteratorReader", "QueueReader", "HistoryReader",
+]

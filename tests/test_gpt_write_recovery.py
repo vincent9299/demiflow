@@ -42,22 +42,22 @@ def _intent(run, action_id, spec):
 
 def _pause_native(tmp_path, monkeypatch, *, mode='create', fn=keep_row):
     """Fault after sealing, before any commit; capture real native identity."""
-    from demiflow.execution import native_plan
+    from demiflow.execution import dataflow_sinks
     spec = LanceWriteSpec(str(tmp_path / 'out.lance'), mode=mode,
                          on=('value',) if mode == 'merge' else ())
-    real_seal = native_plan.bind_native_execution
     captured = {}
 
-    def stop(action, source, plan, **kwargs):
-        layout, placement = real_seal(action, source, plan, **kwargs)
+    def stop(kernel, *, request, services):
+        action = services.action
         intent = _intent(action.context, action.action_id, spec)
         action.context.journal.action_event(action.action_id, 'intent', intent)
+        seal = action.context.journal.source_binding(action.action_id + '-dataflow-sealed')
         captured.update(action_id=action.action_id, declaration=action.declaration,
-                        intent=intent, plan_ref=dict(placement.programs[0]["plan_ref"]))
+                        intent=intent, plan_ref=seal['programs'][0])
         raise InterruptedError('before native publication')
 
     with monkeypatch.context() as fault:
-        fault.setattr(native_plan, 'bind_native_execution', stop)
+        fault.setattr(dataflow_sinks, 'make_native_terminal_sink', stop)
         with pytest.raises(InterruptedError, match='before native publication'):
             with RunContext.start(tmp_path / 'run') as run:
                 captured['ref'] = run.ref
@@ -125,24 +125,24 @@ def test_r_e_stale_absence_fact_never_overwrites_foreign_rows(tmp_path, monkeypa
 
 def test_resume_reuses_original_program_manifest_and_bindings(tmp_path, monkeypatch):
     import hashlib
-    from demiflow.execution import chain
+    from demiflow.execution import dataflow_seal
     paused = _pause_native(tmp_path, monkeypatch)
     journal = RunJournal(tmp_path / 'run')
     aid = paused['action_id']
     before = {suffix: journal.source_binding(aid + suffix)
-              for suffix in ('-sealed-plan', '-execution-bindings')}
+              for suffix in ('-dataflow-sealed',)}
     # The write seam seals a code-pin carrier, not a transient pickle: it is
     # deliberately unregistered so the post-run audit survives orphan cleanup.
-    carrier = tmp_path / 'run' / paused['plan_ref']['path']
+    carrier = tmp_path / 'run' / '.dataflow-store' / paused['plan_ref']['store_id'] / 'objects' / paused['plan_ref']['key']
     assert carrier.exists()
-    assert hashlib.sha256(carrier.read_bytes()).hexdigest() == paused['plan_ref']['sha256']
-    assert carrier.stat().st_size == paused['plan_ref']['bytes']
+    assert hashlib.sha256(carrier.read_bytes()).hexdigest() == paused['plan_ref']['digest']
+    assert carrier.stat().st_size == paused['plan_ref']['size_bytes']
 
     def forbidden_restage(*args, **kwargs):
         pytest.fail('native resume must not pickle/rebind the existing execution plan')
 
-    monkeypatch.setattr(chain, 'stage_plan_artifact', forbidden_restage)
-    monkeypatch.setattr(chain, 'seal_write_plan_ref', forbidden_restage)
+    monkeypatch.setattr(dataflow_seal, 'stage_dataflow_programs', forbidden_restage)
+    monkeypatch.setattr(dataflow_seal, 'seal_dataflow', forbidden_restage)
     with RunContext.resume(paused['ref']) as run:
         _seed_admission(run, paused)
         receipt = _dataset().write_lance(paused['spec'].uri, mode='create', return_receipt=True)
@@ -152,9 +152,10 @@ def test_resume_reuses_original_program_manifest_and_bindings(tmp_path, monkeypa
 
 def test_resume_corrupt_original_binding_is_refused_without_restaging(tmp_path, monkeypatch):
     paused = _pause_native(tmp_path, monkeypatch)
-    ref = RunJournal(tmp_path / 'run').source_binding(paused['action_id'] + '-execution-bindings')
-    (tmp_path / 'run' / ref['path']).write_bytes(b'{}')
-    with pytest.raises(RecoveryContractError, match='artifact carrier length differs'):
+    ref = RunJournal(tmp_path / 'run').source_binding(paused['action_id'] + '-dataflow-sealed')['physical_ref']
+    (tmp_path / 'run' / '.dataflow-store' / ref['store_id'] / 'objects' / ref['key']).write_bytes(b'{}')
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with pytest.raises(DataflowError, match='artifact size differs'):
         with RunContext.resume(paused['ref']) as run:
             _seed_admission(run, paused)
             _dataset().write_lance(paused['spec'].uri, mode='create')
@@ -181,7 +182,8 @@ def test_r_d_changed_business_source_is_refused_before_publication(tmp_path, mon
     try:
         paused = _pause_native(tmp_path, monkeypatch, fn=module.transform)
         path.write_text('def transform(row):\n    return {"value": 999}\n')
-        with pytest.raises(RecoveryContractError, match='identity|code|sealed'):
+        from demiflow.execution.contracts.dataflow_errors import DataflowError
+        with pytest.raises((RecoveryContractError, DataflowError), match='identity|code|sealed|CODE_MISMATCH'):
             with RunContext.resume(paused['ref']) as run:
                 _seed_admission(run, paused)
                 _dataset(module.transform).write_lance(paused['spec'].uri, mode='create')
@@ -256,7 +258,9 @@ def stopped_workbench(tmp_path, monkeypatch):
             value = runs.show(root, rid)
             assert value['status'] not in runs.TERMINAL, value
             actions = value['actions']
-            if actions:
+            if any(RunJournal(target).source_binding(aid + '-dataflow-sealed') is not None
+                   and RunJournal(target).source_binding(aid + '-create-target-absent') is not None
+                   for aid in actions):
                 break
             assert time.monotonic() < deadline, 'no execution action before cancellation'
             time.sleep(.01)
@@ -315,6 +319,13 @@ def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
            'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'MALLOC_ARENA_MAX': '2',
            'RAYON_NUM_THREADS': '2', 'TOKIO_WORKER_THREADS': '2', 'LANCE_CPU_THREADS': '2'}
     before = journal.execution_view(detail='summary')['events']
+    # v3 records absence in driver preflight before starting any source/model.
+    # Later inspection preserves that historical fact, never turns it into
+    # authorization to overwrite a subsequently created target (R-E above).
+    prior_proof = journal.source_binding(aid + '-create-target-absent')
+    assert prior_proof == create_target_absent_binding(journal.recovery_identity()['run_id'],
+        aid, journal.execution_action(aid)['declaration'], intent)
+    assert prior_proof is not None
 
     def register():
         child = subprocess.run([sys.executable, '-B', '-c',
@@ -330,13 +341,13 @@ def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
 
     # R-A: a foreign physical target exists; refusal preserves all its rows.
     lance.write_dataset(pa.table({'value': [999]}), str(uri))
-    assert register() is None
+    assert register() == prior_proof
     assert lance.dataset(str(uri)).to_table().to_pylist() == [{'value': 999}]
     shutil.rmtree(uri)  # Only this test's freshly created foreign-target fixture.
 
     # Unreadable/malformed storage is not an absence proof.
     uri.write_text('not a Lance dataset')
-    assert register() is None
+    assert register() == prior_proof
     assert uri.read_text() == 'not a Lance dataset'
     uri.unlink()
 
@@ -346,11 +357,11 @@ def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
     receipt = write_lance(spec, [pa.table({'value': [888]})],
                           operation_id=intent['operation_id'])
     assert receipt.status == 'committed'
-    assert register() is None
+    assert register() == prior_proof
     assert lance.dataset(str(uri)).version == 1
     shutil.rmtree(uri)  # Only the native publication created immediately above.
 
-    # B: only the real missing-target case records the immutable sidecar.
+    # The same immutable preflight fact remains once the fixture target is gone.
     proof = register()
     assert proof == create_target_absent_binding(journal.recovery_identity()['run_id'],
         aid, journal.execution_action(aid)['declaration'], intent)

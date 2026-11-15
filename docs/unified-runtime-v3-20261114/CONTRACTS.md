@@ -8,7 +8,9 @@
 
 ID 使用 lowercase sha256 hex；人类 source/port 名称不是 hash。ArtifactRef.key 是 store 内相对不可变 key，不含绝对路径、`..`、URL query 或凭证。原有 DataRef/Artifact 格式由桥接函数调用原校验器，不能把 ArtifactRef 直接交给 K4 的 v1 validator。代码 pickle 和业务数据编码有不同 media_type，数据读取不得当程序执行。
 
-错误类型统一 `DataflowError(code, message, *, retryable=False, context={})`，code 枚举：INVALID_CONTRACT、UNSUPPORTED_CAPABILITY、RESOURCE_INFEASIBLE、BUDGET_EXCEEDED、SOURCE_CHANGED、CODE_MISMATCH、FENCED、CANCELLED、DEADLINE_EXCEEDED、CORRUPT_ARTIFACT、UNKNOWN_EFFECT、INCOMPATIBLE_HISTORY、INTERNAL_PROTOCOL。未知 effect 不可标 retryable；CAPACITY_PENDING 可在原有限 deadline 内等 credit，不重新执行业务调用。异常 context 仅含有界身份/位置，不泄露请求内容和密钥。与现有错误类转换只能保留语义，不吞异常。
+错误类型统一 `DataflowError(code, message, *, retryable=False, context={})`，code 枚举：INVALID_CONTRACT、UNSUPPORTED_CAPABILITY、RESOURCE_INFEASIBLE、BUDGET_EXCEEDED、SOURCE_CHANGED、CODE_MISMATCH、FENCED、CANCELLED、DEADLINE_EXCEEDED、CAPACITY_PENDING、CORRUPT_ARTIFACT、UNKNOWN_EFFECT、INCOMPATIBLE_HISTORY、INTERNAL_PROTOCOL。未知 effect 不可标 retryable；CAPACITY_PENDING 可在原有限 deadline 内等 credit，不重新执行业务调用。异常 context 仅含有界身份/位置，不泄露请求内容和密钥。与现有错误类转换只能保留语义，不吞异常。
+
+CAPACITY_PENDING 与相邻码的边界（AMEND-001 固定）：它表示 credit/容量**暂时**不足，可在**原有**有限 deadline 内等待重试，不延长 deadline、不重新执行业务调用、不自动提高预算；`BUDGET_EXCEEDED` 是终态硬拒绝（如真实超大行、超硬上界），不可等待；`DEADLINE_EXCEEDED` 是原 deadline 已耗尽。三者不得互相替代。`UNKNOWN_EFFECT` 永不可标 retryable。码集仍闭合，未知 code 仍拒绝，消费者仍不得自行扩展。
 
 ## C02 编译输入与共享实例
 
@@ -174,3 +176,29 @@ schema/columns必须遵守既有fetch_if_missing参数：只读已有元数据�
 ## prepend不是隐藏子执行
 
 expand_operation_inputs将StreamPrependOp.source_dataset捕获为同一action的prefix端口，主输入为main；prefix先完整校验max_rows/max_row_bytes并按有限范围完成，再按声明顺序接main。prefix可以与其他分支共享上游，不能在worker运行中创建新Dataset/RunAction。原stream._make_worker隐式执行prefix分支与source_snapshot.prefix_rows退役，旧prefix snapshot仅按历史读取合同保留。
+
+## 总控契约修订记录
+
+### AMEND-001 · C01 错误码闭合集补入 CAPACITY_PENDING（2026-11-15，总控裁决）
+
+**触发**：lane X 提交最小裁决请求。C01 同一段先闭合列出 13 个 code，紧接着又规定 `CAPACITY_PENDING` 的语义（"可在原有限 deadline 内等 credit，不重新执行业务调用"），但该词不在枚举内，且在整个设计包中仅出现这一次。C006 要求"code 闭合集、未知 code 拒绝"，C075 要求"枚举必须按 CONTRACTS，不得由消费者自行扩展"，C05:43 又要求"存储满则背压或明确失败，不自动提高预算"。
+
+**反例（可复现）**：lane C 忠实实现 13 码闭合 frozenset（`contracts/dataflow_errors.py:16-30`），构造器对未知码 `raise ValueError`（:143）。lane X 忠实按 C01 散文实现 credit 背压。⇒ 集成树用真实 C 跑 X005 背压路径必然 `ValueError`。**两个 lane 都无缺陷，是冻结合同自相矛盾。**
+
+**总控独立查证的既有权威（决定性依据）**：
+- `demiflow/resources/contracts.py:18-28` 的 `ERROR_CODES` frozenset **已含 `CAPACITY_PENDING`**；该文件是七份**字节冻结**文件之一，`git diff 70e357c..HEAD` 为空，任何 lane 不得修改 ⇒ 它是不可争辩的基线权威。
+- v2 `demiflow/execution/exchange/channel.py:49`：`raise ProtocolError("CAPACITY_PENDING", "channel credit exhausted", retriable=True)` —— **正是 X 所需的 credit 耗尽可等待背压语义**。
+- `demiflow/resources/local.py:156/174`、`ray.py:173` 捕获该码后返回 `PENDING/FRESH` + `conditions=["capacity_pending"]`，即**等待而非重执行业务、而非抬预算**。
+- `resources/device_pool.py:276`、`capacity.py:170/180` 同样以该码报告设备/scratch 容量暂时不足。
+
+**裁决**：枚举遗漏属**设计转录缺陷**，不是有意排除。补入 `CAPACITY_PENDING` 使枚举与同段既有散文、以及冻结基线权威和 v2 既有行为一致。**不是新增能力、不是放宽任何 guard、不是消费者自行扩展。** 闭合集由 13 码变为 **14 码**，其余全部不变。
+
+**语义固定**：见 C01 新增的边界段（暂时不足可等待 / 原 deadline 不延长 / 不重执行业务 / 不抬预算；与 BUDGET_EXCEEDED 终态硬拒绝、DEADLINE_EXCEEDED 原 deadline 已耗尽三者不得互替；UNKNOWN_EFFECT 永不可 retryable；未知 code 仍拒绝）。
+
+**执行分工**：
+- 总控：修订本文件 C01 枚举与边界段（本 commit，仅文档）。
+- **lane C**（`dataflow_errors.py` 唯一 owner）：在 `DATAFLOW_ERROR_CODES` 增 `"CAPACITY_PENDING"` 一行；强化 C006/C075 反例（CAPACITY_PENDING 可 retryable；UNKNOWN_EFFECT+retryable 仍拒绝；未知 code 仍拒绝；闭合集 14 码）；追加新 commit，重跑 G-C。不改任何字段/身份/wire 白名单。
+- **lane X**：无需改代码（其替身已按 C01 散文含该码）；集成树用真实 C 重跑 G-X 时该路径自然成立。
+- 消费 credit/容量背压的 lane（B/D/K/M/E/H/P）：按上述固定语义使用，不得自行扩码。
+
+**不改的东西**：七份字节冻结文件、任何 DTO 字段、任何身份公式、任何资源额度、任何既有 guard。
