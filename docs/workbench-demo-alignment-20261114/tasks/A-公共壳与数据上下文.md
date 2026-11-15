@@ -11,6 +11,8 @@ A负责公共装配，不得替B/D/E改模块内部。app.js内表/Case旧只读
 - `demiflow/workbench/web/style.css`
 - `demiflow/workbench/web/view.js`
 
+接线修订：另读 [Runtime v3 接线](../05-runtime-v3-wiring.md)（C8）；平台在途源码不由本路覆写，合流按明确交接执行。
+
 ## A01 · `updateNavigation`
 
 - 文件：`demiflow/workbench/web/app.js`；动作：`modify`。
@@ -141,15 +143,15 @@ A负责公共装配，不得替B/D/E改模块内部。app.js内表/Case旧只读
 
 - 文件：`demiflow/workbench/web/view.js`；动作：`modify`。
 - 签名：`validateView(value) -> validatedClone`。
-- 契约：C4；调用/接线任务：A02, A06。
+- 契约：C4 C8；调用/接线任务：A02, A06。
 - 输入：validateView(value) -> validatedClone。
 - 输出：扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化。
 
-扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化。严格正safe-int/SHA校验，未知字段仍拒绝，encode/decode沿用本验证器。 同时按C2扩v2 run action_id/logical_node_id/occurrence_id依赖约束，旧node_id/report_digest成对规则保留，历史链接不重写。
+扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化。严格正safe-int/SHA校验，未知字段仍拒绝，encode/decode沿用本验证器。 同时按C2扩v2 run action_id/logical_node_id/occurrence_id依赖约束，旧node_id/report_digest成对规则保留，历史链接不重写。 C8进一步定义run URL的dag_id/plan_id/plan_revision/plan_format四元组全部给或全不写；要求action与attempt，v3新生成实例链接有occurrence。旧URL字节保持，不发未声明HTTP参数。
 
 **失败与状态**：遵守上述契约的作用域、预算、权限和未知回执规则；不能用空值/成功提示吞错，不能清除旧草稿和已提交结果。UI异步结果须绑定创建请求时的身份。
 
-**验收**：V02, V08；实现方提交具体断言与结果，消费者调用覆盖必需。局部替身测试不替代最终真实集成。
+**验收**：V02, V04, V08；实现方提交具体断言与结果，消费者调用覆盖必需。局部替身测试不替代最终真实集成。
 
 ## A11 · `common-layout`
 

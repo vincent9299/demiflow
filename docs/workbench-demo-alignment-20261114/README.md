@@ -1,6 +1,6 @@
 # 工作台对齐 D1.9：源码复核与可独立编码设计
 
-设计版本：UI-D1.9/1，2026-11-14。实现基线：`267b9144c6bf7447c6822aa716f6d5c0eda16990`，分支 `engine/gpt-integration-review-20261114`，工作树 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114`。
+设计版本：UI-D1.9/2，2026-11-15（原对比与源码证据日期2026-11-14）。实现基线：`267b9144c6bf7447c6822aa716f6d5c0eda16990`，分支 `engine/gpt-integration-review-20261114`，工作树 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_integration_review_20261114`。
 
 **当前交付是对比和设计，尚未实施这批 UI 改动，也未派发会话。** 不把已有引擎验收或本次截图计为本设计的产品验收。在线旧服务不等于此基线；实施和验收必须声明实际服务代码路径。
 
@@ -36,23 +36,24 @@
 2. [页面行为与接口契约](02-contracts.md)、[类型定义](contracts.d.ts)：唯一冻结输入输出；函数任务不能自行扩字段。
 3. [任务索引](03-tasks.md)及 `tasks/`：每项一函数/方法，少数显式装配或 CSS 任务；明确调用方和修改授权。
 4. [验收与集成](04-acceptance.md)：端到端用户路径、反例、命令及未完成项判定。
-5. [机器清单](tasks.json)、[设计检查器](check_design.py)：检查文件归属、调用方有权修改、任务与验收闭合；不代替运行验收。
+5. [Runtime v3 接线修订](05-runtime-v3-wiring.md)：新旧计划、实例端口、观测身份和与平台W的共享文件交接。提供方补充尚未验证，详见机器台账。
+6. [机器清单](tasks.json)、[设计检查器](check_design.py)：检查文件归属、调用方有权修改、任务与验收闭合；不代替运行验收。
 
 ## 4. 七路工作：六路实现，一路验收
 
-共93项任务、30个主写文件（另列旧回归测试的必要兼容范围）。包括函数/方法/类型、6项样式、1项入口装配、9个精确新验收函数；不是把样式任务伪称函数卡。
+共95项任务、30个主写文件（另列旧回归测试的必要兼容范围）。包括函数/方法/类型、6项样式、1项入口装配、9个精确新验收函数；不是把样式任务伪称函数卡。
 
 | 路 | 交付 | 唯一主写范围 | 冻结依赖 |
 |---|---|---|---|
 | A | 公共壳、目录、版本选择、字段分布、跨模块装配 | app.js、style.css、index.html、view.js | B/D/E 保持 mount 入口；F 固定版本读取；D 图表 |
 | B | 图中心的配置/检查/运行/结果体验 | workbench.js、workbench.css、workbench-state.js | C 的只读呈现模型与图 API；既有 commands/observer |
-| C | 可读图和事实呈现 | workbench-graph.js、新 workbench-presentation.js、新 workbench-graph.css | 现有 graph JSON；不读文件、不编译 DAG |
+| C | 可读图和事实呈现 | workbench-graph.js、新 workbench-presentation.js、新 workbench-graph.css | 旧 graph JSON＋v3精确实例投影，C09唯一纯适配；不读文件、不编译 DAG |
 | D | Notebook、通用输出和轻量图表 | analysis.js/css、analysis-output.js/css、analysis-render.js、新 analysis-charts.js | A 数据来源；原生分析 API、E 接收固定输出 |
 | E | 紧凑 Case、配置及评测 | analysis-case.js/css | D field 渲染器；既有 Store/transport/records；F 版本来源 |
 | F | 已登记历史版本的只读贯通 | API/worker/工作区与分析 source 的窄改动，新 catalog_versions.py | 复用 Catalog、preview_binding、native reader，不动引擎 |
 | V | 用户旅程与边界验收 | 新增本批专属 tests 和截图夹具 | 所有已冻结接口；实现未集成时可先写测试，但不能用假端点宣布通过 |
 
-每个文件只属于一条路；同一路的函数任务可细分给 agent，但必须各自分支提交，由该路一次合入。同一共享文件不让多个 agent 同时覆写。所有路从同一基线编码；不等别人实现才下笔。生产函数签名、状态和样本见契约；测试替身只验证消费者，最终必须换成真实提供者。
+本UI包内每个文件只属于一条路；跨平台包有两处明确重叠，按C8先接收W交付再由B/C迁移，不声称全局零冲突。同一路的函数任务可细分给 agent，但必须各自分支提交，由该路一次合入。同一共享文件不让多个 agent 同时覆写。所有路从同一基线编码；不等别人实现才下笔。生产函数签名、状态和样本见契约；测试替身只验证消费者，最终必须换成真实提供者。
 
 **三个交付里程碑，不是串行编码阶段**：M1 看懂并跑通真实管道（A/B/C）；M2 固定版本→Notebook→Case→评测（A/D/E/F）；M3 两条完整用户旅程、历史与异常验收（V＋总控）。六路同时开发，集成顺序仅为方便定位：公共脚本和类型→各模块→装配→真实验收。过程中只处理必要契约冲突，完成整批后统一 review/修改。
 

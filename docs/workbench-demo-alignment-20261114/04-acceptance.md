@@ -101,3 +101,15 @@ V拥有**这些旧测试中必要的选择器/夹具兼容修改**，不得改�
 3. Notebook真实table MIME是handle，不能只做消费虚构rows的图表；补D15固定handle→source→page读取与V05真实命中断言。
 4. 主图选择不能只key logical_id；核对实际DAG边不含occurrence端点，采用“逻辑组＋明确成员选择”，不伪造每次出现的连线。多action与occurrence、缺桥、历史report替代均写入冻结模型及V04。
 5. 所有新增提供方有可修改的生产消费者；所有新验收函数都有精确命令。检查器只验证设计结构，真实可用性仍靠上面旅程。
+
+## 7. UI-D1.9/2 与 Runtime v3 合流附加门槛
+
+仍为同9个精确测试函数，V03/V04/V08/V09增加C8参数化断言，不把验收拆成无命令的新测试。V04覆盖legacy原生历史和v3真封存、同semantic不同occurrence串联、共享源/join端口、U1–U3反例。V08覆盖同run/attempt换action/plan/revision；V09验证W018–W021语义迁移和C09真实调用，清理新增B18。无W/Runtime不能用mock计通过；Local实际统一入口必跑，Ray Core表面接线的环境结果单列。
+
+运行上述9门前，在候选树补跑平台W门（该文件归平台W，UI V只在其交付后修改前端符号/DOM兼容断言，不能改Python历史保护断言）：
+
+```bash
+/yzp/zhaozy/yangzepeng/0905/env/bin/python -m pytest tests/test_runtime_v3_w.py --basetemp "$UI_EVIDENCE/runtime-w" -o cache_dir="$UI_EVIDENCE/runtime-w-cache" --junitxml="$UI_EVIDENCE/runtime-w.xml" -q
+```
+
+这条命令依赖平台交付，当前UI设计树不存在该文件；不创建假占位。回执同时记录UI交付提交、Runtime/W交付提交、合流提交和实际服务源码。runtime-wiring.json中各required_not_verified项只能用真实生产方/消费者合流证据关闭。原截图和267b914输入仍是历史对比证据，不改写为v3验收。

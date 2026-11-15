@@ -1,8 +1,8 @@
 {
   "format": "demiflow_workbench_design_tasks_v1",
-  "design": "UI-D1.9/1",
+  "design": "UI-D1.9/2",
   "source_head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
-  "status": "design_ready_implementation_not_started",
+  "status": "design_ready_runtime_provider_requirements_not_verified",
   "tasks": [
     {
       "id": "A01",
@@ -182,16 +182,17 @@
       "symbol": "validateView",
       "signature": "validateView(value) -> validatedClone",
       "action": "modify",
-      "contract": "C4",
+      "contract": "C4 C8",
       "inputs": "validateView(value) -> validatedClone",
-      "outputs": "只扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化",
-      "behavior": "扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化。严格正safe-int/SHA校验，未知字段仍拒绝，encode/decode沿用本验证器。 同时按C2扩v2 run action_id/logical_node_id/occurrence_id依赖约束，旧node_id/report_digest成对规则保留，历史链接不重写。",
+      "outputs": "扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化",
+      "behavior": "扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化。严格正safe-int/SHA校验，未知字段仍拒绝，encode/decode沿用本验证器。 同时按C2扩v2 run action_id/logical_node_id/occurrence_id依赖约束，旧node_id/report_digest成对规则保留，历史链接不重写。 C8进一步定义run URL的dag_id/plan_id/plan_revision/plan_format四元组全部给或全不写；要求action与attempt，v3新生成实例链接有occurrence。旧URL字节保持，不发未声明HTTP参数。",
       "callers": [
         "A02",
         "A06"
       ],
       "acceptance": [
         "V02",
+        "V04",
         "V08"
       ]
     },
@@ -281,10 +282,10 @@
       "symbol": "mount",
       "signature": "mount(options) -> Promise<existingWorkbenchHandle>",
       "action": "modify",
-      "contract": "C0 C2 C3",
+      "contract": "C0 C2 C3 C8",
       "inputs": "mount(options) -> Promise<existingWorkbenchHandle>",
       "outputs": "沿用options和原返回API；重排toolbar、主图、inspector、source与run/results槽位",
-      "behavior": "沿用options和原返回API；重排toolbar、主图、inspector、source与run/results槽位。只构造一个GraphController，加入action选择器和高级诊断入口；按钮调用下列同一控制器方法。完整dispose保留observer/源码阅读器清理。 消费C2的run深链接字段，读取封存图后恢复指定action/成员；未知引用明确错误，不回首个action冒充定位成功。",
+      "behavior": "沿用options和原返回API；重排toolbar、主图、inspector、source与run/results槽位。只构造一个GraphController，加入action选择器和高级诊断入口；按钮调用下列同一控制器方法。完整dispose保留observer/源码阅读器清理。 消费C2的run深链接字段，读取封存图后恢复指定action/成员；未知引用明确错误，不回首个action冒充定位成功。 合流时承接W018–W020的v3语义，按C8恢复旧/新URL并核对真实计划，B/C两处文件交接见05；只维护一张主图。",
       "callers": [
         "A02"
       ],
@@ -301,10 +302,10 @@
       "symbol": "fetchGraph",
       "signature": "fetchGraph(ticket,{preserveSelection=false,refresh=false}={}) -> Promise<void>",
       "action": "modify",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "fetchGraph(ticket,{preserveSelection=false,refresh=false}={}) -> Promise<void>",
       "outputs": "接受state.acceptGraph后调用C01/C03和graph.update",
-      "behavior": "接受state.acceptGraph后调用C01/C03和graph.update。封存主视角按action保留；partial/空/source-only明确且提供检查入口。保持existing node邻域/分页，不自动拉全图、不调用编译器。状态/桥变化触发派生模型更新，普通metrics轮询不重排。 C调用通过B14统一封装；不保留第二个builder入口。",
+      "behavior": "接受state.acceptGraph后调用C01/C03和graph.update。封存主视角按action保留；partial/空/source-only明确且提供检查入口。保持existing node邻域/分页，不自动拉全图、不调用编译器。状态/桥变化触发派生模型更新，普通metrics轮询不重排。 C调用通过B14统一封装；不保留第二个builder入口。 v3与legacy交C09唯一适配；graph binding相同但action/plan/revision变化也须更新选择与读取票据。",
       "callers": [
         "B01",
         "B07"
@@ -321,10 +322,10 @@
       "symbol": "selectGraphNode",
       "signature": "selectGraphNode(selection:NodeSelection) -> Promise<void>",
       "action": "add",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "selectGraphNode(selection:NodeSelection) -> Promise<void>",
       "outputs": "新统一入口替代两个相互改选择的处理链",
-      "behavior": "新统一入口替代两个相互改选择的处理链。校验当前GraphModel内key；有reportNodeId才调用state.chooseNode/loadSource，封存occurrence准确透传；不在当前图时定位邻域后按原identity重选。无桥只显示真实封存节点详情，不借别人的源码。 selection可为组或其显式成员；组内多occurrence先展示成员picker，未选成员前不调用graph-source、不用第一条bridge。 rememberView写C2完整action/logical/occurrence引用；读回按封存模型重新核验，不仅保存报告node_id。",
+      "behavior": "新统一入口替代两个相互改选择的处理链。校验当前GraphModel内key；有reportNodeId才调用state.chooseNode/loadSource，封存occurrence准确透传；不在当前图时定位邻域后按原identity重选。无桥只显示真实封存节点详情，不借别人的源码。 selection可为组或其显式成员；组内多occurrence先展示成员picker，未选成员前不调用graph-source、不用第一条bridge。 rememberView写C2完整action/logical/occurrence引用；读回按封存模型重新核验，不仅保存报告node_id。 NodeSelection新增execution；v3点选是精确occurrence，legacy组规则不变。rememberView按C8写完整dag/plan/revision/format；未知或过期定位不回首节点。",
       "callers": [
         "B01",
         "B04"
@@ -360,10 +361,10 @@
       "symbol": "paintConfiguration",
       "signature": "paintConfiguration(node:RawReportNode|null) -> void",
       "action": "modify",
-      "contract": "C2 C3",
+      "contract": "C2 C3 C8",
       "inputs": "paintConfiguration(node:RawReportNode|null) -> void",
       "outputs": "用C04展示输入输出/参数来由；可写字段仍affects/parse/CAS原规则",
-      "behavior": "用C04展示输入输出/参数来由；可写字段仍affects/parse/CAS原规则。无修改隐藏保存，readonly显示原因。run配置仅展示sealed值；不读当前params覆盖历史；原共享参数影响数保留。",
+      "behavior": "用C04展示输入输出/参数来由；可写字段仍affects/parse/CAS原规则。无修改隐藏保存，readonly显示原因。run配置仅展示sealed值；不读当前params覆盖历史；原共享参数影响数保留。 通过C04在只读运行详情展示真实resource role/profile、exchange原因和恢复限制，计划配额不得当作观测，不能放进可编辑参数列表。",
       "callers": [
         "B03",
         "B04"
@@ -380,10 +381,10 @@
       "symbol": "loadSource",
       "signature": "loadSource() -> Promise<void>",
       "action": "modify",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "loadSource() -> Promise<void>",
       "outputs": "保持graph-source查询与严格graph_binding/node_id验证；新选择带明确action所对应report node及logical/occurrence",
-      "behavior": "保持graph-source查询与严格graph_binding/node_id验证；新选择带明确action所对应report node及logical/occurrence。异步旧source丢弃，未知/缺封存不得取当前实现。Prompt仅有真实材料时可用，无关节点不把空Prompt页作为默认选项。",
+      "behavior": "保持graph-source查询与严格graph_binding/node_id验证；新选择带明确action所对应report node及logical/occurrence。异步旧source丢弃，未知/缺封存不得取当前实现。Prompt仅有真实材料时可用，无关节点不把空Prompt页作为默认选项。 请求HTTP字段不扩；捕获execution与detail票据，返回时必须仍属同action/dag/plan/revision/occurrence；选中action的bridge才授权源码。",
       "callers": [
         "B03",
         "B05"
@@ -420,10 +421,10 @@
       "symbol": "paintRunBar",
       "signature": "paintRunBar() -> void",
       "action": "modify",
-      "contract": "C3",
+      "contract": "C3 C8",
       "inputs": "paintRunBar() -> void",
       "outputs": "运行/attempt/动作、当前与历史清楚分离；stop/resume捕获exact目标并保留权限及恢复限制；返回当前配置恢复原草稿，默认action变化不改run",
-      "behavior": "运行/attempt/动作、当前与历史清楚分离；stop/resume捕获exact目标并保留权限及恢复限制；返回当前配置恢复原草稿，默认action变化不改run。高级dag/plan id放详情。",
+      "behavior": "运行/attempt/动作、当前与历史清楚分离；stop/resume捕获exact目标并保留权限及恢复限制；返回当前配置恢复原草稿，默认action变化不改run。高级dag/plan id放详情。 v3 physical.recovery仅是计划声明，实际resume仍由manager能力判定；INCOMPATIBLE_HISTORY/UNKNOWN_EFFECT/CAPACITY_PENDING如实说明，不自动重新提交。",
       "callers": [
         "B01",
         "B02"
@@ -440,10 +441,10 @@
       "symbol": "paintResults",
       "signature": "paintResults() -> void",
       "action": "modify",
-      "contract": "C3 C4",
+      "contract": "C3 C4 C8",
       "inputs": "paintResults() -> void",
       "outputs": "按真实output状态显示固定版本/行数与打开数据、比较入口；未登记/部分提交/失败不合并为成功",
-      "behavior": "按真实output状态显示固定版本/行数与打开数据、比较入口；未登记/部分提交/失败不合并为成功。原openResult/run_compare契约保留，打开结果到A05且有具体binding。",
+      "behavior": "按真实output状态显示固定版本/行数与打开数据、比较入口；未登记/部分提交/失败不合并为成功。原openResult/run_compare契约保留，打开结果到A05且有具体binding。 平台内部ArtifactRef/ResultHandle不直接转浏览器URL；只消费原run-view已确认且有权限的固定结果登记，交A/D/E原分析链。",
       "callers": [
         "B01",
         "B08"
@@ -460,10 +461,10 @@
       "symbol": "loadRunDetail",
       "signature": "loadRunDetail(force=false,resetRetry=false) -> Promise<void>",
       "action": "modify",
-      "contract": "C3",
+      "contract": "C3 C8",
       "inputs": "loadRunDetail(force=false,resetRetry=false) -> Promise<void>",
       "outputs": "统一详情tab文案与所选run/attempt；run日志不假node过滤",
-      "behavior": "统一详情tab文案与所选run/attempt；run日志不假node过滤。保留log offset/events cursor/observation分页；折叠不主动读全文，切run清旧响应；缺测单独说明，预算及4096等原上限不扩。",
+      "behavior": "统一详情tab文案与所选run/attempt；run日志不假node过滤。保留log offset/events cursor/observation分页；折叠不主动读全文，切run清旧响应；缺测单独说明，预算及4096等原上限不扩。 v3节点指标必须具有C8完整作用域凭据；无plan身份的旧页不提升为当前v3指标，run日志仍按原run/attempt分页。",
       "callers": [
         "B01",
         "B08"
@@ -480,10 +481,10 @@
       "symbol": "create",
       "signature": "create(project) -> existingStateController",
       "action": "modify",
-      "contract": "C0 C2",
+      "contract": "C0 C2 C8",
       "inputs": "create(project) -> existingStateController",
       "outputs": "仅在现有state内增加graphPreference=auto|report、actionId和完整NodeSelection；transition重置相应选择；capture/valid/acceptGraph语义保持",
-      "behavior": "仅在现有state内增加graphPreference=auto|report、actionId和完整NodeSelection；transition重置相应选择；capture/valid/acceptGraph语义保持。禁止另外持久化GraphModel或新全局Store；旧draft格式不变。 新增setGraphView({preference,actionId})方法，只在原state更新选择并返回capture ticket；不增加持久存储。",
+      "behavior": "仅在现有state内增加graphPreference=auto|report、actionId和完整NodeSelection；transition重置相应选择；capture/valid/acceptGraph语义保持。禁止另外持久化GraphModel或新全局Store；旧draft格式不变。 新增setGraphView({preference,actionId,execution=null})方法，只在原state更新选择并返回capture ticket；不增加持久存储。 在现有state增加ExecutionViewIdentity与setGraphView签名C8；只使图/源码/节点观测读取票据随action/dag/plan/revision失效。运行级stop/日志及原写入pending scope保留，不因换节点丢提交回执。",
       "callers": [
         "B01",
         "B03"
@@ -541,10 +542,10 @@
       "symbol": "paintGraph",
       "signature": "paintGraph() -> GraphModel|null",
       "action": "add",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "paintGraph() -> GraphModel|null",
       "outputs": "统一纯呈现调用入口：从当前state.graph/action/preference/snapshot调C01/C03后graph.update并保留选中key；无graph返回null",
-      "behavior": "统一纯呈现调用入口：从当前state.graph/action/preference/snapshot调C01/C03后graph.update并保留选中key；无graph返回null。B02成功读取及B01 observer.onSnapshot都调用这里，包括unsupported/unchanged分支；不再调用已删除的graphView.paint。模型结构没变不重排。",
+      "behavior": "统一纯呈现调用入口：从当前state.graph/action/preference/snapshot调C01/C03后graph.update并保留选中key；无graph返回null。B02成功读取及B01 observer.onSnapshot都调用这里，包括unsupported/unchanged分支；不再调用已删除的graphView.paint。模型结构没变不重排。 C03内唯一调用C09；结构版本/plan变更重建精确映射，metrics变化不重排。将W018/W019的真实语义迁入此链，禁止另开v3画布。",
       "callers": [
         "B01",
         "B02",
@@ -582,10 +583,10 @@
       "symbol": "renderLogical",
       "signature": "移除renderLogical(graph)，由paintGraph单一路线替代",
       "action": "remove",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "移除renderLogical(graph)，由paintGraph单一路线替代",
       "outputs": "删除旧logicalView.update及仅被它使用的logicalName/logicalPanel等私有helper；仍有高级事实消费者的logicalEntry/桥helper先迁到C或保持单份再删除",
-      "behavior": "删除旧logicalView.update及仅被它使用的logicalName/logicalPanel等私有helper；仍有高级事实消费者的logicalEntry/桥helper先迁到C或保持单份再删除。全文件rg校验无悬空logicalView，不能保留隐藏第二执行UI。",
+      "behavior": "删除旧logicalView.update及仅被它使用的logicalName/logicalPanel等私有helper；仍有高级事实消费者的logicalEntry/桥helper先迁到C或保持单份再删除。全文件rg校验无悬空logicalView，不能保留隐藏第二执行UI。 迁入W019的v3物理详情/恢复限制后删除renderLogical；替代消费者C03/C04/B14。",
       "callers": [
         "B14"
       ],
@@ -600,13 +601,35 @@
       "symbol": "chooseLogicalNode",
       "signature": "移除chooseLogicalNode(id,declared)，统一NodeSelection",
       "action": "remove",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "移除chooseLogicalNode(id,declared)，统一NodeSelection",
       "outputs": "源码/参数/观测选择迁B03、C04；删除旧occurrence按钮写logicalSelected逻辑，新的occurrence直接NodeSelection key",
-      "behavior": "源码/参数/观测选择迁B03、C04；删除旧occurrence按钮写logicalSelected逻辑，新的occurrence直接NodeSelection key。原chooseNode兼容委托仅B13，去除旧observer/handle.dispose对logicalView调用。",
+      "behavior": "源码/参数/观测选择迁B03、C04；删除旧occurrence按钮写logicalSelected逻辑，新的occurrence直接NodeSelection key。原chooseNode兼容委托仅B13，去除旧observer/handle.dispose对logicalView调用。 迁入W020的精确实例及历史定位后删除chooseLogicalNode；唯一入口B03/B13。",
       "callers": [
         "B03",
         "B13"
+      ],
+      "acceptance": [
+        "V04",
+        "V09"
+      ]
+    },
+    {
+      "id": "B18",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "logicalEntry",
+      "signature": "移除旧logicalEntry选择入口；选择统一由C01/C09/B14处理",
+      "action": "remove",
+      "contract": "C2 C8",
+      "inputs": "W018交付行为及C8唯一版本适配/选择合同",
+      "outputs": "旧helper及全部消费者删除，W的v3能力保留在新主图",
+      "behavior": "W018先完成其隔离交付；B合流时把按action选择及v3字段处理迁到C01/C09/B14，再移除logicalEntry。旧URL/显式错误保持；禁止两套选择状态同时存活。",
+      "callers": [
+        "B01",
+        "B14",
+        "B16",
+        "B17"
       ],
       "acceptance": [
         "V04",
@@ -620,10 +643,10 @@
       "symbol": "chooseGraphView",
       "signature": "chooseGraphView(graph, {actionId,preference}) -> GraphChoice",
       "action": "add",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "chooseGraphView(graph, {actionId,preference}) -> GraphChoice",
-      "outputs": "严格按C2表选择basis；未知action先报告再回首项，不能选择某个成功action掩盖失败",
-      "behavior": "严格按C2表选择basis；未知action先报告再回首项，不能选择某个成功action掩盖失败。sealed不可用返回reason，report替代须用户显式选，源码图不宣称可执行。",
+      "outputs": "按C2/C8选择source/report/legacy/v3；未知明确action不自动回首项。",
+      "behavior": "按C2选择主视角；sealed版本由C09校验，不能凭exchanges等字段猜测。深链接的明确action不存在时返回unavailable；只有没有明确选择才按服务端顺序默认。缺封存不静默切当前图；report替代须用户显式选。",
       "callers": [
         "B14"
       ],
@@ -637,12 +660,12 @@
       "lane": "C",
       "file": "demiflow/workbench/web/workbench-presentation.js",
       "symbol": "buildNodeCard",
-      "signature": "buildNodeCard(graph,selection,snapshot) -> NodeCard",
+      "signature": "buildNodeCard(graph,selection,snapshot,execution=null) -> NodeCard",
       "action": "add",
-      "contract": "C2",
-      "inputs": "buildNodeCard(graph,selection,snapshot) -> NodeCard",
-      "outputs": "按selection唯一找报告节点/封存occurrence；标题优先真实alias/operator.name，类型字典仅描述平台动作",
-      "behavior": "按selection唯一找报告节点/封存occurrence；标题优先真实alias/operator.name，类型字典仅描述平台动作。summary最多两条真实字段参数摘要，字符串每项<=160字符；状态复用真实observations，不用run成功填所有节点。 多occurrence组的selection.occurrenceId=null、reportNodeId=null，返回完整occurrences供选择；state说“多次出现/状态不同”而不是借用首成员。",
+      "contract": "C2 C8",
+      "inputs": "原graph、NodeSelection、原snapshot；execution为C03本次构建的ExecutionProjection或null（source/report），不是持久状态。",
+      "outputs": "按精确实例生成NodeCard；legacy才保留逻辑组和成员picker。",
+      "behavior": "source/report沿原规则。sealed消费C03传入的ExecutionProjection，不重新建身份。legacy组保留所有成员，不能借首成员状态；v3一occurrence一卡，相同semantic也不合并。title保留真实实名，summary<=2且每项<=160字符。按C8完整作用域核对观测，缺scope/缺页/融合均不猜成功。",
       "callers": [
         "C03"
       ],
@@ -658,10 +681,10 @@
       "symbol": "buildGraphModel",
       "signature": "buildGraphModel(graph,{choice,snapshot,selection}) -> GraphModel",
       "action": "add",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "buildGraphModel(graph,{choice,snapshot,selection}) -> GraphModel",
-      "outputs": "逐节点用C02生成key，边保持原端口/关系类型；多occurrence分别绘制，不改DAG身份",
-      "behavior": "逐报告节点或封存逻辑组用C02生成卡；当前dag边只有logical_node_id+port，故同action同logical ID绘一组，occurrences完整列出，不猜instance连线。组key含basis/action/logical/null，成员selection含occurrence；边按真实logical端点连组，无跨action合并/笛卡尔扩边。明确组内状态混合，不用第一成员充当整组。预算与局部图保持，纯函数不fetch/写Store。",
+      "outputs": "版本分支明确的GraphModel；execution携带本次真实运行身份。",
+      "behavior": "source/report沿旧投影；sealed先调用C09一次，再把结果传C02。legacy按logical ID分组、成员选择；v3按occurrence单独绘图，用原edge_id和端口连接，禁止同semantic合并或笛卡尔扩边。缺实例端点/不匹配返回明确unavailable及可选当时检查图；不伪画完整计划。保持预算，纯函数不fetch/写Store。",
       "callers": [
         "B14"
       ],
@@ -677,10 +700,10 @@
       "symbol": "buildNodeDetails",
       "signature": "buildNodeDetails(graph,selection) -> NodeDetails",
       "action": "add",
-      "contract": "C2",
+      "contract": "C2 C8",
       "inputs": "buildNodeDetails(graph,selection) -> NodeDetails",
-      "outputs": "只关联可证明的report/bridge字段；前驱字段标明上游输出，不冒充输入声明；未知值null+reason",
-      "behavior": "只关联可证明的report/bridge字段；前驱字段标明上游输出，不冒充输入声明；未知值null+reason。恢复限制始终保留；纯函数不读取当前业务文件。 选中多occurrence组时仅给逻辑级概况，sourceAvailable=false/reason=select_occurrence；成员选择后才关联具体report/observation。",
+      "outputs": "NodeDetails增加execution、placement、exchanges与recovery事实，未知为null/reason。",
+      "behavior": "调用C09验证选中action；legacy多成员未选择时只给组概况，v3精确occurrence关联。按C8物理索引读取stage/profile/role/分区/replica目标、与本节点相邻的exchange.mode/reason、recovery/limitations。计划配额不冒充实时用量。源码参数只经真实bridge，缺桥禁用；不读取当前业务源码。",
       "callers": [
         "B05"
       ],
@@ -715,10 +738,10 @@
       "symbol": "mount",
       "signature": "mount(host,{onSelect}) -> GraphController",
       "action": "modify",
-      "contract": "C0 C1 C2",
+      "contract": "C0 C1 C2 C8",
       "inputs": "mount(host,{onSelect}) -> GraphController",
       "outputs": "复用SVG/ResizeObserver但统一update(model)路线；C05布局、卡片文本多行与summary，固定screen字号优先、键盘焦点/aria-label完整；选择回调NodeSelection",
-      "behavior": "复用SVG/ResizeObserver但统一update(model)路线；C05布局、卡片文本多行与summary，固定screen字号优先、键盘焦点/aria-label完整；选择回调NodeSelection。resize保持manual视角，fit由显式操作触发。dispose断开全部监听。 update结构不变时仅更新状态/文案，不能每个snapshot清空SVG或恢复滚动位置。",
+      "behavior": "复用SVG/ResizeObserver但统一update(model)路线；C05布局、卡片文本多行与summary，固定screen字号优先、键盘焦点/aria-label完整；选择回调NodeSelection。resize保持manual视角，fit由显式操作触发。dispose断开全部监听。 update结构不变时仅更新状态/文案，不能每个snapshot清空SVG或恢复滚动位置。 统一mount必须承接runtime-v3:W021的真实v3详情/节点能力，禁止按旧logical ID把v3节点去重；只消费GraphModel，不自行做格式分派。",
       "callers": [
         "B01"
       ],
@@ -735,10 +758,10 @@
       "symbol": "mountLogical",
       "signature": "移除重复逻辑绘图入口及其私有helper，仅保留单一mount",
       "action": "remove",
-      "contract": "C0 C2",
+      "contract": "C0 C2 C8",
       "inputs": "移除重复逻辑绘图入口及其私有helper，仅保留单一mount",
       "outputs": "B01/B02迁移到统一model后删除mountLogical export和重复SVG；status/cpuChart仍有消费者须保留",
-      "behavior": "B01/B02迁移到统一model后删除mountLogical export和重复SVG；status/cpuChart仍有消费者须保留。迁移commit可短期兼容，最终验收不能存在两份普通/逻辑状态和两张隐藏画布。",
+      "behavior": "B01/B02迁移到统一model后删除mountLogical export和重复SVG；status/cpuChart仍有消费者须保留。迁移commit可短期兼容，最终验收不能存在两份普通/逻辑状态和两张隐藏画布。 按05-runtime-v3-wiring的W021→C06迁移表，在W交付后移除；保留真实端口/资源/恢复展示语义，不整文件覆盖W的提交。",
       "callers": [
         "B01",
         "B02",
@@ -766,6 +789,26 @@
       "acceptance": [
         "V01",
         "V03"
+      ]
+    },
+    {
+      "id": "C09",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-presentation.js",
+      "symbol": "normalizeExecutionPlan",
+      "signature": "normalizeExecutionPlan(entry,binding) -> ExecutionProjection",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "原graph.logical.actions[]的一个action＋原GraphBinding；不读文件/不fetch",
+      "outputs": "available联合类型：legacy逻辑组或v3实例图、完整身份、物理摘要；失败为稳定reason",
+      "behavior": "按05及contracts.d.ts精确版本识别，校验action/dag/plan/revision、节点/端口/边/物理关联、现有预算。legacy保留原字节和组边；v3保留occurrence/edge_id/端口，缺端点返回v3_endpoint_identity_missing。未知schema不能降级旧图；不重算hash，不把投影持久化。",
+      "callers": [
+        "C03",
+        "C04"
+      ],
+      "acceptance": [
+        "V04",
+        "V09"
       ]
     },
     {
@@ -1676,10 +1719,10 @@
       "symbol": "test_ui_d19_graph_config_check_run",
       "signature": "test_ui_d19_graph_config_check_run(owned_fixture, browser) -> None",
       "action": "test",
-      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
       "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
       "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
-      "behavior": "从source-only入口→显式检查→真实7节点图→节点配置保存/冲突→再次检查→运行→固定输出；验证API命中、节点摘要事实与返回绑定，不靠label通过。",
+      "behavior": "从source-only入口→显式检查→真实7节点图→节点配置保存/冲突→再次检查→运行→固定输出；验证API命中、节点摘要事实与返回绑定，不靠label通过。 最终运行必须真实经过统一DataflowExecution/封存v3，记录模块路径和实际schema；只在旧executor算出同结果不能通过。Local是基础，Ray Core表面接线另记真实provider结果，缺环境not_run。",
       "callers": [
         "B01",
         "B02",
@@ -1705,10 +1748,10 @@
       "symbol": "test_ui_d19_sealed_graph_attempts",
       "signature": "test_ui_d19_sealed_graph_attempts(owned_fixture, browser) -> None",
       "action": "test",
-      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
       "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
-      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
-      "behavior": "真实两个action、重复logical occurrence、局部图、缺桥/源码与历史attempt；默认封存图、精确selection/observations、日志范围、恢复限制与切换不串。无需重跑引擎全套，复用已存在业务验收夹具生成真实事实。 额外断言logical边不被展开成猜测的occurrence笛卡尔连线，多成员组选定一次出现后源码/观测才精确绑定。",
+      "outputs": "legacy历史＋runtime-v3真实封存的参数化断言与绑定证据。",
+      "behavior": "保留旧两个action/组成员/历史只读反例；新增C8真实v3共享源、同semantic两个occurrence串联和join左右输入，边和端口与封存逐项比对。丢边端点必须unavailable，不同实例不可合并成自环；检验stage/exchange/recovery、缺观测不造数、源码按正确action。新旧URL、计划漂移、历史digest原样；mock仅为反例，基准链须真实W+Runtime。",
       "callers": [
         "B02",
         "B06",
@@ -1717,7 +1760,9 @@
         "B10",
         "B11",
         "C01",
-        "C03"
+        "C03",
+        "C09",
+        "B18"
       ],
       "acceptance": [
         "V04"
@@ -1809,10 +1854,10 @@
       "symbol": "test_ui_d19_late_response_and_cleanup",
       "signature": "test_ui_d19_late_response_and_cleanup(owned_fixture, browser) -> None",
       "action": "test",
-      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
       "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
       "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
-      "behavior": "延迟graph/source/output/Case及项目读取，切对象后旧响应不得涂新页；重复点击写只有一intent，容量不足GET有界退避。20次切tab/case后worker/blob/observer/requests回基线，失败不清除草稿。",
+      "behavior": "延迟graph/source/output/Case及项目读取，切对象后旧响应不得涂新页；重复点击写只有一intent，容量不足GET有界退避。20次切tab/case后worker/blob/observer/requests回基线，失败不清除草稿。 增加同run/attempt的action/plan/revision变化，旧source/observations响应不能被接收；CAPACITY_PENDING不得自动新建run。",
       "callers": [
         "A02",
         "A03",
@@ -1835,13 +1880,15 @@
       "symbol": "test_ui_d19_asset_and_single_authority",
       "signature": "test_ui_d19_asset_and_single_authority(owned_fixture, browser) -> None",
       "action": "test",
-      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
       "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
       "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
-      "behavior": "index实际加载新模块、globals可用、所有新函数真实调用；无mountLogical消费者/双画布/第二Store；打包assets可达，冻结七件和旧主仓不变，实际import路径匹配。",
+      "behavior": "index实际加载新模块、globals可用、所有新函数真实调用；无mountLogical消费者/双画布/第二Store；打包assets可达，冻结七件和旧主仓不变，实际import路径匹配。 真实调用C09，W018–W021能力迁移表逐项有断言；logicalEntry/renderLogical/chooseLogicalNode/mountLogical旧入口最终无消费者。平台tests/test_runtime_v3_w.py仅在W交付后改前端符号/DOM断言，不改Python语义测试。",
       "callers": [
         "A12",
-        "C07"
+        "C07",
+        "C09",
+        "B18"
       ],
       "acceptance": [
         "V09"
@@ -1854,10 +1901,10 @@
       "symbol": "owned_fixture",
       "signature": "@pytest.fixture owned_fixture(tmp_path,monkeypatch,request) -> Iterator[OwnedFixture]",
       "action": "add",
-      "contract": "C0 C7",
+      "contract": "C0 C7 C8",
       "inputs": "@pytest.fixture owned_fixture(tmp_path,monkeypatch,request) -> Iterator[OwnedFixture]",
       "outputs": "建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成",
-      "behavior": "建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成。提供固定表两注册版本和图片/标注真实数据，不伪造service权限；finally关闭自己启动的服务/进程。测试不得链接主仓服务。",
+      "behavior": "建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成。提供固定表两注册版本和图片/标注真实数据，不伪造service权限；finally关闭自己启动的服务/进程。测试不得链接主仓服务。 C8夹具分别生成/载入真实legacy封存与统一v3封存；测试替身标清、不得计组合通过；候选缺W实现记录not_run，不回退主仓。",
       "callers": [
         "V01",
         "V02",
@@ -1908,5 +1955,14 @@
     "tests/test_forge_workbench_frontend.py",
     "tests/test_forge_workspace.py",
     "tests/test_workbench_execution_binding_browser.py"
-  ]
+  ],
+  "runtime_wiring": "runtime-wiring.json",
+  "integration_test_compatibility": {
+    "owner": "V",
+    "files": [
+      "tests/test_runtime_v3_w.py"
+    ],
+    "phase": "after_runtime_W_delivery_only",
+    "allowed": "migrate frontend symbol/DOM assertions to final UI functions; retain all behavior and Python assertions"
+  }
 }

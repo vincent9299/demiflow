@@ -1,0 +1,380 @@
+{
+  "kind": "synthetic_consumer_contract_only",
+  "not_an_engine_artifact": true,
+  "not_runtime_evidence": true,
+  "binding": {
+    "workspace_id": "w11111111111111111111111111111111",
+    "basis_kind": "run",
+    "basis_digest": "0000000000000000000000000000000000000000000000000000000000000050",
+    "entry": "flows/example.py:run",
+    "params": null,
+    "run_id": "fixture-run",
+    "attempt": 1
+  },
+  "entry": {
+    "version": "v3",
+    "action_id": "fixture-action",
+    "status": "sealed",
+    "binding_level": "sealed",
+    "plan_id": "0000000000000000000000000000000000000000000000000000000000000051",
+    "dag": {
+      "schema_version": "demiflow.dataflow_graph.v3",
+      "action_id": "fixture-action",
+      "dag_id": "0000000000000000000000000000000000000000000000000000000000000052",
+      "nodes": [
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000014",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "op_kind": "source",
+          "input_ports": [],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "io",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000002",
+          "op_kind": "map",
+          "input_ports": [
+            "in"
+          ],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "cpu",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000003",
+          "op_kind": "map",
+          "input_ports": [
+            "in"
+          ],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "cpu",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000004",
+          "op_kind": "join",
+          "input_ports": [
+            "left",
+            "right"
+          ],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "cpu",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000017",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000005",
+          "op_kind": "terminal",
+          "input_ports": [
+            "in"
+          ],
+          "output_ports": [],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "io",
+            "mergeable": false
+          }
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "0000000000000000000000000000000000000000000000000000000000000028",
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000014",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000001",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000002",
+            "port": "in"
+          }
+        },
+        {
+          "edge_id": "0000000000000000000000000000000000000000000000000000000000000029",
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000002",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000003",
+            "port": "in"
+          }
+        },
+        {
+          "edge_id": "000000000000000000000000000000000000000000000000000000000000002a",
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000002",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000004",
+            "port": "left"
+          }
+        },
+        {
+          "edge_id": "000000000000000000000000000000000000000000000000000000000000002b",
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000003",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000004",
+            "port": "right"
+          }
+        },
+        {
+          "edge_id": "000000000000000000000000000000000000000000000000000000000000002c",
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000004",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000017",
+            "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000005",
+            "port": "in"
+          }
+        }
+      ],
+      "sources": [
+        "0000000000000000000000000000000000000000000000000000000000000001"
+      ],
+      "terminals": [
+        "0000000000000000000000000000000000000000000000000000000000000005"
+      ]
+    },
+    "physical": {
+      "plan_id": "0000000000000000000000000000000000000000000000000000000000000051",
+      "plan_revision": 0,
+      "stages": {
+        "0000000000000000000000000000000000000000000000000000000000000001": {
+          "stage_id": "stage_0",
+          "partition_count": 1,
+          "profile": {
+            "requests": {},
+            "limits": {},
+            "requirements": {}
+          },
+          "replica_min": 1,
+          "replica_target": 1,
+          "replica_max": 1,
+          "resident_bytes": 4096,
+          "output_bytes": 1024,
+          "state_bytes": 0
+        },
+        "0000000000000000000000000000000000000000000000000000000000000002": {
+          "stage_id": "stage_1",
+          "partition_count": 1,
+          "profile": {
+            "requests": {},
+            "limits": {},
+            "requirements": {}
+          },
+          "replica_min": 1,
+          "replica_target": 1,
+          "replica_max": 1,
+          "resident_bytes": 4096,
+          "output_bytes": 1024,
+          "state_bytes": 0
+        },
+        "0000000000000000000000000000000000000000000000000000000000000003": {
+          "stage_id": "stage_2",
+          "partition_count": 1,
+          "profile": {
+            "requests": {},
+            "limits": {},
+            "requirements": {}
+          },
+          "replica_min": 1,
+          "replica_target": 1,
+          "replica_max": 1,
+          "resident_bytes": 4096,
+          "output_bytes": 1024,
+          "state_bytes": 0
+        },
+        "0000000000000000000000000000000000000000000000000000000000000004": {
+          "stage_id": "stage_3",
+          "partition_count": 1,
+          "profile": {
+            "requests": {},
+            "limits": {},
+            "requirements": {}
+          },
+          "replica_min": 1,
+          "replica_target": 1,
+          "replica_max": 1,
+          "resident_bytes": 4096,
+          "output_bytes": 1024,
+          "state_bytes": 0
+        },
+        "0000000000000000000000000000000000000000000000000000000000000005": {
+          "stage_id": "stage_4",
+          "partition_count": 1,
+          "profile": {
+            "requests": {},
+            "limits": {},
+            "requirements": {}
+          },
+          "replica_min": 1,
+          "replica_target": 1,
+          "replica_max": 1,
+          "resident_bytes": 4096,
+          "output_bytes": 1024,
+          "state_bytes": 0
+        }
+      },
+      "exchanges": [
+        {
+          "channel_id": "channel_0",
+          "edge_id": "0000000000000000000000000000000000000000000000000000000000000028",
+          "mode": "memory_incremental",
+          "routing": "forward",
+          "keys": [],
+          "reason": "fixture incremental input",
+          "route_epoch": 0,
+          "read_domain": "fixture",
+          "credit_rows": 1,
+          "credit_bytes": 1024,
+          "storage_bytes": 4096,
+          "producer_count": 1,
+          "consumer_count": 1
+        },
+        {
+          "channel_id": "channel_1",
+          "edge_id": "0000000000000000000000000000000000000000000000000000000000000029",
+          "mode": "memory_incremental",
+          "routing": "forward",
+          "keys": [],
+          "reason": "fixture incremental input",
+          "route_epoch": 0,
+          "read_domain": "fixture",
+          "credit_rows": 1,
+          "credit_bytes": 1024,
+          "storage_bytes": 4096,
+          "producer_count": 1,
+          "consumer_count": 1
+        },
+        {
+          "channel_id": "channel_2",
+          "edge_id": "000000000000000000000000000000000000000000000000000000000000002a",
+          "mode": "finite_sealed",
+          "routing": "forward",
+          "keys": [],
+          "reason": "fixture declared finite input",
+          "route_epoch": 0,
+          "read_domain": "fixture",
+          "credit_rows": 1,
+          "credit_bytes": 1024,
+          "storage_bytes": 4096,
+          "producer_count": 1,
+          "consumer_count": 1
+        },
+        {
+          "channel_id": "channel_3",
+          "edge_id": "000000000000000000000000000000000000000000000000000000000000002b",
+          "mode": "finite_sealed",
+          "routing": "forward",
+          "keys": [],
+          "reason": "fixture declared finite input",
+          "route_epoch": 0,
+          "read_domain": "fixture",
+          "credit_rows": 1,
+          "credit_bytes": 1024,
+          "storage_bytes": 4096,
+          "producer_count": 1,
+          "consumer_count": 1
+        },
+        {
+          "channel_id": "channel_4",
+          "edge_id": "000000000000000000000000000000000000000000000000000000000000002c",
+          "mode": "memory_incremental",
+          "routing": "forward",
+          "keys": [],
+          "reason": "fixture incremental input",
+          "route_epoch": 0,
+          "read_domain": "fixture",
+          "credit_rows": 1,
+          "credit_bytes": 1024,
+          "storage_bytes": 4096,
+          "producer_count": 1,
+          "consumer_count": 1
+        }
+      ],
+      "recovery": "checkpoint",
+      "limitations": [],
+      "policy": {
+        "provider": "local"
+      }
+    },
+    "node_observations": {
+      "available": false,
+      "reason": "synthetic_sample_has_no_runtime_observations"
+    }
+  },
+  "expected": {
+    "format": "v3",
+    "visual_nodes": 5,
+    "edges": 5,
+    "same_semantic_distinct_occurrences": [
+      "0000000000000000000000000000000000000000000000000000000000000002",
+      "0000000000000000000000000000000000000000000000000000000000000003"
+    ],
+    "join_ports": [
+      "left",
+      "right"
+    ],
+    "no_invented_self_loop": true
+  },
+  "required_mutations": [
+    {
+      "remove": "entry.dag.edges[0].from.occurrence_id",
+      "expect": "v3_endpoint_identity_missing"
+    },
+    {
+      "set": "entry.dag.schema_version",
+      "value": "unknown.future",
+      "expect": "unsupported_plan_schema"
+    },
+    {
+      "set": "entry.physical.plan_id",
+      "value": "0000000000000000000000000000000000000000000000000000000000000063",
+      "expect": "identity_mismatch"
+    }
+  ]
+}

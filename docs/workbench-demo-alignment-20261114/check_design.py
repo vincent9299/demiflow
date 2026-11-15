@@ -57,9 +57,14 @@ for item in tasks:
 done('existing function and method names exist in the source')
 
 planned_files=set(owners)
+external_tests=set(manifest.get('integration_test_compatibility',{}).get('files',[]))
 for relative in set(re.findall(r'tests/test_[A-Za-z0-9_]+\.py', acceptance)):
-    assert (ROOT/relative).is_file() or relative in planned_files, relative
-done('regression paths exist; future tests have explicit owners')
+    assert (ROOT/relative).is_file() or relative in planned_files or relative in external_tests, relative
+if external_tests:
+    compatibility=manifest['integration_test_compatibility']
+    assert compatibility['owner']=='V'
+    assert compatibility['phase']=='after_runtime_W_delivery_only'
+done('regression paths exist or have explicit local/external delivery owners')
 
 cards = '\n'.join(path.read_text() for path in (HERE/'tasks').glob('*.md'))
 for item in tasks:
@@ -87,5 +92,62 @@ frozen={'demiflow/execution/'+p for p in ['raw_fetch.py','queue_execution.py','q
 frozen.update({'demiflow/planning/dag.py','demiflow/resources/contracts.py'})
 assert not frozen.intersection(planned_files)
 done('load-bearing files have no implementation tasks')
+
+# Cross-package wiring is explicit; inspect pinned design bytes, not live lane edits.
+wiring=json.loads((HERE/'runtime-wiring.json').read_text())
+receipt=json.loads((HERE/wiring['source_receipt']).read_text())
+revision=wiring['runtime_design_commit']
+assert manifest['design']==wiring['ui_design']=='UI-D1.9/2'
+assert revision==receipt['runtime_design_head']
+for item in receipt['inputs']:
+    raw=subprocess.check_output(['git','show',revision+':'+item['path']],cwd=ROOT)
+    assert hashlib.sha256(raw).hexdigest()==item['sha256'],item['path']
+upstream=json.loads(subprocess.check_output(['git','show',revision+':'+wiring['runtime_plan_path']],cwd=ROOT))
+up_by_id={item['id']:item for item in upstream['tasks']}
+overlaps=planned_files & {item['file'] for item in upstream['tasks']}
+assert overlaps=={item['file'] for item in wiring['handoffs']},overlaps
+for handoff in wiring['handoffs']:
+    path=handoff['file']
+    assert handoff['final_owner']=='ui:'+owners[path]
+    assert handoff['upstream_owner']=='runtime-v3:W'
+    assert handoff['order']=='runtime_W_delivery_then_ui_semantic_migration'
+    assert {i for i in up_by_id if up_by_id[i]['file']==path}==set(handoff['upstream_tasks'])
+    assert all(up_by_id[i]['lane']=='W' for i in handoff['upstream_tasks'])
+    assert all(by_id[i]['file']==path for i in handoff['ui_tasks'])
+    assert all(by_id[i]['action'] in {'add','modify'} for i in handoff['replacement_tasks'])
+for requirement in wiring['requirements']:
+    assert all(i in up_by_id for i in requirement['producer_tasks'])
+    assert all(i in by_id for i in requirement['ui_tasks'])
+    assert all(i in gates for i in requirement['acceptance'])
+assert external_tests=={'tests/test_runtime_v3_w.py'}
+assert wiring['provider_status']=='required_not_verified'
+assert wiring['integration_acceptance']=='not_run'
+done('runtime source pin, all shared files, producers and authorized consumers have handoffs')
+
+# These are synthetic consumer-contract examples, not executable engine artifacts.
+sample=json.loads((HERE/'samples/runtime-v3-wire.json').read_text())
+legacy=json.loads((HERE/'samples/legacy-wire.json').read_text())
+for item in (sample,legacy):
+    assert item['not_an_engine_artifact'] and item['not_runtime_evidence']
+entry=sample['entry'];nodes=entry['dag']['nodes'];edges=entry['dag']['edges']
+index={n['occurrence_id']:n for n in nodes}
+assert len(index)==len(nodes)==sample['expected']['visual_nodes']
+assert len({n['logical_node_id'] for n in nodes})<len(nodes)
+assert len(edges)==sample['expected']['edges']
+assert len({e['edge_id'] for e in edges})==len(edges)
+for edge in edges:
+    for side,ports in [('from','output_ports'),('to','input_ports')]:
+        endpoint=edge[side];node=index[endpoint['occurrence_id']]
+        assert endpoint['logical_node_id']==node['logical_node_id']
+        assert endpoint['port'] in node[ports]
+    assert edge['from']['occurrence_id']!=edge['to']['occurrence_id']
+assert any(e['from']['logical_node_id']==e['to']['logical_node_id'] for e in edges)
+assert set(entry['physical']['stages'])==set(index)
+assert {e['edge_id'] for e in entry['physical']['exchanges']}=={e['edge_id'] for e in edges}
+assert len({n['logical_node_id'] for n in legacy['entry']['dag']['nodes']})==legacy['expected']['visual_nodes']
+assert all('occurrence_id' not in e['from'] for e in legacy['entry']['dag']['edges'])
+assert by_id['C09']['callers']==['C03','C04']
+assert by_id['B18']['action']=='remove' and by_id['B18']['symbol']=='logicalEntry'
+done('versioned example topology preserves repeated occurrences and exact port edges')
 print(json.dumps(dict(status='design_consistent',product_acceptance='not_run',
     tasks=len(tasks),files=len(owners),lanes=len(set(owners.values())),checks=checks),ensure_ascii=False,indent=2))

@@ -1,4 +1,4 @@
-# 冻结契约 UI-D1.9/1
+# 冻结契约 UI-D1.9/2
 
 ## C0. 形态、所有权和生命周期
 
@@ -34,15 +34,15 @@
 
 `buildGraphModel(graph, {choice, snapshot, selection}) -> GraphModel` 是纯函数。原始图 JSON仍为 `demiflow_workbench_graph_v1`（`graph/model.py::get`）；参数、freshness、completeness、logical.actions 不复制编译。服务端未提供的事实返回null/reason，不发网络请求。
 
-- 报告/源码节点key为JSON序列化 `[basis_digest,report_node_id]`。**核对当前DAG格式后冻结**：边端点只有logical_node_id+port，没有occurrence_id。因此封存图按action内逻辑节点成组绘制，组key为`[basis_digest,action_id,logical_node_id,null]`，卡内列出全部occurrences；成员选择key为`[basis_digest,action_id,logical_node_id,occurrence_id]`。逻辑边连接组，不能猜每次出现之间的边或作笛卡尔扩边。不能只保留组的第一条出现充当执行身份；前端key不反写dag_id。
+- 报告/源码节点key为JSON序列化 `[basis_digest,report_node_id]`。**按版本区分**：legacy（demiflow.logical_dag.v1）边仅logical ID+port，按逻辑组绘图，组key为`[basis_digest,action_id,logical_node_id,null]`，成员key补occurrence；所有成员保留，不能猜实例边。v3（demiflow.dataflow_graph.v3）按occurrence逐个绘图，key为`[basis_digest,action_id,dag_id,plan_id,plan_revision,occurrence_id]`，边保留原edge_id和两端occurrence/port。必须经C09，缺端点明确unavailable，不能套legacy画法。精确DTO与提供方补充见C8。
 - action/dag/plan身份完全来自封存facts；bridge只按原action/dag/report校验结果使用，未知/多个候选不取第一个。source请求复用原`graph-source`，携带graph_binding/node_id及明确logical_node_id/occurrence_id。
 - Card：key是绘图节点/组key，边和布局使用它；selection是默认点击目标（报告节点、单成员的明确occurrence，或多成员组），occurrences保留全部成员选择；选中成员时高亮所属组。类型、人可读标题、最多两条事实摘要、状态。平台API类型可静态翻译为“读取/关联/过滤/写出”；自定义函数保留实名，不能自动编造业务用途。摘要取已提供 alias/字段/参数/结果版本；省略时能展开原值。source_call只说“调用入口”。
 - Inspector：概况→输入输出→参数→源码入口→高级依据。输入字段仅可显示该边上游已知输出字段并注明来源；缺类型/端口为未知，不能推断契约。不可编辑时显示原因；只有实际可写改动才出现保存动作。
-- 观测继续使用既有真实报告节点/occurrence桥；多成员组未选一次出现时只显示“多次出现/状态不同”和逻辑概况，不拿第一条bridge读源码/参数。选定成员后才关联精确report node与观测。fused/unmeasured/unsupported不可用全run CPU复制成逐节点CPU。未知和已完成输出、整体run状态分别显示。
+- 观测继续使用既有真实报告节点/occurrence桥；legacy多成员组未选一次出现时只显示“多次出现/状态不同”和逻辑概况，不拿第一条bridge读源码/参数。选定成员后才关联精确report node与观测。fused/unmeasured/unsupported不可用全run CPU复制成逐节点CPU。未知和已完成输出、整体run状态分别显示。
 - payload预算沿用服务端1MiB及256节点/512边上界；超限拒绝/明确局部图，不递归全量取图。定位调用既有 node_index/graph node_id，单次64条索引。
 - `ForgeWorkbenchGraph.mount(host,{onSelect}) -> GraphController` 新 `update(GraphModel)`；旧 `mountLogical` 只可在本批迁移中短暂保留，B迁移完成后同批删除旧消费者和重复绘图逻辑。status和cpuChart已有消费者继续保留。
 
-接线冻结：`state.setGraphView({preference,actionId})`只在原State更新图选择并返回原capture ticket。B的`paintGraph()`统一调chooseGraphView/buildGraphModel/update；fetchGraph和observer.onSnapshot都走它，包括unsupported与状态变化。旧graphView.paint、logicalView.update/select/dispose必须全部迁移；旧报告node定位经chooseNode委托到唯一selectGraphNode。GraphController.update对同结构快照仅更新状态/文案，不能每次轮询清SVG或重置滚动。
+接线冻结：`state.setGraphView({preference,actionId,execution=null})`只在原State更新图选择并返回原capture ticket。B的`paintGraph()`统一调chooseGraphView/buildGraphModel/update；fetchGraph和observer.onSnapshot都走它，包括unsupported与状态变化。旧graphView.paint、logicalView.update/select/dispose必须全部迁移；旧报告node定位经chooseNode委托到唯一selectGraphNode。GraphController.update对同结构快照仅更新状态/文案，不能每次轮询清SVG或重置滚动。
 
 深链接：A10将v2 run视图扩展可选`action_id`（非空<=128字符）、`logical_node_id`（SHA256）、`occurrence_id`（SHA256）。logical要求action，occurrence要求logical；这些字段出现时要求明确attempt。原node_id/report_digest成对约束不变。B03写完整定位，B01读取sealed图后核验action/成员和可选报告桥；无桥可只存逻辑引用而不伪造node_id。用户给出的未知/过期定位显示缺口，不能回首个action冒充定位成功。组链接不带occurrence，成员链接带完整出现身份；不向graph HTTP请求加入未声明参数。
 
@@ -132,3 +132,11 @@ v1/v2所有现有URL保留；v2 `table_request/table/case`可选version和alias_
 冻结样本至少包括：source-only入口、7节点报告、两个sealed action、同logical_id两occurrence、缺桥/缺历史源码、图裁剪、stale参数、未知prepare回执；新旧table locator各一、alias漂移、已删历史版本；dirty notebook/过期revision/内核generation变化/未知submit；Case v1、v2两方案每组图片+文本+评分、重复业务键、未绑定方案、标注冲突、媒体失效。V使用真实fixtures生成，不手写“契约通过”的假事实。
 
 沿用后端上限；前端不能加大读取量来补体验。样例页默认20最多100、投影<=16（分析显式来源<=32）、分布原1000行/8MiB投影上限；API原请求64KiB/URL8192等保持。图表内存256KiB、字段原渲染256KiB、Case原32字段、Notebook64单元/每单元16KiB保持。UI只缓存当前页与已有有界草稿，不预取全部运行/Case/媒体。所有读写不确定性与权限以已有服务返回为准。
+
+## C8. Runtime v3 与平台 W 接线
+
+本契约的不可分部分是[05-runtime-v3-wiring.md](05-runtime-v3-wiring.md)和[runtime-wiring.json](runtime-wiring.json)。它限定新旧plan schema、C09的输入输出、完整ExecutionViewIdentity、v3端口/occurrence图、物理详情、观测作用域、URL四元组以及W→B/C的两文件交接。新字段只用于读取/展示，不能重算身份或创建运行权威。C2的逻辑分组仅适用legacy；v3必须精确实例边。
+
+`buildNodeCard(graph,selection,snapshot,execution=null)`增加本次C09结果作为第四参数，由C03传入；source/report为null。`setGraphView({preference,actionId,execution=null})`只更新原State；execution是已校验ExecutionViewIdentity或null，切换后旧节点/图/源码票据失效，原写入回执归属保持。没有新增全局Store。
+
+提供方W补充是已列明的集成要求，当前状态required_not_verified；类型冻结用于各路独立编码，不能据此声称真实W已交付。W候选源码发生变化时核验字节/字段，不复制其易变内部实现。

@@ -2,7 +2,7 @@
 
 设计契约以[02-contracts.md](02-contracts.md)和[contracts.d.ts](contracts.d.ts)为准；同名已有函数指所在IIFE/闭包内的函数，非要求全部export。每项的调用方列代表必须接线的任务，**测试项的此列是被验实现**。CSS/入口装配/类型是显式非函数任务，不伪称函数。
 
-共 **93 项**：A 14项, B 17项, C 8项, D 15项, E 11项, F 17项, V 11项。
+共 **95 项**：A 14项, B 18项, C 9项, D 15项, E 11项, F 17项, V 11项。
 
 | 路 | 文件数 | 任务书 |
 |---|---:|---|
@@ -40,10 +40,10 @@
 | `demiflow/workbench/web/view.js` | A | A10 |
 | `demiflow/workbench/web/workbench-graph.css` | C | C08 |
 | `demiflow/workbench/web/workbench-graph.js` | C | C05, C06, C07 |
-| `demiflow/workbench/web/workbench-presentation.js` | C | C01, C02, C03, C04 |
+| `demiflow/workbench/web/workbench-presentation.js` | C | C01, C02, C03, C04, C09 |
 | `demiflow/workbench/web/workbench-state.js` | B | B11 |
 | `demiflow/workbench/web/workbench.css` | B | B12 |
-| `demiflow/workbench/web/workbench.js` | B | B01, B02, B03, B04, B05, B06, B07, B08, B09, B10, B13, B14, B15, B16, B17 |
+| `demiflow/workbench/web/workbench.js` | B | B01, B02, B03, B04, B05, B06, B07, B08, B09, B10, B13, B14, B15, B16, B17, B18 |
 | `demiflow/workbench/worker.py` | F | F03 |
 | `tests/d19_fixtures.py` | V | V10, V11 |
 | `tests/test_workbench_d19_browser.py` | V | V01, V03, V04, V05, V06, V07, V08, V09 |
@@ -57,3 +57,7 @@
 - A08调D07；D08调D10/D11；E06调D12；D08的onCase仍进入E的checkedPresentation。
 - A/B共同CSS迁移仅按C1列出的所有权变更；最终唯一规则，无全文件互相覆盖。
 - V01–V09均列为必跑精确nodeid，见04-acceptance，不存在写了测试却零命令的卡。
+
+## 平台 v3 的交接
+
+跨包两文件及W018–W021迁移见[接线修订](05-runtime-v3-wiring.md)。新增C09唯一版本适配、B18删除旧logicalEntry；C03一次调用C09，C02消费其结果，C04按需校验详情。UI七路使用ui:前缀，与runtime-v3同字母lane区分。生产方U1–U3未验收列在runtime-wiring.json，不能用消费者mock关闭。

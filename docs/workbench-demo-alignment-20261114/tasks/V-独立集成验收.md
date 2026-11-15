@@ -10,6 +10,8 @@
 - `tests/test_workbench_d19_browser.py`
 - `tests/test_workbench_d19_versions.py`
 
+接线修订：另读 [Runtime v3 接线](../05-runtime-v3-wiring.md)（C8）；平台在途源码不由本路覆写，合流按明确交接执行。
+
 ## V01 · `test_ui_d19_shell_and_responsive`
 
 - 文件：`tests/test_workbench_d19_browser.py`；动作：`test`。
@@ -42,11 +44,11 @@
 
 - 文件：`tests/test_workbench_d19_browser.py`；动作：`test`。
 - 签名：`test_ui_d19_graph_config_check_run(owned_fixture, browser) -> None`。
-- 契约：C0 C1 C2 C3 C4 C5 C6；调用/接线任务：B01, B02, B03, B04, B05, B07, C01, C02, C03, C04, C05, C06。
+- 契约：C0 C1 C2 C3 C4 C5 C6 C8；调用/接线任务：B01, B02, B03, B04, B05, B07, C01, C02, C03, C04, C05, C06。
 - 输入：本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身。
 - 输出：绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run。
 
-从source-only入口→显式检查→真实7节点图→节点配置保存/冲突→再次检查→运行→固定输出；验证API命中、节点摘要事实与返回绑定，不靠label通过。
+从source-only入口→显式检查→真实7节点图→节点配置保存/冲突→再次检查→运行→固定输出；验证API命中、节点摘要事实与返回绑定，不靠label通过。 最终运行必须真实经过统一DataflowExecution/封存v3，记录模块路径和实际schema；只在旧executor算出同结果不能通过。Local是基础，Ray Core表面接线另记真实provider结果，缺环境not_run。
 
 **失败与状态**：遵守上述契约的作用域、预算、权限和未知回执规则；不能用空值/成功提示吞错，不能清除旧草稿和已提交结果。UI异步结果须绑定创建请求时的身份。
 
@@ -56,11 +58,11 @@
 
 - 文件：`tests/test_workbench_d19_browser.py`；动作：`test`。
 - 签名：`test_ui_d19_sealed_graph_attempts(owned_fixture, browser) -> None`。
-- 契约：C0 C1 C2 C3 C4 C5 C6；调用/接线任务：B02, B06, B08, B09, B10, B11, C01, C03。
+- 契约：C0 C1 C2 C3 C4 C5 C6 C8；调用/接线任务：B02, B06, B08, B09, B10, B11, C01, C03, C09, B18。
 - 输入：本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身。
-- 输出：绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run。
+- 输出：legacy历史＋runtime-v3真实封存的参数化断言与绑定证据。。
 
-真实两个action、重复logical occurrence、局部图、缺桥/源码与历史attempt；默认封存图、精确selection/observations、日志范围、恢复限制与切换不串。无需重跑引擎全套，复用已存在业务验收夹具生成真实事实。 额外断言logical边不被展开成猜测的occurrence笛卡尔连线，多成员组选定一次出现后源码/观测才精确绑定。
+保留旧两个action/组成员/历史只读反例；新增C8真实v3共享源、同semantic两个occurrence串联和join左右输入，边和端口与封存逐项比对。丢边端点必须unavailable，不同实例不可合并成自环；检验stage/exchange/recovery、缺观测不造数、源码按正确action。新旧URL、计划漂移、历史digest原样；mock仅为反例，基准链须真实W+Runtime。
 
 **失败与状态**：遵守上述契约的作用域、预算、权限和未知回执规则；不能用空值/成功提示吞错，不能清除旧草稿和已提交结果。UI异步结果须绑定创建请求时的身份。
 
@@ -112,11 +114,11 @@
 
 - 文件：`tests/test_workbench_d19_browser.py`；动作：`test`。
 - 签名：`test_ui_d19_late_response_and_cleanup(owned_fixture, browser) -> None`。
-- 契约：C0 C1 C2 C3 C4 C5 C6；调用/接线任务：A02, A03, A04, B06, B07, D02, D09, E01, E08。
+- 契约：C0 C1 C2 C3 C4 C5 C6 C8；调用/接线任务：A02, A03, A04, B06, B07, D02, D09, E01, E08。
 - 输入：本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身。
 - 输出：绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run。
 
-延迟graph/source/output/Case及项目读取，切对象后旧响应不得涂新页；重复点击写只有一intent，容量不足GET有界退避。20次切tab/case后worker/blob/observer/requests回基线，失败不清除草稿。
+延迟graph/source/output/Case及项目读取，切对象后旧响应不得涂新页；重复点击写只有一intent，容量不足GET有界退避。20次切tab/case后worker/blob/observer/requests回基线，失败不清除草稿。 增加同run/attempt的action/plan/revision变化，旧source/observations响应不能被接收；CAPACITY_PENDING不得自动新建run。
 
 **失败与状态**：遵守上述契约的作用域、预算、权限和未知回执规则；不能用空值/成功提示吞错，不能清除旧草稿和已提交结果。UI异步结果须绑定创建请求时的身份。
 
@@ -126,11 +128,11 @@
 
 - 文件：`tests/test_workbench_d19_browser.py`；动作：`test`。
 - 签名：`test_ui_d19_asset_and_single_authority(owned_fixture, browser) -> None`。
-- 契约：C0 C1 C2 C3 C4 C5 C6；调用/接线任务：A12, C07。
+- 契约：C0 C1 C2 C3 C4 C5 C6 C8；调用/接线任务：A12, C07, C09, B18。
 - 输入：本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身。
 - 输出：绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run。
 
-index实际加载新模块、globals可用、所有新函数真实调用；无mountLogical消费者/双画布/第二Store；打包assets可达，冻结七件和旧主仓不变，实际import路径匹配。
+index实际加载新模块、globals可用、所有新函数真实调用；无mountLogical消费者/双画布/第二Store；打包assets可达，冻结七件和旧主仓不变，实际import路径匹配。 真实调用C09，W018–W021能力迁移表逐项有断言；logicalEntry/renderLogical/chooseLogicalNode/mountLogical旧入口最终无消费者。平台tests/test_runtime_v3_w.py仅在W交付后改前端符号/DOM断言，不改Python语义测试。
 
 **失败与状态**：遵守上述契约的作用域、预算、权限和未知回执规则；不能用空值/成功提示吞错，不能清除旧草稿和已提交结果。UI异步结果须绑定创建请求时的身份。
 
@@ -140,11 +142,11 @@ index实际加载新模块、globals可用、所有新函数真实调用；无mo
 
 - 文件：`tests/d19_fixtures.py`；动作：`add`。
 - 签名：`@pytest.fixture owned_fixture(tmp_path,monkeypatch,request) -> Iterator[OwnedFixture]`。
-- 契约：C0 C7；调用/接线任务：V01, V02, V03, V04, V05, V06, V07, V08, V09。
+- 契约：C0 C7 C8；调用/接线任务：V01, V02, V03, V04, V05, V06, V07, V08, V09。
 - 输入：@pytest.fixture owned_fixture(tmp_path,monkeypatch,request) -> Iterator[OwnedFixture]。
 - 输出：建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成。
 
-建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成。提供固定表两注册版本和图片/标注真实数据，不伪造service权限；finally关闭自己启动的服务/进程。测试不得链接主仓服务。
+建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成。提供固定表两注册版本和图片/标注真实数据，不伪造service权限；finally关闭自己启动的服务/进程。测试不得链接主仓服务。 C8夹具分别生成/载入真实legacy封存与统一v3封存；测试替身标清、不得计组合通过；候选缺W实现记录not_run，不回退主仓。
 
 **失败与状态**：遵守上述契约的作用域、预算、权限和未知回执规则；不能用空值/成功提示吞错，不能清除旧草稿和已提交结果。UI异步结果须绑定创建请求时的身份。
 
