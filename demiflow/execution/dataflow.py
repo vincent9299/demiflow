@@ -793,6 +793,7 @@ class DataflowExecution:
                     'active_stages': list(self._phases[self._phase_index]),
                     'completed_stages': sorted(self._completed_stages),
                     'phase_complete': phase_done,
+                    'satisfied_source_splits': sorted(self._checkpoint._operator_complete),
                     'finite_seals': {key: _artifact_json(ref) for key, ref in self._finite_seals.items()}}
                 self._cut = self._checkpoint.begin(final=final,
                     participants=participants_for(self._physical, self._phases[self._phase_index]),

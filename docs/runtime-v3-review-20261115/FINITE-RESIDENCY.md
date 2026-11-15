@@ -31,6 +31,10 @@ has an optional `residency` object:
 - `completed_stages`: retired stages whose earlier completion cuts were ACKed.
 - `phase_complete`: every active worker actually emitted its done frontier.
 - `finite_seals`: channel ID to the existing finite scope seal ArtifactRef.
+- Optional `satisfied_source_splits`: declared source splits whose downstream
+  logical limit was satisfied, authenticated before the cut. Recovery restores
+  this fact without changing the source cursor into a false physical EOI. Old
+  residency cuts without this optional field remain compatible.
 
 `cut.participants` contains only this phase's actual workers. `contributions`
 contains their actual current snapshots plus earlier retired snapshots, preserving
@@ -71,6 +75,16 @@ All commands used `PYTHONPATH=$PWD:$PWD/tests`, private
 - Legacy lane-unit probes P/E are **not counted as passed**: P has 7 failures and
   E has 19 failures from stale fake DTO/API fixtures; the primary coordinator was
   notified. They are owned by the separate regression repair lane.
+
+Additional business edge evidence after the initial phase/device commits:
+`/tmp/demiflow-residency-phase-edges2.xml` has **2 passed** for logical
+`limit(2) -> sort -> sort` phase recovery and real phase `write_lance(create)`
+recovery. The limit case proves final=true while physical source EOI remains
+false. The write case proves upstream phase cuts do not create an empty table;
+resumption creates exactly Lance version 1 with the four expected rows.
+`/tmp/demiflow-residency-edges-final.xml` has **23 passed, 1 skipped** combining
+all six Local phase proofs and 17 existing checkpoint tests. Ray's earlier
+same-host execution proof is recorded above; no new physical-host claim is made.
 
 ## Explicit limits
 

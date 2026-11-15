@@ -149,3 +149,54 @@ def test_resume_inside_first_phase_restores_finite_spool_prefix(tmp_path, monkey
         assert not states[0]['residency']['phase_complete']
         assert states[-1]['cut']['final']
         assert len(states) > 3
+
+
+def limited_rows():
+    for n in range(10000):
+        if n >= 500:
+            raise RuntimeError('logical limit did not stop admission')
+        yield {'n': n}
+
+
+def limited_dataset():
+    return data.from_iter(limited_rows).limit(2).sort('n').sort('n')
+
+
+def test_phase_recovery_keeps_logical_input_completion_distinct_from_eoi(tmp_path, monkeypatch):
+    class Interrupted(Exception): pass
+    def stop(ex, image):
+        raise Interrupted()
+    with pytest.raises(Interrupted):
+        with RunContext.start(tmp_path/'run', limits=LIMITS) as run, data.local_execution():
+            ref = run.ref
+            with monkeypatch.context() as patch:
+                patch.setattr(DataflowExecution, '_retire_phase', stop)
+                limited_dataset().take_all()
+    with RunContext.resume(ref) as run, data.local_execution():
+        assert limited_dataset().take_all() == [{'n': 0}, {'n': 1}]
+        facts, states = carriers(run)
+        assert states[0]['residency']['satisfied_source_splits']
+        assert states[-1]['cut']['final']
+        assert any(not c['end_of_input'] for c in states[-1]['dataflow.sources.v3'])
+
+
+def test_finite_phase_write_lance_commits_once_and_recovers(tmp_path, monkeypatch):
+    import lance
+    class Interrupted(Exception): pass
+    def stop(ex, image):
+        raise Interrupted()
+    target = tmp_path/'output.lance'
+    with pytest.raises(Interrupted):
+        with RunContext.start(tmp_path/'run', limits=LIMITS) as run, data.local_execution():
+            ref = run.ref
+            with monkeypatch.context() as patch:
+                patch.setattr(DataflowExecution, '_retire_phase', stop)
+                dataset().write_lance(str(target), mode='create', return_receipt=True)
+    assert not target.exists()  # An upstream phase must not publish an empty table.
+    with RunContext.resume(ref) as run, data.local_execution():
+        receipt = dataset().write_lance(str(target), mode='create', return_receipt=True)
+        assert receipt.status == 'committed' and receipt.written_rows == 4
+        assert receipt.committed_version == 1
+        facts, states = carriers(run)
+        assert states[-1]['cut']['final']
+    assert lance.dataset(str(target)).to_table().to_pylist() == [{'n': n} for n in range(1, 5)]

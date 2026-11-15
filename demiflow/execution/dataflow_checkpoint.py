@@ -491,6 +491,8 @@ class DataflowCheckpointCoordinator:
                 validate_recovered_residency(self._physical, cut, contributions, residency,
                     facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"])
             self.residency = residency
+            if residency is not None:
+                self._operator_complete.update(residency.get('satisfied_source_splits', ()))
             merged = self._merge_source_vector(contributions)
             if merged != vector:
                 raise DataflowError("SOURCE_CHANGED", "Recovered source vector disagrees with contributions")

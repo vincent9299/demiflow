@@ -54,10 +54,15 @@ def validate_recovered_residency(physical, cut, contributions, residency, *, fac
     from .dataflow_checkpoint import _contribution_json, _artifact_from_json
     def reject(message):
         raise DataflowError('CORRUPT_ARTIFACT', message)
-    if (type(residency) is not dict or set(residency) != {
+    if (type(residency) is not dict or set(residency) - {'satisfied_source_splits'} != {
             'schema', 'active_stages', 'completed_stages', 'phase_complete', 'finite_seals'}
             or residency['schema'] != SCHEMA or type(residency['phase_complete']) is not bool):
         reject('invalid residency cut schema')
+    satisfied = residency.get('satisfied_source_splits', [])
+    if (not isinstance(satisfied, list) or any(type(s) is not str for s in satisfied)
+            or len(set(satisfied)) != len(satisfied)
+            or not set(satisfied) <= {s.split_id for s in physical.splits}):
+        reject('residency input completion names undeclared source splits')
     active, completed = residency['active_stages'], residency['completed_stages']
     all_stages = {s.stage_id for s in physical.stages}
     if (not isinstance(active, list) or not active or not isinstance(completed, list)
