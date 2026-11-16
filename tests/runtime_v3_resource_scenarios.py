@@ -89,6 +89,8 @@ def arrow_worker_preallocation(directory, *, provider='local', rejected=True):
         callback = json.loads((directory / 'callback.json').read_text())
         assert callback['rows'] == count and callback['schema'] == str(schema)
         assert callback['values'] == [{'value': None}] * count
+        result['callback'] = callback
+        _write(directory / 'proof.json', result)
     return result
 
 
@@ -642,6 +644,55 @@ def _child(scenario, provider, directory):
     return result
 
 
+def _export_evidence(directory, *, provider, scenario):
+    """Preserve bounded observations outside the pytest-owned data directory."""
+    base = os.environ.get('DEMIFLOW_RESOURCE_EVIDENCE')
+    if base is None:
+        return None
+    import shutil
+    import sqlite3
+    from itertools import islice
+    destination = Path(base).resolve()
+    assert destination.parent == Path('/tmp') and destination.name.startswith('demiflow-')
+    destination = destination / provider / scenario
+    destination.mkdir(parents=True, exist_ok=False)
+    candidates = [directory/'result.json', directory/'process.log']
+    candidates += list(islice(directory.glob('*/*.json'), 4097))
+    candidates += list(islice((directory/'capacity-domain'/'capacity'/'allocations').glob('*.json'), 1025))
+    assert len(candidates) <= 5120
+    copied = {}; total = 0
+    for source in candidates:
+        if not source.exists():
+            continue
+        assert source.is_file() and not source.is_symlink()
+        size = source.stat().st_size
+        total += size
+        assert size <= 64*1024**2 and total <= 256*1024**2
+        target = destination / source.relative_to(directory)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        copied[str(target.relative_to(destination))] = {'bytes':size,'sha256':hashlib.sha256(target.read_bytes()).hexdigest()}
+    databases = list(islice(directory.glob('*/run/run.sqlite'), 33))
+    assert len(databases) <= 32
+    for source in databases:
+        target = destination / source.relative_to(directory)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect('file:' + str(source) + '?mode=ro', uri=True) as original:
+            with sqlite3.connect(target) as snapshot:
+                pages = original.execute('PRAGMA page_count').fetchone()[0]
+                page_size = original.execute('PRAGMA page_size').fetchone()[0]
+                assert pages * page_size <= 64*1024**2
+                assert total + pages * page_size <= 256*1024**2
+                original.backup(snapshot)
+        total += target.stat().st_size
+        assert total <= 256*1024**2
+        copied[str(target.relative_to(destination))] = {'bytes':target.stat().st_size,
+            'sha256':hashlib.sha256(target.read_bytes()).hexdigest()}
+    _write(destination/'index.json',{'scope':'observations and original journals, not a replayable payload archive',
+        'files':copied,'bytes':total})
+    return str(destination)
+
+
 def _run(fx, scenario, fault):
     if fault is not None:
         raise ValueError('Resource scenarios have explicit fixed negative cases, not arbitrary fault labels')
@@ -664,6 +715,8 @@ def _run(fx, scenario, fault):
                 os.kill(process.pid,signal.SIGKILL);process.wait(timeout=10)
             raise AssertionError('Owned resource acceptance timed out; inspect original unit evidence')
     result=json.loads((directory/'result.json').read_text())
+    exported = _export_evidence(directory, provider=fx.provider, scenario=scenario)
+    if exported is not None: result['exported_evidence'] = exported
     assert status==0 and result['error'] is None,result
     return result
 
