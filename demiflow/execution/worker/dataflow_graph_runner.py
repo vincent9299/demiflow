@@ -91,6 +91,8 @@ class WorkerGraphRunner:
                 self._outgoing.setdefault(edge.producer, []).append(edge)
             if (edge.consumer not in executor._node_specs or self.partition in spec.consumer_partitions):
                 self._incoming.setdefault(edge.consumer, []).append(edge)
+        from .finite_input import FiniteInputDrain
+        self._finite_input = FiniteInputDrain(self)
         self._relational_regions = getattr(executor, '_relational_regions', {})
         self._region_members = {occ for region in self._relational_regions.values()
                                 for occ in region.plan.occurrences}
@@ -337,6 +339,7 @@ class WorkerGraphRunner:
                     or not set(completed_ports) <= ready_ports):
                 raise DataflowError('FENCED', 'recovery completion contains an unclosed input port')
             self._finished_ports = set(completed_ports)
+            self._finite_input.restore(frontier.get('finite_reads', {}))
             self._closed_inputs = set(frontier.get('closed_inputs', ()))
             self._closed_outputs = set(frontier.get('closed_outputs', ()))
             for (occurrence, _), kernel in self.e._kernels.items():
@@ -656,6 +659,8 @@ class WorkerGraphRunner:
             for occ, node in self.e._node_specs.items():
                 if node.kind == 'source' and not any(s.source_id == occ for s in self.e.assignment.source_splits):
                     self._finish_node(occ)
+        if not self._paused and self._cut is None and processed < max_records:
+            processed += self._finite_input.step(max_records=max_records - processed, deadline_ms=deadline_ms)
         if not (self._paused and self._idle_sent):
             processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
@@ -1221,39 +1226,9 @@ class WorkerGraphRunner:
                 self._edge_eoi(spec.edge_id, entry['producer'])
             self._send('ack', {'delivery_id': command['delivery_id'], 'producer_partition': None})
             return
-        for member in seal['producers']:
-            if (spec.edge_id, member['partition_id']) in self._finished_inputs:
-                continue
-            data = ArtifactRef(**member['manifest_ref'])
-            from ..dataflow_segments import block_chunks, block_totals
-            declared_rows, size = block_totals(self.services.store, data, self.bounds)
-            if size > spec.storage_bytes:
-                raise DataflowError('BUDGET_EXCEEDED', 'finite producer exceeds storage reservation')
-            if declared_rows is not None and declared_rows - 1 != member['last_sequence']:
-                raise DataflowError('CORRUPT_ARTIFACT', 'finite producer index row count differs from seal')
-            stream = frame_stream(block_chunks(self.services.store, data, self.bounds,
-                chunk_bytes=read_chunk_bytes(self.bounds, self.services)), self.bounds, services=self.services)
-            count = 0
-            try:
-                while True:
-                    line = stream.readline(line_limit(self.bounds))
-                    if not line:
-                        break
-                    raw, item = self._frame_call(decode_frame, line, self.bounds, finite=True,
-                        _frame_retained=stream.buffered_bytes)
-                    del line
-                    count += 1
-                    if item['target'] == self.partition:
-                        record = self._frame_call(decode_document, raw, record_id=item['record_id'],
-                            sequence=item['sequence'], bounds=self.bounds, _frame_retained=stream.buffered_bytes)
-                        self._push(edge.consumer, edge.input_port, record)
-                        del record
-                    del raw, item
-                if count - 1 != member['last_sequence']:
-                    raise DataflowError('CORRUPT_ARTIFACT', 'finite producer row count differs from seal')
-            finally:
-                stream.close()
-            self._edge_eoi(spec.edge_id, member['partition_id'])
+        # ACK adopts immutable, fully authenticated references. Consumption
+        # proceeds in bounded steps; its cursor shares the original worker cut.
+        self._finite_input.adopt(spec.edge_id, ref)
         self._send('ack', {'delivery_id': command['delivery_id'], 'producer_partition': None})
 
     def _parkable_credits(self):
@@ -1282,7 +1257,8 @@ class WorkerGraphRunner:
             'durable_deliveries': self._credit_payloads, 'emitted_eoi': sorted(self._emitted_eoi),
             'metrics': self._metrics, 'event_sequence': self.e._event_sequence,
             'consumed_deliveries': sorted(self._consumed_deliveries),
-            'memory_frontiers': self._memory_frontiers}, self.bounds.max_state_bytes)
+            'memory_frontiers': self._memory_frontiers,
+            'finite_reads': self._finite_input.snapshot()}, self.bounds.max_state_bytes)
         states[identity(['worker-frontier', self.partition])] = self.services.store.put(
             iter([frontier]), max_bytes=len(frontier), media_type='application/json')
         refs = snapshot_channels(self.e._channels, cut=request, store=self.services.store)
@@ -1325,6 +1301,7 @@ class WorkerGraphRunner:
         for iterator in self._active_finishes.values():
             iterator.close()
         self._active_finishes.clear()
+        self._finite_input.close()
         self._peer.close()
         self._terminal_blocks.close()
         for stream in self._finite.values():

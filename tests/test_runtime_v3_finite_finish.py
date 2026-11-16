@@ -23,7 +23,9 @@ def pipeline(left=12, right=3):
 def test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity(tmp_path, monkeypatch):
     original_event = DataflowExecution._handle_event
     original_commit = DataflowCheckpointCoordinator.commit
+    original_launch = DataflowExecution._prepare_launch
     seen, boundary = [], {}
+    resumed_stages = []
     def event(execution, event):
         result = original_event(execution,event)
         if event.kind=='terminal':
@@ -43,6 +45,30 @@ def test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity(tm
                     assert not image.cut.final
                     boundary.update(commit_id=image.commit_id,emitted=cursor['emitted'])
                     raise Interrupted('actual finite output ACK')
+        # The original 256 MiB budget may place the join and terminal in
+        # separate finite phases. Then the real resumable frontier belongs to
+        # the terminal's sealed-input reader, not the already completed join.
+        # Require an actual intermediate ACK and the exact consumed prefix;
+        # final-only publication is still a failure of this counterexample.
+        if len(seen) >= 5 and not image.cut.final:
+            publication = json.loads(b''.join(coordinator._store.read(
+                image.confirmed_sinks['take_all'], max_bytes=coordinator._physical.bounds.max_control_bytes)))
+            prefix = publication['manifest']['total_rows']
+            for contribution in image.contributions:
+                for ref in contribution.operator_states.values():
+                    if ref.media_type != 'application/json':
+                        continue
+                    frontier = json.loads(b''.join(coordinator._store.read(ref, max_bytes=ref.size_bytes)))
+                    reads = frontier.get('finite_reads', {})
+                    if not reads:
+                        continue
+                    consumed = sum(sum(value['positions'].values()) for value in reads.values())
+                    if 0 < consumed < 1000:
+                        assert consumed == prefix
+                        completed = {stage.stage_id for stage in coordinator._physical.stages
+                                     if stage.stage_id not in (coordinator.residency or {}).get('active_stages', ())}
+                        boundary.update(commit_id=image.commit_id, emitted=consumed, completed=completed)
+                        raise Interrupted('actual finite output ACK')
         return image
     with monkeypatch.context() as patch:
         patch.setattr(DataflowExecution,'_handle_event',event)
@@ -53,12 +79,18 @@ def test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity(tm
                 run_ref=run.ref
                 pipeline(100,10).take_all()
     assert 0 < boundary['emitted'] < 1000
-    with RunContext.resume(run_ref) as run,data.local_execution(workers=4):
-        rows=pipeline(100,10).take_all()
-        assert sorted((r['i'],r['j']) for r in rows)==[(i,j) for i in range(100) for j in range(10)]
-        assert len(rows)==1000
-        assert any(f['commit_id']==boundary['commit_id'] and f['status']=='acked'
-                   for f in run.journal.execution_commits('action-1'))
+    def launch(execution, lease, stage):
+        resumed_stages.append(stage.stage_id)
+        return original_launch(execution, lease, stage)
+    with monkeypatch.context() as patch:
+        patch.setattr(DataflowExecution, '_prepare_launch', launch)
+        with RunContext.resume(run_ref) as run,data.local_execution(workers=4):
+            rows=pipeline(100,10).take_all()
+            assert sorted((r['i'],r['j']) for r in rows)==[(i,j) for i in range(100) for j in range(10)]
+            assert len(rows)==1000
+            assert any(f['commit_id']==boundary['commit_id'] and f['status']=='acked'
+                       for f in run.journal.execution_commits('action-1'))
+    assert not set(resumed_stages) & boundary.get('completed', set())
 
 
 def test_finite_join_memory_transport_does_not_accumulate_per_row_history(tmp_path, monkeypatch):
