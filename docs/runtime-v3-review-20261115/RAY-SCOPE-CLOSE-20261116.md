@@ -23,7 +23,7 @@ DataflowExecution才释放其本地store句柄，scope关闭错误仍被返回�
 RUNNING之后连接失败、scope关闭失败叠加连接失败。结果3 passed/12.51秒，
 测试前后源码/提交未变，三阶段完整、冻结七件保持、0子进程。
 回执：`/tmp/demiflow-root-l016-fault-r2-evidence/verification.json`。
-Ray在fixture内初始化并关闭；整进程FD为3→14，残留项为Ray运行库的eventfd/socket/日志句柄，
+Ray在fixture内初始化并关闭；整进程FD为3→14，残留项包含Ray日志及eventfd/socket，尚未逐项证明全部匿名句柄的归属；
 不宣称FD零增长，也不以本组代替已有独立FD预算门。
 
 L016全部28个原nodeid保持：布局/程序/资源/通道从真实封存和assignment读取；
