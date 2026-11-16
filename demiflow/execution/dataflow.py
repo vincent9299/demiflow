@@ -887,6 +887,8 @@ class DataflowExecution:
             self._node_metrics[(occ, partition)] = metrics
             from .dataflow_usage import observe_prompt_usage
             observe_prompt_usage(self, event, payload)
+            from .dataflow_model_observations import observe_models
+            observe_models(self, event, payload)
             from .dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)
             key = self._report_keys.get(occ)
@@ -1214,6 +1216,7 @@ class DataflowExecution:
             return
         self._cancelled = True
         self._state = "cancelled"
+        self._services.journal_service.stop_model_admission(reason)
         if self._cut is not None and self._cut.cut_id in self._checkpoint._pending:
             self._checkpoint.abort(self._cut.cut_id, reason=reason)
         for endpoint in self._endpoints.values():

@@ -220,3 +220,6 @@ def stream_observations(execution, stats):
         'min_s': v['min_ns'] / 1e9, 'max_s': v['max_ns'] / 1e9,
         'mean_s': v['total_ns'] / 1e9 / v['count'] if v['count'] else 0,
     } for name, v in totals.items()}
+
+    from .dataflow_model_observations import stream_model_observations
+    stream_model_observations(execution, stats)

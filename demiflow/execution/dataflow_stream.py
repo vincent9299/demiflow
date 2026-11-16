@@ -81,14 +81,26 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
         return stats
     except BaseException as exc:
         failure = exc
+        if isinstance(exc, ServiceStopped) and str(exc) == 'operator_stop_file' and handle is not None:
+            from .request_limits import COOPERATIVE_STOP_REASON
+            try:
+                handle._execution.cancel(COOPERATIVE_STOP_REASON)
+            except BaseException as cleanup:
+                failure.add_note('cooperative stop: ' + str(cleanup))
         raise
     finally:
         observe()
         if handle is not None:
             from .dataflow_api import record_execution_metadata
             record_execution_metadata(request, handle._execution)
-        for cleanup in ((lambda: callbacks.resolve(on_drain(stats), closing=True)) if on_drain else None,
-                        handle.close if handle is not None else None, callbacks.close):
+        def finish_observations():
+            observe()
+            if handle is not None:
+                from .dataflow_model_observations import finish_journal_audit
+                finish_journal_audit(handle._execution, stats)
+        for cleanup in (handle.close if handle is not None else None, finish_observations,
+                        (lambda: callbacks.resolve(on_drain(stats), closing=True)) if on_drain else None,
+                        callbacks.close):
             if cleanup is None:
                 continue
             try:

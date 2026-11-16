@@ -383,6 +383,10 @@ class DataflowWorkerExecutor:
             if self._closed:
                 return
             self._cancel_reason = reason
+            for kernel in self._kernels.values():
+                stop = getattr(kernel, 'request_stop', None)
+                if stop is not None:
+                    stop(reason)
             self._admit_open = False
             self._cancel_event.set()
             if hasattr(self, "_runner"):

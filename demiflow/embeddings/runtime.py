@@ -207,7 +207,7 @@ class EmbeddingActor:
                             task = asyncio.create_task(self._fresh_exchange(request, encoded, timings))
                             native.inflight[reservation] = task
                             try:
-                                record, references = await asyncio.shield(task)
+                                record, references = await drain_on_service_stop(task, enabled=True)
                             finally:
                                 # Cooperative cancellation leaves admitted work
                                 # registered until aclose drains and persists it.

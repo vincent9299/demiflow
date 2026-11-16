@@ -4,6 +4,10 @@ import time
 from contextlib import asynccontextmanager
 
 
+# Fixed internal Cancel reason; arbitrary cancellation never grants drain semantics.
+COOPERATIVE_STOP_REASON = 'cooperative:operator_stop_file'
+
+
 class ServiceStopped(RuntimeError):
     """Fatal service state: callers must stop dispatch, not turn it into a row verdict."""
 
@@ -15,7 +19,7 @@ async def drain_on_service_stop(awaitable, *, enabled):
     deadline and persistence; this helper never admits new work or publishes a
     result after cancellation. Both prompt and embedding actors use this rule.
     """
-    task = asyncio.create_task(awaitable)
+    task = asyncio.ensure_future(awaitable)
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError as cancelled:

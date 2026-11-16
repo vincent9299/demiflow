@@ -63,6 +63,7 @@ class AsyncInstance:
         self.native_scope = None
         self.native_call_ordinal = 0
         self._stopping = threading.Event()
+        self._stop_reason = None
         self._tasks = set()  # Owned exclusively by this instance's event loop.
         self._started = False
         self._stop_called = False
@@ -140,7 +141,13 @@ class AsyncInstance:
                     raise result.error
                 return result
         except BaseException:
-            future.cancel()
+            from ..request_limits import COOPERATIVE_STOP_REASON
+            if not closing and self._stop_reason == COOPERATIVE_STOP_REASON:
+                # Do not cancel the concurrent Future: that loses the reason
+                # and can interrupt an already-draining journaled exchange.
+                self.loop.call_soon_threadsafe(self._cancel_cooperative_tasks)
+            else:
+                future.cancel()
             raise
 
     def start(self):
@@ -195,9 +202,20 @@ class AsyncInstance:
         result = self.resolve(result)
         return self.validation.output(result) if self.validation is not None else result
 
-    def request_stop(self):
-        """Interrupt async calls before waiting for invocation threads to drain."""
+    def request_stop(self, reason=None):
+        """Stop admission; only the fixed service-stop reason drains paid calls."""
+        from ..request_limits import COOPERATIVE_STOP_REASON
+        if not self._stopping.is_set():
+            self._stop_reason = reason if reason == COOPERATIVE_STOP_REASON else None
         self._stopping.set()
+        if self.loop is not None and self._stop_reason == COOPERATIVE_STOP_REASON:
+            self.loop.call_soon_threadsafe(self._cancel_cooperative_tasks)
+
+    def _cancel_cooperative_tasks(self):
+        from ..request_limits import ServiceStopped
+        for task in tuple(self._tasks):
+            if not task.cancelling():
+                task.cancel(ServiceStopped('operator_stop_file'))
 
     def _drain(self, *, background=False):
         if self.loop is None:
@@ -210,7 +228,9 @@ class AsyncInstance:
                 # Repeated cancellation would interrupt the very finally block
                 # whose completion makes it safe to release actor resources.
                 if not task.cancelling():
-                    task.cancel()
+                    from ..request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
+                    reason = ServiceStopped('operator_stop_file') if self._stop_reason == COOPERATIVE_STOP_REASON else None
+                    task.cancel(reason)
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
         self.resolve(cancel_pending(), closing=True)

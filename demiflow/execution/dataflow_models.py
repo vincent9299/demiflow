@@ -122,6 +122,7 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
             # native configuration/identity bytes remain unchanged.
             config['private_journal'] = _json_config(declared['options']['sqlite_journal'])
             config['max_requests'] = declared['max_requests']
+            config['collect_journal_totals'] = declared['options'].get('collect_journal_totals', True)
             state = 'nonrecoverable'
         ports = _input_ports(('main',))
     elif isinstance(operation, AgentMapOp):

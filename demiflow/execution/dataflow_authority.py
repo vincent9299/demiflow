@@ -254,6 +254,7 @@ class DriverJournalService:
         self._native_reserve_replies = OrderedDict()
         self._native_reserve_owners = {}
         self._native_reserve_lock = threading.Lock()
+        self._model_admission_stop = None
         self._workers: list[threading.Thread] = []
         self._stop = threading.Event()
         # Two fixed control descriptors, owned by this service (not artifact
@@ -627,6 +628,20 @@ class DriverJournalService:
             raise DataflowError("INVALID_CONTRACT", "native service does not support this operation")
         return handler(command, lease=lease)
 
+    def stop_model_admission(self, reason):
+        # This gate belongs to the original driver reserve authority. A reserve
+        # already past the gate may finish; no worker claim grants admission.
+        if self._model_admission_stop is None:
+            self._model_admission_stop = reason
+
+    def _check_model_admission(self):
+        reason = self._model_admission_stop
+        if reason is not None:
+            from .request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
+            if reason == COOPERATIVE_STOP_REASON:
+                raise ServiceStopped('operator_stop_file')
+            raise DataflowError('CANCELLED', 'model request admission is closed')
+
     # -- native model journal (H069) ----------------------------------------
     def native_request(self, command: NativeJournalCommand, *, lease: "WorkerLease | None") -> NativeJournalReply:
         if command.operation not in _NATIVE_OPS:
@@ -636,6 +651,8 @@ class DriverJournalService:
         identifier(command.node_id)
         if command.action_id != self._action.action_id:
             raise DataflowError("FENCED", "native command belongs to another action")
+        if command.operation in {'reserve', 'reserve_http_retry'}:
+            self._check_model_admission()
         request = self._native_request(command)
         if request.request_key != command.request_key:
             raise DataflowError("INVALID_CONTRACT", "native request_key does not match the request")

@@ -510,6 +510,10 @@ class WorkerGraphRunner:
         kernel = self.e._kernels.get((occ, self.partition))
         payload = {'occurrence_id': occ, 'partition_id': self.partition,
                    'metrics': dict(self._metrics[occ])}
+        from ..dataflow_model_observations import worker_model_observations
+        models = worker_model_observations(kernel)
+        if models is not None:
+            payload['model_observations'] = models
         usage = worker_prompt_usage(kernel)
         if usage is not None:
             payload['prompt_usage'] = usage
@@ -972,7 +976,9 @@ class WorkerGraphRunner:
 
     def close(self):
         self.e._cancel_event.set()
-        self.e._mailbox.cancel_pending()
+        from ..request_limits import COOPERATIVE_STOP_REASON
+        if self.e._cancel_reason != COOPERATIVE_STOP_REASON:
+            self.e._mailbox.cancel_pending()
         self.wake()
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout=self.bounds.timeout_ms / 1000)

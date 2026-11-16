@@ -1167,6 +1167,11 @@ class OperatorKernel:
         else:
             raise _err("INCOMPATIBLE_HISTORY", "unknown actor state image mode")
 
+    def request_stop(self, reason=None):
+        for instance in self._instances:
+            if instance is not None:
+                instance.request_stop(reason)
+
     # -- K022 close ---------------------------------------------------------
     def close(self) -> None:
         if self._closed:
@@ -1183,6 +1188,12 @@ class OperatorKernel:
                 continue
             try:
                 _close_instance(instance)
+            except BaseException as exc:
+                errors.append(exc)
+        if not errors:
+            from ..dataflow_model_observations import worker_model_observations
+            try:
+                worker_model_observations(self, final=True)
             except BaseException as exc:
                 errors.append(exc)
         self._instances.clear()

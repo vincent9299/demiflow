@@ -100,3 +100,55 @@ parent-only mutable list. Those failures require separate compatibility or
 test-harness adjudication and are not claimed fixed here. Full traces remain at
 `/tmp/demiflow-private-embedding-r3.log`; the two related traces are at
 `/tmp/demiflow-private-embedding-r4.log`.
+
+## Fixed cache acceptance and follow-up
+
+Cache commit `a61b82667979e547c6c57544983e2f746979c4c0` passed 48 source-bound
+checks in 225.25 s, with no source/HEAD/status changes during execution:
+`/tmp/demiflow-private-embedding-fixed-r3/verification.json` and `junit.xml`.
+The receipt includes the exact interpreter/argv/environment, actual imported
+module path, and every tracked `demiflow/` and `tests/` SHA256. Original default
+SQLite behavior additionally passed 10 selected tests (4 unrelated historical
+Prompt cases deselected) in 2.27 s: `/tmp/demiflow-private-sqlite-default-r1.xml`.
+
+Earlier fixed-r1/r2 failures are retained: their `/tmp` runner put `/tmp/ray`
+(the real Ray session directory) on `sys.path` as a namespace package in an
+environment without Ray. Fixed-r3 removed that runner directory from `sys.path`;
+no production workaround or environment installation was made. Future runners
+use `python -P` with explicit worktree/test PYTHONPATH.
+
+The follow-up restores the two cross-layer gaps described above:
+
+* Only the fixed internal Cancel reason `cooperative:operator_stop_file` carries
+  an original `ServiceStopped` into async task cancellation. Driver reserve
+  admission closes first; original successful reserve RPC receipts remain
+  retryable and response/error/artifact RPCs remain available for admitted work.
+  Ordinary cancellation and deadline expiry do not acquire cooperative behavior.
+* The same already-registered native embedding task now passes through the
+  existing cooperative drain helper, rather than escaping through `shield` into
+  background cleanup. Its native inflight registry, request quota and original
+  journal remain authoritative. Private and native real process/thread checks
+  both preserve two confirmed responses and zero errors after the stop file.
+* Actor close still follows the original bounded lifecycle and control deadline.
+  The deadline counterexample rejects a delayed drain and subsequently closes
+  its actual loop. No response is invented to make cancellation look successful.
+* Embedding metrics flow through the original progress and final Drain messages,
+  with strict field/type/finite/byte/instance-count checks. Per-instance summaries
+  stay separate; histogram quantiles are not arithmetically merged. Current boot
+  observations are explicitly distinct from committed effects and billing.
+* Final observations are captured after actor work drains and before its holder
+  is cleared. `on_drain` sees final statistics. Historical SQL aggregation occurs
+  once on the driver using the sealed private path; `collect_journal_totals=False`
+  performs no historical scan. That flag is added only to explicit private-mode
+  declarations; default native plan/identity fields are unchanged.
+
+Exploratory follow-up evidence: original private stop 2/2; new native/private
+process/thread, stop-admission, ordinary-cancel and deadline group 12/12 in
+19.47 s (`/tmp/demiflow-coop-native-r2.log`, process exit 0); model observation
+counterexamples and real four-request/cache/audit/on_drain flow 10/10 in 11.62 s
+(`/tmp/demiflow-model-metrics-r2.log`). The earlier native stop run really failed
+(two error records), then its process did not exit; only that owned pytest PID
+was terminated. The repaired group exited normally. The earlier lifecycle
+exploration had three workbench certification failures while files were still
+being edited; these remain unaccepted until the fixed-source rerun. None of
+these exploratory runs substitutes for the final source-bound receipt.
