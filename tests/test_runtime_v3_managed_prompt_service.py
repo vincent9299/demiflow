@@ -23,7 +23,7 @@ def prompt_transport(value, monkeypatch):
     old = "{'model':'fixture','data':[\n                {'index':i,'embedding':gpu_vector if mode.startswith('cuda') else [3,4,0]} for i in range(len(body['input']))]}"
     assert old in script
     value['script'].write_text(script.replace(old,
-        "{'choices':[{'message':{'content':'{\"result\":\"ok\"}'},'finish_reason':'stop'}]}"))
+        "{'choices':[{'message':{'content':json.dumps({'result': ('cuda:'+str(gpu_vector)) if mode.startswith('cuda') else 'ok'})},'finish_reason':'stop'}]}"))
     value['pack'] = parse_prompt_pack(PACK.replace('mock-model', 'fixture').replace(
         'base_url_env: TEST_PROMPT_URL', 'base_url: '+value['service'].base_url))
     monkeypatch.setenv('TEST_PROMPT_KEY', 'test')
@@ -157,7 +157,7 @@ def test_prompt_service_runs_on_its_actual_original_gpu_grant(tmp_path, monkeypa
         thread = threading.Thread(target=observe); thread.start()
         try:
             saved = dataset(value, tmp_path, cached=False).materialize()
-            assert [row['answer'] for row in saved.take_all()] == ['ok']*8
+            assert [row['answer'] for row in saved.take_all()] == ['cuda:[3.0, 4.0, 0.0]']*8
             assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
         finally:
             done.set(); thread.join(42)
