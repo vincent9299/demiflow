@@ -24,13 +24,16 @@ def test_short_lived_batch_preserves_order_bytes_and_per_record_release(monkeypa
             return result
         monkeypatch.setattr(socket, 'create_connection', counted)
         frames = read_peer_many(refs, bounds=bounds)
-        for index, raw in enumerate(frames):
+        for index in range(len(expected)):
+            raw = next(frames)
             assert raw == expected[index]
             # Only the consumer owns this received copy, even while the read
             # generator is suspended for a slow callback or native poll.
             assert sys.getrefcount(raw) == 2
             assert peer._bytes == sum(map(len, expected[index:]))
             peer.release(refs[index]['key'])
+        with pytest.raises(StopIteration):
+            next(frames)
         assert len(connections) == 1 and connections[0].fileno() == -1
         assert peer._bytes == 0 and not peer._buffers
         # Historical single-key request remains supported on the same server.
