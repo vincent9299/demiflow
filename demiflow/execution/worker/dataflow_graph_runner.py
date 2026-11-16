@@ -695,7 +695,9 @@ class WorkerGraphRunner:
             except DataflowError as exc:
                 if not exc.retryable:
                     raise
-                if self._park_mode:
+                if (self._park_mode and not (spec is not None
+                        and spec.mode == 'memory_incremental'
+                        and len(self._credits) < self._credit_limit)):
                     raise DataflowError('RESOURCE_INFEASIBLE',
                         'one operator invocation exceeds the parked durable credit window; co-resident execution required') from exc
                 if time.monotonic() >= deadline:
