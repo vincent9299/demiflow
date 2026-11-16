@@ -66,4 +66,26 @@ profile 覆盖 source 生成器首次调用到最后 EOI，包含让出 generato
 
 剩余约 6.015s wait 的 caller 属于 profiler 启用前已存在的调用栈，没有可直接归属的完整 caller 记录；不能把它硬判成某一种 idle。Source 主要等待下游/driver，source 自身编码微优化的收益上限低。任意 from_iter 仍保持独立，不能拿融合源阻塞下游的退步换分数。
 
-下一步是同 workload 的同步后缀 consumer profiler，定位真实 peer 读取、逐节点 Record、terminal spool 与 credit 等待关键路径，再决定生产修改；截至本记录还没有 consumer profile 结果。
+## 同步后缀 consumer 的真实归因
+
+固定 `186baff`（生产同 `a4a6fbe`）：`/tmp/demiflow-perf-consumer-worker-profile-r1/fast_cpu/`，原 10,000 行与摘要正确，`verification.json` 记录运行前后源摘要一致。实际 worker profile 为 `consumer-worker-2350.prof`/`.txt`；原参数没有改。
+
+私有 harness `owned_consumer_profile_harness.py` 只把第一条算术 lambda 换成执行完全相同表达式的 profiler 包装函数，首次调用启动、原最后输入行关闭；不是额外 operator，不改变融合、worker 或业务窗口。差异存于 `/tmp/demiflow-source-worker-profile-support/consumer-probe.patch`。运行开始时 root 有真实 Ray 功能测试并行，途中结束；**35.232s 含 profile 与并发背景，不能用于性能同比**。
+
+| 原函数 | 次数 | profile 包含时间 |
+|---|---:|---:|
+| 全覆盖 | 27,108,370 calls | 29.426s |
+| `_receive_data` | 19,999 | 19.096s |
+| `_push` | 59,996 / 20,000 | 11.784s |
+| condition wait | 4,763 | 8.097s |
+| 其中可直接归属原 journal RPC wait | 3,775 | 4.608s |
+| `store.put` | 487 | 5.261s |
+| snapshot | 49 | 4.937s |
+| `read_peer_many` | 20,853 | 3.649s |
+| socket recv | 39,998 | 2.636s |
+| Record 构造 | 69,996 | 2.632s |
+| terminal append | 9,999 | 1.543s |
+
+以上包含关系不相加；consumer 的 caller 表没有 `_publish` 信用等待。Source 的信用等待主要由下游逐行解码、Record 转换、原状态/终端快照 RPC 的处理速度形成，不能归咎于终端不 ACK。I08 仍未完成，不以这些归因冒称整链性能达标。
+
+随后转到更直接的可用性阻塞：原 1 worker / 64×4KiB / 16MiB / 120s 公平场景，79 次 ACK、80 次真实 worker 启动后仍只有 12/128 个输出。原日志逐 cut 显示 union 收尾阶段平均三次启动才产生一行，优先修复该停驻协议造成的过细切换；原输入、预算、120s 均不改变。
