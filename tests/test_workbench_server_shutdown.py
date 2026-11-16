@@ -106,12 +106,13 @@ print(json.dumps({'format':'demiflow_forge_platform_catalog_v3','owned':True}))
             assert ('request_reader_closed', False) in events
         if outcome != 'disconnect':
             response = client.getresponse()
-            assert response.status == (500 if outcome == 'inspection_error' else 200)
+            assert response.status == (422 if outcome == 'inspection_error' else 200)
             body = json.loads(response.read())
             if outcome == 'success':
                 assert body.get('owned') is True
             else:
-                assert body['code'] == 'operation_failed'
+                assert body['code'] == 'operation_rejected'
+                assert body['error'] == 'Platform inspection process failed (3)'
         assert OPERATION_SECONDS == 60
         try:
             observed = psutil.Process(identity[0])
