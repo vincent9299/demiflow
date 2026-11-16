@@ -161,7 +161,7 @@ def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, v
         spec['targets'][0]['plan'] = _stream_map(Actor)
     executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
     with RunContext.start(tmp_path/'compile', limits={'memory_bytes': HISTORICAL_MEMORY}) as run:
-        with run.action({'kind': 'materialize', 'fixture': variant}):
+        with run.action({'kind': 'materialize', 'fixture': variant}) as execution:
             request = _graph_action_request(spec, executor)
             policy, bounds = resolve_action_runtime(request)
             graph = lower_action(request, bounds=bounds).graph
@@ -171,7 +171,7 @@ def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, v
             target = next(v['producer'] for v in tags.values() if v['reader'] == 'c0')
             if variant == 'resources':
                 stages = tuple(replace(stage, profile=ResourceProfile(
-                    requests={**stage.profile.requests, 'accelerator_gpu': 1}))
+                    requests=dict(stage.profile.requests), requirements={'isolation': 'process'}))
                     if target in stage.occurrences else stage for stage in stages)
             if variant == 'fusion_off':
                 policy = replace(policy, fusion=False)
@@ -197,3 +197,4 @@ def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, v
                     assert owners[tag] == original[tag]
                     assert owners[target] == original[target]
             assert len({owners[v['producer']].stage_id for v in tags.values()}) == len(readers)
+            execution.complete({'kind': 'compile-only'})
