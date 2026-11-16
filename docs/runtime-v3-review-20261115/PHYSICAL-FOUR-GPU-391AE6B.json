@@ -1,0 +1,465 @@
+{
+  "head_before": "391ae6b19e936bbf99758b8a8a82b370576db38c",
+  "dirty_before": "",
+  "import_path": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115/demiflow/__init__.py",
+  "python": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+  "command": [
+    "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_runtime_v3_physical_four_gpu.py",
+    "--basetemp=/tmp/demiflow-four-gpu-final",
+    "--junitxml=/tmp/demiflow-four-gpu-final.xml"
+  ],
+  "status": "complete",
+  "source": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115",
+  "exit_code": 0,
+  "head_after": "391ae6b19e936bbf99758b8a8a82b370576db38c",
+  "dirty_after": "",
+  "elapsed": 79.18977093696594,
+  "unchanged": true,
+  "cases": [
+    {
+      "name": "test_four_physical_gpu_workers_overlap_and_release[normal]",
+      "class": "tests.test_runtime_v3_physical_four_gpu",
+      "failed": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_four_physical_gpu_workers_overlap_and_release[failure]",
+      "class": "tests.test_runtime_v3_physical_four_gpu",
+      "failed": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_four_physical_gpu_workers_overlap_and_release[cancel]",
+      "class": "tests.test_runtime_v3_physical_four_gpu",
+      "failed": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "input_count": 1788,
+  "input_manifest_sha256": "73f923ecf234b582ded5ce8ac26ce03bcb4b411f2c7c270c2f9fadcbaaa636f1",
+  "evidence": {
+    "/tmp/demiflow-four-gpu-final-evidence/verification.json": "15852a4580db07fb8ff78fae437cfbd5b1627e4eb7c42756db6fe45b2f782363",
+    "/tmp/demiflow-four-gpu-final-evidence/physical-observations.json": "85c09b93803a881179656306ce08aa9bc2588251c280cd4449b05f5b86e522bf",
+    "/tmp/demiflow-four-gpu-final.xml": "07b630c0af621f59ed2503e69bea3d77da0baeb80c6603d837fd228cfc017509",
+    "/tmp/demiflow-four-gpu-final.log": "c06ccb31bad276dac98adbb9aa54355f06f7b37b7bef99ec152da6e36a893477"
+  },
+  "scenarios": [
+    {
+      "mode": "normal",
+      "active_count": 4,
+      "charged": {
+        "accelerator_gpu": 4
+      },
+      "workers": [
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 48581,
+          "visible": "GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "2a24892e74454587a0621ea640bc055f",
+          "lane": 3
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 48578,
+          "visible": "GPU-15e6e27f-f68b-1327-f7b4-558a8419877a",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "d1cb55aea1a142b6b454c70c888018c3",
+          "lane": 0
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 48579,
+          "visible": "GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "a3e4d44f61f74e609179df6146051a74",
+          "lane": 1
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 48580,
+          "visible": "GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "2702c8da9cf543edb6eadd320adafad0",
+          "lane": 2
+        }
+      ],
+      "nvml": "48580, GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71, 616\n48581, GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4, 616\n48579, GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa, 616\n48578, GPU-15e6e27f-f68b-1327-f7b4-558a8419877a, 616",
+      "released_allocations": [
+        {
+          "allocation_id": "d1cb55aea1a142b6b454c70c888018c3",
+          "created_ms": 1794789942620,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-15e6e27f-f68b-1327-f7b4-558a8419877a",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:6ee236e278f0b018f68702aa2c7d515b28a69d0affdb1d424fcffa662c1cf5f6:cleanup.json",
+          "released_ms": 1794789964767,
+          "spec_hash": "8750750b0665872ae9270e04f77d060ecfbd6bcc05a521009df571fd23b6208c",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "a3e4d44f61f74e609179df6146051a74",
+          "created_ms": 1794789942635,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:37d0944ba279375f8a87d6d6064625702bbbde3f501813f42e12aef4efe36b19:cleanup.json",
+          "released_ms": 1794789964604,
+          "spec_hash": "6eed408d27c15c14dc43d6650099bde2fdb98863e48648b3be431bf5e64081c3",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "2702c8da9cf543edb6eadd320adafad0",
+          "created_ms": 1794789942648,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:101fd9da3e9bcd2265331c8e0a4bf5d3946f75422ecea43300bea6569a4a9cdf:cleanup.json",
+          "released_ms": 1794789964232,
+          "spec_hash": "1bf697d92725550e4e928746acb548f8fb752a3dbfbcba5511b0f648301f70d8",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "2a24892e74454587a0621ea640bc055f",
+          "created_ms": 1794789942660,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:47091f8a1150cadf62019e7559d3585d812e34a5a99f68e67cf88dafd73e411d:cleanup.json",
+          "released_ms": 1794789964416,
+          "spec_hash": "e7019d514bd031d5f34f4111140d6a4710a1cbc96416c54713a8e6964a90864d",
+          "state": "RELEASED"
+        }
+      ],
+      "charged_after": {},
+      "compute_apps_after": ""
+    },
+    {
+      "mode": "failure",
+      "active_count": 4,
+      "charged": {
+        "accelerator_gpu": 4
+      },
+      "workers": [
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49143,
+          "visible": "GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "035c9c8c4a9840a096dfec88dbb3439a",
+          "lane": 3
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49140,
+          "visible": "GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "2f2f245c6e1e46e99c2dfed1a83d7bc9",
+          "lane": 1
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49139,
+          "visible": "GPU-15e6e27f-f68b-1327-f7b4-558a8419877a",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "8c166a2223134774bb94f235861a9cdc",
+          "lane": 0
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49141,
+          "visible": "GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "7eebeffbb9dd44c4883f42c8ac3ad6ac",
+          "lane": 2
+        }
+      ],
+      "nvml": "49141, GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71, 616\n49143, GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4, 616\n49140, GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa, 616\n49139, GPU-15e6e27f-f68b-1327-f7b4-558a8419877a, 616",
+      "released_allocations": [
+        {
+          "allocation_id": "8c166a2223134774bb94f235861a9cdc",
+          "created_ms": 1794789966095,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-15e6e27f-f68b-1327-f7b4-558a8419877a",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:d8ffa0985e6d074c82f82765cf8937aaf3f01ca5dd76ca730dcd756ddcfafac9:cleanup.json",
+          "released_ms": 1794789987016,
+          "spec_hash": "f20a6fdacd7e0c15ffea21789a4cd69ca8119efe9ba32c37e4d0a9e04863d01f",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "2f2f245c6e1e46e99c2dfed1a83d7bc9",
+          "created_ms": 1794789966108,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:fae99c68db6a49e60dbe0625d6e3b5f6305c6259a0a3e1701b27e4e0246c80ef:cleanup.json",
+          "released_ms": 1794789986710,
+          "spec_hash": "9f2a59519c09d3640cb7243d7d4c7d2b74de7c5a14c650c61055424bb3a437c1",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "7eebeffbb9dd44c4883f42c8ac3ad6ac",
+          "created_ms": 1794789966120,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:730b036e3bf1bb3b60e41ded7881bb6f2a428d33bd01be699cdf6660a73bcb0d:cleanup.json",
+          "released_ms": 1794789986954,
+          "spec_hash": "cb135bef1f1f4a7d42ce5b7724ba62f238bab3b1a0e4cd36d0fcea4a8c306b42",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "035c9c8c4a9840a096dfec88dbb3439a",
+          "created_ms": 1794789966133,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:650d56af2695a3027cc8aefd80a089d8f1e6f2bb3437a5d8e3d22b8a6d91d26f:cleanup.json",
+          "released_ms": 1794789986506,
+          "spec_hash": "26ebbac0360f0293573d0bb3cd7c3ea51e3640e6ef25a45f5732b13172bc55b6",
+          "state": "RELEASED"
+        }
+      ],
+      "charged_after": {},
+      "compute_apps_after": ""
+    },
+    {
+      "mode": "cancel",
+      "active_count": 4,
+      "charged": {
+        "accelerator_gpu": 4
+      },
+      "workers": [
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49747,
+          "visible": "GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "d2845b2c912343a08e41bcd6f95fd5a1",
+          "lane": 3
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49744,
+          "visible": "GPU-15e6e27f-f68b-1327-f7b4-558a8419877a",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "1733e24eeb034e489f26d7ff473fa3c4",
+          "lane": 0
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49745,
+          "visible": "GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "63db348ca08f4f7495dd89e3d5a1466e",
+          "lane": 1
+        },
+        {
+          "n": 0,
+          "answer": 16773120,
+          "pid": 49746,
+          "visible": "GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71",
+          "device_count": 1,
+          "device_name": "NVIDIA H100 80GB HBM3",
+          "torch": "2.13.0+cu130",
+          "cuda": "13.0",
+          "allocated_peak": 49152,
+          "reserved_peak": 2097152,
+          "allocation_id": "d7ea7e92e6e24cd0b0295472cc9d83c2",
+          "lane": 2
+        }
+      ],
+      "nvml": "49746, GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71, 616\n49747, GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4, 616\n49745, GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa, 616\n49744, GPU-15e6e27f-f68b-1327-f7b4-558a8419877a, 616",
+      "released_allocations": [
+        {
+          "allocation_id": "1733e24eeb034e489f26d7ff473fa3c4",
+          "created_ms": 1794789989148,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-15e6e27f-f68b-1327-f7b4-558a8419877a",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:92943f8eb0c7467a9f5d32494c0b2c95324a9e388318f6f829cf12d32cd0e464:cleanup.json",
+          "released_ms": 1794790010031,
+          "spec_hash": "3d3e5917d55251b90d3a404c583d9954d17e486794b9ad7a899fca74388a9255",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "63db348ca08f4f7495dd89e3d5a1466e",
+          "created_ms": 1794789989161,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:04c0a779cb69f69a3b77f47d874a74eb392fb4aa02a672edd0e15c711fa8d1cb:cleanup.json",
+          "released_ms": 1794790010437,
+          "spec_hash": "70ed2d15464bd9f20a698fec69b372e2b8f9031ca1f7157d36a09d8494373693",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "d7ea7e92e6e24cd0b0295472cc9d83c2",
+          "created_ms": 1794789989173,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:e65658675637b6d093136b228fc4c712769dc59762f842e1ff00bf119008d74a:cleanup.json",
+          "released_ms": 1794790010884,
+          "spec_hash": "14a1115c46cec0f1b708e8af5d87706f7e0838e099c891bd1c9de00375916d40",
+          "state": "RELEASED"
+        },
+        {
+          "allocation_id": "d2845b2c912343a08e41bcd6f95fd5a1",
+          "created_ms": 1794789989186,
+          "deadline_ms": 30000,
+          "devices": [
+            {
+              "device_id": "GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4",
+              "memory_bytes": 85520809984,
+              "type": "gpu"
+            }
+          ],
+          "release_evidence": "df-resource-evidence:v1:8bb7b617d187b8e54386d824a73f1060f22632aa3429a207df01f448a2e0ad8b:cleanup.json",
+          "released_ms": 1794790010883,
+          "spec_hash": "384e82c687072dea8f8afa813581858b28f641bd23e75450ec3b11b39971de83",
+          "state": "RELEASED"
+        }
+      ],
+      "charged_after": {},
+      "compute_apps_after": ""
+    }
+  ],
+  "hardware_after": "index, uuid, memory.used [MiB], utilization.gpu [%]\n0, GPU-b1e12243-75a0-c769-ce2c-3c7ac9d8ef71, 0 MiB, 0 %\n1, GPU-c292fcd2-9409-938e-2df6-d4cbfb09a5f4, 0 MiB, 0 %\n2, GPU-31ae56bf-199b-ac95-2ac4-0f6489fb3baa, 0 MiB, 0 %\n3, GPU-15e6e27f-f68b-1327-f7b4-558a8419877a, 0 MiB, 0 %\n",
+  "independent_root_check": {
+    "integrated_as": "00e572e",
+    "production_reference": "3f989a0",
+    "input_mismatches": 0,
+    "later_f9af1eb_not_retested": true
+  }
+}
