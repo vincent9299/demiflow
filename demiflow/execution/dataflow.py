@@ -742,13 +742,15 @@ class DataflowExecution:
             if time.monotonic() >= deadline:
                 break
         self._pending_events = len(events)
-        for event in events:
-            self._validate_event(event)
-            if event.kind in ("effect", "artifact", "reserve", "read_action", "read_configuration",
-                              "check_grant", "restrict_recovery", "queue", "native_request"):
-                self._services.journal_service.submit(event)
-            else:
-                self._handle_event(event)
+        from .dataflow_hosts import batch_business_commands
+        with batch_business_commands(self._endpoints.values()):
+            for event in events:
+                self._validate_event(event)
+                if event.kind in ("effect", "artifact", "reserve", "read_action", "read_configuration",
+                                  "check_grant", "restrict_recovery", "queue", "native_request"):
+                    self._services.journal_service.submit(event)
+                else:
+                    self._handle_event(event)
         progress = self._checkpoint_progress()
         # A finite input may already be completely committed while its join or
         # sort still emits many rows. Actual output/ACK progress must also drive

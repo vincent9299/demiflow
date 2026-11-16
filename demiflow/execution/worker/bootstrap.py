@@ -27,6 +27,8 @@ LAUNCH_ENV = "DEMIFLOW_WORKER_LAUNCH"
 CONTROL_FD_ENV = "DEMIFLOW_WORKER_CONTROL_FD"
 _MAX_CONTROL_BYTES = 1 << 20
 _MAX_LAUNCH_BYTES = 1 << 16
+_CONTROL_BATCH_EVENTS = 64
+_CONTROL_READ_CHUNK = 1 << 16
 
 
 def send_message(sock, message):
@@ -34,6 +36,107 @@ def send_message(sock, message):
     if len(raw) > _MAX_CONTROL_BYTES:
         raise RecoveryContractError("Control message exceeds byte budget")
     sock.sendall(len(raw).to_bytes(4, "big") + raw)
+
+
+def send_messages(sock, messages):
+    """Coalesce only already available, unchanged length-prefixed frames.
+
+    The packet payload ceiling is the original single-message ceiling, not
+    that ceiling multiplied by the event count. A maximum-size legacy frame
+    retains its four-byte header allowance and is sent alone.
+    """
+    _send_encoded_messages(sock, (document(message) for message in messages))
+
+
+def _send_encoded_messages(sock, messages):
+    """Send frames already encoded by the original strict document validator."""
+    packet = bytearray()
+    count = 0
+    for raw in messages:
+        if len(raw) > _MAX_CONTROL_BYTES:
+            raise RecoveryContractError("Control message exceeds byte budget")
+        size = 4 + len(raw)
+        if packet and (len(packet) + size > _MAX_CONTROL_BYTES
+                       or count == _CONTROL_BATCH_EVENTS):
+            sock.sendall(packet)
+            packet.clear()
+            count = 0
+        packet.extend(len(raw).to_bytes(4, 'big'))
+        packet.extend(raw)
+        count += 1
+        if len(packet) >= _MAX_CONTROL_BYTES:
+            sock.sendall(packet)
+            packet.clear()
+            count = 0
+    if packet:
+        sock.sendall(packet)
+
+
+class ControlFrameReader:
+    """One socket owner retains partial frames across nonblocking polls.
+
+    Read-ahead is at most 64 KiB. A larger frame is received only up to its
+    declared boundary, then decoded from the detached buffer, without copying
+    that buffer. Thus pending raw bytes plus an explicit decode slice stay
+    within the original frame ceiling (plus its fixed four-byte header).
+    """
+
+    def __init__(self, sock, *, timeout_s):
+        self.sock = sock
+        self.timeout_s = timeout_s
+        self._buffer = bytearray()
+        self._partial_at = None
+        self._eof = False
+
+    def read_ready(self, *, max_messages):
+        import select
+        if type(max_messages) is not int or max_messages < 1:
+            raise RecoveryContractError('Control read needs a positive event budget')
+        maximum = min(max_messages, _CONTROL_BATCH_EVENTS)
+        messages, decoded_bytes, read_bytes = [], 0, 0
+        while len(messages) < maximum:
+            length = int.from_bytes(self._buffer[:4], 'big') if len(self._buffer) >= 4 else None
+            if length is not None and length > _MAX_CONTROL_BYTES:
+                raise RecoveryContractError('Control message exceeds byte budget')
+            frame_bytes = None if length is None else length + 4
+            if frame_bytes is not None and len(self._buffer) >= frame_bytes:
+                if messages and decoded_bytes + frame_bytes > _MAX_CONTROL_BYTES:
+                    break
+                if len(self._buffer) == frame_bytes:
+                    raw, self._buffer = self._buffer, bytearray()
+                    del raw[:4]
+                else:
+                    # Coalesced bytes fit the read-ahead window; this slice
+                    # and the remaining input together remain bounded.
+                    raw = self._buffer[4:frame_bytes]
+                    del self._buffer[:frame_bytes]
+                messages.append(json.loads(raw))
+                del raw
+                decoded_bytes += frame_bytes
+                self._partial_at = None
+                continue
+            if self._eof:
+                if self._buffer:
+                    raise RecoveryContractError('Truncated control message')
+                return tuple(messages) if messages else None
+            if self._buffer:
+                if self._partial_at is None:
+                    self._partial_at = time.monotonic()
+                elif time.monotonic() - self._partial_at >= self.timeout_s:
+                    raise TimeoutError('Partial control message deadline elapsed')
+            if read_bytes >= _MAX_CONTROL_BYTES or not select.select([self.sock], [], [], 0)[0]:
+                break
+            needed = (_CONTROL_READ_CHUNK if frame_bytes is None
+                      else min(_CONTROL_READ_CHUNK, frame_bytes - len(self._buffer)))
+            needed = min(needed, _MAX_CONTROL_BYTES - read_bytes)
+            chunk = self.sock.recv(needed)
+            if not chunk:
+                self._eof = True
+                continue
+            self._buffer.extend(chunk)
+            read_bytes += len(chunk)
+            del chunk
+        return tuple(messages)
 
 
 def _recv_exactly(sock, count):
@@ -169,13 +272,30 @@ def _run_v3_worker(launch_spec, sock):
             wake_outbox()
 
     runtime.register()
+    reader = ControlFrameReader(sock, timeout_s=bounds.timeout_ms / 1000)
     command_thread = threading.Thread(target=serve_commands, name="dataflow-commands", daemon=True)
     command_thread.start()
     try:
         while not stop.is_set():
-            for event in mailbox.drain(max_events=bounds.max_pending_events):
-                frame = json.loads(encode_wire(event, type_name="WorkerEvent", bounds=bounds))
-                send({"type": "worker_event", "event": frame["payload"]})
+            messages = reader.read_ready(max_messages=bounds.max_pending_events)
+            if messages is None:
+                break
+            for message in messages:
+                if message.get("type") == "control_reply":
+                    reply = decode_wire(message["wire"].encode(), type_name="ControlReply", bounds=bounds)
+                    mailbox.deliver(reply)
+                else:
+                    try:
+                        commands.put_nowait(message)
+                    except queue.Full:
+                        raise DataflowError("BUDGET_EXCEEDED", "worker command queue is full")
+            events = mailbox.drain(max_events=min(bounds.max_pending_events, _CONTROL_BATCH_EVENTS))
+            with send_lock:
+                send_messages(sock, ({"type": "worker_event", "event":
+                    json.loads(encode_wire(event, type_name="WorkerEvent", bounds=bounds))["payload"]}
+                    for event in events))
+            if messages or events:
+                continue
             ready = select.select([sock, wake_reader], [], [], 0.05)[0]
             if wake_reader in ready:
                 try:
@@ -183,19 +303,6 @@ def _run_v3_worker(launch_spec, sock):
                         pass
                 except BlockingIOError:
                     pass
-            if sock not in ready:
-                continue
-            message = recv_message(sock)
-            if message is None:
-                break
-            if message.get("type") == "control_reply":
-                reply = decode_wire(message["wire"].encode(), type_name="ControlReply", bounds=bounds)
-                mailbox.deliver(reply)
-            else:
-                try:
-                    commands.put_nowait(message)
-                except queue.Full:
-                    raise DataflowError("BUDGET_EXCEEDED", "worker command queue is full")
     finally:
         stop.set()
         mailbox.close()

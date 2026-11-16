@@ -666,26 +666,27 @@ def test_h016(monkeypatch):
 
 
 def test_h017(monkeypatch):
-    import select
+    import socket
     from collections import deque
     import demiflow.execution.worker.bootstrap as B
     ep = HOSTS.LocalHostEndpoint.__new__(HOSTS.LocalHostEndpoint)
     ev = mk_event('e')
     payload = json.loads(codec.encode_wire(ev, type_name='WorkerEvent', bounds=BIG))['payload']
-    seq = iter([{'type': 'worker_event', 'event': payload} for _ in range(5)])
-    monkeypatch.setattr(B, 'recv_message', lambda sock: next(seq, None))
-    ep._sock = NS(settimeout=lambda t: None)
+    sender, ep._sock = socket.socketpair()
+    ep._control_reader = B.ControlFrameReader(ep._sock, timeout_s=1)
     ep._services = NS(bounds=BIG, policy=POLICY)
     ep._events = deque()
-    monkeypatch.setattr(select, 'select', lambda *a: ([ep._sock], [], []))
-    got = ep.poll(max_events=3, deadline_ms=100)
-    assert len(got) == 3 and got[0].operation_id == ev.operation_id
-    monkeypatch.setattr(select, 'select', lambda *a: ([], [], []))
-    assert ep.poll(max_events=3, deadline_ms=100) == ()
-    monkeypatch.setattr(select, 'select', lambda *a: ([ep._sock], [], []))
-    monkeypatch.setattr(B, 'recv_message', lambda sock: None)
-    with pytest.raises(DataflowError, match='UNKNOWN_EFFECT'):
-        ep.poll(max_events=3, deadline_ms=100)
+    try:
+        B.send_messages(sender, [{'type': 'worker_event', 'event': payload} for _ in range(5)])
+        got = ep.poll(max_events=3, deadline_ms=100)
+        assert len(got) == 3 and got[0].operation_id == ev.operation_id
+        assert len(ep.poll(max_events=3, deadline_ms=100)) == 2
+        assert ep.poll(max_events=3, deadline_ms=100) == ()
+        sender.close()
+        with pytest.raises(DataflowError, match='UNKNOWN_EFFECT'):
+            ep.poll(max_events=3, deadline_ms=100)
+    finally:
+        sender.close(); ep._sock.close()
 
 
 def test_h018():

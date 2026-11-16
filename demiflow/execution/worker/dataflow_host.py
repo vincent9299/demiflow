@@ -216,6 +216,22 @@ class HostedDataflowWorker:
     def receive(self, command):
         self._runtime._v3_ensure_executor().receive(command)
 
+    def receive_many(self, commands):
+        """One transport RPC; every original command retains its own receive."""
+        from .bootstrap import _CONTROL_BATCH_EVENTS, _MAX_CONTROL_BYTES
+        from ..recovery_contract import document
+        if type(commands) not in (tuple, list) or not 1 <= len(commands) <= min(
+                _CONTROL_BATCH_EVENTS, self._mailbox._bounds.max_pending_events):
+            raise DataflowError('BUDGET_EXCEEDED', 'control batch exceeds event budget')
+        total = 0
+        for command in commands:
+            raw = document({'type': 'dataflow_command', 'command': command})
+            total += len(raw) + 4
+            if total > _MAX_CONTROL_BYTES and len(commands) != 1:
+                raise DataflowError('BUDGET_EXCEEDED', 'control batch exceeds byte budget')
+        for command in commands:
+            self.receive(command)
+
     def deliver_receipt(self, receipt: dict) -> None:
         if receipt.get("boot_id") not in (None, self._boot_id):
             raise DataflowError("FENCED", "commit receipt belongs to a different boot")

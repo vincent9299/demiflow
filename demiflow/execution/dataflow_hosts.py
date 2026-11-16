@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from contextlib import contextmanager, ExitStack
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Callable
 
@@ -237,6 +238,17 @@ class DataflowLocalConnector(LocalControlConnector):
         send_message(self.driver_socks[allocation_id], _reply_frame(reply, bounds=bounds))
 
 
+@contextmanager
+def batch_business_commands(endpoints):
+    """Flush already-ready commands before the original driver advances cuts."""
+    with ExitStack() as stack:
+        for endpoint in endpoints:
+            scope = getattr(endpoint, 'batch_business', None)
+            if scope is not None:
+                stack.enter_context(scope())
+        yield
+
+
 class _EndpointBase:
     def __init__(self, lease: "WorkerLease", *, services: "DriverServices"):
         self._lease = lease
@@ -257,6 +269,8 @@ class _EndpointBase:
         self._connector = self._provider._control
         self._assignment = None
         self._events = deque()
+        self._business_batch = None
+        self._business_bytes = 0
 
     def _build_launch(self, assignment: "WorkerAssignment") -> tuple[dict, dict, dict]:
         run = self._services.action.context
@@ -327,13 +341,56 @@ class _EndpointBase:
                 "controller_epoch": run.attempt, "authority_ref": self._grant["grant_id"],
                 "allocation_id": self._allocation_id, "boot_id": self._boot_id, "payload": payload}
 
-    def send_business(self, command):
+    @contextmanager
+    def batch_business(self):
+        if self._business_batch is not None:
+            yield
+            return
+        self._business_batch = []
+        try:
+            yield
+        finally:
+            try:
+                self.flush_business()
+            finally:
+                self._business_batch = None
+                self._business_bytes = 0
+
+    def flush_business(self):
+        pending = getattr(self, '_business_batch', None)
+        if not pending:
+            return
+        # A failed/unknown send is never retried as if it were unsent. The
+        # original execution failure/recovery path owns that outcome.
+        self._business_batch = []
+        self._business_bytes = 0
         if hasattr(self, "_sock"):
-            from .worker.bootstrap import send_message
-            send_message(self._sock, {"type": "dataflow_command", "command": command})
+            from .worker.bootstrap import _send_encoded_messages
+            _send_encoded_messages(self._sock, (raw for _, raw in pending))
         else:
-            ray.get(self._connector._actor(self._allocation_id).receive.remote(command),
+            actor = self._connector._actor(self._allocation_id)
+            ray.get(actor.receive_many.remote(tuple(command for command, _ in pending)),
                     timeout=self._services.policy.control_timeout_ms / 1000)
+
+    def send_business(self, command):
+        from .worker.bootstrap import _send_encoded_messages, _MAX_CONTROL_BYTES, _CONTROL_BATCH_EVENTS
+        from .recovery_contract import document
+        raw = document({"type": "dataflow_command", "command": command})
+        if getattr(self, '_business_batch', None) is None:
+            if hasattr(self, '_sock'):
+                _send_encoded_messages(self._sock, (raw,))
+            else:
+                ray.get(self._connector._actor(self._allocation_id).receive.remote(command),
+                        timeout=self._services.policy.control_timeout_ms / 1000)
+            return
+        size = len(raw) + 4
+        if (self._business_batch and self._business_bytes + size > _MAX_CONTROL_BYTES
+                or len(self._business_batch) >= min(_CONTROL_BATCH_EVENTS, self._services.bounds.max_pending_events)):
+            self.flush_business()
+        self._business_batch.append((command, raw))
+        self._business_bytes += size
+        if command.get('kind') not in ('data', 'ack') or self._business_bytes >= _MAX_CONTROL_BYTES:
+            self.flush_business()
 
     def _early_event(self, event):
         self._check_event_identity(event)
@@ -367,6 +424,7 @@ class _EndpointBase:
         return tuple(observed)
 
     def request_cut(self, request: "CutRequest") -> None:
+        self.flush_business()
         if not self._activated:
             raise DataflowError("FENCED", "cut requested before activation")
         existing = self._cuts.get(request.cut_id)
@@ -410,7 +468,7 @@ class LocalHostEndpoint(_EndpointBase):
 
     def activate(self, assignment: "WorkerAssignment") -> None:
         from .contracts.worker import WorkerProtocolModel
-        from .worker.bootstrap import recv_message
+        from .worker.bootstrap import recv_message, ControlFrameReader
         from .worker.dataflow_host import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError("FENCED", "worker assignment was not staged before allocation")
@@ -426,6 +484,8 @@ class LocalHostEndpoint(_EndpointBase):
         if register is None or register.get("kind") != "Register":
             raise DataflowError("INTERNAL_PROTOCOL", "local worker did not register")
         self._model.handle(register, now_ms=int(time.time() * 1000))
+        self._control_reader = ControlFrameReader(self._sock,
+            timeout_s=self._services.policy.control_timeout_ms / 1000)
         control = make_worker_control_assignment(assignment, grant=grant, manifest_ref=manifest_ref,
                                                  ready_deadline_ms=60000)
         self._send_k3("VerifyArtifactAndCapabilities",
@@ -438,7 +498,8 @@ class LocalHostEndpoint(_EndpointBase):
         self._activated = True
 
     def _send_k3(self, kind: str, payload: dict) -> dict:
-        from .worker.bootstrap import recv_message, send_message
+        from .worker.bootstrap import send_message
+        self.flush_business()
         envelope = self._k3_envelope(kind, payload)
         send_message(self._sock, envelope)
         deadline = time.monotonic() + self._services.policy.control_timeout_ms / 1000
@@ -446,46 +507,47 @@ class LocalHostEndpoint(_EndpointBase):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise DataflowError("DEADLINE_EXCEEDED", "Local worker control command timed out")
-            import select
-            if not select.select([self._sock], [], [], min(.05, remaining))[0]:
-                continue
-            message = recv_message(self._sock)
-            if message is None:
+            messages = self._control_reader.read_ready(max_messages=self._services.bounds.max_pending_events)
+            if messages is None:
                 raise DataflowError("UNKNOWN_EFFECT", "local worker closed before responding")
-            if message.get("response_to") == envelope["operation_id"]:
-                self._accept_final_observations(message)
-                if "error" in message:
+            response = None
+            for message in messages:
+                if message.get("response_to") == envelope["operation_id"]:
+                    response = message
+                if message.get("type") == "worker_event":
+                    event = _event_from_dict(message["event"], bounds=self._services.bounds)
+                    self._early_event(event)
+                if message.get("kind") in ("Register", "Ready", "Heartbeat"):
+                    self._model.handle(message, now_ms=int(time.time() * 1000))
+            if response is not None:
+                self._accept_final_observations(response)
+                if "error" in response:
                     from .dataflow_failures import restore_failure
-                    raise restore_failure(message["error"])
+                    raise restore_failure(response["error"])
                 if kind in ("Drain", "Quiesce", "Cancel"):
                     self._cleanup_completed = True
-                return message["receipt"]
-            if message.get("type") == "worker_event":
-                event = _event_from_dict(message["event"], bounds=self._services.bounds)
-                self._early_event(event)
-            if message.get("kind") in ("Register", "Ready", "Heartbeat"):
-                self._model.handle(message, now_ms=int(time.time() * 1000))
+                return response["receipt"]
+            if not messages:
+                import select
+                select.select([self._sock], [], [], min(.05, remaining))
 
     def poll(self, *, max_events: int, deadline_ms: int):
-        import select
-        from .worker.bootstrap import recv_message
         events = []
         while self._events and len(events) < max_events:
             events.append(self._events.popleft())
-        # Wait before reading a frame; a timeout halfway through a frame must
-        # never discard its prefix and corrupt the next message boundary.
-        self._sock.settimeout(self._services.policy.control_timeout_ms / 1000)
-        while len(events) < max_events and select.select([self._sock], [], [], 0)[0]:
-            frame = recv_message(self._sock)
-            if frame is None:
+        if len(events) < max_events:
+            frames = self._control_reader.read_ready(max_messages=max_events - len(events))
+            if frames is None:
                 raise DataflowError("UNKNOWN_EFFECT", "worker connection closed during execution")
-            if frame.get("type") == "worker_event":
-                events.append(_event_from_dict(frame["event"], bounds=self._services.bounds))
-            elif "error" in frame:
-                raise DataflowError("INTERNAL_PROTOCOL", "worker control failed: " + str(frame["error"]))
+            for frame in frames:
+                if frame.get("type") == "worker_event":
+                    events.append(_event_from_dict(frame["event"], bounds=self._services.bounds))
+                elif "error" in frame:
+                    raise DataflowError("INTERNAL_PROTOCOL", "worker control failed: " + str(frame["error"]))
         return tuple(events)
 
     def deliver_reply(self, reply: "ControlReply") -> None:
+        self.flush_business()
         self._connector.deliver_control_reply(self._allocation_id, reply)
 
 
@@ -624,6 +686,7 @@ class RayHostEndpoint(_EndpointBase):
         self._activated = True
 
     def _send_k3(self, kind: str, payload: dict) -> dict:
+        self.flush_business()
         actor = self._connector._actor(self._allocation_id)
         command = actor.handle.remote(self._k3_envelope(kind, payload))
         deadline = time.monotonic() + self._services.policy.control_timeout_ms / 1000
@@ -656,4 +719,5 @@ class RayHostEndpoint(_EndpointBase):
         return tuple(events)
 
     def deliver_reply(self, reply: "ControlReply") -> None:
+        self.flush_business()
         self._connector.deliver_control_reply(self._allocation_id, reply)
