@@ -1,7 +1,8 @@
 """Explicit, bounded local key/value storage for lookup and datasinks.
 
-Reads never create a database. Each write batch is atomic; separate batches
-and other sinks are separate commits. Values are strict JSON, not Python code.
+Reads never create a database. ``put_many`` writes one bounded transaction;
+the native Dataset sink stages its input, then atomically publishes the original
+commit's rows and SQLite receipt. Values are strict JSON, not Python code.
 """
 from contextlib import closing
 from dataclasses import dataclass

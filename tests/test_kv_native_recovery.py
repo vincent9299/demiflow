@@ -1,5 +1,6 @@
 """Real Dataset writes and original commit recovery against a SQLite destination."""
 import json
+import math
 import os
 from pathlib import Path
 import sqlite3
@@ -55,6 +56,28 @@ def _child(root, boundary, mode):
 def _markers(store):
     with sqlite3.connect(store.path) as db:
         return db.execute('SELECT namespace,run_id,action_id,commit_id,prepared_digest,receipt FROM kv_sink_commits').fetchall()
+
+
+@pytest.mark.parametrize('empty', [False, True])
+def test_empty_or_typed_duplicate_rows_keep_original_kv_encoding(tmp_path, empty):
+    store = SQLiteKV(tmp_path/'index.sqlite', 'test')
+    history = SQLiteKV(store.path, 'other')
+    history.put_many([('中文', {'version': 'historical'})])
+    rows = [] if empty else [
+        {'key':'中文','value':{'text':'first','number':1.,'items':[1,None]}},
+        {'key':'中文','value':{'text':'你好','number':-0.,'items':[2,None]}},
+        {'key':'null','value':None}]
+    with RunContext.start(tmp_path/'run'), data.local_execution(workers=1):
+        sink = store.datasink(batch_rows=1)
+        data.from_items(rows).write_datasink(sink)
+        assert sink.receipt.written_rows == len(rows)
+    assert len(_markers(store)) == 1
+    assert history.get('中文')['value'] == {'version':'historical'}
+    if not empty:
+        value = store.get('中文')['value']
+        assert value['text'] == '你好' and value['items'] == [2,None]
+        assert math.copysign(1, value['number']) == -1
+        assert store.get('null') == {'hit':True,'value':None}
 
 
 @pytest.mark.parametrize('boundary', ['after_prepare_before_record', 'after_prepared', 'after_sink_commit_before_receipt'])
