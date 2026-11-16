@@ -112,12 +112,12 @@ class RunArtifactStore:
         self._bounds = bounds
         self._writer_lease = None
         self._writer_closed = False
-        from .dataflow_object_lease import protocol_identity
+        from .dataflow_object_lease import protocol_identity, journal_identity
         self._lease_identity = protocol_identity(root)
         self._protocol_required = self._lease_identity is not None
         original_protocol = getattr(journal, 'store_protocol', lambda: None)()
         if original_protocol is not None:
-            original = tuple(original_protocol[:2])
+            original = journal_identity(original_protocol)
             if original_protocol[2] and self._lease_identity != original:
                 raise DataflowError('FENCED', 'Published object header differs from original journal')
             self._lease_identity = original
@@ -132,7 +132,8 @@ class RunArtifactStore:
                     self._writer_lease = ObjectLease(root, expected=self._lease_identity)
                 else:
                     try:
-                        self._writer_lease = ObjectLease(root, create=True, exclusive=True)
+                        self._writer_lease = ObjectLease(root, create=True, exclusive=True,
+                                                        protocol_version=2 if fresh else 1)
                         created = True
                     except FileExistsError:
                         self._writer_lease = ObjectLease(root)

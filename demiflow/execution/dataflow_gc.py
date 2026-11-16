@@ -13,7 +13,7 @@ import time
 
 from .contracts.dataflow import ArtifactRef
 from .contracts.dataflow_errors import DataflowError
-from .dataflow_object_lease import exclusive_access, exclusive_here
+from .dataflow_object_lease import exclusive_access, exclusive_here, journal_identity
 from .dataflow_store import RunArtifactStore, _no_symlink, _sync_directory
 
 
@@ -110,7 +110,7 @@ def _exclusive(journal, fence):
     # Same order as native publication / claim_execution. The exclusive-context
     # marker only permits this thread's bounded internal journal/read operations.
     with journal._publication_lease(0), exclusive_access(
-            journal.directory / '.dataflow-store', protocol[:2]):
+            journal.directory / '.dataflow-store', journal_identity(protocol)):
         with journal.execution_guard(fence):
             pass
         with journal._connection() as db:

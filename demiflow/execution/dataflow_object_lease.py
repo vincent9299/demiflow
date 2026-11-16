@@ -8,6 +8,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import secrets
 import stat
 import threading
 import time
@@ -17,6 +18,56 @@ from .contracts.dataflow_errors import DataflowError
 _LOCAL = threading.local()
 NAME = '.published-objects.lock'
 HEADER = '.published-objects.v1'
+
+
+def validate_identity(value):
+    """v1 is host-local; v2 is a shared filesystem object, never a host dev_t.
+
+    Keep the established header filename so old readers fail closed on v2,
+    rather than treating a new store as a legacy namespace with no protocol.
+    """
+    if type(value) not in (list, tuple):
+        raise ValueError('invalid lease identity')
+    value = tuple(value)
+    if len(value) == 2 and all(type(v) is int and v >= 0 for v in value):
+        return value
+    if (len(value) == 5 and value[0] == 2 and type(value[0]) is int
+            and all(type(v) is int and v >= 0 for v in value[1:4])
+            and type(value[4]) is str and len(value[4]) == 32
+            and all(c in '0123456789abcdef' for c in value[4])):
+        return value
+    raise ValueError('unsupported lease identity version or fields')
+
+
+def journal_identity(protocol):
+    """Read the original protocol row without upgrading any historical fact."""
+    if len(protocol) == 3:
+        return validate_identity(protocol[:2])
+    if len(protocol) != 4 or type(protocol[3]) is not str:
+        raise DataflowError('FENCED', 'Published object journal protocol is invalid')
+    try:
+        value = validate_identity(json.loads(protocol[3]))
+        if len(value) != 5 or value[3] != protocol[1]:
+            raise ValueError('journal inode binding differs')
+        return value
+    except (ValueError, TypeError) as exc:
+        raise DataflowError('FENCED', 'Published object journal identity is invalid') from exc
+
+
+def _shared_identity(root, fd, local, nonce):
+    # f_fsid is the filesystem identity, unlike st_dev's host-local mount number.
+    # Both the root and the lock object are pinned: copying a run/header elsewhere
+    # cannot turn that copy into the originally journal-bound lock.
+    root = Path(root)
+    if os.pread(fd, 33, 0) != nonce.encode('ascii'):
+        raise DataflowError('FENCED', 'Published object nonce differs from original lock')
+    root_stat = root.lstat()
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise DataflowError('FENCED', 'Published object root is not a directory')
+    fsid = os.fstatvfs(fd).f_fsid
+    if fsid != os.statvfs(root).f_fsid:
+        raise DataflowError('FENCED', 'Published object lock and root are on different filesystems')
+    return validate_identity((2, fsid, root_stat.st_ino, local[1], nonce))
 
 
 def protocol_identity(root):
@@ -29,10 +80,9 @@ def protocol_identity(root):
         with os.fdopen(fd, 'rb', closefd=False) as stream:
             raw = stream.read(257)
         value = json.loads(raw)
-        if (len(raw) > 256 or type(value) is not list or len(value) != 2
-                or any(type(v) is not int or v < 0 for v in value)):
+        if len(raw) > 256 or type(value) is not list:
             raise ValueError('invalid lease header')
-        return tuple(value)
+        return validate_identity(value)
     except (ValueError, TypeError) as exc:
         raise DataflowError('FENCED', 'Published object protocol header is invalid') from exc
     finally:
@@ -41,6 +91,7 @@ def protocol_identity(root):
 
 def record_protocol(root, identity):
     """Physical evidence only; the native journal alone decides eligibility."""
+    identity = validate_identity(identity)
     old = protocol_identity(root)
     if old is not None:
         if old != tuple(identity):
@@ -61,13 +112,13 @@ def exclusive_here(root):
     lease = getattr(_LOCAL, 'exclusive', {}).get(str(Path(root)))
     if lease is None:
         return False
-    inode(lease.path, lease.fd)
+    lease.check()
     return True
 
 
-def inode(path, fd):
+def inode(path, fd, *, size=0):
     visible, held = path.lstat(), os.fstat(fd)
-    if (not stat.S_ISREG(held.st_mode) or held.st_nlink != 1 or held.st_size != 0
+    if (not stat.S_ISREG(held.st_mode) or held.st_nlink != 1 or held.st_size != size
             or (visible.st_dev, visible.st_ino) != (held.st_dev, held.st_ino)
             or not stat.S_ISREG(visible.st_mode)):
         raise DataflowError('FENCED', 'Published object lease inode changed')
@@ -76,12 +127,14 @@ def inode(path, fd):
 
 class ObjectLease:
     def __init__(self, root, *, create=False, exclusive=False, expected=None, on_close=None,
-                 wait_ms=0):
+                 wait_ms=0, protocol_version=2):
         from .dataflow_store import _no_symlink, _sync_directory
         self.fd = None
         self._on_close = on_close
         if type(wait_ms) is not int or not 0 <= wait_ms <= 5000 or (exclusive and wait_ms):
             raise ValueError('Only shared object leases may wait, for at most 5000 ms')
+        if type(protocol_version) is not int or protocol_version not in (1, 2):
+            raise ValueError('Unsupported object lease protocol version')
         self.path = Path(root) / NAME
         self.waited = False
         _no_symlink(self.path)
@@ -106,8 +159,31 @@ class ObjectLease:
                     if remaining <= 0:
                         raise
                     time.sleep(min(.005, remaining))
-            self.identity = inode(self.path, fd)
-            if expected is not None and self.identity != tuple(expected):
+            physical = protocol_identity(root)
+            expected = validate_identity(expected) if expected is not None else physical
+            if physical is not None and expected is not None and physical != expected:
+                raise DataflowError('FENCED', 'Published object protocol differs from original journal')
+            if create:
+                if physical is not None:
+                    raise DataflowError('FENCED', 'Cannot recreate a registered published object lease')
+                local = inode(self.path, fd)
+                if protocol_version == 2:
+                    nonce = secrets.token_hex(16)
+                    if os.write(fd, nonce.encode('ascii')) != 32:
+                        raise OSError('Incomplete published object lock nonce')
+                    os.fsync(fd)
+                    local = inode(self.path, fd, size=32)
+                    self.identity = _shared_identity(root, fd, local, nonce)
+                else:
+                    self.identity = local
+            elif expected is not None and len(expected) == 5:
+                if physical != expected:
+                    raise DataflowError('FENCED', 'Published object shared protocol header is missing')
+                local = inode(self.path, fd, size=32)
+                self.identity = _shared_identity(root, fd, local, expected[4])
+            else:
+                self.identity = inode(self.path, fd)  # Preserve v1's exact, host-local meaning.
+            if expected is not None and self.identity != expected:
                 raise DataflowError('FENCED', 'Published object lease differs from original journal')
             if create:
                 _sync_directory(self.path.parent)
@@ -115,6 +191,13 @@ class ObjectLease:
         except BaseException:
             os.close(fd)
             raise
+
+    def check(self):
+        local = inode(self.path, self.fd, size=32 if len(self.identity) == 5 else 0)
+        current = (_shared_identity(self.path.parent, self.fd, local, self.identity[4])
+                   if len(self.identity) == 5 else local)
+        if current != self.identity:
+            raise DataflowError('FENCED', 'Published object lease identity changed')
 
     def close(self):
         if self.fd is not None:
@@ -170,7 +253,7 @@ def held_exclusive(lease):
     _LOCAL.exclusive = {**old, str(root): lease}
     try:
         yield lease
-        inode(lease.path, lease.fd)
+        lease.check()
     finally:
         _LOCAL.exclusive = old
 

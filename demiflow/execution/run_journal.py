@@ -234,6 +234,9 @@ class RunJournal:
         object_columns = {r[1] for r in db.execute('PRAGMA table_info(runtime_dataflow_objects)')}
         if 'charge_id' not in object_columns:
             db.execute('ALTER TABLE runtime_dataflow_objects ADD COLUMN charge_id TEXT')
+        protocol_columns = {r[1] for r in db.execute('PRAGMA table_info(runtime_dataflow_gc_protocol)')}
+        if 'identity_json' not in protocol_columns:
+            db.execute('ALTER TABLE runtime_dataflow_gc_protocol ADD COLUMN identity_json TEXT')
         db.executescript("""
           CREATE TABLE IF NOT EXISTS runtime_storage (singleton INTEGER PRIMARY KEY CHECK(singleton=1), items INTEGER NOT NULL, bytes INTEGER NOT NULL, object_bytes INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS runtime_reservation_count (singleton INTEGER PRIMARY KEY CHECK(singleton=1), items INTEGER NOT NULL);
@@ -267,13 +270,13 @@ class RunJournal:
 
     @contextmanager
     def _transaction(self):
-        from .dataflow_object_lease import shared_access
+        from .dataflow_object_lease import shared_access, journal_identity
         protocol = self.dataflow_gc_protocol() if self.path.exists() else None
         # GC is optional maintenance, not loss of this supervisor's attempt.
         # Wait before taking the writer connection/transaction; the original
         # inode and the attempt below are still checked after acquisition. This
         # separate, finite 5 s lease window changes neither SQLite nor run limits.
-        with shared_access(self.directory / '.dataflow-store', protocol[:2] if protocol else None,
+        with shared_access(self.directory / '.dataflow-store', journal_identity(protocol) if protocol else None,
                            require_protocol=bool(protocol and protocol[2]), wait_ms=5000), self._connection(write=True) as db:
             with db:
                 db.execute('BEGIN IMMEDIATE')
@@ -840,23 +843,46 @@ class RunJournal:
     def bind_dataflow_gc_protocol(self, fence, inode, *, fresh):
         """Only a namespace born under the physical lease protocol is eligible."""
         from .recovery_contract import RecoveryContractError
+        from .dataflow_object_lease import NAME, validate_identity, journal_identity
+        inode = validate_identity(inode)
         with self.execution_guard(fence) as db:
-            old = db.execute('SELECT device,inode,eligible FROM runtime_dataflow_gc_protocol').fetchone()
+            old = self._dataflow_gc_protocol_row(db)
             if old is not None:
-                if old[:2] != tuple(inode):
+                if journal_identity(old) != inode:
                     raise RecoveryContractError('Published object lease was replaced')
                 return bool(old[2])
             legacy = db.execute('SELECT 1 FROM runtime_dataflow_objects LIMIT 1').fetchone()
             legacy = legacy or db.execute('SELECT 1 FROM runtime_dataflow_staging LIMIT 1').fetchone()
             eligible = bool(fresh and not legacy)
-            db.execute('INSERT INTO runtime_dataflow_gc_protocol VALUES (1,?,?,?)', (*inode, int(eligible)))
+            if len(inode) == 2:
+                device, number = inode
+                document = None
+            else:
+                # dev_t remains useful creator-host evidence, but is never a
+                # cross-host identity. The original row owns the versioned fact.
+                device = (self.directory / '.dataflow-store' / NAME).lstat().st_dev
+                number = inode[3]
+                document = json.dumps(list(inode), separators=(',', ':'))
+            db.execute('INSERT INTO runtime_dataflow_gc_protocol '
+                       '(singleton,device,inode,eligible,identity_json) VALUES (1,?,?,?,?)',
+                       (device, number, int(eligible), document))
             return eligible
+
+    @staticmethod
+    def _dataflow_gc_protocol_row(db):
+        try:
+            row = db.execute('SELECT device,inode,eligible,identity_json FROM runtime_dataflow_gc_protocol').fetchone()
+        except sqlite3.OperationalError as exc:
+            if 'no such column: identity_json' not in str(exc):
+                raise
+            return db.execute('SELECT device,inode,eligible FROM runtime_dataflow_gc_protocol').fetchone()
+        return row[:3] if row is not None and row[3] is None else row
 
     def dataflow_gc_protocol(self):
         with self._connection() as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_dataflow_gc_protocol'").fetchone():
                 return None
-            return db.execute('SELECT device,inode,eligible FROM runtime_dataflow_gc_protocol').fetchone()
+            return self._dataflow_gc_protocol_row(db)
 
     def pending_dataflow_gc(self):
         with self._connection() as db:
