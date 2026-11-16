@@ -103,10 +103,13 @@ def _commit_shape(run):
     }
 
 
-def _k6_shapes(run):
-    """Normalize the original journal's verified v3 cut, never a second ledger."""
+def _k6_shapes(run, execution, expected):
+    """Verify native cuts/retained ACK proofs and every ordered published prefix."""
     import hashlib
-    shapes = []
+    from demiflow.execution.dataflow_replay import PublishedRecordReader
+    from demiflow.execution.dataflow_record_frames import document_limit
+    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    shapes, inherited, prior_ids, growth = [], {}, [], []
     for fact in run.journal.execution_commits(_chain_child_id(run)):
         assert fact['status'] == 'acked'
         ref = fact['prepared']['state']['dataflow-cut-v3']
@@ -116,21 +119,65 @@ def _k6_shapes(run):
         assert value['schema'] == 'demiflow.dataflow_cut.v3'
         cut, contributions = value['cut'], value['contributions']
         assert cut['sequence'] == fact['sequence']
-        assert set(cut['participants']) == {c['participant_id'] for c in contributions}
-        assert all(c['cut_id'] == cut['cut_id'] for c in contributions)
-        shapes.append({
-            'participants': len(cut['participants']),
-            'source_progress_components': len(value['dataflow.sources.v3']),
+        by_owner = {c['participant_id']: c for c in contributions}
+        assert len(by_owner) == len(contributions)
+        assert set(cut['participants']) <= by_owner.keys()
+        for key, contribution in by_owner.items():
+            if key in cut['participants']:
+                assert contribution['cut_id'] == cut['cut_id']
+            else:
+                assert contribution == inherited[key], 'retained state lacks an earlier original ACK'
+        inherited = by_owner
+        publication = fact['prepared']['sinks']['materialize']
+        reader = PublishedRecordReader(publication, store=execution._store, bounds=execution._bounds)
+        rows, ids = [], []
+        try:
+            while True:
+                try:
+                    document, record_id, sequence, _ = reader.pop()
+                except StopIteration:
+                    break
+                record = _decode_record_document(document, record_id=record_id, sequence=sequence,
+                    max_bytes=document_limit(execution._bounds),
+                    payload_max_bytes=execution._bounds.max_row_bytes,
+                    metadata_max_bytes=execution._bounds.max_control_bytes)
+                rows.append(dict(record.inline)); ids.append(record_id)
+                assert len(rows) <= len(expected)
+        finally:
+            reader.close()
+        assert len(rows) == publication['rows'] == publication['manifest']['total_rows']
+        assert rows == expected[:len(rows)]
+        assert ids[:len(prior_ids)] == prior_ids
+        assert len(rows) >= len(prior_ids)
+        if len(rows) > len(prior_ids):
+            growth.append(len(rows))
+        prior_ids = ids
+        sources = [(c['next_sequence'], c['end_of_input']) for c in value['dataflow.sources.v3']]
+        if cut['final']:
+            assert rows == expected and all(eoi for _, eoi in sources)
+            assert publication['manifest']['final']
+        shapes.append({'sequence': fact['sequence'], 'participants': len(cut['participants']),
+            'retained_contributions': len(contributions), 'source_progress': sorted(sources),
             'channel_cuts': sum(len(c['channels']) for c in contributions),
             'operator_states': sum(len(c['operator_states']) for c in contributions),
-            'seal_keys': sorted(cut), 'sealed': cut['final'],
-        })
+            'seal_keys': sorted(cut), 'sealed': cut['final'], 'published_rows': len(rows)})
+    assert growth == sorted(set(growth)) and growth[-1] == len(expected)
+    assert sum(v['sealed'] for v in shapes) == 1 and shapes[-1]['sealed']
+    (run.directory/'provider-cut-evidence.json').write_text(json.dumps(shapes, indent=2))
     return shapes
 
 
 # ---------------- SEM: same plan/source, two providers, identical semantics ----------------
 
-def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
+def test_sem_local_ray_equivalence(tmp_path, ray_cluster, monkeypatch):
+    from demiflow.execution import dataflow_api
+    original = dataflow_api.execute_action
+    executions = []
+    def observe(request, **kwargs):
+        handle = original(request, **kwargs)
+        executions.append(handle._execution)
+        return handle
+    monkeypatch.setattr(dataflow_api, "execute_action", observe)
     def double(row):
         return {**row, "x": row["x"] * 2}
 
@@ -148,7 +195,7 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
         assert local_owner == (local_run.attempt, local_run.fence)
         # K6 manifests are per-cut checkpoint records, GC'd on run exit (durable
         # recovery uses the journal commit's prepared.state); capture while open.
-        local_k6 = _k6_shapes(local_run)
+        local_k6 = _k6_shapes(local_run, next(e for e in executions if e._action.context is local_run), expected)
 
     ray_dir = tmp_path / "ray-run"
     ray_executor = RayDatasetExecutor(workers=1, unified_chain=True)
@@ -159,27 +206,24 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
         with ray_run.journal._connection() as db:
             ray_owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert ray_owner == (ray_run.attempt, ray_run.fence)
-        ray_k6 = _k6_shapes(ray_run)
+        ray_k6 = _k6_shapes(ray_run, next(e for e in executions if e._action.context is ray_run), expected)
 
     # Output multiset + record identity (x value) identical across providers.
     assert local_rows == expected
     assert ray_rows == expected
     assert sorted(local_rows, key=lambda r: r["x"]) == sorted(ray_rows, key=lambda r: r["x"])
-    # Commit sequence/position progression identical (same checkpoint semantics).
-    assert local_commits["sequences"] == ray_commits["sequences"]
-    assert local_commits["positions"] == ray_commits["positions"]
-    assert local_commits["statuses"] == ray_commits["statuses"] == ["acked"] * len(local_commits["sequences"])
-    assert len(set(local_commits["commit_ids"])) == len(local_commits["commit_ids"])
-    assert len(set(ray_commits["commit_ids"])) == len(ray_commits["commit_ids"])
-    # K6 manifest shape identical (participants/source-progress vector/channel cuts/seal).
-    # Hash-addressed artifact filenames are not checkpoint order. Positions and
-    # sequences are compared above; compare the manifest shapes as a multiset.
-    import json
-    assert sorted(map(json.dumps, local_k6)) == sorted(map(json.dumps, ray_k6))
-    assert local_k6, "no K6 checkpoint manifest was produced"
-    # Exactly one manifest is the sealed final cut; hash-named files are not
-    # cut-ordered, so check the sealed invariant rather than the last element.
-    assert sum(1 for shape in local_k6 if shape["sealed"]) == 1
+    # Physical phase/park cuts may differ between providers. Every actual ACK
+    # remains contiguous and immutable; each published business prefix above is
+    # checked against the same exact ordered records, including retained IDs.
+    for commits in (local_commits, ray_commits):
+        assert commits['sequences'] == list(range(1, len(commits['sequences']) + 1))
+        assert commits['positions'] == commits['sequences']
+        assert commits['statuses'] == ['acked'] * len(commits['sequences'])
+        assert len(set(commits['commit_ids'])) == len(commits['commit_ids'])
+    assert local_k6[-1]['source_progress'] == ray_k6[-1]['source_progress'] == [(10, True)]
+    assert local_k6[-1]['published_rows'] == ray_k6[-1]['published_rows'] == len(expected)
+    assert local_k6[-1]['seal_keys'] == ray_k6[-1]['seal_keys']
+    assert 'ray.data' not in sys.modules
 
 
 # ---------------- Ray fault: actor death, new allocation recovers exactly once ----------------
