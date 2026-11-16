@@ -811,7 +811,7 @@ def compile_physical_dataflow(
     stages = partition_stages(graph, policy=policy, bounds=bounds)
     stages = _refine_source_partitions(graph, stages, splits, policy, bounds)
     from .dataflow_fusion import fuse_single_worker_pipeline
-    stages = fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds)
+    stages = fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     from .dataflow_thread_fusion import fuse_thread_suffix
     stages = fuse_thread_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     from .dataflow_finite_fusion import fuse_finite_suffix

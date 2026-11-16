@@ -164,7 +164,7 @@ def test_completed_live_result_still_rejects_actual_code_drift(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize('mode', ['thread','process'])
-def test_plain_iterator_map_early_close_keeps_source_independent(tmp_path, monkeypatch, mode):
+def test_plain_iterator_map_early_close_keeps_original_demand_in_one_pure_worker(tmp_path, monkeypatch, mode):
     plans, allocations = _capture(monkeypatch)
     reads = tmp_path/'reads'
     def source():
@@ -175,10 +175,17 @@ def test_plain_iterator_map_early_close_keeps_source_independent(tmp_path, monke
         assert data.from_iter(source).map(lambda row:row).take(1) == [{'n':0}]
     assert 1 <= len(reads.read_text().splitlines()) <= 25
     graph, physical = plans[0]
-    assert len(physical.stages) == len(allocations) == 2
-    # Pure synchronous kernels now share one business thread/grant; resident
-    # memory still sums, and the source remains an independent allocation.
-    _check_profiles(graph, physical, shared_cpu=True)
+    assert len(physical.stages) == len(allocations) == 1
+    # max_workers is a ceiling: this pure synchronous chain has no native
+    # completion or timer that could be starved by the source. All original
+    # logical nodes stay visible; actual CPU shares and memory still sums.
+    from demiflow.planning.dataflow_place import partition_stages
+    originals = partition_stages(graph, policy=physical.policy, bounds=physical.bounds)
+    stage = physical.stages[0]
+    assert set(stage.occurrences) == {node.occurrence_id for node in graph.nodes}
+    assert stage.profile.requests['cpu_millis'] == max(s.profile.requests['cpu_millis'] for s in originals)
+    assert stage.profile.requests['memory_bytes'] == sum(
+        max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in originals)
     assert _actual_grants(run, allocations) == sorted(
         (s.profile.requests['cpu_millis'], s.profile.requests['memory_bytes'])
         for s in physical.stages)

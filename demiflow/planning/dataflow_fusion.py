@@ -1,4 +1,4 @@
-"""One explicitly requested worker can run a bounded pure linear pipeline.
+"""One admitted worker can run a bounded pure synchronous linear pipeline.
 
 Logical occurrences and their observations remain intact. This only chooses
 physical co-location in the existing GraphRunner; it creates no executor or
@@ -13,8 +13,14 @@ _TERMINALS = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_bat
     'count', 'columns', 'schema', 'size_bytes', 'materialize', 'collect_summary'})
 
 
-def fuse_single_worker_pipeline(graph, stages, *, policy, bounds):
-    if not policy.fusion or policy.max_active_workers != 1:
+def fuse_single_worker_pipeline(graph, stages, *, policy, bounds, hosts=None):
+    if not policy.fusion:
+        return stages
+    # Preserve independently runnable CPU pipelines when the requested ceiling
+    # can already host them. Automatic co-location only extends the layout that
+    # worker pressure would otherwise force into a shared suffix.
+    if policy.max_active_workers != 1 and (policy.max_active_workers is None
+            or sum(len(stage.partitions) for stage in stages) <= policy.max_active_workers):
         return stages
     if len(graph.sources) != 1 or len(graph.terminals) != 1 or len(stages) < 2:
         return stages
@@ -56,7 +62,7 @@ def fuse_single_worker_pipeline(graph, stages, *, policy, bounds):
               or len(kernel.inputs) != 1 or kernel.inputs[0].requirement != 'incremental'
               or kernel.configuration.get('concurrency', 1) != 1):
             return stages
-        if kernel.configuration.get('flush_interval'):
+        if kernel.configuration.get('streaming_map') or kernel.configuration.get('flush_interval'):
             # A blocking source pull shares this business thread. Keeping a
             # timer-driven operator here would delay its flush until the next
             # source row/EOI, violating the declared incremental deadline.
@@ -67,6 +73,16 @@ def fuse_single_worker_pipeline(graph, stages, *, policy, bounds):
         return stages
     requests = {'cpu_millis': max(s.profile.requests['cpu_millis'] for s in members),
                 'memory_bytes': resident}
+    # max_active_workers is a ceiling, not a demand to create transport
+    # between synchronous kernels. Optional co-location must fit one real
+    # host; aggregate cluster capacity cannot justify a merged allocation.
+    if hosts is None:
+        if policy.max_active_workers != 1:
+            return stages
+    elif not any(requests['cpu_millis'] <= host.logical_resources.get(
+            'cpu_millis', host.logical_resources.get('cpu', 0) * 1000)
+            and resident <= host.logical_resources.get('memory_bytes', 0) for host in hosts):
+        return stages
     refs = tuple(dict.fromkeys(ref for s in members for ref in s.kernel_refs))
     return (replace(members[0], occurrences=tuple(chain), profile=ResourceProfile(requests=requests),
         replica_min=1, replica_target=1, replica_max=1, resident_bytes=resident,
