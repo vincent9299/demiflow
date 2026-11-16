@@ -70,10 +70,13 @@ def test_failed_pull_releases_owner_without_masking_original_error():
 
 
 def test_native_arrow_pack_uses_parent_run_for_every_callback(tmp_path):
-    seen = []
+    import json
+    seen = tmp_path / 'source-callbacks.jsonl'
     def records():
         for key in range(6):
-            seen.append(current_run().ref)
+            reference = current_run().ref
+            with seen.open('a') as evidence:
+                evidence.write(json.dumps([reference.directory, reference.run_id]) + '\n')
             yield {'k': key, 'payload': b'x' * (2 * 1024**2)}
     executor = LocalDatasetExecutor(resource_root=tmp_path)
     source = DataAPI(executor)
@@ -83,8 +86,10 @@ def test_native_arrow_pack_uses_parent_run_for_every_callback(tmp_path):
                     .join(source.from_items([{'k': i} for i in range(6)]), on='k')
                     .map(lambda row: {'k': row['k']}).take_all())
             assert sorted(rows, key=lambda r: r['k']) == [{'k': i} for i in range(6)]
-            assert seen == [run.ref] * 6
+            assert [json.loads(line) for line in seen.read_text().splitlines()] == [
+                [run.ref.directory, run.ref.run_id]] * 6
             assert executor._run_ref == run.ref
+            assert current_run() is run
     finally:
         executor.close()
 

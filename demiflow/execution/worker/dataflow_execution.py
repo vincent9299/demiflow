@@ -279,6 +279,7 @@ class DataflowWorkerExecutor:
     def start(self) -> None:
         from ..dataflow_models import restore_actor_state
         from ..dataflow_sources import open_source_reader
+        from ..dataflow_source_context import source_run_scope, source_run_view
         from ..exchange.dataflow_channels import open_channels
         from ..kernels.dataflow import make_kernel
         with self._control_lock:
@@ -301,14 +302,17 @@ class DataflowWorkerExecutor:
                             restore_actor_state(instance, ref=state_ref, services=self._services)
                     self._kernels[(occ, partition)] = kernel
             for source_id, splits in self._split_by_source.items():
+                if not hasattr(self, '_source_run'):
+                    self._source_run = source_run_view(self._services)
                 snapshot = self._snapshot_by_source.get(source_id)
                 if snapshot is None:
                     raise _dataflow_error("SOURCE_CHANGED", "no snapshot for assigned source",
                                           context={"source_id": source_id})
                 for split in splits:
                     cursor = self._restored_cursors.get(split.split_id)
-                    reader = open_source_reader(snapshot, split, cursor=cursor,
-                                                services=self._services)
+                    with source_run_scope(self._source_run):
+                        reader = open_source_reader(snapshot, split, cursor=cursor,
+                                                    services=self._services)
                     self._readers[split.split_id] = reader
             if self._channels is None:
                 self._channels = open_channels(self._input_specs + self._output_specs,
@@ -446,7 +450,9 @@ class DataflowWorkerExecutor:
                     errors.append(exc)  # Continue physical cleanup; preserve the first error.
         for split_id, reader in list(self._readers.items()):
             try:
-                reader.close()
+                from ..dataflow_source_context import source_run_scope
+                with source_run_scope(self._source_run):
+                    reader.close()
             except BaseException as exc:
                 errors.append(exc)
         self._kernels.clear()

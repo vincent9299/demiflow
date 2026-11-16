@@ -557,7 +557,9 @@ class WorkerGraphRunner:
                 if self._park_mode and not self._park_can_output(source):
                     self._paused = True
                     break
-                poll = reader.next_record()
+                from ..dataflow_source_context import source_run_scope
+                with source_run_scope(self.e._source_run):
+                    poll = reader.next_record()
                 if poll.status == 'record':
                     source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
                     self._output(source, poll.record)
