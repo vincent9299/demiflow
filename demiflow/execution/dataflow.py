@@ -353,6 +353,8 @@ class DataflowExecution:
             from .recovery_identity import platform_identity
             graph, physical, sealed = load_dataflow(self._action.context.directory,
                 self._action.action_id, store=self._store, bounds=self._bounds)
+            from .dataflow_shared import validate_shared_actor_binding
+            validate_shared_actor_binding(self._request, graph, bounds=physical.bounds)
             from .dataflow_schema import validate_literal_schema_replay
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
             from .dataflow_native_limits import validate_execution_binding
