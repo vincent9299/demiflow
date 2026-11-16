@@ -100,7 +100,8 @@ def stage_literal(source, reference, *, source_id, store, bounds):
                 if pending is None:
                     row, schema = next(source_rows)
                     schema_ref = schemas.put(schema)
-                    encoded, _, _ = _typed_shape(row, bounds.max_row_bytes)
+                    encoded, native, _ = _typed_shape(row, bounds.max_row_bytes)
+                    admit_workspace(2 * native + 512 + _forest_workspace(forest, reference, bounds), bounds)
                     record = Record(identity([source_id, 'literal', index]), {'index': index},
                                     None, row, encoded, index, schema_ref)
                     total, parts = frame_parts(record, bounds,
@@ -166,15 +167,18 @@ class LiteralRows:
                 or manifest['count'] != self.reference.count or manifest['kind'] != self.reference.kind
                 or manifest['items_digest'] != self.reference.items_digest):
             raise DataflowError('SOURCE_CHANGED', 'literal input manifest differs from its original declaration')
+        self._metadata_bytes = metadata_bytes(manifest)
+        # The root carrier and decoded manifest coexist during conversion.
+        self._call(admit_workspace, metadata_bytes(manifest['data_ref']) + 512, bounds)
         root = ArtifactRef(**manifest['data_ref'])
+        del manifest
+        self._metadata_bytes = metadata_bytes((root, self.reference.count, self.reference.items_digest))
+        self._call(admit_workspace, 0, bounds)
         total, _ = block_totals(store, root, bounds, frame_call=self._call)
         if total != self.reference.count:
             raise DataflowError('CORRUPT_ARTIFACT', 'literal root count differs from its original declaration')
-        self._metadata_bytes = metadata_bytes((root, self.reference.count, self.reference.items_digest))
-        self._call(admit_workspace, 0, bounds)
         self._segments = range_segments(store, root, bounds, start=self.index, end=self.end,
             frame_call=self._call, on_retained=self._retain_index)
-        del manifest
 
     def _chunks(self, ref):
         bounds, store = self.services.bounds, self.services.store

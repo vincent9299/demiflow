@@ -836,6 +836,12 @@ class WorkerGraphRunner:
                 reader_bytes -= reader.buffered_bytes
             source_bytes = sum(getattr(source, 'retained_bytes', 0)
                                for source in getattr(self.e, '_readers', {}).values())
+            # A frame codec counts its own input Record. Other source splits'
+            # suspended pending records remain distinct retained owners.
+            for source in getattr(self.e, '_readers', {}).values():
+                pending = getattr(source, '_pending_record', None)
+                if pending is not None and any(value is pending for value in args):
+                    source_bytes -= getattr(source, 'pending_inline_bytes', 0)
             if _frame_source_reader_growth is not None:
                 source_bytes -= _frame_source_reader_growth.buffered_bytes
             retained = peer_bytes + kernel_bytes + reader_bytes + source_bytes + _frame_retained

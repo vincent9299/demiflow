@@ -120,11 +120,20 @@ class _BaseReader:
             ref = self._replay_pending.popleft()
             if ref.media_type != "application/vnd.demiflow.source-pending.v3":
                 raise DataflowError("INCOMPATIBLE_HISTORY", "pending source record lacks provenance")
-            encoded, saved = read_pending_frame(ref, self._services.store,
-                self._services.bounds, services=self._services)
-            record = decode_document(encoded,
-                record_id=saved["record_id"], sequence=saved["sequence"],
-                bounds=self._services.bounds, services=self._services)
+            if getattr(self, '_literal_rows', None) is not None:
+                from .dataflow_record_frames import read_document, decode_frame, line_limit
+                raw = self._literal_frame_call(read_document, ref, self._services.store,
+                    self._services.bounds, _maximum=line_limit(self._services.bounds))
+                encoded, saved = self._literal_frame_call(decode_frame, raw, self._services.bounds, newline=False)
+                del raw
+                record = self._literal_frame_call(decode_document, encoded,
+                    record_id=saved['record_id'], sequence=saved['sequence'], bounds=self._services.bounds)
+            else:
+                encoded, saved = read_pending_frame(ref, self._services.store,
+                    self._services.bounds, services=self._services)
+                record = decode_document(encoded,
+                    record_id=saved["record_id"], sequence=saved["sequence"],
+                    bounds=self._services.bounds, services=self._services)
             # Retain the replayed item until the next successful pull confirms
             # ordered publication, just as on the original attempt.
             self._pending = (ref, *self._replay_pending)
@@ -186,7 +195,10 @@ class _BaseReader:
         if self._pending_record is not None:
             from .dataflow_record_frames import frame_parts
             record = self._pending_record
-            size, chunks = frame_parts(record, self._services.bounds, services=self._services, newline=False)
+            if getattr(self, '_literal_rows', None) is not None:
+                size, chunks = self._literal_frame_call(frame_parts, record, self._services.bounds, newline=False)
+            else:
+                size, chunks = frame_parts(record, self._services.bounds, services=self._services, newline=False)
             ref = self._services.store.put(chunks, max_bytes=size,
                 media_type="application/vnd.demiflow.source-pending.v3")
             self._pending = (ref,)
@@ -294,8 +306,29 @@ class ItemsReader(_BaseReader):
         return row, position
 
     @property
+    def pending_inline_bytes(self):
+        record = self._pending_record
+        if self._literal_rows is None or record is None or record.inline is None:
+            return 0
+        from .dataflow_record_frames import _typed_shape
+        return _typed_shape(record.inline, self._services.bounds.max_row_bytes)[1]
+
+    @property
+    def pending_record_bytes(self):
+        record = self._pending_record
+        if self._literal_rows is None or record is None:
+            return 0
+        from .dataflow_record_frames import _json_shape, metadata_bytes
+        import sys
+        return (self.pending_inline_bytes + sys.getsizeof(record) + sys.getsizeof(vars(record))
+                + _json_shape(record.source_position, self._services.bounds.max_control_bytes)[1]
+                + metadata_bytes((record.record_id, record.sequence, record.encoded_bytes,
+                                  record.payload_ref, record.schema_ref)))
+
+    @property
     def retained_bytes(self):
-        return self._literal_rows.retained_bytes if self._literal_rows is not None else 0
+        return ((self._literal_rows.retained_bytes + self.pending_record_bytes)
+                if self._literal_rows is not None else 0)
 
     @property
     def buffered_bytes(self):
@@ -307,9 +340,12 @@ class ItemsReader(_BaseReader):
             return shared(function, *args,
                 _frame_source_reader_growth=self if source_growth else None, **kwargs)
         retained = self.retained_bytes - (self.buffered_bytes if source_growth else 0)
+        if any(value is self._pending_record for value in args):
+            retained -= self.pending_inline_bytes
         return function(*args, services=self._services, retained=retained, **kwargs)
 
     def _teardown(self) -> None:
+        self._pending_record = None
         close = getattr(self._rows, "close", None)
         if close is not None:
             close()

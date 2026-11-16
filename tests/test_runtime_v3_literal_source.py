@@ -245,3 +245,35 @@ def test_real_dataset_literal_original_ack_gc_and_resume(tmp_path,monkeypatch):
         patch.setattr(DataflowExecution,'_prepare_launch',forbidden)
         with RunContext.resume(reference):
             assert data.from_items(rows).take_all()==rows
+
+
+def test_other_finished_split_pending_record_shares_original_worker_grant(tmp_path):
+    from demiflow.execution.dataflow_record_frames import admit_workspace
+    from test_runtime_v3_finite_reader_credit import HeldState
+    with store_fixture(tmp_path) as (_,store,_):
+        bounds=replace(store._bounds,max_resident_bytes=256*1024,max_control_bytes=4096,
+            max_state_bytes=4096,max_row_bytes=8192,max_batch_bytes=16384)
+        source=ItemsSource(example(4))
+        snapshot=snapshot_source(source,action=NS(action_id='literal-peer-pending'),store=store,bounds=bounds)
+        services=services_for(store,bounds,snapshot,literal_reference(source,bounds))
+        splits=plan_source_splits(snapshot,source,target_partitions=4,bounds=bounds)
+        readers=[open_source_reader(snapshot,s,cursor=None,services=services) for s in splits]
+        runner=WorkerGraphRunner.__new__(WorkerGraphRunner)
+        held=HeldState();runner.e=NS(_readers=dict(enumerate(readers)),_kernels={'held':held})
+        runner.services,runner.bounds=services,bounds
+        runner._condition=threading.Condition();runner._wake_generation=0
+        runner._peer=NS(_bytes=0);runner._finite_input=None
+        for reader in readers:reader._shared_frame_call=runner._frame_call
+        try:
+            assert readers[0].next_record().status=='record'
+            assert readers[0]._literal_rows.retained_bytes==0  # Its one-row split ended.
+            assert readers[0].retained_bytes>1024
+            held.retain(bounds.max_resident_bytes-1024)
+            with pytest.raises(DataflowError,match='resident budget'):
+                runner._frame_call(admit_workspace,0,bounds)
+            # Only the original downstream acknowledgement releases that owner.
+            readers[0].acknowledge_output()
+            runner._frame_call(admit_workspace,0,bounds)
+        finally:
+            for reader in readers:reader.close()
+        assert all(reader.retained_bytes==0 for reader in readers)
