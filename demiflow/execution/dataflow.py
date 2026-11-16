@@ -130,6 +130,7 @@ class DataflowExecution:
         self._idle = set()
         self._done = set()
         self._stopping = False
+        self._terminal_stop_deadline = None
         self._limit = (request.arguments.get("limit") if request.kind == "take" else
                        request.arguments.get("batch_size", 20) if request.kind == "take_batch" else None)
         self._failure = None
@@ -178,6 +179,8 @@ class DataflowExecution:
         if self._stopping or self._state == "succeeded":
             return
         self._stopping = True
+        self._terminal_stop_deadline = (time.monotonic() +
+            self._action.context.limits['cancel_grace_s'])
         self._start_checkpoint_deadline()
         self._checkpoint_deferred.clear()
         self._idle.clear()
@@ -216,6 +219,10 @@ class DataflowExecution:
     def _check_stop(self) -> None:
         self._action.context.check_stop()
         self._native_guard.check()
+        if (self._terminal_stop_deadline is not None and self._terminal_result is None
+                and time.monotonic() >= self._terminal_stop_deadline):
+            from .recovery_contract import RecoveryContractError
+            raise RecoveryContractError('Delivery exceeded cancel grace; unfinished writer is isolated while draining')
         self._check_checkpoint_deadline()
         if time.monotonic() - self._began_at >= self._bounds.timeout_ms / 1000:
             raise DataflowError('DEADLINE_EXCEEDED', 'action exceeded its admitted execution timeout')
@@ -1515,7 +1522,7 @@ class DataflowExecution:
         if self._cut is not None and self._cut.cut_id in self._checkpoint._pending:
             self._checkpoint.abort(self._cut.cut_id, reason=reason)
         for endpoint in self._endpoints.values():
-            endpoint.cancel(reason, deadline_ms=self._policy.control_timeout_ms)
+            endpoint.cancel(reason, deadline_ms=self._cleanup_grace_ms())
         # Unknown model requests are never replayed and committed results are
         # never deleted; physical owners are released only on confirmed exit.
 
@@ -1536,7 +1543,7 @@ class DataflowExecution:
         except Exception as exc:
             cleanup_error = exc
         self._closed = True
-        deadline_ms = self._policy.control_timeout_ms
+        deadline_ms = self._cleanup_grace_ms()
         physical_closed = not self._scope_open
         # Finish actor aclose and reader teardown while the driver journal is
         # still reachable. Physical termination remains the final fallback.
@@ -1564,6 +1571,70 @@ class DataflowExecution:
                     cleanup_error = exc
                 else:
                     cleanup_error.add_note("Physical cleanup also failed: " + str(exc))
+        if not physical_closed and self._defer_live_thread_cleanup():
+            from .recovery_contract import RecoveryContractError
+            isolated = RecoveryContractError('Native writer is isolated while draining; run lease is retained')
+            if cleanup_error is not None:
+                isolated.add_note('Original cleanup: ' + str(cleanup_error))
+            raise isolated
+        self._close_owned_handles(physical_closed=physical_closed,
+                                  cleanup_error=cleanup_error, deadline_ms=deadline_ms)
+
+    def _cleanup_grace_ms(self):
+        if self._stopping or self._cancelled or self._failure is not None:
+            return max(1, min(self._policy.control_timeout_ms,
+                int(self._action.context.limits['cancel_grace_s'] * 1000)))
+        return self._policy.control_timeout_ms
+
+    def _defer_live_thread_cleanup(self):
+        if self._policy.provider != 'local' or self._policy.worker_mode != 'thread':
+            return False
+        connector = self._services.resources.provider._control
+        units = tuple(connector.units.values())
+        if not units:
+            return False
+        # A requested stop, closed mailbox or cancelled Future is not physical
+        # exit evidence. The original provider owns the real thread membership.
+        live = False
+        for unit in units:
+            with unit.owned_lock:
+                owned = tuple(unit.owned)
+            live |= unit.thread.is_alive() or any(thread.is_alive() for thread in owned)
+        if not live:
+            return False
+        from contextvars import copy_context
+        from threading import Thread
+        context = copy_context()
+
+        def finish():
+            try:
+                while not getattr(self._scheduler, '_physical_exit_confirmed', False):
+                    try:
+                        # Repeat reconciliation of the original ABANDON intent;
+                        # no replacement allocation or execution is admitted.
+                        self._scheduler.close(deadline_ms=250)
+                    except Exception:
+                        if not getattr(self._scheduler, '_physical_exit_confirmed', False):
+                            time.sleep(.01)
+                for endpoint in self._endpoints.values():
+                    try:
+                        self._drain_worker_observations(endpoint)
+                    except Exception:
+                        pass
+                self._close_owned_handles(physical_closed=True, deadline_ms=1000,
+                                          wait_for_service=True)
+            except BaseException as exc:
+                self._deferred_cleanup_error = exc
+                raise
+
+        self._deferred_cleanup = Thread(target=context.run, args=(finish,),
+            name='demiflow-dataflow-owned-drain', daemon=True)
+        self._deferred_cleanup.start()
+        self._action.context.quarantine_worker(self._deferred_cleanup)
+        return True
+
+    def _close_owned_handles(self, *, physical_closed, deadline_ms,
+                             cleanup_error=None, wait_for_service=False):
         if self._channels is not None:
             close_channels(self._channels, reason="execution_close", deadline_ms=deadline_ms)
             self._channels = None
@@ -1582,7 +1653,13 @@ class DataflowExecution:
             pass
         if getattr(self, '_stream_lance', None) is not None:
             self._stream_lance.close()
-        stopped = getattr(self._services.journal_service, 'physically_stopped', lambda: False)()
+        physically_stopped = getattr(self._services.journal_service, 'physically_stopped', lambda: False)
+        if wait_for_service:
+            # The run lease remains owned by this quarantine thread until the
+            # original driver RPC/native I/O threads also positively exit.
+            while not physically_stopped():
+                time.sleep(.01)
+        stopped = physically_stopped()
         if physical_closed and stopped:
             self._store.close()
             from .dataflow_gc import collect_published_orphans, defer_run_gc

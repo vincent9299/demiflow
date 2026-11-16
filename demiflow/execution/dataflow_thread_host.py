@@ -187,9 +187,16 @@ class ThreadHostEndpoint(_EndpointBase):
         self._send_k3('Assign', {'assignment': control})
         self._activated = True
 
-    def _send_k3(self, kind, payload):
-        future = self._connector.units[self._allocation_id].submit('handle', self._k3_envelope(kind, payload))
-        deadline = time.monotonic() + self._services.policy.control_timeout_ms / 1000
+    def _send_k3(self, kind, payload, *, timeout_ms=None):
+        cleanup = kind in ('Drain', 'Quiesce', 'Cancel')
+        future = getattr(self, '_cleanup_future', None) if cleanup else None
+        if future is None:
+            future = self._connector.units[self._allocation_id].submit('handle', self._k3_envelope(kind, payload))
+            if cleanup:
+                self._cleanup_future = future
+        timeout_ms = min(self._services.policy.control_timeout_ms,
+            timeout_ms if timeout_ms is not None else payload.get('deadline_ms', self._services.policy.control_timeout_ms))
+        deadline = time.monotonic() + timeout_ms / 1000
         while not future.done():
             for event in self._connector.pull(self._allocation_id, limit=self._services.bounds.max_pending_events):
                 self._early_event(event)
@@ -208,6 +215,14 @@ class ThreadHostEndpoint(_EndpointBase):
         if kind in ('Drain', 'Quiesce', 'Cancel'):
             self._cleanup_completed = True
         return result.get('receipt')
+
+    def cancel(self, reason, *, deadline_ms):
+        import uuid
+        try:
+            self._send_k3('Cancel', {'operation_id': uuid.uuid4().hex, 'reason': reason},
+                          timeout_ms=deadline_ms)
+        except DataflowError:
+            pass  # Original provider retains every unconfirmed physical owner.
 
     def send_business(self, command):
         host = self._connector._host(self._allocation_id)

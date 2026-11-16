@@ -307,7 +307,10 @@ class DataflowScheduler:
         self._desired_revision = accepted["desired_revision"]
         deadline = time.monotonic() + deadline_ms / 1000.0
         while True:
-            self._resources.reconcile_once(fence, deadline, 16)
+            # Cleanup I/O may use the entire grace. Claim only the operation
+            # we can actually attempt; an unstarted leased sibling would wait
+            # its claim TTL even after the held thread has really exited.
+            self._resources.reconcile_once(fence, deadline, 1)
             snapshot = self._resources.get(self.scope_id)
             if not snapshot.get("cleanup_obligations") and all(a.get("cleanup") == "CONFIRMED" for a in snapshot["allocations"]):
                 self._closed = True
@@ -338,7 +341,10 @@ class DataflowScheduler:
                 raise
         _, _, fence = self._owner_binding()
         while True:
-            self._resources.reconcile_once(fence, deadline, 16)
+            # Cleanup I/O may use the entire grace. Claim only the operation
+            # we can actually attempt; an unstarted leased sibling would wait
+            # its claim TTL even after the held thread has really exited.
+            self._resources.reconcile_once(fence, deadline, 1)
             reader = getattr(self._resources.state, "read_allocation", None)
             if reader is not None:
                 observations = [reader(self.scope_id, allocation_id) for allocation_id in allocations]
