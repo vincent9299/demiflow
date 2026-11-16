@@ -1,0 +1,2411 @@
+{
+  "date": "2026-11-16",
+  "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+  "branch": "engine/gpt-v3-regression-20261115",
+  "tested_code_head": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+  "commits": [
+    "60e8d307c1a8e650f510ca9007791783c26bc5c5",
+    "24e2cb09af06be236fd7156ba02afeae10d97455",
+    "d860639e5c49e34f61ba8cfc24361a9e03046698",
+    "17a93bc69cfaac8215d263710d61dd102b6f5e69"
+  ],
+  "production_files": [
+    "demiflow/execution/dataflow.py",
+    "demiflow/execution/dataflow_environment.py"
+  ],
+  "source_verification": {
+    "same_source_in_both_runs": true,
+    "git_archive_head": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+    "input_count": 2188,
+    "mismatches": [],
+    "frozen_reference": "362d8528c27ae60a0d6ae0ccc986a0ff93847de8",
+    "frozen_sha256": {
+      "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+      "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+      "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+      "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+      "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+      "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+      "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+    }
+  },
+  "local": {
+    "fixed_head": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+    "head_after": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+    "inputs": 2188,
+    "changed_inputs": [],
+    "status_after": "",
+    "exit_code": 0,
+    "call_results": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0
+    },
+    "call_seconds": 143.71753484755754,
+    "wall_seconds": 153.61286735534668,
+    "fixture_fd_checks": [
+      {
+        "baseline": 53,
+        "before_original_close": 53
+      }
+    ],
+    "children_after_environment_close": [],
+    "environment": {
+      "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/tests",
+      "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-v017-local-final-capacity",
+      "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-v017-local-final-home",
+      "DEMIFLOW_RESOURCE_DOMAIN": "/tmp/demiflow-v017-local-final-domain",
+      "DEMIFLOW_V3_PROVIDER": "local",
+      "DEMIFLOW_V3_ENV": "local"
+    },
+    "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+    "import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/__init__.py",
+    "scope": {
+      "public": "actual Dataset model-field routing and shared forks; original hash/rebalance lowering",
+      "native": "explicit ExchangeSpec contracts submitted before first seal; original HostedWorkers and ACK recovery",
+      "not_claimed": [
+        "new Dataset target/broadcast DSL",
+        "business-name to physical-reader compiler mapping",
+        "physical host outage or two-host execution"
+      ]
+    },
+    "public_dataset": {
+      "shared_models": {
+        "rows": 24,
+        "plan_id": "029e12e03992ee714e7fe1f44fd89311eb3609ac0bd7407024066328b5992cc9",
+        "dag_id": "b9301d0559797bfcf6a67c8890cb8b910637640d8ab299d3205755c6cf2754fa",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "3d8952fb97854229a398d95e04a2f7e7",
+          "new_fence": "784eae1e74154de097350cf9ece0c5c3"
+        },
+        "loss": {
+          "allocation_id": "1480dc2ff9c6446a85ddc6f1a7254134",
+          "boot_id": "aa34185f156f49e980948e62a8c30ef6",
+          "runner_thread_id": 64051,
+          "worker_process_id": 63961,
+          "stage_id": "stage-a259d3009c5fbca0f19d1b82a456571a21fc44f93523198c1ac60b1afcbbe4f2",
+          "partition_ids": [
+            "stage-a259d3009c5fbca0f19d1b82a456571a21fc44f93523198c1ac60b1afcbbe4f2-p0"
+          ],
+          "kind": "actual Local worker SIGKILL",
+          "signal": 9,
+          "command": "/yzp/zhaozy/yangzepeng/0905/env/bin/python\u0000-B\u0000-m\u0000demiflow.execution.worker.bootstrap\u0000"
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 60,
+        "restored_positive_ordinals": [
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "hash_rebalance": {
+        "rows": 12,
+        "plan_id": "689cd9b2b0064f8a9ac43904d3c744ea99342534f167ddc2b0a38e2eab6e4700",
+        "dag_id": "75866fe0c47dfbcfa8ef804f84debddb485e875278beb8848a2b5d3effd1f4d5",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "c6026bc7443b44589f8e689cb7c46f3d",
+          "new_fence": "1a7b6b6601f046c48035b827734d66ea"
+        },
+        "loss": {
+          "allocation_id": "0bf3386e33db41349fdc909ed857ef6a",
+          "boot_id": "c8d1a2aef9314dd7927dc139dd88efa4",
+          "runner_thread_id": 65306,
+          "worker_process_id": 65224,
+          "stage_id": "stage-b8b05a18d11d68cfa147e24afffcafc4ff65a255f5611dee1d1213730813266f",
+          "partition_ids": [
+            "stage-b8b05a18d11d68cfa147e24afffcafc4ff65a255f5611dee1d1213730813266f-p0"
+          ],
+          "kind": "actual Local worker SIGKILL",
+          "signal": 9,
+          "command": "/yzp/zhaozy/yangzepeng/0905/env/bin/python\u0000-B\u0000-m\u0000demiflow.execution.worker.bootstrap\u0000"
+        },
+        "acked_prefix_entries": 8,
+        "final_acked_entries": 11,
+        "committed_cut_count": 11,
+        "verified_suffix_deliveries": 16,
+        "restored_positive_ordinals": [
+          4
+        ],
+        "duplicate_delivery_rejections": 1
+      }
+    },
+    "native_physical_contracts": {
+      "hash": {
+        "rows": 12,
+        "plan_id": "10b02a7525a893824325ac3257bb7fae4dbb9a5deba3fcab11265403a8b08021",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "440ffcb77c0f4a1193f78ad4f97f7f70",
+          "new_fence": "a99bc638c0c748758759dad1d600ef73"
+        },
+        "loss": {
+          "allocation_id": "97c1c2c1a91b4db5bd31efcc97822f6e",
+          "boot_id": "25be2038dc92467cb15a6278ba0fcc48",
+          "runner_thread_id": 530,
+          "worker_process_id": 350,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Local worker SIGKILL",
+          "signal": 9,
+          "command": "/yzp/zhaozy/yangzepeng/0905/env/bin/python\u0000-B\u0000-m\u0000demiflow.execution.worker.bootstrap\u0000"
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 16,
+        "restored_positive_ordinals": [
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "rebalance": {
+        "rows": 12,
+        "plan_id": "038bf66bb713cf52e509d6d380926a4a337d7d92236f5ee84d64518dd515449c",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "c5d2e9392b6449e2b6a3399f066a9f21",
+          "new_fence": "9e6dae5641d04ee48ed5e3770815500b"
+        },
+        "loss": {
+          "allocation_id": "9a0f1ecb991241048d292c5271cb6ea3",
+          "boot_id": "5caa7d4339a94e678bb073cb7dbe4c5c",
+          "runner_thread_id": 1132,
+          "worker_process_id": 1055,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Local worker SIGKILL",
+          "signal": 9,
+          "command": "/yzp/zhaozy/yangzepeng/0905/env/bin/python\u0000-B\u0000-m\u0000demiflow.execution.worker.bootstrap\u0000"
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 20,
+        "restored_positive_ordinals": [
+          1,
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "target": {
+        "rows": 12,
+        "plan_id": "32409f5af6663b05bf2553fbfcb0ac355c1187b8dc904a406d0d4c6b22a2ca18",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "4d22fba35a8843dbaf0007b4720e7b93",
+          "new_fence": "cf015b7a110547dda4c775bd471bbcf4"
+        },
+        "loss": {
+          "allocation_id": "ff98b5b0b4834eddba0a2f13acb0cf45",
+          "boot_id": "83534711d41e48338a9d0546b35d2be2",
+          "runner_thread_id": 1563,
+          "worker_process_id": 1486,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Local worker SIGKILL",
+          "signal": 9,
+          "command": "/yzp/zhaozy/yangzepeng/0905/env/bin/python\u0000-B\u0000-m\u0000demiflow.execution.worker.bootstrap\u0000"
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 20,
+        "restored_positive_ordinals": [
+          1,
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "broadcast": {
+        "rows": 24,
+        "plan_id": "c3acfe6d89cbe7b4f28fb021dc0a3a8f82ef968bb3283ae7d4ebe31446d7d0fd",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "31a8af746ff84a5ea3eae4fe85c431b3",
+          "new_fence": "2559b8447ad94496bdf896670a96d7c9"
+        },
+        "loss": {
+          "allocation_id": "8fc516f6b47d4153b87ba32e8d8375f2",
+          "boot_id": "a495b13980e64e0f9d5488521d2623b8",
+          "runner_thread_id": 2145,
+          "worker_process_id": 2066,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Local worker SIGKILL",
+          "signal": 9,
+          "command": "/yzp/zhaozy/yangzepeng/0905/env/bin/python\u0000-B\u0000-m\u0000demiflow.execution.worker.bootstrap\u0000"
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 40,
+        "restored_positive_ordinals": [
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      }
+    },
+    "public_shared_model_requests": 12,
+    "committed_shared_prefix_rows": 2,
+    "unknown_physical_target": {
+      "code": "INVALID_CONTRACT",
+      "message": "INVALID_CONTRACT: target value is not a reader of this channel"
+    },
+    "unknown_business_model": {
+      "error": "\"'undeclared'\"",
+      "http_requests": [],
+      "commits": []
+    },
+    "original_channel_component_routes": [
+      {
+        "routing": "hash",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ]
+          ],
+          [
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ]
+          ],
+          [
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ]
+          ],
+          [
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ]
+          ],
+          [
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ]
+          ],
+          [
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "dcf49bc070f6538bde7552a823719c610e8fa0bd4acc41deeb0ba86dcea13464",
+        "snapshot_digest": "3ef6dd3b8e60591c4ca9bc8ee2dee7676fb749b045be0451e7c37b8c8f3a1aa9"
+      },
+      {
+        "routing": "rebalance",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ],
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "e4624291dee90c3110fadb4b69ce642bff72199beb6250316956e289b05c8b88",
+        "snapshot_digest": "c8ddc67a2b2da8b2fc838682f669a8313db233a0dd1d944a0a79de6b5f3007f0"
+      },
+      {
+        "routing": "target",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ],
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "a6714f9c53db5846d8f1c3564149ae46ea62b8d78d22ccf96490ebff547ccfd5",
+        "snapshot_digest": "d78064f8a499c0bbe3822a6cef4f9ac3f1d4662516b90bd67357c4b8de82c8a0"
+      },
+      {
+        "routing": "broadcast",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ],
+            [
+              "b",
+              "ffe9f46218fc45e1cddd9f0579f387ec6025ff026fde988b3be57029d778b7f0",
+              0
+            ],
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "a",
+              "61cb8866cd68a72e74fac5ac334f061725b693f3f127fe35c3324d7d2c862432",
+              1
+            ],
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ],
+            [
+              "c",
+              "302d4e297437b250ccbde5cbe4c14372772d6adcc8573dd1c769371a1cea4cfa",
+              1
+            ]
+          ],
+          [
+            [
+              "a",
+              "70497253c7cabb6d923088ae266c9b0f556c7b8eb930dbc1d57fa86a688ed99a",
+              2
+            ],
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ],
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ],
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ],
+            [
+              "c",
+              "3d136ee6aca5f12e8832b65a7eae3720b1758c65d4c5ad07e97ed080ecec7ab1",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "a",
+              "7cab55da26ef7fcb553dc0076e43f7a11b21503934401a12023809047acb7163",
+              4
+            ],
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ],
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "a",
+              "c5fc448b720464ca978ba48f62b1f6946ceacf6aa1b5bbc1bd0bbf5373f1baab",
+              5
+            ],
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ],
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ],
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ],
+            [
+              "c",
+              "ec0bdab521b80e7e15de8ac48106cae220fc1345395183c4d9932b45ec664ff4",
+              6
+            ]
+          ],
+          [
+            [
+              "a",
+              "e7c14bd53cd6ed136157d047e362f19a677204375a4fe5a7ce7a2395c9a88896",
+              7
+            ],
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ],
+            [
+              "c",
+              "f3b5c9c18f8910e624b0a9f0feb9a13894015ca1855da300a455a0b7d6461d01",
+              7
+            ]
+          ],
+          [
+            [
+              "a",
+              "cfe9b2a25db7f20eac127279916101ba8d17f90424b52349907eef427354b564",
+              8
+            ],
+            [
+              "b",
+              "727d83216a63d4e127166b58ae5080204fc0883bb242656c7a11cd458ae2f473",
+              8
+            ],
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ],
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ],
+            [
+              "c",
+              "c8b027455b97331fa75f3563cae3107e496a4e3703e042227ffa4bc44f0664a1",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ],
+            [
+              "b",
+              "ffe9f46218fc45e1cddd9f0579f387ec6025ff026fde988b3be57029d778b7f0",
+              0
+            ],
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "a",
+              "61cb8866cd68a72e74fac5ac334f061725b693f3f127fe35c3324d7d2c862432",
+              1
+            ],
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ],
+            [
+              "c",
+              "302d4e297437b250ccbde5cbe4c14372772d6adcc8573dd1c769371a1cea4cfa",
+              1
+            ]
+          ],
+          [
+            [
+              "a",
+              "70497253c7cabb6d923088ae266c9b0f556c7b8eb930dbc1d57fa86a688ed99a",
+              2
+            ],
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ],
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ],
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ],
+            [
+              "c",
+              "3d136ee6aca5f12e8832b65a7eae3720b1758c65d4c5ad07e97ed080ecec7ab1",
+              3
+            ]
+          ],
+          [
+            [
+              "a",
+              "7cab55da26ef7fcb553dc0076e43f7a11b21503934401a12023809047acb7163",
+              4
+            ],
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ],
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "a",
+              "c5fc448b720464ca978ba48f62b1f6946ceacf6aa1b5bbc1bd0bbf5373f1baab",
+              5
+            ],
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ],
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ],
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ],
+            [
+              "c",
+              "ec0bdab521b80e7e15de8ac48106cae220fc1345395183c4d9932b45ec664ff4",
+              6
+            ]
+          ],
+          [
+            [
+              "a",
+              "e7c14bd53cd6ed136157d047e362f19a677204375a4fe5a7ce7a2395c9a88896",
+              7
+            ],
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ],
+            [
+              "c",
+              "f3b5c9c18f8910e624b0a9f0feb9a13894015ca1855da300a455a0b7d6461d01",
+              7
+            ]
+          ],
+          [
+            [
+              "a",
+              "cfe9b2a25db7f20eac127279916101ba8d17f90424b52349907eef427354b564",
+              8
+            ],
+            [
+              "b",
+              "727d83216a63d4e127166b58ae5080204fc0883bb242656c7a11cd458ae2f473",
+              8
+            ],
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ],
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ],
+            [
+              "c",
+              "c8b027455b97331fa75f3563cae3107e496a4e3703e042227ffa4bc44f0664a1",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "80756b588eadb7bcb09bc14528a8d2e201ff94deba33a21b37c7ee2f15e6b6b2",
+        "snapshot_digest": "869122dc2effb63142ff3b2f21f4b1a6a7de62c02cb18318843f7ca789e18c14"
+      }
+    ],
+    "execute_action_calls": 9,
+    "ray_data_import_attempts": [],
+    "files": {
+      "/tmp/demiflow-v017-local-final-evidence/verification.json": "e7ee7d07103a25295d56921b73b16f69e191200143a7e1f35a521be591fb2996",
+      "/tmp/demiflow-v017-local-final-evidence/result.xml": "4b465708894447ae75620a45bb9a844526a1eef39015347a4460fe2d9b8c5ae8",
+      "/tmp/demiflow-v017-local-final-evidence/scenario-route_recovery.json": "43032433c5f5fb1242f49ade43d7a65a1e11b94ec179d0948f3fe07bf27ca91f"
+    },
+    "private_ray_environment": null
+  },
+  "ray_core": {
+    "fixed_head": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+    "head_after": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+    "inputs": 2188,
+    "changed_inputs": [],
+    "status_after": "",
+    "exit_code": 0,
+    "call_results": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "call_seconds": 175.82506751269102,
+    "wall_seconds": 181.4668686389923,
+    "fixture_fd_checks": [
+      {
+        "baseline": 38,
+        "before_original_close": 41
+      }
+    ],
+    "children_after_environment_close": [],
+    "environment": {
+      "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/tests",
+      "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-v017-ray-final-capacity",
+      "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-v017-ray-final-home",
+      "DEMIFLOW_RESOURCE_DOMAIN": "/tmp/demiflow-v017-ray-final-domain",
+      "DEMIFLOW_V3_PROVIDER": "ray_core",
+      "DEMIFLOW_V3_ENV": "ray"
+    },
+    "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+    "import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115/demiflow/__init__.py",
+    "scope": {
+      "public": "actual Dataset model-field routing and shared forks; original hash/rebalance lowering",
+      "native": "explicit ExchangeSpec contracts submitted before first seal; original HostedWorkers and ACK recovery",
+      "not_claimed": [
+        "new Dataset target/broadcast DSL",
+        "business-name to physical-reader compiler mapping",
+        "physical host outage or two-host execution"
+      ]
+    },
+    "public_dataset": {
+      "shared_models": {
+        "rows": 24,
+        "plan_id": "60ec8a4b58a74e42117e2ff725d96d1e4e9bc012d381ed72adad4b3adeb6640d",
+        "dag_id": "e9beeb1833bf55e2844df1d958f2277648093e8ea402a2fb1611f1e341fac2bc",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "58ca299395774af59d1624732bb6d69f",
+          "new_fence": "17b9cf9dfd2d4e1487f710e7c1073dff"
+        },
+        "loss": {
+          "allocation_id": "08f61090f3254c6e847a07d05260688d",
+          "boot_id": "e4954e12113a4f168b65e7e880ebc951",
+          "worker_process_id": 7192,
+          "runner_thread_id": 7875,
+          "stage_id": "stage-a259d3009c5fbca0f19d1b82a456571a21fc44f93523198c1ac60b1afcbbe4f2",
+          "partition_ids": [
+            "stage-a259d3009c5fbca0f19d1b82a456571a21fc44f93523198c1ac60b1afcbbe4f2-p0"
+          ],
+          "kind": "actual Ray HostedDataflowWorker loss",
+          "death": {
+            "actor_id": "c62c89f8977c8a6609b6920301000000",
+            "state": "DEAD",
+            "pid": 7192,
+            "node_id": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751",
+            "num_restarts": 0
+          }
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 60,
+        "restored_positive_ordinals": [
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "hash_rebalance": {
+        "rows": 12,
+        "plan_id": "56925c966695044c355428a3c908b7241f46448d7dce9518d7a36418e9763b57",
+        "dag_id": "75866fe0c47dfbcfa8ef804f84debddb485e875278beb8848a2b5d3effd1f4d5",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "dd9ecdaffd4345d3a40a081142b80685",
+          "new_fence": "095fd3dbb6b14ddfab45755b9fb2d27e"
+        },
+        "loss": {
+          "allocation_id": "c588ea173f984a0892e57c5f5b8450f3",
+          "boot_id": "a6063e75212a4280bc9a1183019534bd",
+          "worker_process_id": 8862,
+          "runner_thread_id": 9305,
+          "stage_id": "stage-b8b05a18d11d68cfa147e24afffcafc4ff65a255f5611dee1d1213730813266f",
+          "partition_ids": [
+            "stage-b8b05a18d11d68cfa147e24afffcafc4ff65a255f5611dee1d1213730813266f-p0"
+          ],
+          "kind": "actual Ray HostedDataflowWorker loss",
+          "death": {
+            "actor_id": "5dc141cd5351f7c164a6841c01000000",
+            "state": "DEAD",
+            "pid": 8862,
+            "node_id": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751",
+            "num_restarts": 0
+          }
+        },
+        "acked_prefix_entries": 8,
+        "final_acked_entries": 11,
+        "committed_cut_count": 11,
+        "verified_suffix_deliveries": 16,
+        "restored_positive_ordinals": [
+          4
+        ],
+        "duplicate_delivery_rejections": 1
+      }
+    },
+    "native_physical_contracts": {
+      "hash": {
+        "rows": 12,
+        "plan_id": "7cc94512ca54cc42bf6e36a01cbf03066bea90117a28b5d0342a9288f9f6dadd",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "6227939fbd00448da9172e2402e5fa4d",
+          "new_fence": "82015026729540a497f3217ce36ac998"
+        },
+        "loss": {
+          "allocation_id": "2d565323a915482c9f6c0f3c01e9a528",
+          "boot_id": "ce36862e30ec4512bc791f0f89d7d876",
+          "worker_process_id": 10104,
+          "runner_thread_id": 10407,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Ray HostedDataflowWorker loss",
+          "death": {
+            "actor_id": "0199da85556ee0ac3cfd840901000000",
+            "state": "DEAD",
+            "pid": 10104,
+            "node_id": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751",
+            "num_restarts": 0
+          }
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 16,
+        "restored_positive_ordinals": [
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "rebalance": {
+        "rows": 12,
+        "plan_id": "657f6cbc3d943b378c4780a9db305bcee17d367810900f521823c3104aad8b5f",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "73668e7a81f74e5ebb39de17eb5844b6",
+          "new_fence": "99bbc2a1fdb84c8f81fe0a5e5353c47c"
+        },
+        "loss": {
+          "allocation_id": "f2807277920c4fd09df82f16224410b2",
+          "boot_id": "b967fa7737724efbad81c7445d4a9177",
+          "worker_process_id": 10825,
+          "runner_thread_id": 11104,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Ray HostedDataflowWorker loss",
+          "death": {
+            "actor_id": "9f8d0462f813684bf4b8cca701000000",
+            "state": "DEAD",
+            "pid": 10825,
+            "node_id": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751",
+            "num_restarts": 0
+          }
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 20,
+        "restored_positive_ordinals": [
+          1,
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "target": {
+        "rows": 12,
+        "plan_id": "ecfe336fee7e0c1f5a739120241f79ff3f4196472e45a0ac52c35237cbcd6169",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "3fef101c0ddd4041867e26483998dabc",
+          "new_fence": "c612608699314724bf28bf29356b036e"
+        },
+        "loss": {
+          "allocation_id": "39d80673d30c4d89b1b810ea69f2620b",
+          "boot_id": "cfba95028c804d3b9acb16bc632384b7",
+          "worker_process_id": 11483,
+          "runner_thread_id": 11750,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Ray HostedDataflowWorker loss",
+          "death": {
+            "actor_id": "5f9072e79a8ad969639e155a01000000",
+            "state": "DEAD",
+            "pid": 11483,
+            "node_id": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751",
+            "num_restarts": 0
+          }
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 20,
+        "restored_positive_ordinals": [
+          1,
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      },
+      "broadcast": {
+        "rows": 24,
+        "plan_id": "b9af08aea5adc172ce2d506ca8c3003980359f6ba07fbb6baf4c6b8eb32f8a25",
+        "dag_id": "35f013d6748c0aec343a173639cdf37ff2a51999732f28e6268265a59e197e66",
+        "attempts": {
+          "old": 1,
+          "new": 2,
+          "old_fence": "585bc4b161b147c9ae45d178a9aacb42",
+          "new_fence": "4017cd9e04794c00b9c97fbb6b51110d"
+        },
+        "loss": {
+          "allocation_id": "ae2ac6a214ef467fbbdbd0e798008ec8",
+          "boot_id": "b66aaf2ce1474768ab774899f5d38f69",
+          "worker_process_id": 12086,
+          "runner_thread_id": 12350,
+          "stage_id": "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+          "partition_ids": [
+            "stage-8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0-p0"
+          ],
+          "kind": "actual Ray HostedDataflowWorker loss",
+          "death": {
+            "actor_id": "216cb183f7ee46bab56079a801000000",
+            "state": "DEAD",
+            "pid": 12086,
+            "node_id": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751",
+            "num_restarts": 0
+          }
+        },
+        "acked_prefix_entries": 1,
+        "final_acked_entries": 7,
+        "committed_cut_count": 7,
+        "verified_suffix_deliveries": 40,
+        "restored_positive_ordinals": [
+          2
+        ],
+        "duplicate_delivery_rejections": 1
+      }
+    },
+    "public_shared_model_requests": 12,
+    "committed_shared_prefix_rows": 2,
+    "unknown_physical_target": {
+      "code": "INVALID_CONTRACT",
+      "message": "INVALID_CONTRACT: target value is not a reader of this channel"
+    },
+    "unknown_business_model": {
+      "error": "\"'undeclared'\"",
+      "http_requests": [],
+      "commits": []
+    },
+    "original_channel_component_routes": [
+      {
+        "routing": "hash",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ]
+          ],
+          [
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ]
+          ],
+          [
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ]
+          ],
+          [
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ]
+          ],
+          [
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ]
+          ],
+          [
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "dcf49bc070f6538bde7552a823719c610e8fa0bd4acc41deeb0ba86dcea13464",
+        "snapshot_digest": "3ef6dd3b8e60591c4ca9bc8ee2dee7676fb749b045be0451e7c37b8c8f3a1aa9"
+      },
+      {
+        "routing": "rebalance",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ],
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "e4624291dee90c3110fadb4b69ce642bff72199beb6250316956e289b05c8b88",
+        "snapshot_digest": "c8ddc67a2b2da8b2fc838682f669a8313db233a0dd1d944a0a79de6b5f3007f0"
+      },
+      {
+        "routing": "target",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ]
+          ],
+          [
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ]
+          ],
+          [
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ]
+          ],
+          [
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ]
+          ],
+          [
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ]
+          ],
+          [
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ]
+          ],
+          [
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "a6714f9c53db5846d8f1c3564149ae46ea62b8d78d22ccf96490ebff547ccfd5",
+        "snapshot_digest": "d78064f8a499c0bbe3822a6cef4f9ac3f1d4662516b90bd67357c4b8de82c8a0"
+      },
+      {
+        "routing": "broadcast",
+        "scope": "native channel contract, not public lowering",
+        "prefix": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ],
+            [
+              "b",
+              "ffe9f46218fc45e1cddd9f0579f387ec6025ff026fde988b3be57029d778b7f0",
+              0
+            ],
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "a",
+              "61cb8866cd68a72e74fac5ac334f061725b693f3f127fe35c3324d7d2c862432",
+              1
+            ],
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ],
+            [
+              "c",
+              "302d4e297437b250ccbde5cbe4c14372772d6adcc8573dd1c769371a1cea4cfa",
+              1
+            ]
+          ],
+          [
+            [
+              "a",
+              "70497253c7cabb6d923088ae266c9b0f556c7b8eb930dbc1d57fa86a688ed99a",
+              2
+            ],
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ],
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ],
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ],
+            [
+              "c",
+              "3d136ee6aca5f12e8832b65a7eae3720b1758c65d4c5ad07e97ed080ecec7ab1",
+              3
+            ]
+          ]
+        ],
+        "suffix": [
+          [
+            [
+              "a",
+              "7cab55da26ef7fcb553dc0076e43f7a11b21503934401a12023809047acb7163",
+              4
+            ],
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ],
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "a",
+              "c5fc448b720464ca978ba48f62b1f6946ceacf6aa1b5bbc1bd0bbf5373f1baab",
+              5
+            ],
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ],
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ],
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ],
+            [
+              "c",
+              "ec0bdab521b80e7e15de8ac48106cae220fc1345395183c4d9932b45ec664ff4",
+              6
+            ]
+          ],
+          [
+            [
+              "a",
+              "e7c14bd53cd6ed136157d047e362f19a677204375a4fe5a7ce7a2395c9a88896",
+              7
+            ],
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ],
+            [
+              "c",
+              "f3b5c9c18f8910e624b0a9f0feb9a13894015ca1855da300a455a0b7d6461d01",
+              7
+            ]
+          ],
+          [
+            [
+              "a",
+              "cfe9b2a25db7f20eac127279916101ba8d17f90424b52349907eef427354b564",
+              8
+            ],
+            [
+              "b",
+              "727d83216a63d4e127166b58ae5080204fc0883bb242656c7a11cd458ae2f473",
+              8
+            ],
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ],
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ],
+            [
+              "c",
+              "c8b027455b97331fa75f3563cae3107e496a4e3703e042227ffa4bc44f0664a1",
+              9
+            ]
+          ]
+        ],
+        "expected": [
+          [
+            [
+              "a",
+              "4fdb4474c9b793628f5ac9697721d8819dc3f471c7f350d7289da8519f0fe221",
+              0
+            ],
+            [
+              "b",
+              "ffe9f46218fc45e1cddd9f0579f387ec6025ff026fde988b3be57029d778b7f0",
+              0
+            ],
+            [
+              "c",
+              "fd7bca64d40d9aa3a912d0e570a96e34f696432aec3b906b78e74ee81a57496e",
+              0
+            ]
+          ],
+          [
+            [
+              "a",
+              "61cb8866cd68a72e74fac5ac334f061725b693f3f127fe35c3324d7d2c862432",
+              1
+            ],
+            [
+              "b",
+              "58c1e0e1002e7616a14f912a2cc75aec058df9fdf7e7caed82c7dc12e2ce12a0",
+              1
+            ],
+            [
+              "c",
+              "302d4e297437b250ccbde5cbe4c14372772d6adcc8573dd1c769371a1cea4cfa",
+              1
+            ]
+          ],
+          [
+            [
+              "a",
+              "70497253c7cabb6d923088ae266c9b0f556c7b8eb930dbc1d57fa86a688ed99a",
+              2
+            ],
+            [
+              "b",
+              "1c6b6bc7668c623d35a9719b51bb1d10260682a77016b937b13924adda94ef71",
+              2
+            ],
+            [
+              "c",
+              "323dd7301cd90f8fc7bc9a975a54e0dcb384277306a0681d46f7c70df750f122",
+              2
+            ]
+          ],
+          [
+            [
+              "a",
+              "bd03b205f03eeb3eebf36e09874f9346058ef3135ebe5f9f1e179c4610d488f0",
+              3
+            ],
+            [
+              "b",
+              "1f6123e98fe6b810781482f00034da6362568d754f49fcd145ddba01a9b86828",
+              3
+            ],
+            [
+              "c",
+              "3d136ee6aca5f12e8832b65a7eae3720b1758c65d4c5ad07e97ed080ecec7ab1",
+              3
+            ]
+          ],
+          [
+            [
+              "a",
+              "7cab55da26ef7fcb553dc0076e43f7a11b21503934401a12023809047acb7163",
+              4
+            ],
+            [
+              "b",
+              "c3d5da5102ba4828ad9a44bc7faf7a5d2f4e6d97f15be1ba6492412009e4f23d",
+              4
+            ],
+            [
+              "c",
+              "b310e44da353064ce1966565c4c95dd202e1d1c9bd06502abea98adc80e3ddd3",
+              4
+            ]
+          ],
+          [
+            [
+              "a",
+              "c5fc448b720464ca978ba48f62b1f6946ceacf6aa1b5bbc1bd0bbf5373f1baab",
+              5
+            ],
+            [
+              "b",
+              "669aa06d1e8b8c566bfc94fca0b16110913fc295bbf54e363524e28c4561fe1b",
+              5
+            ],
+            [
+              "c",
+              "f941e0bf0c7dff753f4328674959a8e762612185895c8758db6c8bac5c06ce5d",
+              5
+            ]
+          ],
+          [
+            [
+              "a",
+              "12b10dc654e71c381243a65076d003dbf7aa486f51f81badb01ef01a007fea5d",
+              6
+            ],
+            [
+              "b",
+              "8bf5193851e35e21d0645ec413c1a9445218211a6ae07b85daf988865836c7cd",
+              6
+            ],
+            [
+              "c",
+              "ec0bdab521b80e7e15de8ac48106cae220fc1345395183c4d9932b45ec664ff4",
+              6
+            ]
+          ],
+          [
+            [
+              "a",
+              "e7c14bd53cd6ed136157d047e362f19a677204375a4fe5a7ce7a2395c9a88896",
+              7
+            ],
+            [
+              "b",
+              "5aa32f3934998047f5f9e1079af818e56a1bff38232bf973f81a2a764b5f2435",
+              7
+            ],
+            [
+              "c",
+              "f3b5c9c18f8910e624b0a9f0feb9a13894015ca1855da300a455a0b7d6461d01",
+              7
+            ]
+          ],
+          [
+            [
+              "a",
+              "cfe9b2a25db7f20eac127279916101ba8d17f90424b52349907eef427354b564",
+              8
+            ],
+            [
+              "b",
+              "727d83216a63d4e127166b58ae5080204fc0883bb242656c7a11cd458ae2f473",
+              8
+            ],
+            [
+              "c",
+              "311474de36378db0ee4b116d2c97a475c48684c72e5ed71b4d85bc38bc5bcd38",
+              8
+            ]
+          ],
+          [
+            [
+              "a",
+              "572036fa274d876b0e56d65d23a984fa29ea136a63e0f1544da9298619ab8960",
+              9
+            ],
+            [
+              "b",
+              "82248fe27f508312040c2d637eb56e67b43c1d94009a216ad0f54d1309f0717f",
+              9
+            ],
+            [
+              "c",
+              "c8b027455b97331fa75f3563cae3107e496a4e3703e042227ffa4bc44f0664a1",
+              9
+            ]
+          ]
+        ],
+        "credit_before": {
+          "rows_left": 0,
+          "bytes_left": 65502,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "credit_after_release": {
+          "rows_left": 1,
+          "bytes_left": 65519,
+          "rows_total": 16,
+          "bytes_total": 65536
+        },
+        "fenced": [
+          "FENCED",
+          "FENCED"
+        ],
+        "slow_reader": "CAPACITY_PENDING",
+        "unaffected_siblings": [
+          "b",
+          "c"
+        ],
+        "cut_id": "80756b588eadb7bcb09bc14528a8d2e201ff94deba33a21b37c7ee2f15e6b6b2",
+        "snapshot_digest": "869122dc2effb63142ff3b2f21f4b1a6a7de62c02cb18318843f7ca789e18c14"
+      }
+    ],
+    "execute_action_calls": 9,
+    "ray_data_import_attempts": [],
+    "files": {
+      "/tmp/demiflow-v017-ray-final-evidence/verification.json": "aa4a883aaf7d39ec5c5c87550189269f157366bcb9690b3b4574368847f6c1b5",
+      "/tmp/demiflow-v017-ray-final-evidence/result.xml": "8ad256dbd9a1d4a820dfc59c9eb4b1b3335c57faf440966b7e2b210d79ca325f",
+      "/tmp/demiflow-v017-ray-final-evidence/scenario-route_recovery.json": "dcb2e32e3d9771379163a635d51494390ab31ebcb015c3eb1d091be8d36172af"
+    },
+    "private_ray_environment": {
+      "root": "/tmp/demiflow-v017-ray-ocz994k3",
+      "nodes": [
+        {
+          "NodeID": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751",
+          "Alive": true,
+          "NodeManagerAddress": "10.233.68.27",
+          "NodeManagerHostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n",
+          "NodeManagerPort": 42357,
+          "ObjectManagerPort": 37781,
+          "ObjectStoreSocketName": "/tmp/demiflow-v017-ray-ocz994k3/session_2026-11-16_17-47-52_236483_6809/sockets/plasma_store",
+          "RayletSocketName": "/tmp/demiflow-v017-ray-ocz994k3/session_2026-11-16_17-47-52_236483_6809/sockets/raylet",
+          "MetricsExportPort": -1,
+          "MetricsAgentPort": -1,
+          "DashboardAgentListenPort": -1,
+          "NodeName": "10.233.68.27",
+          "RuntimeEnvAgentPort": 40099,
+          "DeathReason": 0,
+          "DeathReasonMessage": "",
+          "alive": true,
+          "Resources": {
+            "CPU": 8.0,
+            "node:10.233.68.27": 1.0,
+            "node:__internal_head__": 1.0,
+            "object_store_memory": 104857600.0,
+            "memory": 518726221824.0
+          },
+          "Labels": {
+            "ray.io/node-id": "addbe1aa4d54b037513f515d50618a7dba328e49e7515383a7a49751"
+          }
+        }
+      ],
+      "initialized_before_fixture": true,
+      "shutdown_completed": true
+    }
+  },
+  "prior_failed_ray": {
+    "head": "60e8d307c1a8e650f510ca9007791783c26bc5c5",
+    "verification": "/tmp/demiflow-v017-ray-fixed-evidence/verification.json",
+    "reason": "prestarted Ray lacked the routed child model environment; exact passive factory projection fixed by 24e2cb0"
+  },
+  "not_claimed": [
+    "new public target/broadcast DSL",
+    "business-name to physical-reader lowering",
+    "two-host routing loss or whole-host/network outage",
+    "all performance gates or whole product completion"
+  ]
+}
