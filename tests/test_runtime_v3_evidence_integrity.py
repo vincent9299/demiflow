@@ -52,23 +52,29 @@ def _api_report():
 
 
 @pytest.mark.parametrize('defect',['failure','missing_execution','missing_test','missing_behavior'])
-def test_api_matrix_guard_rejects_claimed_success_without_complete_actual_evidence(monkeypatch,defect):
+@pytest.mark.parametrize('provider', ['local', 'ray_core'])
+def test_api_matrix_guard_rejects_claimed_success_without_complete_actual_evidence(monkeypatch,defect,provider):
     import runtime_v3_api_scenarios
+    import runtime_v3_ray_matrix_process
     report=_api_report()
     if defect=='failure':report['failed']={'0':{'failed':['real-positive']}}
     elif defect=='missing_execution':report['executed'].pop()
     elif defect=='missing_test':report['tested'].pop('0')
     else:report['cases']=[]
     monkeypatch.setattr(runtime_v3_api_scenarios,'api_matrix',lambda fx,fault:report)
-    with pytest.raises(AssertionError):support._s_api_matrix(SimpleNamespace(),None)
+    monkeypatch.setattr(runtime_v3_ray_matrix_process,'run_ray_api_matrix',lambda fx,fault:report)
+    with pytest.raises(AssertionError):support._s_api_matrix(SimpleNamespace(provider=provider),None)
 
 
-def test_api_matrix_guard_preserves_explicit_unverified_entries(monkeypatch):
+@pytest.mark.parametrize('provider', ['local', 'ray_core'])
+def test_api_matrix_guard_preserves_explicit_unverified_entries(monkeypatch,provider):
     import runtime_v3_api_scenarios
+    import runtime_v3_ray_matrix_process
     report=_api_report();report['not_run']={'0':{'not_run':['external source unavailable']}}
     report['complete']=False;recorded=[]
     monkeypatch.setattr(runtime_v3_api_scenarios,'api_matrix',lambda fx,fault:report)
-    fixture=SimpleNamespace(_record_not_run=lambda name,detail:recorded.append((name,detail)))
+    monkeypatch.setattr(runtime_v3_ray_matrix_process,'run_ray_api_matrix',lambda fx,fault:report)
+    fixture=SimpleNamespace(provider=provider,_record_not_run=lambda name,detail:recorded.append((name,detail)))
     with pytest.raises(support.NotRunError):support._s_api_matrix(fixture,None)
     assert recorded[0][0]=='api_matrix'
     assert recorded[0][1]['unverified_api']==report['not_run']
