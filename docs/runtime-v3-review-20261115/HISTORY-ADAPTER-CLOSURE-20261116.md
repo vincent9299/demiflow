@@ -1,6 +1,6 @@
 # 原生适配与历史失败收口（2026-11-16）
 
-本轮隔离树：`/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115`，分支 `engine/gpt-v3-artifact-recovery-20261115`。最后业务测试源码为 `8c00da5`；本文件与配套 JSON 是其后新增的回执整理。
+本轮隔离树：`/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115`，分支 `engine/gpt-v3-artifact-recovery-20261115`。最后 A020 六项回执记录 `13210ea` 与在途测试工具摘要；其全部输入字节随后固定于 `7687bd4`，逐摘要核验为零差异。该回执不冒称运行时全树 clean。其他业务证据仍分别绑定原固定提交。
 
 结论只限下列实际证据：本 lane 将原 90 个失败中的 75 个完成同名复验或有明确新契约的迁移。并入 native lane 的 L010 和 root 的 L015 后，证据并集覆盖 83 个，剩余 L017 原 7 个由 root 接续。它不是一个最终集成版本的全仓通过声明。配套 JSON 逐条保留旧 nodeid、原失败阶段、实际新 nodeid、源码版本、回执与验证阶段；L015 只有无 failure/error/skip 的 JUnit，明确没有冒造三阶段回执。
 
@@ -10,7 +10,7 @@
 2. **双封存载体读选择**：`load_sealed_plan(..., version=None|'v2'|'v3')`。默认行为不变，仍优先 v3；指定版本缺失直接 `missing_plan`，损坏仍按原摘要/schema 检验拒绝，不改走另一格式。`v2` 指原 F1 v1/v2 家族。旧 native binding 的两个读取点明确选原 v2；只读旧历史，没有重写旧 seal，也没有第二执行/提交权威。
 3. **旧 stream/pull 入口薄适配**：`iter_stream_rows` 去除自己的线程、ObjectRowsSink 和 CommitCoordinator，复用唯一 `dataset_native.execute`；原 action/source/完整 operations/run 身份校验保留，补同长度不同 plan 反例。借来的 action 不由适配层 complete。limit=0 不创建 action、不读 source。local_pull 同接原 v3入口；local_stream Arrow 输出也把 take/take_batch 的 limit 传入原 native terminal，不能变为全量成功。
 4. **公开 `take_batch(0)` 的真零读**：原来只返回空结果，真实惰性 source 仍被启动，旧 `_iter_source` spy 没有看见。现在 `_lower_request` 与 take(0) 一样生成原生空 source/plan，不另造执行路径；真实 source 文件标记证明零读。
-5. **薄聚合入口 program ID**：`Sum.name` 是 `sum(id)`，不能当执行 program 的标识。仅改两行，使用公开 Dataset 已有的 `aggregate-N` 标识，用户结果名称仍是 `sum(id)`。
+5. **薄聚合入口兼容**：`Sum.name` 是 `sum(id)`，不能当执行 program 的标识；使用公开 Dataset 已有的 `aggregate-N` 标识，用户结果名称仍是 `sum(id)`。保留 L012 承诺的低层空 aggregation tuple：通过同一原生 aggregate terminal 的原 Count 证明输入数量，仅做返回转换，空输入为 None、非空输入为 {}，不恢复旧 source 循环。
 6. **Engine 剩余借用 placement**：native lane 的 `b07c416` 使 `Engine.python_rows` 调唯一 execute 并传原 execution；本 lane 用真实输入、原 allocator、同一 action、故意 UDF ValueError 与 finally 锁定实际行为，没有恢复 `_apply_plan`。
 
 `arrow_batch`/`lance_scan` 原分支本轮未盲改。新的统一公开 Dataset 不依赖这些历史低层入口；本轮承诺范围是已明确接续的 native pull/stream/Engine 薄适配。
@@ -21,7 +21,7 @@
 - A015 不再断言 `local_pull/datafusion` 旧分流表，改为 Local/Ray 对同一声明有同一 capability，explain 不读 Lance、不构造 actor、不创建 run/action，并保留真实资源声明。explain 的 supported 没有冒称实际已获 grant。
 - A016 不恢复 `_apply_plan`。直接测保留的 native 薄入口，非法 sealed placement 在真实 source 之前拒绝，合法路径执行真实输出。
 - 旧 `streaming schema/count/aggregate/size/write` 的“必须拒绝”断言，按统一引擎已支持的契约改为实际正确结果；合法资源声明不再按旧 Ray 专用路径一概拒绝。退休 compute/range 与非法 CPU 的拒绝另有真实负例。
-- A020 原 `ex.aggregate(..., ()) is None` 是低层空聚合 tuple 的行为，公开 `Dataset.aggregate()` 本来要求至少一个 aggregation。现在分别锁：公开零 aggregation 在 source 前拒绝、`aggregate(Sum('id'))` 空输入为 `{'sum(id)': None}`、公开标量 `sum('id')` 空输入仍为 `None`、非空 streaming Sum 为精确 3。没有把一个合法空数据集行为改成拒绝。
+- A020 同时保留低层与公开两条契约：原 `ex.aggregate(..., ())` 空输入为 None、非空输入为 {}，两个真实用例均经同一 action/ACK；公开 `Dataset.aggregate()` 的零 aggregation 仍在 source 前拒绝，非空 Sum 的精确结果、空 Sum 字典、空标量 None 均另外锁定。root 复核指出初版把低层兼容误当可退休后，已撤回该解释并补修生产；旧回执保留，不以有价值的新增测试替代已承诺旧行为。
 - R006/R012 不再调用退休的旧 stream 恢复执行器。原 `checkpoint_rows=2`、`checkpoint_interval_ms=60000` 不变；经真实 Dataset materialize 的原 `after_acked` 故障点中断，要求原 cut 的实际 batch/group/timer/prepend remainder，原 prepared/receipt 前缀逐字不变，连续序列、完整结果和无重复均保留。没有伪造 checkpoint 文件或加预算使测试变绿。
 
 ## 固定源码实测
@@ -35,9 +35,10 @@
 | `demiflow-history-adapter-final-r6` | `85834ff` | 8 项：5 passed、3 failed，16.44s | L045 全文件三阶段通过；混合文件不算通过 |
 | `demiflow-history-adapter-final-r7` | `b28a534` | 6 项：4 passed、2 failed，11.45s | A020 4 项全绿；Arrow fixture 尚未通过 |
 | `demiflow-history-stream-arrow-r9` | `29b69c0` | 4 passed，10.17s | Arrow 新旧 caller 真实限额与小预算拒绝 |
-| `demiflow-history-aggregate-final-r10` | `8c00da5` | 4 passed，15.51s | A020 追加公开空 Sum 标量断言后完整复验 |
+| `demiflow-history-aggregate-final-r10` | `8c00da5` | 4 passed，15.51s | A020 增测，尚不能单独证明低层空 tuple 兼容 |
+| `demiflow-history-aggregate-empty-r11` | recorded `13210ea` + working inputs → byte-matches `7687bd4` | 6 passed，26.73s | 原低层空 tuple 及非空 tuple 返回、原 ACK、全部增测闭环 |
 
-每个采用的回执保留精确命令、Python、PYTHONPATH、三个 `/tmp/demiflow-*` 独立资源域、源码前后摘要、全量 nodeid、setup/call/teardown。新批次没有 skip、deselected 或 collection error。逐输入文件与回执 HEAD 的 `git archive` 比较均无摘要不符；JSON 保存每份回执与 XML 的 SHA256。未把不同 HEAD 的通过数相加伪装成同版本全集通过。
+每个采用的回执保留精确命令、Python、PYTHONPATH、三个 `/tmp/demiflow-*` 独立资源域、源码前后摘要、全量 nodeid、setup/call/teardown。采用的新批次没有 skip、deselected 或 collection error。r11 的源码工具初版与业务修复在同一工作树，先如实记录 dirty 摘要，随后对 `7687bd4` 逐文件核验；不能把它改写成 recorded HEAD 已含这些文件。逐输入文件与回执 HEAD 的 `git archive` 比较均无摘要不符；JSON 保存每份回执与 XML 的 SHA256。未把不同 HEAD 的通过数相加伪装成同版本全集通过。
 
 r4 的错误、r6/r7/r8 的 fixture 错误及红基线均留在原 `/tmp` 目录。r6/r7/r8 中新 Arrow 测试误低估驻留数，随后只读编译探针核实 source/map/schema/terminal 是四个不可 park 的实际 stage；最终测试保留 2-worker 拒绝（零 source、零 commit），并为正例显式声明 4-worker/4000mCPU/192MiB。正例仍为 1000 行惰性输入、take/take_batch=3、batch_rows=2，要求实际读取小于 1000、精确输出 3 行、RecordBatch 每批≤2、int32 schema、原 ACK、借 action 未 complete。不存在用该预算调整掩盖旧历史小预算回归的情况。
 
@@ -51,7 +52,7 @@ r4 的错误、r6/r7/r8 的 fixture 错误及红基线均留在原 `/tmp` 目录
 
 1. `ad96846` seal 版本选择；`ac03e09` + `24aca7a` 合在一起取，保证未知类零属性读取。
 2. `46da6c4` stream/pull 薄适配；`f22882a` take_batch(0)；`912dad7` Arrow limit 透传。
-3. `5162d8c` aggregate program ID。
+3. `5162d8c` aggregate program ID；`13210ea` 低层空 tuple None/{} 的同 terminal 兼容（不可漏取）。
 
 本 lane 独有测试（按历史顺序取，最终断言以末版为准）：
 

@@ -525,6 +525,7 @@
       "sha256": "1881bf9d40a5422bec1a20bfa86f08c92001e55b864e3d60a3c1c028e286fca6",
       "xml_sha256": "61fc6f26770bd292254e07aa1e0acd572679c4e40076dc722cc56e8e4a1692fd",
       "head": "29b69c0f2d7dba70ff252ba41f1f5c5f83137694",
+      "bound_commit": "29b69c0f2d7dba70ff252ba41f1f5c5f83137694",
       "inputs": 1873,
       "mismatches": [],
       "source_unchanged": true,
@@ -573,6 +574,7 @@
       "sha256": "d285642a76c33a2f4fbaef7630bd9d29494c9265374e225e2de92f9e1993afed",
       "xml_sha256": "ee0297d57a22235983faf5fe9d1034ddb81ee47eff072611977e3aaaaf6486af",
       "head": "8c00da5e9a6bb3556c5fcc3691b9021b34de7623",
+      "bound_commit": "8c00da5e9a6bb3556c5fcc3691b9021b34de7623",
       "inputs": 1873,
       "mismatches": [],
       "source_unchanged": true,
@@ -610,6 +612,57 @@
           "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-history-aggregate-final-r10/resources",
           "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-history-aggregate-final-r10/home",
           "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-history-aggregate-final-r10/forge",
+          "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115/tests"
+        },
+        "runner": "/tmp/demiflow-history-batch-runner.py",
+        "runner_sha256": "cf2e5017bcac9e9dbe1aacce4287254aa3fc6e7a03f83691010839f0692915dc"
+      }
+    },
+    {
+      "receipt": "/tmp/demiflow-history-aggregate-empty-r11/receipt.json",
+      "sha256": "40808d922db760873b85f632aec7881174e6dd64ebb4876780b514049cd8c15a",
+      "xml_sha256": "086b1f5ced74460ff34032f95c9f4d0cb2a7d317caf4feeacac07c4283afa55c",
+      "head": "13210ea48d5c29800caa3165a10ea0aa33045fc1",
+      "bound_commit": "7687bd4",
+      "inputs": 1877,
+      "mismatches": [],
+      "source_unchanged": true,
+      "entirely_passed_files": [
+        "tests/test_upgrade_v2_unit_A020.py"
+      ],
+      "mixed_report_returncode": 0,
+      "call_counts": {
+        "passed": 6
+      },
+      "phase_counts": {
+        "setup:passed": 6,
+        "call:passed": 6,
+        "teardown:passed": 6
+      },
+      "collected_nodeids": [
+        "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum",
+        "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read",
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
+        "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read",
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
+        "tests/test_upgrade_v2_unit_A020.py::test_nonempty_source_empty_aggregation_preserves_empty_dict"
+      ],
+      "command": {
+        "cwd": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115",
+        "python": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "argv": [
+          "-q",
+          "--tb=short",
+          "-p",
+          "no:cacheprovider",
+          "--basetemp=/tmp/demiflow-history-aggregate-empty-r11/tmp",
+          "--junitxml=/tmp/demiflow-history-aggregate-empty-r11/result.xml",
+          "tests/test_upgrade_v2_unit_A020.py"
+        ],
+        "environment": {
+          "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-history-aggregate-empty-r11/resources",
+          "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-history-aggregate-empty-r11/home",
+          "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-history-aggregate-empty-r11/forge",
           "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115/tests"
         },
         "runner": "/tmp/demiflow-history-batch-runner.py",
@@ -744,6 +797,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -1242,6 +1296,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -1740,6 +1795,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -2238,6 +2294,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -2736,6 +2793,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -3234,6 +3292,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -3732,6 +3791,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -4230,6 +4290,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_bool_boundaries_still_type_error",
@@ -4728,6 +4789,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_scalar_bool_no_longer_raises_type_error"
@@ -4767,6 +4829,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A-U01.py::test_scalar_default_matches_sequence_form"
@@ -4806,6 +4869,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A002.py::test_composition_limit_enforced"
@@ -4845,6 +4909,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A002.py::test_async_map_plan_passes",
@@ -5100,6 +5165,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A002.py::test_async_map_plan_passes",
@@ -5355,6 +5421,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A006.py::test_inline_streaming_take_delivers"
@@ -5394,6 +5461,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A006.py::test_plain_take_pulls_prefix"
@@ -5433,6 +5501,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A006.py::test_take_zero_returns_empty_without_read"
@@ -5472,6 +5541,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A006.py::test_thread_streaming_take_delivers"
@@ -5511,6 +5581,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A007.py::test_inline_streaming_iter_rows_delivers"
@@ -5550,6 +5621,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A007.py::test_plain_iter_rows_pulls_all"
@@ -5589,6 +5661,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A007.py::test_thread_streaming_iter_rows_delivers"
@@ -5628,6 +5701,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A008.py::test_streaming_write_lance_admits_then_requires_action_context"
@@ -5667,6 +5741,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A013.py::test_schema_fetch_false_no_action_no_read"
@@ -5706,6 +5781,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A013.py::test_schema_fetch_false_no_action_no_read",
@@ -5799,6 +5875,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A014.py::test_borrow_explicit_action_does_not_complete"
@@ -5838,6 +5915,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A014.py::test_borrow_via_current_action"
@@ -5877,6 +5955,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A014.py::test_self_created_delivery_delivers_rows"
@@ -5916,6 +5995,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A015.py::test_arrow_batch_capability_does_not_construct_actor",
@@ -6063,6 +6143,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A015.py::test_arrow_batch_capability_does_not_construct_actor",
@@ -6210,6 +6291,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A015.py::test_arrow_batch_capability_does_not_construct_actor",
@@ -6357,6 +6439,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A015.py::test_arrow_batch_capability_does_not_construct_actor",
@@ -6504,6 +6587,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A015.py::test_arrow_batch_capability_does_not_construct_actor",
@@ -6651,6 +6735,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A016.py::test_invalid_bound_execution_is_refused",
@@ -6744,6 +6829,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A016.py::test_invalid_bound_execution_is_refused",
@@ -6837,6 +6923,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A016.py::test_invalid_bound_execution_is_refused",
@@ -6930,6 +7017,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A017.py::test_plain_iter_batches_groups_rows"
@@ -6969,6 +7057,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A017.py::test_streaming_iter_batches_groups_rows"
@@ -7008,6 +7097,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A018.py::test_materialized_count_preserves_real_published_count_without_recomputing",
@@ -7101,6 +7191,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A018.py::test_plain_count_counts_rows"
@@ -7140,6 +7231,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A018.py::test_streaming_count_counts_rows"
@@ -7179,6 +7271,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A019.py::test_plain_take_batch_returns_prefix"
@@ -7218,6 +7311,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A019.py::test_streaming_take_batch_returns_prefix"
@@ -7257,6 +7351,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A019.py::test_take_batch_zero_is_empty"
@@ -7293,118 +7388,41 @@
     {
       "original_nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
       "original_failed_phase": "call",
-      "status": "replacement_contract_validated",
-      "receipt": "/tmp/demiflow-history-aggregate-final-r10/receipt.json",
-      "head": "8c00da5e9a6bb3556c5fcc3691b9021b34de7623",
+      "status": "same_nodeid_revalidated",
+      "receipt": "/tmp/demiflow-history-aggregate-empty-r11/receipt.json",
+      "head": "13210ea48d5c29800caa3165a10ea0aa33045fc1",
+      "bound_commit": "7687bd4",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
-        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
-        "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read",
-        "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read",
-        "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum"
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none"
       ],
       "execution_evidence": {
-        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum": [
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none": [
           {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
             "when": "setup",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.00012214481830596924,
+            "rerun": 0,
+            "seconds": 8.549541234970093e-05,
             "detail": null
           },
           {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
             "when": "call",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 9.897434994578362,
+            "rerun": 0,
+            "seconds": 4.906553260982037,
             "detail": null
           },
           {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
             "when": "teardown",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.0001642368733882904,
-            "detail": null
-          }
-        ],
-        "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read": [
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read",
-            "when": "setup",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.000521048903465271,
-            "detail": null
-          },
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read",
-            "when": "call",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.0004332922399044037,
-            "detail": null
-          },
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read",
-            "when": "teardown",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.00014659389853477478,
-            "detail": null
-          }
-        ],
-        "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read": [
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read",
-            "when": "setup",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.0006341338157653809,
-            "detail": null
-          },
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read",
-            "when": "call",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.7044412717223167,
-            "detail": null
-          },
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read",
-            "when": "teardown",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.00028611719608306885,
-            "detail": null
-          }
-        ],
-        "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum": [
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum",
-            "when": "setup",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.00023113563656806946,
-            "detail": null
-          },
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum",
-            "when": "call",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 4.580527815967798,
-            "detail": null
-          },
-          {
-            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum",
-            "when": "teardown",
-            "outcome": "passed",
-            "wasxfail": null,
-            "seconds": 0.00013572722673416138,
+            "rerun": 0,
+            "seconds": 0.00011893361806869507,
             "detail": null
           }
         ]
@@ -7414,23 +7432,85 @@
       "original_nodeid": "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_rejected_before_read",
       "original_failed_phase": "call",
       "status": "replacement_contract_validated",
-      "receipt": "/tmp/demiflow-history-aggregate-final-r10/receipt.json",
-      "head": "8c00da5e9a6bb3556c5fcc3691b9021b34de7623",
+      "receipt": "/tmp/demiflow-history-aggregate-empty-r11/receipt.json",
+      "head": "13210ea48d5c29800caa3165a10ea0aa33045fc1",
+      "bound_commit": "7687bd4",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
+        "tests/test_upgrade_v2_unit_A020.py::test_nonempty_source_empty_aggregation_preserves_empty_dict",
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
         "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
         "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read",
         "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read",
         "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum"
       ],
       "execution_evidence": {
+        "tests/test_upgrade_v2_unit_A020.py::test_nonempty_source_empty_aggregation_preserves_empty_dict": [
+          {
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_nonempty_source_empty_aggregation_preserves_empty_dict",
+            "when": "setup",
+            "outcome": "passed",
+            "wasxfail": null,
+            "rerun": 0,
+            "seconds": 0.0004930794239044189,
+            "detail": null
+          },
+          {
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_nonempty_source_empty_aggregation_preserves_empty_dict",
+            "when": "call",
+            "outcome": "passed",
+            "wasxfail": null,
+            "rerun": 0,
+            "seconds": 4.810887802392244,
+            "detail": null
+          },
+          {
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_nonempty_source_empty_aggregation_preserves_empty_dict",
+            "when": "teardown",
+            "outcome": "passed",
+            "wasxfail": null,
+            "rerun": 0,
+            "seconds": 0.0001902170479297638,
+            "detail": null
+          }
+        ],
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none": [
+          {
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
+            "when": "setup",
+            "outcome": "passed",
+            "wasxfail": null,
+            "rerun": 0,
+            "seconds": 8.549541234970093e-05,
+            "detail": null
+          },
+          {
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
+            "when": "call",
+            "outcome": "passed",
+            "wasxfail": null,
+            "rerun": 0,
+            "seconds": 4.906553260982037,
+            "detail": null
+          },
+          {
+            "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
+            "when": "teardown",
+            "outcome": "passed",
+            "wasxfail": null,
+            "rerun": 0,
+            "seconds": 0.00011893361806869507,
+            "detail": null
+          }
+        ],
         "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum": [
           {
             "nodeid": "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
             "when": "setup",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.00012214481830596924,
+            "rerun": 0,
+            "seconds": 0.00011854991316795349,
             "detail": null
           },
           {
@@ -7438,7 +7518,8 @@
             "when": "call",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 9.897434994578362,
+            "rerun": 0,
+            "seconds": 10.229791391640902,
             "detail": null
           },
           {
@@ -7446,7 +7527,8 @@
             "when": "teardown",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.0001642368733882904,
+            "rerun": 0,
+            "seconds": 0.00013484060764312744,
             "detail": null
           }
         ],
@@ -7456,7 +7538,8 @@
             "when": "setup",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.000521048903465271,
+            "rerun": 0,
+            "seconds": 0.0005059726536273956,
             "detail": null
           },
           {
@@ -7464,7 +7547,8 @@
             "when": "call",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.0004332922399044037,
+            "rerun": 0,
+            "seconds": 0.00042835623025894165,
             "detail": null
           },
           {
@@ -7472,7 +7556,8 @@
             "when": "teardown",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.00014659389853477478,
+            "rerun": 0,
+            "seconds": 8.84123146533966e-05,
             "detail": null
           }
         ],
@@ -7482,7 +7567,8 @@
             "when": "setup",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.0006341338157653809,
+            "rerun": 0,
+            "seconds": 0.0006632693111896515,
             "detail": null
           },
           {
@@ -7490,7 +7576,8 @@
             "when": "call",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.7044412717223167,
+            "rerun": 0,
+            "seconds": 0.540728721767664,
             "detail": null
           },
           {
@@ -7498,7 +7585,8 @@
             "when": "teardown",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.00028611719608306885,
+            "rerun": 0,
+            "seconds": 0.00015304610133171082,
             "detail": null
           }
         ],
@@ -7508,7 +7596,8 @@
             "when": "setup",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.00023113563656806946,
+            "rerun": 0,
+            "seconds": 0.0002728663384914398,
             "detail": null
           },
           {
@@ -7516,7 +7605,8 @@
             "when": "call",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 4.580527815967798,
+            "rerun": 0,
+            "seconds": 5.8610564060509205,
             "detail": null
           },
           {
@@ -7524,7 +7614,8 @@
             "when": "teardown",
             "outcome": "passed",
             "wasxfail": null,
-            "seconds": 0.00013572722673416138,
+            "rerun": 0,
+            "seconds": 0.0001613609492778778,
             "detail": null
           }
         ]
@@ -7536,6 +7627,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A021.py::test_plain_schema_infers_fields"
@@ -7575,6 +7667,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A021.py::test_fetch_if_missing_false_returns_none_without_read",
@@ -7695,6 +7788,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A022.py::test_plain_size_bytes_positive"
@@ -7734,6 +7828,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A022.py::test_plain_size_bytes_positive",
@@ -7827,6 +7922,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A023.py::test_plain_materialize_requires_action_context"
@@ -7866,6 +7962,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A023.py::test_streaming_materialize_admits_then_requires_action_context"
@@ -7905,6 +8002,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A024.py::test_streaming_write_datasink_admits_then_requires_action_context"
@@ -7944,6 +8042,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A025.py::test_streaming_write_file_preserves_real_rows",
@@ -8091,6 +8190,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A025.py::test_write_csv_self_created_action"
@@ -8130,6 +8230,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A025.py::test_write_json_self_created_action"
@@ -8169,6 +8270,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A025.py::test_write_parquet_self_created_action"
@@ -8208,6 +8310,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A027.py::test_aggregate_rejects_non_aggregate_before_action",
@@ -8328,6 +8431,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A028.py::test_size_bytes_single_action",
@@ -8394,6 +8498,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_A029.py::test_write_csv_single_action",
@@ -8514,6 +8619,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_F001.py::test_async_and_batch_driver_is_stream",
@@ -8850,6 +8956,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_F001.py::test_async_and_batch_driver_is_stream",
@@ -9186,6 +9293,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_F002.py::test_native_options_guard_still_raises"
@@ -9225,6 +9333,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_F002.py::test_bound_map_facts_match_sealed_baseline",
@@ -10101,6 +10210,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_F002.py::test_bound_map_facts_match_sealed_baseline",
@@ -10977,6 +11087,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_F002.py::test_bound_map_facts_match_sealed_baseline",
@@ -11853,6 +11964,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-migration-r3/receipt.json",
       "head": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
+      "bound_commit": "0f170dc7acb18bfb4479625e5b7054c651fa928f",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_F002.py::test_bound_map_facts_match_sealed_baseline",
@@ -12947,6 +13059,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-final-r6/receipt.json",
       "head": "85834ff84a4f491124cb54234a2aa50061108250",
+      "bound_commit": "85834ff84a4f491124cb54234a2aa50061108250",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_L045.py::test_python_rows_forwards_bound_execution_and_real_budget",
@@ -13040,6 +13153,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-final-r6/receipt.json",
       "head": "85834ff84a4f491124cb54234a2aa50061108250",
+      "bound_commit": "85834ff84a4f491124cb54234a2aa50061108250",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_L045.py::test_python_rows_preserves_finally_on_callback_error"
@@ -13079,6 +13193,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-final-r6/receipt.json",
       "head": "85834ff84a4f491124cb54234a2aa50061108250",
+      "bound_commit": "85834ff84a4f491124cb54234a2aa50061108250",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_L045.py::test_python_rows_unbound_forwards_none"
@@ -13118,6 +13233,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-public-migration-r2/receipt.json",
       "head": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
+      "bound_commit": "8af18838eb74f6cc1f7c359554a660a5ec8d1eca",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_M013.py::test_zero_ceiling_rejects_reserve_without_intent"
@@ -13157,6 +13273,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_R006.py::test_concurrent_batch_c2_crash_recovers_remainder_exactly_once"
@@ -13196,6 +13313,7 @@
       "status": "replacement_contract_validated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_R006.py::test_concurrent_batch_c2_crash_recovers_remainder_exactly_once",
@@ -13262,6 +13380,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_R012.py::test_empty_source_prepend_materializes_prefix_under_checkpoints"
@@ -13301,6 +13420,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_R012.py::test_grouped_crash_recovers_pending_groups_exactly_once"
@@ -13340,6 +13460,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_R012.py::test_prepend_crash_does_not_republish_emitted_prefix"
@@ -13379,6 +13500,7 @@
       "status": "same_nodeid_revalidated",
       "receipt": "/tmp/demiflow-history-adapter-combined-r5/receipt.json",
       "head": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
+      "bound_commit": "de592f5b45c0a5bf87e428e357868690ac33c8ab",
       "evidence_kind": "three_phase",
       "replacement_nodeids": [
         "tests/test_upgrade_v2_unit_R012.py::test_timed_batch_crash_recovers_pending_window_exactly_once"
