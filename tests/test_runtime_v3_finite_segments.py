@@ -31,8 +31,10 @@ def test_old_flat_finite_prefix_can_append_into_same_incremental_forest(tmp_path
 
 def test_real_finite_cuts_do_not_rewrite_committed_payload_prefix(tmp_path):
     count = 24
+    # Bound admission as well as the trigger: a fast source must not race
+    # all 24 rows past the first checkpoint request on an unloaded machine.
     with RunContext.start(tmp_path/'run',limits={'checkpoint_rows':4,
-            'checkpoint_interval_ms':60000,'max_row_bytes':8192,'max_batch_bytes':16384}) as run:
+            'checkpoint_unconfirmed_rows':4, 'checkpoint_interval_ms':60000,'max_row_bytes':8192,'max_batch_bytes':16384}) as run:
         result = data.from_items([{'n':i,'value':'x'*128} for i in reversed(range(count))]).sort('n').take_all()
         assert result == [{'n':i,'value':'x'*128} for i in range(count)]
         assert len(run.journal.execution_commits('action-1')) >= 4
