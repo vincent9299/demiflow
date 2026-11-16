@@ -10,6 +10,7 @@ import yaml
 from demiflow import data
 from demiflow.execution.checked import CheckedExecution
 from demiflow.execution.local_kernel import local_execution
+from demiflow.execution.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.workbench.runs.limits import DEFAULT_LIMITS
@@ -33,8 +34,7 @@ def contract(tmp_path, definition, *, options=None):
     (tmp_path / 'flows/prompt.yaml').write_text(yaml.safe_dump(definition, sort_keys=False))
     settings = {'trust_env': False, 'collect_journal_totals': False, 'timeout_s': 2,
                 'max_request_bytes': 1048576, 'max_response_bytes': 1048576, 'model_revision': 'fixture-v1',
-                'input_limits': {'max_images': 1, 'max_image_bytes': 1024, 'max_total_image_bytes': 1024},
-                'sqlite_journal': {'path': 'evidence/calls.sqlite', 'timeout_s': 1, 'max_requests': 2, 'max_disk_bytes': 4194304}}
+                'input_limits': {'max_images': 1, 'max_image_bytes': 1024, 'max_total_image_bytes': 1024}}
     settings.update(options or {})
     body = "from demiflow import data\ndef run(*, target):\n    rows = data.from_items(" + repr([
         {'candidates': ITEMS, 'image': 'data:image/png;base64,aW1hZ2U='}]) + ")\n"
@@ -59,22 +59,35 @@ def test_managed_questions_preserve_partial_answers_and_exact_replay(server, tmp
     flow = load(monkeypatch, 'flows.model', tmp_path / 'flows/model.py')
     monkeypatch.chdir(tmp_path)
     (tmp_path / 'work').mkdir()
-    for _ in range(2):
+    def execute():
         context = CheckedExecution(nodes=report['nodes'], edges=report['edges'], actions=report['actions'],
             operators=report['operators'], source_root=tmp_path, limits=DEFAULT_LIMITS,
             record=lambda *args: None, check_stop=lambda: None)
         with local_execution(workers=1, worker_mode='thread', partitions=1, memory_bytes=128 * 1024**2,
                              temp_directory=str(tmp_path / 'work')) as session:
             session._executor.resource_root = tmp_path
-            if Path(target).exists():
-                # Only remove this fixture's final table; the real native model
-                # ledger remains durable, so the identical call must be reused.
-                import shutil
-                shutil.rmtree(target)
             with context.bind_context():
                 flow.run(target=target)
-        result = lance.dataset(target).to_table().to_pylist()[0]
-        assert result['answer'] == {'answers': {'a': {'type': 'noul', 'noul': 0.9}}, 'errors': {'b': 'missing_answer'}}
+    class Interrupted(Exception):
+        pass
+    # Replay the original native run. A second business SQLite journal and
+    # deleting an already published output would test a different contract.
+    with pytest.raises(Interrupted):
+        with RunContext.start(tmp_path/'run') as run:
+            reference = run.ref
+            execute()
+            raise Interrupted('after confirmed native actions')
+    first = lance.dataset(target)
+    expected = {'answers': {'a': {'type': 'noul', 'noul': 0.9}}, 'errors': {'b': 'missing_answer'}}
+    assert first.to_table().to_pylist()[0]['answer'] == expected
+    with RunContext.resume(reference) as resumed:
+        execute()
+        assert resumed.attempt == 2
+        assert resumed.journal.budget_consumed('requests') == 1
+    final = lance.dataset(target)
+    assert final.version == first.version
+    assert final.to_table().to_pylist()[0]['answer'] == expected
+    assert not (tmp_path/'evidence/calls.sqlite').exists()
     assert len(server['requests']) == 1
 
 

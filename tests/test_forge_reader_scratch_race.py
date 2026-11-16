@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import tempfile
 import threading
 import time
 from types import SimpleNamespace
@@ -132,16 +133,19 @@ def callback(tmp_path):
         effective_permissions=lambda item:item['permissions'],native_reader=None)
     service.closed=threading.Event();service.slots=threading.BoundedSemaphore(1)
     service.sources=threading.BoundedSemaphore(1);service.authority_controls=threading.BoundedSemaphore(1)
-    service.listener=Listener(tmp_path/'auth.sock',public=True)
-    service.thread=threading.Thread(target=service._serve_authority,daemon=True)
-    service.thread.start()
-    authority=Authority.__new__(Authority);authority.project=key;authority.principal=service.principal
-    authority.peer=Peer(os.getpid(),os.geteuid(),os.getegid(),service.identity)
-    authority.deployment=SimpleNamespace(value=dict(site=dict(web_auth_socket_path=str(service.listener.path))))
-    try:yield service,authority,key
-    finally:
-        service.closed.set();service.listener.close();service.thread.join(2)
-        assert not service.thread.is_alive()
+    # AF_UNIX has a fixed pathname limit; batch evidence paths are intentionally
+    # descriptive and can exceed it. Own a short private socket directory.
+    with tempfile.TemporaryDirectory(prefix='demiflow-auth-',dir='/tmp') as socket_root:
+        service.listener=Listener(Path(socket_root)/'auth.sock',public=True)
+        service.thread=threading.Thread(target=service._serve_authority,daemon=True)
+        service.thread.start()
+        authority=Authority.__new__(Authority);authority.project=key;authority.principal=service.principal
+        authority.peer=Peer(os.getpid(),os.geteuid(),os.getegid(),service.identity)
+        authority.deployment=SimpleNamespace(value=dict(site=dict(web_auth_socket_path=str(service.listener.path))))
+        try:yield service,authority,key
+        finally:
+            service.closed.set();service.listener.close();service.thread.join(2)
+            assert not service.thread.is_alive()
 
 
 def drive(exchange):
