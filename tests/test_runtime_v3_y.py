@@ -473,6 +473,7 @@ def test_y012(executor, source, plan):
     assert request.arguments["names"] == ["sum", "mean"]
     assert len(request.programs) == 2
     assert all(isinstance(p, FakeActionProgram) and p.kind == "aggregate" for p in request.programs)
+    assert [program.name for program in request.programs] == ["aggregate-0", "aggregate-1"]
     assert request.programs[0].value is aggregates[0]
     assert request.programs[1].value is aggregates[1]
     assert ENGINE.run_calls == [request]

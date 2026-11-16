@@ -174,8 +174,8 @@ class RayDatasetExecutor(DatasetExecutor):
     ) -> Any:
         from ..contracts.dataflow import ActionProgram
         programs = tuple(
-            ActionProgram(name=aggregate.name, kind="aggregate", value=aggregate)
-            for aggregate in aggregates
+            ActionProgram(name="aggregate-" + str(index), kind="aggregate", value=aggregate)
+            for index, aggregate in enumerate(aggregates)
         )
         return self._run(
             source, plan, "aggregate",
