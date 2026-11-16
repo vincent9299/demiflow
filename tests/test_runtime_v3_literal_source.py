@@ -355,7 +355,37 @@ def test_literal_leaf_is_authenticated_before_first_row(tmp_path):
         services=services_for(store,bounds,snapshot,literal_reference(source,bounds))
         split=plan_source_splits(snapshot,source,target_partitions=1,bounds=bounds)[0]
         reader=open_source_reader(snapshot,split,cursor=None,services=services)
-        with pytest.raises(DataflowError,match='digest|integrity|corrupt'):
+        with pytest.raises(DataflowError,match='artifact bytes do not match its reference'):
             reader.next_record()
         assert reader._next_sequence==0 and reader.retained_bytes==0
+        reader.close()
+
+
+def test_literal_root_authentication_failure_releases_manifest_workspace(tmp_path):
+    from demiflow.execution.dataflow_record_frames import read_document
+    from test_runtime_v3_finite_reader_credit import HeldState
+    with store_fixture(tmp_path) as (_,store,_):
+        bounds=replace(store._bounds,max_resident_bytes=256*1024,max_control_bytes=4096,
+            max_state_bytes=4096,max_row_bytes=8192,max_batch_bytes=16384)
+        source=ItemsSource(example(40))
+        snapshot=snapshot_source(source,action=NS(action_id='literal-root-credit'),store=store,bounds=bounds)
+        services=services_for(store,bounds,snapshot,literal_reference(source,bounds))
+        split=plan_source_splits(snapshot,source,target_partitions=1,bounds=bounds)[0]
+        reader=open_source_reader(snapshot,split,cursor=None,services=services)
+        runner=WorkerGraphRunner.__new__(WorkerGraphRunner)
+        held=HeldState();runner.e=NS(_readers={'source':reader},_kernels={'held':held})
+        runner.services,runner.bounds=services,bounds
+        runner._condition=threading.Condition();runner._wake_generation=0
+        runner._peer=NS(_bytes=0);runner._finite_input=None
+        observed=[]
+        def shared(function,*args,**kwargs):
+            if function is read_document and args[0]!=snapshot.manifest_ref:
+                observed.append(reader.retained_bytes)
+                held.retain(bounds.max_resident_bytes-32)
+            return runner._frame_call(function,*args,**kwargs)
+        reader._shared_frame_call=shared
+        with pytest.raises(DataflowError,match='resident budget'):
+            reader.next_record()
+        assert observed and observed[0]>0
+        assert reader.retained_bytes==0
         reader.close()
