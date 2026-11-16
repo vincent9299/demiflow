@@ -2,6 +2,7 @@
 import copy
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,8 +23,13 @@ def run(*, source, target):
     proof = read_native_execution(root, result['run_id'], attempt=result['attempt'], owned_root=owner)
     evidence = dict(original_native_execution_evidence=[proof])
     assert validate_native_execution_evidence(evidence, owned_root=owner)
+    from test_runtime_v3_acceptance import _run_unified
+    def gate(document):
+        result = dict(document, ray_data_import_attempts=[], module_paths={}, execute_action_calls=[])
+        return _run_unified(SimpleNamespace(root=owner, run=lambda *a,**k:result), 'workbench_real_plan')
+    assert gate(evidence)['execute_action_calls'] == []  # Original facts are not fabricated calls.
     with pytest.raises(AssertionError):
-        validate_native_execution_evidence(dict(original_native_execution_evidence=[]), owned_root=owner)
+        gate(dict(original_native_execution_evidence=[]))
     alterations = [
         lambda p: p.update(run_id='r'+'0'*24),
         lambda p: p.update(attempt=2),
@@ -35,7 +41,7 @@ def run(*, source, target):
     for alter in alterations:
         changed = copy.deepcopy(proof); alter(changed)
         with pytest.raises((AssertionError, ValueError, FileNotFoundError)):
-            validate_native_execution_evidence(dict(original_native_execution_evidence=[changed]), owned_root=owner)
+            gate(dict(original_native_execution_evidence=[changed]))
     # A valid looking proof cannot mask modified sealed code on disk either.
     sealed = root/'.forge/runs'/result['run_id']/'runtime/demiflow/execution/dataflow.py'
     original = sealed.read_bytes(); mode = sealed.stat().st_mode

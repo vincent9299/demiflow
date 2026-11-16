@@ -123,10 +123,12 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
         receipt = runs._native_execution_receipt(journal, action_id)
         assert receipt is not None and output['result'] is not None
         reference = output['result']['ref']
-        assert reference['uri'] == output['uri']
-        assert reference['version'] == receipt['committed_version']
+        _, resolved, uri = runs.result_table(workspace, run_id, output['name'])
+        assert str(uri) == output['uri'] == receipt['uri']
+        assert resolved.to_dict() == reference
+        assert reference['lance_version'] == receipt['committed_version']
         assert reference['row_count'] == receipt['written_rows']
-        snapshot = lance.dataset(reference['uri'], version=reference['version'])
+        snapshot = lance.dataset(str(uri), version=reference['lance_version'])
         assert snapshot.count_rows() == reference['row_count']
         outputs.append(dict(action_id=action_id, result=reference, receipt=receipt,
             rows=snapshot.to_table().to_pylist()))
