@@ -89,11 +89,8 @@ def _plan(double, items_count=10):
 
 
 def _chain_child_id(run):
-    with run.journal._connection() as db:
-        row = db.execute("SELECT action_id FROM runtime_actions "
-                         "WHERE action_id LIKE '%-chain'").fetchone()
-    assert row is not None, "chain output child action was not bound"
-    return row[0]
+    from runtime_v3_owned_crash import materialize_action_id
+    return materialize_action_id(run)
 
 
 def _commit_shape(run):
@@ -106,20 +103,27 @@ def _commit_shape(run):
     }
 
 
-def _k6_shapes(run_dir):
-    """Normalized K6 manifest shape (structure, not run-specific hashes/paths)."""
+def _k6_shapes(run):
+    """Normalize the original journal's verified v3 cut, never a second ledger."""
+    import hashlib
     shapes = []
-    for path in sorted((Path(run_dir) / "state").glob("*.json")):
-        value = json.loads(path.read_text())
-        if value.get("schema_version") != "demiflow.checkpoint_manifest.v1":
-            continue
+    for fact in run.journal.execution_commits(_chain_child_id(run)):
+        assert fact['status'] == 'acked'
+        ref = fact['prepared']['state']['dataflow-cut-v3']
+        raw = (run.directory / ref['path']).read_bytes()
+        assert len(raw) == ref['bytes'] and hashlib.sha256(raw).hexdigest() == ref['sha256']
+        value = json.loads(raw)
+        assert value['schema'] == 'demiflow.dataflow_cut.v3'
+        cut, contributions = value['cut'], value['contributions']
+        assert cut['sequence'] == fact['sequence']
+        assert set(cut['participants']) == {c['participant_id'] for c in contributions}
+        assert all(c['cut_id'] == cut['cut_id'] for c in contributions)
         shapes.append({
-            "participants": {k: len(v) for k, v in value["participants"].items()},
-            "source_progress_components": len(value["source_progress"]),
-            "channel_cuts": len(value["channel_cuts"]),
-            "operator_states": len(value["operator_states"]),
-            "seal_keys": sorted(value["seal"].keys()),
-            "sealed": value["seal"]["sealed"],
+            'participants': len(cut['participants']),
+            'source_progress_components': len(value['dataflow.sources.v3']),
+            'channel_cuts': sum(len(c['channels']) for c in contributions),
+            'operator_states': sum(len(c['operator_states']) for c in contributions),
+            'seal_keys': sorted(cut), 'sealed': cut['final'],
         })
     return shapes
 
@@ -144,10 +148,10 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
         assert local_owner == (local_run.attempt, local_run.fence)
         # K6 manifests are per-cut checkpoint records, GC'd on run exit (durable
         # recovery uses the journal commit's prepared.state); capture while open.
-        local_k6 = _k6_shapes(local_dir)
+        local_k6 = _k6_shapes(local_run)
 
     ray_dir = tmp_path / "ray-run"
-    ray_executor = RayDatasetExecutor(unified_chain=True)
+    ray_executor = RayDatasetExecutor(workers=1, unified_chain=True)
     ray_dataset = Dataset(ItemsSource(items), plan, ray_executor)
     with RunContext.start(ray_dir, limits=limits) as ray_run:
         ray_rows = ray_dataset.materialize().take_all()
@@ -155,7 +159,7 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
         with ray_run.journal._connection() as db:
             ray_owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert ray_owner == (ray_run.attempt, ray_run.fence)
-        ray_k6 = _k6_shapes(ray_dir)
+        ray_k6 = _k6_shapes(ray_run)
 
     # Output multiset + record identity (x value) identical across providers.
     assert local_rows == expected
@@ -181,38 +185,60 @@ def test_sem_local_ray_equivalence(tmp_path, ray_cluster):
 # ---------------- Ray fault: actor death, new allocation recovers exactly once ----------------
 
 def test_ray_actor_death_recovers_acked_prefix_exactly_once(tmp_path, ray_cluster):
+    from collections import Counter
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import kill_owned_worker
+    driver_pid = os.getpid()
     crash_marker = tmp_path / "crashed-once"
+    trace = tmp_path / 'business-calls'
 
     def double(row):
-        # Kill the whole actor process once, after at least one durable acked cut.
-        # On a single host this also simulates node loss: the actor becomes
-        # unreachable and Ray reports RayActorError to the driver (no auto-replay,
-        # max_restarts=0).
+        with trace.open('a') as stream:
+            stream.write(str(row['x']) + '\n')
         if row["x"] == 4 and not crash_marker.exists():
-            crash_marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(crash_marker, driver_pid)
         return {**row, "x": row["x"] * 2}
 
     items, plan, expected = _plan(double)
-    executor = RayDatasetExecutor(unified_chain=True)
+    executor = RayDatasetExecutor(workers=1, unified_chain=True)
     dataset = Dataset(ItemsSource(items), plan, executor)
-    with pytest.raises((RayActorError, RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match='UNKNOWN_EFFECT') as failure:
         with RunContext.start(tmp_path / "run",
                               limits={"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}) as run:
             reference = run.ref
-            dataset.materialize().take_all()  # actor SIGKILLs mid-chain
-    assert crash_marker.exists()
+            dataset.materialize().take_all()
+    assert failure.value.code == 'UNKNOWN_EFFECT'
+    assert isinstance(failure.value.__cause__, RayActorError)
+    death = json.loads(crash_marker.read_text())
+    assert death['pid'] != driver_pid and death['signal'] == 'SIGKILL'
+    with run.journal._connection() as db:
+        allocations = [json.loads(row[0]) for row in db.execute('SELECT document FROM resource_allocations')]
+    assert allocations and all(a['cleanup'] == 'CONFIRMED' and a['observation'] == 'FRESH'
+        and a['evidence_ref'].startswith('ray-actor-dead:') for a in allocations)
+    first_calls = [int(x) for x in trace.read_text().splitlines()]
     with RunContext.resume(reference) as run2:
+        before = {f['commit_id']:f for f in run2.journal.execution_commits(_chain_child_id(run2))
+                  if f['status'] == 'acked'}
+        assert before, 'no original ACK prefix survived the actor death'
         rows = dataset.materialize().take_all()
         assert rows == expected
         facts = run2.journal.execution_commits(_chain_child_id(run2))
         sequences = [f["sequence"] for f in facts]
-        assert sequences == list(range(1, len(facts) + 1))  # contiguous, no gap/dup
+        assert sequences == list(range(1, len(facts) + 1))
         assert all(f["status"] == "acked" for f in facts)
         assert len({f["commit_id"] for f in facts}) == len(facts)
+        after = {f['commit_id']:f for f in facts}
+        assert before.keys() < after.keys()
+        assert all(after[key]['receipts'] == fact['receipts'] for key,fact in before.items())
         with run2.journal._connection() as db:
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
-        assert owner == (run2.attempt, run2.fence)  # actor death never moved ownership
+        assert owner == (run2.attempt, run2.fence)
+    all_calls = [int(x) for x in trace.read_text().splitlines()]
+    counts = Counter(all_calls)
+    assert first_calls == list(range(5))
+    assert [counts[i] for i in range(4)] == [1]*4
+    assert counts[4] == 2 and all(counts[i] == 1 for i in range(5,10))
+    assert 'ray.data' not in sys.modules
 
 
 # ---------------- Ray fault: single-host node-loss simulation + confirmed cleanup ----------------
