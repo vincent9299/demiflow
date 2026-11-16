@@ -290,3 +290,48 @@ def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, pr
     assert len(deliveries) == 512 and len(set(deliveries)) == 512
     assert all(1 <= len(batch) <= 64 for batch in terminal)
     assert len(terminal) < len(deliveries), 'actual terminal ACKs still make one RPC per row'
+
+
+@pytest.mark.parametrize('fault', ['early_close', 'read_error'])
+def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path, monkeypatch, fault):
+    from demiflow import data
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.run_context import RunContext
+    import demiflow.execution.exchange.dataflow_bridge as bridge
+    original_start, original_decode = DataflowExecution.start, bridge._decode_record_document
+    executions, decoded = [], []
+    def start(execution):
+        assert execution._policy.provider == 'local' and execution._policy.worker_mode != 'thread'
+        executions.append(execution)
+        return original_start(execution)
+    def decode(*args, **kwargs):
+        decoded.append(1)
+        if len(decoded) == 2:
+            raise ValueError('injected second real terminal read failure')
+        return original_decode(*args, **kwargs)
+    monkeypatch.setattr(DataflowExecution, 'start', start)
+    monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
+    if fault == 'read_error':
+        monkeypatch.setattr(bridge, '_decode_record_document', decode)
+    def execute():
+        with RunContext.start(tmp_path/'run', limits={'timeout_s':30,
+                'checkpoint_interval_ms':60000}) as run, data.local_execution(workers=2):
+            rows = data.range(1000).map(lambda row: {'id': row['id'] * 2}).iter_rows()
+            if fault == 'early_close':
+                assert next(rows) == {'id':0}
+                rows.close()
+                facts = run.journal.execution_commits('action-1')
+                assert facts and facts[-1]['status'] == 'acked'
+                assert not executions[-1]._restore_image.cut.final
+            else:
+                try:
+                    list(rows)
+                finally:
+                    rows.close()
+    if fault == 'read_error':
+        with pytest.raises(ValueError, match='second real terminal read'):
+            execute()
+        assert len(decoded) == 2
+    else:
+        execute()
+    assert executions and all(not e._endpoints and not e._active_worker_allocations for e in executions)
