@@ -1,0 +1,70 @@
+{
+  "production_head": "8184c10156d65f4205eba2ffeea668a96cfbfa6f",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115",
+  "branch": "engine/gpt-fastcpu-profile-20261117",
+  "production_diff": "",
+  "run_status": "passed",
+  "workload_matches_original_spec": true,
+  "source_unchanged": true,
+  "diagnostic_time_s": 18.494891245,
+  "first_result_s": 2.110561424,
+  "public_output_rows": 10000,
+  "original_acked_cuts": 34,
+  "sampled_original_pool": {
+    "active": [],
+    "charged": {},
+    "authority_path": "/tmp/demiflow-historical-fastcpu-profile-20261117/fast_cpu/capacity/capacity"
+  },
+  "remaining_descendants": [],
+  "profiling_not_formal_performance_pass": true,
+  "evidence": [
+    {
+      "path": "/tmp/demiflow-historical-fastcpu-profile-20261117/fast_cpu/config.json",
+      "sha256": "3d002f99b487160f08e93d49a94d1497de1eda90c31c97b5ffb7b7248eddc2a2"
+    },
+    {
+      "path": "/tmp/demiflow-historical-fastcpu-profile-20261117/fast_cpu/trial.json",
+      "sha256": "601c94077267bb7614d7e9e4e5ef97f7e8f18ca2b2e7d890a3e36acb91193a85"
+    },
+    {
+      "path": "/tmp/demiflow-historical-fastcpu-profile-20261117/fast_cpu/driver.prof",
+      "sha256": "3d949c3c3d413f08ae717d3700e79030c99ffc49ad15bfa281396f0a56497b94"
+    },
+    {
+      "path": "/tmp/demiflow-historical-fastcpu-profile-20261117/process-tree.speedscope.json",
+      "sha256": "6444ad2c5701638cbba6b7742405f50e6e3268b3e2ddfd133f40673808151edd"
+    },
+    {
+      "path": "/tmp/demiflow-historical-fastcpu-profile-20261117/verification.json",
+      "sha256": "e3efde9e058dc2c9a88063ebbaa4130e7e4b1ef4de1a50a07fda24b64464d2f9"
+    },
+    {
+      "path": "/tmp/demiflow-historical-fastcpu-profile-20261117/attribution.json",
+      "sha256": "d33d41f7566e4867630887f993c93b67f7439bcc5433f1a03453a313c29791b4"
+    }
+  ],
+  "recommended_scopes": [
+    {
+      "priority": 1,
+      "files": [
+        "demiflow/execution/exchange/dataflow_transport.py"
+      ],
+      "change": "private per-owner PRF key secret plus bounded locator counter; preserve unguessable keys and original token/SHA/credit/ACK"
+    },
+    {
+      "priority": 2,
+      "files": [
+        "demiflow/execution/contracts/dataflow_codec.py"
+      ],
+      "change": "closed-schema constant string measurement; preserve every original budget/shape/DTO check"
+    },
+    {
+      "priority": 3,
+      "files": [
+        "demiflow/execution/worker/terminal_blocks.py",
+        "demiflow/execution/dataflow_scratch.py"
+      ],
+      "change": "bounded append buffer charged to original terminal grant and original staging journal; flush at original snapshot boundaries"
+    }
+  ]
+}
