@@ -66,7 +66,7 @@ def test_blob_constructor_is_not_called_when_input_and_storage_do_not_fit(tmp_pa
     # R/B describe one business payload, while Python+Arrow+writer copies
     # occupy the separately sealed publication workspace within original M.
     # Keep the original 14KB row and caps; make their actual coexistence fail.
-    limits = {**LIMITS, 'memory_bytes':384*1024, 'max_batch_bytes':32768, 'max_row_bytes':32768}
+    limits = {**LIMITS, 'memory_bytes':400*1024, 'max_batch_bytes':32768, 'max_row_bytes':32768}
     target = tmp_path/'rejected.lance'
     with pytest.raises(DataflowError, match='batch conversion admission') as error:
         with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(batch_rows=1):
