@@ -1,14 +1,11 @@
 """Public Datasink hooks on actual generic native sinks, not KV-specific hooks."""
 import json
-from pathlib import Path
 
 import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
-
-
 from native_datasink_support import CallbackSink
 
 
