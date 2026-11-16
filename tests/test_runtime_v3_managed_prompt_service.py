@@ -15,6 +15,10 @@ from test_map_prompt_async import PACK
 
 def fixture(root, monkeypatch, request, *, mode='success'):
     value = managed_fixture(root, monkeypatch, request=request, mode=mode)
+    return prompt_transport(value, monkeypatch)
+
+
+def prompt_transport(value, monkeypatch):
     script = value['script'].read_text()
     old = "{'model':'fixture','data':[\n                {'index':i,'embedding':gpu_vector if mode.startswith('cuda') else [3,4,0]} for i in range(len(body['input']))]}"
     assert old in script
@@ -106,3 +110,57 @@ def test_prompt_cancel_reaps_original_service_and_leaves_no_success(tmp_path, mo
     assert not thread.is_alive() and seen.is_set() and not errors
     assert run.journal.execution_action('action-1')['result'] is None
     assert_reaped(value, requests=sum(r['event']=='request' for r in events(value)))
+
+
+from test_runtime_v3_managed_service_gpu import gpu_service
+
+
+@pytest.mark.parametrize('gpu_service', ['cancel'], indirect=True)
+def test_prompt_service_runs_on_its_actual_original_gpu_grant(tmp_path, monkeypatch, gpu_service):
+    import os
+    import subprocess
+    from pathlib import Path
+    from demiflow.execution.dataflow_devices import device_pool
+    from test_runtime_v3_managed_service_gpu import _released
+    value = prompt_transport(gpu_service, monkeypatch)
+    observed, errors, done = [], [], threading.Event()
+    limits = {'memory_bytes': 4*1024**3, 'max_rss_bytes': 2*1024**3, 'timeout_s': 60}
+
+    def observe():
+        try:
+            deadline = time.monotonic()+40
+            while time.monotonic() < deadline and not done.is_set():
+                entries = events(value)
+                if any(row['event']=='request' for row in entries):
+                    cuda = next(row for row in entries if row['event']=='cuda')
+                    assert cuda['values']==[3.,4.,0.] and cuda['allocated'] > 0
+                    snapshot = device_pool('local').snapshot()
+                    assert len(snapshot['active']) == 1
+                    active = snapshot['active'][0]
+                    assert [d['device_id'] for d in active['devices']] == [value['expected_uuid']]
+                    record = json.loads((Path(os.environ['DEMIFLOW_RESOURCE_ROOT'])/'capacity/allocations'/
+                        (active['allocation_id']+'.json')).read_text())
+                    assert record['effective']['memory_bytes'] == 2*1024**3
+                    nvml = subprocess.check_output(['nvidia-smi', '--query-compute-apps=pid,gpu_uuid',
+                        '--format=csv,noheader,nounits'], text=True)
+                    assert any(line.split(',')[0].strip()==str(cuda['pid']) and
+                        line.split(',')[1].strip()==value['expected_uuid'] for line in nvml.splitlines())
+                    observed.append({'cuda': cuda, 'pool': snapshot, 'memory': record, 'nvml': nvml})
+                    return
+                time.sleep(.01)
+            raise AssertionError('Actual Prompt GPU service request was not observed')
+        except BaseException as exc:
+            errors.append(repr(exc))
+
+    with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(
+            workers=4, memory_bytes=4*1024**3, native_resources={'max_rss_bytes': 2*1024**3}):
+        thread = threading.Thread(target=observe); thread.start()
+        try:
+            saved = dataset(value, tmp_path, cached=False).materialize()
+            assert [row['answer'] for row in saved.take_all()] == ['ok']*8
+            assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+        finally:
+            done.set(); thread.join(42)
+    assert observed and not errors and not thread.is_alive()
+    released = _released(value)
+    (tmp_path/'prompt-gpu-proof.json').write_text(json.dumps({'observed': observed, 'released': released}, indent=2))
