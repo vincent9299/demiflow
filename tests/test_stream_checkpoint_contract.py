@@ -67,22 +67,39 @@ def test_checkpoint_empty_stream_really_commits_schema(tmp_path):
 
 
 def test_checkpoint_rejects_redirect_before_opening_table(tmp_path, monkeypatch):
+    _assert_redirect_rejected(tmp_path, monkeypatch, change='prepared')
+
+
+@pytest.mark.parametrize('change', ['declared_reference', 'declared_spec'])
+def test_native_scope_cannot_redirect_its_sealed_writer(tmp_path, monkeypatch, change):
+    _assert_redirect_rejected(tmp_path, monkeypatch, change=change)
+
+
+def _assert_redirect_rejected(tmp_path, monkeypatch, *, change):
     schema, outputs = declared(tmp_path)
     def execute():
         return save([{'id': 'a'}, {'id': 'a'}], outputs, schema)
     reference = interrupt_after_success(tmp_path / 'run', execute)
     journal = RunJournal(reference.directory)
     scopes = [(key, declaration) for key, declaration in native_scopes(journal)
-              if declaration['spec'] is None and declaration['reference'] is not None]
+              if (declaration['spec'] is not None if change == 'declared_spec' else
+                  declaration['spec'] is None and declaration['reference'] is not None)]
     assert scopes
     key, declaration = scopes[0]
     fact = journal.execution_commits(key)[0]
     prepared = fact['prepared']
     foreign = tmp_path / 'foreign.lance'
-    prepared['sinks']['lance']['reference'] = {'uri': str(foreign), 'version': 1}
+    if change != 'declared_spec':
+        prepared['sinks']['lance']['reference'] = {'uri': str(foreign), 'version': 1}
+    if change == 'declared_reference':
+        declaration['reference'] = dict(prepared['sinks']['lance']['reference'])
+    elif change == 'declared_spec':
+        declaration['spec']['fields']['uri'] = str(foreign)
     with journal._transaction() as db:
         db.execute('UPDATE runtime_commits SET prepared=? WHERE commit_id=?',
                    (json.dumps(prepared), fact['commit_id']))
+        db.execute('UPDATE runtime_commit_scopes SET declaration=? WHERE scope_id=?',
+                   (json.dumps(declaration), key))
     opened = []
     from demiflow.lance import storage
     original = storage.open_lance_dataset
@@ -93,7 +110,7 @@ def test_checkpoint_rejects_redirect_before_opening_table(tmp_path, monkeypatch)
             pytest.fail('unowned URI was opened before native reference ownership validation')
         return original(uri, *args, **kwargs)
     monkeypatch.setattr(storage, 'open_lance_dataset', guarded)
-    with pytest.raises(DataflowError, match='reference.*declaration|declared.*reference') as failure:
+    with pytest.raises(DataflowError, match='reference.*declaration|declared.*reference|sealed writer') as failure:
         with RunContext.resume(reference):
             execute()
     assert failure.value.code == 'CORRUPT_ARTIFACT'
