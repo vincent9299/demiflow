@@ -226,8 +226,9 @@ def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypa
         assert all(store.inspect(run) for run in runs)
         with pytest.raises(DataflowError,match='sort subwindow'):
             build_sort_runs(iter(rows),spec=spec,services=svc,window=replace(window,resident_bytes=65537))
-        with pytest.raises(DataflowError,match='single sort frame'):
+        with pytest.raises(DataflowError) as failure:
             build_sort_runs(iter([record({'k':'x'*3000})]),spec=spec,services=svc,window=window)
+        assert failure.value.code=='BUDGET_EXCEEDED'
         closed=merge_sort_runs(runs,spec=spec,services=svc,window=window)
         next(closed)
         closed.close()

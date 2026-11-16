@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import struct
+import sys
 from dataclasses import dataclass, replace
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -58,7 +59,7 @@ class SortWindow:
 
     Each merge reader holds a frame, its decoded comparison key and a buffer;
     two more frame windows cover heap/output/codec temporaries. Build reserves
-    four row windows for the current key/record/codec in addition to its run.
+    six row windows for the current key/record/codec in addition to its run.
     key_only is for internal key/offset carriers, never public business rows.
     """
     resident_bytes: int
@@ -77,10 +78,23 @@ class SortWindow:
                 or self.frame_bytes > self.run_bytes
                 or self.read_chunk_bytes > min(1 << 20, bounds.max_row_bytes)
                 or self.merge_fan_in > min(_MERGE_FAN_IN, bounds.max_open_files)
-                or self.run_bytes + 4 * bounds.max_row_bytes > self.resident_bytes
+                or self.run_bytes + 6 * bounds.max_row_bytes > self.resident_bytes
                 or self.merge_fan_in * (3 * self.frame_bytes + self.read_chunk_bytes)
                    + 2 * self.frame_bytes > self.resident_bytes):
             raise _err('RESOURCE_INFEASIBLE', 'sort subwindow exceeds its admitted live-object window')
+
+
+def _retained_frame_bytes(key, provenance, encoded):
+    # Encoded bytes and decoded comparison tokens coexist in the retained run.
+    # Count the actual closed builtin tree (including container allocation),
+    # without invoking user methods or pretending encoding is its only copy.
+    def size(value):
+        if type(value) is tuple:
+            return sys.getsizeof(value) + sum(size(item) for item in value)
+        if type(value) in (bytes, str, int):
+            return sys.getsizeof(value)
+        raise _err('INTERNAL_PROTOCOL', 'unexpected sort comparison token')
+    return size(key) + size(provenance) + sys.getsizeof(encoded) + _FRAME_OVERHEAD
 
 
 def shuffle_key(record_id: str, *, seed: int, occurrence_id: str) -> bytes:
@@ -311,7 +325,7 @@ def build_sort_runs(
         if not frames:
             return
         frames.sort(key=lambda item: (item[0], item[1]))
-        total = used
+        total = used if window is None else sum(len(frame[2]) for frame in frames)
         if spill_total + total > bounds.max_spill_bytes:
             raise _err("BUDGET_EXCEEDED", "sort spill exceeds max_spill_bytes", bytes=spill_total + total)
         refs.append(_write_run(frames, services))
@@ -340,10 +354,13 @@ def build_sort_runs(
             frame_bytes = len(encoded) + _FRAME_OVERHEAD
             if frame_bytes > (run_budget if window is None else window.frame_bytes):
                 raise _err("BUDGET_EXCEEDED", "single sort frame exceeds the resident budget")
-            if frames and used + frame_bytes > run_budget:
+            resident = frame_bytes if window is None else _retained_frame_bytes(key, prov, encoded)
+            if resident > run_budget:
+                raise _err('BUDGET_EXCEEDED', 'single retained sort frame exceeds the resident budget')
+            if frames and used + resident > run_budget:
                 flush()
             frames.append((key, prov, encoded))
-            used += frame_bytes
+            used += resident
         flush()
     except BaseException:
         for ref in refs:

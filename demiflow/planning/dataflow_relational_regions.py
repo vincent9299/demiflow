@@ -109,7 +109,12 @@ def region_resident_bytes(plan, bounds):
     if plan.ordered_groups:
         # Reduce: 8R belongs exclusively to the actual external-sort window;
         # depth+1 row windows plus the original batch window remain available
-        # for arena hydration, key/codec/output temporaries. Reducer state and
+        # for arena hydration, key/codec/output temporaries. A depth-d binary
+        # merge holds at most d+2 row-sized values: retained left siblings,
+        # current pair and its merged result. B >= R supplies the extra row.
+        # During sort build those hydrated parents are released before yielding
+        # the key carrier; sort's 2R retained run + 6R current codec window is
+        # separate and includes the decoded comparison tokens. Reducer state and
         # metadata coexist. This is larger than join-only, never a max(profile)
         # substitution for simultaneously live resources.
         return (bounds.max_batch_bytes + (plan.join_depth + 9) * bounds.max_row_bytes
