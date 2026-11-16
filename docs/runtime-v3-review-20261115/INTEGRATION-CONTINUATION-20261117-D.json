@@ -1,0 +1,128 @@
+{
+  "head": "6d0530d01acef4c33f46cda450785e92f29e4964",
+  "inputs": 2964,
+  "source_all_receipts_equal": true,
+  "all_source_blobs_match_commit": true,
+  "groups": [
+    {
+      "receipt": "/tmp/demiflow-root-final-local-6d-api_local/receipt.json",
+      "sha256": "6fcfa08106739b342b731e54c730a0978bd4e646f6d6ed00fb5d187d4361908d",
+      "calls": 12,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-local-6d-model_effect_recovery_local/receipt.json",
+      "sha256": "39f1f3aa2d66e316ebc6f326daf815093bcc9e1711293d6655cd40d6ad552494",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-local-6d-queue_full_business_local/receipt.json",
+      "sha256": "c31d9603f909da9c819e51c4529588a1bcea8262258c7381890ec897b4bf9203",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-local-6d-document_embedding_single/receipt.json",
+      "sha256": "8f633057a35d29d58a3fad1962bc3bf5dbb16ac2b3ee31f07ab12f22b221114f",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-product-6d-managed-r1/receipt.json",
+      "sha256": "b62ce1e7a75ddf82308cda48c303c0b129bc5c66f838f67fc59e800ba192f551",
+      "calls": 2,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-product-6d-browser-r1/receipt.json",
+      "sha256": "1eb91ccdee338ec524dca3759508415dd7825293b0cc5e6cf8210f446f27a4f3",
+      "calls": 4,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-product-6d-notebook-r1/receipt.json",
+      "sha256": "41ee4cd7a0b75acf894bd52326e091a6ff207e64b3ff1647e9d471393151eddc",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-product-6d-close-r1/receipt.json",
+      "sha256": "e1a03ff391fe7e936917265866e16af869946a22c0da255e66a101874ed09796",
+      "calls": 7,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-6d-frame_boundary_ray/receipt.json",
+      "sha256": "ea34527e0a450fb75d3fa53ca0a6050a0be58f34e8ab890bc04c8463af28105e",
+      "calls": 2,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-6d-region_ray/receipt.json",
+      "sha256": "13254a61e25a46e60cc33a382012ef8dc7e07baae1027392ae0cb63014bd84b9",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-6d-graph_routes_ray/receipt.json",
+      "sha256": "d617c35dd05379f2a34ae2d696f1defd2f0ccea8da2076955d2dbff07f7ea3a2",
+      "calls": 2,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-6d-terminal_recovery_ray/receipt.json",
+      "sha256": "c21a02e2d199ff7c2cdaf1e5d6bf8a06a0b94dc3304cd31f3718e7586dd37417",
+      "calls": 2,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-6d-unknown_paid_embedding_ray/receipt.json",
+      "sha256": "36e2b701d2c701c48ece27be95604617f4e5d72e3709f34c4dbb3d66d9b096d7",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-6d-api_ray_core/receipt.json",
+      "sha256": "ca3eade0460d473c9494bdf99ecd7627e55da57fd81f8778fd87744b81684c50",
+      "calls": 12,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-business-6d-model_effect_recovery_ray_core/receipt.json",
+      "sha256": "89c28a8ba91d44f13a3786bd8488ecfed2af5352ccd62cb45b14727d29e36279",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-ray-business-6d-queue_full_business_ray_core/receipt.json",
+      "sha256": "6f1a5512ad15c4041a1be05fa3a2083b91afdd2e0b5b4de12ce795702f290f6d",
+      "calls": 1,
+      "failed": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-final-core-6d-evidence/verification.json",
+      "sha256": "4247bf528b4ae58bf1629e7077ced0a292d6ccbb378cd31982d4cccad9a1e0db",
+      "calls": 68,
+      "failed": [
+        "tests/test_runtime_v3_finite_finish.py::test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity"
+      ]
+    }
+  ],
+  "calls": 119,
+  "failed": 1,
+  "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+  "main_dirty_status_unchanged": true,
+  "main_dirty_hashes_unchanged": 18,
+  "frozen": {
+    "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+    "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+    "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+    "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+    "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+    "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+    "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+  },
+  "all_passed": false,
+  "notice": "Original finite-output test failure preserved. This is not whole-repository or performance completion."
+}

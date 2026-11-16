@@ -4,6 +4,10 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **2026-11-17 最新固定候选 `6d0530d`**：payload/frame、实际tuple codec空间、reduce初值/新旧状态/序列化共驻及历史grant、工作台关闭等待已合。原完整4KiB/16KiB tuple反例、19项join-chain和原40KiB驻留均通过。Local/Ray各168 API场景、覆盖98入口；真实三模型×三恢复窗口、queue完整业务/unknown、工作台14项组合通过。根节点独立核验17份回执的2964输入摘要全部等于同一Git提交，119项中118通过/1失败，详见[最新组合证据与剩余修复](INTEGRATION-CONTINUATION-20261117-D.md)。
+- **当前正在修的唯一该组合失败**：默认预算使join/terminal合法分phase，旧测试只看join.finish_cursor；同时实测terminal非adopt有限输入不能中途checkpoint。新隔离叶树已有原100×10中途ACK/恢复1000正例，但仍在收口reader保留空间、park协作、旧frontier连续恢复，并补真实Ray/GC验证。未把测试观察点修改当生产修复，也未宣称叶树最终全绿。主root仍待合此修复。
+- **整体仍未完成**：上述finite修复的定向终验、原U3安静窗口、受影响GPU、正式I08五轮矩阵及V035历史总裁决。两机旧SSH入口当前认证拒绝，等待已提出的信息问题回复，不猜凭证；PostgreSQL仍无测试DSN。下方较早“frame/reducer正在修”等均是历史快照，不覆盖本节。
+
 - **2026-11-17 当前继续修复点（优先于以下快照）**：U3候选、同键region与原五条缓存/异步/清理测试迁移已合。独立核owner49项＋真实U3 Ray2项的源码与提交全等；但发现合法payload被record封装误拒，以及reduce初值/新旧状态/编码副本共驻少计，正在统一修复。根节点90b0ef7的4条旧产品locator/目录计数红项已在9ff14a8原selector全部复验通过；另配置并发读图通过。该组6绿/1红，红项为保留原数据的4KiB完整tuple封装反例，仍待核心修复。原I08与最终组合/V035尚未完成，见[本轮事实与缺口](INTEGRATION-CONTINUATION-20261117-C.md)。
 
 - **2026-11-17 当前权威增量**：固定 `8be9e45`，原 GC 与真实 Ray 终端/类型/有限 join 恢复 7 项全部通过；前一固定 `4904f10` 44 项通过、1 项 GC oracle 失败，该 oracle 已修并由本轮原 selector 关闭。原宽行 p2 保持 40k×8KiB/256MiB/120秒，实测 97.4076 秒。已合 source 行数 cut、实际共驻 quantum、确定末行 EOF、观测包装器关闭及有限 join 投影；见 [本轮实现与独立证据](INTEGRATION-CLOSURE-20261117-B.md)。
