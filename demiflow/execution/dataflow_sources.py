@@ -56,7 +56,8 @@ def _canonical_kind(kind):
 
 
 def _content_digest(value: Any) -> str:
-    return hashlib.sha256(pickle.dumps(value, protocol=4)).hexdigest()
+    from .literal_source import items_fingerprint
+    return items_fingerprint(value)[0]
 
 
 def _json_digest(value: Any) -> str:
@@ -241,6 +242,11 @@ def snapshot_source(
     elif isinstance(source, MaterializedSource):
         kind, replay, finite = "MaterializedSource", "seek", True
         immutable = facts
+        from .literal_source import literal_reference, stage_literal
+        reference = literal_reference(source, bounds)
+        if reference is not None:
+            manifest_ref = stage_literal(source, reference, source_id=source_id,
+                                         store=store, bounds=bounds)
     elif isinstance(source, IterableSource):
         kind, replay, finite = "IterableSource", "attempt_only", False
         immutable = facts
@@ -402,7 +408,7 @@ def verify_source_snapshot(snapshot: SourceSnapshot, *, store: Any, bounds: Boun
                     "materialized", "iterable", "datasource", "queue_history", "queue"):
         raise DataflowError("INVALID_CONTRACT", f"unknown source kind: {kind}")
 
-    if kind == 'items' and snapshot.manifest_ref is not None:
+    if kind in ('items', 'materialized') and snapshot.manifest_ref is not None:
         # Literal data is authenticated lazily by the reader under the worker's
         # shared codec grant, before any row or user effect is exposed.
         from .literal_source import MEDIA

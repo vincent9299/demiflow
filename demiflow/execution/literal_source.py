@@ -44,24 +44,34 @@ class LiteralSourceReference:
     count: int
     items_digest: str
     schema: str = SCHEMA
+    kind: str = "items"
 
 
 def literal_reference(source, bounds):
-    from ..data.sources import ItemsSource
-    if type(source) is not ItemsSource:
+    from ..data.sources import ItemsSource, MaterializedSource
+    from .dataflow_inputs import InputMaterializedHandle
+    if type(source) is ItemsSource:
+        value, count, kind = source.items, len(source.items), 'items'
+    elif type(source) is MaterializedSource and type(source.handle) is InputMaterializedHandle:
+        value, count, kind = source.handle, source.handle.row_count, 'materialized'
+    else:
         return None
-    digest, size = items_fingerprint(source.items)
+    digest, size = items_fingerprint(value)
     # A bounded tiny program keeps the legacy zero-data-artifact fast path.
     # Both program and snapshot use this function; resume uses sealed carriers.
     if size <= min(65536, max(1, bounds.max_state_bytes // 4)):
         return None
-    return LiteralSourceReference(len(source.items), digest)
+    return LiteralSourceReference(count, digest, kind=kind)
 
 
 def stage_literal(source, reference, *, source_id, store, bounds):
     forest = SegmentForest(store, bounds)
     index = 0
     pending = None
+    from ..data.sources import ItemsSource
+    from .record_schema import RecordSchemas
+    schemas = RecordSchemas(store=store, bounds=bounds)
+    source_rows = ((row, None) for row in source.items) if type(source) is ItemsSource else source.handle.typed_rows()
     rows_per_segment = min(1024, bounds.max_pending_events)
     # A frame's control/escaping bytes are not its business row byte allowance.
     target = max(bounds.max_batch_bytes, line_limit(bounds))
@@ -72,10 +82,11 @@ def stage_literal(source, reference, *, source_id, store, bounds):
             size = 0
             while pending is not None or index < reference.count:
                 if pending is None:
-                    row = source.items[index]
+                    row, schema = next(source_rows)
+                    schema_ref = schemas.put(schema)
                     encoded, _, _ = _typed_shape(row, bounds.max_row_bytes)
                     record = Record(identity([source_id, 'literal', index]), {'index': index},
-                                    None, row, encoded, index)
+                                    None, row, encoded, index, schema_ref)
                     total, parts = frame_parts(record, bounds,
                         retained=metadata_bytes(forest.roots) + 2 * bounds.max_control_bytes)
                     pending = total, parts
@@ -93,7 +104,7 @@ def stage_literal(source, reference, *, source_id, store, bounds):
         forest.append(ref, rows=rows)
     root = forest.seal()
     manifest = {'schema': SCHEMA, 'count': reference.count,
-                'items_digest': reference.items_digest, 'source_id': source_id,
+                'items_digest': reference.items_digest, 'kind': reference.kind, 'source_id': source_id,
                 'data_ref': asdict(root)}
     raw = document(manifest, bounds.max_control_bytes)
     return store.put(iter((raw,)), max_bytes=bounds.max_control_bytes, media_type=MEDIA)
@@ -133,10 +144,10 @@ class LiteralRows:
         raw = self._call(read_document, ref, store, bounds, _maximum=bounds.max_control_bytes)
         manifest = self._call(decode_metadata, raw, bounds)
         del raw
-        expected = {'schema', 'count', 'items_digest', 'source_id', 'data_ref'}
+        expected = {'schema', 'count', 'items_digest', 'kind', 'source_id', 'data_ref'}
         if (type(manifest) is not dict or set(manifest) != expected
                 or manifest['schema'] != SCHEMA or manifest['source_id'] != self.snapshot.source_id
-                or manifest['count'] != self.reference.count
+                or manifest['count'] != self.reference.count or manifest['kind'] != self.reference.kind
                 or manifest['items_digest'] != self.reference.items_digest):
             raise DataflowError('SOURCE_CHANGED', 'literal input manifest differs from its original declaration')
         root = ArtifactRef(**manifest['data_ref'])
@@ -209,6 +220,7 @@ class LiteralRows:
                 # second business tree merely to refreeze it immediately.
                 row = record.inline
                 self.last_encoded_bytes = record.encoded_bytes
+                self.last_schema_ref = record.schema_ref
                 del record
                 self.index += 1
                 if self.index == self.end:

@@ -139,3 +139,40 @@ def test_source_data_quota_rejects_before_snapshot_or_program_can_publish_a_resu
             snapshot_source(source,action=NS(action_id='literal-spill'),store=store,bounds=bounds)
         assert not run.journal.execution_commits('action-1')
         assert not list(store._staging.glob('*.part'))
+
+
+@pytest.mark.parametrize('format',['items','arrow','numpy','pandas'])
+def test_materialized_literal_uses_original_handle_digest_and_declared_schema(tmp_path,format):
+    from demiflow.data.sources import MaterializedSource
+    from demiflow.execution.dataflow_inputs import build_input_handle
+    import numpy as np
+    import pandas as pd
+    import pyarrow as pa
+    values=[{'i':i,'value':b'raw\x00'*100} for i in range(40)]
+    value={'items':values,'arrow':pa.Table.from_pylist(values),
+        'numpy':np.arange(4000,dtype=np.int64).reshape(40,100),
+        'pandas':pd.DataFrame(values)}[format]
+    handle=build_input_handle(value,format=format)
+    source=MaterializedSource(handle,handle.row_count)
+    with store_fixture(tmp_path) as (_,store,_):
+        bounds=replace(store._bounds,max_state_bytes=4096,max_row_bytes=8192,max_batch_bytes=16384)
+        reference=literal_reference(source,bounds)
+        assert reference.kind=='materialized'
+        original=hashlib.sha256(pickle.dumps(handle,protocol=4)).hexdigest()
+        snapshot=snapshot_source(source,action=NS(action_id='materialized-literal'),store=store,bounds=bounds)
+        assert snapshot.immutable_identity['handle_digest']==original==reference.items_digest
+        services=services_for(store,bounds,snapshot,reference)
+        split=plan_source_splits(snapshot,source,target_partitions=1,bounds=bounds)[0]
+        reader=open_source_reader(snapshot,split,cursor=None,services=services)
+        rows=[];schemas=[]
+        while True:
+            poll=reader.next_record()
+            if poll.status=='eoi':break
+            rows.append(thaw_record_value(poll.record.inline));schemas.append(poll.record.schema_ref)
+        reader.close()
+        if format=='numpy':
+            assert len(rows)==40
+            assert np.array_equal(np.stack([row['data'] for row in rows]),value)
+        else:
+            assert rows==values
+        assert all(ref is not None for ref in schemas) if format in ('arrow','pandas') else all(ref is None for ref in schemas)

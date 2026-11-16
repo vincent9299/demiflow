@@ -233,13 +233,16 @@ class ItemsReader(_BaseReader):
         self._literal_rows = None
         from .literal_source import LiteralSourceReference, LiteralRows
         self._literal_items = isinstance(plan, (ItemsSource, LiteralSourceReference))
-        if isinstance(plan, LiteralSourceReference) or self._snapshot.manifest_ref is not None and isinstance(plan, ItemsSource):
+        if isinstance(plan, LiteralSourceReference) or self._snapshot.manifest_ref is not None and isinstance(plan, (ItemsSource, MaterializedSource)):
             facts = self._snapshot.immutable_identity
+            count = facts.get('count') if facts['kind'] == 'ItemsSource' else facts.get('row_count')
+            digest = facts.get('items_digest') if facts['kind'] == 'ItemsSource' else facts.get('handle_digest')
+            kind = 'items' if facts['kind'] == 'ItemsSource' else 'materialized'
             reference = (plan if isinstance(plan, LiteralSourceReference) else
-                         LiteralSourceReference(len(plan.items), facts['items_digest']))
+                         LiteralSourceReference(count, digest, kind=kind))
             if (reference.schema != 'demiflow.literal-source.v1'
-                    or reference.count != facts.get('count')
-                    or reference.items_digest != facts.get('items_digest')):
+                    or reference.count != count or reference.kind != kind
+                    or reference.items_digest != digest):
                 raise DataflowError('SOURCE_CHANGED', 'literal source program differs from its snapshot')
             self._end = int(split.locator.get('end', reference.count))
             if not self._start <= self._index <= self._end <= reference.count:
@@ -273,6 +276,7 @@ class ItemsReader(_BaseReader):
                    else next(self._iterator))
             if self._literal_rows is not None:
                 self._decoded_row_bytes = self._literal_rows.last_encoded_bytes
+                self._schema_ref = self._literal_rows.last_schema_ref
         except StopIteration as exc:
             raise DataflowError("SOURCE_CHANGED", "materialized input ended before its sealed row count") from exc
         if self._typed_rows:
