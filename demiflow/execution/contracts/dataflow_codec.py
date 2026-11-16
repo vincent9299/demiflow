@@ -988,8 +988,12 @@ def _measure_document(frame, bounds):
         # before creating even its bounded UTF-8 view; never create escaped raw.
         if len(value) + size + 2 > bounds.max_control_bytes:
             raise _budget_err("wire frame exceeds control byte budget")
-        utf8_bytes = len(value.encode("utf-8"))
+        # Most control fields are ASCII identifiers. Their codepoint length is
+        # already the exact UTF-8 width; do not allocate another bytes object.
+        utf8_bytes = len(value) if value.isascii() else len(value.encode("utf-8"))
         add(utf8_bytes + 2)
+        if _JSON_ESCAPES.search(value) is None:
+            return utf8_bytes
         for match in _JSON_ESCAPES.finditer(value):
             char = match.group()
             add(1 if char in '\"\\\b\f\n\r\t' else 5)
