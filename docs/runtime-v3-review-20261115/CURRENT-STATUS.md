@@ -4,6 +4,9 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **服务退出与原资源释放**：已集成 guardian `c487cde` 与原 RunResourceState 重试 `90f24a4`。返回 UNCONFIRMED 后保留全额占用，只将已完成 I/O 的再次检查间隔降至不超过100ms；未返回 I/O 仍保留原30秒 crash lease。原状态机、真实原pool、Prompt真实池及worker强杀共20个不同case通过（19+后续2，有1个重叠）；强杀测试同时锁定“不早退”和最终原allocation CONFIRMED/pool RELEASED。最初detached红为真实Broken pipe不在夹具故障词表，修订后两种强杀均过，原红保留。见 [资源重试](CLEANUP-RETRY-CLOSURE.md)。guardian cleanup自身错误的持锁强化与本地GPU服务准入仍在执行。
+- **旧模型组合**：固定 `56fb2fc` 的完整 Embedding + inference 两文件84 passed/2 failed，Embedding文件全通过。两红之一是Prompt指标缺失（独立候选专项已绿，待最终固定交付），另一个旧父进程观察器已改为实际thread worker及原RemotePromptJournal端口，保留真实池/关闭/零历史审计断言，集成验收通过。显式Prompt缓存与混合两模型磁盘总预算仍在收口，不宣称两文件已同HEAD全绿。
+
 当前生产已集成真实 peer 批读、Ray mailbox、持久展开窗口、受管对象 Embedding、工作台真实 GPU 和原 producer unit 恢复；Ray 异步后缀现与 Local 使用同一资源规则。各项保留实际验收版本。这不是“全部完成”的版本：旧私有模型缓存兼容、性能和部分正式验收门仍在收口，未推送或合入主仓。
 
 - **模型兼容集成**：原生路由 Prompt 已进入同一图、原 journal、run/node/route 原子额度与原 ACK 恢复；owner Local18项、真实Ray1项通过。显式 Embedding 私有缓存保持原 delivery-only，owner48项通过；总控独立核全部源摘要及附件。总控 `d85dca1` 的原 adaptive/有限准备/HTTP预取重叠与路由组合17项通过。原先遗漏的七个 Embedding 失败在旧267b914全部通过，已按真实行为逐项补修，托管服务与合作停止仍在收口。见 [模型兼容与边界](MODEL-COMPATIBILITY-CLOSURE.md)。

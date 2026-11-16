@@ -1,0 +1,95 @@
+{
+  "schema": "demiflow.cleanup_retry_primary.v1",
+  "runs": [
+    {
+      "path": "/tmp/demiflow-cleanup-retry-fixed-evidence/verification.json",
+      "sha256": "0f7e3e437b3b1b0d2732a2b75d1c1b5534d5cdabbd99229c32ef0afe61015a42",
+      "head": "90f24a45770afe9ff5ff3c26b780e004184da266",
+      "input_count": 1843,
+      "source_changes": [],
+      "exit_code": 1,
+      "tests": 20,
+      "failed": [
+        "test_worker_sigkill_retains_unit_until_actual_service_tree_exits[detached]"
+      ],
+      "junit_path": "/tmp/demiflow-cleanup-retry-fixed.xml",
+      "junit_sha256": "29a647fc4fcdcd858a63746b6f196b0f4b1889da65628e3716725117c9a1f0d1",
+      "command": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "/tmp/demiflow-final-v3-safe-runner.py",
+        "/tmp/demiflow-cleanup-retry-fixed",
+        "tests/test_runtime_v3_cleanup_retry.py",
+        "tests/test_u2_conformance.py",
+        "tests/test_inference_execution.py::test_prompt_real_calls_use_owned_pools_and_skip_historical_audit",
+        "tests/test_runtime_v3_managed_embedding_service.py::test_worker_sigkill_retains_unit_until_actual_service_tree_exits"
+      ],
+      "pytest_args": [
+        "-q",
+        "--tb=short",
+        "tests/test_runtime_v3_cleanup_retry.py",
+        "tests/test_u2_conformance.py",
+        "tests/test_inference_execution.py::test_prompt_real_calls_use_owned_pools_and_skip_historical_audit",
+        "tests/test_runtime_v3_managed_embedding_service.py::test_worker_sigkill_retains_unit_until_actual_service_tree_exits",
+        "--basetemp=/tmp/demiflow-cleanup-retry-fixed-tests",
+        "--junitxml=/tmp/demiflow-cleanup-retry-fixed.xml"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-cleanup-retry-pool",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-cleanup-retry-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-cleanup-retry-domain",
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      }
+    },
+    {
+      "path": "/tmp/demiflow-cleanup-retry-fixed-r2-evidence/verification.json",
+      "sha256": "ac1b92dbaad615970d2816d778aec77ffd5415527540be3151add4cb10304539",
+      "head": "2dd3a440744f2d5c603495aa731e71b1487d4c48",
+      "input_count": 1843,
+      "source_changes": [],
+      "exit_code": 0,
+      "tests": 2,
+      "failed": [],
+      "junit_path": "/tmp/demiflow-cleanup-retry-fixed-r2.xml",
+      "junit_sha256": "f7a0ada3b9d0839ffbbe7388d4aee2ef02efa3fc284d370a4cfcc3200dd5a4e3",
+      "command": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "/tmp/demiflow-final-v3-safe-runner.py",
+        "/tmp/demiflow-cleanup-retry-fixed-r2",
+        "tests/test_runtime_v3_managed_embedding_service.py::test_worker_sigkill_retains_unit_until_actual_service_tree_exits"
+      ],
+      "pytest_args": [
+        "-q",
+        "--tb=short",
+        "tests/test_runtime_v3_managed_embedding_service.py::test_worker_sigkill_retains_unit_until_actual_service_tree_exits",
+        "--basetemp=/tmp/demiflow-cleanup-retry-fixed-r2-tests",
+        "--junitxml=/tmp/demiflow-cleanup-retry-fixed-r2.xml"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-cleanup-retry-r2-pool",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-cleanup-retry-r2-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-cleanup-retry-r2-domain",
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      }
+    }
+  ],
+  "boundary": {
+    "candidate": "2dd3a440744f2d5c603495aa731e71b1487d4c48",
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "status_same": true,
+    "dirty_hash_count": 18,
+    "dirty_hash_changes": [],
+    "frozen_changed": [],
+    "scope": "Main checkout and frozen7 only; three prior boundary incidents remain disclosed separately.",
+    "head_same": true
+  },
+  "distinct_passing_cases": 20,
+  "note": "19 pass/1 red at 90f24a4; real SIGKILL write-side BrokenPipe fixture corrected; both kill cases pass at 2dd3a44. Production retry bytes unchanged. Not a single 20-test invocation."
+}
