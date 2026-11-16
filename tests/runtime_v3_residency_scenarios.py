@@ -176,6 +176,8 @@ def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True,
 
 
 def multiworker_barrier(fx, fault=None):
+    if fx.provider=='ray_core' and not getattr(fx,'_residency_child',False):
+        return _ray_child(fx,'multiworker_barrier',fault)
     if fault is not None:
         raise ValueError('multiworker_barrier uses the original nonfinal ACK boundary')
     from demiflow import data
@@ -254,6 +256,8 @@ class LifecycleActor:
 
 
 def actor_state_lifecycle(fx,fault=None):
+    if fx.provider=='ray_core' and not getattr(fx,'_residency_child',False):
+        return _ray_child(fx,'actor_state_lifecycle',fault)
     if fault is not None:
         raise ValueError('actor lifecycle covers success, failure and cancellation together')
     from demiflow import data
@@ -356,6 +360,8 @@ def actor_state_lifecycle(fx,fault=None):
 
 
 def route_recovery(fx,fault=None):
+    if fx.provider=='ray_core' and not getattr(fx,'_residency_child',False):
+        return _ray_child(fx,'route_recovery',fault)
     # Public routes first; the unavailable DSL target/broadcast paths remain
     # explicit. Component route tests do not turn those into public coverage.
     from demiflow import data
@@ -442,3 +448,60 @@ def _channel_recovery(fx):
                 'cut_id':cut.cut_id,'snapshot_digest':refs['route'].digest})
             store.close()
     return cases
+
+
+def _ray_child(fx,name,fault):
+    """Own Ray's process-scoped runtime in a disposable, tree-pinned child."""
+    import subprocess
+    import sys
+    from runtime_v3_recovery_scenarios import _write, _read, WORKTREE
+    directory=fx.root/('child-'+name)
+    directory.mkdir()
+    request=directory/'request.json'
+    _write(request,{'root':str(fx.root),'task':name,'fault':fault,'output':str(directory/'result.json')})
+    with (directory/'stdout').open('wb') as out,(directory/'stderr').open('wb') as err:
+        child=subprocess.Popen([sys.executable,'-B','-m','runtime_v3_residency_scenarios',str(request)],
+            cwd=WORKTREE,env={**os.environ,'PYTHONPATH':str(WORKTREE)+':'+str(WORKTREE/'tests'),
+                'PYTHONDONTWRITEBYTECODE':'1','DEMIFLOW_RESOURCE_ROOT':str(fx.root/'capacity')},
+            stdout=out,stderr=err,start_new_session=True)
+        fx._children.append(child)
+        try:child.wait(timeout=240)
+        except subprocess.TimeoutExpired:
+            child.kill();child.wait(timeout=10)
+            raise AssertionError('private Ray acceptance child exceeded 240s aggregate deadline')
+    assert child.returncode in (0,3),(directory/'stderr').read_text()[-16000:]
+    result=_read(directory/'result.json')
+    if child.returncode==3:
+        from runtime_v3_support import NotRunError
+        fx._record_not_run(name,result['missing'])
+        raise NotRunError(name,result['missing'])
+    result['ray_child']={'pid':child.pid,'returncode':child.returncode,'scope':'same-host private Ray Core'}
+    return result
+
+
+def _main(path):
+    import sys
+    import demiflow
+    from types import SimpleNamespace
+    from runtime_v3_recovery_scenarios import _write, _read, WORKTREE
+    from runtime_v3_support import NotRunError, _RayDataBlocker
+    assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE)
+    config=_read(Path(path));root=Path(config['root'])
+    assert root.is_relative_to('/tmp') and any(p.startswith('demiflow-') for p in root.parts)
+    fx=SimpleNamespace(root=root,journal_dir=root/'journal',evidence_dir=root/'evidence',
+        provider='ray_core',bounds={'timeout_ms':120000},_children=[],_residency_child=True)
+    fx._save_evidence=lambda name,value:_write(fx.evidence_dir/(name+'.json'),value)
+    fx._record_not_run=lambda name,detail:_write(fx.evidence_dir/('not-run-'+name+'.json'),detail)
+    code=0
+    with _RayDataBlocker() as blocked:
+        try:result=globals()[config['task']](fx,config['fault'])
+        except NotRunError as exc:
+            result={'missing':exc.missing};code=3
+        assert not blocked.attempts
+    _write(Path(config['output']),result)
+    raise SystemExit(code)
+
+
+if __name__=='__main__':
+    import sys
+    _main(sys.argv[1])
