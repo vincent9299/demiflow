@@ -53,6 +53,24 @@ def test_index_preserves_alias_priority_and_invalidates_same_mtime_size(tmp_path
     assert artifacts.resolve_local_artifact(tmp_path/'old')==tmp_path/'two'
 
 
+def test_fresh_index_rejects_changed_bytes_with_identical_stat_ticks(tmp_path,index_config,monkeypatch):
+    path=write(tmp_path,dict(version=1,files={'old':'one'}))
+    original=locations.identity(path.stat())
+    identify=locations.identity
+    def coarse(info):
+        value=identify(info)
+        return original if value[:3]==original[:3] else value
+    monkeypatch.setattr(locations,'identity',coarse)
+    first=locations.IndexedLocations(str(path),original)
+    assert first.get('old')=='one'
+    write(tmp_path,dict(version=1,files={'old':'two'}))
+    assert locations.identity(path.stat())==original
+    with pytest.raises(ValueError,match='content changed'):
+        first.get('old')
+    second=locations.IndexedLocations(str(path),original)
+    assert second.path!=first.path and second.get('old')=='two'
+
+
 def test_second_process_object_uses_index_without_reparsing(tmp_path,index_config,monkeypatch):
     path=write(tmp_path,dict(version=1,files={'a':'b'}));identity=locations.identity(path.stat())
     first=locations.IndexedLocations(str(path),identity);assert first.get('a')=='b'

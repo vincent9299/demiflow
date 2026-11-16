@@ -106,6 +106,34 @@ def identity(info):
     return (info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
 
 
+def source_digest(filename, source_identity):
+    """Bounded content proof when filesystem timestamp ticks can coincide."""
+    if source_identity[2] > MAX_SOURCE:
+        raise ValueError('Location manifest exceeds 1 GiB')
+    fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    digest, size, started = hashlib.sha256(), 0, time.monotonic()
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or identity(info) != tuple(source_identity):
+            raise ValueError('Location manifest changed before fingerprinting')
+        while chunk := stream.read(64 * 1024):
+            size += len(chunk)
+            if size > source_identity[2] or time.monotonic() - started > 110:
+                raise ValueError('Location manifest fingerprint exceeds size/time budget')
+            digest.update(chunk)
+        if (size != source_identity[2] or identity(os.fstat(stream.fileno())) != tuple(source_identity)
+                or identity(Path(filename).stat()) != tuple(source_identity)):
+            raise ValueError('Location manifest changed while fingerprinting')
+    return digest.hexdigest()
+
+
+def recent_digest(filename, info):
+    # A same-size rewrite and restored mtime may share the preceding ctime tick.
+    # Old unchanged files retain the cheap metadata cache; fresh files must
+    # distinguish bytes before looking up either an in-memory or disk index.
+    return source_digest(filename, identity(info)) if time.time_ns() - info.st_ctime_ns < 2_000_000_000 else None
+
+
 @contextmanager
 def _lock(directory, exclusive):
     directory.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -123,11 +151,18 @@ def _lock(directory, exclusive):
 
 
 class IndexedLocations:
-    def __init__(self, filename, source_identity, field='files'):
+    def __init__(self, filename, source_identity, field='files', *, content_digest=None):
         if field not in {'files', 'tables'}: raise ValueError('Unknown location mapping field')
         if source_identity[2]>MAX_SOURCE: raise ValueError('Location manifest exceeds 1 GiB')
         self.filename=filename; self.source_identity=tuple(source_identity); self.field=field
-        self.key=json.dumps([FORMAT,filename,self.source_identity,field],separators=(',',':'))
+        if content_digest is None and time.time_ns() - self.source_identity[4] < 2_000_000_000:
+            content_digest = source_digest(filename, self.source_identity)
+        self.content_digest = content_digest
+        self._content_verified_after_tick = False
+        key = [FORMAT,filename,self.source_identity,field]
+        if content_digest is not None:
+            key.append(content_digest)
+        self.key=json.dumps(key,separators=(',',':'))
         directory=Path(os.environ.get('DEMIFLOW_LOCATION_CACHE',Path.home()/'.cache/demiflow/location-index')).expanduser().absolute()
         self.path=directory/(hashlib.sha256(self.key.encode()).hexdigest()+'.sqlite')
 
@@ -189,6 +224,9 @@ class IndexedLocations:
                         if (identity(os.fstat(stream.fileno()))!=self.source_identity
                                 or identity(Path(self.filename).stat())!=self.source_identity):
                             raise ValueError('Location manifest changed while indexing')
+                        if (self.content_digest is not None
+                                and source_digest(self.filename, self.source_identity) != self.content_digest):
+                            raise ValueError('Location manifest content changed while indexing')
                         db.execute('INSERT INTO source VALUES (?)',(self.key,));db.commit()
                     finally: db.close()
                 # Publish only a durable complete derivative; a crash must not
@@ -216,6 +254,12 @@ class IndexedLocations:
         info = path.stat()
         if not stat.S_ISREG(info.st_mode) or identity(info) != self.source_identity:
             raise ValueError('Location manifest changed before indexing or lookup')
+        if self.content_digest is not None and not self._content_verified_after_tick:
+            if source_digest(self.filename, self.source_identity) != self.content_digest:
+                raise ValueError('Location manifest content changed before indexing or lookup')
+            # After a full proof beyond the coarse timestamp window, any future
+            # rewrite changes ctime and the metadata check above rejects it.
+            self._content_verified_after_tick = time.time_ns() - info.st_ctime_ns >= 2_000_000_000
 
     @lru_cache(maxsize=1024)
     def _get(self,key):

@@ -22,15 +22,25 @@ def test_located_gzip_invalid_rows_and_json_container(tmp_path):
 
 
 def test_native_union_is_lazy_repeatable_and_keeps_context(tmp_path):
-    data=DataAPI();seen=[]
-    def rows():seen.append('read');yield {'id':1}
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    data=DataAPI();seen=tmp_path/'source-calls'
+    def rows():
+        with seen.open('a') as stream:stream.write('read\n')
+        yield {'id':1}
     left=data.from_iter(rows);ds=left.union(data.from_items([{'id':2}]))
-    assert seen==[] and ds._executor is left._executor
+    assert not seen.exists() and ds._executor is left._executor
     assert ds.take_all()==[{'id':1},{'id':2}]
-    assert ds.take_all()==[{'id':1},{'id':2}] and len(seen)==2
-    saved=ds.checkpoint(tmp_path/'union.jsonl',version='1')
-    ds.checkpoint(tmp_path/'union.jsonl',version='1')
-    assert len(seen)==3 and saved.count()==2
+    assert ds.take_all()==[{'id':1},{'id':2}] and len(seen.read_text().splitlines())==2
+    with pytest.raises(DataflowError, match='checkpoint'):
+        ds.checkpoint(tmp_path/'union.jsonl',version='1')
+    assert not (tmp_path/'union.jsonl').exists() and len(seen.read_text().splitlines())==2
+    with RunContext.start(tmp_path/'run') as run:
+        ref=run.ref
+        assert ds.materialize().take_all()==[{'id':1},{'id':2}]
+    with RunContext.resume(ref):
+        assert ds.materialize().take_all()==[{'id':1},{'id':2}]
+    assert len(seen.read_text().splitlines())==3
 
 
 def test_scan_report_records_limit_errors_and_missing(tmp_path):

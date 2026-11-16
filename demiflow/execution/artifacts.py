@@ -28,8 +28,10 @@ def resolve_local_artifact(value):
             info = manifest.stat()
             if not stat_mode.S_ISREG(info.st_mode):
                 continue
+            from .location_index import recent_digest
             mapping = _artifact_locations(str(manifest), info.st_mtime_ns, info.st_size,
-                                          info.st_dev, info.st_ino, info.st_ctime_ns)
+                                          info.st_dev, info.st_ino, info.st_ctime_ns,
+                                          recent_digest(str(manifest), info))
         except FileNotFoundError:
             # An optional location manifest may disappear between stat and
             # open during maintenance. Treat this like an absent manifest;
@@ -48,11 +50,17 @@ def resolve_local_artifact(value):
 
 
 @lru_cache(maxsize=16)
-def _artifact_locations(filename, modified_ns, size, device=0, inode=0, changed_ns=0):
+def _artifact_locations(filename, modified_ns, size, device=0, inode=0, changed_ns=0, content_digest=None):
     if size>_LOCATION_INDEX_THRESHOLD:
         from .location_index import IndexedLocations
-        return IndexedLocations(filename,(device,inode,size,modified_ns,changed_ns))
-    document = json.loads(Path(filename).read_text())
+        return IndexedLocations(filename,(device,inode,size,modified_ns,changed_ns), content_digest=content_digest)
+    with Path(filename).open('rb') as stream:
+        raw = stream.read(size + 1)
+    if len(raw) != size:
+        raise ValueError('Location manifest size changed while reading')
+    if content_digest is not None and hashlib.sha256(raw).hexdigest() != content_digest:
+        raise ValueError('Location manifest content changed while reading')
+    document = json.loads(raw)
     if document.get('version') != 1 or not isinstance(document.get('files'), dict):
         raise ValueError('Invalid artifact location manifest: ' + filename)
     return document['files']

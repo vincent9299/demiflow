@@ -17,6 +17,15 @@ _BUILTINS = {name: getattr(builtins, name) for name in (
     'NotImplementedError', 'ZeroDivisionError')}
 _KNOWN = {cls.__module__ + '.' + cls.__qualname__: cls for cls in _BUILTINS.values()}
 _KNOWN['sqlite3.OperationalError'] = sqlite3.OperationalError
+# Located JSON readers historically expose these parse errors to their callers.
+# Admit only the two fixed library classes, never import a remote type name.
+try:
+    from ijson.common import JSONError, IncompleteJSONError
+except ImportError:
+    pass
+else:
+    _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls
+                   for cls in (JSONError, IncompleteJSONError)})
 from .queue_contract import QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit
 _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls for cls in (
     QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable)})
