@@ -4,6 +4,10 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **Prompt＋真实托管服务完整链路**：`4cf3555` 同版本35 passed/0 skipped，包含原 HTTP owner、私有缓存、原物化结果重读、取消/退出、原生声明守卫与历史身份。真实 H100 服务 PID/NVML/原 device grant、原2 GiB内存预约、CUDA计算结果及最终释放均有证据。未另建服务调度/提交账本；服务完整环境只保留在执行程序，公开事实存摘要。见 [模型与服务总控复验](MODEL-SERVICE-CLOSURE.md) 和 [机器回执](MODEL-SERVICE-PRIMARY-VERIFICATION.json)。Local 数值GPU服务不代表 Ray/任意DeploymentService/路由服务的全量对称。
+- **输入、观测与退出增量**：旧 inference＋模型真实观测39 passed；cleanup OSError/原状态机18 passed；大图片 literal 有界身份＋原block21 passed/1 Ray skipped。默认身份及元数据1 MiB限制不改。显式私有 Prompt 普通当前attempt物化已集成；跨库失败不授予恢复。私有缓存 requeue 后新调用计费的最后同类修复仍在 owner 验证。
+- **及时交接与内存核心项**：两处 worker 丢唤醒已集成；原控制格式不变，无收益的wire格式实验未合入。实际Arrow反例确认worker/终端/写出存在分配后才检查的路径，正在前移原准入；性能及公平/峰值正式组合仍未通过，不能宣称全部完成。
+
 - **服务退出与原资源释放**：已集成 guardian `c487cde` 与原 RunResourceState 重试 `90f24a4`。返回 UNCONFIRMED 后保留全额占用，只将已完成 I/O 的再次检查间隔降至不超过100ms；未返回 I/O 仍保留原30秒 crash lease。原状态机、真实原pool、Prompt真实池及worker强杀共20个不同case通过（19+后续2，有1个重叠）；强杀测试同时锁定“不早退”和最终原allocation CONFIRMED/pool RELEASED。最初detached红为真实Broken pipe不在夹具故障词表，修订后两种强杀均过，原红保留。见 [资源重试](CLEANUP-RETRY-CLOSURE.md)。guardian cleanup自身错误的持锁强化与本地GPU服务准入仍在执行。
 - **旧模型组合**：固定 `56fb2fc` 的完整 Embedding + inference 两文件84 passed/2 failed，Embedding文件全通过。两红之一是Prompt指标缺失（独立候选专项已绿，待最终固定交付），另一个旧父进程观察器已改为实际thread worker及原RemotePromptJournal端口，保留真实池/关闭/零历史审计断言，集成验收通过。显式Prompt缓存与混合两模型磁盘总预算仍在收口，不宣称两文件已同HEAD全绿。
 

@@ -34,9 +34,15 @@ It retains the two HTTP calls, all four pool-thread assertions, exact client clo
 count, closed executors and forbidden unrequested historical audit. Observing an
 unused private SQLite adapter in the parent process could not verify this path.
 
+Subsequent integration `b10997b` also preserves returned unexpected cleanup
+I/O failures (including OSError) as UNCONFIRMED instead of leaving them on a
+stale crash lease. The same original retry state machine applies; no exit proof
+is fabricated. Eighteen relevant tests pass at that fixed revision. The later
+guardian unknown-observation/port-custody and actual GPU service integration is
+recorded in [the model/service closure](MODEL-SERVICE-CLOSURE.md).
+
 The guardian's simultaneous hard-kill plus descendants discarding the inherited
 FD remains the explicitly documented cooperating-process-unit boundary; this
-change does not claim OS sandbox containment. GPU service admission and guardian
-cleanup-helper exception retention are separate in-flight follow-ups. The
+change does not claim OS sandbox containment. The
 earlier private test allocation left BOUND has not been manually refunded or
 relabeled as confirmed.
