@@ -1,144 +1,169 @@
-"""L015 · run_local_chain — verify_preserve evidence (no production change).
+"""L015's sealed-placement/authority obligations on the actual unified chain.
 
-The baseline implementation is kept byte-for-byte. These tests bind the card's
-requirement structurally, on the real function AST: resources / stages /
-partitions / program binding come from the INTERPRETED layout, the worker
-derives checkpoint policy and stage budgets from that same layout, the driver
-holds the only commit authority, and the failure/cancel terminal releases the
-resource scope through the ResourceManager protocol.
-
-Runtime behaviour (real managed worker, real commit cuts, real recovery) is
-bound by the existing chain acceptance files, cited in the delivery receipt;
-this file does not re-run them.
+The v2 driver AST is retired. These tests run its compatibility entry through
+v3, then inspect original sealed artifacts, actual assignments and allocations.
 """
-import ast
-import inspect
-import textwrap
+import json
+import os
+from pathlib import Path
+
+import pytest
 
 from demiflow.execution import chain
+from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.dataflow_seal import load_dataflow
+from demiflow.execution.recovery_identity import plan_identity
+from demiflow.execution.run_context import RunContext
+from test_runtime_v3_chain_compatibility import _entry
 
 
-def _function(name):
-    return ast.parse(textwrap.dedent(inspect.getsource(getattr(chain, name)))).body[0]
+def _identity(row):
+    return row
 
 
-def _dotted(node):
-    parts = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
+def _fail(row):
+    raise ValueError('owned chain failure')
 
 
-def _calls(node, name):
-    return [item for item in ast.walk(node)
-            if isinstance(item, ast.Call) and _dotted(item.func) == name]
+def _mark(row, *, path):
+    with Path(path).open('a') as stream:
+        stream.write(str(row['id']) + '\n')
+    return row
 
 
-def _assigned(node, name):
-    for item in ast.walk(node):
-        if isinstance(item, ast.Assign) and any(
-                isinstance(target, ast.Name) and target.id == name for target in item.targets):
-            return item.value
-    raise AssertionError("no assignment to " + name)
+@pytest.fixture(scope='module')
+def actual_chain(tmp_path_factory):
+    root = tmp_path_factory.mktemp('chain-contract')
+    assignments, executions, commits = [], [], []
+    original_assignment = DataflowExecution._assignment
+    from demiflow.execution.commit import CommitCoordinator
+    original_commit = CommitCoordinator.commit
+    def assign(execution, *args, **kwargs):
+        value = original_assignment(execution, *args, **kwargs)
+        assignments.append(value)
+        if execution not in executions:
+            executions.append(execution)
+        return value
+    def commit(owner, *args, **kwargs):
+        fact = original_commit(owner, *args, **kwargs)
+        commits.append((os.getpid(), fact['commit_id']))
+        return fact
+    with pytest.MonkeyPatch.context() as patch:
+        for key, suffix in [('DEMIFLOW_RESOURCE_ROOT', 'pool'), ('DEMIFLOW_RESOURCE_HOME', 'home'),
+                            ('DEMIFLOW_FORGE_DOMAIN', 'domain')]:
+            patch.setenv(key, str(root / suffix))
+        patch.setattr(DataflowExecution, '_assignment', assign)
+        patch.setattr(CommitCoordinator, 'commit', commit)
+        with RunContext.start(root / 'run', limits={'memory_bytes': 32 * 2**20,
+                'max_row_bytes': 4096, 'max_batch_bytes': 16384}) as run, _entry(root) as (api, executor, entry):
+            dataset = api.from_items([{'id': 1}, {'id': 2}]).map(_identity)
+            with run.action(plan_identity('materialize', dataset._source, dataset._plan)) as action:
+                result = entry(executor, dataset)
+                try:
+                    assert list(result.rows()) == [{'id': 1}, {'id': 2}]
+                    assert len(executions) == 1 and assignments
+                    execution = executions[0]
+                    graph, physical, sealed = load_dataflow(run.directory, action.action_id,
+                        store=execution._store, bounds=execution._bounds)
+                    with run.journal._connection() as db:
+                        allocations = {key: json.loads(spec) for key, spec in
+                            db.execute('SELECT allocation_id,spec FROM resource_allocations')}
+                    yield dict(run=run, action=action, execution=execution, graph=graph,
+                        physical=physical, sealed=sealed, assignments=assignments,
+                        allocations=allocations, commits=commits)
+                    action.complete({'kind': 'materialized', 'rows': result.row_count})
+                finally:
+                    result.release()
 
 
-def _dict_value(value):
-    assert isinstance(value, ast.Dict), "not a dict literal"
-    return {_dotted_key(key): val for key, val in zip(value.keys, value.values)}
+def test_layout_is_interpreted_from_the_sealed_plan(actual_chain):
+    facts = actual_chain
+    assert facts['execution']._physical == facts['physical']
+    assert facts['execution']._graph == facts['graph']
+    assert all(a.sealed == facts['sealed'] for a in facts['assignments'])
 
 
-def _dict_literal(node, name):
-    return _dict_value(_assigned(node, name))
+def test_worker_profile_comes_from_the_layout(actual_chain):
+    for assignment in actual_chain['assignments']:
+        allocation = actual_chain['allocations'][assignment.lease.allocation_id]
+        assert len(assignment.stages) == 1
+        assert allocation['request']['profile'] == assignment.stages[0].profile.to_dict()
+        assert allocation['effective']['memory_bytes'] >= assignment.stages[0].profile.requests['memory_bytes']
 
 
-def _dotted_key(key):
-    return key.value if isinstance(key, ast.Constant) else _dotted(key)
+def test_stages_and_partitions_come_from_the_placement(actual_chain):
+    stages = {stage.stage_id: stage for stage in actual_chain['physical'].stages}
+    for assignment in actual_chain['assignments']:
+        assert assignment.stages == (stages[assignment.lease.stage_id],)
+        assert set(assignment.lease.partition_ids) <= set(assignment.stages[0].partitions)
 
 
-def _in_finally(node, call):
-    for item in ast.walk(node):
-        if isinstance(item, ast.Try):
-            for statement in item.finalbody:
-                if call in ast.walk(statement):
-                    return True
-    return False
+def test_program_binding_comes_from_the_sealed_bindings(actual_chain):
+    execution = actual_chain['execution']
+    assert execution._sealed == actual_chain['sealed']
+    marker = actual_chain['run'].journal.source_binding(actual_chain['action'].action_id + '-dataflow-sealed')
+    assert marker['physical_ref']['digest'] == actual_chain['sealed'].physical_ref.digest
+    for allocation in actual_chain['allocations'].values():
+        assert allocation['request']['launch']['artifact_refs']['physical']['digest'] == marker['physical_ref']['digest']
 
 
-def test_layout_is_interpreted_from_the_sealed_plan():
-    fn = _function("run_local_chain")
-    assert len(_calls(fn, "interpret_physical_plan")) == 1
-    assert len(_calls(fn, "load_sealed_plan")) == 1
-    assert len(_calls(fn, "load_execution_bindings")) == 1
-    placement = ast.unparse(_assigned(fn, "placement"))
-    assert "layout.workers" in placement
-    assert "group_id == 'chain-group'" in placement
+def test_assignment_channels_are_validated_against_the_layout(actual_chain):
+    for assignment in actual_chain['assignments']:
+        partitions = set(assignment.lease.partition_ids)
+        edges = actual_chain['physical'].exchanges
+        assert assignment.inputs == tuple(e for e in edges if partitions.intersection(e.consumer_partitions)
+                                         and not partitions.intersection(e.producer_partitions))
+        assert assignment.outputs == tuple(e for e in edges if partitions.intersection(e.producer_partitions)
+                                          and not partitions.intersection(e.consumer_partitions))
 
 
-def test_worker_profile_comes_from_the_layout():
-    fn = _function("run_local_chain")
-    profile = ast.unparse(_assigned(fn, "sealed_profile"))
-    assert profile == "ResourceProfile(**to_wire(placement.profile))"
-    requests = _calls(fn, "WorkerRequest")
-    assert len(requests) == 1
-    assert ast.unparse(requests[0].args[2]) == "sealed_profile"
+def test_driver_holds_the_only_commit_authority(actual_chain):
+    facts = actual_chain
+    original = facts['run'].journal.execution_commits(facts['action'].action_id)
+    assert original and all(item['status'] == 'acked' for item in original)
+    assert {key for _, key in facts['commits']} == {item['commit_id'] for item in original}
+    assert {pid for pid, _ in facts['commits']} == {os.getpid()}
 
 
-def test_stages_and_partitions_come_from_the_placement():
-    fn = _function("run_local_chain")
-    assignment = _dict_literal(fn, "assignment")
-    assert ast.unparse(assignment["stages"]) == "list(placement.stage_ids)"
-    assert ast.unparse(assignment["partitions"]) == "list(placement.partition_ids)"
+def test_failure_terminal_releases_the_resource_scope(tmp_path):
+    run = None
+    with pytest.raises(ValueError, match='owned chain failure'):
+        with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as (api, executor, entry):
+            ds = api.from_items([{'id': 1}]).map(_fail)
+            with run.action(plan_identity('materialize', ds._source, ds._plan)):
+                entry(executor, ds)
+    with run.journal._connection() as db:
+        cleanup = db.execute('SELECT cleanup FROM resource_allocations').fetchall()
+    assert cleanup and all(value == ('CONFIRMED',) for value in cleanup)
+    assert not run.journal.execution_commits('action-1')
 
 
-def test_program_binding_comes_from_the_sealed_bindings():
-    fn = _function("run_local_chain")
-    assert ast.unparse(_assigned(fn, "bindings_ref")) == "bindings['ref']"
-    launch = _dict_literal(fn, "launch_spec")
-    execution_plan = _dict_value(launch["execution_plan"])
-    assert ast.unparse(execution_plan["bindings_ref"]) == "bindings_ref"
-    assert ast.unparse(execution_plan["action_id"]) == "action.action_id"
-    # The worker re-derives placement/checkpoint/stage budgets from this ref.
-    from demiflow.execution.worker import layout as worker_layout
-    source = inspect.getsource(worker_layout.load_worker_layout)
-    assert "interpret_physical_plan" in source
-    assert "return placement, layout.checkpoint, stage_limits" in source
-    assert 'stage_limits[binding["program_index"]] = dict(stage["budgets"])' in source
-
-
-def test_assignment_channels_are_validated_against_the_layout():
-    # The driver sends an empty channel set for the single-worker chain slice;
-    # the worker refuses any mismatch against the interpreted layout, so this
-    # is fail-closed rather than an unchecked literal.
-    from demiflow.execution import plan_interpreter
-    source = inspect.getsource(plan_interpreter.validate_worker_assignment)
-    assert "_group_channel_ids(layout, placement)" in source
-    assert "assignment input channels differ from the layout" in source
-    assert "assignment output channels differ from the layout" in source
-
-
-def test_driver_holds_the_only_commit_authority():
-    fn = _function("run_local_chain")
-    assert len(_calls(fn, "terminal.commit_cut")) == 1
-    assert _calls(fn, "CommitCoordinator") == []
-    assert len(_calls(fn, "terminal.finish")) == 1
-    assert len(_calls(fn, "DriverStreamTerminal")) == 1
-
-
-def test_failure_terminal_releases_the_resource_scope():
-    fn = _function("run_local_chain")
-    closes = _calls(fn, "manager.close")
-    assert len(closes) == 1
-    assert _in_finally(fn, closes[0]), "scope close must run on failure/cancel too"
-    reconciles = _calls(fn, "manager.reconcile_once")
-    assert any(_in_finally(fn, call) for call in reconciles)
-    assert len(_calls(fn, "connector.close")) == 1
-
-
-def test_restore_point_comes_from_the_terminal_journal():
-    fn = _function("run_local_chain")
-    assert ast.unparse(_assigned(fn, "restore")) == "terminal.restore_point()"
-    assignment = _dict_literal(fn, "assignment")
-    assert "restore" in ast.unparse(assignment["restore_point"])
+def test_restore_point_comes_from_the_terminal_journal(tmp_path):
+    class Interrupted(Exception):
+        pass
+    marker = tmp_path / 'calls'
+    reference, first_plan, original_commits = None, None, None
+    with pytest.raises(Interrupted):
+        with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as (api, executor, entry):
+            ds = api.from_items([{'id': 1}, {'id': 2}]).map(_mark, fn_kwargs={'path': str(marker)})
+            with run.action(plan_identity('materialize', ds._source, ds._plan)) as action:
+                result = entry(executor, ds)
+                result.release()
+                reference = run.ref
+                first_plan = run.journal.source_binding('action-1-dataflow-sealed')
+                original_commits = run.journal.execution_commits('action-1')
+                assert original_commits and all(item['status'] == 'acked' for item in original_commits)
+                raise Interrupted()
+    original_calls = marker.read_bytes()
+    with RunContext.resume(reference) as run, _entry(tmp_path) as (api, executor, entry):
+        ds = api.from_items([{'id': 1}, {'id': 2}]).map(_mark, fn_kwargs={'path': str(marker)})
+        with run.action(plan_identity('materialize', ds._source, ds._plan)) as action:
+            result = entry(executor, ds)
+            try:
+                assert list(result.rows()) == [{'id': 1}, {'id': 2}]
+                assert marker.read_bytes() == original_calls
+                assert run.journal.source_binding('action-1-dataflow-sealed') == first_plan
+                assert run.journal.execution_commits('action-1') == original_commits
+                action.complete({'kind': 'materialized', 'rows': 2})
+            finally:
+                result.release()

@@ -498,21 +498,30 @@ def _dataset():
 def test_f013(fake_action):
     _binding_assertion()
     from demiflow.execution.chain import run_local_chain
-    STATE.handle = _FakeActionHandle(result_value="materialized-handle")
-    out = run_local_chain(_FakeExecutor(), _dataset())
+    from demiflow.execution.dataflow_api import declare_action_v3
+    dataset = _dataset()
+    fake_action.__class__.declaration = declare_action_v3(dataset._source, dataset._plan,
+        kind='materialize', arguments={}, sink_declaration=None)
+    STATE.run_result = "materialized-handle"
+    out = run_local_chain(_FakeExecutor(), dataset)
     assert out == "materialized-handle"
-    assert len(STATE.execute_calls) == 1
-    assert STATE.execute_calls[0]["request"].kind == "materialize"
-    assert STATE.execute_calls[0]["request"].provider == "local"
+    assert len(STATE.run_calls) == 1
+    assert STATE.run_calls[0].kind == "materialize"
+    assert STATE.run_calls[0].provider == "local"
 
 
 def test_f014(fake_action):
     _binding_assertion()
     from demiflow.execution.chain import run_ray_chain
-    STATE.handle = _FakeActionHandle(result_value="ray-handle")
-    out = run_ray_chain(_FakeExecutor("ray"), _dataset())
+    from demiflow.execution.dataflow_api import declare_action_v3
+    dataset = _dataset()
+    fake_action.__class__.declaration = declare_action_v3(dataset._source, dataset._plan,
+        kind='materialize', arguments={}, sink_declaration=None)
+    STATE.run_result = "ray-handle"
+    out = run_ray_chain(_FakeExecutor("ray"), dataset)
     assert out == "ray-handle"
-    assert STATE.execute_calls[0]["request"].provider == "ray_core"
+    assert len(STATE.run_calls) == 1
+    assert STATE.run_calls[0].provider == "ray_core"
 
 
 def _graph_spec():
