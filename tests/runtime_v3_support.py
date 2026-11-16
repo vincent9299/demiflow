@@ -550,7 +550,8 @@ class RuntimeV3Fixture:
         executor = LocalDatasetExecutor() if self.provider == "local" else RayDatasetExecutor()
         from contextlib import nullcontext
         self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix',
-            'multiworker_barrier', 'route_recovery', 'driver_restart', 'actor_state_lifecycle', 'performance'}
+            'multiworker_barrier', 'route_recovery', 'driver_restart', 'actor_state_lifecycle', 'performance',
+            'history_identity', 'workbench_real_plan', 'product_regression'}
         scope = nullcontext() if self_managed else RunContext.start(self.journal_dir / scenario)
         try:
             with scope, _use_executor(executor):
@@ -1203,21 +1204,18 @@ def _s_driver_restart(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]
 
 
 def _s_history_identity(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must compare the original prompt identities and historical artifacts, not synthetic enum hashes'}
-    fx._record_not_run('history_identity', detail)
-    raise NotRunError('history_identity', detail)
+    from runtime_v3_product_scenarios import history_identity
+    return history_identity(fx, fault)
 
 
 def _s_workbench_real_plan(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must execute prepare/start/show/cancel/resume and join the actual report/plan bridge'}
-    fx._record_not_run('workbench_real_plan', detail)
-    raise NotRunError('workbench_real_plan', detail)
+    from runtime_v3_product_scenarios import workbench_real_plan
+    return workbench_real_plan(fx, fault)
 
 
 def _s_product_regression(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must exercise Notebook/Python/SQL/Case/development-chat UI behavior, not list_runs'}
-    fx._record_not_run('product_regression', detail)
-    raise NotRunError('product_regression', detail)
+    from runtime_v3_product_scenarios import product_regression
+    return product_regression(fx, fault)
 
 
 def _s_bounded_terminal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:

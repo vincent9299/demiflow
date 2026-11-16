@@ -29,7 +29,12 @@ def _run_unified(fx, scenario, *, fault=None):
     assert all(p.startswith(str(s.WORKTREE)) for p in evidence["module_paths"].values()), (
         f"{scenario}: a demiflow module loaded outside the worktree"
     )
-    if scenario not in _NON_PIPELINE:
+    if scenario in {'workbench_real_plan', 'product_regression'}:
+        # These managed workers run the original sealed runtime under Python -I.
+        # Never relabel journal facts as a direct execute_action observation.
+        from runtime_v3_product_scenarios import validate_native_execution_evidence
+        validate_native_execution_evidence(evidence, owned_root=fx.root)
+    elif scenario not in _NON_PIPELINE:
         assert evidence["execute_action_calls"], (
             f"{scenario}: default path did not invoke the unified execute_action facade (fake unification)"
         )
