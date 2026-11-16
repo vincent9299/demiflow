@@ -287,6 +287,29 @@ def resolve_action_runtime(request: ActionRequest):
 
 # -- E016 run_dataset_action ----------------------------------------------
 def run_dataset_action(request: ActionRequest) -> object:
+    if request.kind != 'write_datasink':
+        return _run_dataset_action(request)
+    sink = request.sink
+    try:
+        sink.on_write_start()
+        result = _run_dataset_action(request)
+    except BaseException as failure:
+        try:
+            sink.on_write_failed(failure)
+        except BaseException as callback:
+            failure.add_note('Datasink failure callback also failed: ' + str(callback))
+        raise
+    # Publication and the original ACK have completed. A callback failure must
+    # not invoke on_write_failed or suggest that the sink was not committed.
+    try:
+        sink.on_write_complete(result)
+    except BaseException as callback:
+        callback.add_note('Datasink completion callback failed after confirmed publication; the original commit remains valid')
+        raise
+    return result
+
+
+def _run_dataset_action(request: ActionRequest) -> object:
     policy, bounds = resolve_action_runtime(request)
     handle = execute_action(request, policy=policy, bounds=bounds)
     from .dataflow_terminals import (collect_rows, iterate_rows, iterate_batches,

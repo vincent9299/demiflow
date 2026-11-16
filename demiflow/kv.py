@@ -13,6 +13,7 @@ import sqlite3
 import tempfile
 
 from .data.datasink import Datasink, WriteResult
+from ._kv_sink import DurableKVSink
 
 
 def encode(value, limit):
@@ -129,7 +130,7 @@ class SQLiteKV:
         return KVDatasink(self, key, value, batch_rows, batch_bytes)
 
 
-class KVDatasink(Datasink):
+class KVDatasink(DurableKVSink, Datasink):
     def __init__(self, store, key, value, batch_rows, batch_bytes):
         if type(batch_rows) is not int or not 1 <= batch_rows <= 256:
             raise ValueError('Invalid KV sink batch_rows')
