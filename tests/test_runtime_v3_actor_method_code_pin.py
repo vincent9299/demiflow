@@ -98,7 +98,12 @@ def test_actor_dependency_walk_never_invokes_instance_or_class_descriptors(tmp_p
             touched.append('descriptor')
             raise AssertionError('user descriptor executed during code seal')
 
-    class Actor:
+    class Meta(type):
+        def __getattribute__(cls, key):
+            touched.append('metaclass:' + key)
+            raise AssertionError('metaclass lookup executed during code seal')
+
+    class Actor(metaclass=Meta):
         hostile = Descriptor()
         def __getattribute__(self, key):
             touched.append(key)

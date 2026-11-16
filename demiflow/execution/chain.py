@@ -461,7 +461,7 @@ def _is_by_reference_class(cls):
     """
     import sys
     import inspect
-    module_name = _class_namespace(cls).get("__module__")
+    module_name = _class_module(cls)
     if not module_name or module_name == "__main__":
         return False
     module = sys.modules.get(module_name)
@@ -538,6 +538,13 @@ def _class_namespace(cls):
 
 def _class_mro(cls):
     return type.__dict__["__mro__"].__get__(cls, type(cls))
+
+
+def _class_module(cls):
+    name = type.__dict__["__module__"].__get__(cls, type(cls))
+    if type(name) is not str:
+        raise RecoveryContractError("Class module name must be a plain string")
+    return name
 
 
 def _instance_namespace(value):
@@ -670,7 +677,7 @@ def _by_value_business_modules(function):
             continue
         if issubclass(kind, type):
             if _is_by_reference_class(value):
-                module = sys.modules.get(_class_namespace(value).get("__module__"))
+                module = sys.modules.get(_class_module(value))
                 if module is not None:
                     pending.append(module)
             else:
@@ -840,7 +847,7 @@ def _business_dependency_modules(plan, *, source=None):
             if issubclass(type(value), types.ModuleType):
                 yield value
             elif type(value) is types.FunctionType or issubclass(type(value), type):
-                module_name = value.__module__ if type(value) is types.FunctionType else _class_namespace(value).get("__module__")
+                module_name = value.__module__ if type(value) is types.FunctionType else _class_module(value)
                 module = sys.modules.get(module_name)
                 if module is not None:
                     yield module
