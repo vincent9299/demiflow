@@ -54,7 +54,15 @@ def test_arrow_callback_failure_does_not_publish_or_retry(tmp_path):
             with pytest.raises(Exception, match='deliberate callback failure'):
                 data.read_lance(source, version=1).map_batches(fail, batch_size=2, batch_format='pyarrow').write_lance(
                     target, mode='overwrite', expected_version=1, schema=table.schema)
-            assert RunJournal(session.run_ref.directory).execution_commits('action-1') == []
+            journal = RunJournal(session.run_ref.directory)
+            # A confirmed input prefix may be checkpointed without publishing
+            # any Lance version. The failed callback cannot seal a final sink.
+            for commit in journal.execution_commits('action-1'):
+                sink = commit['prepared']['sinks']['write_lance']
+                assert sink['manifest']['final'] is False
+                assert sink['native'] is None
+                assert sink['rows'] == 0
+            assert journal.execution_action('action-1')['result'] is None
     assert RunJournal(session.run_ref.directory).execution_status()['status'] == 'failed'
     assert calls.read_text().splitlines() == ['1', '3']
     assert lance.dataset(target).version == 1

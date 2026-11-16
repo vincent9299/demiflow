@@ -204,6 +204,9 @@ class _OutputBudget:
 def _single_row_batch(
     row: Mapping[str, Any], batch_format: str, services: RuntimeServices
 ) -> tuple[Any, int]:
+    from ..batch_conversion import admit_batch_conversion
+    admit_batch_conversion([row], 'pandas' if batch_format == 'default' else batch_format,
+        schema=None, bounds=services.bounds)
     if batch_format in ("default", "pandas"):
         import pandas as pd
 
@@ -406,6 +409,8 @@ def invoke_unary(
 def _rows_to_batch(
     rows: list[dict[str, Any]], batch_format: str, services: RuntimeServices, *, schema=None
 ) -> tuple[Any, int]:
+    from ..batch_conversion import admit_batch_conversion
+    admit_batch_conversion(rows, batch_format, schema=schema, bounds=services.bounds)
     if batch_format in ("default", "numpy"):
         import numpy as np
         columns = rows[0].keys() if rows else ()

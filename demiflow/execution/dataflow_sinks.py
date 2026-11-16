@@ -391,6 +391,8 @@ class NativeTerminalSink(_DataflowArtifactSink):
         batch, size = [], 0
         schema_ref, schema = None, None
         def table():
+            from .batch_conversion import admit_batch_conversion
+            admit_batch_conversion(batch, 'pyarrow', schema=schema, bounds=self._bounds)
             result = pa.Table.from_pylist(batch, schema=schema)
             if size + result.nbytes > self._bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')

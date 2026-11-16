@@ -1,5 +1,6 @@
 """Native terminal logical blocks backed by incremental artifact forests."""
 from dataclasses import asdict
+from collections.abc import Mapping
 
 from ..contracts.dataflow import BlockPartition
 from ..contracts.dataflow_errors import DataflowError
@@ -41,12 +42,25 @@ def declared_blocks(graph, terminal, bounds):
 
 class TerminalBlocks:
     """At most one scratch FD is open; block switches seal only new tail bytes."""
-    def __init__(self, services, partition_id, *, declaration=None, partitioned=True):
+    def __init__(self, services, partition_id, *, declaration=None, partitioned=True, budget=None):
         self.services, self.bounds = services, services.bounds
         self.partition_id, self.partitioned = partition_id, partitioned
         stages = getattr(getattr(services, 'assignment', None), 'stages', ())
         granted = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in stages) if stages else self.bounds.max_resident_bytes
-        self._metadata_limit = min(self.bounds.max_state_bytes, granted // 2)
+        if budget is None:
+            # Historical sealed plans and finite-channel helpers keep their
+            # original window; a new compiler never rewrites their grants.
+            self._metadata_limit = min(self.bounds.max_state_bytes, granted // 2)
+        else:
+            if (not isinstance(budget, Mapping) or set(budget) != {'payload_bytes', 'metadata_bytes'}
+                    or any(type(v) is not int for v in budget.values())):
+                raise DataflowError('INVALID_CONTRACT', 'invalid sealed terminal memory windows')
+            payload, metadata = budget['payload_bytes'], budget['metadata_bytes']
+            if (payload != self.bounds.max_batch_bytes + self.bounds.max_row_bytes
+                    or not 3072 <= metadata <= self.bounds.max_state_bytes
+                    or payload + metadata > granted):
+                raise DataflowError('RESOURCE_INFEASIBLE', 'terminal payload and metadata exceed the original grant')
+            self._metadata_limit = metadata
         self.blocks = {}
         self._layouts = set()
         self.rows = self.bytes = 0

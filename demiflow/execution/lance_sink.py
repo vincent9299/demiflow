@@ -64,6 +64,11 @@ class LanceSink(Datasink):
                             # row dictionaries may have canonicalized key order.
                             block = block.select(block_schema.names)
                         retained = block.get_total_buffer_size()
+                        from .arrow_batch_sink import _cast_allocation
+                        allocation = _cast_allocation(
+                            pa.Table.from_batches([block]) if isinstance(block, pa.RecordBatch) else block, block_schema)
+                        if retained + allocation > self.run.limits['max_batch_bytes']:
+                            raise RecoveryContractError('Lance cast coexistence exceeds batch budget before allocation')
                         block = block.cast(block_schema)
                         if retained + block.get_total_buffer_size() > self.run.limits['max_batch_bytes']:
                             raise RecoveryContractError('Lance cast coexistence exceeds batch budget')

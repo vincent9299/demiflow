@@ -1,0 +1,30 @@
+# Resource admission: actual Arrow allocations and terminal metadata
+
+Worktree: `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115`.
+Branch: `engine/gpt-v3-artifact-recovery-20261115`. Base: `abe8fad`.
+
+This delivery fixes concrete allocation-before-admission failures and a separately exposed terminal grant omission. It does **not** declare the whole V012/V023 or performance acceptance complete. The attached verification JSON binds the delivered source bytes; tests ran against these dirty-base bytes before the commit was made.
+
+## Actual failures and fixes
+
+- Real public Arrow source → batch actor under a 4,096-byte batch budget allocated **133,184 bytes** in the actual Arrow allocator before rejecting. Sixteen typed null values with `fixed_size_list<float64,1024>` reproduce it. Both row-to-batch constructors now call the existing pure bounded conversion admission before constructing NumPy/Pandas/Arrow arrays. The original callback and post-conversion checks remain.
+- Real public Dataset → Lance writer under a 65,536-byte batch budget allocated **2,097,216 bytes** before rejecting. Sixteen null values with a target `fixed_size_binary[131072]` reproduce it. The native sink now calls the same existing pre-admission before `Table.from_pylist`. The subsequent real Lance schema cast reserves original retained input plus the existing bounded target-allocation estimate before `cast`; its original postcheck remains. No new allocator or inflated budget was introduced.
+- A legal eight-row float64 batch converted with actual Arrow peak **1,152 bytes**, then failed in terminal metadata under the same 4 KiB batch / 1 KiB row / 512 KiB state / 4 MiB run envelope. The terminal used half its payload grant for metadata without reserving their simultaneous residence. New terminal plans now seal `W = max_batch_bytes + max_row_bytes` and `M = min(max_state_bytes, max(3072, W // 2))`; the original terminal resource profile reserves **W + M**. Three KiB is one block plus one segment-tree root. A smaller state ceiling is rejected before launch. Worker initialization authenticates the sealed windows against the original assignment grant; subsequent block/root growth still has its original hard check.
+
+The tiny legal case now reaches real count=8, with its actual callback schema and all eight values verified. Its original terminal profile is W=5120, M=3072, total=8192; the run and payload ceilings are unchanged. Existing sealed plans without the new execution marker retain their original half-grant window. Finite-channel helpers retain their old behavior. Semantic action/request declarations are not extended; new plan execution facts honestly carry the additional window and profile.
+
+## Validation and exact scope
+
+The final focused invocation `/tmp/demiflow-resource-arrow-final.xml` passed **10 tests in 30.88 seconds**. It covers both public conversion routes, actual native allocator peaks, legal positives, no publication after rejection, equal-width cast input/output reservations, the tiny terminal grant positive, pre-launch state rejection, old-plan window behavior and rejection of excess roots. Source/fixture bytes and raw proofs are bound in `RESOURCE-PREALLOCATION-VERIFICATION-20261116.json`.
+
+The old Arrow callback-failure test initially failed its `commits == []` assertion. A three-production-file rollback to exact `abe8fad` reproduced the same failure (`/tmp/demiflow-resource-original-source-probe/evidence.json`). Read-only journal observation showed one acknowledged **non-final prefix** with zero output rows, `native=None`, and action result `None`. The target retained version 1 and its original row; callback calls remained exactly `1,3`. The test now asserts those real no-publication/no-retry boundaries and the failed enclosing run, permitting a legal input-prefix checkpoint. No production commit behavior was changed to satisfy this test.
+
+Earlier evidence: 71 related tests passed before the terminal-window change, with two disclosed failures (tiny terminal index and the old callback assertion). It is supporting prior evidence, not a claim of 71 final-byte reruns. Initial fixture mistakes (unsupported executor constructor arguments and an undersized serialized-program state budget) are not counted as product regressions. The original 16-row negative samples and 4 KiB / 64 KiB payload budgets were not reduced.
+
+## V012/V023 harness still in progress
+
+`tests/runtime_v3_resource_scenarios.py` contains executable real Dataset resource experiments. Some scenario combinations remain unverified; the support-hook integration is kept separate until they run. The original one-worker case with a real private-pool holder leaving exactly one CPU, 64 rows × 4 KiB, two branches and a slow consumer **failed its original 120-second limit**. The source, both branches and consumer started, but 80 worker activations and 79 acknowledged cuts produced only 12/128 final-stream rows by the timeout. All 80 original allocations were confirmed and the holder was released only through its original unit/pool protocol. The original sealed graph, physical plan and commits are preserved at `/tmp/demiflow-resource-fair-smoke2/compiled-red.json`; the parent assigned this scheduling-cost defect to the performance lane. This report does not relabel progress as completed fairness or raise its budget.
+
+The harness retains the original 16,384 × 4 KiB hotspot, an 8 MiB disk-failure counterexample, wide fanout/slow consumption, single-row rejection and state/output coexistence scenarios. Their pending full Local/Ray results must be reported separately. Typed-null amplification, allocator peak, logical payload budget, worker reservation and process RSS are distinct measurements. These tests do not claim an OS hard RSS bound or bounded arbitrary user callback allocation.
+
+All launchers use and assert private RESOURCE_ROOT, RESOURCE_HOME and FORGE_DOMAIN under `/tmp/demiflow-*`, and verify the imported source worktree. The main checkout, existing shared pools, environments and services were not edited or tested. No push or main merge occurred.

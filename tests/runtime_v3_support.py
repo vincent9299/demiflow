@@ -1068,9 +1068,8 @@ def _s_cpu_gpu_isolation(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, A
 
 
 def _s_fairness_deadlock(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must exercise small resource limits and a blocked consumer; ordinary union cannot prove fairness'}
-    fx._record_not_run('fairness_deadlock', detail)
-    raise NotRunError('fairness_deadlock', detail)
+    from runtime_v3_resource_scenarios import fairness_deadlock
+    return fairness_deadlock(fx, fault)
 
 
 def _s_relational_semantics(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
@@ -1170,9 +1169,8 @@ def _s_queue_full_business(fx: RuntimeV3Fixture, fault: str | None) -> dict[str,
 
 
 def _s_memory_peak(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must measure and assert simultaneous resident copies under a fixed small budget'}
-    fx._record_not_run('memory_peak', detail)
-    raise NotRunError('memory_peak', detail)
+    from runtime_v3_resource_scenarios import memory_peak
+    return memory_peak(fx, fault)
 
 
 def _s_disk_gc(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:

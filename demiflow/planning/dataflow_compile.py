@@ -834,11 +834,21 @@ class _Capture:
         if definition is None:
             raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
         semantic = {"kind": request.kind, "arguments": _plain(request.arguments)}
+        # The first terminal block and its first forest root occupy 3 KiB
+        # while the input/output payload is still resident. Seal both windows
+        # into the original profile; do not borrow half of that payload grant.
+        payload = self.bounds.max_batch_bytes + self.bounds.max_row_bytes
+        metadata = min(self.bounds.max_state_bytes, max(3072, payload // 2))
+        if metadata < 3072:
+            raise _error("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root")
+        profile = _default_profile(None, bounds=self.bounds)
+        profile = replace(profile, requests={**profile.requests, "memory_bytes": payload + metadata})
+        configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
         kernel = KernelSpec(
-            kind=request.kind, implementation_ref=None, configuration=_plain(semantic),
+            kind=request.kind, implementation_ref=None, configuration=configuration,
             inputs=(_input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",
-            profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
+            profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)

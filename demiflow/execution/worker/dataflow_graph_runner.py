@@ -105,7 +105,8 @@ class WorkerGraphRunner:
         scalar = self._terminal_spec is not None and self._terminal_spec.kind in (
             'count', 'schema', 'columns', 'size_bytes', 'aggregate', 'collect_summary')
         self._terminal_blocks = TerminalBlocks(self.services, self.partition,
-            declaration=declaration, partitioned=not scalar)
+            declaration=declaration, partitioned=not scalar,
+            budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None)
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
