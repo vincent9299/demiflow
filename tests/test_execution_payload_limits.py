@@ -132,7 +132,7 @@ def test_wide_model_output_recovers_with_identical_budget_without_repeating_effe
     journal = RunJournal(reference.directory)
     assert journal.execution_status()['status'] == ('cancelled' if window == 'cancel_after_prepared' else 'failed')
     assert journal.execution_commits('action-1')[-1]['status'] == 'acked'  # original materialize
-    assert journal.execution_commits('action-2')[-1]['status'] == ('acked' if window == 'native_return_loss' else 'prepared')
+    assert journal.execution_commits('action-2')[-1]['status'] == 'prepared'  # receipt has not returned
     if window == 'native_return_loss':assert lance.dataset(str(tmp_path / 'wide.lance')).version == 1
     else:assert not (tmp_path / 'wide.lance').exists()
     monkeypatch.setattr(protocol, 'fault_point', lambda *_: None)
