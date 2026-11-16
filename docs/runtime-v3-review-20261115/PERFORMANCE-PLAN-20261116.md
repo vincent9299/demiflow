@@ -48,3 +48,7 @@ Ray 另在每个真实节点预建一个零 CPU / GPU 的测试监视 actor，�
 ## 独立接口与接线
 
 `performance(fx, fault=None)` 返回五轮 `measurements`（每轮包含具名用例/版本/环境记录）、实际warmup事实、真实 `child_execute_action_calls` 和详细判定。测量由`run_comparison`统筹，`measure_trial`起隔离子进程，`evaluate_report`根据原始记录裁定。新正式test必须锁语义、预算、重复轮数、暖身分离、比较方向以及不完整数据不能假绿；真正引擎用例验证每条测量路径。现有 `runtime_v3_support._s_performance` 由总控接线，本lane不越写。
+
+## 部署可比性补充（2026-11-16）
+
+正式相对性能判定还必须通过 [存储与计时可比性守卫](PERFORMANCE-COMPARABILITY-CLOSURE.md)：源码/运行数据/临时目录在两臂、前后及各轮的物理存储条件要有实际证据，Ray 每个真实节点独立采集，driver 不能代证。缺证据或部署不同记 `not_comparable`，不输出相对比值/净代码收益、不放宽原阈值。该补充未改机器计划、业务规模或基线角色；探针在明确计时边界外。
