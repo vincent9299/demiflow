@@ -1369,19 +1369,21 @@ class _OutputSubscription:
                 workspace(receive_bytes)  # before opening/receiving payload data
                 frames = read_peer_many(tuple(item['peer'] for item in batch), bounds=e._bounds)
                 try:
-                    for payload in batch:
-                        workspace(receive_bytes)
-                        raw = next(frames)
-                        size = record_encoded_bytes(raw, maximum=e._bounds.max_row_bytes)
-                        if admit is not None:
-                            admit(size, len(records), payload_bytes)
-                        records.append(_decode_record_document(raw, record_id=payload['record_id'],
-                            sequence=payload['sequence'], max_bytes=e._bounds.max_row_bytes))
-                        e._terminal_queue.popleft()
-                        e._ack(payload['delivery_id'])
-                        admitted += payload['peer']['bytes']
-                        payload_bytes += size
-                        del raw
+                    from .dataflow_hosts import batch_business_commands
+                    with batch_business_commands(e._endpoints.values()):
+                        for payload in batch:
+                            workspace(receive_bytes)
+                            raw = next(frames)
+                            size = record_encoded_bytes(raw, maximum=e._bounds.max_row_bytes)
+                            if admit is not None:
+                                admit(size, len(records), payload_bytes)
+                            records.append(_decode_record_document(raw, record_id=payload['record_id'],
+                                sequence=payload['sequence'], max_bytes=e._bounds.max_row_bytes))
+                            e._terminal_queue.popleft()
+                            e._ack(payload['delivery_id'])
+                            admitted += payload['peer']['bytes']
+                            payload_bytes += size
+                            del raw
                 finally:
                     frames.close()
             return tuple(records)

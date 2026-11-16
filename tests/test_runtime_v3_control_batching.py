@@ -14,6 +14,7 @@ from demiflow.execution.worker.bootstrap import (
     ControlFrameReader, send_messages, _MAX_CONTROL_BYTES,
 )
 from demiflow.execution.worker.dataflow_host import HostedDataflowWorker
+from test_runtime_v3_ray_terminal_seams import private_ray_provider
 
 
 class Capture:
@@ -255,3 +256,37 @@ def test_lifecycle_response_and_events_share_one_reader_and_keep_fencing():
             endpoint._early_event(make('WorkerEvent', kind='progress', boot_id='another-boot'))
     finally:
         driver.close(); worker.close(); thread.join(timeout=1)
+
+
+def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, private_ray_provider):
+    import sys
+    from demiflow import data
+    from demiflow.execution.dataflow_hosts import RayHostEndpoint
+    from demiflow.execution.run_context import RunContext
+    original = _EndpointBase.flush_business
+    terminal = []
+    def flush(endpoint):
+        pending = tuple(endpoint._business_batch or ())
+        frame, at_terminal = sys._getframe(1), False
+        while frame is not None:
+            if frame.f_code.co_name == 'read_admitted':
+                at_terminal = True
+                break
+            frame = frame.f_back
+        result = original(endpoint)  # Count only successful actual actor replies.
+        if isinstance(endpoint, RayHostEndpoint) and pending and at_terminal:
+            assert all(command['kind'] == 'ack' for command, _ in pending)
+            terminal.append(tuple(command['delivery_id'] for command, _ in pending))
+        return result
+    monkeypatch.setattr(_EndpointBase, 'flush_business', flush)
+    monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
+    with RunContext.start(tmp_path/'run', limits={'timeout_s':120,
+            'memory_bytes':256*1024**2, 'checkpoint_rows':512}) as run:
+        assert data.range(512).map(lambda row: {'id': row['id'] * 2}).take_all() == [
+            {'id':i*2} for i in range(512)]
+        facts = run.journal.execution_commits('action-1')
+        assert facts and facts[-1]['status'] == 'acked'
+    deliveries = [item for batch in terminal for item in batch]
+    assert len(deliveries) == 512 and len(set(deliveries)) == 512
+    assert all(1 <= len(batch) <= 64 for batch in terminal)
+    assert len(terminal) < len(deliveries), 'actual terminal ACKs still make one RPC per row'
