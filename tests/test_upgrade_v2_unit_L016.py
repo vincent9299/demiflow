@@ -161,16 +161,16 @@ def ray_chain_facts(ray_local, tmp_path_factory):
     from demiflow.execution.dataflow_hosts import DataflowRayConnector
     events, reservations, imports = [], [], []
     original_apply = ResourceManager.apply
-    original_kill, original_close = DataflowRayConnector.terminate, DataflowRayConnector.close
+    original_kill, original_close = ray_local.kill, DataflowRayConnector.close
     original_reserve, original_import = LocalCapacityPool.reserve, builtins.__import__
     def apply(manager, context, plan):
         result = original_apply(manager, context, plan)
         for release in plan.retirements:
             events.append(('release', release.allocation_id, release.mode))
         return result
-    def terminate(connector, allocation_id):
-        events.append(('kill', allocation_id))
-        return original_kill(connector, allocation_id)
+    def terminate(actor, *args, **kwargs):
+        events.append(('kill_actor', actor._actor_id.hex()))
+        return original_kill(actor, *args, **kwargs)
     def close(connector, allocation_id):
         events.append(('connector_close', allocation_id))
         return original_close(connector, allocation_id)
@@ -185,16 +185,22 @@ def ray_chain_facts(ray_local, tmp_path_factory):
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv('DEMIFLOW_V3_PROVIDER', 'ray_core')
         patch.setattr(ResourceManager, 'apply', apply)
-        patch.setattr(DataflowRayConnector, 'terminate', terminate)
+        patch.setattr(ray_local, 'kill', terminate)
         patch.setattr(DataflowRayConnector, 'close', close)
         patch.setattr(LocalCapacityPool, 'reserve', reserve)
         patch.setattr(builtins, '__import__', importing)
-        facts = next(source := chain_contract.actual_chain.__wrapped__(tmp_path_factory))
+        source = chain_contract.actual_chain.__wrapped__(tmp_path_factory)
         try:
-            facts.update(terminal_events=events, local_reservations=reservations, ray_data_imports=imports)
-            yield facts
+            facts = next(source)
         finally:
             source.close()
+        with facts['run'].journal._connection() as db:
+            actor_ids = {json.loads(raw)['placement']['actor_id']: key for key, raw in
+                db.execute('SELECT allocation_id,document FROM resource_allocations')}
+        events = [('kill', actor_ids[event[1]]) if event[0] == 'kill_actor' else event for event in events]
+        facts.update(terminal_events=events, local_reservations=reservations, ray_data_imports=imports)
+    yield facts
+
 
 
 # ---------------- real Ray faults, original resource/journal authority ----------------
@@ -254,16 +260,18 @@ def _ray_failure(tmp_path, ray, *, mode, reference=None):
     original_absent = RayResourceProvider.ensure_absent
     original_close = ResourceManager.close
     original_scheduler_close = DataflowScheduler.close
-    original_kill = DataflowRayConnector.terminate
+    original_kill = ray.kill
     original_connector_close = DataflowRayConnector.close
-    executions, events = [], []
+    executions, events, actor_allocations = [], [], {}
     def created(execution, *args, **kwargs):
         original_init(execution, *args, **kwargs)
         executions.append(execution)
     def present(provider, allocation_id, spec):
-        if mode == 'before':
-            raise ResourceError('LAUNCH_FAILED', 'injected placement failure')
         result = original_present(provider, allocation_id, spec)
+        if mode == 'before':
+            # The real provider owns an unactivated shell and can prove its
+            # eventual death; no fake 'never-created' proof is manufactured.
+            result = dict(result, phase='FAILED', conditions=['LAUNCH_FAILED', 'injected placement failure'])
         events.append(('present', allocation_id, result['phase']))
         return result
     def activate(endpoint, assignment):
@@ -277,6 +285,9 @@ def _ray_failure(tmp_path, ray, *, mode, reference=None):
         return original_command(endpoint, kind, payload)
     def absent(provider, identity, deadline_ms):
         events.append(('absent', identity['allocation_id']))
+        owned = provider._actors.get(identity['allocation_id'])
+        if owned is not None:
+            actor_allocations[owned[0]._actor_id.hex()] = identity['allocation_id']
         result = original_absent(provider, identity, deadline_ms)
         if mode == 'unconfirmed':
             # Lose only the confirmation. Physical teardown still ran, but its
@@ -293,9 +304,9 @@ def _ray_failure(tmp_path, ray, *, mode, reference=None):
     def scheduler_close(scheduler, *, deadline_ms):
         return original_scheduler_close(scheduler,
             deadline_ms=min(deadline_ms, 200) if mode == 'unconfirmed' else deadline_ms)
-    def kill(connector, allocation_id):
-        events.append(('kill', allocation_id))
-        return original_kill(connector, allocation_id)
+    def kill(actor, *args, **kwargs):
+        events.append(('kill', actor_allocations.get(actor._actor_id.hex(), actor._actor_id.hex())))
+        return original_kill(actor, *args, **kwargs)
     def connector_close(connector, allocation_id):
         events.append(('connector_close', allocation_id))
         return original_connector_close(connector, allocation_id)
@@ -315,7 +326,7 @@ def _ray_failure(tmp_path, ray, *, mode, reference=None):
                     (RayHostEndpoint, '_send_k3', command),
                     (ResourceManager, 'close', close),
                     (DataflowScheduler, 'close', scheduler_close),
-                    (DataflowRayConnector, 'terminate', kill),
+                    (ray, 'kill', kill),
                     (DataflowRayConnector, 'close', connector_close)):
                     patch.setattr(owner, name, replacement)
                 try:
@@ -414,7 +425,9 @@ def test_terminal_failure_still_kills_the_actor_and_keeps_the_original_error(tmp
     assert any('resource terminal unavailable' in note for note in facts['error'].__notes__)
     scopes, allocations, _ = facts['snapshot']
     assert scopes and all(scope['state'] == 'OPEN' for scope in scopes)
-    assert facts['charged']['workers'] == len(allocations)
+    assert all(a['cleanup'] == 'CONFIRMED' for a in allocations)
+    assert facts['charged']['workers'] == 0
+    assert facts['charged']['cpu_millis'] == facts['charged']['memory_bytes'] == 0
     assert facts['actors'] == (), 'a failed ledger close must not leave its owned worker alive'
     assert any(event[0] == 'kill' for event in facts['events'])
 

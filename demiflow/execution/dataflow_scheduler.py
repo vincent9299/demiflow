@@ -90,6 +90,7 @@ class DataflowScheduler:
         self._receipts: dict[str, ArtifactRef] = {}
         self._desired_revision = 0
         self._closed = False
+        self._physical_exit_confirmed = False
         self._requests = {}
         self._allocation_by_operation = {}
         # Grant documents staged by the driver before activate; the lease carries
@@ -288,9 +289,21 @@ class DataflowScheduler:
         if self._closed:
             return
         _, _, fence = self._owner_binding()
-        accepted = self._resources.close(self._context("close-" + uuid.uuid4().hex), {
-            "mode": "ABANDON", "engine_receipt_ref": "execution-close",
-            "terminate_deadline_ms": deadline_ms, "reason": "execution_close"})
+        try:
+            accepted = self._resources.close(self._context("close-" + uuid.uuid4().hex), {
+                "mode": "ABANDON", "engine_receipt_ref": "execution-close",
+                "terminate_deadline_ms": deadline_ms, "reason": "execution_close"})
+        except Exception as failure:
+            # A failed scope terminal must not strand its already-owned workers.
+            # Retire only the original outstanding requests through the SAME
+            # ResourceManager. This does not invent an exit proof or claim that
+            # the scope closed; the original failure remains observable.
+            try:
+                self._retire_after_close_failure(deadline_ms=deadline_ms)
+                self._physical_exit_confirmed = True
+            except Exception as cleanup:
+                failure.add_note("Owned worker retirement also failed: " + str(cleanup))
+            raise
         self._desired_revision = accepted["desired_revision"]
         deadline = time.monotonic() + deadline_ms / 1000.0
         while True:
@@ -298,10 +311,45 @@ class DataflowScheduler:
             snapshot = self._resources.get(self.scope_id)
             if not snapshot.get("cleanup_obligations") and all(a.get("cleanup") == "CONFIRMED" for a in snapshot["allocations"]):
                 self._closed = True
+                self._physical_exit_confirmed = True
                 return
             if time.monotonic() >= deadline:
                 raise DataflowError("DEADLINE_EXCEEDED", "worker exit remains unconfirmed")
             time.sleep(min(0.01, max(0, deadline - time.monotonic())))
+
+    def _retire_after_close_failure(self, *, deadline_ms: int) -> None:
+        allocations = tuple(self._requests)
+        if not allocations:
+            return
+        deadline = time.monotonic() + deadline_ms / 1000.0
+        snapshot = self._resources.get(self.scope_id)
+        self._desired_revision = snapshot["desired_revision"]
+        retirements = tuple(ReleaseSpec(allocation_id, "ABANDON",
+            "close-failed-" + allocation_id, max(1, deadline_ms), "scope_close_failed")
+            for allocation_id in allocations)
+        try:
+            accepted = self._resources.apply(self._context(uuid.uuid4().hex),
+                ResourcePlan(self.scope_id, (), retirements))
+            self._desired_revision = accepted["desired_revision"]
+        except Exception as failure:
+            # close() may have committed and then lost its reply. In that case
+            # its original terminal intents already own the cleanup work.
+            if getattr(failure, "code", None) != "SCOPE_CLOSED":
+                raise
+        _, _, fence = self._owner_binding()
+        while True:
+            self._resources.reconcile_once(fence, deadline, 16)
+            reader = getattr(self._resources.state, "read_allocation", None)
+            if reader is not None:
+                observations = [reader(self.scope_id, allocation_id) for allocation_id in allocations]
+            else:
+                rows = {row["allocation_id"]: row for row in self._resources.get(self.scope_id)["allocations"]}
+                observations = [rows.get(allocation_id) for allocation_id in allocations]
+            if all(row is not None and row.get("cleanup") == "CONFIRMED" for row in observations):
+                return
+            if time.monotonic() >= deadline:
+                raise DataflowError("DEADLINE_EXCEEDED", "owned worker exit remains unconfirmed after scope close failed")
+            time.sleep(min(.01, max(0, deadline - time.monotonic())))
 
     # -- E013 complete ----------------------------------------------------
     def complete(self, operation_id: str, *, receipt_ref: ArtifactRef) -> None:

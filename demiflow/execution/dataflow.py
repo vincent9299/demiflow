@@ -1312,6 +1312,10 @@ class DataflowExecution:
                 self._scheduler.close(deadline_ms=deadline_ms)
                 physical_closed = True
             except Exception as exc:
+                # Native retirement may confirm all physical exits even if the
+                # scope-close receipt failed. Release local handles only on that
+                # proof; preserve the scope failure and original logical state.
+                physical_closed = self._scheduler._physical_exit_confirmed
                 if cleanup_error is None:
                     cleanup_error = exc
                 else:
