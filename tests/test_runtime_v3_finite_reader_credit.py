@@ -214,3 +214,126 @@ def test_parked_reader_uses_original_output_credit_and_keeps_exact_position(tmp_
             assert drain.step(max_records=20, deadline_ms=1000) == 0
         finally:
             drain.close()
+
+
+@pytest.mark.parametrize('maximum', [260, (1 << 30) + 31, (1 << 60) + 31])
+def test_cursor_metadata_ceiling_covers_alias_splitting_and_integer_growth(tmp_path, maximum):
+    # A pure metadata boundary: no huge producer or fabricated seal is run.
+    # Shared initial integers later become independently allocated cursors.
+    from demiflow.execution.worker.finite_input import _metadata_ceiling
+    from demiflow.execution.dataflow_record_frames import metadata_bytes, admit_workspace
+    positions = dict.fromkeys(('p' + str(i) for i in range(32)), 0)
+    states = {'edge': {'positions': positions}}
+    entries = {'edge': tuple({'producer': p, 'total_rows': maximum} for p in positions)}
+    ceiling = _metadata_ceiling(states, entries)
+    for index, producer in enumerate(positions):
+        positions[producer] = int(str(maximum - index))
+        assert metadata_bytes((states, entries)) <= ceiling
+    with store_fixture(tmp_path) as (_, store, _):
+        services, spec = limited_fixture(store)
+        runner, _, _ = owner(services, spec)
+        runner._finite_input._states, runner._finite_input._entries = states, entries
+        runner._finite_input._metadata_bytes = ceiling
+        remaining = resident_limit(runner.bounds, services) - ceiling
+        assert remaining > 0
+        runner._frame_call(admit_workspace, remaining, runner.bounds)
+        with pytest.raises(DataflowError, match='original resident budget'):
+            runner._frame_call(admit_workspace, remaining + 1, runner.bounds)
+        runner._finite_input.close()
+        assert runner._finite_input.retained_bytes == ceiling
+
+
+def test_cached_multi_producer_reader_keeps_order_and_original_recovery(tmp_path, monkeypatch):
+    from demiflow.execution.worker import finite_input as module
+    with store_fixture(tmp_path) as (_, store, _):
+        services, spec = fixture(store)
+        spec = replace(spec, producer_partitions=tuple('p' + str(i) for i in range(8)))
+        services.assignment.inputs = (spec,)
+        seal, _, expected = make_seal(services, spec)
+        runner, _, prefix = owner(services, spec)
+        drain, resumed = runner._finite_input, None
+        original, measurements = module.metadata_bytes, []
+        def measure(value):
+            measurements.append(None)
+            return original(value)
+        monkeypatch.setattr(module, 'metadata_bytes', measure)
+        try:
+            drain.adopt(spec.edge_id, seal)
+            measurements.clear()
+            for _ in range(6):
+                assert drain.step(max_records=1, deadline_ms=1000) == 1
+            saved, completed = drain.snapshot(), set(runner._finished_inputs)
+            assert prefix == expected[:6] and completed == {(spec.edge_id, 'p0')}
+            assert measurements == []  # No whole metadata walk per row/codec.
+            assert set(saved[spec.edge_id]) == {'seal_ref', 'positions'}
+            drain.close()
+            next_runner, _, suffix = owner(services, spec)
+            next_runner._finished_inputs = completed
+            resumed = next_runner._finite_input
+            resumed.restore(saved)
+            resumed.adopt(spec.edge_id, seal)
+            assert resumed.snapshot() == saved
+            measurements.clear()
+            for _ in range(100):
+                if not resumed.step(max_records=1, deadline_ms=1000):
+                    break
+            assert prefix + suffix == expected
+            assert next_runner._finished_inputs == {(spec.edge_id, p) for p in spec.producer_partitions}
+            assert measurements == [] and resumed._stream is None
+        finally:
+            drain.close()
+            if resumed is not None:
+                resumed.close()
+
+
+def test_index_growth_is_readmitted_before_extending_the_record_buffer(tmp_path):
+    # Independent reproduced boundary: with 7999 bytes free, old-index growth
+    # and new-index chunk allocation each fit, but complete growth with the
+    # newly retained real index does not. Reject before bytearray.extend.
+    from dataclasses import asdict
+    from demiflow.execution.dataflow_segments import block_chunks, SEGMENTS_MEDIA, FINITE_RECORDS_MEDIA, SCHEMA
+    from demiflow.execution.dataflow_record_frames import frame_stream, read_chunk_bytes, admit_workspace
+    from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
+    from demiflow.execution.recovery_contract import document
+    with store_fixture(tmp_path) as (_, store, _):
+        services, spec = limited_fixture(store)
+        rows = (record({'v': 1}, 0), record({'v': 'x' * 8192}, 1))
+        payload = b''.join(document({'record_id': row.record_id, 'sequence': row.sequence,
+            'target': 'c0', 'document': _encode_record_document(row, max_bytes=65536).decode()})
+            + b'\n' for row in rows)
+        leaf = store.put(iter([payload]), max_bytes=len(payload), media_type=FINITE_RECORDS_MEDIA)
+        raw = document({'schema': SCHEMA, 'height': 1, 'rows': 2, 'bytes': len(payload),
+            'children': [{'ref': asdict(leaf), 'rows': 2, 'bytes': len(payload), 'height': 0}]})
+        root = store.put(iter([raw]), max_bytes=len(raw), media_type=SEGMENTS_MEDIA)
+        runner, held, _ = owner(services, spec)
+        drain = runner._finite_input
+        original, checks = runner._frame_call, []
+        def call(function, *args, **kwargs):
+            check = {'growth': kwargs.get('_frame_reader_growth', False),
+                     'index': drain._index_bytes, 'passed': False}
+            checks.append(check)
+            result = original(function, *args, **kwargs)
+            check['passed'] = True
+            return result
+        runner._frame_call = call
+        def stream():
+            return frame_stream(block_chunks(store, root, services.bounds,
+                chunk_bytes=read_chunk_bytes(services.bounds, services), frame_call=call,
+                on_retained=drain._retain_index), services.bounds, services=services,
+                check_workspace=lambda size: call(admit_workspace, size, services.bounds,
+                                                   _frame_reader_growth=True))
+        try:
+            drain._stream = stream()
+            assert drain._stream.readline(65536).endswith(b'\n')
+            drain.close()
+            checks.clear()
+            held.retain(services.bounds.max_resident_bytes - 8000)
+            drain._stream = stream()
+            with pytest.raises(DataflowError, match='original resident budget'):
+                drain._stream.readline(65536)
+            assert checks[0] == {'growth': True, 'index': 0, 'passed': True}
+            assert any(c['index'] > 0 and not c['growth'] and c['passed'] for c in checks)
+            assert checks[-1]['growth'] and checks[-1]['index'] > 0 and not checks[-1]['passed']
+            assert drain._stream._buffer == bytearray()
+        finally:
+            drain.close()

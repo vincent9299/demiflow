@@ -77,6 +77,12 @@ class _ReplayLines:
                 self._held_chunk = 0
                 self._eof = True
                 continue
+            # Advancing chunks may retain new segment-index metadata. Its
+            # physical chunk allocation has already been admitted by the
+            # original reader; recheck the complete buffer growth with that
+            # metadata now live, before bytearray.extend allocates its copy.
+            # Keep the previous held chunk charged until this second check.
+            self._check(2 * sys.getsizeof(self._buffer) + self._held_chunk + 3 * self._chunk_bytes)
             self._held_chunk = len(chunk)
             self._buffer.extend(chunk)
             del chunk

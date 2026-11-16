@@ -4,6 +4,7 @@ Only immutable references and consumed frame ordinals enter the existing worker
 frontier. The handoff ACK means the worker adopted those references, not that it
 consumed them. Output/actor state and this cursor commit in the same native cut.
 """
+import sys
 import time
 
 from ..contracts.dataflow import ArtifactRef
@@ -18,15 +19,26 @@ from ..dataflow_sinks import _artifact_json
 from ..recovery_contract import document
 
 
+def _metadata_ceiling(states, entries):
+    # Cursor integers can grow or stop aliasing the initial zero / total_rows.
+    # Charge one independent maximum-sized integer per producer, even when
+    # identity-based measurement currently counts a shared integer only once.
+    integers = sum(sys.getsizeof(entry['total_rows'])
+                   for members in entries.values() for entry in members)
+    return metadata_bytes((states, entries)) + integers + sys.getsizeof((None, None))
+
+
 class FiniteInputDrain:
     def __init__(self, runner):
         self.runner = runner
         self._states = {}
         self._entries = {}
         self._active = None
+        self._active_entry = None
         self._stream = None
         self._scanned = 0
         self._index_bytes = 0
+        self._metadata_bytes = 0
 
     @property
     def buffered_bytes(self):
@@ -34,8 +46,7 @@ class FiniteInputDrain:
 
     @property
     def retained_bytes(self):
-        metadata = metadata_bytes((self._states, self._entries)) if self._states or self._entries else 0
-        return self.buffered_bytes + self._index_bytes + metadata
+        return self.buffered_bytes + self._index_bytes + self._metadata_bytes
 
     def _retain_index(self, size):
         self._index_bytes = size
@@ -77,13 +88,20 @@ class FiniteInputDrain:
                         and positions[entry['producer']] != entry['total_rows']):
                     raise DataflowError('FENCED', 'completed finite input has an unfinished cursor')
         state = {'seal_ref': _artifact_json(seal_ref), 'positions': positions}
+        states = {**self._states, edge_id: state}
+        members = {**self._entries, edge_id: entries}
+        ceiling = _metadata_ceiling(states, members)
         from ..dataflow_record_frames import _json_shape
-        size, workspace = _json_shape({**self._states, edge_id: state}, runner.bounds.max_state_bytes)
-        runner._frame_call(admit_workspace, workspace + 2 * size,
-                           runner.bounds, _frame_retained=metadata_bytes(entries))
-        document({**self._states, edge_id: state}, runner.bounds.max_state_bytes)
-        self._states[edge_id] = state
-        self._entries[edge_id] = entries
+        size, workspace = _json_shape(states, runner.bounds.max_state_bytes)
+        # The original grant must also hold the new conservative ceiling.
+        # Both old map containers survive until replacement; their children
+        # alias the candidate and are already included in its measured tree.
+        growth = max(0, ceiling - self._metadata_bytes)
+        growth += sys.getsizeof(self._states) + sys.getsizeof(self._entries)
+        runner._frame_call(admit_workspace,
+            max(workspace + 2 * size + metadata_bytes(entries), growth), runner.bounds)
+        document(states, runner.bounds.max_state_bytes)
+        self._states, self._entries, self._metadata_bytes = states, members, ceiling
 
     def restore(self, value):
         if type(value) is not dict or len(value) > self.runner.bounds.max_edges:
@@ -103,6 +121,10 @@ class FiniteInputDrain:
                 for edge, state in self._states.items()}
 
     def _next_member(self):
+        if self._active_entry is not None:
+            edge_id, entry = self._active_entry
+            if (edge_id, entry['producer']) not in self.runner._finished_inputs:
+                return self._active_entry
         for edge_id, entries in self._entries.items():
             for entry in entries:
                 if (edge_id, entry['producer']) not in self.runner._finished_inputs:
@@ -136,6 +158,7 @@ class FiniteInputDrain:
             if self._active != key:
                 self.close()
                 self._active = key
+                self._active_entry = current
                 self._stream = frame_stream(block_chunks(runner.services.store,
                     entry['manifest_ref'], runner.bounds,
                     chunk_bytes=read_chunk_bytes(runner.bounds, runner.services),
@@ -191,5 +214,6 @@ class FiniteInputDrain:
         if self._stream is not None:
             self._stream.close()
         self._stream = self._active = None
+        self._active_entry = None
         self._scanned = 0
         self._index_bytes = 0
