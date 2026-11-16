@@ -21,7 +21,7 @@ ROOT_EXPORTS = {
     'PipelineRunResult', 'PipelineExecutionTarget', 'PlatformRuntimeIdentity',
 }
 DATA_EXPORTS = {
-    'read_queue', 'read_queue_records', 'add_lance_columns',
+    'read_queue', 'read_queue_records', 'read_legacy_queue_records', 'add_lance_columns',
     'ensure_lance_vector_index', 'local_execution', 'from_items', 'from_iter',
     'read_records', 'range', 'from_arrow', 'from_numpy', 'from_pandas',
     'read_parquet', 'read_json', 'read_csv', 'read_text', 'read_binary_files',
@@ -96,12 +96,17 @@ def test_take_and_take_all_preserve_bounded_collection_semantics():
         data.from_items(rows).take_all(limit=-1)
 
 
-def test_take_all_limit_reads_at_most_one_extra_row():
-    seen = []
-    ds = counted_source([{'x': i} for i in range(5)], seen)
+def test_take_all_limit_reads_at_most_one_extra_row(tmp_path):
+    from _worker_event_fixtures import emit, events
+    seen = tmp_path / 'source-reads.jsonl'
+    def rows():
+        for i in range(5):
+            emit(seen, 'read', x=i)
+            yield {'x': i}
+    ds = data.from_iter(rows)
     with pytest.raises(ValueError, match='more than the take_all limit'):
         ds.take_all(limit=2)
-    assert len(seen) == 3
+    assert [event['x'] for event in events(seen)] == [0, 1, 2]
 
 
 def test_take_all_finishes_observer_on_every_success_path(monkeypatch):

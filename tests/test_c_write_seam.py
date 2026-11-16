@@ -72,7 +72,7 @@ def assert_sealed_readable(run_dir, run, expected_kinds):
     assert graph.dag_id == physical.dag_id == binding["dag_id"] == facts["dag_id"]
     assert physical.plan_id == binding["plan_id"] == facts["plan_id"]
     view = facts["plan_view"]
-    assert [n["occurrence_id"] for n in view["logical_dag"]["nodes"]] == [n.occurrence_id for n in graph.nodes]
+    assert [n["occurrence_id"] for n in view["dag"]["nodes"]] == [n.occurrence_id for n in graph.nodes]
     bindings = load_execution_bindings(run_dir, action_id, sealed_plan=sealed)
     assert bindings["version"] == "v3"
     assert bindings["document"]["action_id"] == action_id
@@ -215,7 +215,16 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
     from demiflow.execution.run_journal import RunJournal
     journal = RunJournal(run_dir)
     action_id = sealed_action_id(journal)
-    assert not journal.execution_commits(action_id), "a commit was acked before the code gate"
+    assert journal.execution_action(action_id)['result'] is None
+    # Earlier source stages may checkpoint before the consumer's load fails.
+    # Such ACKs must not publish rows, a Lance version, or a final result.
+    for commit in journal.execution_commits(action_id):
+        assert commit['status'] == 'acked'
+        sink = commit['prepared']['sinks']['write_lance']
+        assert sink['rows'] == sink['bytes'] == 0
+        assert sink['native'] is None
+        assert sink['manifest']['final'] is False
+        assert sink['manifest']['partitions'] == []
 
 
 # --- Streamed layer-3: the sealed layout is really consumed -------------------
@@ -483,7 +492,7 @@ def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch)
     sealed = facts.read_sealed_plan(target, action_id)
     assert sealed["available"] is True, sealed
     assert sealed["version"] == "v3"
-    assert sealed["plan_view"]["logical_dag"]["nodes"], "sealed graph has no nodes"
+    assert sealed["plan_view"]["dag"]["nodes"], "sealed graph has no nodes"
 
     bridge = facts.read_identity_bridge(target, action_id, dag_id=sealed["dag_id"],
                                         report_digest=inspection_digest)

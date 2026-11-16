@@ -70,12 +70,6 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
     return log
 
 
-def native_reports(dataset):
-    # The two large-payload historical performance cases below still need an
-    # equivalent runtime observation contract; do not fabricate legacy stats.
-    return [s for s in dataset.execution_metadata().diagnostics['stages'] if s['name'] == 'datafusion']
-
-
 def test_engine_session_is_not_a_public_dataset_api():
     assert not hasattr(data, 'datafusion_execution')
     assert not hasattr(data, 'DataFusionOptions')
@@ -313,24 +307,18 @@ def test_partition_callbacks_preserve_task_state_and_failure_before_commit(tmp_p
     # boundary; swallowing it would (correctly) trip unconfirmed-history safety.
     with pytest.raises(ValueError,match='callback failed once'):
         with data.local_execution(workers=2,worker_mode='process',batch_rows=3):
-            rows.map(fail).write_lance(str(target),mode='overwrite',schema=schema)
+            failed_rows = (data.read_lance(str(left),version=1)
+                .join(data.read_lance(str(right),version=1),on='k').map(Number))
+            failed_rows.map(fail).write_lance(str(target),mode='overwrite',schema=schema)
     assert lance.dataset(str(target)).version==1
 
 
 @pytest.mark.slow
 def test_large_group_orders_only_keys_and_preserves_sequential_reducer(tmp_path, monkeypatch):
     """80 MiB of opaque input under a 32 MiB engine pool; no wide final sort."""
-    from dataclasses import replace
-    from demiflow.execution import dataset_native, native_resources
-    monkeypatch.setattr(dataset_native, 'SORT_STAGE_ROWS', 1)
-    original = native_resources.dataset_session
-    def limited(*args, **kwargs):
-        session = original(*args, **kwargs)
-        session.options = replace(session.options, memory_bytes=32*1024**2,
-            max_rss_bytes=2*1024**3, threads=1, partitions=1, timeout_s=120)
-        session.resources = tmp_path / 'limited_resources'
-        return session
-    monkeypatch.setattr(native_resources, 'dataset_session', limited)
+    from _group_order_fixtures import install_group_order_probe
+    from demiflow.execution.run_context import RunContext
+    proof_path = install_group_order_probe(tmp_path, monkeypatch)
     source = api(tmp_path)
     count = 20000
     def records():
@@ -342,26 +330,32 @@ def test_large_group_orders_only_keys_and_preserves_sequential_reducer(tmp_path,
             'total': (state or {}).get('total', 0)+row['seq'],
             'first': state['first'] if state else row['seq'], 'last': row['seq']}
     result = source.from_iter(records).reduce_by_key('k', fold)
-    assert result.take_all() == [dict(k=k, n=len(range(k,count,3)),
-        total=sum(range(k,count,3)), first=k, last=list(range(k,count,3))[-1]) for k in range(3)]
-    reports = native_reports(result)
-    ordered = [r for r in reports if r['purpose']=='combined']
-    assert len(ordered)==1
-    directory = Path(ordered[0]['query'])
-    request = json.loads((directory/'request.json').read_text())
-    worker = json.loads((directory/'worker_result.json').read_text())
-    assert 'ORDER BY' in request['sql']
-    assert worker['opaque_payload_read']['rows']==count
-    assert worker['opaque_payload_read']['query_payload_columns']==0
-    assert worker['opaque_payload_read']['max_batch_bytes'] <= 8 * 2**20
-    assert worker['opaque_payload_read']['max_batch_bytes'] <= 8*1024**2
+    limits = dict(memory_bytes=32 * 1024**2, max_rss_bytes=2 * 1024**3,
+                  max_row_bytes=65536, max_batch_bytes=256 * 1024,
+                  max_state_bytes=2 * 1024**2, timeout_s=120)
+    with RunContext.start(tmp_path / 'run', limits=limits) as run:
+        assert result.take_all() == [dict(k=k, n=len(range(k,count,3)),
+            total=sum(range(k,count,3)), first=k, last=list(range(k,count,3))[-1]) for k in range(3)]
+        _, physical, journal = sealed_plan(result)
+        assert physical.bounds.max_resident_bytes == limits['memory_bytes']
+        assert journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    reports = events(proof_path)
+    assert len(reports) == 1
+    proof = reports[0]
+    assert proof['keys'] == ['k'] and proof['rows'] == count
+    assert proof['max_key_bytes'] < 64  # 4 KiB payload is never a comparison field.
+    assert proof['max_run_resident_bytes'] <= limits['memory_bytes']
+    assert proof['spill_bytes'] > limits['memory_bytes'] and proof['runs'] > 1
+    assert proof['max_batch_bytes'] <= 8 * 1024**2
+    with journal._connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM resource_allocations WHERE cleanup!='CONFIRMED'").fetchone()[0] == 0
     assert not list(tmp_path.glob('demiflow-dataset-*'))
 
 
 def test_narrow_group_batches_are_not_shrunk_by_an_unrelated_wide_input(tmp_path, monkeypatch):
     """A wide left sibling must not force thousands of tiny RHS row lookups."""
-    from demiflow.execution import dataset_native
-    monkeypatch.setattr(dataset_native, 'SORT_STAGE_ROWS', 1)
+    from _group_order_fixtures import install_group_order_probe
+    proof_path = install_group_order_probe(tmp_path, monkeypatch)
     source = api(tmp_path)
     wide = [{'k': k, 'payload': bytes([k])*512*1024} for k in range(4)]
     narrow = [{'k': i % 4, 'seq': i} for i in range(4000)]
@@ -376,16 +370,20 @@ def test_narrow_group_batches_are_not_shrunk_by_an_unrelated_wide_input(tmp_path
     result = wide_query.join(grouped, on='k')
     assert_same_rows(result.take_all(), [
         {**row, 'n': 1000, 'last': 3996+row['k']} for row in wide])
-    reports = native_reports(result)
-    ordered = next(r for r in reports if 'ORDER BY' in (Path(r['query'])/'query.sql').read_text())
-    worker = json.loads((Path(ordered['query'])/'worker_result.json').read_text())
-    ordered_options = json.loads((Path(ordered['query'])/'request.json').read_text())['options']
-    assert ordered_options['partitions'] == min(2, ordered_options['threads'])
-    assert worker['opaque_payload_read']['rows'] == 4000
-    assert worker['opaque_payload_read']['batches'] <= 2
-    final = json.loads((Path(reports[-1]['query'])/'result.json').read_text())
-    # The final result hydrates the wide payload within its separate byte budget.
-    assert final['options']['batch_rows'] == 8192
-    assert final['options']['partitions'] == min(2, final['options']['threads'])
-    assert final['worker']['opaque_payload_read']['max_batch_bytes'] <= 8 * 2**20
+    graph, physical, journal = sealed_plan(result)
+    assert [node.kernel.kind for node in graph.nodes].count('reduce') == 1
+    reports = events(proof_path)
+    assert len(reports) == 1
+    proof = reports[0]
+    assert proof['keys'] == ['k'] and proof['rows'] == 4000
+    assert proof['max_key_bytes'] < 64
+    # The narrow side still fills ordinary native runs; a previous wide input
+    # cannot shrink it into thousands of one-row materializations.
+    assert proof['runs'] <= 2
+    assert proof['max_run_resident_bytes'] <= proof['max_resident_bytes']
+    assert proof['max_resident_bytes'] <= physical.bounds.max_resident_bytes
+    assert proof['max_row_bytes'] <= physical.bounds.max_row_bytes
+    assert proof['max_batch_bytes'] <= physical.bounds.max_batch_bytes
+    with journal._connection() as db:
+        assert db.execute("SELECT COUNT(*) FROM resource_allocations WHERE cleanup!='CONFIRMED'").fetchone()[0] == 0
     assert not list(tmp_path.glob('demiflow-dataset-*'))

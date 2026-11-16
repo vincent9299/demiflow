@@ -95,15 +95,43 @@ def test_native_arrow_pack_uses_parent_run_for_every_callback(tmp_path):
 
 
 def test_wide_native_row_rejects_without_commit_and_accepts_explicit_budget(tmp_path):
-    from demiflow.execution import RecoveryContractError
-    from test_dataset_large_payload import test_indivisible_payload_over_eight_mib_survives_join_and_sink
-    # The old frozen candidate incorrectly used the 8 MiB batching target as
-    # a default row ceiling. Keep its evidence; exercise a real explicit cap here.
-    with pytest.raises(RuntimeContractError, match='byte budget'):
-        with RunContext.start(tmp_path / 'rejected-run', limits={
-                'max_row_bytes': 8 * 1024**2, 'max_batch_bytes': 8 * 1024**2}):
-            test_indivisible_payload_over_eight_mib_survives_join_and_sink(tmp_path)
-    assert not (tmp_path / 'wide.lance').exists()
-    with RunContext.start(tmp_path / 'admitted-run', limits={
-            'max_row_bytes': 16 * 1024**2, 'max_batch_bytes': 32 * 1024**2}):
-        test_indivisible_payload_over_eight_mib_survives_join_and_sink(tmp_path)
+    import lance
+    import pyarrow as pa
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    payload = b'full-original\x00' * 750000
+    output = tmp_path / 'wide.lance'
+    schema = pa.schema([('k', pa.int64()), ('payload', pa.large_binary()), ('tag', pa.string())])
+    executor = LocalDatasetExecutor(resource_root=tmp_path)
+    source = DataAPI(executor)
+    result = source.from_items([{'k': 1, 'payload': payload}, {'k': 2, 'payload': None}]).join(
+        source.from_items([{'k': 1, 'tag': 'a'}, {'k': 1, 'tag': 'b'}]), on='k', how='left')
+    try:
+        with pytest.raises((DataflowError, RuntimeContractError)) as error:
+            with RunContext.start(tmp_path / 'rejected-run', limits={
+                    'max_row_bytes': 8 * 1024**2, 'max_batch_bytes': 8 * 1024**2}):
+                result.write_lance(str(output), mode='create', schema=schema)
+        if isinstance(error.value, DataflowError):
+            assert error.value.code == 'BUDGET_EXCEEDED'
+        else:
+            assert 'byte budget' in str(error.value)
+        assert not (output / '_versions').exists()
+        failed = RunJournal(tmp_path / 'rejected-run')
+        assert failed.execution_status()['status'] == 'failed'
+        assert failed.execution_action('action-1')['result'] is None
+        assert not failed.execution_commits('action-1')
+        with RunContext.start(tmp_path / 'admitted-run', limits={
+                'memory_bytes': 256 * 1024**2,
+                'max_row_bytes': 16 * 1024**2, 'max_batch_bytes': 32 * 1024**2}):
+            result.write_lance(str(output), mode='create', schema=schema)
+        table = lance.dataset(str(output))
+        rows = table.to_table().to_pylist()
+        assert sorted((row['k'], row['tag'] or '') for row in rows) == [(1, 'a'), (1, 'b'), (2, '')]
+        assert all(row['payload'] == payload for row in rows if row['k'] == 1)
+        assert [row for row in rows if row['k'] == 2] == [{'k': 2, 'payload': None, 'tag': None}]
+        assert table.schema == schema and table.version == 1
+        from test_dataset_native import sealed_plan
+        _, physical, _ = sealed_plan(result)
+        assert physical.bounds.max_row_bytes == 16 * 1024**2
+        assert physical.bounds.max_batch_bytes == 32 * 1024**2
+    finally:
+        executor.close()
