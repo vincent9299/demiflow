@@ -1,14 +1,30 @@
-from demiflow.execution.stream_checkpoint import StreamCheckpoint
+"""Changing a pipeline creates a new run, never rewrites the old identity."""
+import pytest
+from demiflow import data
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.recovery_contract import RecoveryContractError
 
 
 def test_explicit_identity_migration_rebinds_checkpoint(tmp_path):
-    path = tmp_path / "checkpoint.json"
-    StreamCheckpoint(path, identity={"contract": "v1"})
-    try:
-        StreamCheckpoint(path, identity={"contract": "v2"})
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("identity changes must be rejected by default")
-    migrated = StreamCheckpoint(path, identity={"contract": "v2"}, allow_identity_migration=True)
-    assert migrated.state["identity"] == migrated.identity
+    old = tmp_path / 'v1.lance'
+    with pytest.raises(OSError, match='stop original'):
+        with RunContext.start(tmp_path / 'v1-run', entry_identity={'contract': 'v1'}) as run:
+            reference = run.ref
+            receipt = data.from_items([{'value': 1}]).write_lance(old, mode='create', return_receipt=True)
+            raise OSError('stop original')
+    journal = RunJournal(reference.directory)
+    identity, history = journal.recovery_identity(), journal.execution_commits('action-1')
+    with pytest.raises(RecoveryContractError, match='identity'):
+        with RunContext.resume(reference, entry_identity={'contract': 'v2'}):
+            raise AssertionError('old history accepted a different pipeline identity')
+    with RunContext.start(tmp_path / 'v2-run', entry_identity={'contract': 'v2'}) as migrated:
+        result = data.read_lance(old, version=receipt.committed_version).map(
+            lambda row: {'value': row['value'] + 1}).write_lance(
+                tmp_path / 'v2.lance', mode='create', return_receipt=True)
+    assert migrated.ref.run_id != reference.run_id
+    assert data.read_lance(tmp_path / 'v2.lance', version=result.committed_version).take_all() == [{'value': 2}]
+    assert data.read_lance(old, version=receipt.committed_version).take_all() == [{'value': 1}]
+    assert journal.recovery_identity() == identity
+    assert journal.execution_commits('action-1') == history
+    assert not (tmp_path / 'checkpoint.json').exists()

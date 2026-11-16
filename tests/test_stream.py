@@ -11,6 +11,9 @@ import pytest
 
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.api import DataAPI
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.run_journal import RunJournal
 
 
 def build(n=50):
@@ -112,7 +115,7 @@ def test_bounded_backpressure(tmp_path):
     assert len(actual) == 40 and 1 < max(actual) <= 4 + 4            # 深度+并发之外被 put 阻塞挡住
 
 
-def test_catch_whitelist_miss_and_fatal_terminates():
+def test_catch_whitelist_miss_and_fatal_terminates(tmp_path):
     """认缺分级：白名单命中计数不断链；白名单外异常终止整链。"""
     class Soft(Exception):
         pass
@@ -139,8 +142,14 @@ def test_catch_whitelist_miss_and_fatal_terminates():
         return r
 
     ds2 = ctx.from_items(items).map_async(bomb, concurrency=1)
-    with pytest.raises(Hard):
-        ds2.run_stream()
+    with pytest.raises(DataflowError, match='fatal') as failure:
+        with RunContext.start(tmp_path / 'fatal-run'):
+            ds2.run_stream()
+    assert failure.value.code == 'INTERNAL_PROTOCOL'
+    assert 'Hard' in str(failure.value)
+    journal = RunJournal(tmp_path / 'fatal-run')
+    assert journal.execution_action('action-1')['result'] is None
+    assert not any(f['status'] == 'acked' for f in journal.execution_commits('action-1'))
 
 
 def test_filter_folding_head_and_between():
@@ -162,7 +171,7 @@ def test_sync_only_ops_rejected():
         ds.run_stream()
 
 
-def test_on_drain_runs_on_success_and_failure():
+def test_on_drain_runs_on_success_and_failure(tmp_path):
     ctx, items = build(6)
     drained = []
 
@@ -179,8 +188,13 @@ def test_on_drain_runs_on_success_and_failure():
         raise Boom()
 
     ds2 = ctx.from_items(items).map_async(bomb, concurrency=1)
-    with pytest.raises(Boom):
-        ds2.run_stream(on_drain=lambda s: drained.append("fail"))
+    with pytest.raises(DataflowError, match='Boom') as failure:
+        with RunContext.start(tmp_path / 'drain-failure'):
+            ds2.run_stream(on_drain=lambda s: drained.append("fail"))
+    assert failure.value.code == 'INTERNAL_PROTOCOL'
+    journal = RunJournal(tmp_path / 'drain-failure')
+    assert journal.execution_action('action-1')['result'] is None
+    assert not any(f['status'] == 'acked' for f in journal.execution_commits('action-1'))
     assert drained == ["ok", "fail"]
 
 
