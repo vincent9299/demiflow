@@ -360,29 +360,32 @@ def compile_kernel_spec(
         for field in fields(operation)
         if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
     }
-    from ..execution.dataflow_acquisition_call import AcquisitionCall
-    from ..execution.dataflow_producer import ProducerCall
-    if native_declaration is not None and native_declaration.target is AcquisitionCall:
-        configuration['native_operation'] = native_declaration.constructor_args[0]
-        if configuration['native_operation'] == 'acquire':
-            actor = getattr(operation.callable.target, '__self__', operation.callable.target)
-            from ..execution.dataflow_fetch import fetch_declaration_key
-            configuration['native_key'] = fetch_declaration_key(actor)
-    if native_declaration is not None and native_declaration.target is ProducerCall:
-        configuration['native_operation'] = 'producer'
-        state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
-    from ..execution.dataflow_search import NativeSearchCall
-    if native_declaration is not None and native_declaration.target is NativeSearchCall:
-        configuration['native_operation'] = 'search'
-        configuration['native_key'] = native_declaration.constructor_args[0]
-        state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
-    from ..execution.dataflow_stream_lance import StreamLanceFactory
-    if (native_declaration is not None and native_declaration.target is StreamLanceFactory
-            and native_declaration.constructor_args[1] is None):
-        # This is the verified passive RPC factory, not the original driver
-        # writer object. Its state hooks and original child-commit scopes own
-        # recovery. A user predicate with unproven state is not upgraded here.
-        state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
+    # Ordinary CPU kernels do not use native services. Importing every native
+    # adapter here initializes Lance/Arrow and model modules even for a map.
+    if native_declaration is not None:
+        from ..execution.dataflow_acquisition_call import AcquisitionCall
+        from ..execution.dataflow_producer import ProducerCall
+        if native_declaration is not None and native_declaration.target is AcquisitionCall:
+            configuration['native_operation'] = native_declaration.constructor_args[0]
+            if configuration['native_operation'] == 'acquire':
+                actor = getattr(operation.callable.target, '__self__', operation.callable.target)
+                from ..execution.dataflow_fetch import fetch_declaration_key
+                configuration['native_key'] = fetch_declaration_key(actor)
+        if native_declaration is not None and native_declaration.target is ProducerCall:
+            configuration['native_operation'] = 'producer'
+            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
+        from ..execution.dataflow_search import NativeSearchCall
+        if native_declaration is not None and native_declaration.target is NativeSearchCall:
+            configuration['native_operation'] = 'search'
+            configuration['native_key'] = native_declaration.constructor_args[0]
+            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
+        from ..execution.dataflow_stream_lance import StreamLanceFactory
+        if (native_declaration is not None and native_declaration.target is StreamLanceFactory
+                and native_declaration.constructor_args[1] is None):
+            # This is the verified passive RPC factory, not the original driver
+            # writer object. Its state hooks and original child-commit scopes own
+            # recovery. A user predicate with unproven state is not upgraded here.
+            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
     stream_options = getattr(operation, 'stream_options', None)
     if stream_options is not None:
         configuration.update(streaming_map=True, concurrency=stream_options.concurrency,

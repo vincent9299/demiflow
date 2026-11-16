@@ -53,6 +53,13 @@ def native_model_declaration(operation):
     if type(operation) is SaveLanceOp:
         from .dataflow_stream_lance import StreamLanceFactory, declaration
         return CallableSpec.create(StreamLanceFactory, fn_constructor_args=(declaration(operation, actor), actor.when))
+    # None and ordinary functions cannot be one of the exact native actor
+    # classes below. Typed model operations retain their original fact guards,
+    # including rejection of a forged function in place of their native actor.
+    import types
+    if not isinstance(operation, EmbeddingMapOp) and (
+            actor is None or type(actor) in (types.FunctionType, types.BuiltinFunctionType)):
+        return None
     from .stream_lookup import LanceLookup
     from ..lance.search import VectorSearch
     if type(actor) is LanceLookup:
