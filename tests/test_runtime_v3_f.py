@@ -606,21 +606,20 @@ def test_f019(fake_action, monkeypatch):
     import demiflow.execution.dataset_native as native
     from demiflow.data.plan import LogicalPlan
     from demiflow.data.sources import ItemsSource
-    import demiflow.data.dataset as dataset_mod
-
     calls = []
-    def _fake_iter_rows(self):
-        calls.append(self)
-        return iter([{"id": 7}])
-    monkeypatch.setattr(dataset_mod.Dataset, "iter_rows", _fake_iter_rows)
+    def _fake_execute(executor, source, plan, *, execution):
+        calls.append(execution)
+        yield {"id": 7}
+    monkeypatch.setattr(native, "execute", _fake_execute)
 
     engine = native.Engine.__new__(native.Engine)
     engine.stats = {}
+    engine.execution = object()
     executor = _FakeExecutor()
     executor._local_kernel_stats = {}
     out = list(engine.python_rows(executor, ItemsSource([{"id": 1}]), LogicalPlan()))
     assert out == [{"id": 7}]
-    assert len(calls) == 1
+    assert calls == [engine.execution]
 
 
 # ---------------------------------------------------------------------------

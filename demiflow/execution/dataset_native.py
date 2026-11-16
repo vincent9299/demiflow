@@ -501,9 +501,8 @@ class Engine:
                     yield row[key], self.decode(rel, row)
 
     def python_rows(self, executor, source, plan):
-        from ..data.dataset import Dataset
         try:
-            yield from Dataset(source, plan, executor).iter_rows()
+            yield from execute(executor, source, plan, execution=self.execution)
         finally:
             child = executor._local_kernel_stats
             if child is not self.stats and child.get('engine') != 'datafusion':
