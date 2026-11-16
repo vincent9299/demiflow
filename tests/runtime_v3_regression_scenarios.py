@@ -173,6 +173,34 @@ def validate_plan(plan, collections, *, inputs):
     return universe, bynode, problems
 
 
+def complete_phases(phases):
+    """One parent execution and every explicitly identified native subtest pass.
+
+    Old ambiguous repeated call reports stay invalid. Subtests cannot replace
+    the parent's call, suppress failures, or make retry/duplicate parents green.
+    """
+    main, subtests = [], []
+    for phase in phases:
+        subtest = phase.get('subtest')
+        if subtest is None:
+            main.append(phase)
+            continue
+        if (type(subtest) is not dict or set(subtest) != {'schema', 'index', 'message', 'parameters'}
+                or subtest['schema'] != 'pytest.subtest.v1' or phase['when'] != 'call'
+                or type(subtest['index']) is not int or subtest['index'] != len(subtests) + 1
+                or subtest['index'] > 100000
+                or subtest['message'] is not None and (type(subtest['message']) is not str or len(subtest['message']) > 4096)
+                or type(subtest['parameters']) is not dict or len(subtest['parameters']) > 64
+                or any(type(k) is not str or len(k) > 256 or type(v) is not str or len(v) > 4096
+                       for k, v in subtest['parameters'].items())):
+            return False
+        subtests.append(phase)
+    return (len(main) == 3 and Counter(p['when'] for p in main)
+            == Counter({'setup': 1, 'call': 1, 'teardown': 1})
+            and all(p['outcome'] == 'passed' and p.get('wasxfail') is None
+                    and not p.get('rerun') for p in phases))
+
+
 def evaluate(plan, collections, receipts, *, inputs):
     """A complete verdict requires one setup/call/teardown success per leaf.
 
@@ -203,10 +231,7 @@ def evaluate(plan, collections, receipts, *, inputs):
             if node in executed or node in failed:
                 raise ValueError('repeated execution receipt cannot replace an earlier result')
             phases = reports[node]
-            good = (len(phases) == 3 and Counter(p['when'] for p in phases)
-                    == Counter({'setup': 1, 'call': 1, 'teardown': 1})
-                    and all(p['outcome'] == 'passed' and p.get('wasxfail') is None
-                            and not p.get('rerun') for p in phases))
+            good = complete_phases(phases)
             (executed if good else failed)[node] = phases
         if receipt.get('returncode') != 0 and not any(n in failed for n in collected):
             raise ValueError('nonzero pytest exit without an accounted failed node')

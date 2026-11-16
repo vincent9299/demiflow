@@ -81,6 +81,7 @@ class Inventory:
         self.collection = []
         self.deselected = []
         self.reports = []
+        self.subtests = {}
 
     def pytest_collection_finish(self, session):
         self.items = [{'nodeid': item.nodeid, 'file': str(item.path.relative_to(ROOT)),
@@ -104,10 +105,27 @@ class Inventory:
         self.deselected.extend(item.nodeid for item in items)
 
     def pytest_runtest_logreport(self, report):
-        self.reports.append({'nodeid': report.nodeid, 'when': report.when, 'outcome': report.outcome,
+        value = {'nodeid': report.nodeid, 'when': report.when, 'outcome': report.outcome,
                              'wasxfail': getattr(report, 'wasxfail', None),
                              'rerun': getattr(report, 'rerun', 0),
-                             'seconds': report.duration, 'detail': str(report.longrepr)[:32000] if report.failed else None})
+                             'seconds': report.duration, 'detail': str(report.longrepr)[:32000] if report.failed else None}
+        # Pytest 9 emits native unittest/fixture subtests as additional call
+        # reports. Only the actual pytest report type can supply this marker;
+        # ordinary duplicate call reports must remain a failing receipt.
+        if type(report).__module__ == '_pytest.subtests' and type(report).__name__ == 'SubtestReport':
+            context = report.context
+            if (context.msg is not None and (type(context.msg) is not str or len(context.msg) > 4096)
+                    or len(context.kwargs) > 64
+                    or any(type(k) is not str or len(k) > 256 or type(v) is not str or len(v) > 4096
+                           for k, v in context.kwargs.items())):
+                raise ValueError('native subtest context exceeds receipt bounds')
+            index = self.subtests.get(report.nodeid, 0) + 1
+            if index > 100000:
+                raise ValueError('native subtest count exceeds receipt bound')
+            self.subtests[report.nodeid] = index
+            value['subtest'] = {'schema': 'pytest.subtest.v1', 'index': index,
+                                'message': context.msg, 'parameters': dict(context.kwargs)}
+        self.reports.append(value)
 
 
 def run(destination, args):

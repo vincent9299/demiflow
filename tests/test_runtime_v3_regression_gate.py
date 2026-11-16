@@ -113,6 +113,49 @@ def test_repeated_receipt_cannot_overwrite_first_execution(fixture):
         gate.evaluate(plan, [collection], [run, deepcopy(run)], inputs=inputs)
 
 
+@pytest.mark.parametrize('defect', [None, 'failed', 'skipped', 'xfail', 'rerun',
+                                   'duplicate_subtest', 'duplicate_parent', 'missing_parent',
+                                   'unmarked', 'wrong_phase', 'malformed'])
+def test_subtests_preserve_parent_and_every_failure_boundary(fixture, defect):
+    run = fixture[2]
+    parent = run['reports'][1]
+    subtest = {**deepcopy(parent), 'subtest': {'schema': 'pytest.subtest.v1', 'index': 1,
+                'message': None, 'parameters': {'case': '0'}}}
+    run['reports'].insert(1, subtest)
+    if defect in {'failed', 'skipped'}:
+        subtest['outcome'] = defect
+    elif defect == 'xfail': subtest['wasxfail'] = ''
+    elif defect == 'rerun': subtest['rerun'] = 1
+    elif defect == 'duplicate_subtest': run['reports'].insert(2, deepcopy(subtest))
+    elif defect == 'duplicate_parent': run['reports'].append(deepcopy(parent))
+    elif defect == 'missing_parent': run['reports'].remove(parent)
+    elif defect == 'unmarked': del subtest['subtest']
+    elif defect == 'wrong_phase': subtest['when'] = 'setup'
+    elif defect == 'malformed': subtest['subtest'] = {}
+    result = check(fixture)
+    assert result['complete'] is (defect is None)
+    assert bool(result['failed']) is (defect is not None)
+
+
+def test_real_unittest_subtests_have_distinct_reports_and_one_parent(tmp_path):
+    node = ('tests/test_forge_development_workspace.py::WorkspaceDevelopmentTests'
+            '::test_projection_validates_skipped_json')
+    result = gate.execute_batch({'nodeids': [node], 'environment': 'local', 'python': sys.executable},
+        entries={node: {'state': 'reviewed', 'environment': 'local'}}, destination=tmp_path / 'subtest-child')
+    receipt = gate.read_json(result['receipt'])
+    assert receipt['returncode'] == 0 and receipt['source_unchanged']
+    assert gate.complete_phases(receipt['reports'])
+    main = [r for r in receipt['reports'] if 'subtest' not in r]
+    children = [r for r in receipt['reports'] if 'subtest' in r]
+    assert [r['when'] for r in main] == ['setup', 'call', 'teardown']
+    assert len(children) == 6
+    assert [r['subtest']['index'] for r in children] == list(range(1, 7))
+    assert all(r['subtest']['parameters'] for r in children)
+    # An old recorder has lost the discriminator; it cannot be reinterpreted.
+    ambiguous = [{k: v for k, v in r.items() if k != 'subtest'} for r in receipt['reports']]
+    assert not gate.complete_phases(ambiguous)
+
+
 def test_repository_file_omitted_by_ignore_is_not_complete(fixture, tmp_path):
     (tmp_path / 'tests').mkdir()
     (tmp_path / 'tests/test_ignored.py').write_text('def test_ignored(): assert False\n')
