@@ -55,7 +55,8 @@ def test_gzip_csv_join_keeps_original_strings_and_multiplicity(tmp_path, how):
         assert any(n.kind == 'source' and n.kernel.kind == 'file'
                    and n.kernel.configuration['format'] == 'csv' for n in graph.nodes)
         assert any(n.kind == 'relational' and n.kernel.kind == 'join' for n in graph.nodes)
-        assert all(c['status'] == 'acked' for c in run.journal.execution_commits(action_id))
+        commits = run.journal.execution_commits(action_id)
+        assert commits and all(c['status'] == 'acked' for c in commits)
 
 
 def test_tsv_strict_width_and_literal_quotes(tmp_path):
@@ -80,4 +81,6 @@ def test_tsv_strict_width_and_literal_quotes(tmp_path):
             convert_options=pacsv.ConvertOptions(column_types={'id': pa.string(), 'name': pa.string()}))
         data.read_lance(str(lp), version=1).join(right, on='id').take_all()
     assert failed_run.journal.execution_action('action-1')['result'] is None
-    assert not any(c['cut'].get('final') for c in failed_run.journal.execution_commits('action-1'))
+    from demiflow.execution.state_artifacts import StateArtifacts
+    assert not any(StateArtifacts(failed_run).read(c['prepared']['state']['dataflow-cut-v3'])['cut']['final']
+                   for c in failed_run.journal.execution_commits('action-1'))

@@ -2,6 +2,7 @@
 import importlib
 import json
 import sys
+from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.csv as pacsv
@@ -163,7 +164,7 @@ def test_csv_invalid_row_handler_runs_and_business_helper_drift_refuses_loaded_p
         archives = snapshot_code_sources(SimpleNamespace(context=run), LogicalPlan(()), source=source)
         assert {str(helper), str(handler_path)} <= {item['source'] for item in archives}
         for item in archives:
-            assert (run.directory / item['path']).read_bytes() == open(item['source'], 'rb').read()
+            assert (run.directory / item['path']).read_bytes() == Path(item['source']).read_bytes()
     helper.write_text('def decision():\n    return "error"\n')
     try:
         with pytest.raises(DataflowError, match='Loaded program code differs'):
