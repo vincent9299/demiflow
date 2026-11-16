@@ -79,6 +79,14 @@ class HostedDataflowWorker:
         self._lock = threading.Lock()
         self._control_outbox: deque = deque()
         config = dict(launch_spec.get("dataflow_v3") or {})
+        self._ray_host = str(config.get('host_id', '')).startswith('ray-')
+        if self._ray_host:
+            import ray
+            import os
+            if not ray.get_runtime_context().get_accelerator_ids().get('GPU'):
+                # Ray may leave visibility unset for a zero-GPU actor. Narrow
+                # this owned shell before any business import or activation.
+                os.environ['CUDA_VISIBLE_DEVICES'] = ''
         from ..contracts.dataflow import Bounds
         bounds = Bounds(**config["bounds"])
 
@@ -114,7 +122,11 @@ class HostedDataflowWorker:
         return getattr(self._runtime, "_v3_executor", None)
 
     def identity(self) -> dict:
-        return {"spec_hash": self._spec_hash, "boot_id": self._boot_id}
+        result = {"spec_hash": self._spec_hash, "boot_id": self._boot_id}
+        if self._ray_host:
+            from ..dataflow_ray_devices import worker_device_binding
+            result['accelerator_binding'] = worker_device_binding()
+        return result
 
     def activate(self, assignment: "WorkerAssignment") -> None:
         from ..contracts.dataflow_codec import encode_wire

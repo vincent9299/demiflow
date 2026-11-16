@@ -383,6 +383,16 @@ class RunResourceState:
                              (scope_id, allocation_id)).fetchone()
         return None if row is None else json.loads(row[0])
 
+    def read_allocation_identity(self, scope_id, allocation_id):
+        """Read original immutable ownership and its latest bounded observation."""
+        identifier(scope_id)
+        identifier(allocation_id)
+        with self.journal._connection() as db:
+            row = db.execute('SELECT spec_hash,document FROM resource_allocations '
+                             'WHERE scope_id=? AND allocation_id=?',
+                             (scope_id, allocation_id)).fetchone()
+        return None if row is None else {'spec_hash': row[0], 'observation': json.loads(row[1])}
+
     def _charged(self, db, scope_id):
         rows = db.execute("SELECT effective FROM resource_allocations WHERE scope_id=? AND cleanup!='CONFIRMED'",
                           (scope_id,)).fetchall()

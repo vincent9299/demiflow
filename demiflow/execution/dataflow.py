@@ -228,7 +228,9 @@ class DataflowExecution:
             from ..planning.dataflow_place import _gpu_count
             need['gpu'] = _gpu_count(stage.profile)
             feasible = [host for host, capacity in remaining.items()
-                        if all(need[key] <= capacity.get(key, 0) for key in need)]
+                        if all(need[key] <= capacity.get(key, 0) for key in need)
+                        and (not need['gpu'] or not hasattr(self._services.resources.provider, 'device_host_feasible')
+                             or self._services.resources.provider.device_host_feasible(host, stage.profile))]
             if not feasible:
                 raise DataflowError('RESOURCE_INFEASIBLE',
                     'No verified host has capacity for this worker placement')

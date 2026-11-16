@@ -508,11 +508,32 @@ else:
 class DataflowRayConnector(_RayControlConnector):
     """Ray actor connector hosting the v3 dataflow worker (H054)."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, device_topology=None, **kwargs):
         if not _RAY_AVAILABLE:
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
         super().__init__(**kwargs)
         self._environments = {}
+        self._device_topology = device_topology
+
+    def device_host_capacity(self, host_id):
+        return 0 if self._device_topology is None else self._device_topology.capacity(host_id)
+
+    def device_host_feasible(self, host_id, profile):
+        if not profile.requests.get('accelerators'):
+            return True
+        return self._device_topology is not None and self._device_topology.feasible(host_id, profile)
+
+    def validate_device_binding(self, allocation_id, identity, *, accelerators,
+                                device_memory_bytes=None):
+        host_id = self.launch_spec(allocation_id)['dataflow_v3']['host_id']
+        binding = identity.get('accelerator_binding')
+        if self._device_topology is None:
+            if (accelerators or type(binding) is not dict or binding.get('devices') != []
+                    or binding.get('node_id') != host_id.removeprefix('ray-')):
+                raise DataflowError('UNSUPPORTED_CAPABILITY', 'Worker has no verified GPU deployment grant')
+            return ()
+        return self._device_topology.verify(binding, host_id=host_id,
+            accelerators=accelerators, device_memory_bytes=device_memory_bytes)
 
     def stage_environment(self, allocation_id, environment):
         self._environments[allocation_id] = dict(environment)

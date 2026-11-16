@@ -43,8 +43,8 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
     run = action.context
     root = run.directory.with_name(run.directory.name + "-driver-resources")
     state = RunResourceState(run.journal)
-    from .dataflow_devices import device_pool
-    devices = device_pool(policy.provider)
+    from .dataflow_devices import device_configuration
+    devices, device_topology = device_configuration(policy.provider)
     if policy.provider == "local":
         from .dataflow_capacity import local_capacity
         from ..resources.capacity import LocalCapacityPool
@@ -66,14 +66,16 @@ def _driver_resources(action: "RunAction", policy: RuntimePolicy):
         from ..resources.ray import RayResourceProvider
         from .dataflow_hosts import DataflowRayConnector
         provider = RayResourceProvider(
-            DataflowRayConnector(command_timeout_s=policy.control_timeout_ms / 1000.0), device_pool=devices)
+            DataflowRayConnector(command_timeout_s=policy.control_timeout_ms / 1000.0,
+                                 device_topology=device_topology), device_pool=devices,
+            allocation_reader=state.read_allocation_identity)
     else:
         raise DataflowError("INVALID_CONTRACT", "unsupported provider: " + str(policy.provider))
     return ResourceManager(provider, state, bounds=ManagerBounds())
 
 
 def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifactStore,
-                  bounds: Bounds) -> tuple[HostDescriptor, ...]:
+                  bounds: Bounds, *, provider=None) -> tuple[HostDescriptor, ...]:
     run = action.context
     revision = run.journal.recovery_identity()["platform_revision"]
     if policy.provider == "local":
@@ -87,7 +89,7 @@ def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifact
             logical_resources={key: float(value) for key, value in capacity.items()},
             isolation_capabilities=("cpu-map", "stream")),)
     elif policy.provider == "ray_core":
-        hosts = _ray_hosts(policy, revision)
+        hosts = _ray_hosts(policy, revision, provider=provider)
     else:
         raise DataflowError("INVALID_CONTRACT", "unsupported provider: " + str(policy.provider))
     challenge_bytes = identity({"run_id": run.ref.run_id, "store_id": policy.store_id}).encode()
@@ -98,19 +100,18 @@ def _driver_hosts(action: "RunAction", policy: RuntimePolicy, store: RunArtifact
     return hosts
 
 
-def _ray_hosts(policy: RuntimePolicy, revision: str) -> tuple[HostDescriptor, ...]:
+def _ray_hosts(policy: RuntimePolicy, revision: str, *, provider=None) -> tuple[HostDescriptor, ...]:
     if not _RAY_AVAILABLE:
         raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
     import ray
     if not ray.is_initialized():
         raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core cluster is not initialized")
-    from .dataflow_devices import gpu_capacity
-    admitted_gpus = gpu_capacity('ray_core')
     hosts = []
     for node in ray.nodes():
         if not node.get("Alive"):
             continue
         host_id = "ray-" + node["NodeID"]
+        admitted_gpus = provider.device_host_capacity(host_id) if provider is not None else 0
         hosts.append(HostDescriptor(
             host_id=host_id, provider="ray_core", runtime_revision=revision,
             store_domains=(policy.store_id,),
@@ -140,7 +141,7 @@ def make_driver_services(action: "RunAction", *, policy: RuntimePolicy, bounds: 
             _, physical, _ = load_dataflow(run.directory, action.action_id, store=store, bounds=bounds)
             policy = replace(policy, worker_mode=physical.policy.worker_mode)
         resources = _driver_resources(action, policy)
-        hosts = _driver_hosts(action, policy, store, bounds)
+        hosts = _driver_hosts(action, policy, store, bounds, provider=resources.provider)
         journal_service = DriverJournalService(action, store=store, bounds=bounds)
         return DriverServices(action=action, journal_service=journal_service, store=store,
                               resources=resources, policy=policy, bounds=bounds, hosts=hosts,
