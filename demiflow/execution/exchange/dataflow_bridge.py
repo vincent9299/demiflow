@@ -176,7 +176,11 @@ def _encode_value(value):
     if scalar is not None:
         return scalar
     if isinstance(value, Mapping):
-        return {"t": "map", "v": [[key, _encode_value(value[key])] for key in sorted(value)]}
+        # The typed map is an ordered entry array. Preserve Python field order
+        # so an untyped row can later infer its original Arrow column order.
+        # Historical sorted entry arrays still decode/re-encode byte-for-byte;
+        # control JSON and semantic identity keep their separate canonical sort.
+        return {"t": "map", "v": [[key, _encode_value(child)] for key, child in value.items()]}
     from ..contracts.array_values import numpy_value, validate_array
     if numpy_value(value) is not None:
         import numpy as np
