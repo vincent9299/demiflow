@@ -329,7 +329,11 @@ class DataflowExecution:
             producer[1].configure(self._action, self._request.source, self._request.plan)
         existing = self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")
         completed_live_nodes = []
-        if self._action.replaying and existing is not None:
+        # A native caller may seal a fully validated plan before starting the
+        # first attempt. That original journal binding is already authoritative:
+        # load it exactly as on resume instead of compiling a second plan.
+        # start() still requires original cut proof for an actual replay.
+        if existing is not None:
             from .dataflow_seal import load_dataflow, load_sealed_dataflow, verify_dataflow_program
             from .recovery_identity import platform_identity
             graph, physical, sealed = load_dataflow(self._action.context.directory,
@@ -342,11 +346,18 @@ class DataflowExecution:
                 raise DataflowError("CODE_MISMATCH", "recovery requires the sealed runtime revision")
             for node in graph.nodes:
                 if node.program_ref is not None:
+                    live_binding = None
                     if node.kernel.configuration.get('thread_attempt'):
-                        completed_live_nodes.append(node)
-                        continue
+                        if self._action.replaying:
+                            completed_live_nodes.append(node)
+                            continue
+                        # A same-attempt live program must authenticate its
+                        # existing registry owner and code. It is not a past
+                        # result and therefore does not require a final ACK.
+                        from .dataflow_thread_programs import owner
+                        live_binding = owner(self._action)
                     verify_dataflow_program(node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
-                                            store=self._store, bounds=self._bounds)
+                                            store=self._store, bounds=self._bounds, live_binding=live_binding)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
             graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,

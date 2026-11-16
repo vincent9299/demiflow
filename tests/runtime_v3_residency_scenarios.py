@@ -360,27 +360,8 @@ def actor_state_lifecycle(fx,fault=None):
 
 
 def route_recovery(fx,fault=None):
-    if fx.provider=='ray_core' and not getattr(fx,'_residency_child',False):
-        return _ray_child(fx,'route_recovery',fault)
-    # Public routes first; the unavailable DSL target/broadcast paths remain
-    # explicit. Component route tests do not turn those into public coverage.
-    from demiflow import data
-    def build():
-        left=data.from_items([{'k':i%2,'i':i} for i in range(8)])
-        right=data.from_items([{'k':0},{'k':1}])
-        return left.join(right,on='k').repartition(2,shuffle=True).map_async(
-            _identity,concurrency=1)
-    result = _resume_after_ack(fx,'route-recovery',build,fusion=False)
-    assert sorted(result['rows'],key=lambda r:r['i']) == [{'k':i%2,'i':i} for i in range(8)]
-    assert 'hash' in result['physical']['routes'] and 'rebalance' in result['physical']['routes']
-    result['channel_contracts'] = _channel_recovery(fx)
-    result['uncovered'] = {'public_target_broadcast':'compiler has no public lowering for target/broadcast'}
-    fx._save_evidence('route-recovery-partial',result)
-    detail={'missing_semantic_harness':result['uncovered'],
-            'verified_evidence':str(fx.evidence_dir/'route-recovery-partial.json')}
-    fx._record_not_run('route_recovery',detail)
-    from runtime_v3_support import NotRunError
-    raise NotRunError('route_recovery',detail)
+    from runtime_v3_route_recovery_scenarios import route_recovery as execute
+    return execute(fx,fault)
 
 
 def _channel_recovery(fx):
@@ -420,6 +401,13 @@ def _channel_recovery(fx):
                 state.enqueue(spec.channel_id,state.issue_sequence(spec.channel_id),
                               channels.encode_record(record,bounds=port._bounds))
             lease=state.reserve(spec.channel_id,'a',rows=1,size_bytes=17,operation_id=identity('credit'))
+            slow=state.reserve(spec.channel_id,'a',rows=15,size_bytes=17,operation_id=identity('slow-reader'))
+            try:state.reserve(spec.channel_id,'a',rows=1,size_bytes=1,operation_id=identity('overflow'))
+            except DataflowError as exc:
+                assert exc.code=='CAPACITY_PENDING'
+            else:raise AssertionError('slow reader exceeded its original credit')
+            assert state.reader_credit(spec.channel_id,'b')['rows_left']==spec.credit_rows
+            assert state.reader_credit(spec.channel_id,'c')['rows_left']==spec.credit_rows
             cut=CutRequest(identity(['channel-cut',routing]),1,0,0,('owner',),False)
             refs=channels.snapshot_channels(state,cut=cut,store=store)
             restored=channels.restore_channels((spec,),refs,services=services)
@@ -447,7 +435,10 @@ def _channel_recovery(fx):
             cases.append({'routing':routing,'scope':'native channel contract, not public lowering',
                 'prefix':prefix,'suffix':suffix,'expected':expected,
                 'credit_before':before,'credit_after_release':released,'fenced':fenced,
+                'slow_reader':'CAPACITY_PENDING','unaffected_siblings':['b','c'],
                 'cut_id':cut.cut_id,'snapshot_digest':refs['route'].digest})
+            restored.release(slow)
+            assert restored.reader_credit('route','a')['rows_left']==spec.credit_rows
             store.close()
     return cases
 
