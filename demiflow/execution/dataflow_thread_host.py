@@ -214,7 +214,9 @@ class ThreadHostEndpoint(_EndpointBase):
         if host is None or host._executor is None or not self._activated:
             raise DataflowError('FENCED', 'business command before thread activation')
         # receive enqueues the command; it never invokes user code here.
+        command = self._activity_command(command)
         host.receive(command)
+        self._activity_generation = command.get('activity_generation', getattr(self, '_activity_generation', 0))
 
     def poll(self, *, max_events, deadline_ms):
         events = []

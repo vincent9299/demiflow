@@ -1050,7 +1050,15 @@ class DataflowExecution:
                 self._checkpoint.observe_source_eoi(cursors)
                 self._done.add(event.allocation_id)
         elif event.kind == "idle":
-            self._idle.add(event.allocation_id)
+            generation = payload.get('activity_generation', 0)
+            expected = getattr(endpoint, '_activity_generation', 0)
+            if type(generation) is not int or not 0 <= generation <= expected:
+                raise DataflowError('FENCED', 'idle activity generation differs from its live worker')
+            # Activation may have queued idle while restored credit was still
+            # held. A later resume/input invalidates it even if the old event
+            # reaches the driver first; only the current quiet frontier cuts.
+            if generation == expected:
+                self._idle.add(event.allocation_id)
         elif event.kind == "cut":
             from .contracts.dataflow_codec import decode_wire
             raw = b"".join(self._store.read(event.payload_ref, max_bytes=self._bounds.max_control_bytes))

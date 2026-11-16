@@ -33,6 +33,7 @@ class WorkerGraphRunner:
         self._queue = deque()
         self._condition = threading.Condition()
         self._wake_generation = 0
+        self._activity_generation = 0
         self._thread = None
         self._paused = False
         self._park_requested = False
@@ -355,6 +356,12 @@ class WorkerGraphRunner:
     def receive(self, command):
         kind = command['kind']
         with self._condition:
+            if 'activity_generation' in command:
+                generation = command['activity_generation']
+                if (type(generation) is not int or not 0 < generation < 2**63
+                        or generation <= getattr(self, '_activity_generation', 0)):
+                    raise DataflowError('FENCED', 'worker activity generation is stale or invalid')
+                self._activity_generation = generation
             if kind == 'ack':
                 entry = self._credits.get(command['delivery_id'])
                 if entry is None:
@@ -563,6 +570,7 @@ class WorkerGraphRunner:
                 self._done_sent = True
             if notify_idle:
                 self._idle_sent = True
+            idle_generation = getattr(self, '_activity_generation', 0)
         if notify_done:
             from ..dataflow_checkpoint import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
@@ -571,7 +579,7 @@ class WorkerGraphRunner:
                     if s.split_id in self._finished_splits and not self.e._readers[s.split_id]._eoi]})
         if notify_idle:
             self._flush_metrics()
-            self._send('idle', {'done': done})
+            self._send('idle', {'done': done, 'activity_generation': idle_generation})
         if self._cut is not None and quiet and (self._paused or done):
             from ..contracts.dataflow_codec import encode_wire
             contribution = self.snapshot(self._cut)

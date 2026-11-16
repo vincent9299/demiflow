@@ -271,6 +271,7 @@ class _EndpointBase:
         self._events = deque()
         self._business_batch = None
         self._business_bytes = 0
+        self._activity_generation = 0
 
     def _build_launch(self, assignment: "WorkerAssignment") -> tuple[dict, dict, dict]:
         run = self._services.action.context
@@ -372,11 +373,25 @@ class _EndpointBase:
             ray.get(actor.receive_many.remote(tuple(command for command, _ in pending)),
                     timeout=self._services.policy.control_timeout_ms / 1000)
 
+    def _activity_command(self, command):
+        # This is a live, per-boot control watermark, never a data identity or
+        # durable frontier. ACK/receipt/lease traffic does not admit work and
+        # must not repeatedly invalidate an otherwise current idle report.
+        if command.get('kind') not in ('data', 'finite_input', 'edge_eoi',
+                'close_output', 'satisfy', 'pause', 'park', 'resume', 'park_policy'):
+            return command
+        generation = getattr(self, '_activity_generation', 0) + 1
+        if generation >= 2**63:
+            raise DataflowError('BUDGET_EXCEEDED', 'worker activity generation exhausted')
+        return dict(command, activity_generation=generation)
+
     def send_business(self, command):
         from .worker.bootstrap import _send_encoded_messages, _MAX_CONTROL_BYTES, _CONTROL_BATCH_EVENTS
         from .recovery_contract import document
+        command = self._activity_command(command)
         raw = document({"type": "dataflow_command", "command": command})
         if getattr(self, '_business_batch', None) is None:
+            self._activity_generation = command.get('activity_generation', getattr(self, '_activity_generation', 0))
             if hasattr(self, '_sock'):
                 _send_encoded_messages(self._sock, (raw,))
             else:
@@ -388,6 +403,7 @@ class _EndpointBase:
                 or len(self._business_batch) >= min(_CONTROL_BATCH_EVENTS, self._services.bounds.max_pending_events)):
             self.flush_business()
         self._business_batch.append((command, raw))
+        self._activity_generation = command.get('activity_generation', getattr(self, '_activity_generation', 0))
         self._business_bytes += size
         if command.get('kind') not in ('data', 'ack') or self._business_bytes >= _MAX_CONTROL_BYTES:
             self.flush_business()
