@@ -79,7 +79,9 @@ def test_live_native_write_uses_two_allocations_and_final_replay_never_recreates
     assert len(physical.stages) == len(allocations) == 2
     writer = next(n for n in graph.nodes if n.kernel.kind == 'SaveLanceOp')
     assert writer.kernel.effect == 'journaled' and writer.kernel.resource_role == 'io'
-    assert physical.recovery == 'attempt_only'
+    # A locally owned class factory now restores its own automatic state. The
+    # separate borrowed callback test below still locks the attempt-only case.
+    assert physical.recovery == 'checkpoint'
     _check_profiles(graph, physical)
     before = events.read_text()
     assert before.splitlines() == ['construct'] + ['call:'+str(n) for n in range(5)]
