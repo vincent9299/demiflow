@@ -22,6 +22,12 @@ from ..contracts.dataflow_errors import DataflowError
 MAX_PEER_BATCH = 32
 
 
+def peer_batch_limit(locator):
+    """A live producer hint can only tighten the consumer's own admission."""
+    value = locator.get('max_batch_records', 1)
+    return value if type(value) is int and 1 <= value <= MAX_PEER_BATCH else 1
+
+
 def _read(sock, size):
     data = bytearray()
     while len(data) < size:

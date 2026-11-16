@@ -19,7 +19,7 @@ from ..contracts.dataflow import ArtifactRef, CutContribution, WorkerStep
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_record_document, _decode_record_document
 from ..exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
-from ..exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH
+from ..exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH, peer_batch_limit
 from ..dataflow_sinks import _artifact_json, _encode_record, RECORDS_MEDIA, MANIFEST_MEDIA
 from ..recovery_contract import document
 
@@ -354,10 +354,7 @@ class WorkerGraphRunner:
                 peer = command.get('peer')
                 if command.get('kind') != 'data' or type(peer) is not dict:
                     break
-                declared = peer.get('max_batch_records', 1)
-                if type(declared) is not int or not 1 <= declared <= MAX_PEER_BATCH:
-                    break
-                limit = min(limit, declared)
+                limit = min(limit, peer_batch_limit(peer))
                 if len(result) >= limit:
                     break
                 spec = self._exchange.get(command.get('edge_id'))
