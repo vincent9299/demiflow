@@ -54,22 +54,19 @@ def test_stable_output_uses_explicit_permission_and_never_redirects(root):
 @pytest.mark.parametrize('minimum', [1, 4])
 def test_sealed_checkpoint_partial_results_remain_readable(root, minimum):
     (root / 'data/stages').mkdir()
-    ws.add_location(root, 'stages', root / 'data/stages', writable=True, write_modes=['checkpoint'])
+    ws.add_location(root, 'stages', root / 'data/stages', writable=True, write_modes=['create'])
     (root / 'flows/staged.py').write_text('''from demiflow import data
 def run(*, source, stage, target, minimum):
     schema = data.schema({'fields': [{'name': 'case_id', 'type': 'string'}]})
-    checkpoint = data.open_checkpoint('checkpoints/stages.json', identity={'input': source},
-        outputs={'cases': {'uri': stage['uri'], 'schema': schema}})
     rows = data.read_lance(source['uri'], version=source['version'], columns=['case_id'])
-    rows.save_lance(stage['uri'], schema=schema, key='case_id', stage='cases', mode='append',
-        max_batch=1, queue_depth=1, max_row_bytes=4096, max_index_bytes=65536).run_stream(checkpoint=checkpoint)
-    result = data.read_checkpoint(checkpoint, 'cases')
+    rows.write_lance(stage['uri'], mode='create', schema=schema, return_receipt=True)
+    result = data.read_lance(stage['uri'], version=1)
     data.require(result.count() >= minimum, 'not enough cases')
     return result.write_lance(target['uri'], mode='create', schema=schema, return_receipt=True)
 ''')
     parameters = {'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {
         'source': {'kind': 'table', 'alias': 'candidates'}, 'minimum': minimum,
-        'stage': {'kind': 'output', 'location_id': 'stages', 'relative_uri': 'cases.lance', 'mode': 'checkpoint', 'expected_version': None},
+        'stage': {'kind': 'output', 'location_id': 'stages', 'relative_uri': 'cases.lance', 'mode': 'create', 'expected_version': None},
         'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'complete.lance', 'mode': 'create', 'expected_version': None}}}
     (root / 'flows/staged.json').write_text(json.dumps(parameters))
     ws.register_flow(root, 'flows/staged.py:run', params='flows/staged.json')
@@ -77,13 +74,13 @@ def run(*, source, stage, target, minimum):
     result = execute(root, prepared)
     assert result['status'] == ('succeeded' if minimum == 1 else 'failed'), result
     stage, final = ({o['name']: o for o in result['outputs']}[name] for name in ('stage', 'target'))
-    assert stage['receipt'] is None and stage['commit']['reference']['version'] == 4
+    assert stage['receipt']['committed_version'] == 1
     assert stage['result']['ref']['row_count'] == 3
     assert len(ws.sample_table(root, 'run:' + result['run_id'] + ':stage')['rows']) == 3
     assert (final['result'] is not None) == (minimum == 1)
     if minimum == 4:
-        # Simulate lost control publication after the native checkpoint commits.
-        # Only this disposable test run is edited; the original CP/Lance evidence
+        # Simulate lost control publication after the native action commits.
+        # Only this disposable test run is edited; the original ACK/Lance evidence
         # remains authoritative for explicit reconciliation.
         deadline = time.monotonic() + 5
         while any(runs.process_matches(result['state'].get(name)) for name in ('supervisor', 'worker')) and time.monotonic() < deadline:
@@ -94,6 +91,6 @@ def run(*, source, stage, target, minimum):
         reconciled = runs.reconcile(root, result['run_id'])
         assert reconciled['reconciliation_errors'] == [], reconciled
         restored = next(o for o in reconciled['outputs'] if o['name'] == 'stage')
-        assert restored['commit']['reference']['version'] == 4
+        assert restored['receipt']['committed_version'] == 1
         assert restored['result']['ref']['row_count'] == 3
         assert reconciled['status'] == 'failed'

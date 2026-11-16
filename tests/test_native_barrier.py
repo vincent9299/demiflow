@@ -249,18 +249,23 @@ def test_enospc_does_not_confirm_checkpoint_or_return_partial_result(tmp_path, m
 
 def test_checkpoint_deadline_fails_and_drains_publication_thread(tmp_path, monkeypatch):
     import time
-    from demiflow.execution.block_sink import BlockSink
-    original = BlockSink.commit
+    from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+    original = _DataflowArtifactSink.commit
+    completed = []
     def slow(sink, prepared, context):
-        if sink.sink_id == 'output':
+        if sink._sink_id == 'materialize':
             time.sleep(1.2)
-        return original(sink, prepared, context)
-    monkeypatch.setattr(BlockSink, 'commit', slow)
+        receipt = original(sink, prepared, context)
+        completed.append(context.commit_id)
+        return receipt
+    monkeypatch.setattr(_DataflowArtifactSink, 'commit', slow)
     with pytest.raises(TimeoutError):
         with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2, 'checkpoint_timeout_s': 1}):
             data.from_items([{'id': i} for i in range(8)]).map_async(identity).materialize()
     # A started native write is drained before ownership/cleanup is released.
     journal = RunJournal(tmp_path/'run')
+    assert completed, 'the actual native publication must have drained'
+    assert all(journal.execution_commit(key)['status'] == 'acked' for key in completed)
     assert journal.execution_action('action-1')['result'] is None
     assert journal.execution_status()['status'] == 'failed'
     assert not [t for t in threading.enumerate() if t.name.startswith('demiflow-terminal-input')]
@@ -422,8 +427,8 @@ def test_recovery_rows_are_in_final_checkpoint_and_not_republished(tmp_path, mon
 
 
 class WideState:
-    def __init__(self):
-        self.payload = 'x' * 600
+    def __init__(self, size=600):
+        self.payload = 'x' * size
 
     def snapshot_state(self):
         return {'payload': self.payload}
@@ -436,10 +441,15 @@ class WideState:
 
 
 def test_aggregate_state_admission_applies_across_alignment_groups(tmp_path):
-    from demiflow.data.runtime_contract import RuntimeContractError
-    with pytest.raises(RuntimeContractError, match='byte budget'):
-        with RunContext.start(tmp_path/'run', limits={'max_state_bytes': 1024, 'checkpoint_rows': 1}):
-            data.from_items([{'id': 1}]).map_async(WideState()).map_async(WideState()).materialize()
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    # The terminal's own bounded metadata needs a legal minimum. Each actor's
+    # image fits; the pair exceeds the original whole-cut state allowance.
+    limits = {'max_state_bytes': 64 * 1024, 'checkpoint_rows': 1}
+    with RunContext.start(tmp_path/'single', limits=limits), data.local_execution(workers=4):
+        assert data.from_items([{'id': 1}]).map_async(WideState(40000)).materialize().take_all() == [{'id': 1}]
+    with pytest.raises(DataflowError, match='Aggregate checkpoint state'):
+        with RunContext.start(tmp_path/'run', limits=limits), data.local_execution(workers=4):
+            data.from_items([{'id': 1}]).map_async(WideState(40000)).map_async(WideState(40000)).materialize()
     assert not RunJournal(tmp_path/'run').execution_commits('action-1')
 
 
