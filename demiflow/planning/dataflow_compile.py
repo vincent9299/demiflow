@@ -1009,7 +1009,10 @@ class _Capture:
             native_publication = not isinstance(request.sink, QueueResultSink)
         if native_publication:
             from ..execution.dataflow_publication_budget import FIELD, SCHEMA
-            configuration[FIELD] = {'schema': SCHEMA, 'resident_bytes': _payload_workspace(self.bounds)}
+            # A native consumer can still hold its previous yielded Arrow
+            # batch when asking this generator to decode the next record.
+            configuration[FIELD] = {'schema': SCHEMA,
+                'resident_bytes': _payload_workspace(self.bounds) + self.bounds.max_batch_bytes}
         kernel = KernelSpec(
             kind=request.kind, implementation_ref=None, configuration=configuration,
             inputs=(_input_port("main", request.kind),),
@@ -1020,7 +1023,7 @@ class _Capture:
         index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)
         if native_publication:
             self.publication_windows[index] = (self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
-                                               _payload_workspace(self.bounds))
+                _payload_workspace(self.bounds) + self.bounds.max_batch_bytes)
         minimum = self.bounds.max_batch_bytes + self.bounds.max_row_bytes + metadata
         if payload + metadata > minimum:
             self.codec_windows[index] = (minimum, payload + metadata)

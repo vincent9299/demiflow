@@ -13,10 +13,13 @@ def test_retained_python_rows_reject_before_the_next_decode_or_constructor(tmp_p
     import demiflow.execution.batch_conversion as conversion
     original = frames.decode_document
     retained = []
+    encoded = []
     constructed = []
     def decode(*args, **kwargs):
         retained.append(kwargs['retained'])
-        return original(*args, **kwargs)
+        result = original(*args, **kwargs)
+        encoded.append(result.encoded_bytes)
+        return result
     def forbidden(*args, **kwargs):
         constructed.append(True)
         raise AssertionError('constructor before shared native window admission')
@@ -30,13 +33,14 @@ def test_retained_python_rows_reject_before_the_next_decode_or_constructor(tmp_p
         with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(batch_rows=256):
             data.from_items(rows).write_lance(str(target), mode='create')
     assert error.value.code == 'BUDGET_EXCEEDED'
-    assert retained and max(retained) > 100000
+    # Actual Python rows and the live index exceed their tiny record bytes;
+    # the refusal may occur while advancing the index before the next decode.
+    assert retained and encoded and max(retained) > 2 * sum(encoded)
     assert not constructed and not target.exists()
     assert run.journal.execution_action('action-1')['result'] is None
 
 
 def test_multi_segment_wide_small_rows_share_index_buffer_and_writer_budget(tmp_path, monkeypatch):
-    import demiflow.execution.dataflow_sinks as sinks
     import demiflow.execution.dataflow_segments as segments
     original = segments.block_chunks
     seen = []
@@ -54,3 +58,15 @@ def test_multi_segment_wide_small_rows_share_index_buffer_and_writer_budget(tmp_
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
     assert lance.dataset(str(target)).to_table().to_pylist() == rows
     assert seen and all(callable(call) and callable(retain) for call,retain in seen)
+
+
+def test_previous_native_batch_coexists_with_the_next_wide_record(tmp_path):
+    payload = b'wide\x00original' * 750000
+    rows = [{'i':i, 'payload':payload} for i in range(2)]
+    target = tmp_path/'wide-sequence.lance'
+    with RunContext.start(tmp_path/'run') as run:
+        receipt = data.from_items(rows).write_lance(str(target), mode='create',
+            schema=pa.schema([('i',pa.int64()),('payload',pa.large_binary())]), return_receipt=True)
+        assert receipt.written_rows == 2
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    assert lance.dataset(str(target)).to_table().to_pylist() == rows
