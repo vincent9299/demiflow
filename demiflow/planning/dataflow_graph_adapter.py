@@ -153,7 +153,19 @@ def decorate_graph_capture(capture, request, *, terminal):
         capture.nodes[index] = replace(node,
             semantic_id=identity(['graph-adapter-v3', node.semantic_id, marker]),
             kernel=replace(node.kernel, configuration=configuration, mergeable=False))
-    mark(ancestor, {'graph_observe': True})
+    ancestor_marker = {'graph_observe': True}
+    # Only literal in-memory readers may share the business pump with this
+    # explicitly inspected synchronous prefix. Opaque/file readers can block;
+    # actor, async and native-resource declarations retain separate owners.
+    from ..data.sources import ItemsSource, RangeSource
+    operations = source.ancestor.operations
+    if (type(source.shared_source) in (ItemsSource, RangeSource) and operations
+            and getattr(source.shared_source, 'native_options', None) is None
+            and all(_synchronous_target(op) and op.native_options is None for op in operations)):
+        ancestor_marker['graph_literal_prefix'] = [
+            capture.nodes[capture.alias_source[id(source.shared_source)]].occurrence_id,
+            *(capture.nodes[node_index(op)].occurrence_id for op in operations)]
+    mark(ancestor, ancestor_marker)
     for (reader, first, last), branch in zip(source.target_ends, source.inputs):
         first_index, end_index = node_index(first), node_index(last)
         mark(first_index, {'graph_reader': reader})
@@ -190,7 +202,7 @@ def decorate_graph_capture(capture, request, *, terminal):
     return merge
 
 
-def specialize_graph_stages(graph, stages, *, policy, bounds):
+def specialize_graph_stages(graph, stages, *, policy, bounds, hosts=None):
     routers = {node.occurrence_id: node.kernel.configuration['graph_route']
                for node in graph.nodes if 'graph_route' in node.kernel.configuration}
     if not routers:
@@ -208,7 +220,85 @@ def specialize_graph_stages(graph, stages, *, policy, bounds):
             raise DataflowError('RESOURCE_INFEASIBLE', 'graph readers exceed admitted replica ceiling')
         result.append(replace(stage, partitions=readers, replica_min=1,
                               replica_target=len(readers), replica_max=len(readers)))
-    return _colocate_private_tags(graph, tuple(result), policy=policy, bounds=bounds)
+    result = _colocate_literal_prefix(graph, tuple(result), policy=policy, bounds=bounds, hosts=hosts)
+    return _colocate_private_tags(graph, result, policy=policy, bounds=bounds)
+
+
+
+def _colocate_literal_prefix(graph, stages, *, policy, bounds, hosts):
+    """A literal pull and plain maps share one original bounded worker.
+
+    Keep every kernel/cursor and its full input/output/state window. This only
+    removes an unnecessary source-to-prefix transport, never a reader partition
+    or branch boundary. Old sealed layouts do not call this compilation hook.
+    """
+    if not policy.fusion or not hosts:
+        return stages
+    nodes = {node.occurrence_id: node for node in graph.nodes}
+    owners = {occ: stage for stage in stages for occ in stage.occurrences}
+    candidates = [tuple(node.kernel.configuration['graph_literal_prefix'])
+                  for node in graph.nodes if 'graph_literal_prefix' in node.kernel.configuration]
+    if len(candidates) != 1:
+        return stages
+    chain = candidates[0]
+    if len(chain) < 2 or len(set(chain)) != len(chain) or any(o not in nodes for o in chain):
+        return stages
+    incoming, outgoing = {}, {}
+    for edge in graph.edges:
+        incoming.setdefault(edge.consumer, []).append(edge)
+        outgoing.setdefault(edge.producer, []).append(edge)
+    for i, occurrence in enumerate(chain):
+        node, kernel = nodes[occurrence], nodes[occurrence].kernel
+        if kernel.state != 'none' or kernel.effect != 'pure':
+            return stages
+        if i == 0:
+            if node.kind != 'source' or kernel.kind not in {'items', 'range'} or incoming.get(occurrence):
+                return stages
+        elif (node.kind != 'transform' or kernel.kind != 'MapOp'
+                or kernel.resource_role != 'cpu' or len(kernel.inputs) != 1
+                or kernel.inputs[0].requirement != 'incremental'
+                or kernel.configuration.get('concurrency', 1) != 1
+                or kernel.configuration.get('execution', 'inline') != 'inline'
+                or 'graph_route' in kernel.configuration):
+            return stages
+        if i:
+            links = incoming.get(occurrence, ())
+            if len(links) != 1 or links[0].producer != chain[i - 1]:
+                return stages
+        links = outgoing.get(occurrence, ())
+        expected = chain[i + 1] if i + 1 < len(chain) else None
+        if len(links) != 1 or (expected is not None and links[0].consumer != expected):
+            return stages
+        if expected is None and 'graph_route' not in nodes[links[0].consumer].kernel.configuration:
+            return stages
+    members = tuple(stage for stage in stages if set(chain).intersection(stage.occurrences))
+    if (len(members) < 2 or any(not set(stage.occurrences).issubset(chain)
+            or len(stage.partitions) != 1 or stage.replica_min != 1
+            or stage.profile.limits or stage.profile.requirements
+            or set(stage.profile.requests) != {'cpu_millis', 'memory_bytes'} for stage in members)):
+        return stages
+    resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes']) for stage in members)
+    # Streaming MapOp retains its original bounded call executor even at
+    # concurrency one. Reader and callback can overlap, so keep the full
+    # original CPU requests instead of claiming sequential CPU deduplication.
+    cpu = sum(stage.profile.requests['cpu_millis'] for stage in members)
+    control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+    if resident + control > bounds.max_resident_bytes or not any(
+            resident <= host.logical_resources.get('memory_bytes', 0)
+            and cpu <= host.logical_resources.get('cpu_millis', host.logical_resources.get('cpu', 0) * 1000)
+            for host in hosts):
+        return stages
+    from ..resources.contracts import ResourceProfile
+    first = owners[chain[0]]
+    merged = replace(first, occurrences=chain,
+        profile=ResourceProfile(requests={'cpu_millis': cpu, 'memory_bytes': resident}),
+        replica_min=1, replica_target=1, replica_max=1, resident_bytes=resident,
+        output_bytes=sum(stage.output_bytes for stage in members),
+        state_bytes=sum(stage.state_bytes for stage in members),
+        kernel_refs=tuple(dict.fromkeys(ref for stage in members for ref in stage.kernel_refs)))
+    removed = {stage.stage_id for stage in members}
+    return tuple(merged if stage.stage_id == first.stage_id else stage
+                 for stage in stages if stage.stage_id == first.stage_id or stage.stage_id not in removed)
 
 
 def _colocate_private_tags(graph, stages, *, policy, bounds):

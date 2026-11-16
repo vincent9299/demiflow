@@ -844,7 +844,7 @@ def compile_physical_dataflow(
     stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = select_fusion_groups(graph, stages, policy=policy)
     from .dataflow_graph_adapter import specialize_graph_stages, specialize_graph_exchanges
-    stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds)
+    stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)
     exchanges = _share_exchange_storage(exchanges, bounds)
