@@ -187,15 +187,13 @@ def test_public_join_decodes_repeated_mutable_envelopes_independently(tmp_path):
     from demiflow.data.api import DataAPI
     from demiflow.execution.executors.local import LocalDatasetExecutor
     source = DataAPI(LocalDatasetExecutor(resource_root=tmp_path))
-    seen = []
-
     def annotate(row):
-        seen.append(row['payload']['items'][0])
+        before = row['payload']['items'][0]
         row['payload']['items'][0] = 99
-        return {'tag': row['tag']}
+        return {'tag': row['tag'], 'before_mutation': before}
 
     rows = (source.from_items([{'k': 1, 'payload': {'items': [0]}}])
             .join(source.from_items([{'k': 1, 'tag': 0}, {'k': 1, 'tag': 1}]), on='k')
             .map(annotate).take_all())
-    assert sorted(rows, key=lambda row: row['tag']) == [{'tag': 0}, {'tag': 1}]
-    assert seen == [0, 0]
+    assert sorted(rows, key=lambda row: row['tag']) == [
+        {'tag': 0, 'before_mutation': 0}, {'tag': 1, 'before_mutation': 0}]

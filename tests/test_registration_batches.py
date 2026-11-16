@@ -19,9 +19,7 @@ def library(tmp_path):
     return DocumentLibrary(index_path=tmp_path/'index.sqlite',object_directory=tmp_path/'objects')
 
 def collect(graph):
-    rows=[]
-    stats=graph.map(lambda r:rows.append(r) or r).run_stream()
-    return rows,stats
+    return list(graph.iter_rows())
 
 def test_fidelity_unknown_time_and_raw_provenance(library):
     text='10<sup>2</sup> and H<sub>2</sub>O. [[bird|bird]]\n\nAnother literal paragraph.'
@@ -44,7 +42,7 @@ def test_batch_native_registration_and_fetch_no_http(library,tmp_path,monkeypatc
     graph=data.from_items(rows).register_documents(request='request',output='receipt',library=library,
         batch_size=2,prepare_workers=2,concurrency=2,queue_depth=4,when=lambda r:r['request'] is not None)
     assert isinstance(graph._plan.operations[-1],RegisterDocumentsBatchOp)
-    got,_=collect(graph)
+    got=collect(graph)
     assert sorted(r['receipt']['status'] for r in got)==['invalid_document','ok','redirect_registered','redirect_registered','skipped']
     assert library.lookup(URL+'Alias2',**LIMITS)['final_url']==URL
     result=library.lookup(URL+'Alias2',**LIMITS)
@@ -59,7 +57,7 @@ def test_redirect_missing_cycles_conflicts_and_bad_shape(library):
     assert library.lookup(URL,**LIMITS) is None
     conflict=library.register({'format':'redirect','url':URL,'target_url':URL+'2'},**LIMITS)
     assert conflict['status']=='invalid_document'
-    rows,_=collect(data.from_items([{'request':{'format':'redirect'}}])
+    rows=collect(data.from_items([{'request':{'format':'redirect'}}])
         .register_documents(request='request',output='out',library=library,batch_size=2))
     assert rows[0]['out']['status']=='invalid_document'
 

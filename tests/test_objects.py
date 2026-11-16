@@ -101,9 +101,12 @@ def test_existing_bytes_verify_without_creating_temporary_file(tmp_path, monkeyp
     store = LocalObjectStore(tmp_path)
     ref = store.put(b'already durable')
     import demiflow.objects as objects
-    def cannot_stage(*args, **kwargs):
-        raise AssertionError('Existing verified object must not be rewritten')
-    monkeypatch.setattr(objects.tempfile, 'mkstemp', cannot_stage)
+    original_open = objects.os.open
+    def cannot_stage(path, flags, *args, **kwargs):
+        if flags & objects.os.O_CREAT:
+            raise AssertionError('Existing verified object must not be rewritten')
+        return original_open(path, flags, *args, **kwargs)
+    monkeypatch.setattr(objects.os, 'open', cannot_stage)
     assert store.put(b'already durable') == ref
     Path(unquote(urlsplit(ref.uri).path)).write_bytes(b'corrupt')
     with pytest.raises(ValueError, match='SHA256 mismatch'):

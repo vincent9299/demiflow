@@ -22,12 +22,17 @@ def data():
 
 @pytest.mark.parametrize("form", ["instance", "bound_method", "class"])
 @pytest.mark.parametrize("start_failure", [False, True])
-def test_actor_ownership_without_policy_attributes(data, form, start_failure):
-    events = []
+def test_actor_ownership_without_policy_attributes(data, form, start_failure, tmp_path):
+    events = tmp_path/'events'
+    def record(name):
+        with events.open('a') as stream:
+            stream.write(name+'\n')
+    def recorded():
+        return events.read_text().splitlines() if events.exists() else []
 
     class Actor:
         def __init__(self):
-            events.append("construct")
+            record("construct")
 
         def snapshot_state(self):
             return {}  # No semantic state; resource lifecycle remains local.
@@ -36,19 +41,19 @@ def test_actor_ownership_without_policy_attributes(data, form, start_failure):
             assert state == {}
 
         async def astart(self):
-            events.append("start")
+            record("start")
             if start_failure:
                 raise ValueError("start failed")
 
         async def __call__(self, row):
-            assert events.count("start") == 1
+            assert recorded().count("start") == 1
             return {"x": row["x"] + 1}
 
         async def astop(self):
-            events.append("stop")
+            record("stop")
 
         async def aclose(self):
-            events.append("close")
+            record("close")
 
     actor = Actor if form == "class" else Actor()
     fn = actor.__call__ if form == "bound_method" else actor
@@ -61,8 +66,8 @@ def test_actor_ownership_without_policy_attributes(data, form, start_failure):
     else:
         rows = ds.materialize().take_all()
         assert rows == [{"x": 2 if form == "class" else 3}]
-        assert events.count("stop") == 1
-    assert events.count("construct") == events.count("start") == events.count("close") == 1
+        assert recorded().count("stop") == 1
+    assert recorded().count("construct") == recorded().count("start") == recorded().count("close") == 1
 
 
 def _checked(dataset, returns):
@@ -74,18 +79,19 @@ def _checked(dataset, returns):
     return Dataset(dataset._source, LogicalPlan((op,)), dataset._executor, dataset._stages)
 
 
-def test_async_actual_return_checked_after_await_and_outside_business_catch(data):
-    calls = []
+def test_async_actual_return_checked_after_await_and_outside_business_catch(data, tmp_path):
+    calls = tmp_path/'calls'
 
     async def malformed(row):
-        calls.append(row["x"])
+        with calls.open("a") as stream:
+            stream.write(str(row["x"])+"\n")
         return {"x": "wrong"}
 
     row_type = {**scalar("record"), "fields": {"x": field(scalar("int"))}}
     ds = _checked(data.from_items([{"x": 1}]).map_async(malformed, catch=(Exception,)), row_type)
     with pytest.raises(RuntimeContractError, match="expected int"):
         ds.materialize()
-    assert calls == [1]
+    assert calls.read_text().splitlines() == ["1"]
 
 
 def test_async_none_list_and_business_miss_preserve_native_semantics(data):
@@ -104,13 +110,19 @@ def test_async_none_list_and_business_miss_preserve_native_semantics(data):
 
 def test_materialize_consumer_does_not_append_business_operator(data, monkeypatch):
     ds = data.from_items([{"x": 1}]).map_async(lambda row: row)
-    original = Dataset._run_stream
+    from demiflow.execution.dataflow import DataflowExecution
+    original = DataflowExecution.prepare
     observed = []
 
-    def drive(self, **kwargs):
-        observed.append((len((kwargs.get("plan") or self._plan).operations), kwargs.get("consume") is not None))
-        return original(self, **kwargs)
+    def prepare(execution):
+        result = original(execution)
+        if execution._request.kind == 'materialize':
+            observed.append(([node.kernel.kind for node in execution._graph.nodes
+                              if node.kind == 'transform'],
+                             [node.kernel.kind for node in execution._graph.nodes
+                              if node.kind == 'terminal']))
+        return result
 
-    monkeypatch.setattr(Dataset, "_run_stream", drive)
+    monkeypatch.setattr(DataflowExecution, 'prepare', prepare)
     assert ds.materialize().take_all() == [{"x": 1}]
-    assert observed == [(1, True)]
+    assert observed == [(['AsyncMapOp'], ['materialize'])]
