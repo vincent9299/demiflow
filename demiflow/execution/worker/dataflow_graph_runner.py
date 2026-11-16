@@ -22,6 +22,8 @@ from ..exchange.dataflow_channels import reserve_credit, _route_record_document,
 from ..exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH, peer_batch_limit
 from ..dataflow_sinks import _artifact_json, _encode_record, RECORDS_MEDIA, MANIFEST_MEDIA
 from ..recovery_contract import document
+from ..dataflow_record_frames import (encode_document, decode_document, document_limit,
+    frame_parts, decode_frame, line_limit, frame_stream, read_chunk_bytes, admit_receive, read_document)
 
 
 class WorkerGraphRunner:
@@ -528,7 +530,7 @@ class WorkerGraphRunner:
                 current = (command.get('edge_id'), command.get('producer_partition'),
                     command.get('route_epoch'), peer.get('host'), peer.get('port'), peer.get('token'))
                 count = peer.get('bytes')
-                if type(count) is not int or count < 0 or count > self.bounds.max_row_bytes:
+                if type(count) is not int or count < 0 or count > document_limit(self.bounds):
                     break
                 if ((owner is not None and current != owner)
                         or len(result) >= min(spec.credit_rows, self.bounds.max_pending_events)
@@ -766,7 +768,7 @@ class WorkerGraphRunner:
                 routed_input = clone_record(record, inline=row, payload_ref=None,
                     encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             route_sequence = self.e._channels.routing.values().get(spec.channel_id, 0)
-            routes, raw = _route_record_document(routed_input, spec=spec,
+            routes, raw = self._frame_call(_route_record_document, routed_input, spec=spec,
                 state=self.e._channels.routing, bounds=self.bounds)
             for routed in routes:
                 from ..recovery_contract import identity
@@ -774,21 +776,45 @@ class WorkerGraphRunner:
                               delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]),
                               route_sequence=route_sequence, validated_raw=raw)
 
+    def _frame_call(self, function, *args, _frame_retained=0, **kwargs):
+        """Original peer ACKs release codec room; never add another grant."""
+        deadline = time.monotonic() + self.bounds.timeout_ms / 1000
+        while True:
+            self.services.check_stop()
+            with self._condition:
+                generation = self._wake_generation
+                peer_bytes = self._peer._bytes
+            kernel_bytes = sum(getattr(kernel, 'retained_resident_bytes', 0)
+                               for kernel in self.e._kernels.values())
+            retained = peer_bytes + kernel_bytes + _frame_retained
+            try:
+                return function(*args, services=self.services, retained=retained, **kwargs)
+            except DataflowError as exc:
+                peak = exc.context.get('codec_workspace_bytes')
+                limit = exc.context.get('resident_limit_bytes')
+                if (exc.code != 'BUDGET_EXCEEDED' or peak is None or not peer_bytes
+                        or peak - peer_bytes > limit):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise DataflowError('DEADLINE_EXCEEDED', 'record codec credit deadline') from exc
+                with self._condition:
+                    if generation == self._wake_generation:
+                        self._condition.wait(.01)
+
     def _publish(self, record, *, edge=None, spec=None, target=None, delivery=None,
                  route_sequence=None, validated_raw=None):
         # Only the joint route/encode call above supplies validated_raw. Default
         # terminal publication keeps its original encoding and validation path.
-        raw = (_encode_record_document(record, max_bytes=self.bounds.max_row_bytes)
+        raw = (self._frame_call(encode_document, record, self.bounds)
                if validated_raw is None else validated_raw)
-        if type(raw) is not bytes or len(raw) > self.bounds.max_row_bytes:
+        if type(raw) is not bytes or len(raw) > document_limit(self.bounds):
             raise DataflowError('INVALID_CONTRACT', 'invalid prevalidated record document')
         if spec is not None and spec.mode == 'finite_sealed':
             stream = self._finite_buffer(spec)
-            line = document({'record_id': record.record_id, 'sequence': record.sequence,
-                             'target': target, 'document': raw.decode()}, self.bounds.max_row_bytes) + b'\n'
-            if stream.bytes + len(line) > spec.storage_bytes:
+            size, chunks = self._frame_call(frame_parts, record, self.bounds, target=target, raw=raw)
+            if stream.bytes + size > spec.storage_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite producer exceeds reserved storage')
-            stream.append(record, line)
+            stream.append_parts(record, chunks, size=size)
             return
         delivery = delivery or self.e._next_operation_id('terminal')
         deadline = time.monotonic() + self.bounds.timeout_ms / 1000
@@ -858,6 +884,7 @@ class WorkerGraphRunner:
                 # peer buffer or executing the business callback a second time.
                 raise DataflowError('INVALID_CONTRACT', 'duplicate or reordered memory delivery')
         if 'peer' in command:
+            self._frame_call(admit_receive, command['peer']['bytes'], self.bounds)
             batch = self._read_batch
             if batch is not None and batch[2] < len(batch[0]) and batch[0][batch[2]] is command:
                 raw = next(batch[1])
@@ -866,9 +893,9 @@ class WorkerGraphRunner:
                 raw = read_peer(command['peer'], bounds=self.bounds)
         else:
             ref = ArtifactRef(**command['ref'])
-            raw = b''.join(self.services.store.read(ref, max_bytes=self.bounds.max_row_bytes))
-        record = _decode_record_document(raw, record_id=command['record_id'], sequence=command['sequence'],
-                                         max_bytes=self.bounds.max_row_bytes)
+            raw = self._frame_call(read_document, ref, self.services.store, self.bounds)
+        record = self._frame_call(decode_document, raw, record_id=command['record_id'], sequence=command['sequence'],
+                                 bounds=self.bounds)
         if memory or command['delivery_id'] not in self._consumed_deliveries:
             self._push(edge.consumer, edge.input_port, record)
             if memory:
@@ -930,11 +957,11 @@ class WorkerGraphRunner:
                         encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._limit is not None and self._terminal_rows >= self._limit:
                 return
-            raw = _encode_record(record, self.bounds) + b'\n'
-            if self._terminal_bytes + len(raw) > self.bounds.max_spill_bytes:
+            size, chunks = self._frame_call(frame_parts, record, self.bounds)
+            if self._terminal_bytes + size > self.bounds.max_spill_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'terminal durable spool exceeds disk bound')
-            self._terminal_blocks.append(record, raw)
-            self._terminal_bytes += len(raw)
+            self._terminal_blocks.append_parts(record, chunks, size=size)
+            self._terminal_bytes += size
             self._terminal_rows += 1
             self._metrics[occ]['rows_output'] += 1
             if self._terminal_columns is None and record.inline is not None:
@@ -1204,20 +1231,28 @@ class WorkerGraphRunner:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite producer exceeds storage reservation')
             if declared_rows is not None and declared_rows - 1 != member['last_sequence']:
                 raise DataflowError('CORRUPT_ARTIFACT', 'finite producer index row count differs from seal')
-            stream = _ChunkStream(block_chunks(self.services.store, data, self.bounds))
+            stream = frame_stream(block_chunks(self.services.store, data, self.bounds,
+                chunk_bytes=read_chunk_bytes(self.bounds, self.services)), self.bounds, services=self.services)
             count = 0
-            while True:
-                line = stream.readline(self.bounds.max_row_bytes + 1)
-                if not line:
-                    break
-                item = json.loads(line)
-                count += 1
-                if item['target'] == self.partition:
-                    record = _decode_record_document(item['document'].encode(), record_id=item['record_id'],
-                        sequence=item['sequence'], max_bytes=self.bounds.max_row_bytes)
-                    self._push(edge.consumer, edge.input_port, record)
-            if count - 1 != member['last_sequence']:
-                raise DataflowError('CORRUPT_ARTIFACT', 'finite producer row count differs from seal')
+            try:
+                while True:
+                    line = stream.readline(line_limit(self.bounds))
+                    if not line:
+                        break
+                    raw, item = self._frame_call(decode_frame, line, self.bounds, finite=True,
+                        _frame_retained=stream.buffered_bytes)
+                    del line
+                    count += 1
+                    if item['target'] == self.partition:
+                        record = self._frame_call(decode_document, raw, record_id=item['record_id'],
+                            sequence=item['sequence'], bounds=self.bounds, _frame_retained=stream.buffered_bytes)
+                        self._push(edge.consumer, edge.input_port, record)
+                        del record
+                    del raw, item
+                if count - 1 != member['last_sequence']:
+                    raise DataflowError('CORRUPT_ARTIFACT', 'finite producer row count differs from seal')
+            finally:
+                stream.close()
             self._edge_eoi(spec.edge_id, member['partition_id'])
         self._send('ack', {'delivery_id': command['delivery_id'], 'producer_partition': None})
 

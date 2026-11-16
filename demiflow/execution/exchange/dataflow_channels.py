@@ -125,7 +125,8 @@ def encode_record(record, *, bounds):
     if not isinstance(bounds, Bounds):
         _fail("INVALID_CONTRACT", "bounds must be a Bounds declaration")
     _validate_record(record)
-    raw = _encode_record_document(record, max_bytes=bounds.max_row_bytes)
+    from ..dataflow_record_frames import encode_document
+    raw = encode_document(record, bounds)
     return EncodedRecord(record_id=record.record_id, encoding=RECORD_ENCODING, data=raw,
                          ref=None, encoded_bytes=len(raw),
                          decoded_upper_bytes=len(raw), sequence=record.sequence)
@@ -147,17 +148,17 @@ def resolve_record(encoded, *, store, bounds):
         _fail("INVALID_CONTRACT", "bounds must be a Bounds declaration")
     if encoded.encoding != RECORD_ENCODING:
         _fail("INVALID_CONTRACT", "unsupported record encoding")
-    if encoded.decoded_upper_bytes > bounds.max_row_bytes:
+    from ..dataflow_record_frames import document_limit, decode_document, read_document
+    if encoded.decoded_upper_bytes > document_limit(bounds):
         _fail("BUDGET_EXCEEDED", "decoded record exceeds the row byte budget")
     # EncodedRecord owns exactly one *transfer document*: inline bytes or a
     # reference to those bytes. A business payload ref lives inside that
     # document together with provenance; it is not a second EncodedRecord body.
-    raw = encoded.data if encoded.data is not None else _read_bounded(
-        store, encoded.ref, max_bytes=bounds.max_row_bytes)
+    raw = encoded.data if encoded.data is not None else read_document(encoded.ref, store, bounds)
     if len(raw) != encoded.encoded_bytes:
         _fail("CORRUPT_ARTIFACT", "encoded record size mismatch")
-    skeleton = _decode_record_document(raw, record_id=encoded.record_id,
-                                       sequence=encoded.sequence, max_bytes=bounds.max_row_bytes)
+    skeleton = decode_document(raw, record_id=encoded.record_id,
+                               sequence=encoded.sequence, bounds=bounds)
     ref = skeleton.payload_ref
     if ref is None:
         return skeleton
@@ -202,7 +203,7 @@ def route_record(record, *, spec, state):
     return _routed_records(record, spec=spec, ordinal=ordinal, window=window)
 
 
-def _route_record_document(record, *, spec, state, bounds):
+def _route_record_document(record, *, spec, state, bounds, services=None, retained=0):
     """One authenticated payload encoding for routing and worker publication.
 
     The payload channel window and the full document row bound are distinct.
@@ -211,15 +212,22 @@ def _route_record_document(record, *, spec, state, bounds):
     """
     if not isinstance(bounds, Bounds):
         _fail("INVALID_CONTRACT", "bounds must be a Bounds declaration")
-    ordinal, window = _route_context(record, spec=spec, state=state)
+    _, window = _route_context(record, spec=spec, state=state, advance=False, validate=False)
     if record.payload_ref is not None and record.encoded_bytes > window:
         _fail("BUDGET_EXCEEDED", "record exceeds the channel byte window")
-    raw = _encode_record_document(record, max_bytes=bounds.max_row_bytes, payload_max_bytes=window)
+    from ..dataflow_record_frames import encode_document
+    raw = encode_document(record, bounds, payload_limit=window, services=services, retained=retained)
+    # Codec admission can wait for original peer ACKs. A refused/retried
+    # workspace must not consume a routing ordinal or change delivery identity.
+    ordinal = state.next_ordinal(spec.channel_id)
     return _routed_records(record, spec=spec, ordinal=ordinal, window=window), raw
 
 
-def _route_context(record, *, spec, state):
-    _validate_record(record)
+def _route_context(record, *, spec, state, advance=True, validate=True):
+    if validate:
+        _validate_record(record)
+    elif not isinstance(record, Record):
+        _fail("INVALID_CONTRACT", "value must be a Record")
     if not isinstance(spec, ExchangeSpec):
         _fail("INVALID_CONTRACT", "spec must be an ExchangeSpec")
     if not callable(getattr(state, "next_ordinal", None)):
@@ -231,7 +239,7 @@ def _route_context(record, *, spec, state):
         _fail("INVALID_CONTRACT", "channel has no reader")
     _ident(spec.channel_id, "channel_id")
     _nonneg_int(spec.route_epoch, "route_epoch")
-    ordinal = state.next_ordinal(spec.channel_id)
+    ordinal = state.next_ordinal(spec.channel_id) if advance else None
     window = spec.storage_bytes if spec.mode == "finite_sealed" else spec.credit_bytes
     return ordinal, window
 

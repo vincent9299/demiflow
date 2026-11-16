@@ -228,14 +228,10 @@ def _partition_id(spec: KernelSpec, services: RuntimeServices) -> str:
     raise DataflowError("INVALID_CONTRACT", "Sink partition id is ambiguous for this lease")
 
 
-def _encode_record(record: Record, bounds) -> bytes:
-    from .exchange.dataflow_bridge import _encode_record_document, _validate_record
-    _validate_record(record)
-    raw = _encode_record_document(record, max_bytes=bounds.max_row_bytes)
-    # The data-only transfer document preserves tuple/bytes/IEEE values. The
-    # record's encoded_bytes describes its payload, not this provenance frame.
-    return document({"record_id": record.record_id, "sequence": record.sequence,
-                     "document": raw.decode("utf-8")}, bounds.max_row_bytes)
+def _encode_record(record: Record, bounds, *, services=None, retained=0) -> bytes:
+    from .dataflow_record_frames import encode_frame
+    # Preserve the original no-newline helper contract and exact JSON bytes.
+    return encode_frame(record, bounds, services=services, retained=retained)[:-1]
 
 
 def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServices) -> ArtifactRef:
@@ -252,7 +248,7 @@ def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServic
         services.check_stop()
         if not isinstance(record, Record):
             raise DataflowError("INVALID_CONTRACT", "Sink staging requires Record values")
-        encoded = _encode_record(record, bounds)
+        encoded = _encode_record(record, bounds, services=services, retained=total + 64 * len(chunks))
         rows += 1
         total += len(encoded) + 1
         if rows > bounds.max_output_rows:
@@ -384,7 +380,8 @@ class NativeTerminalSink(_DataflowArtifactSink):
     def _blocks(self, manifest):
         import pyarrow as pa
         from .dataflow_handles import _ChunkStream
-        from .exchange.dataflow_bridge import _decode_record_document, _decode_payload
+        from .exchange.dataflow_bridge import _decode_payload
+        from .dataflow_record_frames import decode_frame, decode_document, line_limit, frame_stream, read_chunk_bytes
         from .contracts.dataflow import thaw_record_value
         from .record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._bounds)
@@ -400,63 +397,71 @@ class NativeTerminalSink(_DataflowArtifactSink):
             if size + result.nbytes > self._bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')
             return result
-        for partition in manifest['partitions']:
-            ref = _artifact_from_json(partition['data_ref'])
-            from .dataflow_segments import block_chunks
-            stream = _ChunkStream(block_chunks(self._store, ref, self._bounds))
-            while True:
-                line = stream.readline(self._bounds.max_row_bytes + 1)
-                if not line:
-                    break
-                item = json.loads(line)
-                record = _decode_record_document(item['document'].encode(), record_id=item['record_id'],
-                    sequence=item['sequence'], max_bytes=self._bounds.max_row_bytes)
-                if is_arrow_record(record):
-                    if batch:
-                        yield table()
-                        batch, size = [], 0
-                    if pending is not None and (record.payload_ref != pending[0]
-                            or record.source_position['row_offset'] != pending[4]
-                            or pending[3] >= self._batch_rows
-                            or pending[5] + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
-                        yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
-                        pending = None
-                    native_batch, index = arrow.locate(record)
-                    if pending is None:
-                        pending = [record.payload_ref, native_batch, index, 0, record.source_position['row_offset'], 0]
-                    pending[3] += 1
-                    pending[4] += 1
-                    pending[5] += record.encoded_bytes
-                    continue
-                if pending is not None:
-                    yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
-                    pending = None
-                    arrow.close()
-                if record.inline is None:
-                    row = _decode_payload(b''.join(self._store.read(record.payload_ref,
-                        max_bytes=self._bounds.max_row_bytes)), max_bytes=self._bounds.max_row_bytes)
-                else:
-                    row = thaw_record_value(record.inline)
-                if batch and (record.schema_ref != schema_ref or len(batch) >= self._batch_rows or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
-                    yield table()
-                    batch, size = [], 0
-                schema_ref = record.schema_ref
-                schema = schemas.read(schema_ref)
-                declared = getattr(getattr(self.native, 'spec', None), 'schema', None)
-                if schema is None and declared is not None:
-                    extra = set(row) - set(declared.names)
-                    if extra:
-                        raise ValueError('Lance output has undeclared fields: ' + ', '.join(sorted(extra)))
-                    # An unmatched join may omit right-side fields. A declared
-                    # nullable target supplies their type even on the first row.
-                    schema = declared
-                batch.append(row)
-                size += record.encoded_bytes
-        if batch:
-            yield table()
-        if pending is not None:
-            yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
-        arrow.close()
+        try:
+            for partition in manifest['partitions']:
+                ref = _artifact_from_json(partition['data_ref'])
+                from .dataflow_segments import block_chunks
+                stream = frame_stream(block_chunks(self._store, ref, self._bounds,
+                    chunk_bytes=read_chunk_bytes(self._bounds)), self._bounds)
+                try:
+                    while True:
+                        line = stream.readline(line_limit(self._bounds))
+                        if not line:
+                            break
+                        raw, item = decode_frame(line, self._bounds, retained=stream.buffered_bytes + size)
+                        del line
+                        record = decode_document(raw, record_id=item['record_id'],
+                            sequence=item['sequence'], bounds=self._bounds, retained=stream.buffered_bytes + size)
+                        del raw
+                        if is_arrow_record(record):
+                            if batch:
+                                yield table()
+                                batch, size = [], 0
+                            if pending is not None and (record.payload_ref != pending[0]
+                                    or record.source_position['row_offset'] != pending[4]
+                                    or pending[3] >= self._batch_rows
+                                    or pending[5] + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
+                                yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+                                pending = None
+                            native_batch, index = arrow.locate(record)
+                            if pending is None:
+                                pending = [record.payload_ref, native_batch, index, 0, record.source_position['row_offset'], 0]
+                            pending[3] += 1
+                            pending[4] += 1
+                            pending[5] += record.encoded_bytes
+                            continue
+                        if pending is not None:
+                            yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+                            pending = None
+                            arrow.close()
+                        if record.inline is None:
+                            row = _decode_payload(b''.join(self._store.read(record.payload_ref,
+                                max_bytes=self._bounds.max_row_bytes)), max_bytes=self._bounds.max_row_bytes)
+                        else:
+                            row = thaw_record_value(record.inline)
+                        if batch and (record.schema_ref != schema_ref or len(batch) >= self._batch_rows or size + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
+                            yield table()
+                            batch, size = [], 0
+                        schema_ref = record.schema_ref
+                        schema = schemas.read(schema_ref)
+                        declared = getattr(getattr(self.native, 'spec', None), 'schema', None)
+                        if schema is None and declared is not None:
+                            extra = set(row) - set(declared.names)
+                            if extra:
+                                raise ValueError('Lance output has undeclared fields: ' + ', '.join(sorted(extra)))
+                            # An unmatched join may omit right-side fields. A declared
+                            # nullable target supplies their type even on the first row.
+                            schema = declared
+                        batch.append(row)
+                        size += record.encoded_bytes
+                finally:
+                    stream.close()
+            if batch:
+                yield table()
+            if pending is not None:
+                yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+        finally:
+            arrow.close()
 
     def prepare(self, manifest, context):
         result = super().prepare(manifest, context)

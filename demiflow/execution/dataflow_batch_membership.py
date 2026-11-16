@@ -23,8 +23,8 @@ def bind_contracts(service, graph, physical):
 
 
 def member(record, bounds):
-    from .exchange.dataflow_bridge import _encode_record_document
-    raw=_encode_record_document(record,max_bytes=bounds.max_row_bytes)
+    from .dataflow_record_frames import encode_document
+    raw=encode_document(record,bounds)
     return [record.record_id,hashlib.sha256(raw).hexdigest()]
 
 

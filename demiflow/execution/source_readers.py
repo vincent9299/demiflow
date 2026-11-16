@@ -116,16 +116,15 @@ class _BaseReader:
     def next_record(self) -> SourcePoll:
         self._check_open()
         if self._replay_pending:
-            from .exchange.dataflow_bridge import _decode_record_document
-            import json
+            from .dataflow_record_frames import read_pending_frame, decode_document
             ref = self._replay_pending.popleft()
             if ref.media_type != "application/vnd.demiflow.source-pending.v3":
                 raise DataflowError("INCOMPATIBLE_HISTORY", "pending source record lacks provenance")
-            raw = b"".join(self._services.store.read(ref, max_bytes=self._services.bounds.max_control_bytes))
-            saved = json.loads(raw)
-            record = _decode_record_document(saved["document"].encode("utf-8"),
+            encoded, saved = read_pending_frame(ref, self._services.store,
+                self._services.bounds, services=self._services)
+            record = decode_document(encoded,
                 record_id=saved["record_id"], sequence=saved["sequence"],
-                max_bytes=self._services.bounds.max_row_bytes)
+                bounds=self._services.bounds, services=self._services)
             # Retain the replayed item until the next successful pull confirms
             # ordered publication, just as on the original attempt.
             self._pending = (ref, *self._replay_pending)
@@ -176,14 +175,10 @@ class _BaseReader:
     def snapshot(self) -> SourceCursor:
         self._check_open()
         if self._pending_record is not None:
-            from .exchange.dataflow_bridge import _encode_record_document
-            from .recovery_contract import document
+            from .dataflow_record_frames import frame_parts
             record = self._pending_record
-            raw = document({"record_id": record.record_id, "sequence": record.sequence,
-                "document": _encode_record_document(record,
-                    max_bytes=self._services.bounds.max_row_bytes).decode()},
-                self._services.bounds.max_control_bytes)
-            ref = self._services.store.put(iter([raw]), max_bytes=len(raw),
+            size, chunks = frame_parts(record, self._services.bounds, services=self._services, newline=False)
+            ref = self._services.store.put(chunks, max_bytes=size,
                 media_type="application/vnd.demiflow.source-pending.v3")
             self._pending = (ref,)
             self._pending_record = None

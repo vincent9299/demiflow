@@ -1721,7 +1721,7 @@ class _OutputSubscription:
 
     def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None):
         from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH, peer_batch_limit
-        from .exchange.dataflow_bridge import _decode_record_document
+        from .dataflow_record_frames import decode_document, document_limit, raw_workspace
         from .dataflow_replay import record_encoded_bytes
         e = self.execution
         records = []
@@ -1750,11 +1750,11 @@ class _OutputSubscription:
                     raise DataflowError('BUDGET_EXCEEDED', 'terminal replay row exceeds admitted read window')
                 # Existing raw frame, the typed decode/canonical re-encode
                 # workspace and the original leased chunk remain simultaneous.
-                workspace(e._replay.buffered_bytes + 2 * len(raw) + size)
+                workspace(e._replay.buffered_bytes + raw_workspace(raw))
                 if admit is not None:
                     admit(size, len(records), payload_bytes)
-                records.append(_decode_record_document(raw, record_id=record_id,
-                    sequence=sequence, max_bytes=e._bounds.max_row_bytes))
+                records.append(decode_document(raw, record_id=record_id,
+                    sequence=sequence, bounds=e._bounds, retained=payload_bytes + e._replay.buffered_bytes))
                 admitted += required
                 payload_bytes += size
                 e._replay.pop()
@@ -1793,11 +1793,13 @@ class _OutputSubscription:
                         for payload in batch:
                             workspace(receive_bytes)
                             raw = next(frames)
-                            size = record_encoded_bytes(raw, maximum=e._bounds.max_row_bytes)
+                            size = record_encoded_bytes(raw, maximum=e._bounds.max_row_bytes,
+                                frame_maximum=document_limit(e._bounds))
+                            workspace(raw_workspace(raw))
                             if admit is not None:
                                 admit(size, len(records), payload_bytes)
-                            records.append(_decode_record_document(raw, record_id=payload['record_id'],
-                                sequence=payload['sequence'], max_bytes=e._bounds.max_row_bytes))
+                            records.append(decode_document(raw, record_id=payload['record_id'],
+                                sequence=payload['sequence'], bounds=e._bounds, retained=payload_bytes))
                             e._terminal_queue.popleft()
                             e._ack(payload['delivery_id'])
                             admitted += payload['peer']['bytes']

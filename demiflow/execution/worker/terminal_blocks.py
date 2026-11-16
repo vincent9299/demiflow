@@ -94,6 +94,9 @@ class TerminalBlocks:
         return key
 
     def append(self, record, raw):
+        self.append_parts(record, iter((raw,)), size=len(raw))
+
+    def append_parts(self, record, chunks, *, size):
         tag = record.block_partition if self.partitioned else None
         # A concrete count also creates empty blocks. No fake business rows.
         if tag is not None and (tag.occurrence_id, tag.count) not in self._layouts:
@@ -109,13 +112,20 @@ class TerminalBlocks:
         if self._tail is None:
             self._tail = ScratchStream(self.services.store, max_bytes=self.bounds.max_spill_bytes,
                 max_io_bytes=self.bounds.max_row_bytes + self.bounds.max_control_bytes)
-        if self.bytes + len(raw) > self.bounds.max_spill_bytes or self.rows >= self.bounds.max_output_rows:
+        if self.bytes + size > self.bounds.max_spill_bytes or self.rows >= self.bounds.max_output_rows:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal output exceeds disk/row budget')
-        self._tail.write(raw)
+        written = 0
+        for raw in chunks:
+            if written + len(raw) > size:
+                raise DataflowError('CORRUPT_ARTIFACT', 'record frame exceeds measured size')
+            self._tail.write(raw)
+            written += len(raw)
+        if written != size:
+            raise DataflowError('CORRUPT_ARTIFACT', 'record frame differs from measured size')
         self._tail_rows += 1
-        self._tail_bytes += len(raw)
+        self._tail_bytes += size
         self.rows += 1
-        self.bytes += len(raw)
+        self.bytes += size
 
     def flush(self):
         if self._tail is None:
@@ -175,7 +185,7 @@ class TerminalBlocks:
             raise DataflowError('CORRUPT_ARTIFACT', 'terminal partition totals disagree with manifest')
 
     def stream(self):
-        from ..dataflow_handles import _ChunkStream
+        from ..dataflow_record_frames import frame_stream, read_chunk_bytes
         owner = self
         class View:
             def __init__(self):
@@ -190,10 +200,14 @@ class TerminalBlocks:
                 def chunks():
                     for part in owner.manifest_partitions():
                         from ..contracts.dataflow import ArtifactRef
-                        yield from block_chunks(owner.services.store, ArtifactRef(**part['data_ref']), owner.bounds)
-                self._stream = _ChunkStream(chunks() if whence == 0 else iter(()))
+                        yield from block_chunks(owner.services.store, ArtifactRef(**part['data_ref']), owner.bounds,
+                            chunk_bytes=read_chunk_bytes(owner.bounds, owner.services))
+                self._stream = frame_stream(chunks() if whence == 0 else iter(()), owner.bounds, services=owner.services)
             def readline(self, size=-1):
                 return self._stream.readline(size)
+            @property
+            def buffered_bytes(self):
+                return self._stream.buffered_bytes
         return View()
 
     def close(self):

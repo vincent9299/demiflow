@@ -589,44 +589,55 @@ class StoredMaterializedHandle:
         from .arrow_payload import ArrowBatchCache, is_arrow_record
         arrow = ArrowBatchCache(self._store, self._bounds)
         from .dataflow_segments import segment_refs
-        for ref in (leaf for block in self._blocks
-                    for leaf in segment_refs(self._store, block, self._bounds)):
-            stream = _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes)))
-            while True:
+        from .dataflow_record_frames import decode_frame, decode_document, line_limit, frame_stream, read_chunk_bytes
+        try:
+            for ref in (leaf for block in self._blocks
+                        for leaf in segment_refs(self._store, block, self._bounds)):
+                stream = (frame_stream(self._store.read(ref, max_bytes=max(1, ref.size_bytes),
+                    chunk_bytes=read_chunk_bytes(self._bounds)), self._bounds)
+                    if ref.media_type == "application/x-demiflow-records-v3" else
+                    _ChunkStream(self._store.read(ref, max_bytes=max(1, ref.size_bytes))))
                 try:
-                    if ref.media_type == "application/x-demiflow-records-v3":
-                        line = stream.readline(self._bounds.max_row_bytes + 1)
-                        if not line:
+                    while True:
+                        try:
+                            if ref.media_type == "application/x-demiflow-records-v3":
+                                line = stream.readline(line_limit(self._bounds))
+                                if not line:
+                                    break
+                                raw, item = decode_frame(line, self._bounds, retained=stream.buffered_bytes)
+                                del line
+                                from .contracts.dataflow import thaw_record_value
+                                record = decode_document(raw, record_id=item["record_id"],
+                                    sequence=item["sequence"], bounds=self._bounds, retained=stream.buffered_bytes)
+                                del raw
+                                if is_arrow_record(record):
+                                    row = arrow.row(record)
+                                elif record.inline is None:
+                                    from .exchange.dataflow_bridge import _decode_payload
+                                    ceiling = self._bounds.max_row_bytes
+                                    row = _decode_payload(b"".join(self._store.read(record.payload_ref,
+                                        max_bytes=ceiling)), max_bytes=ceiling)
+                                else:
+                                    row = thaw_record_value(record.inline)
+                            else:
+                                row = pickle.load(stream)
+                        except EOFError:
                             break
-                        item = json.loads(line)
-                        from .exchange.dataflow_bridge import _decode_record_document
-                        from .contracts.dataflow import thaw_record_value
-                        record = _decode_record_document(item["document"].encode(),
-                            record_id=item["record_id"], sequence=item["sequence"], max_bytes=len(line))
-                        if is_arrow_record(record):
-                            row = arrow.row(record)
-                        elif record.inline is None:
-                            from .exchange.dataflow_bridge import _decode_payload
-                            ceiling = self._bounds.max_row_bytes
-                            row = _decode_payload(b"".join(self._store.read(record.payload_ref,
-                                max_bytes=ceiling)), max_bytes=ceiling)
+                        count += 1
+                        if count > self._rows:
+                            raise _error("CORRUPT_ARTIFACT", "materialized row count differs")
+                        if with_schema:
+                            schema = (schemas.read(record.schema_ref)
+                                      if ref.media_type == "application/x-demiflow-records-v3" else None)
+                            yield row, schema
                         else:
-                            row = thaw_record_value(record.inline)
-                    else:
-                        row = pickle.load(stream)
-                except EOFError:
-                    break
-                count += 1
-                if count > self._rows:
-                    raise _error("CORRUPT_ARTIFACT", "materialized row count differs")
-                if with_schema:
-                    schema = (schemas.read(record.schema_ref)
-                              if ref.media_type == "application/x-demiflow-records-v3" else None)
-                    yield row, schema
-                else:
-                    yield row
-        if count != self._rows:
-            raise _error("CORRUPT_ARTIFACT", "materialized row count differs")
+                            yield row
+                finally:
+                    stream.close()
+            if count != self._rows:
+                raise _error("CORRUPT_ARTIFACT", "materialized row count differs")
+        finally:
+            arrow.close()
 
     def release(self) -> None:
         with self._lock:

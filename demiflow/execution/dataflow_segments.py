@@ -89,9 +89,10 @@ def segment_refs(store, root, bounds):
     yield from tree_refs(store, root, bounds, leaves_only=True)
 
 
-def block_chunks(store, root, bounds):
+def block_chunks(store, root, bounds, *, chunk_bytes=None):
     for ref in segment_refs(store, root, bounds):
-        yield from store.read(ref, max_bytes=max(1, ref.size_bytes))
+        options = {} if chunk_bytes is None else {'chunk_bytes': chunk_bytes}
+        yield from store.read(ref, max_bytes=max(1, ref.size_bytes), **options)
 
 
 def block_totals(store, root, bounds):

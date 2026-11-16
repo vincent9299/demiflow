@@ -10,14 +10,14 @@ from .contracts.dataflow import ArtifactRef, BlockPartition
 from .contracts.dataflow_errors import DataflowError
 
 
-def record_encoded_bytes(raw, *, maximum):
+def record_encoded_bytes(raw, *, maximum, frame_maximum=None):
     """Read the canonical control prefix without decoding the business payload.
 
     Record documents sort keys: optional ``bp`` precedes ``eb``; the potentially
     large typed payload ``p`` follows it. Full decoding still verifies canonical
     bytes, IDs, provenance, schema and the declared payload size after admission.
     """
-    if type(raw) is not bytes or len(raw) > maximum:
+    if type(raw) is not bytes or len(raw) > (maximum if frame_maximum is None else frame_maximum):
         raise DataflowError('BUDGET_EXCEEDED', 'terminal record frame exceeds its row bound')
     try:
         cursor = len(b'{"eb":')
@@ -107,7 +107,7 @@ class PublishedRecordReader:
 
     def _read_frames(self, publication):
         from .dataflow_segments import segment_refs
-        from ..data.runtime_contract import check_size
+        from .dataflow_record_frames import decode_frame, document_limit, line_limit, raw_workspace
         for partition in publication['manifest']['partitions']:
             root = ArtifactRef(**partition['data_ref'])
             def chunks():
@@ -119,28 +119,15 @@ class PublishedRecordReader:
             self._stream = stream
             try:
                 while True:
-                    line = stream.readline(self._bounds.max_row_bytes + 1)
+                    line = stream.readline(line_limit(self._bounds))
                     if not line:
                         break
-                    # CPython UTF-8 decoding uses one byte/codepoint for
-                    # ASCII and at most four otherwise. The outer record is
-                    # metadata plus one serialized document, not row data.
-                    text_bound = len(line) + 64 if line.isascii() else 4 * len(line) + 80
-                    self._workspace(stream.buffered_bytes + len(line) + text_bound)
-                    text = line.decode('utf-8')
-                    del line
-                    # JSON unescaping cannot produce more codepoints than
-                    # the original text. Include the outer dict/scalars.
-                    self._workspace(stream.buffered_bytes + sys.getsizeof(text) + 4 * len(text) + 1024)
-                    item = json.loads(text)
-                    del text
+                    self._workspace(stream.buffered_bytes + raw_workspace(line, typed=False))
+                    raw, item = decode_frame(line, self._bounds, retained=stream.buffered_bytes)
                     record_id, sequence = item['record_id'], item['sequence']
-                    document = item['document']
-                    raw_bound = len(document) if document.isascii() else 4 * len(document)
-                    self._workspace(stream.buffered_bytes + check_size(item, self._bounds.max_resident_bytes) + raw_bound)
-                    raw = document.encode('utf-8')
-                    del document, item
-                    size = record_encoded_bytes(raw, maximum=self._bounds.max_row_bytes)
+                    del line, item
+                    size = record_encoded_bytes(raw, maximum=self._bounds.max_row_bytes,
+                                                frame_maximum=document_limit(self._bounds))
                     self._raw_bytes = len(raw)
                     yield raw, record_id, sequence, size
                     del raw

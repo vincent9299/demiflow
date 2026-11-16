@@ -10,7 +10,8 @@ from .contracts.dataflow import ArtifactRef, Record
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_handles import _ChunkStream
 from .dataflow_segments import block_chunks, block_totals
-from .exchange.dataflow_bridge import _decode_record_document, _validate_record
+from .exchange.dataflow_bridge import _validate_record, _decode_record_document
+from .dataflow_record_frames import decode_frame, decode_document, admit_document, document_limit, line_limit, frame_stream, read_chunk_bytes
 
 _FIELDS = {'schema', 'seal_ref', 'manifest_ref', 'edge_id', 'producer', 'target',
            'rows', 'bytes', 'total_rows', 'total_bytes'}
@@ -92,27 +93,34 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
         raise DataflowError('BUDGET_EXCEEDED', 'finite input exceeds original storage bound')
     if size != total_bytes or declared is not None and declared != total_rows:
         _fail('finite producer index counts differ from seal')
-    stream = _ChunkStream(block_chunks(services.store, ref, services.bounds))
+    stream = frame_stream(block_chunks(services.store, ref, services.bounds,
+        chunk_bytes=read_chunk_bytes(services.bounds, services)), services.bounds, services=services)
     consumers = spec.consumer_partitions
     count = byte_count = 0
     broadcast = None
     try:
         while True:
             services.check_stop()
-            line = stream.readline(services.bounds.max_row_bytes + 1)
+            line = stream.readline(line_limit(services.bounds))
             if not line:
                 break
             byte_count += len(line)
-            if not line.endswith(b'\n'):
-                _fail('finite record frame is truncated')
-            item = _json(line)
-            if (type(item) is not dict or set(item) != {'record_id','sequence','target','document'}
-                    or type(item['document']) is not str or type(item['target']) is not str
-                    or item['target'] not in consumers):
+            if spec.routing == 'broadcast' and count % len(consumers) == 0:
+                broadcast = None
+            held = len(broadcast[2]) if broadcast is not None else 0
+            retained = stream.buffered_bytes + held
+            raw, item = decode_frame(line, services.bounds, services=services, finite=True, retained=retained)
+            del line
+            if type(item['target']) is not str or item['target'] not in consumers:
                 _fail('finite record frame or target differs from channel')
-            decode = _decode_record_document if project is None else project
-            record = decode(item['document'].encode(), record_id=item['record_id'],
-                sequence=item['sequence'], max_bytes=services.bounds.max_row_bytes)
+            admit_document(raw, services.bounds, services=services, retained=retained)
+            if project is None:
+                record = _decode_record_document(raw, record_id=item['record_id'], sequence=item['sequence'],
+                    max_bytes=document_limit(services.bounds), payload_max_bytes=services.bounds.max_row_bytes,
+                    metadata_max_bytes=services.bounds.max_control_bytes)
+            else:
+                record = project(raw, record_id=item['record_id'], sequence=item['sequence'],
+                    max_bytes=document_limit(services.bounds), payload_max_bytes=services.bounds.max_row_bytes)
             if isinstance(record, Record):
                 _validate_record(record)
             if record.encoded_bytes > services.bounds.max_row_bytes:
@@ -130,7 +138,7 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
                 expected = consumers[count % len(consumers)]
             elif spec.routing == 'broadcast':
                 index = count % len(consumers)
-                current = (item['record_id'], item['sequence'], item['document'])
+                current = (item['record_id'], item['sequence'], raw)
                 if index == 0:
                     broadcast = current
                 elif current != broadcast:
@@ -151,6 +159,7 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
                 _fail('finite producer exceeds sealed row or byte counts')
             if item['target'] == target:
                 yield record
+            del record, raw, item
         if (count != total_rows or byte_count != total_bytes
                 or spec.routing == 'broadcast' and count % len(consumers)):
             _fail('finite producer row/byte count differs from seal')

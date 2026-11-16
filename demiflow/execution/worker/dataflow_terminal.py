@@ -7,7 +7,7 @@ import base64
 import json
 
 from ..contracts.dataflow_errors import DataflowError
-from ..exchange.dataflow_bridge import _decode_record_document
+from ..dataflow_record_frames import decode_frame, decode_document, line_limit
 from ..kernels.dataflow import _materialize_row
 from ..kernels import state_codec
 
@@ -32,14 +32,15 @@ def terminal_scalar(stream, *, spec, services, occurrence_id, schema_ref=None):
     try:
         while True:
             services.check_stop()
-            line = stream.readline(services.bounds.max_row_bytes + 2)
+            line = stream.readline(line_limit(services.bounds))
             if not line:
                 break
-            if len(line) > services.bounds.max_row_bytes + 1 or not line.endswith(b'\n'):
-                raise DataflowError('BUDGET_EXCEEDED', 'terminal record frame exceeds its bound')
-            item = json.loads(line)
-            record = _decode_record_document(item['document'].encode(), record_id=item['record_id'],
-                sequence=item['sequence'], max_bytes=services.bounds.max_row_bytes)
+            held = getattr(stream, 'buffered_bytes', 0)
+            raw, item = decode_frame(line, services.bounds, services=services, retained=held)
+            del line
+            record = decode_document(raw, record_id=item['record_id'],
+                sequence=item['sequence'], bounds=services.bounds, services=services, retained=held)
+            del raw
             rows += 1
             size += record.encoded_bytes
             if kind == 'size_bytes':

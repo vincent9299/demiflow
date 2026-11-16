@@ -18,6 +18,7 @@ import threading
 import time
 
 from ..contracts.dataflow_errors import DataflowError
+from ..dataflow_record_frames import document_limit, admit_receive, peer_chunk_bytes
 
 MAX_PEER_BATCH = 32
 
@@ -28,10 +29,10 @@ def peer_batch_limit(locator):
     return value if type(value) is int and 1 <= value <= MAX_PEER_BATCH else 1
 
 
-def _read(sock, size):
+def _read(sock, size, *, chunk_bytes=65536):
     data = bytearray()
     while len(data) < size:
-        part = sock.recv(min(65536, size - len(data)))
+        part = sock.recv(min(chunk_bytes, size - len(data)))
         if not part:
             raise DataflowError('CORRUPT_ARTIFACT', 'peer closed an incomplete data frame')
         data.extend(part)
@@ -160,8 +161,8 @@ class PeerBuffers:
 
     def put(self, data):
         with self._lock:
-            if len(data) > self._bounds.max_row_bytes:
-                raise DataflowError('BUDGET_EXCEEDED', 'peer record exceeds max_row_bytes')
+            if len(data) > document_limit(self._bounds):
+                raise DataflowError('BUDGET_EXCEEDED', 'peer document exceeds frame byte bound')
             if (len(self._buffers) >= self._bounds.max_pending_events or
                     self._bytes + len(data) > self._bounds.max_resident_bytes):
                 raise DataflowError('CAPACITY_PENDING', 'peer buffer credit exhausted', retryable=True)
@@ -229,8 +230,9 @@ def read_peer_many(locators, *, bounds):
     endpoint = (first['host'], first['port'], first['token'])
     for locator in locators:
         size = locator['bytes']
-        if type(size) is not int or size < 0 or size > bounds.max_row_bytes:
-            raise DataflowError('BUDGET_EXCEEDED', 'peer document exceeds row byte bound')
+        if type(size) is not int or size < 0 or size > document_limit(bounds):
+            raise DataflowError('BUDGET_EXCEEDED', 'peer document exceeds frame byte bound')
+        admit_receive(size, bounds)
         if (locator['host'], locator['port'], locator['token']) != endpoint:
             raise DataflowError('INVALID_CONTRACT', 'peer transport batch crosses producer authority')
     request = json.dumps({'key': first['key'], 'token': first['token']} if len(locators) == 1
@@ -242,14 +244,14 @@ def read_peer_many(locators, *, bounds):
         for locator in locators:
             # The suspended generator must not retain the yielded raw row
             # across the consumer's next kernel poll or slow business callback.
-            yield _read_peer_frame(sock, locator)
+            yield _read_peer_frame(sock, locator, chunk_bytes=peer_chunk_bytes(bounds))
 
 
-def _read_peer_frame(sock, locator):
+def _read_peer_frame(sock, locator, *, chunk_bytes=65536):
     observed = struct.unpack('!Q', _read(sock, 8))[0]
     if observed != locator['bytes']:
         raise DataflowError('CORRUPT_ARTIFACT', 'peer frame size differs from locator')
-    data = _read(sock, observed)
+    data = _read(sock, observed, chunk_bytes=chunk_bytes)
     if hashlib.sha256(data).hexdigest() != locator['sha256']:
         raise DataflowError('CORRUPT_ARTIFACT', 'peer frame checksum differs from locator')
     return data

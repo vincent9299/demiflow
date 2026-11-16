@@ -424,7 +424,21 @@ def _record_document_bytes(doc, *, payload_raw, max_bytes):
     return b''.join(parts)
 
 
-def _decode_record_document(raw, *, record_id, sequence, max_bytes):
+def _same_codec_tree(left, right):
+    """Data-only equality used before canonical encoding; NaN stays supported."""
+    if type(left) is not type(right):
+        return False
+    if type(left) is dict:
+        return left.keys() == right.keys() and all(_same_codec_tree(left[k], right[k]) for k in left)
+    if type(left) is list:
+        return len(left) == len(right) and all(_same_codec_tree(a, b) for a, b in zip(left, right))
+    if type(left) is float and math.isnan(left):
+        return math.isnan(right)
+    return left == right
+
+
+def _decode_record_document(raw, *, record_id, sequence, max_bytes,
+                            payload_max_bytes=None, metadata_max_bytes=None):
     if len(raw) > max_bytes:
         _fail("BUDGET_EXCEEDED", "encoded record document exceeds the row byte budget")
     doc = _codec_loads(raw)
@@ -451,11 +465,31 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes):
         _fail("CORRUPT_ARTIFACT", "record document must carry exactly one payload")
     if type(doc["sp"]) is not dict or type(doc["eb"]) is not int or doc["eb"] < 0:
         _fail("CORRUPT_ARTIFACT", "record document provenance is malformed")
+    payload_limit = max_bytes if payload_max_bytes is None else min(max_bytes, payload_max_bytes)
+    if payload_max_bytes is not None and doc['eb'] > payload_limit:
+        _fail('BUDGET_EXCEEDED', 'encoded payload exceeds max_row_bytes bound')
+    if metadata_max_bytes is not None:
+        from ..dataflow_record_frames import _json_shape
+        _json_shape({**doc, 'p': None}, metadata_max_bytes)
     if doc["p"] is not None:
         row = _decode_value(doc["p"])
         if type(row) is not dict:
             _fail("CORRUPT_ARTIFACT", "record document payload must be a row mapping")
-        payload_raw = _encode_payload(row, max_bytes=max_bytes)
+        if payload_max_bytes is None:
+            payload_raw = _encode_payload(row, max_bytes=payload_limit)
+        else:
+            # Validate normalization without simultaneously retaining a second
+            # complete tagged tree AND both its JSON text/byte copies. Those
+            # are separate peaks inside the caller's original codec grant.
+            from ..dataflow_record_frames import _typed_shape
+            _typed_shape(row, payload_limit)
+            expected = _encode_value(row)
+            if not _same_codec_tree(expected, doc['p']):
+                _fail('CORRUPT_ARTIFACT', 'record document bytes are not canonical')
+            del expected
+            payload_raw = _codec_dumps(doc['p'])
+            if len(payload_raw) > payload_limit:
+                _fail('BUDGET_EXCEEDED', 'encoded payload exceeds max_row_bytes bound')
         if len(payload_raw) != doc["eb"]:
             _fail("CORRUPT_ARTIFACT", "record document payload size mismatch")
         if _record_document_bytes(doc, payload_raw=payload_raw, max_bytes=max_bytes) != raw:

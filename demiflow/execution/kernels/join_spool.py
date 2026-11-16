@@ -40,7 +40,8 @@ class _EncodedJoinInput:
         self.resident_bytes = _PROJECTED_RESIDENT_MULTIPLIER * len(raw)
 
 
-def _project_join_document(raw, *, record_id, sequence, max_bytes, fields, row_window):
+def _project_join_document(raw, *, record_id, sequence, max_bytes, fields, row_window,
+                           payload_max_bytes=None):
     from ..exchange.dataflow_bridge import _codec_loads, _decode_value
     # Large/unsupported records keep the same original Record path. Do not
     # enlarge a grant to make the optimized representation fit.
@@ -48,12 +49,14 @@ def _project_join_document(raw, *, record_id, sequence, max_bytes, fields, row_w
     # plus the original scratch frame/copy. Unfitting inputs use the old path.
     peak = (_PROJECTED_RESIDENT_MULTIPLIER + 4 + 8 * len(fields)) * len(raw)
     if len(raw) > max_bytes or peak > row_window:
-        return _decode_record_document(raw, record_id=record_id, sequence=sequence, max_bytes=max_bytes)
+        return _decode_record_document(raw, record_id=record_id, sequence=sequence, max_bytes=max_bytes,
+                                       payload_max_bytes=payload_max_bytes)
     doc = _codec_loads(raw)
     payload = doc.get('p') if type(doc) is dict else None
     if (type(payload) is not dict or payload.get('t') != 'map' or doc.get('r') is not None):
-        return _decode_record_document(raw, record_id=record_id, sequence=sequence, max_bytes=max_bytes)
-    if type(doc.get('eb')) is not int or not 0 <= doc['eb'] <= max_bytes:
+        return _decode_record_document(raw, record_id=record_id, sequence=sequence, max_bytes=max_bytes,
+                                       payload_max_bytes=payload_max_bytes)
+    if type(doc.get('eb')) is not int or not 0 <= doc['eb'] <= (max_bytes if payload_max_bytes is None else payload_max_bytes):
         raise _err('CORRUPT_ARTIFACT', 'projected finite record size is invalid')
     # Decode only declared keys, using the original codec and original join
     # key function below. Opaque payload bytes stay in their canonical form.
