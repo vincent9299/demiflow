@@ -33,7 +33,7 @@ class WorkerGraphRunner:
         self.bounds = self.services.bounds
         self.partition = executor.assignment.lease.partition_ids[0]
         self._queue = deque()
-        # At most the sole driver's receipt and next cut can be pending.
+        # At most the sole driver's receipt and sealed-frontier recut can be pending.
         # Keep these bounded control messages reachable even when the next
         # generation fills the business queue behind a sealed frontier.
         self._cut_controls = deque()
@@ -489,9 +489,12 @@ class WorkerGraphRunner:
                 self._idle_sent = False
                 self._cut = None
                 self._sealed_cut = None
-            elif kind in ('receipt', 'cut'):
+            elif kind == 'receipt' or kind == 'cut' and self._sealed_cut is not None:
                 if len(self._cut_controls) >= 2:
                     raise DataflowError('BUDGET_EXCEEDED', 'worker cut control queue exceeds its bound')
+                # An active cut stays in the original FIFO so earlier data
+                # drains first. Only a recut of an already sealed frontier
+                # bypasses next-generation input. Receipts are control only.
                 self._cut_controls.append(command)
                 self._idle_sent = False
             else:
