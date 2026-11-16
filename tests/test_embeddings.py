@@ -329,8 +329,10 @@ def test_budget_and_blocking_io_stay_bounded(server, tmp_path, monkeypatch):
             with lock: state['active'] -= 1
     monkeypatch.setattr(runtime, 'prepare', slow_prepare)
     ds = node(server, tmp_path, batch_size=1, concurrency=4, max_requests=2)
-    with pytest.raises(PromptBudgetExceededError): ds.take_all()
-    assert len(server['bodies']) <= 2 and state['peak'] <= 2
+    with data.local_execution(worker_mode='thread'):
+        with pytest.raises(PromptBudgetExceededError): ds.take_all()
+    assert len(server['bodies']) <= 2 and 0 < state['peak'] <= 2
+    assert state['threads']
     assert all(name.startswith('demiflow-embeddings') for name in state['threads'])
     assert state['active'] == 0
 
