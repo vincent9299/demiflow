@@ -1,0 +1,12 @@
+{
+  "production_commits": [
+    "d9ad440",
+    "dce26e3"
+  ],
+  "evidence": {
+    "/tmp/demiflow-ready-peer-bound-r3-evidence/verification.json": "e752eaeee6b8b0f1e10f446c8e1d2be0f63378dc168b143965b189db6cfe1ba3",
+    "/tmp/demiflow-ready-peer-hint-r4-evidence/verification.json": "18636b1e3dcaacfe300dc4d78f638a8393e210e72d9ea9ca60a81bc1efd1bca3"
+  },
+  "actual_performance": "not_run_for_this_candidate",
+  "real_host_recovery": "pending_integrated_validation"
+}
