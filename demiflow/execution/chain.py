@@ -529,17 +529,54 @@ def _by_value_reachable(function):
     return values
 
 
+def _class_namespace(cls):
+    # Read the built-in type storage, not a metaclass attribute or descriptor.
+    return type.__dict__["__dict__"].__get__(cls, type(cls))
+
+
+def _class_mro(cls):
+    return type.__dict__["__mro__"].__get__(cls, type(cls))
+
+
+def _instance_namespace(value):
+    import types
+    for base in _class_mro(type(value)):
+        descriptor = _class_namespace(base).get("__dict__")
+        if type(descriptor) is types.GetSetDescriptorType:
+            return descriptor.__get__(value, type(value))
+    return None
+
+
 def _declared_slots(cls):
-    """Slot names declared across a class MRO (passive), excluding dict/weakref."""
+    """Declared slot names without running a custom metaclass or descriptor."""
     slots = []
-    for base in getattr(cls, "__mro__", ()):
-        declared = getattr(base, "__slots__", ())
-        if isinstance(declared, str):
+    for base in _class_mro(cls):
+        declared = _class_namespace(base).get("__slots__", ())
+        if type(declared) is str:
             declared = (declared,)
+        if type(declared) not in (tuple, list):
+            raise RecoveryContractError("Opaque class slots need an explicit code dependency adapter")
         for slot in declared:
+            if type(slot) is not str:
+                raise RecoveryContractError("Class slot names must be strings")
             if slot not in ("__dict__", "__weakref__"):
                 slots.append(slot)
     return slots
+
+
+def _instance_slots(value):
+    import types
+    # Member descriptors are native storage readers. An arbitrary property with
+    # the same name is never invoked while sealing code.
+    for base in _class_mro(type(value)):
+        namespace = _class_namespace(base)
+        for slot in _declared_slots(base):
+            descriptor = namespace.get(slot)
+            if type(descriptor) is types.MemberDescriptorType:
+                try:
+                    yield descriptor.__get__(value, type(value))
+                except AttributeError:
+                    pass
 
 
 def _is_walkable_value(value):
@@ -559,7 +596,7 @@ def _is_walkable_value(value):
         return True
     if inspect.isfunction(value) or inspect.isclass(value) or inspect.ismethod(value):
         return True
-    if getattr(value, "__dict__", None) is not None:
+    if type(value) in (staticmethod, classmethod, property) or _instance_namespace(value) is not None:
         return True
     return bool(_declared_slots(type(value)))
 
@@ -610,6 +647,12 @@ def _by_value_business_modules(function):
             if name and name != "__main__":
                 modules.append(value)
             continue
+        if type(value) in (staticmethod, classmethod):
+            enqueue((value.__func__,))
+            continue
+        if type(value) is property:
+            enqueue((value.fget, value.fset, value.fdel))
+            continue
         if inspect.ismethod(value):
             enqueue((value.__self__, value.__func__))
             continue
@@ -631,7 +674,9 @@ def _by_value_business_modules(function):
                 if module is not None:
                     pending.append(module)
             else:
-                enqueue(vars(value).values())
+                enqueue(_class_namespace(value).values())
+                enqueue(type.__dict__["__bases__"].__get__(value, type(value)))
+                enqueue((type(value),))
             continue
         if isinstance(value, functools.partial):
             enqueue((value.func,))
@@ -645,19 +690,15 @@ def _by_value_business_modules(function):
             enqueue(value)
             continue
         cls = type(value)
-        if _is_by_reference_class(cls):
-            module = sys.modules.get(cls.__module__)
-            if module is not None:
-                pending.append(module)
-        state = getattr(value, "__dict__", None)
-        if isinstance(state, dict):
+        # cloudpickle serializes a by-value instance's class as well as its data.
+        # Methods can carry by-name modules even when the instance dict is empty.
+        # Re-enter the same BFS so cycles, function/value limits and source
+        # digest/archive membership remain one authority.
+        enqueue((cls,))
+        state = _instance_namespace(value)
+        if type(state) is dict:
             enqueue(state.values())
-        for slot in _declared_slots(cls):
-            try:
-                slot_value = getattr(value, slot)
-            except AttributeError:
-                continue
-            enqueue((slot_value,))
+        enqueue(_instance_slots(value))
     return modules
 
 
@@ -787,7 +828,7 @@ def _business_dependency_modules(plan, *, source=None):
             except (RuntimeError, ValueError, TypeError):
                 pass
             target = getattr(getattr(operation, "callable", None), "target", None)
-            function = getattr(target, "__self__", target)
+            function = target.__self__ if inspect.ismethod(target) else target
             if inspect.isfunction(function) and _is_by_reference_udf(function):
                 yield function
 
@@ -808,8 +849,12 @@ def _business_dependency_modules(plan, *, source=None):
             except (RuntimeError, ValueError, TypeError):
                 pass
             target = getattr(getattr(operation, "callable", None), "target", None)
-            function = getattr(target, "__self__", target)
+            function = target.__self__ if inspect.ismethod(target) else target
             if inspect.isfunction(function) and not _is_by_reference_udf(function):
+                yield function
+            elif function is not None and not inspect.isfunction(function):
+                # A callable class/instance/partial is serialized too. Its
+                # by-value class methods and capture slots use the same walk.
                 yield function
 
     pending = deque()
@@ -916,7 +961,7 @@ def snapshot_code_sources(action, plan, *, source=None):
 
     for operation in plan.operations:
         target = getattr(getattr(operation, "callable", None), "target", None)
-        function = getattr(target, "__self__", target)
+        function = target.__self__ if inspect.ismethod(target) else target
         if not inspect.isfunction(function):
             continue
         filename = inspect.getsourcefile(function)

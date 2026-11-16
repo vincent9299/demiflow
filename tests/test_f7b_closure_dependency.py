@@ -121,10 +121,13 @@ def _checkpointable_capture(transform, trace):
     # module, or partial.args[0] module. Preserve that exact inner reference path;
     # the explicit owner declares that none of them is mutable business state.
     class CapturedTransform:
+        def __init__(self):
+            self.transform = transform
+
         def __call__(self, row):
             with trace.open("a") as stream:
                 stream.write(str(row["x"]) + "\n")
-            return transform(row)
+            return self.transform(row)
 
         def snapshot_state(self):
             return {}
@@ -135,8 +138,7 @@ def _checkpointable_capture(transform, trace):
     return CapturedTransform()
 
 
-@pytest.mark.parametrize("form", FORMS)
-def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
+def _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, owner_factory):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
                                         materialize_action_id)
@@ -158,7 +160,7 @@ def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, f
         case.mkdir()
         hook, marker = _crash_hook(case)
         trace = case / "business-calls"
-        owner = _checkpointable_capture(transform, trace)
+        owner = owner_factory(transform, trace)
         root = case / "run"
         def pipeline():
             return (data.from_items(rows_in).map_async(owner, concurrency=1)
@@ -203,6 +205,11 @@ def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, f
         assert "Loaded program code differs from the sealed pin" in str(excinfo.value)
     assert trace.read_bytes() == before_calls, "edited code ran before pin verification"
     assert_released(root)
+
+
+@pytest.mark.parametrize("form", FORMS)
+def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
+    _assert_capture_resume_code_pin(tmp_path, monkeypatch, form, _checkpointable_capture)
 
 
 # --- G3: closure-captured helper edit -> worker LOAD gate refuses (three forms) ---
