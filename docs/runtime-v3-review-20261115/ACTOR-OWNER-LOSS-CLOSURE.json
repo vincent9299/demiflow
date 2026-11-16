@@ -1,0 +1,39 @@
+{
+  "scope": "V027 node_loss, actual actor owner loss on same-host Ray",
+  "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+  "branch": "engine/gpt-v3-regression-20261115",
+  "fixed_head": "c76187520131ff8fd36863d3999b906b30ba0534",
+  "implementation_commits": [
+    "11b2892",
+    "c761875"
+  ],
+  "results": {
+    "passed": 21,
+    "failed": 0,
+    "skipped": 0,
+    "deselected_component_duplicates": 4,
+    "seconds": 48.18
+  },
+  "source_count": 2179,
+  "source_changed": [],
+  "artifact_sha256": {
+    "/tmp/demiflow-v027-final-evidence/verification.json": "449c4d0ef0523fe38074de5e5a5dab01d23d42fe862db16d0ba499d3076884ce",
+    "/tmp/demiflow-v027-final-evidence/scenario-node_loss.json": "1c083924833fc6b8333e51caeee8ca5fa606c71e96c9780a098aadbec8dc2fc5",
+    "/tmp/demiflow-v027-final-evidence/result.xml": "608351b4cbe64893f0ee1b7b0589323407af9173310cb694c7592a6a0f5c9294",
+    "/tmp/demiflow-v027-final-evidence/post-exit-cleanup.json": "d19c67409d520c680c0f5f67d71551104e9b8c51f2d24d27b8d3928db8dadc65",
+    "/tmp/demiflow-node-loss-fixed-runner.py": "3aef0d38fe36c3d67208e7a783e92c8eca90495c50e0e56669563e459eb346e3",
+    "/tmp/demiflow-v027-final.log": "a4fa5217b0b599f4a1dcc890389b0debcbedb93f34ba276bf139c309c0d8687e",
+    "/tmp/demiflow-v027-fixed-evidence/verification.json": "dc6f7cf73a7fdcafe70a7e66b576a2d333a67a532dbb653da9ffb291dc536959",
+    "/tmp/demiflow-v027-fixed.log": "7a4e54cf362c486ae4e947d318f5e7d2a5ad76816f90f521fb4667fbc4c1d7ec",
+    "/tmp/demiflow-v027-trial.log": "9a3e80988aec4a1f662ab832d02c4977264a2e8c50db50f8d35401ca4416b17f",
+    "/tmp/demiflow-v027-trial2.log": "e2a90f170c26ea498af6417b43c5c86415fc70103b6aeae524176a1e5aae350e",
+    "/tmp/demiflow-v027-unknown-trial.log": "45bdf12efaa524f70fa02fae1cd2b6e2401bbd8f68489f0c346860a1f01a90cd",
+    "/tmp/demiflow-v027-pending-trial.log": "7a280ba3b3cfe227a4dc944b1027d97bd0889a83e1bf353499e6f8590a6e3204"
+  },
+  "scope_limits": [
+    "No physical host outage or network partition was injected.",
+    "Completed ray.put cache can remain readable; recovery authority is exclusively the original ACK and ArtifactRefs.",
+    "Real pending HostedDataflowWorker.close RPCs fail with ActorDiedError when the actor is killed after HTTP acceptance.",
+    "No production code, frozen files, shared environment/service or main checkout changed."
+  ]
+}
