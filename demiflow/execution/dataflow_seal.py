@@ -230,9 +230,9 @@ def _owned_factory_declaration(spec):
             if type(value) in (classmethod, staticmethod):
                 value = value.__func__
             if type(value) is types.FunctionType:
-                args, kwargs = (spec.constructor_args, spec.constructor_kwargs) if name == '__init__' else (
+                args, kwargs = (spec.constructor_args, spec.constructor_kwargs) if name in {'__new__', '__init__'} else (
                     (spec.call_args, spec.call_kwargs) if name == '__call__' else ((), {}))
-                if function_residency_kind(value, call_args=args, call_kwargs=dict(kwargs)) != 'none':
+                if function_residency_kind(value, call_args=args, call_kwargs=kwargs) != 'none':
                     return False
             elif type(value) not in immutable:
                 return False
