@@ -42,10 +42,27 @@ def test_write_lance_rejects_zero_rows(tmp_path):
 
 
 def test_write_lance_append_schema_mismatch_is_indeterminate(tmp_path):
+    # Keep the historical selector. A deterministic schema mismatch must now
+    # fail in native prepare; it is not evidence of uncertain publication.
+    import lance
+    from demiflow.execution import RunContext
+    from demiflow.execution.run_journal import RunJournal
     uri = str(tmp_path / "t.lance")
     ds([{"k": "a"}]).write_lance(uri)
-    with pytest.raises(LanceWriteError):
-        ds([{"other": 1}]).write_lance(uri)
+    version = lance.dataset(uri).version
+    with pytest.raises(InvalidLanceRequest, match="Lance append schema differs at field 'k'"):
+        with RunContext.start(tmp_path / 'mismatch-run'):
+            ds([{"other": 1}]).write_lance(uri)
+    assert lance.dataset(uri).version == version
+    assert lance.dataset(uri).to_table().to_pylist() == [{"k": "a"}]
+    journal = RunJournal(tmp_path / 'mismatch-run')
+    for fact in journal.execution_commits('action-1'):
+        if fact['status'] == 'pending':
+            assert fact['prepared'] is None and fact['receipts'] == {}
+            continue
+        assert fact['status'] == 'acked'
+        assert not fact['prepared']['sinks']['write_lance']['manifest']['final']
+        assert fact['receipts']['write_lance']['data'].get('native_receipt') is None
 
 
 def test_read_lance_pinned_version_ignores_later_appends(tmp_path):

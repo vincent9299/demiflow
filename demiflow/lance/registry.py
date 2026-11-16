@@ -7,7 +7,7 @@
 - ``ReleaseRegistry``：发布登记（_demiflow/registry/releases.lance）。一次发布＝多张
   表的固定版本组合；登记是可见边界，登记前逐引用核验（catalog 在册＋固定
   版本可读＋schema/行数一致），任何不符在写入可见行之前失败。
-- ``write_registered_table``：checkpoint_lance 原子提交＋回执读取＋引用
+- ``write_registered_table``：原生 RunJournal 提交＋回执读取＋引用
   构造＋catalog 登记的公共写端。schema 由调用方显式传入——本层不知道任何
   业务 schema 集合。
 
