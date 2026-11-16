@@ -211,6 +211,60 @@
         "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_mainpath_20261116:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_mainpath_20261116/tests",
         "TMPDIR": "/tmp/demiflow-relational-history-r3/scratch"
       }
+    },
+    {
+      "receipt": "/tmp/demiflow-root-browser-fold-9ff-evidence/verification.json",
+      "receipt_sha256": "ea23748bde7646a6c50758205075e0332ebde8dd39ed8854c80c45a14a10293a",
+      "head": "9ff14a8f878dbe80032220f8bbd8b494ccdb2203",
+      "inputs": 2959,
+      "source_mismatches": [],
+      "source_unchanged": true,
+      "complete_passed": 6,
+      "incomplete": {
+        "tests/test_runtime_v3_region_terminal_envelope.py::test_region_legal_fold_payload_survives_terminal_envelope[4096-400]": [
+          [
+            "setup",
+            "passed"
+          ],
+          [
+            "call",
+            "failed"
+          ],
+          [
+            "teardown",
+            "passed"
+          ]
+        ]
+      },
+      "proof_mismatches": [],
+      "returncode": 1,
+      "children_after": [
+        {
+          "pid": 37806,
+          "name": "python",
+          "created": 1794859146.47
+        }
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-root-browser-fold-9ff-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-root-browser-fold-9ff-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-root-browser-fold-9ff-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-root-browser-fold-9ff-locations",
+        "TMPDIR": "/tmp/demiflow-root-browser-fold-9ff-tmp",
+        "DEMIFLOW_V3_PROVIDER": null,
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome",
+        "FORGE_WORKBENCH_EVIDENCE": "/tmp/demiflow-root-browser-fold-9ff-browser",
+        "FORGE_OUTPUT_EVIDENCE": "/tmp/demiflow-root-browser-fold-9ff-output",
+        "FORGE_ACCEPTANCE_DIR": "/tmp/demiflow-root-browser-fold-9ff-acceptance"
+      },
+      "children_followup": {
+        "observed_at": "2026-11-16T20:03:50.577058+00:00",
+        "all_recorded_pids_absent": true
+      }
     }
   ],
   "boundaries": {
@@ -233,5 +287,8 @@
     "Four browser test oracle migrations require rerun; cached history owner proofs need final affected combination",
     "Formal I08 original performance matrix and final API/Local/Ray/business/product affected acceptance",
     "V035 inventory and explicit failed/not_run/environment disposition; not all source-bound leaf tests executed"
-  ]
+  ],
+  "latest_tested_candidate": "9ff14a8f878dbe80032220f8bbd8b494ccdb2203",
+  "two_hosts_current_preflight": "blocked: original SSH public-key authentication rejected; no remote code ran",
+  "performance_preparation": "/tmp/demiflow-i08-execution-preparation-20261117/README.md"
 }

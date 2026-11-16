@@ -12,16 +12,18 @@
 ## 两项核心修复仍在进行
 
 1. **行payload与record封装混用上限。** 4KiB内合法typed payload因provenance和JSON转义在终端被误拒；同类限制也存在peer、finite与结果重读。统一分离业务行、document和外层frame的上限，并在原resident/scratch/grant内计同时活副本；旧bytes/media/ACK不变。root新增原完整tuple fold反例，不能以短校验值替代合法宽输出。
-2. **reduce状态共驻少计。** 新region只算一份S；原普通reduce也缺显式平台初值/deepcopy/序列化副本核算。真实1MiB任务中376832-byte region grant持有832360-byte三个list容器仍ACK，反例在 `/tmp/demiflow-region-state-audit-20261117/result.json`。正统一修compiler/profile和运行时准入；不能用fallback掩盖普通路径问题，也不提高原256MiB。
+2. **reduce状态共驻少计。** 新region只算一份S；原普通reduce也缺显式平台初值/deepcopy/序列化副本核算。真实1MiB任务中376832-byte region grant持有832360-byte三个list容器仍ACK，反例在 `/tmp/demiflow-region-state-audit-20261117/result.json`。正统一修compiler/profile和运行时准入；不能用fallback掩盖普通路径问题，也不提高原256MiB。合流契约增加只读的kernel瞬时驻留观察，让输出编码与尚存reduce状态共用原grant；仅peer ACK可释放的部分允许等待。
 
 ## 本轮根节点验收与测试迁移
 
 固定90b0ef7组合：**88 passed、4 failed、0 skipped，522.20秒**，2957输入前后相同、全部与提交一致，子进程清理为空。75项性能harness/比较守卫和13项产品测试通过；不能把这些称作性能矩阵已过。
 
-四红均在同一旧产品测试文件：一处等待已替换的run-bar strong，三处把run旁边的driver-resources目录误数成第二次运行。48e40f9已改为等待真实新run/选择值，并同时核公开历史total和磁盘真实run身份，未删除请求幂等/失败receipt/停止等产品断言；尚待原四条复验。此前新发现的共享历史证据写入改到tmp_path，性能子进程第4个location-cache域也已加入进程内断言与本机/远端存储比较。
+四红均在同一旧产品测试文件：一处等待已替换的run-bar strong，三处把run旁边的driver-resources目录误数成第二次运行。48e40f9已改为等待真实新run/选择值，并同时核公开历史total和磁盘真实run身份，未删除请求幂等/失败receipt/停止等产品断言。9ff14a8原四条复验全部通过，另配置采纳/并发读图用例通过；同组完整tuple输出16KiB通过、4KiB仍为原封装错误。7项共6绿/1红，2959输入摘要逐一匹配该提交、测试前后不变。回执末端曾见1个新生Python子进程，独立后查该PID已不存在，不能将回执原值改写为零。此前新发现的共享历史证据写入改到tmp_path，性能子进程第4个location-cache域也已加入进程内断言与本机/远端存储比较。
 
 ## 尚未完成
 
 上述两项资源修复及合流后受影响API/业务/Local-Ray/工作台；原I08九类、原资源与同文件系统五轮；V035最终完整collection/逐节点状态。历史XML补回1138项观察，不代表最终同源码通过。PG缺真实环境、旧业务Lance源需单独只读边界，不能归为普通私有fixture。
 
 原40 ACK仅为旧screen实测，不是正式plan要求固定40；保持原checkpoint策略并记录实际逐cut。主仓仍e40a6dd，原11项dirty状态/18个文件摘要不变；承重七件不变。未push、未合主仓。
+
+I08执行清单已在 `/tmp/demiflow-i08-execution-preparation-20261117/README.md` 备妥，尚未跑正式压力。原SSH入口本次只读预检公钥认证拒绝，两机复验暂阻；本机Local/Ray/GPU准备可独立继续，不把历史两机通过充作本轮通过。
