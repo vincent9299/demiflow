@@ -159,7 +159,7 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
         durable = execution._durable_residency if parked else None
         stored = (durable.entries.get(value['delivery_id'])
                   if event.kind=='data' and durable is not None else None)
-        if event.kind=='data' and not duplicates and (stored is not None or value['delivery_id'] in execution._deliveries):
+        if event.kind=='data' and not duplicates and (stored is not None if parked else value['delivery_id'] in execution._deliveries):
             from copy import deepcopy
             before=dict(execution._deliveries)
             retained=deepcopy(durable.entries) if durable is not None else None
