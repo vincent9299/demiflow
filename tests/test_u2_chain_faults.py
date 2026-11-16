@@ -67,11 +67,8 @@ def _dataset(double):
 
 
 def _chain_child_id(run):
-    with run.journal._connection() as db:
-        row = db.execute("SELECT action_id FROM runtime_actions "
-                         "WHERE action_id LIKE '%-chain'").fetchone()
-    assert row is not None, "chain output child action was not bound"
-    return row[0]
+    from runtime_v3_owned_crash import materialize_action_id
+    return materialize_action_id(run)
 
 
 def _release_crash_orphans(root):
@@ -102,13 +99,18 @@ def _release_crash_orphans(root):
 # ---------------- F2: worker crash, new allocation recovers ----------------
 
 def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
+    from runtime_v3_owned_crash import (kill_owned_worker, assert_worker_killed,
+                                       action_process_records, assert_released)
+    driver_pid = os.getpid()
     crash_marker = tmp_path / "crashed-once"
+    trace = tmp_path / 'business-calls'
 
     def double(row):
+        with trace.open('a') as stream:
+            stream.write(str(row['x']) + '\n')
         # Crash the whole worker once, after at least one durable acked cut.
         if row["x"] == 4 and not crash_marker.exists():
-            crash_marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(crash_marker, driver_pid)
         return {**row, "x": row["x"] * 2}
 
     dataset, expected = _dataset(double)
@@ -120,8 +122,11 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
                               limits={"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}) as run:
             reference = run.ref
             dataset.materialize().take_all()  # worker SIGKILLs mid-chain
-    assert crash_marker.exists()
+    assert_worker_killed(crash_marker, tmp_path / 'run')
     with RunContext.resume(reference) as run2:
+        before = {f['commit_id']: f for f in run2.journal.execution_commits(_chain_child_id(run2))
+                  if f['status'] == 'acked'}
+        assert before, 'the real crash must retain its original ACK prefix'
         rows = dataset.materialize().take_all()
         assert rows == expected
         facts = run2.journal.execution_commits(_chain_child_id(run2))
@@ -129,15 +134,22 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         assert sequences == list(range(1, len(facts) + 1))  # contiguous, no gap/dup
         assert all(fact["status"] == "acked" for fact in facts)
         assert len({fact["commit_id"] for fact in facts}) == len(facts)
+        after = {f['commit_id']: f for f in facts}
+        assert before.keys() < after.keys()
+        assert all(after[key]['receipts'] == fact['receipts'] for key, fact in before.items())
         with run2.journal._connection() as db:
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert owner == (run2.attempt, run2.fence)  # worker crash never moved ownership
 
-    records = list((tmp_path / "run-resources" / "units").glob("*/*/process.json"))
+    records = action_process_records(run2, _chain_child_id(run2))
     assert len(records) == 2, "a new worker allocation was not provisioned for recovery"
-    pids = {json.loads(path.read_text())["identity"]["pid"] for path in records}
+    pids = {value['identity']['pid'] for _, value in records.values()}
     assert len(pids) == 2 and os.getpid() not in pids
-    _release_crash_orphans(tmp_path / "run-resources")
+    from collections import Counter
+    calls = Counter(int(line) for line in trace.read_text().splitlines())
+    assert [calls[i] for i in range(4)] == [1] * 4
+    assert calls[4] == 2 and all(calls[i] == 1 for i in range(5, 10))
+    assert_released(tmp_path / 'run')
 
 
 # ---------------- F3: driver restart reconciles before recompute ----------------
@@ -183,10 +195,12 @@ def test_f3_driver_restart_recovers_prepared_before_recompute(tmp_path, monkeypa
 
     # The acked prefix was never recomputed: each source row ran exactly once.
     assert sorted(int(line) for line in trace.read_text().splitlines()) == list(range(10))
-    _release_crash_orphans(tmp_path / "run-resources")
+    from runtime_v3_owned_crash import assert_released
+    assert_released(tmp_path / 'run')
 
 
 def test_f3_completed_chain_short_circuits_reentry(tmp_path):
+    from runtime_v3_owned_crash import action_process_records, process_records, assert_released
     def double(row):
         return {**row, "x": row["x"] * 2}
 
@@ -198,6 +212,7 @@ def test_f3_completed_chain_short_circuits_reentry(tmp_path):
                               limits={"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}) as run:
             reference = run.ref
             assert dataset.materialize().take_all() == expected
+            before_records = process_records(run.directory)
             raise RuntimeError("later action failed")
     with RunContext.resume(reference) as run2:
         # terminal.complete short-circuits before any worker provisioning or
@@ -205,12 +220,11 @@ def test_f3_completed_chain_short_circuits_reentry(tmp_path):
         assert dataset.materialize().take_all() == expected
         facts = run2.journal.execution_commits(_chain_child_id(run2))
         assert all(fact["status"] == "acked" for fact in facts)
+        assert process_records(run2.directory) == before_records
 
-    records = list((tmp_path / "run-resources" / "units").glob("*/*/process.json"))
+    records = action_process_records(run2, _chain_child_id(run2))
     assert len(records) == 1, "completed chain re-entry provisioned a second worker"
-    pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity",
-                             capacity={"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3})
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+    assert_released(tmp_path / 'run')
 
 
 # ---------------- F4: cancel grace convergence / quarantine isolation ----------------
