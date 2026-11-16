@@ -22,7 +22,7 @@ def prepare_cleanup(local_env):
     return run, pool, unit, provider, state, manager
 
 
-@pytest.mark.parametrize('result', ['unconfirmed', 'provider_error'])
+@pytest.mark.parametrize('result', ['unconfirmed', 'provider_error', 'transient_io_error'])
 def test_returned_cleanup_retries_without_refunding_unknown_exit(local_env, monkeypatch, result):
     run, pool, unit, provider, state, manager = prepare_cleanup(local_env)
     calls = []
@@ -33,6 +33,8 @@ def test_returned_cleanup_retries_without_refunding_unknown_exit(local_env, monk
         if len(calls) == 1:
             if result == 'provider_error':
                 raise ResourceError('CLEANUP_UNCONFIRMED', 'owned child is still draining')
+            if result == 'transient_io_error':
+                raise OSError('temporary process observation failure')
             return {'confirmed': False, 'evidence_ref': 'owned-child-still-draining'}
         return original(*args, **kwargs)
 

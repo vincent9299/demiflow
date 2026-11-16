@@ -199,6 +199,15 @@ class ResourceManager:
                 return entry
             return self._stale(allocation_id, [exc.code, exc.reason], exc.evidence_ref)
         except Exception as exc:
+            if operation["kind"] == "ensure_absent":
+                # Cleanup I/O returned an error, rather than disappearing with
+                # its controller. Keep exit unknown and resources charged, but
+                # let the same intent retry under the state's bounded backoff.
+                entry = {"allocation_id": allocation_id, "cleanup": "UNCONFIRMED",
+                         "observed_at_ms": int(time.time() * 1000),
+                         "conditions": ["PROVIDER_UNAVAILABLE", str(exc)[:256]]}
+                entry["observation_revision"] = self._revision(entry)
+                return entry
             return self._stale(allocation_id, ["PROVIDER_UNAVAILABLE", str(exc)[:256]])
 
     def reconcile_once(self, authority, deadline, limit):
