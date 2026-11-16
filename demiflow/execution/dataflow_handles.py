@@ -586,6 +586,8 @@ class StoredMaterializedHandle:
         from .record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._bounds) if with_schema else None
         count = 0
+        from .arrow_payload import ArrowBatchCache, is_arrow_record
+        arrow = ArrowBatchCache(self._store, self._bounds)
         from .dataflow_segments import segment_refs
         for ref in (leaf for block in self._blocks
                     for leaf in segment_refs(self._store, block, self._bounds)):
@@ -601,7 +603,9 @@ class StoredMaterializedHandle:
                         from .contracts.dataflow import thaw_record_value
                         record = _decode_record_document(item["document"].encode(),
                             record_id=item["record_id"], sequence=item["sequence"], max_bytes=len(line))
-                        if record.inline is None:
+                        if is_arrow_record(record):
+                            row = arrow.row(record)
+                        elif record.inline is None:
                             from .exchange.dataflow_bridge import _decode_payload
                             ceiling = self._bounds.max_row_bytes
                             row = _decode_payload(b"".join(self._store.read(record.payload_ref,

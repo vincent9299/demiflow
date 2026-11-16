@@ -472,6 +472,9 @@ class RunArtifactStore:
         self._journal.release_materialized(ref, owner=owner)
 
     def close(self):
+        cache = getattr(self, '_arrow_payload_cache', None)
+        if cache is not None:
+            cache.close()
         # Read-only/result handles may still read explicitly rooted history.
         # New publications require a new active store owner.
         self._writer_closed = True

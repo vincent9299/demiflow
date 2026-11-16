@@ -57,6 +57,10 @@ class WorkerGraphRunner:
         self._consumed_deliveries = set()
         self._memory_frontiers = {}
         physical = executor._physical
+        from ..arrow_payload import allows_batch_carrier
+        arrow_enabled = allows_batch_carrier(executor._graph, physical)
+        for reader in executor._readers.values():
+            reader._arrow_enabled = arrow_enabled
         self._park_mode = (any(e.mode == 'durable_incremental' for e in physical.exchanges)
             and sum(s.resident_bytes * s.replica_target for s in physical.stages)
                 + physical.residency.control_reserved_bytes > self.bounds.max_resident_bytes)
@@ -828,7 +832,13 @@ class WorkerGraphRunner:
                     # restored prefix; do not decode/encode/spool the probe.
                     # Cross-partition totals remain the driver's responsibility.
                     raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
-            if record.inline is None:
+            from ..arrow_payload import is_arrow_record, batch_cache
+            if is_arrow_record(record):
+                # Actual worker delivery uses the transfer codec directly.
+                # Authenticate and bind the shared payload before accepting its
+                # row bytes/schema into terminal state, even for co-location.
+                batch_cache(self.services.store, self.bounds, services=self.services).locate(record)
+            elif record.inline is None:
                 from ..dataflow_records import clone_record
                 from ..kernels.dataflow import _materialize_row, _row_bytes
                 row = _materialize_row(record, self.services)
@@ -865,6 +875,9 @@ class WorkerGraphRunner:
             self._metrics[occ]['rows_output'] += 1
             if self._terminal_columns is None and record.inline is not None:
                 self._terminal_columns = sorted(record.inline)
+            elif self._terminal_columns is None and record.schema_ref is not None:
+                from ..record_schema import RecordSchemas
+                self._terminal_columns = RecordSchemas(self.services).read(record.schema_ref).names
             if self._terminal_spec.kind in ('take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches'):
                 self._publish(record)
             if self._limit is not None and self._terminal_rows >= self._limit:

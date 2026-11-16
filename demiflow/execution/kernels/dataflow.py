@@ -135,6 +135,9 @@ def _input_row_bytes(record: Record) -> int:
     if record.inline is not None:
         return record.encoded_bytes
     if record.payload_ref is not None:
+        from ..arrow_payload import is_arrow_record
+        if is_arrow_record(record):
+            return record.encoded_bytes
         return record.payload_ref.size_bytes
     raise _err("INVALID_CONTRACT", "record carries neither inline nor payload_ref")
 
@@ -144,6 +147,9 @@ def _materialize_row(record: Record, services: RuntimeServices) -> dict[str, Any
         raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
     if record.inline is not None:
         return thaw_record_value(record.inline)
+    from ..arrow_payload import is_arrow_record, materialize_arrow_row
+    if is_arrow_record(record):
+        return materialize_arrow_row(record, services)
     ref = record.payload_ref
     limit = services.bounds.max_row_bytes
     if ref.size_bytes > limit:
@@ -273,6 +279,9 @@ def invoke_unary(
     _check_stop(services)
     kind = spec.kind
     cfg = spec.configuration
+    if kind == 'LimitOp':
+        yield record
+        return
     row = _materialize_row(record, services)
     position = record.source_position
     sequence = record.sequence
@@ -353,8 +362,6 @@ def invoke_unary(
             out = _output_record(child, position, out_row, sequence, services)
             budget.charge(out)
             yield out
-    elif kind == "LimitOp":
-        yield record
     elif kind == "SelectColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
         projected = {column: row[column] for column in columns}

@@ -15,13 +15,66 @@ def _error(message):
     return DataflowError('BUDGET_EXCEEDED', 'batch conversion admission: ' + message)
 
 
+def is_lance_blob_type(dtype):
+    """A single known native extension; arbitrary user hooks remain refused."""
+    if type(dtype).__module__ != 'lance.blob' or type(dtype).__name__ != 'BlobType':
+        return False
+    from lance.blob import BlobType
+    if type(dtype) is not BlobType:
+        return False
+    import pyarrow as pa
+    fields = tuple(dtype.storage_type)
+    expected = (('data', pa.large_binary()), ('uri', pa.string()),
+                ('position', pa.uint64()), ('size', pa.uint64()))
+    return (len(fields) in (2, 4)
+            and all(field.name == name and field.type == kind
+                    for field, (name, kind) in zip(fields, expected))
+            and all(field.nullable for field in fields[:2]))
+
+
+def _blob_storage_value(value):
+    # Match the native blob constructor without reading a URI or copying bytes.
+    if value is None or type(value) is dict:
+        return value
+    if type(value) is bytes:
+        return {'data':value, 'uri':None, 'position':None, 'size':None}
+    if type(value) is str:
+        return {'data':None, 'uri':value, 'position':None, 'size':None}
+    raise TypeError('Lance blob value requires bytes, URI, native storage dict or None')
+
+
+def native_arrow_table(rows, schema):
+    """Construct already-admitted native columns with original blob semantics."""
+    import pyarrow as pa
+    if schema is None or not any(is_lance_blob_type(f.type) for f in schema):
+        return pa.Table.from_pylist(rows, schema=schema)
+    import lance
+    from lance.blob import Blob
+    arrays = []
+    for field in schema:
+        values = [row.get(field.name) for row in rows]
+        if is_lance_blob_type(field.type):
+            values = [Blob(**value) if type(value) is dict else value for value in values]
+            array = lance.blob_array(values)
+            if array.type != field.type:
+                # Historical two-field BlobType storage remains its own type.
+                storage = pa.StructArray.from_arrays(
+                    [array.storage.field(f.name) for f in field.type.storage_type],
+                    fields=list(field.type.storage_type), mask=array.is_null())
+                array = pa.ExtensionArray.from_storage(field.type, storage)
+        else:
+            array = pa.array(values, type=field.type)
+        arrays.append(array)
+    return pa.Table.from_arrays(arrays, schema=schema)
+
+
 def _builtin_storage(dtype):
     """Known native storage layouts; never invoke a user extension hook."""
     import pyarrow as pa
     known = tuple(getattr(pa, name) for name in (
         'JsonType', 'UuidType', 'Bool8Type', 'FixedShapeTensorType', 'OpaqueType')
                   if hasattr(pa, name))
-    return dtype.storage_type if type(dtype) in known else None
+    return dtype.storage_type if type(dtype) in known or is_lance_blob_type(dtype) else None
 
 
 def _binary_size(value):
@@ -92,6 +145,14 @@ class _Admission:
             if storage is not None:
                 # Keep known native storage declarations, including empty
                 # and null-only typed columns, on the real constructor.
+                if is_lance_blob_type(dtype):
+                    original = column
+                    column = _Column(n, lambda: (_blob_storage_value(value)
+                                                  for value in original.values()), column.implicit_nulls)
+                    # Native blob_array holds five pointer lists, a null mask,
+                    # optional Blob wrappers and per-column constructor lists.
+                    self.builder += 512 * n
+                    self.check(self.builder)
                 self.arrow(column, storage, depth + 1)
                 return
             raise DataflowError('UNSUPPORTED_CAPABILITY',
@@ -307,6 +368,8 @@ class _Admission:
             return 16
         storage = _builtin_storage(dtype)
         if storage is not None:
+            if is_lance_blob_type(dtype):
+                value = _blob_storage_value(value)
             return self.typed_boxed(value, storage, depth + 1)
         if pa.types.is_dictionary(dtype) or pa.types.is_run_end_encoded(dtype):
             return self.typed_boxed(value, dtype.value_type, depth + 1)

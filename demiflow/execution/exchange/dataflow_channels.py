@@ -164,6 +164,10 @@ def resolve_record(encoded, *, store, bounds):
     _validate_artifact_ref(ref, "record payload ref")
     if ref.store_id != store.store_id:
         _fail("INVALID_CONTRACT", "record ref belongs to a different store domain")
+    from ..arrow_payload import is_arrow_record, batch_cache
+    if is_arrow_record(skeleton):
+        batch_cache(store, bounds).locate(skeleton)
+        return skeleton
     payload = _read_bounded(store, ref, max_bytes=bounds.max_row_bytes)
     if len(payload) != ref.size_bytes or hashlib.sha256(payload).hexdigest() != ref.digest:
         _fail("CORRUPT_ARTIFACT", "record payload size/digest mismatch")

@@ -142,8 +142,12 @@ class _BaseReader:
         row, position = result
         sequence = self._next_sequence
         record_id = identity([self._snapshot.source_id, self._split.split_id, position])
-        encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
-        record = Record(record_id, position, None, row, encoded_bytes, sequence, self._schema_ref)
+        from .arrow_payload import ArrowPayload
+        if isinstance(row, ArrowPayload):
+            record = Record(record_id, position, row.ref, None, row.encoded_bytes, sequence, self._schema_ref)
+        else:
+            encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
+            record = Record(record_id, position, None, row, encoded_bytes, sequence, self._schema_ref)
         if self._snapshot.replay != "attempt_only":
             # Keep one bounded in-flight row. Persist it only if a snapshot
             # precedes its downstream acknowledgement, not on every seek read.
@@ -549,11 +553,30 @@ class LanceReader(_BaseReader):
         self._version = int(self._offset.get("version", self._snapshot.immutable_identity["version"]))
         self._fragment_ids = tuple(split.locator.get("fragment_ids", ()))
         self._global = bool(split.locator.get("global_query", False))
-        self._rows = self._iter_rows()
+        self._arrow_cursor = None
         target_fragment = int(self._offset.get("fragment_id", 0))
         target_offset = int(self._offset.get("row_offset", 0))
         self._fragment_id = target_fragment
         self._row_offset = target_offset
+        saved = self._offset.get('arrow_batch')
+        self._rows = self._iter_rows()
+        prefix = None
+        if saved is not None:
+            from .arrow_payload import ArrowBatchCache, ArrowPayload
+            ref = ArtifactRef(**saved)
+            cache = ArrowBatchCache(self._services.store, self._services.bounds, services=self._services)
+            batch, header = cache.load(ref)
+            if (header['source_id'] != self._snapshot.source_id or header['split_id'] != split.split_id
+                    or header['version'] != self._version or header['fragment_id'] != target_fragment
+                    or not header['start'] <= target_offset <= header['start'] + header['count']):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Arrow cursor differs from the original source binding')
+            self._schema_ref = self._schemas.put(batch.schema)
+            begin = target_offset
+            target_offset = header['start'] + header['count']
+            prefix = ((target_fragment, offset, ArrowPayload(ref, header['sizes'][offset - header['start']]))
+                      for offset in range(begin, target_offset))
+            cache.close()
+            del batch
         if target_fragment or target_offset:
             # Offset denotes the next unread row. Keep the matching row and
             # advance into the following fragment when the saved fragment ended.
@@ -562,6 +585,8 @@ class LanceReader(_BaseReader):
             self._rows = itertools.dropwhile(
                 lambda item: (order.get(item[0], 0), item[1]) < (target_index, target_offset),
                 self._rows)
+        if prefix is not None:
+            self._rows = itertools.chain(prefix, self._rows)
 
     def _iter_rows(self) -> Iterator[tuple[int, int, Any]]:
         from dataclasses import replace
@@ -575,31 +600,44 @@ class LanceReader(_BaseReader):
             yield from key_rows(self)
             return
         exact = replace(self._plan.query, version=self._version)
+        if hasattr(exact, 'batch_readahead'):
+            # One native prefetch plus the current batch fits the same source
+            # grant; do not inherit Lance's larger implicit prefetch window.
+            exact = replace(exact, batch_readahead=1, fragment_readahead=1)
         batch_rows = max(1, min(256, self._services.bounds.max_batch_bytes // self._services.bounds.max_row_bytes))
         from .dataflow_native_limits import limit_value
         batch_rows = limit_value(self._services, 'batch_rows', batch_rows)
         if getattr(exact, 'batch_size', None) is not None:
             exact = replace(exact, batch_size=min(exact.batch_size, batch_rows))
-        def rows(batch):
+        self._arrow_scan_rows = getattr(exact, 'batch_size', None) or batch_rows
+        def rows(batch, fragment_id, start):
             if batch.nbytes > self._services.bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'Lance decoded batch exceeds max_batch_bytes')
             self._schema_ref = self._schemas.put(batch.schema)
+            from .arrow_payload import publish_batch, ArrowPayload, fallback_row
+            carrier = (publish_batch(batch, reader=self, fragment_id=fragment_id, start=start)
+                       if getattr(self, '_arrow_enabled', True) else None)
+            if carrier is not None:
+                ref, sizes = carrier
+                for size in sizes:
+                    yield ArrowPayload(ref, size)
+                return
             for index in range(batch.num_rows):
                 part = batch.slice(index, 1)
                 if part.nbytes > self._services.bounds.max_row_bytes:
                     raise DataflowError('BUDGET_EXCEEDED', 'Lance row exceeds max_row_bytes')
-                yield part.to_pylist()[0]
+                yield fallback_row(batch, index)
         if isinstance(exact, LanceVectorSearchSpec):
             index = 0
             for batch in _iter_vector(exact, batch_size=batch_rows):
-                for row in rows(batch):
+                for row in rows(batch, 0, index):
                     yield 0, index, row
                     index += 1
             return
         if self._global:
             row_offset = 0
             for batch in _iter_scan(exact, batch_size=batch_rows):
-                for row in rows(batch):
+                for row in rows(batch, 0, row_offset):
                     yield 0, row_offset, row
                     row_offset += 1
             return
@@ -611,7 +649,7 @@ class LanceReader(_BaseReader):
                 raise DataflowError("SOURCE_CHANGED", f"Lance fragment missing: {fragment_id}")
             row_offset = 0
             for batch in _iter_scan(exact, batch_size=batch_rows, fragments=[fragment]):
-                for row in rows(batch):
+                for row in rows(batch, fragment_id, row_offset):
                     yield fragment_id, row_offset, row
                     row_offset += 1
 
@@ -629,7 +667,17 @@ class LanceReader(_BaseReader):
         self._row_offset = row_offset + 1
         self._offset = {"version": self._version, "fragment_id": fragment_id,
                         "row_offset": row_offset + 1}
+        from .arrow_payload import ArrowPayload
+        if isinstance(row, ArrowPayload):
+            from dataclasses import asdict
+            self._offset['arrow_batch'] = asdict(row.ref)
         return row, position
+
+    def _teardown(self):
+        rows, self._rows = self._rows, iter(())
+        close = getattr(rows, 'close', None)
+        if close is not None:
+            close()
 
 
 class SqlReader(_BaseReader):

@@ -388,12 +388,15 @@ class NativeTerminalSink(_DataflowArtifactSink):
         from .contracts.dataflow import thaw_record_value
         from .record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._bounds)
+        from .arrow_payload import ArrowBatchCache, is_arrow_record
+        arrow = ArrowBatchCache(self._store, self._bounds)
+        pending = None
         batch, size = [], 0
         schema_ref, schema = None, None
         def table():
-            from .batch_conversion import admit_batch_conversion
+            from .batch_conversion import admit_batch_conversion, native_arrow_table
             admit_batch_conversion(batch, 'pyarrow', schema=schema, bounds=self._bounds)
-            result = pa.Table.from_pylist(batch, schema=schema)
+            result = native_arrow_table(batch, schema)
             if size + result.nbytes > self._bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')
             return result
@@ -408,6 +411,27 @@ class NativeTerminalSink(_DataflowArtifactSink):
                 item = json.loads(line)
                 record = _decode_record_document(item['document'].encode(), record_id=item['record_id'],
                     sequence=item['sequence'], max_bytes=self._bounds.max_row_bytes)
+                if is_arrow_record(record):
+                    if batch:
+                        yield table()
+                        batch, size = [], 0
+                    if pending is not None and (record.payload_ref != pending[0]
+                            or record.source_position['row_offset'] != pending[4]
+                            or pending[3] >= self._batch_rows
+                            or pending[5] + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
+                        yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+                        pending = None
+                    native_batch, index = arrow.locate(record)
+                    if pending is None:
+                        pending = [record.payload_ref, native_batch, index, 0, record.source_position['row_offset'], 0]
+                    pending[3] += 1
+                    pending[4] += 1
+                    pending[5] += record.encoded_bytes
+                    continue
+                if pending is not None:
+                    yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+                    pending = None
+                    arrow.close()
                 if record.inline is None:
                     row = _decode_payload(b''.join(self._store.read(record.payload_ref,
                         max_bytes=self._bounds.max_row_bytes)), max_bytes=self._bounds.max_row_bytes)
@@ -430,6 +454,9 @@ class NativeTerminalSink(_DataflowArtifactSink):
                 size += record.encoded_bytes
         if batch:
             yield table()
+        if pending is not None:
+            yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+        arrow.close()
 
     def prepare(self, manifest, context):
         result = super().prepare(manifest, context)
