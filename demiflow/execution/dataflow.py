@@ -633,6 +633,16 @@ class DataflowExecution:
                 raise DataflowError('CORRUPT_ARTIFACT', 'completed residency lacks final publication')
 
     def _launch_phase(self):
+        # A durable handoff starts only after the original cut was ACKed and
+        # every old owner was retired. K1/K2 admission performs no new business;
+        # charging that idle boot time to the next checkpoint makes slow hosts
+        # checkpoint one row and retire again on every launch.
+        handoff_image = self._restore_image
+        can_start_clock = (self._started and self._durable_residency is not None
+            and handoff_image is not None and handoff_image is self._checkpoint._last_image
+            and not handoff_image.cut.final and not self._endpoints
+            and not self._active_worker_allocations and not self._by_partition
+            and not self._lease_by_operation and self._checkpoint_progress() == 0)
         phase = self._phases[self._phase_index]
         stages = [s for s in self._stage_order() if s.stage_id in phase]
         pending = [(stage, self._initial_work(stage, partition))
@@ -658,6 +668,15 @@ class DataflowExecution:
                 if time.monotonic() >= deadline:
                     raise DataflowError('CAPACITY_PENDING', 'Worker admission deadline exceeded before business activation', retryable=True)
                 time.sleep(min(.01, max(0, deadline - time.monotonic())))
+        if (can_start_clock and ready and self._restore_image is handoff_image
+                and self._checkpoint._last_image is handoff_image
+                and not self._active_worker_allocations and not self._by_partition
+                and not self._lease_by_operation and self._checkpoint_progress() == 0
+                and set(self._endpoints) == {lease.allocation_id for lease, _ in ready}):
+            # Set this once, before the FIRST activation. Actor construction,
+            # every activation and all later business still count against the
+            # unchanged interval. Never move it past partly activated work.
+            self._checkpoint_at = time.monotonic()
         for lease, stage in ready:
             self._activate(lease, stage)
         if self._durable_residency is not None:
