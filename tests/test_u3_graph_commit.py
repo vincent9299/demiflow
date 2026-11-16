@@ -53,7 +53,13 @@ def _graph_spec(n=24, cut_rows=8, mode="durable_incremental", readers=("c0", "c1
     return spec, list(readers), n
 
 
-def _execute(tmp_path, spec, readers, count, *, checkpoint_rows):
+class _AfterGraphAction(RuntimeError):
+    def __init__(self, proof):
+        super().__init__('interrupted after graph ACK, before run completion')
+        self.proof = proof
+
+
+def _execute(tmp_path, spec, readers, count, *, checkpoint_rows, interrupt_after_action=False):
     from _native_graph_fixtures import (HISTORICAL_MEMORY, HISTORICAL_WORKERS,
         assert_native_graph, assert_managed_graph)
     executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
@@ -68,6 +74,8 @@ def _execute(tmp_path, spec, readers, count, *, checkpoint_rows):
         facts, carriers, physical = assert_native_graph(run, action_id, result,
             readers=readers, count=count)
         assert_managed_graph(executor, run.directory, result)
+        if interrupt_after_action:
+            raise _AfterGraphAction((run, action_id, result, facts, carriers, physical))
     return run, action_id, result, facts, carriers, physical
 
 
@@ -90,7 +98,9 @@ def test_empty_source_sealed_cut(tmp_path):
 
 def test_finite_sealed_mode_commits(tmp_path):
     spec, readers, n = _graph_spec(n=12, cut_rows=12, mode="finite_sealed", readers=("c0", "c1"))
-    run, action_id, original, facts, carriers, physical = _execute(tmp_path, spec, readers, n, checkpoint_rows=64)
+    with pytest.raises(_AfterGraphAction) as stopped:
+        _execute(tmp_path, spec, readers, n, checkpoint_rows=64, interrupt_after_action=True)
+    run, action_id, original, facts, carriers, physical = stopped.value.proof
     assert any(e.mode == 'finite_sealed' for e in physical.exchanges)
     assert carriers[-1]['cut']['final'] is True
     assert carriers[-1]['dataflow.sources.v3'][0]['next_sequence'] == 12
@@ -119,7 +129,6 @@ def test_durable_graph_reclaims_channel_segments(tmp_path):
     foreign.parent.mkdir(parents=True)
     foreign.write_bytes(b'not-a-runtime-object')
     run, action_id, _, facts, carriers, physical = _execute(tmp_path, spec, readers, n, checkpoint_rows=8)
-    assert sorted({c['dataflow.sources.v3'][0]['next_sequence'] for c in carriers}) == [8, 16, 24]
     assert any(e.mode == 'durable_incremental' for e in physical.exchanges)
     # GC operates on the original object settlements after confirmed owner exit.
     # ACKed channel snapshots remain roots for historical recovery, so expecting
@@ -137,9 +146,10 @@ def test_durable_graph_reclaims_channel_segments(tmp_path):
     rows = committed_rows(run, action_id, facts[-1])
     for reader in readers:
         assert [row['row'] for row in rows if row['reader_id'] == reader] == [{'x': i * 2} for i in range(n)]
+    assert sorted({c['dataflow.sources.v3'][0]['next_sequence'] for c in carriers}) == [8, 16, 24]
 
 
-@pytest.mark.parametrize('variant', ['plain', 'concurrent', 'actor', 'resources', 'fusion_off'])
+@pytest.mark.parametrize('variant', ['plain', 'concurrent', 'async', 'actor', 'resources', 'fusion_off'])
 def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, variant):
     from dataclasses import replace
     from _native_graph_fixtures import HISTORICAL_MEMORY, HISTORICAL_WORKERS
@@ -154,6 +164,11 @@ def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, v
     if variant == 'concurrent':
         spec['targets'][0]['plan'] = LogicalPlan((MapOp(CallableSpec.create(lambda row: row),
             stream_options=MapStreamOptions(concurrency=2)),))
+    elif variant == 'async':
+        from demiflow.data.plan import AsyncMapOp
+        async def callback(row):
+            raise AssertionError('capture must not invoke async business code')
+        spec['targets'][0]['plan'] = LogicalPlan((AsyncMapOp(CallableSpec.create(callback)),))
     elif variant == 'actor':
         class Actor:
             def __call__(self, row):
@@ -193,6 +208,7 @@ def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, v
                     assert merged.profile.requests['memory_bytes'] >= sum(s.profile.requests['memory_bytes'] for s in before)
                     assert merged.output_bytes == sum(s.output_bytes for s in before)
                     assert merged.state_bytes == sum(s.state_bytes for s in before)
+                    assert merged.profile.requests['cpu_millis'] == max(s.profile.requests['cpu_millis'] for s in before)
                 else:
                     assert owners[tag] == original[tag]
                     assert owners[target] == original[target]
