@@ -160,10 +160,19 @@ def test_explicit_output_and_scratch_caps_prevent_publication(tmp_path, monkeypa
     assert lance.dataset(str(target)).to_table().to_pylist() == [{'text': 'original'}]
 
 
-def test_native_small_explicit_budgets_preserve_duplicates_nulls_and_worker_limits(tmp_path):
+def test_native_small_explicit_budgets_preserve_duplicates_nulls_and_worker_limits(tmp_path, monkeypatch):
     from demiflow.data.api import DataAPI
     from demiflow.execution.executors.local import LocalDatasetExecutor
     import json
+    batches = []
+    prepare = LanceSink.prepare
+    def observe(sink, blocks, context):
+        def measured():
+            for block in blocks:
+                batches.append(block.num_rows)
+                yield block
+        return prepare(sink, measured(), context)
+    monkeypatch.setattr(LanceSink, 'prepare', observe)
     executor = LocalDatasetExecutor(resource_root=tmp_path)
     source = DataAPI(executor)
     try:
@@ -189,6 +198,7 @@ def test_native_small_explicit_budgets_preserve_duplicates_nulls_and_worker_limi
             for group in physical.residency.simultaneous_groups:
                 assert sum(stages[key].resident_bytes * len(stages[key].partitions) for key in group) + physical.residency.control_reserved_bytes <= 64 * 2**20
             assert run.limits['batch_rows'] == 2
+            assert batches and sum(batches) == 5 and max(batches) <= 2
     finally:executor.close()
 
 
