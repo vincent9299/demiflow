@@ -1,0 +1,195 @@
+{
+  "kind": "pure_codec_diagnostic_not_business_acceptance",
+  "python": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+  "version": "3.11.16 (main, Sep  2 2026, 23:39:52) [GCC 15.3.0]",
+  "source_commit": "2b9815234a535e9be2604743bd798a27de300d11",
+  "input_sha256": {
+    "demiflow/execution/dataflow_record_frames.py": "2c43f998e3ab933a602791fcf837997d830c7d2990b36197516a52a773a2bcb8",
+    "demiflow/execution/exchange/dataflow_bridge.py": "9d6044a1e302c6293a49810d912e7c346733b90fa0af94d0118c1f40600152a4",
+    "demiflow/execution/contracts/dataflow.py": "07845ab16876cace8b3497e85a196ba2f41128e0ce7d9a99a08cb3ed7d23e3e8",
+    "tests/test_runtime_v3_region_terminal_envelope.py": "acbea1e8213c9012170a66b6e66114e1051a7c67ea60a49de75c6883276c9806",
+    "tests/_native_relational_fixtures.py": "cfee5db4bbb8889bae6bceb065c41c18c41da7440af43792a710ebab3b1d0940"
+  },
+  "probe_sha256": "9d7009c3fe6ebcca34dd1b91e1f2a3edbdc71a5b86a35df5aac9559f5b54bb6e",
+  "provenance": "Empty source_position and no schema sidecar; actual terminal frames add metadata.",
+  "memory_scope": "Prewarmed tracemalloc interval plus existing deduplicated object graph; not RSS.",
+  "results": [
+    {
+      "row_limit": 4096,
+      "key_bytes": 400,
+      "index": 0,
+      "tuple_count": 32,
+      "payload_bytes": 2856,
+      "payload_sha256": "ff7867a9218124cddfd8c517909d24d2b0194d3004cc308285237a749ab49390",
+      "document_bytes": 2895,
+      "workspace_admission": 111583,
+      "full": {
+        "phase": "full_decode",
+        "incremental_peak": 96507,
+        "incremental_retained": 25708,
+        "existing_deep": 2928,
+        "peak_plus_existing_deep": 99435
+      },
+      "phases": [
+        {
+          "phase": "json_parse",
+          "incremental_peak": 39785,
+          "incremental_retained": 35599,
+          "existing_deep": 2928,
+          "peak_plus_existing_deep": 42713
+        },
+        {
+          "phase": "decode_value",
+          "incremental_peak": 3827,
+          "incremental_retained": 3000,
+          "existing_deep": 38757,
+          "peak_plus_existing_deep": 42584
+        },
+        {
+          "phase": "second_tag_tree",
+          "incremental_peak": 27728,
+          "incremental_retained": 27688,
+          "existing_deep": 41309,
+          "peak_plus_existing_deep": 69037
+        },
+        {
+          "phase": "canonical_payload",
+          "incremental_peak": 41868,
+          "incremental_retained": 3945,
+          "existing_deep": 41309,
+          "peak_plus_existing_deep": 83177
+        },
+        {
+          "phase": "freeze_record",
+          "incremental_peak": 5126,
+          "incremental_retained": 3580,
+          "existing_deep": 44206,
+          "peak_plus_existing_deep": 49332
+        }
+      ]
+    },
+    {
+      "row_limit": 4096,
+      "key_bytes": 400,
+      "index": 1,
+      "tuple_count": 32,
+      "payload_bytes": 2860,
+      "payload_sha256": "09d8ca598397ab857d649636de98b986cc26ed2eaf6d706259e6fe12a25bda51",
+      "document_bytes": 2899,
+      "workspace_admission": 111595,
+      "full": {
+        "phase": "full_decode",
+        "incremental_peak": 96515,
+        "incremental_retained": 25660,
+        "existing_deep": 2932,
+        "peak_plus_existing_deep": 99447
+      }
+    },
+    {
+      "row_limit": 4096,
+      "key_bytes": 400,
+      "index": 2,
+      "tuple_count": 8,
+      "payload_bytes": 583,
+      "payload_sha256": "fec238bc29b55fb74159f032c6e4dcf8734345ae20c4b975c4f5a3584e2a2304",
+      "document_bytes": 621,
+      "workspace_admission": 29013,
+      "full": {
+        "phase": "full_decode",
+        "incremental_peak": 27729,
+        "incremental_retained": 17683,
+        "existing_deep": 654,
+        "peak_plus_existing_deep": 28383
+      }
+    },
+    {
+      "row_limit": 16384,
+      "key_bytes": 6144,
+      "index": 0,
+      "tuple_count": 32,
+      "payload_bytes": 8600,
+      "payload_sha256": "9697a48060d5dce87bd9742208dcd840de8c814a1f00cd524a32bf327917597b",
+      "document_bytes": 8639,
+      "workspace_admission": 123071,
+      "full": {
+        "phase": "full_decode",
+        "incremental_peak": 113739,
+        "incremental_retained": 31356,
+        "existing_deep": 8672,
+        "peak_plus_existing_deep": 122411
+      },
+      "phases": [
+        {
+          "phase": "json_parse",
+          "incremental_peak": 51273,
+          "incremental_retained": 41343,
+          "existing_deep": 8672,
+          "peak_plus_existing_deep": 59945
+        },
+        {
+          "phase": "decode_value",
+          "incremental_peak": 3827,
+          "incremental_retained": 3000,
+          "existing_deep": 50245,
+          "peak_plus_existing_deep": 54072
+        },
+        {
+          "phase": "second_tag_tree",
+          "incremental_peak": 27728,
+          "incremental_retained": 27688,
+          "existing_deep": 52797,
+          "peak_plus_existing_deep": 80525
+        },
+        {
+          "phase": "canonical_payload",
+          "incremental_peak": 53356,
+          "incremental_retained": 9689,
+          "existing_deep": 52797,
+          "peak_plus_existing_deep": 106153
+        },
+        {
+          "phase": "freeze_record",
+          "incremental_peak": 5022,
+          "incremental_retained": 3476,
+          "existing_deep": 61438,
+          "peak_plus_existing_deep": 66460
+        }
+      ]
+    },
+    {
+      "row_limit": 16384,
+      "key_bytes": 6144,
+      "index": 1,
+      "tuple_count": 32,
+      "payload_bytes": 8604,
+      "payload_sha256": "3df0b45f85ecb58e8bcffcff3250dabb8f413a4ac6baf791cde373bccb2a3033",
+      "document_bytes": 8643,
+      "workspace_admission": 123083,
+      "full": {
+        "phase": "full_decode",
+        "incremental_peak": 113747,
+        "incremental_retained": 31308,
+        "existing_deep": 8676,
+        "peak_plus_existing_deep": 122423
+      }
+    },
+    {
+      "row_limit": 16384,
+      "key_bytes": 6144,
+      "index": 2,
+      "tuple_count": 8,
+      "payload_bytes": 583,
+      "payload_sha256": "fec238bc29b55fb74159f032c6e4dcf8734345ae20c4b975c4f5a3584e2a2304",
+      "document_bytes": 621,
+      "workspace_admission": 29013,
+      "full": {
+        "phase": "full_decode",
+        "incremental_peak": 27729,
+        "incremental_retained": 17595,
+        "existing_deep": 654,
+        "peak_plus_existing_deep": 28383
+      }
+    }
+  ]
+}
+
