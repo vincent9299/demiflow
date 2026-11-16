@@ -104,8 +104,8 @@ def test_region_pure_join_nonfinal_ack_restores_original_input_refs(tmp_path,mon
     from demiflow.execution.dataflow_kernel_pack import read_kernel_image
     from demiflow.execution.kernels import state_codec
     def flow():
-        return data.from_items([{'k':1,'v':i} for i in range(6)]).join(
-            data.from_items([{'k':1,'r':i} for i in range(3)]),on='k').join(
+        return data.from_items([{'k':1,'v':i} for i in range(20)]).join(
+            data.from_items([{'k':1,'r':i} for i in range(8)]),on='k').join(
             data.from_items([{'k':1,'z':i} for i in range(2)]),on='k')
     class Interrupted(Exception):pass
     commit=DataflowCheckpointCoordinator.commit
@@ -136,7 +136,7 @@ def test_region_pure_join_nonfinal_ack_restores_original_input_refs(tmp_path,mon
     with RunContext.resume(reference) as run,data.local_execution(workers=2) as local:
         before=run.journal.execution_commits('action-1')
         actual=flow().take_all()
-        assert sorted((r['v'],r['r'],r['z']) for r in actual)==[(v,r,z) for v in range(6) for r in range(3) for z in range(2)]
+        assert sorted((r['v'],r['r'],r['z']) for r in actual)==[(v,r,z) for v in range(20) for r in range(8) for z in range(2)]
         after=run.journal.execution_commits('action-1')
         assert after[:len(before)]==before and all(x['status']=='acked' for x in after)
         assert local.stats['plan_id']==caught[0][1]
