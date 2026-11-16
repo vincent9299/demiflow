@@ -60,11 +60,15 @@ def snapshot(root):
     files = sorted((root / 'demiflow').rglob('*.py'))
     if len(files) > 10000:
         raise ValueError('source evidence file budget exceeded')
+    harness_files = [Path(__file__), Path(__file__).with_name('runtime_v3_performance_ray.py')]
+    harness = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in harness_files}
     return {'root': str(root), 'head': _git(root, 'rev-parse', 'HEAD'),
             'dirty': _git(root, 'status', '--porcelain'),
+            'production_clean': not _git(root, 'status', '--porcelain', '--untracked-files=all', '--', 'demiflow'),
             'production_sha256': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
                                   for p in files},
-            'harness_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'harness_sha256': hashlib.sha256(_json(harness).encode()).hexdigest(),
+            'harness_inputs': harness,
             'plan_sha256': hashlib.sha256(PLAN_PATH.read_bytes()).hexdigest()}
 
 
@@ -320,6 +324,7 @@ class Observations:
     """Wrappers delegate original authorities, retaining bounded summaries only."""
     def __init__(self):
         self.calls, self.cuts, self.plans = [], [], []
+        self.ray_observer = None
         self.copy = {'status': 'partial', 'driver_control_encode': {'calls': 0, 'bytes': 0},
                      'driver_control_decode': {'calls': 0, 'bytes': 0},
                      'unobserved': 'worker/Arrow/DataFusion/CUDA internal copies; bytes below are serialized boundary bytes, not memory-copy counts'}
@@ -365,6 +370,13 @@ class Observations:
                     'policy': _plain(execution._policy)})
             return result
         self.patch(dataflow.DataflowExecution, 'start', started)
+        if self.ray_observer is not None:
+            activate = dataflow.DataflowExecution._activate
+            def activated(execution, lease, stage):
+                result = activate(execution, lease, stage)
+                self.ray_observer.register(execution, lease)
+                return result
+            self.patch(dataflow.DataflowExecution, '_activate', activated)
         advance = dataflow.DataflowExecution._advance_cut
         def advanced(execution):
             result = advance(execution)
@@ -509,6 +521,7 @@ def run_child(config):
     (root / 'temporary').mkdir(exist_ok=True)
     spec, variant, provider = config['spec'], config['variant'], config['provider']
     expected_root = Path(variant['root']).resolve()
+    assert os.environ['DEMIFLOW_RESOURCE_ROOT'] == str(root / 'capacity')
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(expected_root)
     from demiflow import data
@@ -520,7 +533,7 @@ def run_child(config):
     sys.meta_path.insert(0, imports)
     first, started, action_done, closed = None, None, None, None
     cancel_requested, cancel_thread = [], None
-    calls, output, session = [], None, None
+    calls, output, session, ray_observer = [], None, None, None
     error = None
     profiler = None
     if config.get('profile'):
@@ -537,13 +550,24 @@ def run_child(config):
                 address = config.get('ray_address')
                 if not address:
                     raise RuntimeError('owned Ray address required; never connect to an implicit cluster')
-                ray.init(address=address, log_to_driver=False)
+                ray.init(address=address, log_to_driver=False, runtime_env={'env_vars': {
+                    'PYTHONPATH': str(expected_root) + ':' + str(OWN_TREE / 'tests'),
+                    'DEMIFLOW_RESOURCE_ROOT': str(root / 'capacity'),
+                    'PYTHONDONTWRITEBYTECODE': '1'}})
                 outer.callback(ray.shutdown)
                 nodes = [n for n in ray.nodes() if n['Alive']]
                 facts['ray_nodes'] = [{'node_id': n['NodeID'], 'hostname': n['NodeManagerHostname']} for n in nodes]
                 if provider == 'two_hosts' and len({n['NodeManagerHostname'] for n in nodes}) < 2:
                     raise RuntimeError('two_hosts requires two actual physical hostnames')
+                from runtime_v3_performance_ray import RayObservations
+                ray_observer = outer.enter_context(RayObservations(expected_root, root / 'capacity',
+                    require_two_hosts=provider == 'two_hosts'))
+                observations.ray_observer = ray_observer
             outer.enter_context(observations)
+            def business_closed():
+                nonlocal closed
+                if closed is None: closed = time.monotonic_ns()
+            outer.callback(business_closed)
             if profiler: profiler.enable()
             started = time.monotonic_ns()
             with RunContext.start(root / 'run', limits=spec['limits']) as run:
@@ -610,7 +634,8 @@ def run_child(config):
                     facts['run_limits'] = dict(run.limits)
             closed = time.monotonic_ns()
     except Exception as exc:
-        closed = time.monotonic_ns(); error = exc
+        if closed is None: closed = time.monotonic_ns()
+        error = exc
         facts['error'] = {'type': type(exc).__name__, 'message': str(exc), 'traceback': traceback.format_exc()}
     finally:
         if profiler:
@@ -625,6 +650,7 @@ def run_child(config):
         cancel_latency_s=(closed-cancel_requested[0])/1e9 if cancel_requested else None,
         child_execute_action_calls=observations.calls, cuts=observations.cuts, plans=observations.plans,
         copy_observation=observations.copy,
+        ray_resources=ray_observer.result if ray_observer else None,
         ray_data_import_attempts=sorted(imports.attempts),
         http_request_count=len(calls), resources=None)
     facts['measurement_started_ns'] = started
@@ -660,11 +686,11 @@ def run_child(config):
     elif variant['kind'] in ('historical', 'reference') and isinstance(error, NotImplementedError):
         facts['status'] = 'unsupported'
     if provider != 'local':
-        # Ray daemons/actors are outside the benchmark driver's descendant
-        # tree, and two-host actors need remote sampling. Never label this
-        # partial local observation complete merely because results are right.
-        facts['limitations'] = ['Ray actor/remote RSS, FD and physical-exit sampling is not yet connected']
-        if facts['status'] == 'passed': facts['status'] = 'not_run'
+        from runtime_v3_performance_ray import ray_receipt_errors
+        remote_errors = ray_receipt_errors(facts['ray_resources'], require_two_hosts=provider == 'two_hosts')
+        facts['limitations'] = ['Shared Ray service/object-store RSS is unattributed; business RSS samples can count shared pages repeatedly']
+        if remote_errors and facts['status'] == 'passed':
+            failures.extend(remote_errors); facts['status'] = 'failed'
     facts['failures'] = failures
     _write(root / 'trial.json', facts)
     return facts
@@ -719,6 +745,12 @@ def measure_trial(spec, variant, phase, repetition, provider, output_root, **set
     result = json.loads(report_path.read_text()) if report_path.exists() else {
         'status': 'failed', 'error': {'message': 'child exited without a trial receipt'}}
     result['resources'] = sampler.result()
+    if result.get('ray_resources'):
+        nodes = result['ray_resources'].get('nodes', [])
+        result['resources']['driver_plus_worker_peak_sum'] = {
+            key: sampler.peaks[key] + sum(node['sampled_peaks'][key] for node in nodes)
+            for key in ('rss_bytes', 'fd_count', 'processes')}
+        result['resources']['peak_sum_scope'] = 'sum of separately sampled driver and per-node business peaks; not a simultaneous RSS hard limit; shared Ray daemons/object store excluded'
     pool = sampler.last_pool
     if sampler.errors or pool and (pool['active'] or any(pool['charged'].values())):
         result['status'] = 'failed'
@@ -779,12 +811,28 @@ def required_cells():
     return cells
 
 
+def expected_baseline(cell):
+    """The coordinator-approved reference is explicit per capability/carrier."""
+    case, provider, *_ = cell.split(':')
+    policy = json.loads(PLAN_PATH.read_text())['baseline_policy']
+    if provider == 'local':
+        entry = policy['local']
+        return entry['reference' if case in entry['new_capability_cases'] else 'default']
+    return policy[provider]
+
+
 def _receipt_errors(row):
     errors = []
     if row.get('status') != 'passed': return errors
     before, after = row.get('source_before'), row.get('source_after')
     if not before or before != after or row.get('source_unchanged') is not True:
         errors.append('source/evidence changed within trial')
+    if row.get('arm') == 'baseline':
+        expected = expected_baseline(row['cell'])
+        if (row.get('baseline_role') != expected or not before
+            or before.get('head') != expected['commit'] or before.get('production_clean') is not True
+            or row.get('variant', {}).get('kind') != expected['kind']):
+            errors.append('baseline identity/capability role differs from approved environment policy')
     if row.get('returncode') != 0 or row.get('failures'):
         errors.append('exit status or recorded failures disagree')
     resources = row.get('resources')
@@ -799,6 +847,9 @@ def _receipt_errors(row):
             errors.append('original pool remains charged')
     if row.get('remaining_observed_descendants_after_driver_exit') != []:
         errors.append('owned physical process exit not proved')
+    if row.get('provider') in ('ray', 'two_hosts'):
+        from runtime_v3_performance_ray import ray_receipt_errors
+        errors.extend(ray_receipt_errors(row.get('ray_resources'), require_two_hosts=row['provider'] == 'two_hosts'))
     elapsed = row.get('elapsed_s')
     if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed <= 0:
         errors.append('elapsed time invalid')
@@ -839,6 +890,8 @@ def evaluate_report(report, *, required=None):
         return {'status': 'not_run', 'failures': [], 'missing': ['empty/duplicate required scope'], 'comparisons': []}
     known = set(required_cells())
     plan = {spec['id']: spec for spec in json.loads(PLAN_PATH.read_text())['cases']}
+    if report.get('baseline_policy') != json.loads(PLAN_PATH.read_text())['baseline_policy']:
+        failures.append({'reason': 'baseline environment policy missing or changed'})
     oracles = {}
     if set(required) - known:
         failures.append({'reason': 'unknown environment/workload cells', 'cells': sorted(set(required)-known)})
@@ -904,6 +957,7 @@ def run_comparison(plan, baseline_roots, candidate_root, output_root, *, cells=N
         raise ValueError('formal measurements require coordinator-frozen candidate')
     if settings.get('profile'):
         raise ValueError('diagnostic cProfile trials cannot be formal measurements')
+    environment_settings = settings.pop('environment_settings', {})
     output_root = Path(output_root); output_root.mkdir(parents=True, exist_ok=False)
     cells = list(cells or required_cells())
     if len(cells) != len(set(cells)) or set(cells) - set(required_cells()):
@@ -913,13 +967,16 @@ def run_comparison(plan, baseline_roots, candidate_root, output_root, *, cells=N
                  for suffix in ((':p1', ':p2') if case['id'] == 'finite_sealed' else ('',))]
     report = {'schema': 'demiflow.performance.report.v1', 'required_cells': cells, 'trials': [],
               'warmup_separate': True, 'environment_cells_not_run': sorted(set(all_cells)-set(cells)),
-              'measurements': [], 'plan': plan}
+              'measurements': [], 'plan': plan,
+              'baseline_policy': json.loads(PLAN_PATH.read_text())['baseline_policy'],
+              'historical_ray_data_performance': 'not_run; B1-Ray is not an old-Ray-Data performance comparison'}
     for cell in cells:
         pieces = cell.split(':'); case_id, provider = pieces[:2]
         case = next(case for case in plan['cases'] if case['id'] == case_id)
-        trial_settings = dict(settings)
+        trial_settings = dict(settings, **environment_settings.get(provider, {}))
         if len(pieces) == 3: trial_settings['partitions'] = int(pieces[2][1:])
-        baseline = baseline_roots.get(cell) or baseline_roots.get('historical')
+        baseline_role = expected_baseline(cell)
+        baseline = baseline_roots.get(cell) or baseline_roots.get(baseline_role['key'])
         if baseline is None: continue
         variants = {'baseline': baseline, 'candidate': {'root': str(candidate_root), 'kind': 'candidate'}}
         schedule = [('warmup', -1, arm) for arm in variants]
@@ -930,9 +987,15 @@ def run_comparison(plan, baseline_roots, candidate_root, output_root, *, cells=N
         for phase, repeat, arm in schedule:
             selected = dict(variants[arm])
             selected.setdefault('python', settings.get('python', sys.executable))
+            if arm == 'baseline':
+                evidence = snapshot(selected['root'])
+                if (evidence['head'] != baseline_role['commit'] or not evidence['production_clean']
+                    or selected.get('kind') != baseline_role['kind']):
+                    raise ValueError('baseline checkout/role differs from approved ' + baseline_role['label'])
             trial = measure_trial(case, selected, phase, repeat, provider,
                 output_root / (cell.replace(':', '-') + f'-{phase}-{repeat}-{arm}'), **trial_settings)
             trial.update(cell=cell, arm=arm)
+            if arm == 'baseline': trial['baseline_role'] = baseline_role
             report['trials'].append(trial)
             _write(output_root / 'report.json', report)
     report['measurements'] = [{'repetition': n, 'trials': [r for r in report['trials']

@@ -6,6 +6,7 @@
 
 - B0：设计历史基线 `267b9144c6bf7447c6822aa716f6d5c0eda16990`，新建只读独立 worktree，绝不在主仓测试。
 - B1：`5ff5da9`，只在 B0 对某能力真实不支持时补充可运行对照；不得把B1说成升级前，也不得填造B0耗时。B0历史RayData承载会明确标记，不混入新引擎禁止RayData的通过证据。
+- B1-Ray：总控于 2026-11-16 明确批准固定 `2fbe83901141e33a1848c8330f696c88cdcc3f63`，仅用于 Ray / two_hosts 格：它已有公开 `workers/native_resources` 同预算入口，尚未包含本轮后续控制传输性能修复。这是能力参考，不是升级前基线，不能据此声称快于旧 Ray Data；旧 Ray Data 的性能对照仍 `not_run`。Local 的 slow_api / uneven_model / cpu_gpu 使用 B1，其余 Local 格保持 B0。机器可读 `baseline_policy` 冻结到完整提交、角色、环境，比较器同时核生产目录干净，不能通过改角色、换 HEAD 或改脏基线假绿。
 - C：由总控最终冻结的候选；每次都核实际模块导入路径、HEAD、生产/测试/harness摘要，前后变化则该次证据无效。
 
 ## 九类真实负载
@@ -31,6 +32,8 @@ finite性能伴随场景用iter_rows测真实用户首条，同时最终候选�
 总耗时包含声明/准入、worker启动、真实结果消费、原ACK和close；另分启动/首条/业务完成/清理。take_all仅在整个结果返回后才有用户可见结果，不能把内部第一行偷偷当成公开首条；可另记录内部边界但字段分开。吞吐按真实语义输出数除完整耗时。
 
 采样每50ms观察本任务driver进程树RSS和FD，记录可见峰值与采样盲区；每500ms有界查看本任务原pool及本任务目录磁盘，限制进程/文件数和监控本身成本，超出观测预算标不完整而非0。不全盘扫描，不把主机共享内存/其它服务算成本任务，不把sum-RSS误称唯一物理页，不把逻辑pool预约误称实际RSS。
+
+Ray 另在每个真实节点预建一个零 CPU / GPU 的测试监视 actor，沿原 allocation → 原 journal spec/boot → 实际 GCS actor/node/PID → `/proc` birth 绑定，仅采样这些业务进程及其子进程。每个 actor 必须有非零 RSS/FD 样本，结束时同时核原 journal `CONFIRMED`、GCS `DEAD`、相同 PID/birth 退出；监视器也证实物理退出。两机要求业务实际覆盖两个 hostname，不能以两个空监视器冒充跨机执行。driver 与各节点峰值相加只是独立采样峰值之和，Ray 共享服务/object store 未归属部分明确排除。监视器预建在业务计时外，注册 RPC 在计时内且单记耗时。每个 trial 用 job runtime_env 绑定被测树与私有 pool，监视器核 worker `/proc/environ` 中这两个非秘密字段，防止历史/候选串树。
 
 复制只在可观测的原encode/serialization/peer传输边界计调用与实际bytes；不猜第三方Arrow/DataFusion/CUDA内部复制，标not_observable。观测spy只包住真实调用，不替换结果、不创建第二个allocator。辅助诊断若有不同观测开销单独标记，不混成正式吞吐数字。
 

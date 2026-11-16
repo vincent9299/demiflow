@@ -7,13 +7,14 @@ import pytest
 
 from runtime_v3_performance_scenarios import (
     PLAN_PATH, OWN_TREE, _digest, expected_rows, input_digest,
-    evaluate_report, measure_trial, required_cells,
+    evaluate_report, measure_trial, required_cells, expected_baseline,
 )
 
 
 def receipt_report():
     spec = next(item for item in json.loads(PLAN_PATH.read_text())['cases'] if item['id'] == 'small_data')
-    evidence = {'head': 'a' * 40, 'production_sha256': {'demiflow/x.py': 'b' * 64},
+    evidence = {'head': expected_baseline('small_data:local')['commit'], 'production_clean': True,
+                'production_sha256': {'demiflow/x.py': 'b' * 64},
                 'harness_sha256': 'c' * 64, 'plan_sha256': 'd' * 64}
     base = {'spec': spec, 'input': input_digest('small_data'),
             'output': _digest(expected_rows('small_data'), ordered=True), 'status': 'passed',
@@ -28,10 +29,13 @@ def receipt_report():
             'child_execute_action_calls': [{'kind': 'take_all', 'provider': 'local'}],
             'cuts': [{'commit_id': 'e' * 64, 'final': True, 'status': 'acked'}],
             'provider': 'local', 'cell': 'small_data:local'}
-    report = {'required_cells': ['small_data:local'], 'trials': []}
+    report = {'required_cells': ['small_data:local'], 'trials': [],
+              'baseline_policy': json.loads(PLAN_PATH.read_text())['baseline_policy']}
     for arm in ('baseline', 'candidate'):
         for phase, repetition in [('warmup', -1)] + [('measure', n) for n in range(5)]:
             row = deepcopy(base); row.update(arm=arm, phase=phase, repetition=repetition)
+            if arm == 'baseline':
+                row.update(baseline_role=expected_baseline('small_data:local'), variant={'kind': 'historical'})
             report['trials'].append(row)
     row = deepcopy(base); row.update(arm='candidate', phase='cancel', repetition=0,
         output=None, first_result_s=None, throughput_rows_s=None, cancel_latency_s=.2,

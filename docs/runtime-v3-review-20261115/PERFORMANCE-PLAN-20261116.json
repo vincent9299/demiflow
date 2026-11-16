@@ -2,7 +2,7 @@
   "schema": "demiflow.performance.plan.v1",
   "status": "coordinator_approved_harness_and_baseline_preflight",
   "historical_baseline": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
-  "new_capability_reference": "5ff5da9",
+  "new_capability_reference": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
   "candidate": "formal measurements wait for final coordinator revision",
   "warmup_per_arm": 1,
   "measured_repetitions": 5,
@@ -209,5 +209,40 @@
     "no installs or unrelated services",
     "no GPU use while residency owns window",
     "copy bytes are observed codec/transport boundaries, not guessed third-party internals"
-  ]
+  ],
+  "ray_capability_reference": "2fbe83901141e33a1848c8330f696c88cdcc3f63",
+  "baseline_policy": {
+    "local": {
+      "default": {
+        "key": "historical",
+        "kind": "historical",
+        "label": "B0 historical Local",
+        "commit": "267b9144c6bf7447c6822aa716f6d5c0eda16990"
+      },
+      "new_capability_cases": [
+        "slow_api",
+        "uneven_model",
+        "cpu_gpu"
+      ],
+      "reference": {
+        "key": "reference",
+        "kind": "reference",
+        "label": "B1 Local capability reference, not upgrade-before",
+        "commit": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4"
+      }
+    },
+    "ray": {
+      "key": "ray_reference",
+      "kind": "reference",
+      "label": "B1-Ray public same-budget capability reference, not old Ray Data",
+      "commit": "2fbe83901141e33a1848c8330f696c88cdcc3f63"
+    },
+    "two_hosts": {
+      "key": "ray_reference",
+      "kind": "reference",
+      "label": "B1-Ray public same-budget capability reference, not old Ray Data",
+      "commit": "2fbe83901141e33a1848c8330f696c88cdcc3f63"
+    }
+  },
+  "historical_ray_data_performance": "not_run: the B1-Ray comparison never establishes a speedup over old Ray Data; old unsupported receipts remain retained"
 }
