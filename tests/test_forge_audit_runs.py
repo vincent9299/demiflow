@@ -1,5 +1,6 @@
 """Admission always checks actual scope, independently of clients and caches."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -35,10 +36,21 @@ def test_start_rechecks_scope_and_cancel_remains_available(root):
     # left unchanged. Model a stopped attempt to exercise the resume gate.
     assert runs.cancel(root, run['run_id'], expected_attempt=1)['status'] == 'prepared'
     (runs.directory(root,run['run_id'])/'unit-1.lock').touch()
-    runs.journal(root, run['run_id']).transition({'prepared'}, 'cancelled',execution_stopped=True,cleanup='complete')
-    with pytest.raises(ForgeError, match='outside'):
+    control = runs.journal(root, run['run_id'])
+    control.transition({'prepared'}, 'cancelled',execution_stopped=True,cleanup='complete')
+    # This control-only fixture has never executed. Public resume must retain
+    # the earlier history gate; it cannot invent an engine recovery contract.
+    assert control.recovery_identity() is None
+    with pytest.raises(ForgeError, match='没有统一恢复契约'):
         runs.resume(root, run['run_id'], expected=run['digest'], expected_attempt=1)
+    # Exercise the original scope gate at its internal control entry, without
+    # bypassing or weakening public historical admission in production.
+    with pytest.raises(ForgeError, match='outside'):
+        runs._resume(root, run['run_id'], expected=run['digest'], expected_attempt=1)
     assert runs.show(root, run['run_id'])['attempt'] == 1
+    assert len(control.list_attempts()) == 1
+    assert all(not control.execution_commits(output['action_id']) for output in run['outputs'])
+    assert all(not Path(output['uri']).exists() for output in run['outputs'])
 
 
 def test_scope_change_requires_new_preparation_and_baseline_is_sealed(root):
