@@ -93,7 +93,7 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
     assert observations
     for item in observations:
         original = item['spool_bytes'] + item['old_tail_chunk_bytes']
-        assert item['spool_bytes'] <= item['row_window']
+        assert item['spool_bytes'] <= item['row_window'] + 1
         assert original <= item['payload_window'], item
         assert original + item['held_wire_bytes'] <= item['payload_window'], item
 
@@ -103,5 +103,98 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
         assert any(item['previous_chunk_bytes'] for item in reads)
     for item in reads:
         assert item['current_chunk_bytes'] <= item['scratch_io_window']
-        assert item['live_tail_bytes'] <= item['batch_window'], item
+        assert item['live_tail_bytes'] <= item['batch_window'] - 1, item
         assert item['spool_bytes'] + item['live_tail_bytes'] + item['held_wire_bytes'] <= item['payload_window'], item
+
+
+@pytest.mark.parametrize('batch_bytes', [8193, 262144])
+def test_real_store_chunking_preserves_segment_hashes_and_restore(tmp_path, monkeypatch, batch_bytes):
+    from hashlib import sha256
+    from types import SimpleNamespace
+    from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition
+    from demiflow.execution.dataflow_scratch import ScratchStream
+    from demiflow.execution.dataflow_segments import block_chunks, segment_refs
+    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_c import bounds, make
+
+    limits = bounds(max_batch_bytes=batch_bytes, max_row_bytes=1024,
+                    max_control_bytes=8192, max_state_bytes=1024*1024)
+    read = ScratchStream.read
+    requested = []
+    def observe(stream, count=-1):
+        requested.append((count, stream._io))
+        return read(stream, count)
+    monkeypatch.setattr(ScratchStream, 'read', observe)
+    with store_fixture(tmp_path) as (_, store, _):
+        services = SimpleNamespace(store=store, bounds=limits)
+        state = TerminalBlocks(services, 'worker', declaration=('layout', 2))
+        rows = [(json.dumps({'n': i, 'payload': 'x'*900})+'\n').encode() for i in range(40)]
+        for i, raw in enumerate(rows):
+            tag = BlockPartition('layout', i // 20, 2)
+            state.append(make('Record', block_partition=tag), raw)
+        partitions = state.manifest_partitions()
+        assert [p['rows'] for p in partitions] == [20, 20]
+        for i, part in enumerate(partitions):
+            expected = b''.join(rows[i*20:(i+1)*20])
+            root = ArtifactRef(**part['data_ref'])
+            leaves = list(segment_refs(store, root, limits))
+            assert len(leaves) == 1
+            assert leaves[0].digest == sha256(expected).hexdigest()
+            assert leaves[0].size_bytes == len(expected)
+            assert b''.join(block_chunks(store, root, limits)) == expected
+        state.close()
+        restored = TerminalBlocks(services, 'worker', declaration=('layout', 2))
+        manifest = {'rows': 40, 'bytes': sum(map(len, rows)), 'partitions': partitions}
+        restored.restore(manifest)
+        assert restored.manifest_partitions() == partitions
+        restored.close()
+    assert requested
+    assert all(0 < count <= min(65536, (batch_bytes - 1) // 2, io) for count, io in requested)
+    assert max(count for count, _ in requested) == min(65536, (batch_bytes - 1) // 2, 9216)
+
+
+@pytest.mark.parametrize('batch_bytes', [1, 2])
+def test_impossible_batch_rejects_before_scratch_read(tmp_path, monkeypatch, batch_bytes):
+    from types import SimpleNamespace
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_scratch import ScratchStream
+    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_c import bounds, make
+    with store_fixture(tmp_path) as (_, store, _):
+        state = TerminalBlocks(SimpleNamespace(store=store, bounds=bounds(max_batch_bytes=batch_bytes)), 'worker')
+        state.append(make('Record'), b'{}\n')
+        def forbidden(*args):
+            raise AssertionError('scratch read happened before impossible-window refusal')
+        monkeypatch.setattr(ScratchStream, 'read', forbidden)
+        try:
+            with pytest.raises(DataflowError, match='consecutive scratch chunks'):
+                state.flush()
+        finally:
+            state.close()
+
+
+def test_exact_original_document_limit_plus_newline_remains_legal(tmp_path):
+    from types import SimpleNamespace
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_sinks import _encode_record
+    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_c import bounds, make
+    row = {'value': 'x'*32}
+    record = make('Record', inline=row, encoded_bytes=len(json.dumps(row, separators=(',', ':')).encode()))
+    raw = _encode_record(record, bounds()) + b'\n'
+    limits = bounds(max_row_bytes=len(raw)-1)
+    # The original full encoder accepts exactly max_row bytes; the existing
+    # newline is reserved from the batch window, not a new row rejection.
+    assert _encode_record(record, limits) + b'\n' == raw
+    with store_fixture(tmp_path) as (_, store, _):
+        state = TerminalBlocks(SimpleNamespace(store=store, bounds=limits), 'worker')
+        state.append(record, raw)
+        parts = state.manifest_partitions()
+        assert state.rows == 1 and state.bytes == len(raw)
+        from demiflow.execution.contracts.dataflow import ArtifactRef
+        from demiflow.execution.dataflow_segments import block_chunks
+        assert b''.join(block_chunks(store, ArtifactRef(**parts[0]['data_ref']), limits)) == raw
+        state.close()

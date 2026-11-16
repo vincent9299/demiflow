@@ -125,11 +125,20 @@ class TerminalBlocks:
                 break
             height, merged = height + 1, merged + 1
         self._admit_metadata(roots=1-merged)
+        # The artifact writer retains the preceding chunk/view while asking
+        # for the next. Both chunks share the original batch window; a pending
+        # terminal append occupies at most max_row_bytes plus its original
+        # newline. Reserve that existing byte without shrinking valid rows.
+        batch_window = self.bounds.max_batch_bytes - (1 if self.partitioned else 0)
+        chunk_bytes = min(65536, batch_window // 2,
+                          self.bounds.max_row_bytes + self.bounds.max_control_bytes)
+        if chunk_bytes < 1:
+            raise DataflowError('BUDGET_EXCEEDED', 'terminal batch window cannot hold consecutive scratch chunks')
         stream = self._tail
         stream.flush()
         stream.seek(0)
         def chunks():
-            while chunk := stream.read(min(65536, self.bounds.max_row_bytes + self.bounds.max_control_bytes)):
+            while chunk := stream.read(chunk_bytes):
                 yield chunk
         ref = self.services.store.put(chunks(), max_bytes=max(1, self._tail_bytes), media_type=RECORDS_MEDIA)
         self.blocks[self._tail_key][1].append(ref, rows=self._tail_rows)
