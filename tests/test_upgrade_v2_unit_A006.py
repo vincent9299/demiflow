@@ -64,3 +64,12 @@ def test_take_rejects_invalid_native_resources_before_read(monkeypatch):
     with pytest.raises(DataflowError, match="positive CPU"):
         call(ex, 'take', ds._source, plan, 2)
     assert calls == []
+
+
+def test_take_accepts_resource_only_backend_spelling_on_local():
+    ex = LocalDatasetExecutor()
+    ds = _plain()
+    plan = ds._plan.append(MapOp(CallableSpec.create(lambda r: r),
+        native_options=NativeOptions(backend='ray', worker_resources={})))
+    assert [row['id'] for row in call(ex, 'take', ds._source, plan, 2)] == [0, 1]
+    assert ex.NAME == 'local'

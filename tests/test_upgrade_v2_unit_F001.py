@@ -1,14 +1,10 @@
-"""F001 verify_preserve: operation_capability is the sole native kind authority.
+"""F001: native kind authority and original fact shapes remain shared.
 
-The function body is byte-identical to baseline bbd93ff (SHA
-ec987ee7e1659d09dd7ea8d7fb416319b7b08036f3456201e33e8b9b756beeda). These tests lock
-its preserved behavior: C02 base key set, the kind table, native specializations,
-third-party rejection, and the native/stream/bound flags. Real producers only.
+The v2 function-source freeze is superseded by the v3 admitted registry. Legacy
+fact bytes remain pinned by F002; newly supported global operations have facts.
 """
 from __future__ import annotations
 
-import ast
-import hashlib
 from pathlib import Path
 
 import demiflow
@@ -17,7 +13,6 @@ from demiflow.data.native_options import parse_native_options
 from demiflow.data.plan import CallableSpec
 from demiflow.execution.plan_facts import operation_capability
 
-_BASELINE_SHA = "ec987ee7e1659d09dd7ea8d7fb416319b7b08036f3456201e33e8b9b756beeda"
 _C02_KEYS = {"kind", "driver", "native_options", "stream_options", "bound"}
 
 
@@ -33,13 +28,18 @@ def test_module_source_is_worktree():
     assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])
 
 
-def test_function_body_matches_baseline_sha():
-    path = Path(demiflow.__file__).parent / "execution" / "plan_facts.py"
-    source = path.read_text()
-    node = next(n for n in ast.walk(ast.parse(source))
-                if isinstance(n, ast.FunctionDef) and n.name == "operation_capability")
-    digest = hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
-    assert digest == _BASELINE_SHA
+def test_facts_consume_the_same_capability_authority(monkeypatch):
+    from demiflow.execution import plan_facts
+    original = plan_facts.operation_capability
+    seen = []
+    def observed(operation):
+        seen.append(operation)
+        return original(operation)
+    monkeypatch.setattr(plan_facts, 'operation_capability', observed)
+    operation = ops.MapOp(_spec())
+    fact = plan_facts.operation_facts(operation)
+    assert seen == [operation]
+    assert all(fact[key] == value for key, value in original(operation).items())
 
 
 def test_c02_key_set_has_no_admitted_field():
@@ -86,10 +86,10 @@ def test_third_party_subclass_rejected():
     assert operation_capability(ForeignBatch(_spec()))["kind"] == "unknown"
 
 
-def test_non_specialized_plan_op_is_unknown():
-    assert operation_capability(ops.SortOp(("id",)))["kind"] == "unknown"
-    assert operation_capability(ops.RandomizeBlockOrderOp())["kind"] == "unknown"
-    assert operation_capability(ops.RepartitionOp(num_blocks=2))["kind"] == "unknown"
+def test_global_plan_ops_have_registered_facts():
+    assert operation_capability(ops.SortOp(("id",)))["kind"] == "sort"
+    assert operation_capability(ops.RandomizeBlockOrderOp())["kind"] == "block_order"
+    assert operation_capability(ops.RepartitionOp(num_blocks=2))["kind"] == "repartition"
 
 
 def test_native_options_flag():

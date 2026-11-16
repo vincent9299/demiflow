@@ -99,15 +99,18 @@ def test_third_party_subclass_rejected():
     ops.SortOp(("a",)), ops.RepartitionOp(num_blocks=2),
     ops.RandomShuffleOp(), ops.RandomizeBlockOrderOp(),
 ])
-def test_unsupported_relational_ops_still_rejected(op):
-    assert operation_capability(op)["kind"] == "unknown"
-    with pytest.raises(RuntimeContractError, match="Unknown actual operation contract"):
-        operation_facts(op)
+def test_supported_global_ops_have_matching_facts(op):
+    expected = {ops.SortOp: 'sort', ops.RepartitionOp: 'repartition',
+                ops.RandomShuffleOp: 'shuffle', ops.RandomizeBlockOrderOp: 'block_order'}
+    assert operation_capability(op)['kind'] == expected[type(op)]
+    fact = operation_facts(op)
+    assert fact['kind'] == expected[type(op)] and fact['arguments']
+    document(fact)
 
 
 def test_native_options_guard_still_raises():
     from demiflow.data.native_options import parse_native_options
-    native = parse_native_options({"ray": {}}, family="row_transform")
+    native = parse_native_options({"ray": {"compute": {"kind": "task_pool", "size": 1}}}, family="row_transform")
     op = ops.MapOp(_spec(), native_options=native)
     with pytest.raises(RuntimeContractError, match="Backend option facts"):
         operation_facts(op)
@@ -278,3 +281,12 @@ def test_vector_search_storage_options_identity_stable():
     a = _vector_op(**spec)
     b = _vector_op(**spec)
     assert document(operation_facts(a)) == document(operation_facts(b))
+
+
+
+def test_resource_only_native_facts_preserve_the_actual_claim():
+    from demiflow.data.native_options import parse_native_options
+    native = parse_native_options({'ray': {'worker_resources': {'cpu': 1, 'memory_bytes': 1048576}}}, family='row_transform')
+    fact = operation_facts(ops.MapOp(_spec(), native_options=native))
+    assert fact['resource_declaration'] == {'cpu': 1., 'memory_bytes': 1048576}
+    document(fact)

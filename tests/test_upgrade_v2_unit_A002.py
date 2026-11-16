@@ -7,6 +7,8 @@ from demiflow.data.plan import (
     MapStreamOptions,
 )
 from demiflow.execution.capabilities import validate_stream_plan
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
 
 def _spec(fn=None):
@@ -42,16 +44,22 @@ def test_no_stream_operation_rejected():
         validate_stream_plan(_plan())
 
 
-def test_unsupported_stream_operation_rejected():
-    with pytest.raises(ValueError):
-        validate_stream_plan(_plan(_stream_map(), MapBatchesOp(_spec())))
+def test_registered_batch_after_stream_passes_and_unknown_kind_is_rejected():
+    assert validate_stream_plan(_plan(_stream_map(), MapBatchesOp(_spec()))) is None
+    class UnknownOperation:
+        pass
+    with pytest.raises(DataflowError, match='UNSUPPORTED_CAPABILITY'):
+        validate_stream_plan(_plan(_stream_map(), UnknownOperation()))
 
 
-def test_stream_backend_options_rejected():
+def test_stream_resource_options_pass_but_ray_data_pool_options_are_rejected():
     plan = _plan(MapOp(_spec(), native_options=NativeOptions(backend="ray"),
                        stream_options=MapStreamOptions()))
+    assert validate_stream_plan(plan) is None
+    invalid = _plan(MapOp(_spec(), native_options=NativeOptions(backend='ray',
+        compute_kind='actor_pool'), stream_options=MapStreamOptions()))
     with pytest.raises(ValueError, match="backend_options"):
-        validate_stream_plan(plan)
+        validate_stream_plan(invalid)
 
 
 def test_worker_scope_requires_callable_class():
@@ -69,6 +77,7 @@ def test_stream_map_rejects_async_callable():
 
 
 def test_composition_limit_enforced():
-    plan = _plan(*[_stream_map() for _ in range(1025)])
-    with pytest.raises(ValueError, match="1024"):
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    plan = _plan(*[_stream_map() for _ in range(bounds.max_nodes)])
+    with pytest.raises(DataflowError, match='BUDGET_EXCEEDED.*node budget'):
         validate_stream_plan(plan)
