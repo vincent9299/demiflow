@@ -388,7 +388,10 @@ def queue_full_business(fx, fault=None):
         root.mkdir()
     else:
         root = Path(tempfile.mkdtemp(prefix='demiflow-queue-business-'))
-    config = {'root': str(root), 'provider': fx.provider}
+    # Worker-count ceilings are not CPU ceilings. The original native explicit
+    # ACK suffix declares 4 CPU, plus its independent 1 CPU source. Local grants
+    # that sum too; give the private Ray host an explicit finite 6 CPU envelope.
+    config = {'root': str(root), 'provider': fx.provider, 'workers': 4, 'ray_cpus': 6}
     path = root/'config.json'; path.write_text(json.dumps(config))
     env = dict(os.environ, PYTHONPATH=str(ROOT)+':'+str(ROOT/'tests'), PYTHONDONTWRITEBYTECODE='1',
                DEMIFLOW_RESOURCE_ROOT=str(root/'capacity'))
@@ -437,8 +440,16 @@ def main():
             os.environ['RAY_AUTH_MODE'] = 'token'; os.environ['RAY_AUTH_TOKEN'] = secrets.token_hex(32)
             # Ray's native module caches auth mode at import time.
             import ray
-            ray.init(address='local', num_cpus=config.get('workers', 4), num_gpus=0, include_dashboard=False,
+            cpus = config.get('ray_cpus', 6)
+            assert type(cpus) is int and 1 <= cpus <= 64
+            ray.init(address='local', num_cpus=cpus, num_gpus=0, include_dashboard=False,
                 object_store_memory=128*1024**2, _temp_dir='/tmp/demiflow-qb-'+secrets.token_hex(5))
+            actual = ray.cluster_resources()
+            assert actual.get('CPU') == cpus and not actual.get('GPU', 0)
+            (root/'cluster-resources.json').write_text(json.dumps({
+                'workers': config.get('workers', 4), 'requested_cpu': cpus,
+                'requested_gpu': 0, 'object_store_memory_bytes': 128*1024**2,
+                'actual': actual}, indent=2))
             driver = dependency_provenance()
             worker = ray.get(ray.remote(max_retries=0)(dependency_provenance).remote(), timeout=30)
             for name in driver['modules']:
