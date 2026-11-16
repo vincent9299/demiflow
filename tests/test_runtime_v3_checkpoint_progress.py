@@ -17,6 +17,7 @@ def execution(metrics, *, previous=None, source_rows=0, threshold=10):
     driver._node_metrics = {key: {'rows_input': 0, 'rows_output': value}
                             for key, value in metrics.items()}
     driver._graph = NS(sources=('source',))
+    driver._checkpoint_source_rows_only = False
     driver._last_checkpoint_rows = source_rows
     driver._last_checkpoint_outputs = dict(previous or {})
     driver._checkpoint_deliveries = 0
@@ -55,6 +56,26 @@ def test_identity_chain_does_not_divide_row_threshold_by_graph_depth():
     driver.pump(deadline_ms=1)
     assert not driver._checkpoint_requested and driver.sent == []
     driver._node_metrics[('map-39', 'p0')]['rows_output'] = 10
+    driver.pump(deadline_ms=1)
+    assert driver._checkpoint_requested and driver.sent == [{'kind': 'pause'}]
+
+
+@pytest.mark.parametrize('trigger', ['source', 'timer', 'regression'])
+def test_graph_source_cut_policy_does_not_count_broadcast_copies(trigger):
+    driver = execution({('source', 'p0'): 12,
+                        **{('router', f'p{i}'): 12 for i in range(6)},
+                        ('terminal', 'p0'): 72}, threshold=60)
+    driver._checkpoint_source_rows_only = True
+    driver._edge_ack_frontiers = {'broadcast': 72}
+    driver.pump(deadline_ms=1)
+    assert driver._checkpoint_progress() == 12
+    assert not driver._checkpoint_requested and driver.sent == []
+    if trigger == 'source':
+        driver._node_metrics[('source', 'p0')]['rows_output'] = 60
+    elif trigger == 'timer':
+        driver._checkpoint_at -= 61
+    else:
+        driver._last_checkpoint_rows = 13
     driver.pump(deadline_ms=1)
     assert driver._checkpoint_requested and driver.sent == [{'kind': 'pause'}]
 

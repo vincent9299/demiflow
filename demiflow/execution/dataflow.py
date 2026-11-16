@@ -94,6 +94,7 @@ class DataflowExecution:
         self._sealed: SealedExecution | None = None
         self._physical: PhysicalDataflow | None = None
         self._graph = None
+        self._checkpoint_source_rows_only = False
         self._scheduler: DataflowScheduler | None = None
         self._checkpoint: DataflowCheckpointCoordinator | None = None
         self._acquisition: NativeAcquisitionService | None = None
@@ -470,6 +471,14 @@ class DataflowExecution:
         from .dataflow_images import bind_image_sinks
         bind_image_sinks(graph, services=self._services, sinks=self._sinks)
         self._graph = graph
+        # The legacy graph declaration measures cut_rows in source ordinals.
+        # Its broadcast/router/tag rows are transport copies of those inputs,
+        # not additional units of that policy. Derive this only from the
+        # authenticated sealed graph, including on recovery; do not recompile
+        # history or introduce a second checkpoint counter.
+        self._checkpoint_source_rows_only = any(
+            node.kind == 'terminal' and 'graph_result' in node.kernel.configuration
+            for node in graph.nodes)
         self._physical = physical
         self._policy = live_policy
         # Historical physical plans stay byte-identical. Current caller limits
@@ -923,6 +932,14 @@ class DataflowExecution:
 
     def _checkpoint_progress(self):
         source_rows, outputs = self._checkpoint_frontiers()
+        if self._checkpoint_source_rows_only:
+            # Timer, source-credit rotation, budget/idle cuts and final EOI
+            # still use the original coordinator. Ordinary Dataset graphs
+            # retain the downstream progress trigger (e.g. a finite join
+            # producing rows after all its sources have already finished).
+            return (source_rows - self._last_checkpoint_rows
+                    if source_rows >= self._last_checkpoint_rows
+                    else self._policy.checkpoint_rows)
         progress = max(source_rows - self._last_checkpoint_rows,
                        max((count - self._last_edge_acks.get(edge, 0)
                             for edge, count in self._edge_ack_frontiers.items()), default=0),
