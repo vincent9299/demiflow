@@ -63,7 +63,8 @@ def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, m
             raise Interrupted()
         return image
     limits={'memory_bytes':256*1024**2,'max_row_bytes':65536,'max_batch_bytes':262144,
-        'max_state_bytes':2*1024**2,'max_scratch_bytes':2*1024**3,'timeout_s':120}
+        'max_state_bytes':2*1024**2,'max_scratch_bytes':2*1024**3,'timeout_s':120,
+        'checkpoint_rows':2,'checkpoint_interval_ms':60000}
     def execute():
         with RunContext.start(tmp_path/'run',limits=limits) as run, data.local_execution(workers=4,worker_mode='thread'):
             nonlocal reference
@@ -87,12 +88,67 @@ def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, m
     assert reads==list(range(5))
     bundle=load_sealed_plan(reference.directory,'action-1')
     assert len(bundle['graph'].sources)==1 and len(bundle['graph'].nodes)==19
+    assert cuts
+    # Fusion may legitimately place the pure suffix together. Logical identity,
+    # source multiplicity and ACK recovery remain the user-visible contract.
+
+
+def _disable_optional_fusion(monkeypatch):
+    from dataclasses import replace
+    from demiflow.execution import dataflow_api
+    resolve = dataflow_api.resolve_runtime_policy
+    def explicit_policy(*args, **kwargs):
+        policy, bounds = resolve(*args, **kwargs)
+        return replace(policy, fusion=False), bounds
+    # Exercise the supported unfused physical policy through the original
+    # compiler, resource authority, real workers, channels and commit journal.
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', explicit_policy)
+
+
+def test_unfused_source_parks_at_64_real_deliveries_before_reading_fifth_row(tmp_path, monkeypatch):
+    from demiflow.execution.source_readers import ItemsReader
+    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    _disable_optional_fusion(monkeypatch)
+    reads, images = [], []
+    next_record = ItemsReader.next_record
+    def observe(reader):
+        poll = next_record(reader)
+        if poll.status == 'record':
+            reads.append(poll.record.inline['i'])
+        return poll
+    monkeypatch.setattr(ItemsReader, 'next_record', observe)
+    commit = DataflowCheckpointCoordinator.commit
+    class AfterOriginalAck(Exception): pass
+    def stop_after_ack(coordinator, *args, **kwargs):
+        image = commit(coordinator, *args, **kwargs)
+        images.append(image)
+        raise AfterOriginalAck()
+    monkeypatch.setattr(DataflowCheckpointCoordinator, 'commit', stop_after_ack)
+    with pytest.raises(AfterOriginalAck):
+        with RunContext.start(tmp_path/'run', limits={'memory_bytes':256*1024**2,
+                'max_row_bytes':65536,'max_batch_bytes':262144,'max_state_bytes':2*1024**2,
+                'max_scratch_bytes':2*1024**3,'timeout_s':30,
+                'checkpoint_rows':64,'checkpoint_interval_ms':60000}) as run, data.local_execution(
+                    workers=4,worker_mode='thread'):
+            reference = run.ref
+            _flow().take_all()
+    assert reads == [0, 1, 2, 3]  # 4 records × 16 recipients = original 64 slots
+    assert len(images) == 1 and not images[0].cut.final
+    assert len(images[0].source_vector) == 1
+    assert images[0].source_vector[0].next_sequence == 4
+    assert not images[0].source_vector[0].end_of_input
+    assert RunJournal(reference.directory).execution_commits('action-1')[-1]['status'] == 'acked'
+    bundle = load_sealed_plan(reference.directory,'action-1')
+    assert not bundle['physical'].policy.fusion
     assert any(e.mode=='durable_incremental' for e in bundle['physical'].exchanges)
 
 
-def test_single_source_invocation_wider_than_all_slots_still_rejects(tmp_path):
+def test_single_source_invocation_wider_than_all_slots_still_rejects(tmp_path, monkeypatch):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.run_journal import RunJournal
+    _disable_optional_fusion(monkeypatch)
     with pytest.raises(DataflowError, match='one operator invocation exceeds the parked durable credit window'):
         with RunContext.start(tmp_path/'run', limits={'memory_bytes':256*1024**2,
                 'max_row_bytes':65536,'max_batch_bytes':262144,'max_state_bytes':2*1024**2,
