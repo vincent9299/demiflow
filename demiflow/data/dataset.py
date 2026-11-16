@@ -2308,6 +2308,7 @@ class Dataset:
         size = None if batch_size is None else int(batch_size)
         if size is not None and size <= 0:
             raise ValueError("Dataset.iter_batches batch_size must be positive or None")
+        normalized_format = _batch_format(batch_format)
         from ..execution.checked import action
         from ..execution.dataflow_api import make_action_request, run_dataset_action
 
@@ -2319,7 +2320,7 @@ class Dataset:
                                               kind="iter_batches",
                                               arguments={"prefetch_batches": prefetch_batches,
                                                          "batch_size": size,
-                                                         "batch_format": _batch_format(batch_format),
+                                                         "batch_format": normalized_format,
                                                          "drop_last": drop_last})
                 batches = run_dataset_action(request)
                 yield from observe_batches(
