@@ -477,7 +477,16 @@ def make_native_terminal_sink(spec, *, request, services):
         declaration = next((p.value for p in request.programs if p.name == 'write_lance'), None)
         if not isinstance(declaration, LanceWriteSpec):
             raise DataflowError('INVALID_CONTRACT', 'write_lance requires its sealed LanceWriteSpec')
-        native = LanceSink(services.action, declaration)
+        from ..data.sources import LanceSource
+        from ..lance.model import LanceScanSpec
+        # The sealed request identifies an exact scan; its already staged
+        # output supplies the count. Never rescan source data during commit.
+        # Unknown/transformed/filtered streams retain the existing auto mode.
+        exact_merge_source = (type(request.source) is LanceSource
+            and isinstance(request.source.query, LanceScanSpec)
+            and not request.source.query.filter and not request.source.query.projection
+            and not request.plan.operations)
+        native = LanceSink(services.action, declaration, exact_merge_source=exact_merge_source)
         if declaration.mode == 'create':
             from ..lance.storage import inspect_lance
             from ..errors import LanceResourceNotFound, LanceWriteConflict

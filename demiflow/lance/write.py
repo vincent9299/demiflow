@@ -27,7 +27,7 @@ _COMMIT_TIMEOUT_SECONDS = 1800
 def write_lance(
     spec: LanceWriteSpec,
     batches: Iterable[pa.RecordBatch | pa.Table],
-    *, limits=None, check_stop=None, operation_id=None,
+    *, limits=None, check_stop=None, operation_id=None, _source_row_count=None,
 ) -> LanceWriteReceipt:
     """执行一次表写入；覆盖始终一次提交，不逐批清空目标。"""
     if operation_id is not None:
@@ -37,7 +37,7 @@ def write_lance(
         batches = _bounded_batches(batches, limits, check_stop)
     if spec.mode == 'merge':
         from .mutate import merge_lance
-        return merge_lance(spec, batches)
+        return merge_lance(spec, batches, _source_row_count=_source_row_count)
     if spec.schema is not None:
         batches = (table.cast(spec.schema) for table in _normalize_tables(batches))
     if spec.expected_version is None or spec.mode == "overwrite":

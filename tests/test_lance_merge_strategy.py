@@ -98,42 +98,52 @@ def test_composite_keys_nested_values_and_nulls(tmp_path):
 
 
 def test_isolated_prepare_commit_race_is_rejected(tmp_path, monkeypatch):
-    from demiflow.execution.datafusion import DataFusionSession
+    import demiflow.lance.mutate as mutation
     from demiflow.errors import LanceWriteConflict
     target, source = str(tmp_path / 'target.lance'), str(tmp_path / 'patch.lance')
     old = lance.write_dataset(pa.table({'id': [1, 2], 'value': ['old', 'old'], 'keep': [7, 8]}), target)
     lance.write_dataset(pa.table({'id': [1, 2], 'value': ['new', 'new']}), source)
-    prepare = DataFusionSession._prepare_lance_merge
+    prepare = mutation._prepare_merge
+    prepared_versions = []
 
-    def race(self, *args):
-        prepared = prepare(self, *args)
+    def race(*args, **kwargs):
+        prepared = prepare(*args, **kwargs)
+        prepared_versions.append(prepared.read_version)
         lance.write_dataset(pa.table({'id': [3], 'value': ['competitor'], 'keep': [9]}), target, mode='append')
         return prepared
 
-    monkeypatch.setattr(DataFusionSession, '_prepare_lance_merge', race)
+    monkeypatch.setattr(mutation, '_prepare_merge', race)
     with pytest.raises(LanceWriteConflict):
         data.read_lance(source, version=1).write_lance(target, mode='merge', on='id', update_columns=['value'])
     result = lance.dataset(target)
+    assert prepared_versions == [old.version]
     assert result.version == old.version + 1
     assert result.to_table().sort_by('id')['value'].to_pylist() == ['old', 'old', 'competitor']
 
 
 def test_isolated_prepare_guard_cannot_commit(tmp_path, monkeypatch):
-    import demiflow.execution.lance_merge as managed
-    from demiflow.execution.datafusion import DataFusionOptions, DataFusionSession, DataFusionQueryError
+    import demiflow.lance.mutate as mutation
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.run_context import RunContext
     target, source = str(tmp_path / 'target.lance'), str(tmp_path / 'patch.lance')
     old = lance.write_dataset(pa.table({'id': [1, 2], 'value': ['old', 'old'], 'keep': [7, 8]}), target)
     lance.write_dataset(pa.table({'id': [1, 2], 'value': ['new', 'new']}), source)
 
-    def tiny_session(executor, directory, **kwargs):
-        return DataFusionSession(resource_directory=tmp_path / 'slots', temp_directory=directory,
-            options=DataFusionOptions(memory_bytes=512 * 1024, max_rss_bytes=1024 * 1024, threads=1,
-                                      timeout_s=15, admission_timeout_s=15))
-
-    monkeypatch.setattr(managed, 'dataset_session', tiny_session)
-    with pytest.raises(DataFusionQueryError) as exc:
-        data.read_lance(source, version=1).write_lance(target, mode='merge', on='id', update_columns=['value'])
-    assert exc.value.report['guard'] == 'rss'
+    commits = []
+    original_commit = mutation._commit_merge
+    def capture_commit(*args, **kwargs):
+        commits.append(True)
+        return original_commit(*args, **kwargs)
+    monkeypatch.setattr(mutation, '_commit_merge', capture_commit)
+    # The retired DataFusion session is no longer a consumer. Exercise the
+    # actual v3 host RSS safeguard under the same sealed native policy.
+    with pytest.raises(DataflowError, match='sampled RSS exceeds max_rss_bytes') as exc:
+        with RunContext.start(tmp_path / 'run') as run:
+            with data.local_execution(native_resources={'max_rss_bytes': 1024 * 1024}):
+                data.read_lance(source, version=1).write_lance(target, mode='merge', on='id', update_columns=['value'])
+    assert exc.value.code == 'BUDGET_EXCEEDED'
+    assert run.journal.execution_commits('action-1') == []
+    assert commits == []
     assert lance.dataset(target).version == old.version
     assert lance.dataset(target).to_table().equals(old.to_table())
 

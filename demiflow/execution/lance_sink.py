@@ -15,10 +15,11 @@ from .state_artifacts import atomic_bytes
 
 
 class LanceSink(Datasink):
-    def __init__(self, action, spec, *, native_merge=None):
+    def __init__(self, action, spec, *, native_merge=None, exact_merge_source=False):
         self.action, self.run, self.spec = action, action.context, spec
         self.sink_id = "lance"
         self.native_merge = native_merge
+        self.exact_merge_source = exact_merge_source
         self.root = self.run.directory / "materializations" / action.action_id / "lance"
 
     def write(self, blocks, context):
@@ -230,7 +231,8 @@ class LanceSink(Datasink):
                         reader = pa.ipc.open_stream(stream)
                         yield from reader
                 receipt = write_lance(effective, original_batches(), limits=self.run.limits, check_stop=self.run.check_stop,
-                                      operation_id=context.commit_id if effective.mode != "merge" else None)
+                    operation_id=context.commit_id if effective.mode != "merge" else None,
+                    _source_row_count=(prepared['rows'] if effective.mode == 'merge' and self.exact_merge_source else None))
         if receipt.status != "committed":
             raise LanceWriteError(receipt)
         result = self._receipt(receipt, context)

@@ -17,6 +17,7 @@ def test_empty_nested_maps_use_declared_schema(tmp_path, relational):
 
 
 def test_unknown_fields_are_not_silently_dropped(tmp_path):
-    with pytest.raises(ValueError,match='outside'):
+    with pytest.raises(ValueError,match='undeclared fields: extra'):
         data.from_items([{'id':'a','extra':3}]).write_lance(str(tmp_path/'bad.lance'),
             mode='create',schema=pa.schema([('id',pa.string())]))
+    assert not (tmp_path / 'bad.lance' / '_versions').exists()

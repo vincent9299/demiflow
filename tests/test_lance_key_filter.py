@@ -1,6 +1,5 @@
 """Key-only exclusion preserves scan semantics without staging wide payloads."""
-import json
-from pathlib import Path
+import os
 
 import lance
 import pyarrow as pa
@@ -9,10 +8,15 @@ import pytest
 from demiflow import data
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
+from demiflow.execution.run_context import RunContext
+from _lance_key_fixtures import install_lance_key_probe
+from _worker_event_fixtures import emit, events
 
 
-def test_exclusion_keeps_scope_order_duplicates_nulls_and_pinned_payloads(tmp_path):
-    api=DataAPI(LocalDatasetExecutor(resource_root=tmp_path))
+def test_exclusion_keeps_scope_order_duplicates_nulls_and_pinned_payloads(tmp_path, monkeypatch):
+    proof_path = install_lance_key_probe(tmp_path, monkeypatch)
+    executor = LocalDatasetExecutor(resource_root=tmp_path)
+    api=DataAPI(executor)
     values=[{'key':v,'seq':i,'payload':{'body':'x'*16384,'parts':[None,str(i)]}} for i,v in
         enumerate(['b','a','c','a',None,'b','z','d'])]
     source=lance.write_dataset(pa.Table.from_pylist(values),tmp_path/'source')
@@ -25,17 +29,22 @@ def test_exclusion_keeps_scope_order_duplicates_nulls_and_pinned_payloads(tmp_pa
     ds=api.read_lance(source.uri,version=pinned,filter='seq>=1',limit=9,batch_size=2)
     pending=ds.exclude_keys(api.read_lance(blocked.uri,version=blocked.version),on='key')
     lance.write_dataset(pa.Table.from_pylist([values[0]]),source.uri,mode='overwrite')
-    assert pending.take_all()==expected
-    stages=pending.execution_metadata().diagnostics['stages']
-    scan=next(s for s in stages if s['name']=='lance_key_scan')
-    assert scan['rows_output']==9 and scan['payload_columns_in_relation']==0
-    hydration=next(s for s in stages if s['name']=='lance_payload_read')
-    assert hydration['rows_output']==len(expected) and hydration['max_batch_rows']<=2
-    query=next(s for s in stages if s['name']=='datafusion')
-    request=json.loads((Path(query['query'])/'request.json').read_text())
-    plan=(Path(query['query'])/'plan.txt').read_text()
-    assert 'payload' not in plan and 'irrelevant' not in plan
-    assert not Path(request['directory']).exists()
+    with RunContext.start(tmp_path / 'run') as run:
+        assert pending.take_all()==expected
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    proof = events(proof_path)
+    scans = [e for e in proof if e['event'] == 'key_scan']
+    hydration = [e for e in proof if e['event'] == 'hydrate']
+    ordered = [e for e in proof if e['event'] == 'key_order']
+    assert sum(e['rows'] for e in scans) == 9
+    assert all(e['version'] == pinned and e['columns'] == ['key'] for e in scans)
+    assert sum(e['rows'] for e in hydration) == len(expected)
+    assert all(e['version'] == pinned and e['rows'] == e['requested'] <= 2 for e in hydration)
+    assert sum(e['rows'] for e in ordered) == len(expected)
+    # Worker probes also assert that join/sort contain keys/row IDs only.
+    assert all(e['pid'] != os.getpid() for e in proof)
+    _assert_resource_cleanup(run)
+    executor.close()
 
 
 @pytest.mark.parametrize('blocked', [[],[1,2,3]])
@@ -47,14 +56,16 @@ def test_empty_and_all_excluded(tmp_path,blocked):
 
 
 def test_composite_keys_and_early_close(tmp_path):
-    api=DataAPI(LocalDatasetExecutor(resource_root=tmp_path))
+    executor = LocalDatasetExecutor(resource_root=tmp_path)
+    api=DataAPI(executor)
     values=[{'a':1,'b':'x'},{'a':1,'b':'y'},{'a':None,'b':'x'},{'a':2,'b':'x'}]
     source=lance.write_dataset(pa.Table.from_pylist(values),tmp_path/'source')
     keys=lance.write_dataset(pa.Table.from_pylist([values[0],values[2]]),tmp_path/'keys')
     result=api.read_lance(source.uri,version=1).exclude_keys(api.read_lance(keys.uri,version=1),on=['a','b'])
-    assert result.take(1)==[values[1]]
-    queries=list((tmp_path/'_demiflow/dataset_native/queries').glob('*/request.json'))
-    assert queries and all(not Path(json.loads(p.read_text())['directory']).exists() for p in queries)
+    with RunContext.start(tmp_path / 'run') as run:
+        assert result.take(1)==[values[1]]
+    _assert_resource_cleanup(run)
+    executor.close()
 
 
 def test_empty_source_and_typed_projection(tmp_path):
@@ -65,17 +76,27 @@ def test_empty_source_and_typed_projection(tmp_path):
 
 
 def test_rejects_transforms_projection_missing_keys_and_native_failure(tmp_path,monkeypatch):
-    from demiflow.execution.datafusion import DataFusionSession
+    from demiflow.errors import InvalidLanceRequest
     source=lance.write_dataset(pa.table({'key':[1],'v':['body']}),tmp_path/'source')
     ds=data.read_lance(source.uri,version=1)
     with pytest.raises(ValueError,match='untransformed'):
         ds.map(lambda r:r).exclude_keys(ds,on='key')
     with pytest.raises(ValueError,match='projection'):
         data.read_lance(source.uri,version=1,projection={'key':'key'}).exclude_keys(ds,on='key')
-    with pytest.raises(KeyError):ds.exclude_keys(ds,on='missing').take_all()
-    calls=[]
-    def fail(*a,**kw):calls.append('query');raise RuntimeError('native test failure')
-    monkeypatch.setattr(DataFusionSession,'query',fail)
+    with pytest.raises(InvalidLanceRequest, match="Lance columns not found:.*missing"):
+        ds.exclude_keys(ds,on='missing').take_all()
+    proof_path = install_lance_key_probe(tmp_path, monkeypatch, fail_relation=True)
+    def payload(row):
+        emit(proof_path, 'payload')
+        return row
     with pytest.raises(RuntimeError,match='native test failure'):
-        ds.exclude_keys(ds,on='key').map(lambda r:calls.append('payload')).take_all()
-    assert calls==['query']
+        ds.exclude_keys(ds,on='key').map(payload).take_all()
+    proof = events(proof_path)
+    assert len([e for e in proof if e['event'] == 'relation']) == 1
+    assert all(e['event'] not in {'payload', 'hydrate'} for e in proof)
+
+
+def _assert_resource_cleanup(run):
+    with run.journal._connection() as db:
+        assert db.execute('SELECT COUNT(*) FROM resource_allocations').fetchone()[0] > 0
+        assert db.execute("SELECT COUNT(*) FROM resource_allocations WHERE cleanup!='CONFIRMED'").fetchone()[0] == 0

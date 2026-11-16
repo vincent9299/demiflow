@@ -175,8 +175,8 @@ def _cast_patch(table, schema):
     return pa.Table.from_arrays(columns, schema=schema)
 
 
-def merge_lance(spec, batches):
-    return _commit_merge(spec, _prepare_merge(spec, batches))
+def merge_lance(spec, batches, *, _source_row_count=None):
+    return _commit_merge(spec, _prepare_merge(spec, batches, _source_row_count=_source_row_count))
 
 
 @dataclass(frozen=True)
@@ -250,6 +250,8 @@ def _prepare_merge(spec, batches, *, _source_row_count=None):
         raise
     finally:
         seen.close()
+    if _source_row_count is not None and count != _source_row_count:
+        raise InvalidLanceRequest('Staged merge row count differs from the prepared source')
     updated, inserted = stats['num_updated_rows'], stats['num_inserted_rows']
     ignored = count - updated - inserted
     if ignored < 0:
