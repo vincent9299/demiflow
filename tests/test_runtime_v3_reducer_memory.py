@@ -184,3 +184,32 @@ def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
         else:
             assert [r.inline['k'] for r in folded]==[2,3]
         assert owner.retained_resident_bytes==0
+
+
+def test_numpy_view_charges_its_unique_owner_before_serialization(monkeypatch):
+    import numpy as np
+    from test_runtime_v3_c import bounds
+    owner=np.arange(8192,dtype=np.int64)
+    view=owner[::8192]
+    assert view.nbytes==8 and owner.nbytes==65536
+    roots=[view,owner,view]
+    measured=reducer_memory.measure_tree(roots,max_bytes=128*1024,max_nodes=100)
+    assert measured.retained==sys.getsizeof(roots)+sys.getsizeof(view)+sys.getsizeof(owner)
+    compact=view.copy()
+    assert reducer_memory.measure_tree(compact,max_bytes=4096,max_nodes=100).retained==sys.getsizeof(compact)
+    memory=reducer_memory.declare(None,bounds(max_state_bytes=4096,max_resident_bytes=1024*1024))
+    calls=[]
+    original=reducer_memory.pickle.Pickler
+    def forbidden(*args,**kwargs):
+        calls.append(True)
+        raise AssertionError('pickle cannot start while a retained owner exceeds the grant')
+    monkeypatch.setattr(reducer_memory.pickle,'Pickler',forbidden)
+    with pytest.raises(DataflowError,match='retained objects'):
+        reducer_memory.check_state({'a':view},memory,serialized_limit=4096)
+    assert calls==[]
+    monkeypatch.setattr(reducer_memory.pickle,'Pickler',original)
+    reducer_memory.check_state({'a':view},{**memory,'state_resident_bytes':128*1024},serialized_limit=4096)
+    buffer=bytearray(65536)
+    from_buffer=np.frombuffer(buffer,dtype=np.uint8,count=1)
+    retained=reducer_memory.measure_tree(from_buffer,max_bytes=128*1024,max_nodes=100).retained
+    assert retained==sys.getsizeof(from_buffer)+sys.getsizeof(from_buffer.base)+sys.getsizeof(buffer)

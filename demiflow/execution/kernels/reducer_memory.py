@@ -86,12 +86,30 @@ def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
                 for child in item:
                     visit(child, depth + 1)
         elif kind.__module__ == 'numpy' and kind.__name__ == 'ndarray':
+            import numpy as np
+            if kind is not np.ndarray:
+                raise _error('UNSUPPORTED_CAPABILITY', 'Reducer array subclass needs a bounded state adapter')
             if item.dtype.hasobject:
                 raise _error('UNSUPPORTED_CAPABILITY', 'Reducer object arrays need a bounded state adapter')
-            size = object.__sizeof__(item) + int(item.nbytes)
-            retained += size
-            copied += size
+            # ndarray.__sizeof__ includes owned storage, but a view's nbytes
+            # does not include the owner kept alive by .base. Follow that
+            # original ownership chain using the same alias set as the tree.
+            retained += sys.getsizeof(item)
+            copied += object.__sizeof__(item) + 16 + int(item.nbytes)
             mutable += 1
+            if item.base is not None:
+                if type(item.base) not in (np.ndarray,memoryview,bytes,bytearray):
+                    raise _error('UNSUPPORTED_CAPABILITY','Reducer foreign array owner needs a bounded state adapter')
+                visit(item.base,depth+1)
+        elif kind is memoryview:
+            retained += sys.getsizeof(item)
+            copied += sys.getsizeof(item) + item.nbytes
+            mutable += 1
+            owner=item.obj
+            import numpy as np
+            if type(owner) not in (np.ndarray,memoryview,bytes,bytearray):
+                raise _error('UNSUPPORTED_CAPABILITY','Reducer foreign buffer owner needs a bounded state adapter')
+            visit(owner,depth+1)
         else:
             # Native GC traversal exposes Python slots/dicts without invoking
             # descriptors. A user __deepcopy__/__reduce__ is a user callback;
