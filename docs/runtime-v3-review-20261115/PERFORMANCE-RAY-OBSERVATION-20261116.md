@@ -14,3 +14,13 @@
 - 两机：`/tmp/demiflow-perf-twohost-observer-runner.py`，output 改为 `/yzp/zhaozy/yangzepeng/0905/_demiflow/physical-host-tests/<owned>`，每节点 2 CPU、0 GPU、128MiB object store，SSH 只启动自有 node，采用共享文件系统，不复制代码。业务 `http_host=10.233.68.27`；remote stdin 管道负责关闭自己 node。其余环境同上。
 
 仍未完成：最终候选固定后的 Local 十格 / Ray 四格 / two_hosts 四格原计划五轮配对、每格 warmup 与取消；旧 Ray Data 性能对照；不可观测第三方复制计数。共享 Ray 服务/object store 的物理内存没有偷算到业务 RSS。计划阈值 1.2、输入、预算、120s 与五轮规则未降低。
+
+## 后续同机原负载与完整性反例
+
+生产同前、harness 固定 `c879676` 的 slow_api 真实通过：`/tmp/demiflow-perf-ray-observer-slow-r1/slow_api/trial.json`，64 次真实请求，first 11.1506s 且早于源 EOI，完整 19.0521s，3 原 ACK 最后 final，3 个原 actor 全部释放及物理退出。cluster children=[]。
+
+同机 finite_sealed p1 **失败**：`/tmp/demiflow-pr-finite1-r2/finite_sealed/trial.json`，first 88.4270s，原 120s 时限耗尽，含失败清理 120.6723s，120 个非 final 原 ACK。原 40000×8192B 双侧、空值/重复、native 256MiB / RSS 2GiB / threads2 / partitions1 全保留，3 个 actor 采样与原清理/物理退出全部闭合。私有 cluster children=[]。首次 cluster 初始化因证据目录过长触发 Ray AF_UNIX socket 107 字节限制，未跑业务、children=[]；保留 `/tmp/demiflow-perf-ray-observer-finite-p1-r1/cluster.json`，独立短临时 socket 目录重启后才是上面实际业务试跑。
+
+另补封闭反例：最终 `RayObservations` 对原 run journal 全部 allocation ID 作有限读取，要求与实际采样集合精确相同，不能仅证明自己登记到的子集。上述四份原业务 receipt（同机 fast、slow、finite 与两机 fast）已做只读补查，完整 ID 集均相等、所有 cleanup=CONFIRMED；报告 `/tmp/demiflow-perf-ray-allocation-completeness-20261116.json` 绑定各 receipt SHA，未回写旧 receipt。新的失败 receipt 另记录 `public_rows_observed`，只计实际从公开 iterator 取到的行，不把部分超时输出冒称完整结果。正式最终报告要求这两个新增字段，旧预热不冒充正式样本。
+
+守卫验收：`/tmp/demiflow-perf-ray-guard-r3.xml` 为 51 passed、1 deliberately deselected slow integration test；原合约、基线身份、空/漏采样、未释放、单机冒两机、额外未观测 allocation 均有拒绝反例。真实业务证据见上，不把 51 个守卫测试数当性能样本数。B1-Ray 隔离参考树 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_rayref_20261116` 固定 `2fbe839`，不在主仓运行。

@@ -267,8 +267,17 @@ class RayObservations:
             'excluded': ['shared Ray daemons/object-store memory', 'monitor/probe actors'],
             'preparation_s_outside_business_clock': self.preparation_s,
             'registration_s_inside_business_clock': self.registration_s,
-            'errors': [], 'nodes': [], 'original_cleanup': [], 'monitor_exit': []}
+            'errors': [], 'nodes': [], 'original_cleanup': [], 'monitor_exit': [],
+            'journal_allocation_ids': []}
         try:
+            # Do not certify merely the subset which reached the activation
+            # observer. Unobserved original allocations make coverage fail.
+            for path in sorted({entry['journal_path'] for entry in self.allocations.values()}):
+                with sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True, timeout=5) as db:
+                    rows = db.execute('SELECT allocation_id FROM resource_allocations ORDER BY allocation_id').fetchmany(513)
+                if len(rows) > 512:
+                    raise ValueError('Ray original allocation evidence cap exceeded')
+                result['journal_allocation_ids'].extend(row[0] for row in rows)
             deadline = time.monotonic() + 10
             while True:
                 alive = [entry for entry in self.allocations.values()
@@ -314,6 +323,10 @@ def ray_receipt_errors(result, *, require_two_hosts=False):
     allocations = [entry for node in nodes for entry in node.get('allocations', [])]
     if not allocations or len({entry['allocation_id'] for entry in allocations}) != len(allocations):
         errors.append('missing or duplicate original Ray allocation samples')
+    declared = result.get('journal_allocation_ids', [])
+    if (len(declared) != len(set(declared))
+        or set(declared) != {entry['allocation_id'] for entry in allocations}):
+        errors.append('original journal contains unobserved or duplicate Ray allocations')
     if any(node.get('errors') or node.get('samples', 0) < 1 for node in nodes):
         errors.append('Ray node samples incomplete')
     if any(entry.get('sample_count', 0) < 1 or entry.get('rss_peak_bytes', 0) <= 0

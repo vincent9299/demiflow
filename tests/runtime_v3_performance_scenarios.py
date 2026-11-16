@@ -540,6 +540,7 @@ def run_child(config):
         import cProfile
         profiler = cProfile.Profile()
     source_eoi_at_first = None
+    public_rows_observed = 0
     try:
         with ExitStack() as outer:
             endpoint = None
@@ -616,8 +617,9 @@ def run_child(config):
                             else dataset.iter_rows())
                     if hasattr(rows, 'close'): execution.callback(rows.close)
                     def observed_rows():
-                        nonlocal first, source_eoi_at_first
+                        nonlocal first, source_eoi_at_first, public_rows_observed
                         for row in rows:
+                            public_rows_observed += 1
                             if first is None:
                                 first = time.monotonic_ns()
                                 source_eoi_at_first = (root / 'source-eoi-left').exists()
@@ -651,6 +653,7 @@ def run_child(config):
         child_execute_action_calls=observations.calls, cuts=observations.cuts, plans=observations.plans,
         copy_observation=observations.copy,
         ray_resources=ray_observer.result if ray_observer else None,
+        public_rows_observed=public_rows_observed,
         ray_data_import_attempts=sorted(imports.attempts),
         http_request_count=len(calls), resources=None)
     facts['measurement_started_ns'] = started
@@ -828,9 +831,11 @@ def _receipt_errors(row):
     if not before or before != after or row.get('source_unchanged') is not True:
         errors.append('source/evidence changed within trial')
     if row.get('arm') == 'baseline':
-        expected = expected_baseline(row['cell'])
+        try: expected = expected_baseline(row['cell'])
+        except (KeyError, ValueError): expected = None
         if (row.get('baseline_role') != expected or not before
-            or before.get('head') != expected['commit'] or before.get('production_clean') is not True
+            or expected is None or before.get('head') != expected['commit']
+            or before.get('production_clean') is not True
             or row.get('variant', {}).get('kind') != expected['kind']):
             errors.append('baseline identity/capability role differs from approved environment policy')
     if row.get('returncode') != 0 or row.get('failures'):
@@ -860,6 +865,8 @@ def _receipt_errors(row):
                     not math.isfinite(value) or not 0 <= value <= elapsed):
                 errors.append(key + ' invalid')
         if row.get('phase') != 'cancel':
+            if row.get('public_rows_observed') != row.get('output', {}).get('rows'):
+                errors.append('public observed row count differs from the complete output')
             if row.get('first_result_s') is None or row.get('action_elapsed_s') is None:
                 errors.append('successful nonempty workload lacks public timing')
             throughput = row.get('throughput_rows_s')

@@ -16,7 +16,7 @@ def _receipt():
         'allocations': [{'allocation_id': host, 'sample_count': 4, 'rss_peak_bytes': 100,
             'fd_peak': 10, 'remaining': [], 'birth': '123', 'process_births': [[1234, '123']]}]}
         for host in ('a', 'b')]
-    return {'errors': [], 'nodes': nodes,
+    return {'errors': [], 'nodes': nodes, 'journal_allocation_ids': ['a', 'b'],
         'original_cleanup': [{'allocation_id': host, 'cleanup': 'CONFIRMED', 'actor_state': 'DEAD'}
             for host in ('a', 'b')],
         'monitor_exit': [{'same_process_alive': False}, {'same_process_alive': False}]}
@@ -27,7 +27,8 @@ def test_complete_two_node_measurement_receipt():
 
 
 @pytest.mark.parametrize('damage', ['missing', 'duplicate', 'unsampled', 'alive', 'no_birth',
-    'no_rss', 'no_fd', 'unconfirmed', 'no_cleanup', 'actor_alive', 'one_host', 'monitor_alive', 'monitor_absent'])
+    'no_rss', 'no_fd', 'unconfirmed', 'no_cleanup', 'actor_alive', 'one_host', 'monitor_alive', 'monitor_absent',
+    'unobserved_allocation', 'missing_journal_inventory'])
 def test_incomplete_remote_evidence_cannot_be_green(damage):
     receipt = deepcopy(_receipt())
     entry = receipt['nodes'][0]['allocations'][0]
@@ -44,6 +45,8 @@ def test_incomplete_remote_evidence_cannot_be_green(damage):
     elif damage == 'one_host': receipt['nodes'][1]['hostname'] = 'a'
     elif damage == 'monitor_alive': receipt['monitor_exit'][0]['same_process_alive'] = True
     elif damage == 'monitor_absent': receipt['monitor_exit'].pop()
+    elif damage == 'unobserved_allocation': receipt['journal_allocation_ids'].append('unobserved')
+    elif damage == 'missing_journal_inventory': receipt.pop('journal_allocation_ids')
     assert ray_receipt_errors(receipt, require_two_hosts=True)
 
 
