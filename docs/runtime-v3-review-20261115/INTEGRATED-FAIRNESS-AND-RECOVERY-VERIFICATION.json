@@ -1,0 +1,234 @@
+{
+  "root_integration_receipts": [
+    {
+      "head": "f67daa91da944dd43f3f09607b3897079facfeaa",
+      "source_inputs_compared": 1873,
+      "source_mismatches": [],
+      "tests": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "1",
+        "time": "139.282",
+        "timestamp": "2026-11-16T18:03:52.214984+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "verification": {
+        "path": "/tmp/demiflow-root-fair-ray-r2-evidence/verification.json",
+        "sha256": "bb6fb7be9bf4bf3d16f7c384b353ab833a66283dc71642667032e80c76d0a06c"
+      },
+      "xml": {
+        "path": "/tmp/demiflow-root-fair-ray-r2.xml",
+        "sha256": "6649aa7fae6cba173ce75c292f212212ab18c724ee0a27e9868fdbaec808fdb1"
+      },
+      "attachments_checked": 5
+    },
+    {
+      "head": "c835adaa32c003a26e8a7e486446a74fb3bc03d3",
+      "source_inputs_compared": 1875,
+      "source_mismatches": [],
+      "tests": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "122",
+        "time": "272.014",
+        "timestamp": "2026-11-16T18:14:36.495516+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "verification": {
+        "path": "/tmp/demiflow-root-local-closure-c835ada-evidence/verification.json",
+        "sha256": "817d167a8aa24d0cb8e7cf8d1624b3d35d46d256ac5c642996012d61dca0fd27"
+      },
+      "xml": {
+        "path": "/tmp/demiflow-root-local-closure-c835ada.xml",
+        "sha256": "5452ab7d2e689018fe4b30d5a2d164268fc41e9d7e13f035a1b6513b2a336af0"
+      },
+      "attachments_checked": 9
+    }
+  ],
+  "original_fairness_archives": [
+    {
+      "root": "/tmp/demiflow-root-fair-ray-r2-native-evidence/ray_core/fairness_deadlock",
+      "files_compared": 23,
+      "cleanup": {
+        "children": [],
+        "original_pool_records": 0,
+        "active_allocations": [],
+        "original_journal_allocations": {
+          "partial-slots/run/run.sqlite": {
+            "CONFIRMED": 36
+          },
+          "hot-key/run/run.sqlite": {
+            "CONFIRMED": 3
+          },
+          "small-disk/run/run.sqlite": {
+            "CONFIRMED": 3
+          }
+        },
+        "unconfirmed": []
+      },
+      "partial_slots_rows": 128,
+      "hot_key_groups": 128,
+      "small_disk_error": {
+        "type": "ExecutionBudgetExceeded",
+        "text": "Execution budget exhausted: artifact_staging_bytes",
+        "code": null
+      },
+      "ray_data_imports": []
+    },
+    {
+      "root": "/tmp/demiflow-root-local-closure-c835ada-native/local/fairness_deadlock",
+      "files_compared": 48,
+      "cleanup": {
+        "children": [],
+        "original_pool_records": 29,
+        "active_allocations": [],
+        "original_journal_allocations": {
+          "partial-slots/run/run.sqlite": {
+            "CONFIRMED": 22
+          },
+          "hot-key/run/run.sqlite": {
+            "CONFIRMED": 3
+          },
+          "small-disk/run/run.sqlite": {
+            "CONFIRMED": 3
+          }
+        },
+        "unconfirmed": []
+      },
+      "partial_slots_rows": 128,
+      "hot_key_groups": 128,
+      "small_disk_error": {
+        "type": "ExecutionBudgetExceeded",
+        "text": "Execution budget exhausted: artifact_staging_bytes",
+        "code": null
+      },
+      "ray_data_imports": []
+    }
+  ],
+  "route_owner_audit": [
+    {
+      "evidence": "/tmp/demiflow-v017-local-final-evidence/verification.json",
+      "sha256": "e7ee7d07103a25295d56921b73b16f69e191200143a7e1f35a521be591fb2996",
+      "head": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+      "inputs": 2188,
+      "source_mismatches": [],
+      "attachments": 1,
+      "attachment_mismatches": [],
+      "children_after": [],
+      "fixture_fd_checks": [
+        {
+          "baseline": 53,
+          "before_original_close": 53
+        }
+      ],
+      "exit_code": 0,
+      "junit": {
+        "path": "/tmp/demiflow-v017-local-final-evidence/result.xml",
+        "sha256": "4b465708894447ae75620a45bb9a844526a1eef39015347a4460fe2d9b8c5ae8",
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "16",
+        "time": "152.193",
+        "timestamp": "2026-11-16T17:42:31.700670+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "scenario": {
+        "path": "/tmp/demiflow-v017-local-final-evidence/scenario-route_recovery.json",
+        "sha256": "43032433c5f5fb1242f49ade43d7a65a1e11b94ec179d0948f3fe07bf27ca91f"
+      }
+    },
+    {
+      "evidence": "/tmp/demiflow-v017-ray-final-evidence/verification.json",
+      "sha256": "aa4a883aaf7d39ec5c5c87550189269f157366bcb9690b3b4574368847f6c1b5",
+      "head": "17a93bc69cfaac8215d263710d61dd102b6f5e69",
+      "inputs": 2188,
+      "source_mismatches": [],
+      "attachments": 1,
+      "attachment_mismatches": [],
+      "children_after": [],
+      "fixture_fd_checks": [
+        {
+          "baseline": 38,
+          "before_original_close": 41
+        }
+      ],
+      "exit_code": 0,
+      "junit": {
+        "path": "/tmp/demiflow-v017-ray-final-evidence/result.xml",
+        "sha256": "8ad256dbd9a1d4a820dfc59c9eb4b1b3335c57faf440966b7e2b210d79ca325f",
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "1",
+        "time": "176.022",
+        "timestamp": "2026-11-16T17:47:55.577703+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "scenario": {
+        "path": "/tmp/demiflow-v017-ray-final-evidence/scenario-route_recovery.json",
+        "sha256": "dcb2e32e3d9771379163a635d51494390ab31ebcb015c3eb1d091be8d36172af"
+      }
+    }
+  ],
+  "idle_owner_audit": {
+    "head": "03f516b9de00068ddaf44279b96b392ae2e180d7",
+    "receipts": [
+      {
+        "label": "partial_local",
+        "source_inputs": 1053,
+        "mismatches": [],
+        "receipt": "/tmp/demiflow-phase-clock-idle-local-r1/verification.json"
+      },
+      {
+        "label": "partial_ray",
+        "source_inputs": 1053,
+        "mismatches": [],
+        "receipt": "/tmp/demiflow-phase-clock-idle-ray-r1/verification.json"
+      },
+      {
+        "label": "regression_local",
+        "source_inputs": 1861,
+        "mismatches": [],
+        "receipt": "/tmp/demiflow-idle-final-local-evidence/verification.json"
+      },
+      {
+        "label": "regression_ray",
+        "source_inputs": 1861,
+        "mismatches": [],
+        "receipt": "/tmp/demiflow-idle-final-ray-evidence/verification.json"
+      }
+    ],
+    "attachments_checked": 15,
+    "attachment_mismatches": []
+  },
+  "boundaries": {
+    "candidate": "c835adaa32c003a26e8a7e486446a74fb3bc03d3",
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "main_status_unchanged": true,
+    "dirty_files_compared": 18,
+    "frozen_count": 7,
+    "frozen": {
+      "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+      "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+      "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+      "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+      "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+      "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+      "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+    },
+    "scope": "Main checkout and frozen sources only; prior separately disclosed resource incidents are not erased by this check."
+  },
+  "pending": [
+    "Final Ray route recovery after integrating idle fix",
+    "Native compatibility execution and schema bounds",
+    "Remaining historical failures and unexecuted coverage",
+    "Full same-budget performance comparison; GC fast precheck performance not yet measured"
+  ]
+}
