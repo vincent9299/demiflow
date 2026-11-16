@@ -288,6 +288,13 @@ class QueueProducer:
         facts = coordinator.recover({'publish':sink})
         if facts and facts[0]['status']!='pending':
             fact = facts[0]
+            prepared = fact['prepared']['sinks']['publish']
+            if prepared['occurrence'] != occurrence or prepared['source_position'] != self.position:
+                raise RecoveryContractError('Recovered publication belongs to another source unit')
+            # A parked worker may replay a call whose native receipt was fixed
+            # after its last Dataset cut. Reuse that original ordinal, rather
+            # than incrementing an offset which already includes this receipt.
+            self.chunk = prepared['output_ordinal']
         else:
             prepared = dict(format=2,occurrence=occurrence,source_position=self.position,output_ordinal=self.chunk,
                             messages=messages,unit_end=unit_end,eos=eos)

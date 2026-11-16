@@ -78,8 +78,35 @@ class NativeProducerService(NativeAcquisitionService):
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'Producer checkpoint has multiple source owners')
             offset = thaw_record_value(cursors[0].offset) if cursors else {}
             position = offset.get('producer_position', 0)
-            if type(position) is not int or position < 0 or position > self._fetch.position:
+            native_position = self._fetch.position
+            if type(position) is not int or position < 0 or position > native_position + 1:
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'Dataset producer frontier is ahead of native progress')
+            descriptor = None
+            if cursors and cursors[0].lease_ref is not None:
+                descriptor = self._read_json(cursors[0].lease_ref,
+                    max_bytes=self._services.bounds.max_control_bytes)
+                if (type(descriptor) is not dict or set(descriptor) != {
+                        'generation', 'position', 'occurrence', 'next_cursor'}
+                        or descriptor['generation'] != self._binding.generation
+                        or type(descriptor['position']) is not int or descriptor['position'] < 0
+                        or descriptor['position'] != position - 1
+                        or descriptor['occurrence'] != identity([
+                            'producer-unit', self._binding.generation, descriptor['position']])
+                        or descriptor['next_cursor'] != offset.get('producer_cursor')):
+                    raise DataflowError('INCOMPATIBLE_HISTORY', 'Producer cursor lost its native unit ownership')
+            residency = getattr(self, '_restore_residency', None) or {}
+            pending = any(not entry['consumed'] for entry in residency.get('deliveries', {}).values())
+            if position > native_position or pending:
+                if descriptor is None or cursors[0].end_of_input:
+                    raise DataflowError('INCOMPATIBLE_HISTORY', 'In-flight producer unit lacks its sealed delivery')
+                if native_position not in (descriptor['position'], descriptor['position'] + 1):
+                    raise DataflowError('INCOMPATIBLE_HISTORY', 'Native producer moved beyond the in-flight unit')
+                self._unit = descriptor
+                position = descriptor['position']
+                self._fetch.next_cursor = descriptor['next_cursor']
+                self._fetch.begin_unit()
+                if position == native_position:
+                    self._fetch.chunk = self._fetch.offset
             # The native unit may have committed just before the Dataset cut was
             # lost. Replay that unit with stable native receipts, never skip it.
             self._fetch.position = position
@@ -154,8 +181,8 @@ class NativeProducerService(NativeAcquisitionService):
 
 
 
-    def before_cut(self):
-        if self._unit is not None:
+    def before_cut(self, *, unit_drained=True):
+        if self._unit is not None and unit_drained:
             self._run_io(self._fetch.end_unit(), timeout_s=self._services.bounds.timeout_ms / 1000)
             self._unit = None
 

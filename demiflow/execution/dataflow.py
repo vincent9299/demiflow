@@ -544,6 +544,7 @@ class DataflowExecution:
         self._configure_phases()
         if self._acquisition is not None:
             self._acquisition._restore_image = self._restore_image
+            self._acquisition._restore_residency = self._checkpoint.residency
             self._acquisition.start()
         self._launch_phase()
         self._started = True
@@ -1092,13 +1093,17 @@ class DataflowExecution:
             for endpoint in self._endpoints.values():
                 endpoint.request_cut(self._cut)
         if self._cut is not None and set(self._cut.participants) <= self._contributions.keys():
-            from .dataflow_producer import NativeProducerService
-            if isinstance(self._acquisition, NativeProducerService):
-                self._acquisition.before_cut()
-            if self._cut.final and self._acquisition is not None:
-                self._native_summary = self._acquisition.finish()
             if durable is not None:
                 durable.before_commit(self._cut, self._contributions)
+            from .dataflow_producer import NativeProducerService
+            if isinstance(self._acquisition, NativeProducerService):
+                # A parked physical owner is not the end of the native input
+                # unit. All downstream/fanout deliveries retain that ownership
+                # until their actual consumer frontiers have drained them.
+                self._acquisition.before_cut(unit_drained=durable is None or
+                    all(entry['consumed'] for entry in durable.entries.values()))
+            if self._cut.final and self._acquisition is not None:
+                self._native_summary = self._acquisition.finish()
             image = self._checkpoint.commit(self._cut.cut_id, sinks=self._sinks)
             # ObjectSink.prepare already transfers exactly its generation.
             # Calls finishing during publication append to the next generation.
