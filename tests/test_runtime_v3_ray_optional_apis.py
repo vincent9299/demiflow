@@ -17,7 +17,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def ray_executor():
-    import ray
+    ray = pytest.importorskip("ray", reason="requires a real Ray Core environment")
     from demiflow.data.api import _use_executor
     from demiflow.execution.executors.ray import RayDatasetExecutor
     from runtime_v3_support import assert_tree_binding

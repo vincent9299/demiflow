@@ -813,6 +813,11 @@ def _s_api_matrix(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
     else:
         evidence = api_matrix(fx, fault)
     assert evidence['api_count'] == 98 and len(evidence['api']) == 98
+    if evidence['failed']:
+        # Fixture cleanup removes its owned directory even on failure. Export
+        # the original case details through the same evidence hook used by
+        # successful scenarios before propagating the failing assertion.
+        fx._save_evidence('api_matrix', evidence)
     assert not evidence['failed'], {key: value['failed'] for key, value in evidence['failed'].items()}
     if evidence['not_run']:
         detail = {'unverified_api': evidence['not_run'], 'executed': evidence['executed']}
