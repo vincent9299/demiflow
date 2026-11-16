@@ -542,22 +542,25 @@ def test_second_failure_after_resume_opens_and_closes_its_own_scope(tmp_path, ra
 
 @pytest.fixture(scope="module")
 def ray_local(tmp_path_factory):
+    import tempfile
     ray = pytest.importorskip("ray")
-    from pathlib import Path
     root = tmp_path_factory.mktemp("ray-chain")
     assert str(root).startswith("/tmp/demiflow-")
     assert not ray.is_initialized(), "this test must own a private 2-CPU cluster"
-    ray.init(address="local", num_cpus=2, num_gpus=0, include_dashboard=False,
-             object_store_memory=100 * 1024**2, _temp_dir=str(root / "ray"))
-    with pytest.MonkeyPatch.context() as patch:
-        for key, suffix in (("DEMIFLOW_RESOURCE_ROOT", "pool"),
-                            ("DEMIFLOW_RESOURCE_HOME", "home"),
-                            ("DEMIFLOW_FORGE_DOMAIN", "forge")):
-            patch.setenv(key, str(root / suffix))
-        try:
-            yield ray
-        finally:
-            ray.shutdown()
+    # AF_UNIX has a 107-byte path ceiling. Ray appends its timestamp and socket
+    # names, so use a short owned directory rather than the long pytest node path.
+    with tempfile.TemporaryDirectory(prefix="demiflow-l16-") as ray_root:
+        with pytest.MonkeyPatch.context() as patch:
+            for key, suffix in (("DEMIFLOW_RESOURCE_ROOT", "pool"),
+                                ("DEMIFLOW_RESOURCE_HOME", "home"),
+                                ("DEMIFLOW_FORGE_DOMAIN", "forge")):
+                patch.setenv(key, str(root / suffix))
+            try:
+                ray.init(address="local", num_cpus=2, num_gpus=0, include_dashboard=False,
+                         object_store_memory=100 * 1024**2, _temp_dir=ray_root)
+                yield ray
+            finally:
+                ray.shutdown()
 
 
 def _ray_dataset(plan, items):
