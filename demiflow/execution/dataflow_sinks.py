@@ -153,7 +153,11 @@ class _DataflowArtifactSink(Datasink):
             data_ref = _artifact_from_json(partition["data_ref"])
             from .dataflow_segments import tree_refs
             for ref in tree_refs(self._store, data_ref, self._bounds):
-                self._store.retain(ref, owner=context.commit_id)
+                # Authenticate the entire prefix before publication, including
+                # old leaves. The original GC traces this publication's typed
+                # children, so each cut needs only its publication owner pin.
+                if not self._store.inspect(ref):
+                    raise DataflowError('UNKNOWN_EFFECT', 'Cannot pin an absent artifact')
         self._store.retain(pub_ref, owner=context.commit_id)
         self._action.context.allocate_artifact(self._marker(context), commit_id=context.commit_id)
         return {"ref": _artifact_json(pub_ref), "sink_id": self._sink_id,
