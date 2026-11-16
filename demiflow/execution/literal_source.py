@@ -203,10 +203,10 @@ class LiteralRows:
         if self._closed or self.index >= self.end:
             self.close()
             raise StopIteration
-        if self._segments is None:
-            self._open()
         bounds = self.services.bounds
         try:
+            if self._segments is None:
+                self._open()
             while True:
                 if self._stream is None:
                     try:
