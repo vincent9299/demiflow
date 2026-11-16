@@ -104,6 +104,8 @@ def _cut_facts(coordinator, image):
             states.append({'participant': owner.participant_id, 'occurrence': occurrence,
                 'kind': value['kind'], 'batch_rows': len(value.get('batch', ())),
                 'state': value.get('state'), 'finish_cursor': value.get('finish_cursor'),
+                'output_cursor': value['output_cursor'], 'call_ordinal': value['call_ordinal'],
+                'worker_states': value.get('worker_states'), 'worker_calls': value.get('worker_calls'),
                 'image_ref': dict(digest=ref.digest, size_bytes=ref.size_bytes, store_id=ref.store_id,
                                   key=ref.key, media_type=ref.media_type)})
     commit = coordinator._action.context.journal.execution_commit(image.commit_id)
@@ -115,7 +117,8 @@ def _cut_facts(coordinator, image):
         'sources': [_cursor_json(c) for c in image.source_vector], 'kernel_images': states}
 
 
-def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True, limits=None):
+def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True, limits=None,
+                      observations=None):
     from demiflow.execution.run_context import RunContext
     from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
     from demiflow.execution.sealed_plans import load_sealed_plan
@@ -149,6 +152,7 @@ def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True,
             raise AssertionError('pipeline never reached the required actual nonfinal ACK')
         before = run.journal.execution_commits('action-1')
         assert boundary and before[-1]['status'] == 'acked'
+        observed_before_resume = observations() if observations is not None else None
         def final_observe(coordinator, *args, **kwargs):
             image = commit(coordinator, *args, **kwargs)
             cuts.append(_cut_facts(coordinator, image))
@@ -172,6 +176,7 @@ def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True,
                        'occurrences':list(s.occurrences)} for s in bundle['physical'].stages],
             'routes':sorted(set(e.routing for e in bundle['physical'].exchanges))},
         'child_execute_action_calls':recorder.calls, 'child_ray_data_import_attempts':blocked.attempts,
+        'observations_before_resume': observed_before_resume,
         'self_managed_run_context':True}
 
 
@@ -267,29 +272,55 @@ def actor_state_lifecycle(fx,fault=None):
     def build():
         return data.from_items([{'i':i} for i in range(5)]).map(Accumulator,
             fn_constructor_args=[path],execution='inline',concurrency=1)
-    result = _resume_after_ack(fx,'actor-state',build)
+    result = _resume_after_ack(fx,'actor-state',build,observations=lambda:_events(path))
     assert [(r['i'],r['total']) for r in result['rows']] == [(0,0),(1,1),(2,3),(3,6),(4,10)]
     calls = [e for e in _events(path) if e['event']=='call']
-    assert [(e['i'],e['total']) for e in calls] == [(r['i'],r['total']) for r in result['rows']]
+    first_calls = [e for e in result['observations_before_resume'] if e['event']=='call']
+    image, = [s for s in result['boundary']['kernel_images']
+              if s['state'] and s['state']['mode']=='plain_json']
+    committed = image['output_cursor']
+    fields = image['state']['value']['fields']
+    assert 0 < committed <= len(first_calls) <= 5
+    expected = [(r['i'],r['total']) for r in result['rows']]
+    assert [(e['i'],e['total']) for e in first_calls] == expected[:len(first_calls)]
+    resumed_calls = calls[len(first_calls):]
+    assert [(e['i'],e['total']) for e in resumed_calls] == expected[committed:]
+    assert fields['total'] == result['rows'][committed-1]['total']
+    assert fields['owner'] == result['rows'][0]['owner']
+    assert not {e['i'] for e in first_calls[:committed]} & {e['i'] for e in resumed_calls}
     assert len({r['owner'] for r in result['rows']}) == 1
     owners_path = str(fx.evidence_dir/'worker-owners.jsonl')
     def worker_build():
         return data.from_items([{'i':i} for i in range(9)]).map(Accumulator,
             fn_constructor_args=[owners_path],execution='thread',concurrency=3,callable_scope='worker')
-    owners = _resume_after_ack(fx,'actor-worker-slots',worker_build,limits={'checkpoint_rows':4})
+    owners = _resume_after_ack(fx,'actor-worker-slots',worker_build,limits={'checkpoint_rows':4},
+                              observations=lambda:_events(owners_path))
     assert sorted(r['i'] for r in owners['rows']) == list(range(9))
     identities = {r['owner'] for r in owners['rows']}
     assert len(identities) == 3
     owner_calls = [e for e in _events(owners_path) if e['event']=='call']
-    assert len(owner_calls) == 9
+    before_calls = [e for e in owners['observations_before_resume'] if e['event']=='call']
+    after_calls = owner_calls[len(before_calls):]
+    owner_image, = [s for s in owners['boundary']['kernel_images'] if s['worker_states']]
+    assert len(owner_image['worker_states']) == len(owner_image['worker_calls']) == 3
+    committed_by_owner = {state['value']['fields']['owner']:(count,state['value']['fields'])
+        for state,count in zip(owner_image['worker_states'],owner_image['worker_calls'])}
+    assert set(committed_by_owner) == identities
+    assert sum(n for n,_ in committed_by_owner.values()) == owner_image['output_cursor']
+    assert len(after_calls) == 9-owner_image['output_cursor']
     for owner in identities:
         values = [r for r in owners['rows'] if r['owner']==owner]
         total = 0
         for row in values:
             total += row['i']
             assert row['total']==total
-        assert [(e['i'],e['total']) for e in owner_calls if e['owner']==owner] == [
-            (r['i'],r['total']) for r in values]
+        n, fields = committed_by_owner[owner]
+        prefix = [e for e in before_calls if e['owner']==owner][:n]
+        suffix = [e for e in after_calls if e['owner']==owner]
+        assert len(prefix) == n
+        assert fields['total'] == (prefix[-1]['total'] if prefix else 0)
+        assert [(e['i'],e['total']) for e in prefix+suffix] == [(r['i'],r['total']) for r in values]
+        assert not {e['i'] for e in prefix} & {e['i'] for e in suffix}
     result['worker_owners'] = owners
     result['child_execute_action_calls'] += owners['child_execute_action_calls']
     result['child_ray_data_import_attempts'] += owners['child_ray_data_import_attempts']
