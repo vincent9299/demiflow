@@ -736,6 +736,13 @@ class LocalDatasetExecutor(DatasetExecutor):
     ) -> Any:
         from ..dataflow_api import make_action_request, run_dataset_action
         from ..contracts.dataflow import ActionProgram
+        # The retained low-level method historically accepts no aggregations:
+        # empty input -> None, nonempty input -> {}. Count on the same native
+        # terminal proves emptiness without restoring a second source loop.
+        empty_aggregations = not aggregates
+        if empty_aggregations:
+            from ...data.aggregate import Count
+            aggregates = (Count(),)
         programs = tuple(
             ActionProgram(name='aggregate-' + str(index), kind='aggregate', value=aggregate)
             for index, aggregate in enumerate(aggregates)
@@ -745,6 +752,8 @@ class LocalDatasetExecutor(DatasetExecutor):
             programs=programs)
         result = run_dataset_action(request)
         self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
+        if empty_aggregations:
+            return {} if result['count()'] else None
         return result
 
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:

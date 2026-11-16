@@ -1,0 +1,110 @@
+{
+  "receipts": [
+    {
+      "path": "/tmp/demiflow-startup-red-evidence/verification.json",
+      "sha256": "8d54ef0bb271b41c0f7f1abb46f551da30f098e626c3403ef0f4c42b8e42b36d",
+      "head": "88728878c1f3f7ff2be745a57f082feeb2a9f7e9",
+      "inputs": 2191,
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "1",
+        "skipped": "0",
+        "tests": "1",
+        "time": "4.132",
+        "timestamp": "2026-11-16T19:17:19.659422+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      }
+    },
+    {
+      "path": "/tmp/demiflow-startup-fixed-evidence/verification.json",
+      "sha256": "bfee7bb779d20a175cb59e52412499280e38d36ed91f92a4c3a455dff8d51eaf",
+      "head": "6cc29ff2b2f669c9c0d6efb5ceeccbdb8e5c0845",
+      "inputs": 2191,
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "2",
+        "tests": "21",
+        "time": "173.760",
+        "timestamp": "2026-11-16T19:21:17.262321+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      }
+    },
+    {
+      "path": "/tmp/demiflow-native-import-comparison-r1/00-warmup-baseline/trial.json",
+      "sha256": "9bd1fca0555e00357ea18edafcab856054f76d4e593b11ffe59cd57a5a2e2b31",
+      "head": "1f90c931bfabb86e47de4fdcbc85d66501a2cea5",
+      "inputs": 1050,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "elapsed_s": 17.071438674
+    },
+    {
+      "path": "/tmp/demiflow-native-import-comparison-r1/01-warmup-candidate/trial.json",
+      "sha256": "ce9f7210d8539370484049ced562f87d0d4ddbb914194087f853f216fb181209",
+      "head": "6cc29ff2b2f669c9c0d6efb5ceeccbdb8e5c0845",
+      "inputs": 1050,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "elapsed_s": 14.399679109
+    },
+    {
+      "path": "/tmp/demiflow-native-import-comparison-r1/02-measured-baseline/trial.json",
+      "sha256": "53a2feed9022f74c60fced24accaf5c12db214fd8e4ce2197427a21133805a1a",
+      "head": "1f90c931bfabb86e47de4fdcbc85d66501a2cea5",
+      "inputs": 1050,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "elapsed_s": 16.066572761
+    },
+    {
+      "path": "/tmp/demiflow-native-import-comparison-r1/03-measured-candidate/trial.json",
+      "sha256": "a94c9de6311a3f7dfbb950c238fac88a86fa80b056c287a450a906a78c10ad83",
+      "head": "6cc29ff2b2f669c9c0d6efb5ceeccbdb8e5c0845",
+      "inputs": 1050,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "elapsed_s": 15.120861539
+    },
+    {
+      "path": "/tmp/demiflow-native-import-comparison-r1/04-measured-candidate/trial.json",
+      "sha256": "187c735188ee2ef4b3999c78956ac8cce2b6a6981ac02e17b454f893e1190343",
+      "head": "6cc29ff2b2f669c9c0d6efb5ceeccbdb8e5c0845",
+      "inputs": 1050,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "elapsed_s": 14.747611738
+    },
+    {
+      "path": "/tmp/demiflow-native-import-comparison-r1/05-measured-baseline/trial.json",
+      "sha256": "4efff0fd7d8a90cfa8873b1372a68172dda0dfdc4bb3f2588f90beac9ebc6ca7",
+      "head": "1f90c931bfabb86e47de4fdcbc85d66501a2cea5",
+      "inputs": 1050,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "elapsed_s": 16.3718107
+    }
+  ],
+  "mismatches": [],
+  "scope": "Independent source and artifact verification; owner fixed Local tests and 2+4 same-budget screen, not final five-repeat matrix"
+}

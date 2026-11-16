@@ -52,3 +52,20 @@ def test_public_aggregate_requires_an_aggregation_before_source_read(tmp_path):
     with pytest.raises(ValueError, match='at least one aggregation'):
         Dataset(source, LogicalPlan(), LocalDatasetExecutor()).aggregate()
     assert not marker.exists()
+
+
+def test_plain_empty_source_aggregate_admits_and_returns_none():
+    ex = LocalDatasetExecutor()
+    ds = data.from_items([]).map(lambda row: row)
+    assert call(ex, 'aggregate', ds._source, ds._plan, ()) is None
+
+
+def test_nonempty_source_empty_aggregation_preserves_empty_dict(tmp_path):
+    from demiflow.execution.run_context import RunContext
+    ex = LocalDatasetExecutor()
+    ds = data.from_items([{'id': 1}, {'id': 2}]).map(lambda row: row)
+    with RunContext.start(tmp_path / 'run') as run:
+        assert call(ex, 'aggregate', ds._source, ds._plan, ()) == {}
+        assert run.position == 1
+        assert run.journal.execution_action('action-2') is None
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
