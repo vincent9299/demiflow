@@ -189,6 +189,7 @@ def test_workbench_prepare_start_uses_registered_objects_and_sealed_native_plan(
     root = tmp_path / 'workspace'
     path, args, report, _ = _fixture(root, catalog, server['model'].base_url, modality)
     assert report['status'] == 'checked', report['diagnostics']
+    (root / 'tables').mkdir()
     ws.attach_table(root, 'inputs', relative_uri='input.lance', version=1,
         location_id='local', dataset_id='embedding-inputs', schema_name='embedding-inputs', schema_version='1')
     path.write_text(path.read_text().replace('data.read_lance(source, version=1)',
