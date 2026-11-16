@@ -348,16 +348,16 @@ def write_registered_table(
 ) -> tuple[DatasetRef, int, bool]:
     """把 ``rows_factory`` 的行写为一张 Lance 表，登记并返回引用、行数与是否重放。
 
-    组合 checkpoint_lance 的原子提交／重放契约与 catalog 登记；schema 显式
+    组合原生 write_lance 的 RunJournal 提交／重放契约与 catalog 登记；schema 显式
     传入（本层不持有任何业务 schema 集合）。行工厂必须是零参可重入迭代器
-    （重放时由 checkpoint 直接读表，不再执行工厂）。
+    （重放时读取原生已确认回执，不再执行工厂）。
 
     重放（目标已有同 fingerprint 提交）时行工厂不执行——调用方需要源侧
     统计（对账、坏行计数）时须自行补一遍纯统计扫描。
 
     ``fingerprint`` 必须由输入身份派生（输入引用＋选择条件＋schema 版本），
     同位置同 fingerprint 重放不重执行；输入变化必须换 fingerprint 或新位置
-    （checkpoint_lance 会拒绝同位置异 fingerprint）。
+    （原 RunJournal 绑定拒绝同位置异 fingerprint）。
     """
     from .checkpoint import read_checkpoint_record
 
@@ -371,34 +371,29 @@ def write_registered_table(
         raise ValueError("relative_uri must stay within the datasets root")
     uri = str(resolve_local_uri(Path(datasets_root) / relative_path))
 
+    if not isinstance(fingerprint, str) or not fingerprint.strip() or fingerprint != fingerprint.strip() or len(fingerprint) > 4096:
+        raise ValueError("fingerprint must be a non-empty string of at most 4096 characters")
+    if type(max_rows_per_batch) is not int or max_rows_per_batch < 1:
+        raise ValueError("max_rows_per_batch must be a positive integer")
     existing = read_checkpoint_record(uri)
     if existing is not None:
+        # Historical sidecars remain readable; new writes never create one.
+        from .control import control_directory
+        if (control_directory(uri) / "registered-native.json").exists():
+            raise ValueError("Conflicting legacy and native registration locators")
         if existing["fingerprint"] != fingerprint:
-            raise ValueError(
-                "target already holds a different fingerprint; use a new location",
-            )
+            raise ValueError("target already holds a different fingerprint; use a new location")
         version = existing["committed_version"]
         rows = _verified_row_count(uri, version, existing)
+        replayed = True
     else:
-        counter = {"rows": 0}
-
-        def counting_rows():
-            for row in rows_factory():
-                counter["rows"] += 1
-                yield row
-
-        data_api.from_iter(counting_rows).checkpoint_lance(
-            uri, schema=schema, fingerprint=fingerprint,
-            storage_options=storage_options,
+        from .registered_write import write_registered_native
+        receipt, replayed = write_registered_native(
+            data_api.from_iter(rows_factory), uri=uri, relative_uri=relative_uri,
+            schema=schema, fingerprint=fingerprint, storage_options=storage_options,
             max_rows_per_batch=max_rows_per_batch,
         )
-        record = read_checkpoint_record(uri)
-        if record is None:
-            raise RuntimeError("Lance checkpoint sidecar missing after commit")
-        version = record["committed_version"]
-        rows = _verified_row_count(uri, version, record)
-        if rows != counter["rows"]:
-            raise RuntimeError("Lance 表行数与写入计数不一致")
+        version, rows = receipt.committed_version, receipt.written_rows
 
     committed_schema = open_lance_dataset(uri, version, ()).schema
     if lance_schema_hash(committed_schema) != lance_schema_hash(schema):
@@ -415,7 +410,7 @@ def write_registered_table(
     )
     if register:
         Catalog(datasets_root).register(ref)
-    return ref, rows, existing is not None
+    return ref, rows, replayed
 
 
 def _default_dataset_id(relative_uri: str) -> str:

@@ -2439,31 +2439,9 @@ class Dataset:
             storage_options=storage_options, mode=mode, schema=schema,
             on=on or (), update_columns=update_columns, when_not_matched=when_not_matched,
         )
-        target = spec.uri
-        from dataclasses import asdict
-        from ..execution.checked import action
-        from ..execution.dataflow_api import make_action_request, run_dataset_action
-        from ..execution.contracts.dataflow import ActionProgram
+        from ..execution.lance_action import execute_lance_write
         native = parse_native_options(backend_options, family="sink")
-        arguments = {} if native is None else {"native_options": asdict(native)}
-        with action("write_table", self._source, self._plan, spec) as checked, observe_action(
-            "write_lance", self._source, self._plan, self._executor,
-            sink_type="LanceWrite", sink_target=target,
-        ) as observer:
-            request = make_action_request(self._executor, checked.source, checked.plan,
-                                          kind='write_lance', arguments=arguments,
-                                          programs=(ActionProgram(name='write_lance', kind='sink', value=spec),))
-            receipt = run_dataset_action(request)
-            checked.receipt(receipt)
-            if receipt.status == "indeterminate":
-                from ..errors import LanceWriteError
-                raise LanceWriteError(receipt)
-            observer.rows = int(receipt.written_rows or 0)
-            observer.complete(
-                result_target=target,
-                write_receipt=receipt.to_dict(),
-                reconciliation_required=False,
-            )
+        receipt = execute_lance_write(self, spec, native_options=native)
         return receipt if return_receipt else None
 
     def _write_file(

@@ -62,9 +62,22 @@ def test_overwrite_failure_preserves_current_version(tmp_path, expected):
         yield {'value': 2}
         raise RuntimeError('injected input failure')
 
-    with pytest.raises(LanceWriteError):
-        data.from_iter(broken).write_lance(
-            uri, mode='overwrite', expected_version=version if expected else None)
+    from demiflow.execution import RunContext
+    # Source failure precedes native prepare in the unified engine; preserve
+    # the original business exception, not a fabricated publication receipt.
+    from demiflow.execution.run_journal import RunJournal
+    with pytest.raises(RuntimeError) as raised:
+        with RunContext.start(tmp_path / 'failed-run'):
+            data.from_iter(broken).write_lance(
+                uri, mode='overwrite', expected_version=version if expected else None)
+    assert type(raised.value) is RuntimeError
+    assert str(raised.value) == 'injected input failure'
+    facts = RunJournal(tmp_path / 'failed-run').execution_commits('action-1')
+    for fact in facts:
+        assert fact['status'] == 'acked'
+        prepared = fact['prepared']['sinks']['write_lance']
+        assert not prepared['manifest']['final']
+        assert fact['receipts']['write_lance']['data'].get('native_receipt') is None
     assert lance.dataset(uri).version == version
     assert lance.dataset(uri).to_table().to_pylist() == [{'value': 1}]
 
@@ -133,49 +146,61 @@ def test_mode_and_schema_are_part_of_write_identity(tmp_path):
     assert default.content_hash != LanceWriteSpec(uri, schema=pa.schema([('x', pa.int64())])).content_hash
 
 
+@pytest.fixture(scope='module')
+def native_ray_executor():
+    import tempfile
+    ray = pytest.importorskip('ray', reason='requires real Ray Core')
+    from runtime_v3_regression_inventory import assert_private
+    from demiflow.execution.executors.ray import RayDatasetExecutor
+    assert_private()
+    assert not ray.is_initialized(), 'test must own its cluster'
+    ray.init(address='local', num_cpus=2, num_gpus=0, include_dashboard=False,
+        object_store_memory=100 * 1024**2,
+        _temp_dir=tempfile.mkdtemp(prefix='demiflow-lance-ray-', dir='/tmp'))
+    executor = RayDatasetExecutor(workers=1)
+    try:
+        yield executor
+    finally:
+        try:
+            executor.close()
+        finally:
+            ray.shutdown()
+    assert not ray.is_initialized()
+
+
 @pytest.mark.parametrize('empty', [False, True])
 @pytest.mark.parametrize('expected', [False, True])
 @pytest.mark.parametrize('mode', ['overwrite', 'merge'])
-def test_ray_direct_sink_submits_one_overwrite(tmp_path, monkeypatch, empty, expected, mode):
-    """只模拟 Ray 的调度边界，真实验证 sink 对多批/空输入的一次 Lance 提交。"""
-    import importlib.util
-    import sys
-    from pathlib import Path
-    from types import ModuleType, SimpleNamespace
-    import demiflow
-
-    for name in ('ray', 'ray.data', 'ray.data.datasource'):
-        monkeypatch.setitem(sys.modules, name, ModuleType(name))
-    sys.modules['ray.data.datasource'].Datasink = object
-    path = Path(demiflow.__file__).parent / 'execution/executors/ray.py'
-    module_spec = importlib.util.spec_from_file_location('demiflow.execution.executors._ray_fixture', path)
-    module = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(module)
-
+def test_ray_direct_sink_submits_one_overwrite(tmp_path, native_ray_executor, empty, expected, mode):
+    """Real Ray Core consumes the whole Dataset into one original native commit."""
+    from demiflow.execution import RunContext
     uri = str(tmp_path / 'ray_sink.lance')
-    DataAPI().from_items([{'value': -1}]).write_lance(uri)
+    lance.write_dataset(pa.table({'value': [-1]}), uri)
     version = lance.dataset(uri).version
-    spec = LanceWriteSpec(uri, mode=mode, schema=pa.schema([('value', pa.int64())]),
-                          expected_version=version if expected else None,
-                          **({'on': 'value', 'when_not_matched': 'insert'} if mode == 'merge' else {}))
-    owner = module._RayLanceDirectWriteSink(spec)
-    adapter = owner.ray_datasink()
-    assert adapter.supports_distributed_writes is False
-    returns = [] if empty else [adapter.write(iter([pa.table({'value': [1]}), pa.table({'value': [2]})]), None)]
-    adapter.on_write_complete(SimpleNamespace(write_returns=returns))
-    assert owner.receipt.status == 'committed'
-    assert owner.receipt.committed_version == version + int(mode == 'overwrite' or not empty)
-    expected_rows = ([] if empty else [{'value': 1}, {'value': 2}])
+    replacement = [] if empty else [{'value': 1}, {'value': 2}]
+    with RunContext.start(tmp_path / 'run', limits={'batch_rows': 1}) as run:
+        receipt = DataAPI(executor=native_ray_executor).from_items(replacement).write_lance(
+            uri, mode=mode, schema=pa.schema([('value', pa.int64())]),
+            expected_version=version if expected else None, return_receipt=True,
+            **({'on': 'value', 'when_not_matched': 'insert'} if mode == 'merge' else {}))
+        facts = run.journal.execution_commits('action-1')
+        assert facts and all(fact['status'] == 'acked' for fact in facts)
+        final = [fact for fact in facts if fact['prepared']['sinks']['write_lance']['manifest']['final']]
+        assert len(final) == 1
+        for fact in facts:
+            if fact is not final[0]:
+                assert fact['prepared']['sinks']['write_lance']['native'] is None
+                assert fact['receipts']['write_lance']['data'].get('native_receipt') is None
+        native = final[0]['receipts']['write_lance']['data']['native_receipt']
+        assert native['data'] == receipt.to_dict()
+        assert run.position == 1 and run.journal.execution_action('action-2') is None
+    assert receipt.status == 'committed'
+    assert receipt.committed_version == version + int(mode == 'overwrite' or not empty)
+    expected_rows = list(replacement)
     if mode == 'merge':
         expected_rows.insert(0, {'value': -1})
     assert lance.dataset(uri).to_table().sort_by('value').to_pylist() == expected_rows
-
-    # 即便给定 expected_version，覆盖仍走单 writer，而不是分片追加提交。
-    executor = object.__new__(module.RayDatasetExecutor)
-    selected = []
-    monkeypatch.setattr(executor, '_write_lance_direct', lambda *args, **kwargs: selected.append(args[2]))
-    executor.write_lance(None, None, spec)
-    assert selected == [spec]
+    assert lance.dataset(uri, version=version).to_table().to_pylist() == [{'value': -1}]
 
 
 def test_create_mode_never_overwrites_an_existing_or_racing_table(tmp_path,monkeypatch):
