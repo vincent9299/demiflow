@@ -682,7 +682,7 @@ def source_callable_roots(source):
     import functools
     import inspect
     from ..data.plan import CallableSpec
-    from ..data.sources import IterableSource, SqlSource
+    from ..data.sources import FileSource, IterableSource, SqlSource
     from .local_kernel import KeyedSource, PlanInput, UnionSource
 
     def pinnable(value):
@@ -741,6 +741,13 @@ def source_callable_roots(source):
             root = pinnable(value.factory)
             if root is not None:
                 roots.append(root)
+        elif type(value) is FileSource and value.format == 'csv':
+            import pyarrow.csv as pacsv
+            options = value.options.get('parse_options')
+            if type(options) is pacsv.ParseOptions:
+                root = pinnable(options.invalid_row_handler)
+                if root is not None:
+                    roots.append(root)
         pending.extend((child, lineage) for child in reversed(children))
     return tuple(roots)
 

@@ -189,8 +189,13 @@ def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
     if isinstance(source, RangeSource):
         return {"kind": "range", "count": source.count}
     if isinstance(source, FileSource):
+        # Only newly supported native option objects need a semantic projection;
+        # previously valid JSON option bytes keep their original representation.
+        options = {key: describe(value) if (type(value).__module__ == 'pyarrow._csv'
+                   and type(value).__name__ in {'ReadOptions', 'ParseOptions', 'ConvertOptions'})
+                   else value for key, value in source.options.items()}
         return {"kind": "file", "format": source.format,
-                "paths": list(source.paths), "options": dict(source.options)}
+                "paths": list(source.paths), "options": options}
     if isinstance(source, SqlSource):
         return {"kind": "sql", "sql": source.sql,
                 "options": dict(source.options),

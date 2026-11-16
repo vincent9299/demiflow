@@ -121,6 +121,51 @@ def describe(value, depth=0):
     # Arrow schemas are declarations; Arrow buffers/data are never encoded here.
     if type(value).__module__.startswith("pyarrow") and type(value).__name__ == "Schema":
         return {"arrow_schema": value.serialize().to_pybytes().hex()}
+    # Native CSV option objects are previously unsupported declarations. Bind
+    # every native field, preserving the old identity path for all other types.
+    if type(value).__module__ == "pyarrow._csv":
+        import functools
+        import pyarrow as pa
+        import pyarrow.csv as pacsv
+        declarations = {
+            pacsv.ReadOptions: ('use_threads', 'block_size', 'skip_rows',
+                'skip_rows_after_names', 'column_names', 'autogenerate_column_names', 'encoding'),
+            pacsv.ParseOptions: ('delimiter', 'quote_char', 'double_quote', 'escape_char',
+                'newlines_in_values', 'ignore_empty_lines', 'invalid_row_handler'),
+            pacsv.ConvertOptions: ('check_utf8', 'column_types', 'null_values',
+                'true_values', 'false_values', 'decimal_point', 'timestamp_parsers',
+                'strings_can_be_null', 'quoted_strings_can_be_null', 'auto_dict_encode',
+                'auto_dict_max_cardinality', 'include_columns', 'include_missing_columns',
+                *(('default_column_type',) if hasattr(pacsv.ConvertOptions, 'default_column_type') else ())),
+        }
+        names = declarations.get(type(value))
+        if names is not None:
+            # Fail closed if a future native library adds a data field we have
+            # not included, instead of certifying an incomplete declaration.
+            public = {n for n in dir(value) if not n.startswith('_')
+                      and not callable(getattr(value, n))}
+            if public - set(names):
+                raise RecoveryContractError('Unbound native CSV option fields')
+            state = {}
+            for name in names:
+                item = getattr(value, name)
+                if name == 'column_types':
+                    state[name] = {key: describe(pa.schema([('value', dtype)]), depth + 1)
+                                   for key, dtype in item.items()}
+                elif name == 'default_column_type' and item is not None:
+                    state[name] = describe(pa.schema([('value', item)]), depth + 1)
+                elif name == 'timestamp_parsers':
+                    state[name] = [{'arrow_csv_timestamp_parser': 'ISO8601'}
+                                   if parser is pacsv.ISO8601 else describe(parser, depth + 1)
+                                   for parser in item]
+                elif name == 'invalid_row_handler' and type(item) is functools.partial:
+                    state[name] = {'partial': describe(item.func, depth + 1),
+                        'args': describe(item.args, depth + 1),
+                        'keywords': describe(item.keywords, depth + 1),
+                        'attributes': describe(vars(item), depth + 1)}
+                else:
+                    state[name] = describe(item, depth + 1)
+            return {'arrow_csv_options': type(value).__name__, 'fields': state}
     # Nested native prompts were previously unrepresentable (live runtime).
     # Reuse their guarded native facts; existing operation identities are unchanged.
     from ..operator_llm.runtime import PromptActor
