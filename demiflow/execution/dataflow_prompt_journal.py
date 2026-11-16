@@ -218,7 +218,7 @@ def private_prompt_request(service, command, request):
         maximum = config['group_max_requests']
         charges['requests-' + identity(command.node_id)] = (1, ceiling if maximum is None else maximum)
     retry = options.get('expected_attempt') if command.operation == 'reserve_http_retry' else 0
-    reservation = identity(['private-prompt-admission', command.action_id, command.node_id, route, command.request_key, retry])
+    reservation = identity(['private-prompt-admission', command.action_id, command.node_id, route, scope, command.request_key, retry])
     from .run_journal import ExecutionBudgetExceeded
     from ..operator_llm.errors import PromptBudgetExceededError
     try:

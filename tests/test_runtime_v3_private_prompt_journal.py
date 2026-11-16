@@ -354,6 +354,36 @@ def test_old_classic_requeue_cannot_remove_active_private_driver_intent(tmp_path
         assert _rows(path) == before and _charged(run) == 1
 
 
+def test_explicit_original_requeue_requires_fresh_admission_for_a_new_row(tmp_path):
+    from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
+    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
+    from test_runtime_v3_native_rpc_replay import interrupted_run, service
+    path = tmp_path/'private.sqlite'
+    with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):
+        authority._action.declaration['kind'] = 'take_all'
+        bind_private_prompt_contracts(authority, _private_graph(path))
+        bind_private_storage(authority)
+        first = _private_event(run, store)
+        assert authority.dispatch(first).payload['value'] is True
+        error = b'{"type":"InterruptedError","detail":"explicitly reviewed unanswered request"}'
+        ref = store.put(iter([error]), max_bytes=len(error), media_type='application/json')
+        assert authority.dispatch(_private_event(run, store, operation='failed', value_ref=ref)).status == 'ok'
+        key = _rows(path)[0][0]
+        original = SQLitePromptJournal(path)
+        try:
+            original.requeue_uncertain([key], actor='explicit-owner', reason='approved-another-attempt')
+        finally:
+            original.close()
+        assert not _rows(path) and _charged(run) == 1
+        second = _private_event(run, store, scope='new-original-business-row')
+        assert authority.dispatch(second).payload['value'] is True
+        assert authority.dispatch(second).payload['value'] is True  # Same RPC remains idempotent.
+        assert _charged(run) == 2 and _rows(path)[0][0] == key
+        with sqlite3.connect(path) as db:
+            assert db.execute('SELECT count(*) FROM recovery_events').fetchone()[0] == 1
+
+
 @pytest.mark.parametrize('after_private', [False, True])
 def test_private_prompt_two_database_crash_retains_admission_and_refuses_resume(tmp_path, native_server, monkeypatch, after_private):
     from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal

@@ -70,7 +70,11 @@ def test_stop_closes_fresh_driver_reserve_but_allows_original_receipt_and_respon
         ref = store.put(iter([value]), max_bytes=len(value), media_type='application/json')
         payload = _thaw_json(request.payload)
         payload.update(operation='response', reservation=None, value_ref=_ref_to_json(ref))
-        payload['operation_id'] = _rpc_operation_id('action-1', 'node-1', payload['request_key'], 'response')
+        if private:
+            response = private_event(run, store, operation='response', value_ref=ref)
+            payload = _thaw_json(response.payload)
+        else:
+            payload['operation_id'] = _rpc_operation_id('action-1', 'node-1', payload['request_key'], 'response')
         response = replace(request, operation_id=payload['operation_id'], payload=payload)
         assert authority.dispatch(response).status == 'ok'
         assert charged(run) == 1

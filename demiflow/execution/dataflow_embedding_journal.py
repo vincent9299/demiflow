@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+import re
 
 from .contracts.dataflow import NativeJournalReply
 from .contracts.dataflow_errors import DataflowError
@@ -60,6 +61,24 @@ def bind_private_embedding_adapter(actor, *, services, node_id, configuration):
     action = make_native_action_view(services, node_id=node_id)
     actor._journal_binding = RemotePrivateEmbeddingJournal(
         services=services, action=action, node_id=node_id, declaration=declared)
+    from .row_scope import current_row_scope
+    from .dataflow_model_journal import _PRIVATE_EMBEDDING_SCOPE
+    maximum = int(configuration.get('max_batch') or 256)
+    exchange = actor._exchange
+    async def scoped_exchange(request, encoded, timings, *, request_part=0):
+        # _invoke_batch already bound its real members and invocation cursor.
+        # Original byte packing yields at least one input per part, so part is
+        # bounded by the declared batch. Do not add it to the HTTP request.
+        scope = current_row_scope()
+        if (scope is None or not re.fullmatch('[0-9a-f]{64}', scope.occurrence)
+                or type(request_part) is not int or not 0 <= request_part < maximum):
+            raise DataflowError('INVALID_CONTRACT', 'Private embedding batch/request scope is invalid')
+        token = _PRIVATE_EMBEDDING_SCOPE.set((scope.occurrence, request_part))
+        try:
+            return await exchange(request, encoded, timings, request_part=request_part)
+        finally:
+            _PRIVATE_EMBEDDING_SCOPE.reset(token)
+    actor._exchange = scoped_exchange
 
 
 def _journal(service, node_id):
@@ -82,15 +101,19 @@ def _journal(service, node_id):
 
 def private_embedding_request(service, command, request):
     from .dataflow_authority import _NATIVE_HANDLERS
-    from .dataflow_model_journal import _rpc_operation_id
+    from .dataflow_model_journal import _private_embedding_rpc_id
+    config = service._private_embedding_nodes[command.node_id]
+    scope, part = command.options.get('row_scope'), command.options.get('request_part')
     if (command.operation not in _OPERATIONS or command.reservation is not None
             or 'native_occurrence' in request or 'native_response_bytes' in request
-            or command.operation_id != _rpc_operation_id(command.action_id, command.node_id,
-                                                          command.request_key, command.operation)):
+            or type(scope) is not str or not re.fullmatch('[0-9a-f]{64}', scope)
+            or type(part) is not int or not 0 <= part < int(config.get('max_batch') or 256)
+            or command.operation_id != _private_embedding_rpc_id(command)):
         raise DataflowError('INVALID_CONTRACT', 'Private embedding does not accept native recovery operations')
-    expected_options = {'with_references'} if command.operation == 'lookup' and command.options else set()
-    if (set(command.options) != expected_options
-            or expected_options and type(command.options['with_references']) is not bool
+    options = {k: v for k, v in command.options.items() if k not in {'row_scope', 'request_part'}}
+    expected_options = {'with_references'} if command.operation == 'lookup' and options else set()
+    if (set(options) != expected_options
+            or expected_options and type(options['with_references']) is not bool
             or command.operation in {'lookup', 'reserve', 'references'} and command.value_ref is not None):
         raise DataflowError('INVALID_CONTRACT', 'Private embedding command contains undeclared fields')
     journal = _journal(service, command.node_id)
@@ -110,11 +133,10 @@ def private_embedding_request(service, command, request):
         return NativeJournalReply(command.operation_id, False, None)
     if journal.read_only:
         raise LookupError('Embedding request missing from read-only journal: ' + command.request_key)
-    config = service._private_embedding_nodes[command.node_id]
     ceiling = service._action.context.limits['max_requests']
     node_ceiling = ceiling if config['max_requests'] is None else config['max_requests']
     reservation = identity(['private-embedding-admission', command.action_id,
-                            command.node_id, command.request_key])
+                            command.node_id, scope, part, command.request_key])
     from .run_journal import ExecutionBudgetExceeded
     from ..operator_llm.errors import PromptBudgetExceededError
     try:

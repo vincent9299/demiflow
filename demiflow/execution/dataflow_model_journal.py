@@ -13,6 +13,8 @@ from __future__ import annotations
 import inspect
 import json
 import math
+from contextvars import ContextVar
+from dataclasses import replace
 from typing import Mapping
 
 from demiflow.execution.contracts.dataflow import (
@@ -213,10 +215,27 @@ class RemotePrivateEmbeddingJournal(RemotePromptJournal):
         self.read_only = declaration.get('read_only', False)
         self.timeout_s = min(self.timeout_s, declaration.get('timeout_s', 30))
 
+    def _command(self, operation, request, *, value_ref=None, reservation=None, options=None):
+        scope = _PRIVATE_EMBEDDING_SCOPE.get()
+        if scope is None or reservation is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Private embedding lost its original batch/request scope')
+        occurrence, part = scope
+        command = super()._command(operation, request, value_ref=value_ref,
+            options={**(options or {}), 'row_scope': occurrence, 'request_part': part})
+        return replace(command, operation_id=_private_embedding_rpc_id(command))
+
     def reserve(self, request):
         # The driver derives ceilings and the stable action/node/key admission.
         # No caller-supplied path, charge or native request reservation crosses.
         return bool(self._rpc(self._command('reserve', request)))
+
+
+_PRIVATE_EMBEDDING_SCOPE = ContextVar('private_embedding_original_request_scope', default=None)
+
+
+def _private_embedding_rpc_id(command):
+    return identity(['private-embedding-rpc-v1', command.action_id, command.node_id,
+                     command.request_key, command.operation, dict(command.options)])
 
 
 class RemotePromptRecovery(NativePromptRecovery):

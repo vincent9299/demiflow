@@ -142,13 +142,103 @@ def private_graph(path):
         kind='embedding', configuration={'private_journal': {'path': str(path)}, 'max_requests': 2}))])
 
 
-def private_event(run, store, seed='a'):
+def private_event(run, store, seed='a', *, scope='first', part=0, operation='reserve', value_ref=None):
+    from demiflow.execution.contracts.dataflow import NativeJournalCommand
+    from demiflow.execution.dataflow_authority import _ref_to_json, _ref_from_json
+    from demiflow.execution.dataflow_model_journal import _private_embedding_rpc_id
+    from demiflow.execution.recovery_contract import identity
     original = event(run, store, seed)
     payload = _thaw_json(original.payload)
-    payload['reservation'] = None
-    op = _rpc_operation_id(payload['action_id'], payload['node_id'], payload['request_key'], 'reserve')
+    payload.update(reservation=None, operation=operation,
+        value_ref=None if value_ref is None else _ref_to_json(value_ref),
+        options={'row_scope': identity(['original-row', scope]), 'request_part': part})
+    command = NativeJournalCommand(**{**payload, 'request_ref': _ref_from_json(payload['request_ref']), 'value_ref': value_ref})
+    op = _private_embedding_rpc_id(command)
     payload['operation_id'] = op
     return replace(original, operation_id=op, payload=payload)
+
+
+@pytest.mark.parametrize('new_scope,new_part', [('second', 0), ('first', 1)])
+def test_original_requeue_needs_new_embedding_batch_part_admission(tmp_path, new_scope, new_part):
+    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    path = tmp_path/'private.sqlite'
+    with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
+        authority._action.declaration['kind'] = 'take_all'
+        bind_private_embedding_contracts(authority, private_graph(path))
+        bind_private_storage(authority)
+        first = private_event(run, store)
+        assert authority.dispatch(first).payload['value'] is True
+        # A distinct invocation cannot reuse a live send permission.
+        with pytest.raises(UncertainPromptCall):
+            authority.dispatch(private_event(run, store, scope=new_scope, part=new_part))
+        assert charged(run) == 1
+        raw = b'{"type":"InterruptedError","detail":"owner reviews paid unknown explicitly"}'
+        ref = store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
+        assert authority.dispatch(private_event(run, store, operation='failed', value_ref=ref)).status == 'ok'
+        with sqlite3.connect(path) as db:
+            key = db.execute('SELECT request_key FROM calls').fetchone()[0]
+        classic = SQLitePromptJournal(path)
+        try:
+            classic.requeue_uncertain([key], actor='explicit-owner', reason='authorized-retry')
+        finally:
+            classic.close()
+        second = private_event(run, store, scope=new_scope, part=new_part)
+        assert authority.dispatch(second).payload['value'] is True
+        assert authority.dispatch(second).payload['value'] is True
+        assert charged(run) == 2
+        with sqlite3.connect(path) as db:
+            assert db.execute('SELECT request_key FROM calls').fetchall() == [(key,)]
+            assert db.execute('SELECT count(*) FROM recovery_events').fetchone()[0] == 1
+
+
+def test_private_embedding_part_outside_sealed_batch_has_no_intent(tmp_path):
+    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
+        authority._action.declaration['kind'] = 'take_all'
+        graph = private_graph(tmp_path/'private.sqlite')
+        graph.nodes[0].kernel.configuration['max_batch'] = 2
+        bind_private_embedding_contracts(authority, graph)
+        bind_private_storage(authority)
+        reply = authority.dispatch(private_event(run, store, part=2))
+        assert reply.status == 'error' and reply.error_code == 'INVALID_CONTRACT'
+        assert charged(run) == 0 and not (tmp_path/'private.sqlite').exists()
+
+
+@pytest.mark.parametrize('provider', ['local', 'ray'])
+def test_real_embedding_packing_preserves_original_batch_and_part_scopes(tmp_path, server, monkeypatch, provider):
+    from runtime_v3_residency_scenarios import _provider
+    from demiflow.execution import dataflow_embedding_journal as module
+    if provider == 'ray':
+        pytest.importorskip('ray')
+    observed = []
+    request = module.private_embedding_request
+    def capture(authority, command, record):
+        result = request(authority, command, record)
+        if command.operation == 'reserve' and result.value:
+            observed.append((command.options['row_scope'], command.options['request_part'], command.request_key))
+        return result
+    monkeypatch.setattr(module, 'private_embedding_request', capture)
+    path = tmp_path/'private.sqlite'
+    rows = [{'text': character*1000} for character in ('a', 'b', 'c')]
+    with _provider(SimpleNamespace(root=tmp_path, provider=provider), workers=3):
+        for replay in range(2):
+            with RunContext.start(tmp_path/str(replay), limits={'max_requests': 3}) as run:
+                result = data.from_items(rows).map_embeddings(model=server['model'], inputs={'text': 'text'},
+                    batch_size=3, concurrency=1, call_output='call',
+                    options={'batch_request_bytes': 1500, 'sqlite_journal': {'path': str(path)}}).take_all()
+                assert len(result) == 3 and all(row['call']['reused'] == bool(replay) for row in result)
+                assert charged(run) == (0 if replay else 3)
+                no_native_calls(run)
+                with run.journal._connection() as db:
+                    facts = [json.loads(row[0]) for row in db.execute("SELECT document FROM runtime_sources WHERE json_extract(document,'$.schema')='demiflow.native_batch_membership.v1'")]
+                assert len(facts) == 1 and len(facts[0]['members']) == 3
+            assert len(server['bodies']) == 3
+    assert len(observed) == 3 and len({scope for scope, _, _ in observed}) == 1
+    assert [part for _, part, _ in observed] == [0, 1, 2]
+    with sqlite3.connect(path) as db:
+        cached = db.execute('SELECT request_key,request_json FROM calls').fetchall()
+    assert {row[0] for row in cached} == {key for _, _, key in observed}
+    assert all('native_occurrence' not in json.loads(raw) and 'row_scope' not in json.loads(raw) for _, raw in cached)
 
 
 def test_duplicate_reserve_rpc_one_original_admission_and_private_intent(tmp_path):
