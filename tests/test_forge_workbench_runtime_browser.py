@@ -147,6 +147,7 @@ def test_native_stop_survives_current_code_removal_and_keeps_attempt_identity(un
             page.get_by_label('运行尝试',exact=True).select_option('1')
             expect(page.locator('.wb-run-bar')).to_contain_text('历史尝试 · 只读')
             expect(page.get_by_role('button',name='停止',exact=True)).to_have_count(0)
+            page.get_by_role('button',name='运行监控',exact=True).click()
             page.get_by_role('button',name='运行日志',exact=True).click()
             expect(page.locator('.wb-run-detail-body')).to_contain_text(active+' / 尝试 1')
             assert selected(page)['attempt']==1
