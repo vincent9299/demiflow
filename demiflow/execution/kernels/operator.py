@@ -917,6 +917,36 @@ class OperatorKernel:
 
     # -- K020 snapshot ------------------------------------------------------
     def snapshot(self) -> ArtifactRef | None:
+        raw = self._snapshot_bytes()
+        return self._services.store.put(iter([raw]), max_bytes=len(raw), media_type=IMAGE_MEDIA_TYPE)
+
+    def _pack_snapshot_ready(self):
+        """Only fixed pure metadata can be encoded twice without user hooks."""
+        if (self._spec.kind not in {'MapOp', 'FlatMapOp', 'BoundMapOp', 'FilterOp', 'AddColumnOp'}
+                or self._spec.state != 'none' or self._spec.effect != 'pure'
+                or self._ports or self._batch or self._groups or self._group_base
+                or self._calls is not None or self._worker_scope or self._finish_cursor is not None
+                or self.aggregate_state is not None
+                or isinstance(self._instance, AsyncInstance) and self._instance.loop is not None
+                or self._batch_deadline is not None or self._timer_deadline is not None):
+            return False
+        # These platform counters and bounded miss labels give the encoder a
+        # conservative fixed workspace. Decline packing before constructing an
+        # image if its metadata lies outside that envelope; ordinary snapshot
+        # still applies its original contract.
+        observed = self.observations.snapshot()
+        counts = [self._emitted, self._batch_ordinal, self._task_rows or 0,
+                  self._task_frontier, self._task_ordinal or 0,
+                  self._instance.native_call_ordinal if isinstance(self._instance, AsyncInstance) else 0]
+        counts.extend(observed[k] for k in ('count', 'total_ns', 'min_ns', 'max_ns'))
+        counts.extend(observed['miss'].values())
+        return (type(self._occurrence) is str and 1 <= len(self._occurrence) <= 64
+                and type(self._partition_id) is str and 1 <= len(self._partition_id) <= 128
+                and all(type(n) is int and 0 <= n < 2**64 for n in counts)
+                and len(observed['miss']) <= 33
+                and all(type(k) is str and len(k) <= 128 for k in observed['miss']))
+
+    def _snapshot_bytes(self):
         self._require_started()
         if not self.checkpoint_ready:
             raise _err('INVALID_CONTRACT', 'Checkpoint requires drained non-native invocations')
@@ -961,7 +991,7 @@ class OperatorKernel:
         limit = self._services.bounds.max_state_bytes
         if limit > 0 and len(raw) > limit:
             raise _err("BUDGET_EXCEEDED", "kernel recovery image exceeds max_state_bytes")
-        return self._services.store.put(iter([raw]), max_bytes=len(raw), media_type=IMAGE_MEDIA_TYPE)
+        return raw
 
     def _state_owner(self, instance=None, *, retain_partial=False):
         import functools
@@ -1034,7 +1064,9 @@ class OperatorKernel:
                 raise _err("INCOMPATIBLE_HISTORY", "stateful kernel cannot restore from an empty ref")
             return
         limit = self._services.bounds.max_state_bytes
-        data = b"".join(self._services.store.read(ref, max_bytes=limit if limit > 0 else ref.size_bytes))
+        from ..dataflow_kernel_pack import read_kernel_image
+        data = read_kernel_image(self._services.store, ref, self._services.bounds,
+                                 occurrence=self._occurrence, partition=self._partition_id)
         image = state_codec.loads(data, max_bytes=limit)
         if image.get("schema_version") != IMAGE_VERSION:
             raise _err("INCOMPATIBLE_HISTORY", "kernel image schema mismatch")

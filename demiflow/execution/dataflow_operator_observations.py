@@ -155,6 +155,7 @@ def observe_operator(execution, event, payload):
 def restore_operator_observations(execution, image):
     from .contracts.dataflow_codec import compute_participant_id
     from .kernels import state_codec
+    from .dataflow_kernel_pack import read_kernel_image
     participants = {compute_participant_id(s.stage_id, p): p
                     for s in execution._physical.stages for p in s.partitions}
     nodes = {n.occurrence_id for n in execution._graph.nodes}
@@ -164,8 +165,8 @@ def restore_operator_observations(execution, image):
         for occurrence, ref in contribution.operator_states.items():
             if occurrence not in nodes:
                 continue
-            state = state_codec.loads(b''.join(execution._store.read(ref,
-                max_bytes=execution._bounds.max_state_bytes)), max_bytes=execution._bounds.max_state_bytes)
+            state = state_codec.loads(read_kernel_image(execution._store, ref, execution._bounds,
+                occurrence=occurrence, partition=partition), max_bytes=execution._bounds.max_state_bytes)
             value = state.get('callback_observations')
             if value is not None:
                 slots[(occurrence, partition)] = (contribution.boot_id, validated(value))

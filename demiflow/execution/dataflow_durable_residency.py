@@ -214,12 +214,13 @@ class DurableResidency:
                     raise DataflowError('CORRUPT_ARTIFACT', 'consumer ACK has no matching input frontier')
             # Nonrecoverable state cannot disappear merely because it has a cut.
             from .kernels import state_codec
+            from .dataflow_kernel_pack import read_kernel_image
             transforms = {n.occurrence_id for n in ex._graph.nodes if n.kind == 'transform'}
             for occurrence, ref in contribution.operator_states.items():
                 if occurrence not in transforms:
                     continue
-                image = state_codec.loads(b''.join(ex._store.read(ref, max_bytes=ex._bounds.max_state_bytes)),
-                                          max_bytes=ex._bounds.max_state_bytes)
+                image = state_codec.loads(read_kernel_image(ex._store, ref, ex._bounds,
+                    occurrence=occurrence, partition=partition), max_bytes=ex._bounds.max_state_bytes)
                 for value in [image.get('state'), *(image.get('worker_states') or [])]:
                     if value and value.get('mode') == 'nonrecoverable':
                         raise DataflowError('RESOURCE_INFEASIBLE', 'parked operator state has no recoverable adapter')

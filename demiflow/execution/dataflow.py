@@ -549,6 +549,10 @@ class DataflowExecution:
             # Validate all actor images before ANY participant executes again.
             # A completed final result is safe to read without recreating actors.
             from .kernels import state_codec
+            from .dataflow_kernel_pack import read_kernel_image
+            from .contracts.dataflow_codec import compute_participant_id
+            partitions = {compute_participant_id(stage.stage_id, partition): partition
+                          for stage in self._physical.stages for partition in stage.partitions}
             transforms = {n.occurrence_id for n in self._graph.nodes if n.kind == "transform"}
             from .dataflow_residency import participants_for
             residency = self._checkpoint.residency or {}
@@ -562,8 +566,9 @@ class DataflowExecution:
                 for occ, ref in contribution.operator_states.items():
                     if occ not in transforms or ref is None:
                         continue
-                    image = state_codec.loads(b"".join(self._store.read(ref,
-                        max_bytes=self._bounds.max_state_bytes)), max_bytes=self._bounds.max_state_bytes)
+                    image = state_codec.loads(read_kernel_image(self._store, ref, self._bounds,
+                        occurrence=occ, partition=partitions[contribution.participant_id]),
+                        max_bytes=self._bounds.max_state_bytes)
                     for state in [image.get('state'), *(image.get('worker_states') or [])]:
                         if state and state.get("mode") == "nonrecoverable":
                             raise DataflowError("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"],

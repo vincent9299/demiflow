@@ -318,11 +318,14 @@ class RunArtifactStore:
                             reserved = grow_staging(self._journal, operation_id,
                                 reserved=reserved, required=size, maximum=max_bytes,
                                 spill_budget=self._bounds.max_spill_bytes)
-                        view = memoryview(chunk)
-                        for offset in range(0, len(view), _MAX_CHUNK_BYTES):
-                            part = view[offset:offset + _MAX_CHUNK_BYTES]
-                            digest.update(part)
-                            stream.write(part)
+                        with memoryview(chunk) as view:
+                            for offset in range(0, len(view), _MAX_CHUNK_BYTES):
+                                with view[offset:offset + _MAX_CHUNK_BYTES] as part:
+                                    digest.update(part)
+                                    stream.write(part)
+                        # A generator may construct its next bounded image when
+                        # advanced. No previous chunk/view may remain resident.
+                        del chunk, view
                     stream.flush()
                     os.fsync(stream.fileno())
             hex_digest = digest.hexdigest()

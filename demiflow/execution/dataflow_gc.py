@@ -335,7 +335,13 @@ class _Trace:
             store = RunArtifactStore(root=self.journal.directory / '.dataflow-store',
                 store_id=ref.store_id, journal=None, bounds=self.bounds, readonly=True)
             media = ref.media_type
-            if media in _LEAVES:
+            from .dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
+            if media == PACK_MEDIA:
+                self.check(ref.size_bytes)
+                for _, raw in iter_kernel_images(store, ref, self.bounds):
+                    self.value(self.decode(raw))
+                    del raw
+            elif media in _LEAVES:
                 # A protected opaque leaf may be large; authenticate incrementally.
                 for chunk in store.read(ref, max_bytes=max(1, ref.size_bytes)):
                     self.check(len(chunk))

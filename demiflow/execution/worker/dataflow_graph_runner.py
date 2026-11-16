@@ -1081,11 +1081,8 @@ class WorkerGraphRunner:
             raise DataflowError('INVALID_CONTRACT', 'cut requires drained inputs and acknowledged deliveries')
         for reader in self.e._readers.values():
             reader.acknowledge_output()
-        states = {}
-        for (occ, partition), kernel in self.e._kernels.items():
-            ref = kernel.snapshot()
-            if ref is not None:
-                states[occ] = ref
+        from ..dataflow_kernel_pack import snapshot_kernel_images
+        states = snapshot_kernel_images(self.e._kernels, store=self.services.store, bounds=self.bounds)
         from ..recovery_contract import identity
         for spec in self.e._output_specs:
             if spec.mode == 'finite_sealed':
