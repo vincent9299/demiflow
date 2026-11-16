@@ -19,7 +19,7 @@ from collections import deque
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Callable
 
-from .contracts.dataflow_codec import encode_wire, decode_wire
+from .contracts.dataflow_codec import encode_wire, decode_wire, decode_wire_document
 from .contracts.dataflow_errors import DataflowError
 from .worker.bootstrap import LocalControlConnector
 
@@ -173,8 +173,8 @@ class ControlMailbox:
 
 
 def _event_from_dict(data: dict, *, bounds) -> "WorkerEvent":
-    raw = json.dumps({"schema": "demiflow.runtime_wire.v3", "type": "WorkerEvent", "payload": data}).encode()
-    return decode_wire(raw, type_name="WorkerEvent", bounds=bounds)
+    frame = {"schema": "demiflow.runtime_wire.v3", "type": "WorkerEvent", "payload": data}
+    return decode_wire_document(frame, type_name="WorkerEvent", bounds=bounds)
 
 
 def _reply_frame(reply: "ControlReply", *, bounds) -> dict:

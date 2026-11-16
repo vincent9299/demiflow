@@ -89,6 +89,7 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _IDENT = re.compile(r"[A-Za-z0-9_.:\-]{1,128}\Z")
 _DECIMAL = re.compile(r"[0-9]{1,20}\Z")
 _WIRE_MAX_NODES = 65536
+_JSON_ESCAPES = re.compile(r'["\\\x00-\x1f]')
 
 _PROVIDERS = frozenset({"local", "ray_core"})
 _MODES = frozenset({"memory_incremental", "durable_incremental", "finite_sealed"})
@@ -957,6 +958,120 @@ def encode_wire(value: object, *, type_name: str, bounds: Bounds) -> bytes:
     return raw
 
 
+def _frame_payload(frame, type_name):
+    if type(frame) is not dict or set(frame) != {"schema", "type", "payload"}:
+        raise _err("wire frame must have closed schema/type/payload")
+    if type(frame["schema"]) is not str or frame["schema"] != WIRE_SCHEMA:
+        raise _err("unsupported wire schema")
+    if type(frame["type"]) is not str or frame["type"] != type_name:
+        raise _err("wire type mismatch: expected " + type_name)
+    return frame["payload"]
+
+
+def _measure_document(frame, bounds):
+    """Count the full canonical frame before any encoded copy is allocated.
+
+    The same walk keeps the original payload conservative estimate/node
+    ceiling and counts exact UTF-8, escaping and envelope bytes;
+    container depth matches the raw decoder's pre-parse scan.
+    """
+    size = 0
+    legacy = [0, 0]  # Same payload node/estimate accounting as _walk_budget.
+    def add(amount):
+        nonlocal size
+        size += amount
+        if size > bounds.max_control_bytes:
+            raise _budget_err("wire frame exceeds control byte budget")
+
+    def string(value):
+        # UTF-8 needs at least one byte/codepoint. Reject an indivisible string
+        # before creating even its bounded UTF-8 view; never create escaped raw.
+        if len(value) + size + 2 > bounds.max_control_bytes:
+            raise _budget_err("wire frame exceeds control byte budget")
+        utf8_bytes = len(value.encode("utf-8"))
+        add(utf8_bytes + 2)
+        for match in _JSON_ESCAPES.finditer(value):
+            char = match.group()
+            add(1 if char in '\"\\\b\f\n\r\t' else 5)
+        return utf8_bytes
+
+    def walk(value, depth, in_payload=False):
+        if in_payload:
+            legacy[0] += 1
+            if legacy[0] > _WIRE_MAX_NODES:
+                raise _budget_err('wire frame exceeds node budget')
+            if depth - 1 > bounds.max_depth:
+                raise _budget_err('wire frame exceeds depth budget')
+        kind = type(value)
+        if kind in (dict, list):
+            if depth + 1 > bounds.max_depth:
+                raise _budget_err("wire frame exceeds depth budget")
+            if kind is dict:
+                if in_payload:
+                    legacy[1] += 2 + 3 * len(value)
+                add(2 + max(0, len(value) - 1) + len(value))
+                for key, item in value.items():
+                    if type(key) is not str:
+                        raise _err("wire frame keys must be strings")
+                    key_bytes = string(key)
+                    if in_payload:
+                        legacy[1] += key_bytes + 3
+                    walk(item, depth + 1, in_payload or depth == 0 and key == "payload")
+            else:
+                if in_payload:
+                    legacy[1] += 2 + len(value)
+                add(2 + max(0, len(value) - 1))
+                for item in value:
+                    walk(item, depth + 1, in_payload)
+        elif kind is str:
+            width = string(value)
+            if in_payload:
+                legacy[1] += width + 2
+        elif value is None:
+            if in_payload:
+                legacy[1] += 5
+            add(4)
+        elif kind is bool:
+            if in_payload:
+                legacy[1] += 5
+            add(4 if value else 5)
+        elif kind is int:
+            if in_payload:
+                legacy[1] += 32
+            # A decimal digit needs fewer than four bits. Avoid converting an
+            # integer that cannot possibly fit the remaining byte allowance.
+            if value.bit_length() > 4 * (bounds.max_control_bytes - size):
+                raise _budget_err("wire frame exceeds control byte budget")
+            add(len(str(value)))
+        elif kind is float:
+            if in_payload:
+                legacy[1] += 32
+            if not math.isfinite(value):
+                raise _err("wire frame must not contain NaN/Infinity")
+            add(len(repr(value)))
+        else:
+            raise _err("wire frame must be finite Json")
+        if legacy[1] > bounds.max_control_bytes:
+            raise _budget_err("wire frame exceeds control byte budget")
+    walk(frame, 0)
+    return size
+
+
+def decode_wire_document(frame: dict, *, type_name: str, bounds: Bounds) -> object:
+    """Validate an already decoded JSON frame without an encode/decode detour.
+
+    This is the same wire authority as decode_wire, with exact canonical frame
+    size/depth checking because there is no incoming byte string to measure.
+    Byte carriers must keep decode_wire so duplicate JSON keys are still rejected.
+    """
+    _check_type_name(type_name)
+    _check_bounds(bounds)
+    payload = _frame_payload(frame, type_name)
+    _measure_document(frame, bounds)
+    _validate_payload(payload, type_name)
+    return _construct_payload(payload, type_name)
+
+
 def decode_wire(raw: bytes, *, type_name: str, bounds: Bounds) -> object:
     _check_type_name(type_name)
     _check_bounds(bounds)
@@ -967,20 +1082,15 @@ def decode_wire(raw: bytes, *, type_name: str, bounds: Bounds) -> object:
     _scan_depth(raw, bounds.max_depth)
     text = raw.decode("utf-8")
     frame = json.loads(text, parse_constant=_reject_constant, object_pairs_hook=_no_duplicate_keys)
-    if type(frame) is not dict or set(frame) != {"schema", "type", "payload"}:
-        raise _err("wire frame must have closed schema/type/payload")
-    if frame["schema"] != WIRE_SCHEMA:
-        raise _err("unsupported wire schema " + str(frame["schema"]))
-    if frame["type"] != type_name:
-        raise _err("wire type mismatch: expected " + type_name)
-    payload = frame["payload"]
+    payload = _frame_payload(frame, type_name)
     state = _walk_budget(payload, bounds.max_depth)
     if state[1] > bounds.max_control_bytes:
         raise _budget_err("wire frame exceeds control byte budget")
     _validate_payload(payload, type_name)
-    dto = _construct_payload(payload, type_name)
-    validate_dataflow_record(dto, type_name=type_name, bounds=bounds)
-    return dto
+    # Every field/cross-field rule has already run on the closed payload;
+    # constructors retain all DTO invariants and freeze nested values. Projecting
+    # this new DTO merely rebuilds the same validated document a second time.
+    return _construct_payload(payload, type_name)
 
 
 def _canonical_bytes(document):
