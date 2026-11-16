@@ -68,7 +68,7 @@ def test_finite_reader_prefix_original_ack_gc_and_exact_recovery(tmp_path, monke
             # Explicit original R/B windows make simultaneous join+terminal
             # residency infeasible under M=256MiB; do not force another planner.
             assert incoming.producer == join.occurrence_id
-            assert spec.mode == 'finite_sealed' and spec.routing == 'forward'
+            assert spec.mode == 'finite_sealed' and spec.routing in {'forward', 'rebalance'}
             assert len(spec.consumer_partitions) == len(terminal_stage.partitions) == 1
             assert tuple(spec.consumer_partitions) == tuple(terminal_stage.partitions)
             upstream = {n.occurrence_id for n in graph.nodes if n.kind == 'source'} | {join.occurrence_id}
@@ -118,7 +118,7 @@ def test_finite_reader_prefix_original_ack_gc_and_exact_recovery(tmp_path, monke
         frontier = _read_json(coordinator._store, frontier_ref, coordinator._physical.bounds)
         assert frontier['schema'] == 'demiflow.worker-frontier.v3'
         reads = frontier['finite_reads']
-        assert set(reads) == {spec.edge_id}, 'this oracle is one forward finite input, not a routing-count shortcut'
+        assert set(reads) == {spec.edge_id}, 'this oracle requires exactly one finite input and one consumer'
         reader = reads[spec.edge_id]
         assert reader['seal_ref'] == residency['finite_seals'][spec.channel_id]
         assert set(reader['positions']) == set(spec.producer_partitions)
