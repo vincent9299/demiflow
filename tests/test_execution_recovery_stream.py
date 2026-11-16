@@ -287,6 +287,58 @@ def test_opaque_actor_default_attempt_only_is_recorded_and_cannot_resume(tmp_pat
     assert run.journal.execution_commits('action-1') == before
 
 
+def test_resume_keeps_sealed_checkpoint_requirement_over_current_default(tmp_path, monkeypatch):
+    from demiflow.execution import dataflow_api
+    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    calls = tmp_path/'calls'
+    class RuntimeResourceCounter:
+        def __init__(self):
+            self.n = 0
+            if os.environ.get('DEMIFLOW_TEST_OPAQUE_ON_RESUME') == '1':
+                self.resource = object()
+        async def __call__(self, row):
+            self.n += 1
+            with calls.open('a') as stream:
+                stream.write(str(self.n)+'\n')
+            return {**row, 'n': self.n}
+    def dataset():
+        return data.from_items([{'id': i} for i in range(10)]).map_async(RuntimeResourceCounter)
+    resolve = dataflow_api.resolve_runtime_policy
+    def checkpoint(options, limits, **kwargs):
+        return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
+    class AfterAck(Exception):
+        pass
+    commit = DataflowCheckpointCoordinator.commit
+    def stop(coordinator, *args, **kwargs):
+        image = commit(coordinator, *args, **kwargs)
+        assert not image.cut.final
+        raise AfterAck()
+    monkeypatch.delenv('DEMIFLOW_TEST_OPAQUE_ON_RESUME', raising=False)
+    with pytest.raises(AfterAck):
+        with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2}) as run:
+            reference = run.ref
+            with monkeypatch.context() as scoped:
+                scoped.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
+                scoped.setattr(DataflowCheckpointCoordinator, 'commit', stop)
+                dataset().materialize()
+    physical = load_sealed_plan(reference.directory, 'action-1')['physical']
+    assert physical.policy.required_recovery == 'checkpoint'
+    before_calls = calls.read_bytes()
+    before_commits = run.journal.execution_commits('action-1')
+    assert before_commits and all(f['status'] == 'acked' for f in before_commits)
+    monkeypatch.setenv('DEMIFLOW_TEST_OPAQUE_ON_RESUME', '1')
+    # The current resolver is back to its weaker default. Only the actual
+    # historical sealed policy may govern the newly constructed actor.
+    with pytest.raises(RecoveryContractError, match='required_recovery=checkpoint'):
+        with RunContext.resume(reference):
+            dataset().materialize()
+    assert calls.read_bytes() == before_calls
+    assert run.journal.execution_commits('action-1') == before_commits
+    assert run.journal.source_binding('action-1-state-recovery-restriction') is None
+    assert load_sealed_plan(reference.directory, 'action-1')['physical'] == physical
+
+
 def test_fixed_source_is_reused_after_source_capture_commit(tmp_path):
     def source():
         path = tmp_path / "mutable.json"
