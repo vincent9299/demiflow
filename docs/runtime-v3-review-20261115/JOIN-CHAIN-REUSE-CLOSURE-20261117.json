@@ -1,0 +1,389 @@
+{
+  "schema": "demiflow.relational-region-closure.v1",
+  "status": "scope_complete_49_passed",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117",
+  "branch": "engine/gpt-native-join-reuse-20261117",
+  "tested_head": "1f6f0f7096f57d4b0dfdfbb0b79e6049c8a73a25",
+  "baseline": "1c2292e8d409bff20105fd34ae7c7c59255d8a33",
+  "projection_prerequisite": "87cc0c301504715b451e68c11339c80c3c788ff5",
+  "prerequisite_cherry_pick": "626be09",
+  "production_test_files": {
+    "demiflow/execution/kernels/operator.py": "4137069a71ef8236acd354d05c27cdf56722b1552bbf164eea1a050d22d857de",
+    "demiflow/execution/kernels/ordering.py": "01c2aa1bdac374829ffc018947931884aaf0b6853edfe1545af0a1a82f5809b2",
+    "demiflow/execution/kernels/relational.py": "3dd3bf027b450a629b90c32acbcefffb8c90651ac451fcd44fd759c69b05f288",
+    "demiflow/execution/kernels/relational_region.py": "e4fd116b22927444140cc2ceb950ac4c7643178975efb9efc53aa78d70170eaf",
+    "demiflow/execution/worker/dataflow_execution.py": "5d8ea1b41480d7086574853b2a19db48d3bd3c0289af6e1e8e3b9ee2085e7821",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "8de8ffc66d15e9132d0927dbd007599e47d561c070082d77a2e0329e940dbed0",
+    "demiflow/planning/dataflow_place.py": "c8dcd07e524f0e2b3da557d13f251dbdde56385940dc2ef0fe3429e64b369ad8",
+    "demiflow/planning/dataflow_relational_regions.py": "0e52a00d1752ee746fcf942af89a65db87e315ba6ce836697138902fff4d259f",
+    "tests/_native_relational_fixtures.py": "cfee5db4bbb8889bae6bceb065c41c18c41da7440af43792a710ebab3b1d0940",
+    "tests/test_local_join_chain.py": "1eb760658da893677c4bef793b93442f472c7ff0f7ae7a06221b6a794a7046bf",
+    "tests/test_runtime_v3_relational_regions.py": "e3a2ed9a0063a3d92675bbe48135af715fead04dad1e0476a86e38c81d2d16b6",
+    "tests/test_runtime_v3_relational_regions_ray.py": "33988f69f5466e1bc03c0dd5103f72ce2c544ee3d94c6338d2a989fe00a9f019"
+  },
+  "frozen_seven": {
+    "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+    "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+    "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+    "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+    "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+    "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+    "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+  },
+  "reports": [
+    {
+      "batch": "region_budget-000",
+      "seconds": 44.28,
+      "head": "1f6f0f7096f57d4b0dfdfbb0b79e6049c8a73a25",
+      "counts": {
+        "passed": 7
+      },
+      "non_passed": {},
+      "receipt": "/tmp/demiflow-join-region-history-r6/region_budget-000/receipt.json",
+      "sha256": "46b438e77c40e1960bae04b0ce9e637a6c9d5a0f3c2821966d26ac33c5e8fa78",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r6/region_budget-000/request.json"
+      ],
+      "environment": "local",
+      "selectors": [
+        "tests/test_runtime_v3_relational_regions.py::test_real_chain_preserves_values_order_and_explicit_region",
+        "tests/test_runtime_v3_relational_regions.py::test_region_planner_preserves_legacy_disable_isolation_and_budget",
+        "tests/test_runtime_v3_relational_regions.py::test_region_original_final_ack_replay_does_not_repeat_reducer",
+        "tests/test_runtime_v3_relational_regions.py::test_region_pure_join_nonfinal_ack_restores_original_input_refs",
+        "tests/test_runtime_v3_relational_regions.py::test_region_semi_anti_keeps_original_arrow_schema",
+        "tests/test_runtime_v3_relational_regions.py::test_region_small_budget_multirun_wide_key_nonassociative_fold",
+        "tests/test_runtime_v3_relational_regions.py::test_sort_subwindow_uses_original_store_and_closes_readers"
+      ],
+      "phase_count": 21,
+      "input_count": 2954,
+      "source_bytes_verified": true
+    },
+    {
+      "batch": "compatibility-000",
+      "seconds": 11.14,
+      "head": "1f6f0f7096f57d4b0dfdfbb0b79e6049c8a73a25",
+      "counts": {
+        "passed": 22
+      },
+      "non_passed": {},
+      "receipt": "/tmp/demiflow-join-region-history-r6/compatibility-000/receipt.json",
+      "sha256": "10bcd1081f8322e7fbdcaf474087d00acd6bf1a9aec13c2c427719520d26d1da",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r6/compatibility-000/request.json"
+      ],
+      "environment": "local",
+      "selectors": [
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[False-forward]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[False-rebalance]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[False-broadcast]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[False-hash]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[False-target]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[True-forward]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[True-rebalance]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[True-broadcast]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[True-hash]",
+        "tests/test_runtime_v3_join_projection.py::test_join_projection_keeps_original_routes_and_revalidates_after_restore[True-target]",
+        "tests/test_runtime_v3_join_projection.py::test_late_immutable_corruption_cannot_emit_any_join_output",
+        "tests/test_runtime_v3_join_projection.py::test_projection_capability_cannot_change_binding_or_cross_store",
+        "tests/test_runtime_v3_join_projection.py::test_projection_falls_back_when_same_row_window_cannot_hold_copies",
+        "tests/test_runtime_v3_join_projection.py::test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and_skew[inner]",
+        "tests/test_runtime_v3_join_projection.py::test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and_skew[left]",
+        "tests/test_runtime_v3_join_projection.py::test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and_skew[semi]",
+        "tests/test_runtime_v3_join_projection.py::test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and_skew[anti]",
+        "tests/test_runtime_v3_join_projection.py::test_projection_metadata_uses_original_state_window_or_falls_back",
+        "tests/test_runtime_v3_join_projection.py::test_duplicate_declared_keys_keep_original_row_admission",
+        "tests/test_runtime_v3_join_projection.py::test_projected_scratch_preserves_original_schema_provenance_and_document_bytes",
+        "tests/test_runtime_v3_k.py::test_k009",
+        "tests/test_runtime_v3_k.py::test_k010"
+      ],
+      "phase_count": 66,
+      "input_count": 2954,
+      "source_bytes_verified": true
+    },
+    {
+      "batch": "historical19-000",
+      "seconds": 198.55,
+      "head": "1f6f0f7096f57d4b0dfdfbb0b79e6049c8a73a25",
+      "counts": {
+        "passed": 19
+      },
+      "non_passed": {},
+      "receipt": "/tmp/demiflow-join-region-history-r6/historical19-000/receipt.json",
+      "sha256": "8a21d4b4eb83552b3997bd28ef0ecb5bf2b20852e1fffd4dcf19a4a297de9580",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r6/historical19-000/request.json"
+      ],
+      "environment": "local",
+      "selectors": [
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[left-left]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[left-inner]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[left-semi]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[left-anti]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[inner-left]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[inner-inner]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[inner-semi]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[inner-anti]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[semi-left]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[semi-inner]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[semi-semi]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[semi-anti]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[anti-left]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[anti-inner]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[anti-semi]",
+        "tests/test_local_join_chain.py::test_join_chain_matches_serial_with_duplicate_and_null_keys[anti-anti]",
+        "tests/test_local_join_chain.py::test_reuse_join_partitions_on_both_sides_and_reject_changed_keys[thread]",
+        "tests/test_local_join_chain.py::test_reuse_join_partitions_on_both_sides_and_reject_changed_keys[process]",
+        "tests/test_local_join_chain.py::test_reduce_with_rewritten_visible_key_is_repartitioned"
+      ],
+      "phase_count": 57,
+      "input_count": 2954,
+      "source_bytes_verified": true
+    },
+    {
+      "batch": "ray-000",
+      "seconds": 20.1,
+      "head": "1f6f0f7096f57d4b0dfdfbb0b79e6049c8a73a25",
+      "counts": {
+        "passed": 1
+      },
+      "non_passed": {},
+      "receipt": "/tmp/demiflow-join-region-history-r6/ray-000/receipt.json",
+      "sha256": "f34c95980aafa7b28ed175cbb2fabe75cb34b92178683cc83fadc58055db3733",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env-ray/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r6/ray-000/request.json"
+      ],
+      "environment": "ray",
+      "selectors": [
+        "tests/test_runtime_v3_relational_regions_ray.py::test_real_ray_region_values_seal_and_final_ack_replay"
+      ],
+      "phase_count": 3,
+      "input_count": 2954,
+      "source_bytes_verified": true
+    }
+  ],
+  "earlier_receipts_retained": [
+    {
+      "batch": "region_new-000",
+      "seconds": 25.21,
+      "head": "72dc93fcbe71b26d3033666968259dacfdb7b4ca",
+      "counts": {
+        "passed": 4
+      },
+      "non_passed": {},
+      "receipt": "/tmp/demiflow-join-region-history-r3/region_new-000/receipt.json",
+      "sha256": "7bf7a38d7fa180684d990e6bbcffd7b9a1ae14d563e9d845056a474f7013e585",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r3/region_new-000/request.json"
+      ],
+      "environment": "local"
+    },
+    {
+      "batch": "region_historical19-000",
+      "seconds": 189.76,
+      "head": "72dc93fcbe71b26d3033666968259dacfdb7b4ca",
+      "counts": {
+        "passed": 19
+      },
+      "non_passed": {},
+      "receipt": "/tmp/demiflow-join-region-history-r3/region_historical19-000/receipt.json",
+      "sha256": "b34ed30a4e7cc9391c0378bfa52ff6d3274a95154e83b0bfe3c7810926079ca9",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r3/region_historical19-000/request.json"
+      ],
+      "environment": "local"
+    },
+    {
+      "batch": "region_budget-000",
+      "seconds": 34.47,
+      "head": "913d71d869ee6ea4bc89a93e87b33cec137e1883",
+      "counts": {
+        "failed": 3,
+        "passed": 4
+      },
+      "non_passed": {
+        "tests/test_runtime_v3_relational_regions.py::test_real_chain_preserves_values_order_and_explicit_region": "failed",
+        "tests/test_runtime_v3_relational_regions.py::test_region_small_budget_multirun_wide_key_nonassociative_fold": "failed",
+        "tests/test_runtime_v3_relational_regions.py::test_sort_subwindow_uses_original_store_and_closes_readers": "failed"
+      },
+      "receipt": "/tmp/demiflow-join-region-history-r4/region_budget-000/receipt.json",
+      "sha256": "e5ad40e71535f95fb0d4ce7c9f17fee3391a1043a2fe507caf830ce3757e6f24",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r4/region_budget-000/request.json"
+      ],
+      "environment": "local"
+    },
+    {
+      "batch": "region_budget-000",
+      "seconds": 38.78,
+      "head": "8c2642fb1323195f01af3118f0222be1c30ee96d",
+      "counts": {
+        "passed": 6,
+        "failed": 1
+      },
+      "non_passed": {
+        "tests/test_runtime_v3_relational_regions.py::test_region_small_budget_multirun_wide_key_nonassociative_fold": "failed"
+      },
+      "receipt": "/tmp/demiflow-join-region-history-r5/region_budget-000/receipt.json",
+      "sha256": "07e9f11f88625a84c477dc3908412cae89ffc5f5a9bbc98eb17ab73e5f9b53b4",
+      "argv": [
+        "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+        "-P",
+        "-B",
+        "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117/tests/runtime_v3_regression_inventory.py",
+        "/tmp/demiflow-join-region-history-r5/region_budget-000/request.json"
+      ],
+      "environment": "local"
+    }
+  ],
+  "measurements": {
+    "normal": {
+      "nodes": 7,
+      "stages": 5,
+      "region": [
+        {
+          "stage_id": "relational-v1-665419baa67ea1f996616e7914cd2ca63df1bbbbadb82ec34090a97053f10372",
+          "occurrences": [
+            "8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+            "0ded40adc75213e1397522769cfeab197956abe29d4123466ee11d4e795a5165",
+            "b8b05a18d11d68cfa147e24afffcafc4ff65a255f5611dee1d1213730813266f"
+          ],
+          "resident_bytes": 222298112,
+          "profile": {
+            "requests": {
+              "cpu_millis": 1000,
+              "memory_bytes": 222298112
+            }
+          }
+        }
+      ],
+      "counters": [
+        {
+          "leaf_key_rows": 8,
+          "leaf_payload_bytes": 897,
+          "intermediate_payload_bytes": 0,
+          "intermediate_reference_bytes": 1340,
+          "intermediate_validation_bytes": 1040,
+          "partition_builds": 3,
+          "intermediate_key_rebuilds": 0,
+          "sort_runs": 1,
+          "sort_window_bytes": 134217728,
+          "sort_run_bytes": 33554432,
+          "sort_frame_bytes": 16760832,
+          "sort_read_chunk_bytes": 65536,
+          "sort_fan_in_limit": 2
+        }
+      ]
+    },
+    "small": {
+      "nodes": 7,
+      "stages": 5,
+      "region": [
+        {
+          "stage_id": "relational-v1-665419baa67ea1f996616e7914cd2ca63df1bbbbadb82ec34090a97053f10372",
+          "occurrences": [
+            "8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+            "0ded40adc75213e1397522769cfeab197956abe29d4123466ee11d4e795a5165",
+            "b8b05a18d11d68cfa147e24afffcafc4ff65a255f5611dee1d1213730813266f"
+          ],
+          "resident_bytes": 151552,
+          "profile": {
+            "requests": {
+              "cpu_millis": 1000,
+              "memory_bytes": 151552
+            }
+          }
+        }
+      ],
+      "counters": [
+        {
+          "leaf_key_rows": 36,
+          "leaf_payload_bytes": 13612,
+          "intermediate_payload_bytes": 0,
+          "intermediate_reference_bytes": 53360,
+          "intermediate_validation_bytes": 49600,
+          "partition_builds": 3,
+          "intermediate_key_rebuilds": 0,
+          "sort_runs": 23,
+          "sort_window_bytes": 32768,
+          "sort_run_bytes": 8192,
+          "sort_frame_bytes": 4080,
+          "sort_read_chunk_bytes": 64,
+          "sort_fan_in_limit": 2
+        }
+      ]
+    },
+    "wide": {
+      "nodes": 7,
+      "stages": 5,
+      "region": [
+        {
+          "stage_id": "relational-v1-665419baa67ea1f996616e7914cd2ca63df1bbbbadb82ec34090a97053f10372",
+          "occurrences": [
+            "8d4f4652d1d23528425fd06d8050b1068b3f3c02b46827e2ff07801b17bcf2b0",
+            "0ded40adc75213e1397522769cfeab197956abe29d4123466ee11d4e795a5165",
+            "b8b05a18d11d68cfa147e24afffcafc4ff65a255f5611dee1d1213730813266f"
+          ],
+          "resident_bytes": 507904,
+          "profile": {
+            "requests": {
+              "cpu_millis": 1000,
+              "memory_bytes": 507904
+            }
+          }
+        }
+      ],
+      "counters": [
+        {
+          "leaf_key_rows": 36,
+          "leaf_payload_bytes": 151492,
+          "intermediate_payload_bytes": 0,
+          "intermediate_reference_bytes": 604784,
+          "intermediate_validation_bytes": 601024,
+          "partition_builds": 3,
+          "intermediate_key_rebuilds": 0,
+          "sort_runs": 33,
+          "sort_window_bytes": 131072,
+          "sort_run_bytes": 32768,
+          "sort_frame_bytes": 16320,
+          "sort_read_chunk_bytes": 256,
+          "sort_fan_in_limit": 2
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Only explicitly sealed single-partition CPU regions of join depth at most two are optimized.",
+    "Intermediate key bytes and transient output-size validation remain; this is not zero-copy or a measured throughput multiplier.",
+    "Sort row/frame windows do not claim a hard Python RSS ceiling.",
+    "The original terminal row/provenance envelope refusal from r5 is assigned to root/historical_finish; this lane does not modify terminal production code.",
+    "No whole-platform or multi-host/GPU performance claim is made by these 49 tests."
+  ]
+}

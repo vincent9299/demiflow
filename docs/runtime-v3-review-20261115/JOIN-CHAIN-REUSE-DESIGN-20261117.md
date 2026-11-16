@@ -1,6 +1,6 @@
 # 连续同键 join/reduce 复用：源码裁决与最小实现方案
 
-状态：**待总控裁决，未实现**。本轮只读生产源码并执行一次私有真实 Dataset 取证；没有迁移旧测试、修改执行器或新增生产机制。
+历史状态：**本文件记录当时待裁决的未实现设计**。随后已获总控批准并完成实施；最终符号、边界和49项验收见 [实施交接](JOIN-CHAIN-REUSE-CLOSURE-20261117.md)。下文取证与建议保留为当时的设计历史，不把提案接口冒充已交付接口。
 
 工作树：`/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117`。
 分支：`engine/gpt-native-join-reuse-20261117`。
