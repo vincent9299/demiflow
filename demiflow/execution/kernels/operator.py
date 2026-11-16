@@ -161,6 +161,7 @@ class _SpoolPort:
         self._segment_rows = segment_rows
         self._refs: list[ArtifactRef] = []
         self._borrowed = []
+        self._borrowed_proofs = {}
         self._pending: list[bytes] = []
         self._empty_bytes = len(state_codec.dumps([], max_bytes=services.bounds.max_batch_bytes))
         self._pending_bytes = self._empty_bytes
@@ -223,15 +224,63 @@ class _SpoolPort:
         candidate = {'position':len(self._refs),'input':dict(entry)}
         state_codec.dumps(self._borrowed + [candidate], max_bytes=self._services.bounds.max_state_bytes)
         self._borrowed.append(candidate)
+        from ..dataflow_finite_input import _ValidatedFiniteEntry
+        if type(entry) is _ValidatedFiniteEntry:
+            self._borrowed_proofs[len(self._borrowed)-1] = entry
+        if not self._projection_metadata_fits():
+            self._borrowed_proofs.clear()
         self._count += entry['rows']
 
     def records(self) -> Iterator[Record]:
-        from ..dataflow_finite_input import borrowed_records
+        return _SpoolRecords(self)
+
+    def _projection_metadata_fits(self):
+        raw = state_codec.dumps(self._borrowed, max_bytes=self._services.bounds.max_state_bytes)
+        return 3 * len(raw) <= self._services.bounds.max_state_bytes
+
+    def _join_records(self, fields):
+        from ..dataflow_finite_input import validate_finite_members, validate_borrowed_entry, _validated_entry
+        if not self._projection_metadata_fits():
+            self._borrowed_proofs.clear()
+            yield from self._records()
+            return
+        # Restored mappings carry no live capability. Revalidate each complete
+        # original scope before returning any optimized join input.
+        for index, item in enumerate(self._borrowed):
+            entry = item['input']
+            proof = self._borrowed_proofs.get(index)
+            if proof is not None:
+                _validated_entry(self._services, entry, proof)
+                continue
+            spec = validate_borrowed_entry(self._services, entry)
+            verified = validate_finite_members(self._services, entry['seal_ref'], spec, target=entry['target'])
+            from ..dataflow_finite_input import _ValidatedFiniteEntry
+            if any(type(fresh) is not _ValidatedFiniteEntry for fresh in verified):
+                self._borrowed_proofs.clear()
+                yield from self._records()
+                return
+            for other, candidate in enumerate(self._borrowed):
+                for fresh in verified:
+                    if dict(fresh) == candidate['input']:
+                        self._borrowed_proofs[other] = fresh
+            _validated_entry(self._services, entry, self._borrowed_proofs.get(index))
+        yield from self._records(join_keys=fields)
+
+    def _records(self, *, join_keys=None):
+        from ..dataflow_finite_input import borrowed_records, borrowed_join_records
         borrowed = iter(self._borrowed)
         pending = next(borrowed, None)
+        member_index = 0
         for index in range(len(self._refs) + 1):
             while pending is not None and pending['position'] == index:
-                yield from borrowed_records(self._services, pending['input'])
+                if join_keys is None:
+                    yield from borrowed_records(self._services, pending['input'])
+                else:
+                    from .join_spool import _resident_limit
+                    yield from borrowed_join_records(self._services, pending['input'],
+                        self._borrowed_proofs[member_index], fields=join_keys,
+                        row_window=max(1, _resident_limit(self._services)//4))
+                member_index += 1
                 pending = next(borrowed, None)
             if index < len(self._refs):
                 ref = self._refs[index]
@@ -247,6 +296,7 @@ class _SpoolPort:
         self._refs = []
         # A borrower never releases or deletes the producer's immutable refs.
         self._borrowed = []
+        self._borrowed_proofs = {}
         self._pending = []
         self._pending_bytes = self._empty_bytes
 
@@ -283,6 +333,7 @@ class _SpoolPort:
             previous = item['position']
         state_codec.dumps(borrowed, max_bytes=self._services.bounds.max_state_bytes)
         self._borrowed = list(borrowed)
+        self._borrowed_proofs = {}
         pending = list(snap["pending"])
         # Old images may contain in-memory pending records. Retain that format
         # and derive byte admission from the actual restored data, never a new
@@ -303,6 +354,30 @@ class _SpoolPort:
             raise _err('CORRUPT_ARTIFACT', 'invalid restored spool row or byte count')
         self._count = snap['count']
         self._bytes = snap['bytes']
+
+
+class _SpoolRecords:
+    """Ordinary Record iterator with an explicit kernel-only join projection."""
+    def __init__(self, port):
+        self.port = port
+        self._iterator = None
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._iterator is None:
+            self._iterator = self.port._records()
+        return next(self._iterator)
+
+    def for_join(self, fields):
+        if self._iterator is not None:
+            raise _err('INVALID_CONTRACT', 'cannot project a partially consumed spool')
+        return self.port._join_records(fields)
+
+    def close(self):
+        if self._iterator is not None:
+            self._iterator.close()
 
 
 class OperatorKernel:

@@ -18,6 +18,50 @@ _NEXT = struct.Struct('!q')
 _ID_BYTES = 64
 _FANOUT = 16
 _NONE = -1
+_PROJECTED_RESIDENT_MULTIPLIER = 32
+
+
+class _EncodedJoinInput:
+    """Kernel-private original document plus a typed key projection.
+
+    Never crosses a public Record/transport boundary or a recovery image.
+    Only a fully validated borrowed finite member can produce this carrier.
+    """
+    __slots__ = ('record_id', 'sequence', 'encoded_bytes', 'document', 'inline',
+                 'payload_ref', 'resident_bytes')
+
+    def __init__(self, raw, record_id, sequence, encoded_bytes, projection):
+        self.record_id, self.sequence = record_id, sequence
+        self.encoded_bytes, self.document = encoded_bytes, raw
+        self.inline, self.payload_ref = projection, None
+        # Outer line/string, canonical document, selected decoded key and the
+        # transient JSON tree all coexist during projection. Reserve that peak
+        # as well as the later scratch copy under the existing row window.
+        self.resident_bytes = _PROJECTED_RESIDENT_MULTIPLIER * len(raw)
+
+
+def _project_join_document(raw, *, record_id, sequence, max_bytes, fields, row_window):
+    from ..exchange.dataflow_bridge import _codec_loads, _decode_value
+    # Large/unsupported records keep the same original Record path. Do not
+    # enlarge a grant to make the optimized representation fit.
+    # Include JSON container overhead and typed-key expansion before parsing,
+    # plus the original scratch frame/copy. Unfitting inputs use the old path.
+    peak = (_PROJECTED_RESIDENT_MULTIPLIER + 4 + 8 * len(fields)) * len(raw)
+    if len(raw) > max_bytes or peak > row_window:
+        return _decode_record_document(raw, record_id=record_id, sequence=sequence, max_bytes=max_bytes)
+    doc = _codec_loads(raw)
+    payload = doc.get('p') if type(doc) is dict else None
+    if (type(payload) is not dict or payload.get('t') != 'map' or doc.get('r') is not None):
+        return _decode_record_document(raw, record_id=record_id, sequence=sequence, max_bytes=max_bytes)
+    if type(doc.get('eb')) is not int or not 0 <= doc['eb'] <= max_bytes:
+        raise _err('CORRUPT_ARTIFACT', 'projected finite record size is invalid')
+    # Decode only declared keys, using the original codec and original join
+    # key function below. Opaque payload bytes stay in their canonical form.
+    projection = {}
+    for pair in payload['v']:
+        if pair[0] in fields:
+            projection[pair[0]] = _decode_value(pair[1])
+    return _EncodedJoinInput(raw, record_id, sequence, doc['eb'], projection)
 
 
 def _resident_limit(services):
@@ -56,14 +100,16 @@ class _Spool:
 
     def append(self, record, fields):
         _check_stop(self.services)
-        row = _materialize_row(record, self.services)
+        encoded = type(record) is _EncodedJoinInput
+        row = record.inline if encoded else _materialize_row(record, self.services)
         # Validate the whole declared key even when one component is null.
         token = _group_key(row, fields).encode('utf-8')
         key = b'' if any(row[name] is None for name in fields) else token
         if len(key) > self.row_window:
             raise _err('BUDGET_EXCEEDED', 'Join key exceeds its admitted resident window')
-        document = _encode_record_document(record, max_bytes=self.document_limit)
-        if len(document) + len(key) + record.encoded_bytes > self.row_window:
+        document = record.document if encoded else _encode_record_document(record, max_bytes=self.document_limit)
+        resident = record.resident_bytes if encoded else record.encoded_bytes
+        if len(document) + len(key) + resident > self.row_window:
             raise _err('BUDGET_EXCEEDED', 'Join input and encoding exceed the admitted resident window')
         hashed = int.from_bytes(hashlib.sha256(key).digest()[:8], 'big')
         header = _HEADER.pack(_NONE, hashed, len(key), len(document), record.sequence)
@@ -71,7 +117,7 @@ class _Spool:
         frame_size = len(header) + len(record_id) + len(key) + len(document)
         # Coalesce only within the existing simultaneous row/encoding window.
         # Large indivisible rows retain the original piecewise write path.
-        if frame_size + len(document) + len(key) + record.encoded_bytes <= self.row_window:
+        if frame_size + len(document) + len(key) + resident <= self.row_window:
             offset = self.file.append(b''.join((header, record_id, key, document)))
             return offset, hashed
         offset = self.file.append(header)

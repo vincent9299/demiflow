@@ -91,6 +91,11 @@ def join_partitions(
     if how not in ("inner", "left", "semi", "anti"):
         raise _err("INVALID_CONTRACT", "unsupported join type", how=how)
     occurrence, budget = _occurrence(spec), _OutputBudget(spec, services, streaming=True)
+    from .operator import _SpoolRecords
+    if type(left) is _SpoolRecords:
+        left = left.for_join(lk)
+    if type(right) is _SpoolRecords:
+        right = right.for_join(rk)
     pairs = join_pairs(iter(left), iter(right), left_keys=lk, right_keys=rk,
                        how=how, services=services)
     try:

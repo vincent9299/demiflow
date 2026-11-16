@@ -6,7 +6,7 @@ immutable bytes on reads. No routing, storage or commit authority is created.
 """
 import json
 
-from .contracts.dataflow import ArtifactRef
+from .contracts.dataflow import ArtifactRef, Record
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_handles import _ChunkStream
 from .dataflow_segments import block_chunks, block_totals
@@ -15,6 +15,37 @@ from .exchange.dataflow_bridge import _decode_record_document, _validate_record
 _FIELDS = {'schema', 'seal_ref', 'manifest_ref', 'edge_id', 'producer', 'target',
            'rows', 'bytes', 'total_rows', 'total_bytes'}
 _SCHEMA = 'demiflow.borrowed-finite-input.v1'
+_FIELD_ORDER = tuple(sorted(_FIELDS))
+
+
+class _ValidatedFiniteEntry(dict):
+    """Process-local evidence of a complete original finite member scan.
+
+    The serialized mapping is unchanged. The capability is deliberately lost
+    by snapshot/restore, and is bound to this store, assignment, bounds and the
+    complete immutable entry (whose digest binds every schema/payload frame).
+    """
+    __slots__ = ('_proof',)
+
+    def __init__(self, entry, services, spec):
+        super().__init__(entry)
+        self._proof = (services.store, services.assignment, services.bounds, spec,
+                       tuple(entry[key] for key in _FIELD_ORDER))
+
+    def permits(self, services, entry, spec):
+        store, assignment, bounds, original_spec, original_entry = self._proof
+        return (set(self) == _FIELDS and services.store is store
+                and services.assignment is assignment and services.bounds == bounds
+                and spec == original_spec and tuple(self[key] for key in _FIELD_ORDER) == original_entry
+                and tuple(entry[key] for key in _FIELD_ORDER) == original_entry)
+
+
+def _validated_entry(services, entry, proof=None):
+    spec = validate_borrowed_entry(services, entry)
+    proof = entry if proof is None else proof
+    if type(proof) is not _ValidatedFiniteEntry or not proof.permits(services, entry, spec):
+        raise DataflowError('FENCED', 'finite projection lacks this attempt full-scan proof')
+    return spec
 
 
 def _fail(message):
@@ -54,7 +85,7 @@ def _scope(services, ref, spec, target):
     return members
 
 
-def _records(services, ref, spec, *, target, total_rows, total_bytes):
+def _records(services, ref, spec, *, target, total_rows, total_bytes, project=None):
     """Yield selected rows only; still validate every producer frame and route."""
     declared, size = block_totals(services.store, ref, services.bounds)
     if size > spec.storage_bytes or size > services.bounds.max_spill_bytes:
@@ -79,9 +110,11 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes):
                     or type(item['document']) is not str or type(item['target']) is not str
                     or item['target'] not in consumers):
                 _fail('finite record frame or target differs from channel')
-            record = _decode_record_document(item['document'].encode(), record_id=item['record_id'],
+            decode = _decode_record_document if project is None else project
+            record = decode(item['document'].encode(), record_id=item['record_id'],
                 sequence=item['sequence'], max_bytes=services.bounds.max_row_bytes)
-            _validate_record(record)
+            if isinstance(record, Record):
+                _validate_record(record)
             if record.encoded_bytes > services.bounds.max_row_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite payload exceeds max_row_bytes')
             if record.payload_ref is not None:
@@ -146,12 +179,16 @@ def validate_finite_members(services, seal_ref, spec, *, target):
         entries.append(entry)
     # The original kernel image budget also bounds the proposed metadata.
     from .kernels import state_codec
-    state_codec.dumps(entries, max_bytes=services.bounds.max_state_bytes)
+    raw = state_codec.dumps(entries, max_bytes=services.bounds.max_state_bytes)
+    # Proof/binding metadata is resident too. If it cannot coexist inside the
+    # original state window, retain the original fully decoded Record path.
+    if 3 * len(raw) <= services.bounds.max_state_bytes:
+        return tuple(_ValidatedFiniteEntry(entry, services, spec) for entry in entries)
     return tuple(entries)
 
 
 def validate_borrowed_entry(services, entry):
-    if (type(entry) is not dict or set(entry) != _FIELDS or entry['schema'] != _SCHEMA
+    if (type(entry) not in (dict, _ValidatedFiniteEntry) or set(entry) != _FIELDS or entry['schema'] != _SCHEMA
             or not isinstance(entry['seal_ref'], ArtifactRef)
             or not isinstance(entry['manifest_ref'], ArtifactRef)
             or any(type(entry[k]) is not str for k in ('edge_id','producer','target'))
@@ -171,6 +208,28 @@ def validate_borrowed_entry(services, entry):
 
 
 def borrowed_records(services, entry):
+    yield from _borrowed_records(services, entry)
+
+
+def borrowed_join_records(services, entry, proof, *, fields, row_window):
+    """Project keys from original bytes after this attempt fully checked scope.
+
+    All original digests, routes and row/byte totals are rechecked on this read.
+    A join drains both streams before producing any output; a damaged late
+    member can therefore never publish a partially authenticated result.
+    """
+    spec = _validated_entry(services, entry, proof)
+    if len(set(fields)) != len(fields):
+        yield from _borrowed_records(services, entry)
+        return
+    from .kernels.join_spool import _project_join_document
+    selected = tuple(dict.fromkeys((*fields, *spec.keys)))
+    def project(raw, **kwargs):
+        return _project_join_document(raw, fields=selected, row_window=row_window, **kwargs)
+    yield from _borrowed_records(services, entry, project=project)
+
+
+def _borrowed_records(services, entry, *, project=None):
     spec = validate_borrowed_entry(services, entry)
     members = _scope(services, entry['seal_ref'], spec, entry['target'])
     member = next(m for m in members if m['partition_id'] == entry['producer'])
@@ -179,7 +238,7 @@ def borrowed_records(services, entry):
         _fail('borrowed input no longer matches its original producer seal')
     count = size = 0
     for record in _records(services, entry['manifest_ref'], spec, target=entry['target'],
-                           total_rows=entry['total_rows'], total_bytes=entry['total_bytes']):
+                           total_rows=entry['total_rows'], total_bytes=entry['total_bytes'], project=project):
         count += 1
         size += record.encoded_bytes
         yield record
