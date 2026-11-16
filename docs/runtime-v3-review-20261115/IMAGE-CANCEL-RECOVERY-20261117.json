@@ -1,0 +1,1064 @@
+{
+  "runs": [
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r1",
+      "head": "b027608106ca0b33d1087cf8fa7a38757d2cb74a",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_managed_image_joint.py::test_actual_forge_multibatch_cancel_resume_prefix[after_prepared]",
+          "detail": "tests/test_managed_image_joint.py:266: in test_actual_forge_multibatch_cancel_resume_prefix\n    assert result['status']=='succeeded',(result,runs.logs(root,value['run_id']))\nE   AssertionError: ({'run_id': 'rc4b5f698d73248d2978ed5c2', 'digest': '6e90c5fa980e745c2c74c0f0143736554585aa93b15d6f4215d15c36be17d3b1',...7bc35ecf53dac57b5a; automatic regeneration is forbidden\nE     ', 'next_offset': 4266, 'truncated': False, 'base_offset': 0})\nE   assert 'failed' == 'succeeded'\nE     \nE     - succeeded\nE     + failed"
+        }
+      ],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2973,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r1/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r1/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r1/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r1/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r1/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "34f7da58fc9caef6c79f7e31dee75e3192b6dcb2699251ba50e6fe2d77e2a309"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r10-windows",
+      "head": "a959cc90a2c96f3e2719321523e2ac72a6ae6d3e",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1,
+        "passed": 5
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_managed_image_joint.py::test_actual_forge_multibatch_cancel_resume_prefix[after_acked]",
+          "detail": "tests/test_managed_image_joint.py:284: in test_actual_forge_multibatch_cancel_resume_prefix\n    assert [sum(source['next_sequence'] for source in cut['dataflow.sources.v3']) for cut in cuts] == [128,130]\nE   assert [128, 130, 130] == [128, 130]\nE     \nE     Left contains one more item: 130\nE     Use -v to get more diff"
+        }
+      ],
+      "phases": 18,
+      "input_binding": {
+        "inputs": 2974,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r10-windows/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r10-windows/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r10-windows/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r10-windows/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r10-windows/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "60ed40ec575d36fc339f7f1cc6ca18d36d0fc29eb0be5f7a3f4cb6fec1a9f047"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r11-controls",
+      "head": "7db554ea55663d2b49847982c58f97a54abc3a55",
+      "status": "passed",
+      "outcomes": {
+        "passed": 35
+      },
+      "failed": [],
+      "phases": 105,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r11-controls/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r11-controls/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r11-controls/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r11-controls/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r11-controls/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "3db1a8a05baaf8fe0ebb5ac86f39164c5e6a2aac0f6d9f937ddef492010908af"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r12-prefix",
+      "head": "7db554ea55663d2b49847982c58f97a54abc3a55",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1,
+        "passed": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_managed_image_joint.py::test_actual_forge_multibatch_cancel_resume_prefix[after_prepared]",
+          "detail": "tests/test_managed_image_joint.py:266: in test_actual_forge_multibatch_cancel_resume_prefix\n    assert result['status']=='succeeded',(result,runs.logs(root,value['run_id']))\nE   AssertionError: ({'run_id': 'r5ce14a128dea4253aa673f83', 'digest': 'c3581bd444716106cf4b312d8b5ae08ef4d7bb8bc0fd9babe10f418feb161a49',...76ee2e0a072f24f45a; automatic regeneration is forbidden\nE     ', 'next_offset': 4370, 'truncated': False, 'base_offset': 0})\nE   assert 'failed' == 'succeeded'\nE     \nE     - succeeded\nE     + failed"
+        }
+      ],
+      "phases": 6,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r12-prefix/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r12-prefix/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r12-prefix/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r12-prefix/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r12-prefix/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "65f2734cd8b8ca1519dc52d8887ce9952bea63df3da4a2db2b3cd4f35869f4cc"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r13-diagnostic",
+      "head": "7db554ea55663d2b49847982c58f97a54abc3a55",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_managed_image_joint.py::test_actual_forge_multibatch_cancel_resume_prefix[after_prepared]",
+          "detail": "tests/test_managed_image_joint.py:255: in test_actual_forge_multibatch_cancel_resume_prefix\n    ready = start_fault(root,value,window,monkeypatch)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_managed_image_joint.py:222: in start_fault\n    assert current['status'] not in runs.TERMINAL,(current,runs.logs(root,value['run_id']))\nE   AssertionError: ({'run_id': 'rbabb951b2407477995f3dbde', 'digest': 'e26db893cd0d164b2ee8f0c37ae23fb41419601006e2a55b364d67ab4cc55b8e',...2.180968, 'io_input_blocks': 0, ...}, ...}, ...}, {'text': '', 'next_offset': 0, 'truncated': False, 'base_offset': 0})\nE   assert 'interrupted' not in {'cancelled', 'failed', 'interrupted', 'succeeded'}\nE    +  where {'cancelled', 'failed', 'interrupted', 'succeeded'} = runs.TERMINAL"
+        }
+      ],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r13-diagnostic/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r13-diagnostic/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r13-diagnostic/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r13-diagnostic/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r13-diagnostic/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "418c8098e32eed60be785c7d9b402e011c290e57b06c835cbcfac31fa194a41f"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r14-diagnostic",
+      "head": "7db554ea55663d2b49847982c58f97a54abc3a55",
+      "status": "passed",
+      "outcomes": {
+        "passed": 1
+      },
+      "failed": [],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r14-diagnostic/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r14-diagnostic/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r14-diagnostic/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r14-diagnostic/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r14-diagnostic/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "c6fc7c9a78816888a40c5636739239e2f9a1945d3b16d70b0ce3d0d8ba01fc9b"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r15-diagnostic",
+      "head": "7db554ea55663d2b49847982c58f97a54abc3a55",
+      "status": "passed",
+      "outcomes": {
+        "passed": 1
+      },
+      "failed": [],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r15-diagnostic/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r15-diagnostic/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r15-diagnostic/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r15-diagnostic/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r15-diagnostic/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "420e4634a98021eac864e01ec9c0f27eb462aafc7bc13b65d6671c7ea31a55dd"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r16-prepared",
+      "head": "7db554ea55663d2b49847982c58f97a54abc3a55",
+      "status": "passed",
+      "outcomes": {
+        "passed": 1
+      },
+      "failed": [],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r16-prepared/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r16-prepared/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r16-prepared/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r16-prepared/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r16-prepared/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "6edeedb0a0b5c332958c68e971c38499ae9da9951b8838d3f6734eb8aaa54413"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r17-early-red",
+      "head": "e288d6ecc1372d124c34986da21bdb3fdf797b61",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 2
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_runtime_v3_control_drain.py::test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter[cooperative:operator_stop_file]",
+          "detail": "tests/test_runtime_v3_control_drain.py:110: in test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter\n    endpoint._early_event(stopped)\ndemiflow/execution/dataflow_hosts.py:418: in _early_event\n    self.deliver_reply(self._services.journal_service.dispatch(event))\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_authority.py:531: in dispatch\n    reply = (self._native_reserve_reply(event, command, lease=lease)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_authority.py:576: in _native_reserve_reply\n    reply = self.native_request(command, lease=lease)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_authority.py:672: in native_request\n    self._check_model_admission()\ndemiflow/execution/dataflow_authority.py:659: in _check_model_admission\n    raise cooperative\nE   demiflow.execution.request_limits.ServiceStopped: operator_stop_file"
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_control_drain.py::test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter[cooperative:run_cancelled]",
+          "detail": "tests/test_runtime_v3_control_drain.py:110: in test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter\n    endpoint._early_event(stopped)\ndemiflow/execution/dataflow_hosts.py:418: in _early_event\n    self.deliver_reply(self._services.journal_service.dispatch(event))\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_authority.py:531: in dispatch\n    reply = (self._native_reserve_reply(event, command, lease=lease)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_authority.py:576: in _native_reserve_reply\n    reply = self.native_request(command, lease=lease)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_authority.py:672: in native_request\n    self._check_model_admission()\ndemiflow/execution/dataflow_authority.py:659: in _check_model_admission\n    raise cooperative\nE   demiflow.execution.request_limits.ServiceStopped: run_cancelled"
+        }
+      ],
+      "phases": 6,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r17-early-red/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r17-early-red/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r17-early-red/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r17-early-red/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r17-early-red/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "c590324bb534e52a8192899995078259b7049dc2be26589c081fbed36363a657"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r18-controls",
+      "head": "3e8b058d797435c0f00f355a76d138447dbc9d23",
+      "status": "passed",
+      "outcomes": {
+        "passed": 37
+      },
+      "failed": [],
+      "phases": 111,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r18-controls/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r18-controls/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r18-controls/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r18-controls/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r18-controls/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "3d3a2f8233586e7b7e90d327cde329421bc58e989692792d85d07022194272e9"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r19-prefix",
+      "head": "3e8b058d797435c0f00f355a76d138447dbc9d23",
+      "status": "passed",
+      "outcomes": {
+        "passed": 2
+      },
+      "failed": [],
+      "phases": 6,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r19-prefix/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r19-prefix/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r19-prefix/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r19-prefix/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r19-prefix/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "f3effd703b54c1720026bbba41430a9f25bcdd81ac35f19fa6a77e565a53602f"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r2-components",
+      "head": "21f6898a2cf09997df6cfac36dca71047f4fa275",
+      "status": "passed",
+      "outcomes": {
+        "passed": 17
+      },
+      "failed": [],
+      "phases": 51,
+      "input_binding": {
+        "inputs": 2973,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r2-components/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r2-components/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r2-components/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r2-components/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r2-components/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "6728f8e9e7fc3c553d44a2a236739540a1f830293c8420f0d889a8bd3c8aa972"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r20-ray",
+      "head": "3e8b058d797435c0f00f355a76d138447dbc9d23",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "skipped": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_runtime_v3_routed_prompt.py::test_routed_native_original_ack_resume[ray]",
+          "detail": null
+        }
+      ],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r20-ray/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r20-ray/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r20-ray/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r20-ray/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r20-ray/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "ray",
+        "DEMIFLOW_V3_PROVIDER": "ray",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "7c9a7dd022718c6a315b3d3b9f33226c9f40e06b60fb0f9840f10c1a94ca712c"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r21-ray",
+      "head": "3e8b058d797435c0f00f355a76d138447dbc9d23",
+      "status": "passed",
+      "outcomes": {
+        "passed": 1
+      },
+      "failed": [],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2975,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r21-ray/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r21-ray/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r21-ray/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r21-ray/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r21-ray/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "ray",
+        "DEMIFLOW_V3_PROVIDER": "ray",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "f186c280e91c1da96570a8b53b7dcc132d01a8a10dddf67ddc6ef54e7d3550cf"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r3-prepared",
+      "head": "21f6898a2cf09997df6cfac36dca71047f4fa275",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_managed_image_joint.py::test_actual_forge_multibatch_cancel_resume_prefix[after_prepared]",
+          "detail": "tests/test_managed_image_joint.py:266: in test_actual_forge_multibatch_cancel_resume_prefix\n    assert result['status']=='succeeded',(result,runs.logs(root,value['run_id']))\nE   AssertionError: ({'run_id': 'r01d005420e894d53aa624c27', 'digest': 'dd12cf481cf96faec246aee4ddf30263299d1fe3b9b57c0b5c0ce649d4f0308b',...cfaf1fae7125ec3401; automatic regeneration is forbidden\nE     ', 'next_offset': 4383, 'truncated': False, 'base_offset': 0})\nE   assert 'failed' == 'succeeded'\nE     \nE     - succeeded\nE     + failed"
+        }
+      ],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2973,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r3-prepared/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r3-prepared/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r3-prepared/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r3-prepared/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r3-prepared/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "090b098e512c8cd0eed90cc118e2550efdcc71b11f4ac7e87fb0c9352bf72b89"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r4-routed",
+      "head": "a1875f5de9e6e85401240eace10233a43140fce9",
+      "status": "passed",
+      "outcomes": {
+        "passed": 7
+      },
+      "failed": [],
+      "phases": 21,
+      "input_binding": {
+        "inputs": 2973,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r4-routed/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r4-routed/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r4-routed/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r4-routed/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r4-routed/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "bdf3175df8b7ab2d52ed3667d79d66519aa73f7f50775a077130f4d680fdf01f"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r5-control",
+      "head": "e02607deab89ac8a5bef2ddbeaf8f51499e7800f",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_runtime_v3_control_drain.py::test_late_reply_drain_preserves_other_worker_boot_and_original_notify",
+          "detail": "tests/test_runtime_v3_control_drain.py:17: in test_late_reply_drain_preserves_other_worker_boot_and_original_notify\n    second=replace(event(run,store,'other'),allocation_id='worker-2',boot_id='boot-2')\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n../../../env/lib/python3.11/dataclasses.py:1503: in replace\n    return obj.__class__(**changes)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n<string>:16: in __init__\n    ???\ndemiflow/execution/contracts/dataflow.py:1106: in __post_init__\n    object.__setattr__(self, \"payload\", _json_map(self.payload, \"WorkerEvent.payload\"))\n                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/contracts/dataflow.py:198: in _json_map\n    frozen[key] = _freeze_json(item, label + \".\" + key, 1, budget)\n                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/contracts/dataflow.py:187: in _freeze_json\n    raise _err(label + \" must be finite Json (no tuple/bytes/NaN)\")\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: WorkerEvent.payload.request_ref must be finite Json (no tuple/bytes/NaN)"
+        }
+      ],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2974,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r5-control/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r5-control/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r5-control/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r5-control/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r5-control/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "08ffc01bd656e2c4fb82afcc18124d1ee89212d942130b92f9a4fb9e39037da8"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r6-control",
+      "head": "6febfca21b1be6f2385754df08afe870b8da9a07",
+      "status": "passed",
+      "outcomes": {
+        "passed": 1
+      },
+      "failed": [],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2974,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r6-control/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r6-control/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r6-control/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r6-control/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r6-control/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "4f752e9b7b4558e77f7cc7fc778419f49e6c81215ffbf7f9325359d316b6cc24"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r7-prepared",
+      "head": "6febfca21b1be6f2385754df08afe870b8da9a07",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_managed_image_joint.py::test_actual_forge_multibatch_cancel_resume_prefix[after_prepared]",
+          "detail": "tests/test_managed_image_joint.py:266: in test_actual_forge_multibatch_cancel_resume_prefix\n    assert result['status']=='succeeded',(result,runs.logs(root,value['run_id']))\nE   AssertionError: ({'run_id': 'r161ab2fbbeb3496aa7762895', 'digest': '10abd8857ac50b155099504137a69cfc4dacda17d4cf1861fa6c20b7d1ebc1ff',...d7e0c1b714d07d0df7; automatic regeneration is forbidden\nE     ', 'next_offset': 4383, 'truncated': False, 'base_offset': 0})\nE   assert 'failed' == 'succeeded'\nE     \nE     - succeeded\nE     + failed"
+        }
+      ],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2974,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r7-prepared/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r7-prepared/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r7-prepared/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r7-prepared/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r7-prepared/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "9d3af0297dc05d2a7225aab17d5a28a94bb37dc3dc3288fddeaea0a9eed381fb"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r8-control",
+      "head": "a959cc90a2c96f3e2719321523e2ac72a6ae6d3e",
+      "status": "passed",
+      "outcomes": {
+        "passed": 3
+      },
+      "failed": [],
+      "phases": 9,
+      "input_binding": {
+        "inputs": 2974,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r8-control/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r8-control/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r8-control/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r8-control/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r8-control/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "1a861b0f4158ab142b40dfb555aabc821c5bcef5268a5c07aeaee02061b32ef2"
+    },
+    {
+      "evidence": "/tmp/demiflow-image-cancel-r9-prepared",
+      "head": "a959cc90a2c96f3e2719321523e2ac72a6ae6d3e",
+      "status": "failed_or_not_run",
+      "outcomes": {
+        "failed": 1
+      },
+      "failed": [
+        {
+          "nodeid": "tests/test_managed_image_joint.py::test_actual_forge_multibatch_cancel_resume_prefix[after_prepared]",
+          "detail": "tests/test_managed_image_joint.py:284: in test_actual_forge_multibatch_cancel_resume_prefix\n    assert [sum(source['next_sequence'] for source in cut['dataflow.sources.v3']) for cut in cuts] == [128,130]\nE   assert [128, 130, 130] == [128, 130]\nE     \nE     Left contains one more item: 130\nE     Use -v to get more diff"
+        }
+      ],
+      "phases": 3,
+      "input_binding": {
+        "inputs": 2974,
+        "mismatches": []
+      },
+      "source_unchanged": true,
+      "no_live_children": true,
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-image-cancel-r9-prepared/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-image-cancel-r9-prepared/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-image-cancel-r9-prepared/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-image-cancel-r9-prepared/locations",
+        "TMPDIR": "/tmp/demiflow-image-cancel-r9-prepared/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "receipt_sha256": "5ce3b447b92acf9f230868c095827cd96922c4192ad61c5b496c45e1c4834a1c"
+    }
+  ],
+  "boundaries": {
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "main_status": " M \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\346\\226\\207\\346\\241\\243.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201Review-20261110.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\270\\211\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\272\\214\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261113.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2476\\346\\217\\220\\344\\272\\244\\345\\264\\251\\346\\272\\203\\347\\252\\227\\345\\217\\243\\351\\242\\235\\345\\272\\246-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2477\\345\\215\\225\\350\\241\\214\\344\\270\\212\\351\\231\\220-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\350\\201\\212\\345\\244\\251\\350\\256\\260\\345\\275\\225.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\351\\230\\266\\346\\256\\265\\350\\247\\204\\345\\210\\222-20261109.md\"\n?? docs/upgrade-implementation-20261113/\n",
+    "dirty_hashes": {
+      "docs/demiflow\u5347\u7ea7\u5b8c\u6574\u8bb0\u5fc6\u6587\u6863.md": "502f40c4cbc9543145a8ab23df1190d5be9fdb3752da0410596a35fdc75d935f",
+      "docs/demiflow\u5347\u7ea7\u4ee3\u7801Review-20261110.md": "f4507d2dd8b5db7cd48fe8625103d761ceb409ebb12d8720fd7043d57fdd8c2a",
+      "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261112-\u7b2c\u4e09\u8f6e.md": "ca4bce379310615025acfa3ab192826922af44c1836b8a78a1f498b96d802447",
+      "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261112-\u7b2c\u4e8c\u8f6e.md": "b4e4edc2ad1700833ca5de5b42f387c11c98626d94ae9c1031a374026747a934",
+      "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261112.md": "d266ba571633e0888b4c6e43590975bc4646db3b6bc392cf7feaae27d6ef00a6",
+      "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261113.md": "f4c96873a0812089c6d29ed17869b4959924258e5b6317f02c9ceb8e683e11c2",
+      "docs/demiflow\u5347\u7ea7\u590d\u5ba1-\u00a76\u63d0\u4ea4\u5d29\u6e83\u7a97\u53e3\u989d\u5ea6-\u88c1\u51b3-20261112.md": "1636877704b10c495a6639e4b2d8e9b866320eb5f1db6242dc6333b4d686c1f1",
+      "docs/demiflow\u5347\u7ea7\u590d\u5ba1-\u00a77\u5355\u884c\u4e0a\u9650-\u88c1\u51b3-20261112.md": "a5e3a5ede68af259b2fc5c3aec72dd006cfb6feda24065ace00e9f42382e6561",
+      "docs/demiflow\u5347\u7ea7\u5b8c\u6574\u8bb0\u5fc6\u804a\u5929\u8bb0\u5f55.md": "0b76b8eff37e14c80948bb25e5cfe8916b622b97fdef35eca46c24cd30b08786",
+      "docs/demiflow\u5347\u7ea7\u9636\u6bb5\u89c4\u5212-20261109.md": "4468ead9e0a11f9ecc7a06c6a22269b9584eb574771a286412f00506c76d69f5",
+      "docs/upgrade-implementation-20261113/README.md": "2ab44324a01b430fe2b9ab95596aaf5cd08b79db6f10425b4ecf6d8dbd0e7ba0",
+      "docs/upgrade-implementation-20261113/agent-a-code-pin.md": "7aa38d2705216e52efc02357f098090dee10d9bffc39f306fbea48ecfed53c0b",
+      "docs/upgrade-implementation-20261113/agent-b-plan-contract.md": "eed89338757bcf9dc373bb63cde7b187c6ebe3b4b5645ff61d64d2adcbb28cae",
+      "docs/upgrade-implementation-20261113/agent-c-runtime-integration.md": "b533c05804122703a0188df809e365059d1009f4385a81acf56b13c191ff6605",
+      "docs/upgrade-implementation-20261113/agent-d-workbench.md": "0655e0e574aede390de6f303263826255f0e8b92bb6f94e9b6f71704cc055fad",
+      "docs/upgrade-implementation-20261113/agent-e-business-proof.md": "f1caa0ad22c293f4a4681b64df0078f083ef287b82ce764b5fb1895e680262bf",
+      "docs/upgrade-implementation-20261113/parallel-contracts-v1.md": "7d2207a17d9cba44de859a82741bd3566199e31bae414b09fa3a6f024246e6da",
+      "docs/upgrade-implementation-20261113/progress-review-20261113.md": "db0148eedb3a8ed29329f881127fa102386c64bec19cfc35eafc0df2b1e89919"
+    },
+    "expected_main": {
+      "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+      "main_status": " M \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\346\\226\\207\\346\\241\\243.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201Review-20261110.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\270\\211\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\272\\214\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261113.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2476\\346\\217\\220\\344\\272\\244\\345\\264\\251\\346\\272\\203\\347\\252\\227\\345\\217\\243\\351\\242\\235\\345\\272\\246-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2477\\345\\215\\225\\350\\241\\214\\344\\270\\212\\351\\231\\220-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\350\\201\\212\\345\\244\\251\\350\\256\\260\\345\\275\\225.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\351\\230\\266\\346\\256\\265\\350\\247\\204\\345\\210\\222-20261109.md\"\n?? docs/upgrade-implementation-20261113/\n",
+      "main_dirty_hashes": {
+        "docs/demiflow\u5347\u7ea7\u5b8c\u6574\u8bb0\u5fc6\u6587\u6863.md": "502f40c4cbc9543145a8ab23df1190d5be9fdb3752da0410596a35fdc75d935f",
+        "docs/demiflow\u5347\u7ea7\u4ee3\u7801Review-20261110.md": "f4507d2dd8b5db7cd48fe8625103d761ceb409ebb12d8720fd7043d57fdd8c2a",
+        "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261112-\u7b2c\u4e09\u8f6e.md": "ca4bce379310615025acfa3ab192826922af44c1836b8a78a1f498b96d802447",
+        "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261112-\u7b2c\u4e8c\u8f6e.md": "b4e4edc2ad1700833ca5de5b42f387c11c98626d94ae9c1031a374026747a934",
+        "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261112.md": "d266ba571633e0888b4c6e43590975bc4646db3b6bc392cf7feaae27d6ef00a6",
+        "docs/demiflow\u5347\u7ea7\u4ee3\u7801\u590d\u5ba1-20261113.md": "f4c96873a0812089c6d29ed17869b4959924258e5b6317f02c9ceb8e683e11c2",
+        "docs/demiflow\u5347\u7ea7\u590d\u5ba1-\u00a76\u63d0\u4ea4\u5d29\u6e83\u7a97\u53e3\u989d\u5ea6-\u88c1\u51b3-20261112.md": "1636877704b10c495a6639e4b2d8e9b866320eb5f1db6242dc6333b4d686c1f1",
+        "docs/demiflow\u5347\u7ea7\u590d\u5ba1-\u00a77\u5355\u884c\u4e0a\u9650-\u88c1\u51b3-20261112.md": "a5e3a5ede68af259b2fc5c3aec72dd006cfb6feda24065ace00e9f42382e6561",
+        "docs/demiflow\u5347\u7ea7\u5b8c\u6574\u8bb0\u5fc6\u804a\u5929\u8bb0\u5f55.md": "0b76b8eff37e14c80948bb25e5cfe8916b622b97fdef35eca46c24cd30b08786",
+        "docs/demiflow\u5347\u7ea7\u9636\u6bb5\u89c4\u5212-20261109.md": "4468ead9e0a11f9ecc7a06c6a22269b9584eb574771a286412f00506c76d69f5",
+        "docs/upgrade-implementation-20261113/README.md": "2ab44324a01b430fe2b9ab95596aaf5cd08b79db6f10425b4ecf6d8dbd0e7ba0",
+        "docs/upgrade-implementation-20261113/agent-a-code-pin.md": "7aa38d2705216e52efc02357f098090dee10d9bffc39f306fbea48ecfed53c0b",
+        "docs/upgrade-implementation-20261113/agent-b-plan-contract.md": "eed89338757bcf9dc373bb63cde7b187c6ebe3b4b5645ff61d64d2adcbb28cae",
+        "docs/upgrade-implementation-20261113/agent-c-runtime-integration.md": "b533c05804122703a0188df809e365059d1009f4385a81acf56b13c191ff6605",
+        "docs/upgrade-implementation-20261113/agent-d-workbench.md": "0655e0e574aede390de6f303263826255f0e8b92bb6f94e9b6f71704cc055fad",
+        "docs/upgrade-implementation-20261113/agent-e-business-proof.md": "f1caa0ad22c293f4a4681b64df0078f083ef287b82ce764b5fb1895e680262bf",
+        "docs/upgrade-implementation-20261113/parallel-contracts-v1.md": "7d2207a17d9cba44de859a82741bd3566199e31bae414b09fa3a6f024246e6da",
+        "docs/upgrade-implementation-20261113/progress-review-20261113.md": "db0148eedb3a8ed29329f881127fa102386c64bec19cfc35eafc0df2b1e89919"
+      },
+      "frozen_reference": "49b666f",
+      "frozen": {
+        "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+        "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+        "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+        "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+        "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+        "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+        "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+      },
+      "unchanged": true
+    },
+    "head_equal": true,
+    "dirty_equal": true,
+    "status_equal": true
+  },
+  "candidate_head": "3e8b058d797435c0f00f355a76d138447dbc9d23",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_image_cancel_20261117",
+  "branch": "engine/gpt-image-cancel-20261117",
+  "final_same_candidate": {
+    "evidence": [
+      "demiflow-image-cancel-r18-controls",
+      "demiflow-image-cancel-r19-prefix",
+      "demiflow-image-cancel-r21-ray"
+    ],
+    "passed": 40,
+    "phases": 120,
+    "input_files_per_receipt": 2975,
+    "input_mismatches": 0,
+    "not_included": "All earlier candidates, diagnostic-only R13/R14/R15, and Ray skipped R20 are excluded from this final pass count."
+  },
+  "strict_prefix_facts": [
+    {
+      "run": "/tmp/demiflow-image-cancel-r19-prefix/tests/test_actual_forge_multibatch_c0/workspace/.forge/runs/r711a1fbcaa2a4d1eafa846c5",
+      "calls_complete_failed": [
+        130,
+        130,
+        0
+      ],
+      "attempts": [
+        {
+          "attempt": 1,
+          "cancel_requested_at": 1794871996.7407675,
+          "cleanup": "complete",
+          "deployment": {
+            "path": "/tmp/demiflow-image-cancel-r19-prefix/forge",
+            "slot": 0
+          },
+          "error": {
+            "message": "Execution cancellation requested",
+            "type": "RecoveryContractError"
+          },
+          "execution_resources": {
+            "child_maxrss_bytes": 304906240,
+            "cpu_system_s": 8.012595,
+            "cpu_user_s": 23.180719,
+            "io_input_blocks": 0,
+            "io_output_blocks": 528104,
+            "scope": "supervisor_and_reaped_descendants",
+            "supervisor_maxrss_bytes": 249974784
+          },
+          "execution_stopped": true,
+          "finished_at": 1794871997.565494,
+          "launch_phase": "spawning",
+          "prepared_at": 1794871960.5894446,
+          "reason": "cancelled",
+          "recoverable": false,
+          "returncode": 1,
+          "revision": 11,
+          "running_at": 1794871969.449622,
+          "sampled_peaks": {
+            "evidence_bytes": 0,
+            "output_bytes": 0,
+            "rss_bytes": 334376960,
+            "scratch_bytes": 18857
+          },
+          "started_at": 1794871966.6153228,
+          "status": "cancelled",
+          "stop_phase": "confirmed",
+          "supervisor": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 52673,
+            "start": "2005695195"
+          },
+          "unit_identity": {
+            "device": 66318,
+            "inode": 1616941689
+          },
+          "updated_at": 1794871997.5883508,
+          "usage": {
+            "elapsed_ms": 30216,
+            "output_bytes": 0
+          },
+          "usage_complete": true,
+          "usage_revision": 149,
+          "worker": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 52691,
+            "start": "2005695259"
+          }
+        },
+        {
+          "attempt": 2,
+          "cleanup": "complete",
+          "deployment": {
+            "path": "/tmp/demiflow-image-cancel-r19-prefix/forge",
+            "slot": 0
+          },
+          "execution_resources": {
+            "child_maxrss_bytes": 318844928,
+            "cpu_system_s": 1.378112,
+            "cpu_user_s": 7.513869,
+            "io_input_blocks": 0,
+            "io_output_blocks": 74096,
+            "scope": "supervisor_and_reaped_descendants",
+            "supervisor_maxrss_bytes": 250408960
+          },
+          "execution_stopped": true,
+          "finished_at": 1794872024.871143,
+          "launch_phase": "spawning",
+          "preparation_ready": false,
+          "returncode": 0,
+          "revision": 20,
+          "running_at": 1794872017.7609603,
+          "sampled_peaks": {
+            "evidence_bytes": 0,
+            "output_bytes": 55587,
+            "rss_bytes": 483000320,
+            "scratch_bytes": 137231
+          },
+          "started_at": 1794872015.1257474,
+          "status": "succeeded",
+          "stop_phase": "confirmed",
+          "supervisor": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 54316,
+            "start": "2005700038"
+          },
+          "unit_identity": {
+            "device": 66318,
+            "inode": 1616941922
+          },
+          "updated_at": 1794872024.8884945,
+          "usage": {
+            "elapsed_ms": 39357,
+            "output_bytes": 55587
+          },
+          "usage_complete": true,
+          "usage_revision": 47,
+          "worker": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 54326,
+            "start": "2005700097"
+          }
+        }
+      ],
+      "budgets": {
+        "image_scratch_admission_bytes": 10118144,
+        "object_namespace_metadata_bytes": 133,
+        "requests": 130,
+        "requests-0f2fb7a9686b2b994a8f2b8f96de6a5bf8c585e715911382971f36357b4ebfe0": 130,
+        "image-requests-df6cf64c5b418c3c160410dca205a73170e8994f13cb8236d340b0d09e833d6e": 130,
+        "object_bytes": 10006,
+        "object_metadata_bytes": 37302,
+        "artifact_staging_bytes": 960747,
+        "output_rows": 130,
+        "row_bytes": 52796,
+        "output_bytes": 62802,
+        "output_admission_bytes": 585276
+      },
+      "materialize_cuts": [
+        {
+          "sequence": 1,
+          "status": "acked",
+          "final": false,
+          "source_next": 128,
+          "source_eoi": [
+            false
+          ],
+          "terminal_rows": 126
+        },
+        {
+          "sequence": 2,
+          "status": "acked",
+          "final": true,
+          "source_next": 130,
+          "source_eoi": [
+            true
+          ],
+          "terminal_rows": 130
+        }
+      ]
+    },
+    {
+      "run": "/tmp/demiflow-image-cancel-r19-prefix/tests/test_actual_forge_multibatch_c1/workspace/.forge/runs/r55044cfad15e4d1aa9e52f17",
+      "calls_complete_failed": [
+        130,
+        130,
+        0
+      ],
+      "attempts": [
+        {
+          "attempt": 1,
+          "cancel_requested_at": 1794872084.3790386,
+          "cleanup": "complete",
+          "deployment": {
+            "path": "/tmp/demiflow-image-cancel-r19-prefix/forge",
+            "slot": 0
+          },
+          "error": {
+            "message": "Execution cancellation requested",
+            "type": "RecoveryContractError"
+          },
+          "execution_resources": {
+            "child_maxrss_bytes": 307232768,
+            "cpu_system_s": 6.805598,
+            "cpu_user_s": 20.637913,
+            "io_input_blocks": 0,
+            "io_output_blocks": 529768,
+            "scope": "supervisor_and_reaped_descendants",
+            "supervisor_maxrss_bytes": 279330816
+          },
+          "execution_stopped": true,
+          "finished_at": 1794872085.2369223,
+          "launch_phase": "spawning",
+          "prepared_at": 1794872050.0588672,
+          "reason": "cancelled",
+          "recoverable": false,
+          "returncode": 1,
+          "revision": 11,
+          "running_at": 1794872058.5199573,
+          "sampled_peaks": {
+            "evidence_bytes": 0,
+            "output_bytes": 0,
+            "rss_bytes": 583299072,
+            "scratch_bytes": 54834
+          },
+          "started_at": 1794872055.8855631,
+          "status": "cancelled",
+          "stop_phase": "confirmed",
+          "supervisor": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 55064,
+            "start": "2005704114"
+          },
+          "unit_identity": {
+            "device": 66318,
+            "inode": 6722258724
+          },
+          "updated_at": 1794872085.2560217,
+          "usage": {
+            "elapsed_ms": 28744,
+            "output_bytes": 0
+          },
+          "usage_complete": true,
+          "usage_revision": 143,
+          "worker": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 55065,
+            "start": "2005704173"
+          }
+        },
+        {
+          "attempt": 2,
+          "cleanup": "complete",
+          "deployment": {
+            "path": "/tmp/demiflow-image-cancel-r19-prefix/forge",
+            "slot": 0
+          },
+          "execution_resources": {
+            "child_maxrss_bytes": 318423040,
+            "cpu_system_s": 1.405433,
+            "cpu_user_s": 7.315994000000001,
+            "io_input_blocks": 0,
+            "io_output_blocks": 73304,
+            "scope": "supervisor_and_reaped_descendants",
+            "supervisor_maxrss_bytes": 281088000
+          },
+          "execution_stopped": true,
+          "finished_at": 1794872111.310685,
+          "launch_phase": "spawning",
+          "preparation_ready": false,
+          "returncode": 0,
+          "revision": 20,
+          "running_at": 1794872104.5427673,
+          "sampled_peaks": {
+            "evidence_bytes": 0,
+            "output_bytes": 55587,
+            "rss_bytes": 483504128,
+            "scratch_bytes": 137231
+          },
+          "started_at": 1794872101.8915112,
+          "status": "succeeded",
+          "stop_phase": "confirmed",
+          "supervisor": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 56271,
+            "start": "2005708714"
+          },
+          "unit_identity": {
+            "device": 66318,
+            "inode": 6722258507
+          },
+          "updated_at": 1794872111.3315527,
+          "usage": {
+            "elapsed_ms": 37521,
+            "output_bytes": 55587
+          },
+          "usage_complete": true,
+          "usage_revision": 45,
+          "worker": {
+            "boot": "65428e4d-96e2-42bd-a81e-a788f1d75e9a",
+            "pid": 56285,
+            "start": "2005708777"
+          }
+        }
+      ],
+      "budgets": {
+        "image_scratch_admission_bytes": 10118144,
+        "object_namespace_metadata_bytes": 133,
+        "requests": 130,
+        "requests-0f2fb7a9686b2b994a8f2b8f96de6a5bf8c585e715911382971f36357b4ebfe0": 130,
+        "image-requests-df6cf64c5b418c3c160410dca205a73170e8994f13cb8236d340b0d09e833d6e": 130,
+        "object_bytes": 10006,
+        "object_metadata_bytes": 37302,
+        "artifact_staging_bytes": 956128,
+        "output_rows": 130,
+        "row_bytes": 52796,
+        "output_bytes": 62802,
+        "output_admission_bytes": 585276
+      },
+      "materialize_cuts": [
+        {
+          "sequence": 1,
+          "status": "acked",
+          "final": false,
+          "source_next": 128,
+          "source_eoi": [
+            false
+          ],
+          "terminal_rows": 126
+        },
+        {
+          "sequence": 2,
+          "status": "acked",
+          "final": true,
+          "source_next": 130,
+          "source_eoi": [
+            true
+          ],
+          "terminal_rows": 130
+        }
+      ]
+    }
+  ],
+  "frozen_seven": {
+    "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+    "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+    "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+    "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+    "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+    "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+    "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+  },
+  "boundary_limits": [
+    "Five other original image publication/unknown/corruption cases passed on a959cc9 (R10), not rerun on the final candidate.",
+    "Integration with the latest root strict recovery policy and its native-RPC helper correction 7c034a8 remains coordinator-owned.",
+    "No multi-host/GPU/performance or PostgreSQL acceptance was run in this lane.",
+    "R13 native faulthandler diagnostic ended during startup with SIGSEGV; R16 external py-spy was denied by host ptrace permissions. Neither supplies failed cancellation stacks. R17 supplied deterministic original mailbox/service failure evidence."
+  ]
+}

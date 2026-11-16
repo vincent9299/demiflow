@@ -5,7 +5,7 @@ actor, HTTP journal, budget, metrics and lifetime. No business selection here.
 """
 import asyncio
 
-from ..execution.request_limits import ServiceStopped
+from ..execution.request_limits import ServiceStopped, is_cooperative_stop_error
 from ..services import ModelServiceError
 
 
@@ -58,7 +58,7 @@ class RoutedPromptActor:
                 # Global/user stop signals and storage/programming errors still
                 # stop the graph. A provider gate only disables its own route.
                 if (not self.isolate_failures or not actor.error_output
-                        or isinstance(exc, ServiceStopped) and str(exc) == 'operator_stop_file'):
+                        or is_cooperative_stop_error(exc)):
                     raise
                 return {**row, actor.error_output: {
                     'category': 'model_unavailable', 'type': type(exc).__name__,

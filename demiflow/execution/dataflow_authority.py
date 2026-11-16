@@ -394,15 +394,31 @@ class DriverJournalService:
         return True
 
     def poll_replies(self, *, max_replies: int) -> tuple[CompletedControl, ...]:
+        return self._take_replies(max_replies=max_replies, worker=None)
+
+    def poll_worker_replies(self, *, max_replies: int, allocation_id: str,
+                            boot_id: str) -> tuple[CompletedControl, ...]:
+        """Deliver this boot's original completed RPCs during K3 cleanup."""
+        identifier(allocation_id)
+        identifier(boot_id)
+        return self._take_replies(max_replies=max_replies, worker=(allocation_id, boot_id))
+
+    def _take_replies(self, *, max_replies, worker):
         if type(max_replies) is not int or max_replies <= 0:
             raise DataflowError("INVALID_CONTRACT", "max_replies must be a positive int")
         with self._lock:
-            batch = self._completed[:max_replies]
-            del self._completed[:max_replies]
+            batch, retained = [], []
+            for completed in self._completed:
+                if (len(batch) < max_replies and (worker is None or
+                        (completed.allocation_id, completed.boot_id) == worker)):
+                    batch.append(completed)
+                else:
+                    retained.append(completed)
+            self._completed = retained
             for completed in batch:
                 self._pending_payloads.pop(completed.reply.operation_id, None)
-            # Partial drains keep the same byte readable. Emptying and draining
-            # share the append lock, so a subsequent completion must rearm it.
+            # Other workers retain both reply order and the readiness byte.
+            # This is the original queue and accounting, not a retry path.
             if not self._completed:
                 self._drain_reply_waitable_locked()
         return tuple(batch)
@@ -470,12 +486,7 @@ class DriverJournalService:
                 event = self._queue.get(timeout=0.05)
             except queue.Empty:
                 continue
-            try:
-                reply = self.dispatch(event)
-            except Exception as exc:
-                from .dataflow_failures import failure_payload
-                reply = ControlReply(operation_id=event.operation_id, status="error", payload=failure_payload(exc),
-                                     payload_ref=None, error_code=getattr(exc, 'code', 'UNKNOWN_EFFECT'))
+            reply = self.dispatch_reply(event)
             completed = CompletedControl(allocation_id=event.allocation_id, boot_id=event.boot_id, reply=reply)
             with self._lock:
                 self._inflight.pop(event.operation_id, None)
@@ -485,6 +496,20 @@ class DriverJournalService:
                     if was_empty:
                         self._notify_reply_locked()
             self._queue.task_done()
+
+    def dispatch_reply(self, event: WorkerEvent) -> ControlReply:
+        """Same data-only RPC outcome for normal pumping and K3 cleanup.
+
+        Rejected fresh admission must release its original waiting worker too;
+        propagating ServiceStopped out of the control loop strands that RPC
+        and can prevent other admitted responses from being drained.
+        """
+        try:
+            return self.dispatch(event)
+        except Exception as exc:
+            from .dataflow_failures import failure_payload
+            return ControlReply(operation_id=event.operation_id, status="error", payload=failure_payload(exc),
+                                payload_ref=None, error_code=getattr(exc, 'code', 'UNKNOWN_EFFECT'))
 
     # -- validation + fixed dispatch (H002) ---------------------------------
     def dispatch(self, event: WorkerEvent) -> ControlReply:
@@ -650,9 +675,10 @@ class DriverJournalService:
     def _check_model_admission(self):
         reason = self._model_admission_stop
         if reason is not None:
-            from .request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
-            if reason == COOPERATIVE_STOP_REASON:
-                raise ServiceStopped('operator_stop_file')
+            from .request_limits import cooperative_stop_error
+            cooperative = cooperative_stop_error(reason)
+            if cooperative is not None:
+                raise cooperative
             raise DataflowError('CANCELLED', 'model request admission is closed')
 
     # -- native model journal (H069) ----------------------------------------

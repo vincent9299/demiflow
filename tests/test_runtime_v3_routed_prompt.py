@@ -238,3 +238,24 @@ def test_routed_declaration_refuses_live_or_changed_children(change):
         actor.actors['a']._runtime.request_gate = RequestGate(1)
     with pytest.raises((ValueError, DataflowError), match='declaration|capacity|copies differ'):
         native_model_declaration(operation)
+
+
+@pytest.mark.parametrize('reason', ['cooperative:operator_stop_file','cooperative:run_cancelled'])
+def test_routed_global_stop_is_not_provider_route_failure(tmp_path,routed_server,monkeypatch,reason):
+    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.request_limits import ServiceStopped
+    original=DriverJournalService.native_request
+    def stop_after_original_reservation(owner,command,**kwargs):
+        reply=original(owner,command,**kwargs)
+        if command.operation=='reserve' and reply.value is True:
+            owner.stop_model_admission(reason)
+        return reply
+    monkeypatch.setattr(DriverJournalService,'native_request',stop_after_original_reservation)
+    with pytest.raises(ServiceStopped):
+        with RunContext.start(tmp_path/'run') as run, data.local_execution():
+            _pipeline([{'item':0,'route':'a'},{'item':1,'route':'a'}],total=2,
+                routes={'a':{'concurrency':1,'max_requests':2}},concurrency=1).take_all()
+    assert len(routed_server.calls)==len(routed_server.finished)==1
+    calls,budgets=_calls(run)
+    assert len(calls)==1 and calls[0][1] is not None and budgets['requests']==1
+    assert not any(fact['status']=='acked' for fact in run.journal.execution_commits('action-1'))

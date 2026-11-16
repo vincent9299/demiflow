@@ -14,14 +14,14 @@ from demiflow.execution.dataflow_authority import _ref_to_json
 from demiflow.execution.dataflow_failures import failure_payload, restore_failure
 from demiflow.execution.dataflow_model_journal import _rpc_operation_id
 from demiflow.execution.kernels.async_instance import AsyncInstance
-from demiflow.execution.request_limits import COOPERATIVE_STOP_REASON, ServiceStopped, drain_on_service_stop
+from demiflow.execution.request_limits import COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON, ServiceStopped, drain_on_service_stop
 from test_runtime_v3_private_embedding_journal import (
     service, interrupted_run, private_graph, private_event, bind_private_embedding_contracts, charged)
 from test_runtime_v3_native_rpc_replay import event
 from test_embeddings import server
 
 
-@pytest.mark.parametrize('reason,settled', [(COOPERATIVE_STOP_REASON, True), ('cancel', False),
+@pytest.mark.parametrize('reason,settled', [(COOPERATIVE_STOP_REASON, True), (COOPERATIVE_RUN_STOP_REASON, True), ('cancel', False),
                                           ('cooperative:other', False), (None, False)])
 def test_async_owner_drains_only_fixed_service_reason(reason, settled):
     entered, finished, cancelled = threading.Event(), threading.Event(), threading.Event()
@@ -50,7 +50,8 @@ def test_async_owner_drains_only_fixed_service_reason(reason, settled):
 
 
 @pytest.mark.parametrize('private', [False, True])
-def test_stop_closes_fresh_driver_reserve_but_allows_original_receipt_and_response(tmp_path, private):
+@pytest.mark.parametrize('reason', [COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON])
+def test_stop_closes_fresh_driver_reserve_but_allows_original_receipt_and_response(tmp_path, private, reason):
     from demiflow.execution.dataflow_private_storage import bind_private_storage
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
         if private:
@@ -61,9 +62,9 @@ def test_stop_closes_fresh_driver_reserve_but_allows_original_receipt_and_respon
         request = make(run, store, 'a')
         original = authority.dispatch(request)
         assert original.status == 'ok'
-        authority.stop_model_admission(COOPERATIVE_STOP_REASON)
+        authority.stop_model_admission(reason)
         assert authority.dispatch(request) == original  # Lost original ACK is not a second HTTP lease.
-        with pytest.raises(ServiceStopped, match='operator_stop_file'):
+        with pytest.raises(ServiceStopped, match='operator_stop_file|run_cancelled'):
             authority.dispatch(make(run, store, 'b'))
         assert charged(run) == 1
         value = b'{"output":"confirmed"}'
@@ -174,3 +175,49 @@ def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
     with RunJournal(tmp_path/'run')._connection() as db:
         assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 2
         assert db.execute("SELECT consumed FROM runtime_budgets WHERE name='requests'").fetchone()[0] == 2
+
+
+def test_handle_requires_original_run_cancel_fact_to_drain(tmp_path):
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.dataflow_handles import RuntimeActionHandle
+    class EndInspection(Exception):pass
+    with pytest.raises(EndInspection):
+        with RunContext.start(tmp_path/'run') as run:
+            reasons=[]
+            def handle():
+                execution=SimpleNamespace(request=SimpleNamespace(action=SimpleNamespace(context=run)),
+                    subscribe_terminal=lambda:SimpleNamespace(close=lambda:None),
+                    cancel=reasons.append,close=lambda:None)
+                return RuntimeActionHandle(execution,bounds=SimpleNamespace(timeout_ms=1000))
+            handle().close()
+            assert reasons==['terminal handle closed before completion']
+            deadline=handle()
+            with pytest.raises(DataflowError,match='time budget'):
+                deadline._raise_deadline()
+            assert reasons[-1]=='terminal deadline exceeded'
+            deadline.close()
+            RunContext.cancel(run.ref)
+            assert run.journal.execution_status()['status']=='stopping'
+            handle().close()
+            assert reasons[-1]==COOPERATIVE_RUN_STOP_REASON
+            raise EndInspection()
+
+
+@pytest.mark.parametrize('reason', [COOPERATIVE_RUN_STOP_REASON, COOPERATIVE_STOP_REASON,
+                                    'terminal handle closed before completion', 'terminal deadline exceeded'])
+def test_original_worker_cancel_reason_survives_cleanup_drain(reason):
+    from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
+    from demiflow.execution.request_limits import cooperative_stop_error
+    services=SimpleNamespace(bounds=SimpleNamespace(timeout_ms=1000,max_pending_events=8,
+        max_row_bytes=1024,max_batch_bytes=4096),check_stop=lambda:None)
+    executor=DataflowWorkerExecutor(services=services,mailbox=SimpleNamespace())
+    instance=AsyncInstance(lambda value:value,services)
+    executor._kernels={'owner':instance}
+    executor.cancel(reason,deadline_ms=1000)
+    executor.cancel('execution_close',deadline_ms=1000)
+    executor.cancel(COOPERATIVE_RUN_STOP_REASON,deadline_ms=1000)
+    assert executor._cancel_reason==reason
+    expected=cooperative_stop_error(reason)
+    actual=instance._cancellation_reason()
+    assert (None if actual is None else str(actual))==(None if expected is None else str(expected))
+    instance.close()

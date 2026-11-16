@@ -1359,8 +1359,8 @@ class WorkerGraphRunner:
 
     def close(self):
         self.e._cancel_event.set()
-        from ..request_limits import COOPERATIVE_STOP_REASON
-        if self.e._cancel_reason != COOPERATIVE_STOP_REASON:
+        from ..request_limits import cooperative_stop_error
+        if cooperative_stop_error(self.e._cancel_reason) is None:
             self.e._mailbox.cancel_pending()
         self.wake()
         if self._thread is not None and self._thread is not threading.current_thread():

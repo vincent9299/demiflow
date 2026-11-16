@@ -588,7 +588,7 @@ class DataflowExecution:
         self._restore_image = self._verified_completed_image or (self._checkpoint.recover(sinks=self._sinks)
             if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
-            from .dataflow_operator_observations import restore_operator_observations
+            from .dataflow_operator_observations import restore_operator_observations, restore_node_metrics
             restore_operator_observations(self, self._restore_image)
             pub = self._publication(self._restore_image)
             self._terminal_seen = pub["manifest"]["total_rows"]
@@ -599,6 +599,8 @@ class DataflowExecution:
                 self._set_result(self._restore_image)
                 self._replay = self._published_records(pub)
                 return
+            restore_node_metrics(self, self._restore_image)
+            self._last_checkpoint_rows, self._last_checkpoint_outputs = self._checkpoint_frontiers()
             # Validate all actor images before ANY participant executes again.
             # A completed final result is safe to read without recreating actors.
             from .kernels import state_codec
@@ -1033,9 +1035,8 @@ class DataflowExecution:
             assigned = {n for stage in endpoint._assignment.stages for n in stage.occurrences}
             if occ not in assigned or partition not in lease.partition_ids:
                 raise DataflowError("FENCED", "node observation is outside assigned stage")
-            metrics = payload['metrics']
-            if set(metrics) != {'rows_input', 'rows_output'} or any(type(v) is not int or v < 0 for v in metrics.values()):
-                raise DataflowError("INVALID_CONTRACT", "node counters must be nonnegative integers")
+            from .dataflow_operator_observations import validated_node_counters
+            metrics = validated_node_counters(payload['metrics'])
             old = self._node_metrics.get((occ, partition), {'rows_input': 0, 'rows_output': 0})
             if any(metrics[k] < old[k] for k in metrics):
                 raise DataflowError("FENCED", "node counters moved backwards within a worker boot")

@@ -4,16 +4,30 @@ import time
 from contextlib import asynccontextmanager
 
 
-# Fixed internal Cancel reason; arbitrary cancellation never grants drain semantics.
+# Fixed internal reasons; arbitrary cancellation never grants drain semantics.
 COOPERATIVE_STOP_REASON = 'cooperative:operator_stop_file'
+COOPERATIVE_RUN_STOP_REASON = 'cooperative:run_cancelled'
+_COOPERATIVE_STOPS = {COOPERATIVE_STOP_REASON: 'operator_stop_file',
+                      COOPERATIVE_RUN_STOP_REASON: 'run_cancelled'}
 
 
 class ServiceStopped(RuntimeError):
     """Fatal service state: callers must stop dispatch, not turn it into a row verdict."""
 
 
+def cooperative_stop_error(reason):
+    """The shared fixed allowlist for bounded draining of admitted effects."""
+    detail = _COOPERATIVE_STOPS.get(reason) if type(reason) is str else None
+    return None if detail is None else ServiceStopped(detail)
+
+
+def is_cooperative_stop_error(error):
+    """Recognize global stop errors from the same fixed reason vocabulary."""
+    return isinstance(error, ServiceStopped) and str(error) in _COOPERATIVE_STOPS.values()
+
+
 async def drain_on_service_stop(awaitable, *, enabled):
-    """Finish an already-admitted journaled exchange on cooperative stream stop.
+    """Finish an already-admitted journaled exchange on cooperative stream/run stop.
 
     Ordinary caller cancellation still aborts promptly. The exchange owns its
     deadline and persistence; this helper never admits new work or publishes a

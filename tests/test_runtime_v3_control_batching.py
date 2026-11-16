@@ -225,6 +225,7 @@ def test_lifecycle_response_and_events_share_one_reader_and_keep_fencing():
     driver, worker = socket.socketpair()
     endpoint = _endpoint(driver)
     endpoint._services.bounds = budget
+    endpoint._services.journal_service = NS(poll_worker_replies=lambda **kwargs: ())
     endpoint._events = deque()
     endpoint._assignment = event
     endpoint._allocation_id = event.allocation_id

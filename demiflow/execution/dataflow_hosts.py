@@ -415,7 +415,7 @@ class _EndpointBase:
                 raise DataflowError("BUDGET_EXCEEDED", "activation event queue exceeds bound")
             self._events.append(event)
         else:
-            self.deliver_reply(self._services.journal_service.dispatch(event))
+            self.deliver_reply(self._services.journal_service.dispatch_reply(event))
 
     def _accept_final_observations(self, result):
         raw = result.get('final_progress', [])
@@ -451,6 +451,16 @@ class _EndpointBase:
             return
         self._cuts[request.cut_id] = request
         self._connector.request_cut(self._allocation_id, request)
+
+    def _deliver_pending_journal_replies(self):
+        # Normal pump may have submitted a paid response just before stopping.
+        # Its async reply still belongs to the same original service queue.
+        # K3 cleanup consumes only this endpoint's boot; other workers keep
+        # their original replies and readiness notification in place.
+        for completed in self._services.journal_service.poll_worker_replies(
+                max_replies=self._services.bounds.max_pending_events,
+                allocation_id=self._allocation_id, boot_id=self._boot_id):
+            self.deliver_reply(completed.reply)
 
     def drain(self, *, deadline_ms: int) -> None:
         if self._cleanup_completed or not self._activated:
@@ -524,6 +534,7 @@ class LocalHostEndpoint(_EndpointBase):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise DataflowError("DEADLINE_EXCEEDED", "Local worker control command timed out")
+            self._deliver_pending_journal_replies()
             messages = self._control_reader.read_ready(max_messages=self._services.bounds.max_pending_events)
             if messages is None:
                 raise DataflowError("UNKNOWN_EFFECT", "local worker closed before responding")
@@ -759,6 +770,7 @@ class RayHostEndpoint(_EndpointBase):
             resource_envelope=getattr(self, '_allocation_envelope', None))
         deadline = time.monotonic() + self._services.policy.control_timeout_ms / 1000
         while True:
+            self._deliver_pending_journal_replies()
             ready, _ = ray.wait([command], timeout=0.01)
             if ready:
                 result = ray.get(command)

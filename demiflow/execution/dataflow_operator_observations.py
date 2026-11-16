@@ -183,6 +183,54 @@ def observe_operator(execution, event, payload):
     slots[key] = (event.boot_id, value)
 
 
+def validated_node_counters(metrics):
+    if (type(metrics) is not dict or set(metrics) != {'rows_input', 'rows_output'}
+            or any(type(v) is not int or v < 0 for v in metrics.values())):
+        raise DataflowError('INVALID_CONTRACT', 'node counters must be nonnegative integers')
+    return dict(metrics)
+
+
+def restore_node_metrics(execution, image):
+    """Recover only the cumulative counters in the original ACKed worker image.
+
+    A colocated worker contributes the same frontier for each physical stage.
+    Authenticate it once and check its full occurrence/partition ownership;
+    neither callback observations nor a source offset can stand in for these
+    counters. Edge delivery ACK counters are attempt-local and remain zero.
+    """
+    import json
+    from .contracts.dataflow_codec import compute_participant_id
+    from .recovery_contract import identity
+    participants = {compute_participant_id(stage.stage_id, partition): (stage, partition)
+                    for stage in execution._physical.stages for partition in stage.partitions}
+    frontiers = {}
+    for contribution in image.contributions:
+        if contribution.participant_id not in participants:
+            raise DataflowError('FENCED', 'restored metric participant differs from physical plan')
+        stage, partition = participants[contribution.participant_id]
+        ref = contribution.operator_states.get(identity(['worker-frontier', partition]))
+        if ref is None:
+            continue  # Legacy worker has no restored cumulative counters.
+        frontiers.setdefault((ref, partition), set()).update(stage.occurrences)
+    restored = {}
+    for (ref, partition), assigned in frontiers.items():
+        frontier = json.loads(b''.join(execution._store.read(ref,
+            max_bytes=execution._bounds.max_state_bytes)))
+        if type(frontier) is not dict or frontier.get('schema') != 'demiflow.worker-frontier.v3':
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'unknown worker completion frontier')
+        metrics = frontier.get('metrics', {})
+        if type(metrics) is not dict or metrics and set(metrics) != assigned:
+            raise DataflowError('FENCED', 'restored metric ownership differs from assigned stages')
+        for occurrence in assigned:
+            value = validated_node_counters(metrics.get(occurrence, {'rows_input': 0, 'rows_output': 0}))
+            key = (occurrence, partition)
+            if key in restored and restored[key] != value:
+                raise DataflowError('FENCED', 'conflicting restored node counters')
+            restored[key] = value
+        del frontier
+    execution._node_metrics = restored
+
+
 def restore_operator_observations(execution, image):
     from .contracts.dataflow_codec import compute_participant_id
     from .kernels import state_codec

@@ -423,11 +423,15 @@ class DataflowWorkerExecutor:
         with self._control_lock:
             if self._closed:
                 return
-            self._cancel_reason = reason
+            # Cancel is followed by a generic K3 Drain during cleanup. Keep
+            # the original reason, just as AsyncInstance does: neither revoke
+            # admitted effect drain nor upgrade an earlier ordinary abort.
+            if self._cancel_reason is None:
+                self._cancel_reason = reason
             for kernel in self._kernels.values():
                 stop = getattr(kernel, 'request_stop', None)
                 if stop is not None:
-                    stop(reason)
+                    stop(self._cancel_reason)
             self._admit_open = False
             self._cancel_event.set()
             if hasattr(self, "_runner"):

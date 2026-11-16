@@ -132,7 +132,16 @@ class RuntimeActionHandle:
             finished = self._finished
         if not finished:
             try:
-                self._execution.cancel("terminal handle closed before completion")
+                reason = 'terminal handle closed before completion'
+                # Only the original run owner can establish cooperative user
+                # cancellation. Early handle close/failure/deadline alone cannot.
+                action = getattr(self._execution.request, 'action', None)
+                context = getattr(action, 'context', None)
+                journal = getattr(context, 'journal', None)
+                if journal is not None and journal.execution_status()['status'] in {'stopping', 'cancelled'}:
+                    from .request_limits import COOPERATIVE_RUN_STOP_REASON
+                    reason = COOPERATIVE_RUN_STOP_REASON
+                self._execution.cancel(reason)
             except Exception as exc:
                 self._cleanup_errors.append(exc)
         self._release_subscription()

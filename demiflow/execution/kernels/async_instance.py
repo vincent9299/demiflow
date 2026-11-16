@@ -176,8 +176,7 @@ class AsyncInstance:
                     raise result.error
                 return result
         except BaseException:
-            from ..request_limits import COOPERATIVE_STOP_REASON
-            if not closing and self._stop_reason == COOPERATIVE_STOP_REASON:
+            if not closing and self._cancellation_reason() is not None:
                 # Do not cancel the concurrent Future: that loses the reason
                 # and can interrupt an already-draining journaled exchange.
                 self.loop.call_soon_threadsafe(self._cancel_cooperative_tasks)
@@ -245,8 +244,8 @@ class AsyncInstance:
                 _CALLBACK_WORK.reset(token)
 
     def _cancellation_reason(self):
-        from ..request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
-        return ServiceStopped('operator_stop_file') if self._stop_reason == COOPERATIVE_STOP_REASON else None
+        from ..request_limits import cooperative_stop_error
+        return cooperative_stop_error(self._stop_reason)
 
     def start(self):
         if self._shared is not None:
@@ -305,21 +304,23 @@ class AsyncInstance:
         return self.validation.output(result) if self.validation is not None else result
 
     def request_stop(self, reason=None):
-        """Stop admission; only the fixed service-stop reason drains paid calls."""
+        """Stop admission; only fixed cooperative reasons drain paid calls."""
         if self._shared is not None:
             return self._shared.base.request_stop(reason)
-        from ..request_limits import COOPERATIVE_STOP_REASON
+        from ..request_limits import cooperative_stop_error
         if not self._stopping.is_set():
-            self._stop_reason = reason if reason == COOPERATIVE_STOP_REASON else None
+            self._stop_reason = reason if cooperative_stop_error(reason) is not None else None
         self._stopping.set()
-        if self.loop is not None and self._stop_reason == COOPERATIVE_STOP_REASON:
+        if self.loop is not None and self._cancellation_reason() is not None:
             self.loop.call_soon_threadsafe(self._cancel_cooperative_tasks)
 
     def _cancel_cooperative_tasks(self):
-        from ..request_limits import ServiceStopped
+        reason = self._cancellation_reason()
+        if reason is None:
+            return
         for task in tuple(self._tasks):
             if not task.cancelling():
-                task.cancel(ServiceStopped('operator_stop_file'))
+                task.cancel(reason)
 
     def _drain(self, *, background=False):
         if self.loop is None:
@@ -332,9 +333,7 @@ class AsyncInstance:
                 # Repeated cancellation would interrupt the very finally block
                 # whose completion makes it safe to release actor resources.
                 if not task.cancelling():
-                    from ..request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
-                    reason = ServiceStopped('operator_stop_file') if self._stop_reason == COOPERATIVE_STOP_REASON else None
-                    task.cancel(reason)
+                    task.cancel(self._cancellation_reason())
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
         self.resolve(cancel_pending(), closing=True)

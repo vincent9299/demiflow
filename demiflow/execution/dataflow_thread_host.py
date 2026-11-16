@@ -198,6 +198,7 @@ class ThreadHostEndpoint(_EndpointBase):
             timeout_ms if timeout_ms is not None else payload.get('deadline_ms', self._services.policy.control_timeout_ms))
         deadline = time.monotonic() + timeout_ms / 1000
         while not future.done():
+            self._deliver_pending_journal_replies()
             for event in self._connector.pull(self._allocation_id, limit=self._services.bounds.max_pending_events):
                 self._early_event(event)
             remaining = deadline-time.monotonic()
