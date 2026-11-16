@@ -149,6 +149,12 @@ class _BaseReader:
             self._decoded_row_bytes = None
             if encoded_bytes is None:
                 encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
+            else:
+                # The decoded immutable row and the source Record's frozen
+                # containers/array copy briefly coexist before publication.
+                from .dataflow_record_frames import admit_workspace, _typed_shape
+                native = _typed_shape(row, self._services.bounds.max_row_bytes)[1]
+                self._literal_frame_call(admit_workspace, 2 * native + 512, self._services.bounds)
             record = Record(record_id, position, None, row, encoded_bytes, sequence, self._schema_ref)
         if self._snapshot.replay != "attempt_only":
             # Keep one bounded in-flight row. Persist it only if a snapshot

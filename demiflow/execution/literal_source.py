@@ -12,8 +12,8 @@ from .contracts.dataflow import ArtifactRef, Record, thaw_record_value
 from .contracts.dataflow_errors import DataflowError
 from .dataflow_record_frames import (admit_workspace, metadata_bytes, read_document,
     decode_metadata, decode_frame, decode_document, frame_parts, frame_stream,
-    read_chunk_bytes, line_limit, _typed_shape)
-from .dataflow_segments import SegmentForest, RECORDS_MEDIA, range_segments
+    read_chunk_bytes, line_limit, _typed_shape, _json_shape)
+from .dataflow_segments import SegmentForest, RECORDS_MEDIA, SEGMENTS_MEDIA, range_segments, block_totals
 from .recovery_contract import document, identity
 
 SCHEMA = 'demiflow.literal-source.v1'
@@ -64,6 +64,22 @@ def literal_reference(source, bounds):
     return LiteralSourceReference(count, digest, kind=kind)
 
 
+def _forest_workspace(forest, reference, bounds):
+    # Only one bounded index document is built at a time. Its largest fanout is
+    # the final forest (or a two-child merge). Use the declared upper counts and
+    # fixed artifact-reference field widths, not the unrelated full control cap.
+    ref = ArtifactRef('f' * 64, bounds.max_spill_bytes, forest.store.store_id,
+                      'f' * 64, SEGMENTS_MEDIA)
+    entry = {'ref': asdict(ref), 'rows': reference.count,
+             'bytes': bounds.max_spill_bytes, 'height': bounds.max_depth}
+    value = {'schema': 'demiflow.terminal-segments.v1', 'height': bounds.max_depth,
+             'rows': reference.count, 'bytes': bounds.max_spill_bytes,
+             'children': [entry] * max(2, len(forest.roots) + 1)}
+    encoded, tree = _json_shape(value, bounds.max_control_bytes)
+    # Existing roots, prospective JSON tree, ASCII text and encoded bytes coexist.
+    return metadata_bytes(forest.roots) + tree + 2 * encoded
+
+
 def stage_literal(source, reference, *, source_id, store, bounds):
     forest = SegmentForest(store, bounds)
     index = 0
@@ -88,7 +104,7 @@ def stage_literal(source, reference, *, source_id, store, bounds):
                     record = Record(identity([source_id, 'literal', index]), {'index': index},
                                     None, row, encoded, index, schema_ref)
                     total, parts = frame_parts(record, bounds,
-                        retained=metadata_bytes(forest.roots) + 2 * bounds.max_control_bytes)
+                        retained=_forest_workspace(forest, reference, bounds))
                     pending = total, parts
                     del record, row
                 total, parts = pending
@@ -151,6 +167,9 @@ class LiteralRows:
                 or manifest['items_digest'] != self.reference.items_digest):
             raise DataflowError('SOURCE_CHANGED', 'literal input manifest differs from its original declaration')
         root = ArtifactRef(**manifest['data_ref'])
+        total, _ = block_totals(store, root, bounds, frame_call=self._call)
+        if total != self.reference.count:
+            raise DataflowError('CORRUPT_ARTIFACT', 'literal root count differs from its original declaration')
         self._metadata_bytes = metadata_bytes((root, self.reference.count, self.reference.items_digest))
         self._call(admit_workspace, 0, bounds)
         self._segments = range_segments(store, root, bounds, start=self.index, end=self.end,
