@@ -255,7 +255,8 @@ def test_actual_forge_multibatch_cancel_resume_prefix(image_workspace_base,tmp_p
     ready = start_fault(root,value,window,monkeypatch)
     assert ready['fact']['status']==('prepared' if window=='after_prepared' else 'acked')
     assert 128 <= len(joint_http['requests']) <= 130
-    assert ready['fact']['intent']['position']['next_ordinal']==128
+    assert sum(source['next_sequence'] for source in ready['cut']['dataflow.sources.v3']) == 128
+    assert not ready['cut']['cut']['final']
     runs.cancel(root,value['run_id']);previous = stop(root,value['run_id'])
     assert previous['status']=='cancelled' and previous['state']['usage_complete'] is True
     original_limits = runs.journal(root,value['run_id']).recovery_identity()['limits']
@@ -275,8 +276,13 @@ def test_actual_forge_multibatch_cancel_resume_prefix(image_workspace_base,tmp_p
     assert consumed['output_bytes']>=before_budgets['output_bytes'] and consumed['output_bytes']<=value['limits']['max_output_bytes']
     assert runs.journal(root,value['run_id']).recovery_identity()['limits']==original_limits
     commits = runs.journal(root,value['run_id']).execution_commits(ready['fact']['action_id'])
-    outputs = [f for f in commits if f['intent']['sinks']==['output']]
-    assert [f['intent']['position']['next_ordinal'] for f in outputs]==[128,130]
+    outputs = [f for f in commits if f['intent']['sinks']==['materialize']]
+    from types import SimpleNamespace
+    from demiflow.execution.state_artifacts import StateArtifacts
+    states = StateArtifacts(SimpleNamespace(directory=runs.directory(root, value['run_id']), limits=original_limits))
+    cuts = [states.read(f['prepared']['state']['dataflow-cut-v3']) for f in outputs]
+    assert [sum(source['next_sequence'] for source in cut['dataflow.sources.v3']) for cut in cuts] == [128,130]
+    assert [cut['cut']['final'] for cut in cuts] == [False, True]
     assert all(f['status']=='acked' for f in outputs) and joint_http['peak']<=2
     assert len({r['body']['prompt'] for r in joint_http['requests']})==130
     save_facts(root,value,result,joint_http,prefix_window=window,prefix_fact=ready['fact'],before_budgets=before_budgets)
@@ -296,7 +302,7 @@ def test_actual_forge_final_image_sink_resume_never_republishes(image_workspace_
     assert previous['status']=='cancelled' and previous['state']['usage_complete'] is True
     consumed=budgets(root,value['run_id'])
     if damage:
-        item=ready['fact']['prepared']['sinks']['lance']['objects']['objects'][0]
+        item=ready['fact']['prepared']['sinks']['write_lance']['objects']['objects'][0]
         path=next((root/'data/.demiflow-objects').rglob(item['sha256']))
         path.write_bytes(b'x'*path.stat().st_size)
         with pytest.raises(ValueError,match='checksum differs'):
@@ -326,7 +332,7 @@ def test_actual_forge_unknown_or_corrupt_images_block_regeneration(image_workspa
     assert previous['status']=='cancelled' and previous['state']['usage_complete'] is True
     before = len(joint_http['requests'])
     if corrupt:
-        fact = ready['fact']['prepared']['sinks']['output']['objects']['objects'][0]
+        fact = ready['fact']['prepared']['sinks']['materialize']['objects']['objects'][0]
         path = next((root/'data/.demiflow-objects').rglob(fact['sha256']))
         path.write_bytes(b'x'*path.stat().st_size)
     launch_observed(root,value,'observe_only',monkeypatch,resume=True)
@@ -413,6 +419,13 @@ def test_native_image_delivery_remains_explicitly_nonresumable(tmp_path,joint_ht
             rows=dataset().take(1)
             raise RuntimeError('controlled interruption after delivery')
     assert len(joint_http['requests'])==1
-    with pytest.raises(RecoveryContractError,match='Delivery has no replay guarantee'):
-        with RunContext.resume(reference):dataset().take(1)
+    # Historical selector: unified Dataset take now seals a final ACK.
+    # Reuse that exact committed result; no replay of the paid operation.
+    from demiflow.execution.run_journal import RunJournal
+    journal = RunJournal(reference.directory)
+    before = journal.execution_commits('action-1')
+    assert before and all(fact['status'] == 'acked' for fact in before)
+    with RunContext.resume(reference):
+        assert dataset().take(1) == rows
+    assert journal.execution_commits('action-1') == before
     assert len(joint_http['requests'])==1 and ObjectRef(**rows[0]['image']).read(max_bytes=4096)

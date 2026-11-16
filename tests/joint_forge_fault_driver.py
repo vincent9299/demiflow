@@ -74,7 +74,10 @@ elif mode == 'execute':
         run = run or current_run()
         fact = run.journal.execution_commit(commit_id) if commit_id else None
         observe('fault')
-        write_json(Path(root)/'joint_fault_ready.json',dict(window=window['window'],fact=fact,run_id=run.ref.run_id))
+        from demiflow.execution.state_artifacts import StateArtifacts
+        cut = (StateArtifacts(run).read(fact['prepared']['state']['dataflow-cut-v3'])
+               if fact and 'dataflow-cut-v3' in fact['prepared'].get('state', {}) else None)
+        write_json(Path(root)/'joint_fault_ready.json',dict(window=window['window'],fact=fact,cut=cut,run_id=run.ref.run_id))
         until = time.monotonic() + 120
         while time.monotonic() < until:
             run.check_stop()
@@ -88,8 +91,13 @@ elif mode == 'execute':
             fact = run.journal.execution_commit(commit_id)
             final=window['window'].startswith('final_')
             point=window['window'].removeprefix('final_') if final else window['window']
-            matches=(fact['intent']['sinks']==['lance'] if final else
-                fact['intent']['sinks']==['output'] and fact['intent']['position']['next_ordinal']==128)
+            from demiflow.execution.state_artifacts import StateArtifacts
+            state = fact.get('prepared', {}).get('state', {}).get('dataflow-cut-v3')
+            cut = StateArtifacts(run).read(state) if state else None
+            matches = bool(cut) and (
+                fact['intent']['sinks'] == ['write_lance'] and cut['cut']['final'] if final else
+                fact['intent']['sinks'] == ['materialize'] and not cut['cut']['final']
+                and sum(source['next_sequence'] for source in cut['dataflow.sources.v3']) == 128)
             if name == point and matches:
                 pause(commit_id)
         protocol.fault_point = fault
