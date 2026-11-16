@@ -130,7 +130,7 @@ def test_registered_objects_reach_checked_native_model_and_original_ack(tmp_path
     node = next(n for n in report['nodes'] if n['kind'] == 'embeddings')
     object_fact, = [r for r in node['analysis']['resources'] if r['kind'] == 'objects']
     assert object_fact['location_id'] == 'objects' and object_fact['root'] == str(tmp_path / 'objects')
-    assert object_fact in report['resources'].values()
+    assert object_fact in report['binding']['resources'].values()
     spec = importlib.util.spec_from_file_location('flows.object_embedding', path)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     observations = []
