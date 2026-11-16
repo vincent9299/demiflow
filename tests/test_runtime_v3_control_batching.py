@@ -282,7 +282,7 @@ def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, pr
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
     with RunContext.start(tmp_path/'run', limits={'timeout_s':120,
             'memory_bytes':256*1024**2, 'checkpoint_rows':512}) as run:
-        assert data.range(512).map(lambda row: {'id': row['id'] * 2}).take_all() == [
+        assert list(data.range(512).map(lambda row: {'id': row['id'] * 2}).iter_rows()) == [
             {'id':i*2} for i in range(512)]
         facts = run.journal.execution_commits('action-1')
         assert facts and facts[-1]['status'] == 'acked'
