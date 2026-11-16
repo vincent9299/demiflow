@@ -126,7 +126,9 @@ def translate_graph(graph_spec):
         # One reused plan object still declares independent target actors. Only
         # the ancestor and routing operations intentionally share construction.
         operations = tuple(replace(operation) for operation in plan.operations)
-        tag = _map(_tag, fn_kwargs={'reader': reader})
+        # The platform tag is one synchronous dictionary operation; it does not
+        # need a streaming actor, pending-call queue or background lifecycle.
+        tag = MapOp(CallableSpec.create(_tag, fn_kwargs={'reader': reader}))
         branches.append(PlanInput(source, LogicalPlan(prefix + operations + (tag,))))
         ends.append((reader, operations[0] if operations else tag, operations[-1] if operations else router))
     return RoutedGraphSource(tuple(branches), declaration, source, ancestor, router, tuple(ends))
@@ -230,6 +232,8 @@ def _colocate_private_tags(graph, stages, *, policy, bounds):
     for node in graph.nodes:
         marker = node.kernel.configuration.get('graph_private_tag')
         if marker is None or not marker['synchronous_target']:
+            continue
+        if node.kernel.configuration.get('streaming_map'):
             continue
         producer = marker['producer']
         head, tail = owners[producer], owners[node.occurrence_id]
