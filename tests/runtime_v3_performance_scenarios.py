@@ -18,6 +18,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -28,6 +29,133 @@ import traceback
 OWN_TREE = Path(__file__).resolve().parents[1]
 PLAN_PATH = OWN_TREE / 'docs/runtime-v3-review-20261115/PERFORMANCE-PLAN-20261116.json'
 MODULUS = 1 << 256
+TIMING_BOUNDARY = {
+    'schema': 'demiflow.performance.timing.v1',
+    'clock': 'time.monotonic_ns',
+    'start': 'immediately before RunContext.start',
+    'stop': 'after public result consumption, original ACK and run/executor close',
+    'included': ['declaration/admission', 'business worker startup/import/code-pin',
+                 'public result consumption/oracle', 'original ACK', 'run/executor cleanup'],
+    'excluded': ['child process spawn/initial driver imports', 'input digest',
+                 'HTTP/Ray observer setup/teardown', 'filesystem probes', 'source snapshots'],
+}
+_STORAGE_ROLES = ('source_checkout', 'source_package', 'harness', 'trial_root',
+                  'run_directory', 'capacity', 'resource_home', 'forge_domain',
+                  'temporary', 'tmp')
+_MOUNT_IDENTITY = ('device', 'fsid', 'fs_type', 'mount_source', 'mount_root',
+                   'mount_point', 'mount_options', 'super_options')
+
+
+def filesystem_identity(path):
+    """Observe one path's actual Linux mount, including not-yet-created children.
+
+    No directory walk or environment dump: only bounded mount metadata and a
+    stat of the closest existing ancestor. A later probe detects child mounts.
+    Missing evidence is explicit; matching path spelling never proves storage.
+    """
+    result = {'path': str(Path(path).absolute()), 'status': 'unknown'}
+    try:
+        resolved = Path(path).resolve()
+        existing = resolved
+        for _ in range(256):
+            if existing.exists():
+                break
+            existing = existing.parent
+        else:
+            raise ValueError('filesystem ancestor bound exceeded')
+        device = existing.stat().st_dev
+        with open('/proc/self/mountinfo', 'rb') as stream:
+            raw = stream.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError('mount evidence byte bound exceeded')
+        unescape = lambda value: re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), value)
+        candidates = []
+        for line in raw.decode().splitlines():
+            fields = line.split(); separator = fields.index('-')
+            mount = Path(unescape(fields[4]))
+            if (fields[2] == f'{os.major(device)}:{os.minor(device)}'
+                    and resolved.is_relative_to(mount)):
+                candidates.append((len(mount.parts), fields, separator, line))
+        if not candidates:
+            raise ValueError('actual path device has no matching mount evidence')
+        _, fields, separator, line = max(candidates, key=lambda item: item[0])
+        result.update(status='observed', resolved_path=str(resolved),
+            observed_existing_path=str(existing), path_exists=existing == resolved,
+            device=fields[2], fsid=os.statvfs(existing).f_fsid,
+            fs_type=fields[separator + 1], mount_source=unescape(fields[separator + 2]),
+            mount_root=unescape(fields[3]), mount_point=unescape(fields[4]),
+            mount_options=sorted(fields[5].split(',')),
+            super_options=sorted(fields[separator + 3].split(',')),
+            mount_id=fields[0], mount_record_sha256=hashlib.sha256(line.encode()).hexdigest())
+    except (OSError, ValueError, IndexError, AttributeError) as exc:
+        result['error'] = type(exc).__name__ + ': ' + str(exc)[:256]
+    return result
+
+
+def _storage_locations(source_root, output_root):
+    source, output = Path(source_root).resolve(), Path(output_root).resolve()
+    return dict(source_checkout=str(source), source_package=str(source / 'demiflow' / '__init__.py'),
+        harness=str(Path(__file__).resolve()), trial_root=str(output),
+        run_directory=str(output / 'run'), capacity=str(output / 'capacity'),
+        resource_home=str(output / 'resource-home'), forge_domain=str(output / 'forge-domain'),
+        temporary=str(output / 'temporary'), tmp=str(output / 'tmp'))
+
+
+def _storage_probe(source_root, output_root):
+    """Same narrow read-only observation in the driver or a selected Ray node."""
+    report = {'status': 'unknown', 'locations': {}}
+    try:
+        import demiflow
+        expected = Path(source_root).resolve() / 'demiflow' / '__init__.py'
+        if Path(demiflow.__file__).resolve() != expected:
+            raise ValueError('filesystem probe imported a different source tree')
+        with open('/proc/sys/kernel/random/boot_id') as stream:
+            boot = stream.read(128).strip()
+        if not re.fullmatch(r'[0-9a-f-]{36}', boot):
+            raise ValueError('host boot identity unavailable')
+        report.update(hostname=os.uname().nodename, boot_id=boot,
+                      mount_namespace=os.readlink('/proc/self/ns/mnt'))
+        report['locations'] = {name: filesystem_identity(path)
+                               for name, path in _storage_locations(source_root, output_root).items()}
+        report['status'] = ('observed' if all(v['status'] == 'observed'
+                                           for v in report['locations'].values()) else 'unknown')
+    except (OSError, ValueError, ImportError) as exc:
+        report['error'] = type(exc).__name__ + ': ' + str(exc)[:256]
+    return report
+
+
+def _ray_storage_probe(source_root, output_root):
+    import ray
+    return {**_storage_probe(source_root, output_root),
+            'node_id': ray.get_runtime_context().get_node_id()}
+
+
+def _capture_storage_environment(source_root, output_root, provider):
+    result = {'driver': _storage_probe(source_root, output_root), 'nodes': [], 'errors': []}
+    if provider == 'local':
+        return result
+    refs = []
+    try:
+        import ray
+        from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+        nodes = [node['NodeID'] for node in ray.nodes() if node['Alive']]
+        if not 1 <= len(nodes) <= 8:
+            raise ValueError('owned Ray storage probe requires one to eight actual nodes')
+        probe = ray.remote(num_cpus=0, num_gpus=0, max_retries=0, max_calls=1)(_ray_storage_probe)
+        refs = [probe.options(scheduling_strategy=NodeAffinitySchedulingStrategy(node, soft=False)).remote(
+            str(source_root), str(output_root)) for node in nodes]
+        observed = ray.get(refs, timeout=30)
+        if [item.get('node_id') for item in observed] != nodes:
+            raise ValueError('storage probe did not run on every selected real node')
+        result['nodes'] = observed
+    except Exception as exc:
+        result['errors'].append(type(exc).__name__ + ': ' + str(exc)[:256])
+        for ref in refs:
+            try:
+                ray.cancel(ref, force=True)
+            except Exception:
+                pass  # Only this probe's own tasks; never cluster/service cleanup.
+    return result
 
 
 def _json(value):
@@ -572,6 +700,14 @@ def run_child(config):
                     require_two_hosts=provider == 'two_hosts'))
                 observations.ray_observer = ray_observer
             outer.enter_context(observations)
+            facts['comparison_environment'] = {
+                'schema': 'demiflow.performance.storage.v1', 'timing': TIMING_BOUNDARY,
+                'before': _capture_storage_environment(expected_root, root, provider)}
+            # Registered before business_closed: LIFO closes the timer first,
+            # then probes while this trial's original Ray connection is alive.
+            def storage_after():
+                facts['comparison_environment']['after'] = _capture_storage_environment(expected_root, root, provider)
+            outer.callback(storage_after)
             def business_closed():
                 nonlocal closed
                 if closed is None: closed = time.monotonic_ns()
@@ -664,6 +800,7 @@ def run_child(config):
         ray_data_import_attempts=sorted(imports.attempts),
         http_request_count=len(calls), resources=None)
     facts['measurement_started_ns'] = started
+    facts['measurement_closed_ns'] = closed
     loaded = {name: str(Path(module.__file__).resolve()) for name, module in tuple(sys.modules.items())
               if name.startswith('demiflow') and getattr(module, '__file__', None)}
     facts['loaded_modules'] = loaded
@@ -900,9 +1037,88 @@ def _receipt_errors(row):
     return errors
 
 
+def _comparison_environment_errors(rows):
+    """Compare physical placement, not the different checkout/trial names.
+
+    Functional receipts remain valid when storage is unobserved or different;
+    no relative timing or net code gain is inferred from those trials.
+    """
+    errors, fingerprints = [], []
+    for row in rows:
+        label = f"{row.get('arm')}/{row.get('phase')}/{row.get('repetition')}"
+        env = row.get('comparison_environment')
+        try:
+            if (not isinstance(env, dict) or env.get('schema') != 'demiflow.performance.storage.v1'
+                    or env.get('timing') != TIMING_BOUNDARY or row.get('profile', False) is not False):
+                raise ValueError('filesystem evidence/timing boundary missing or diagnostic profile enabled')
+            start, stop = row.get('measurement_started_ns'), row.get('measurement_closed_ns')
+            if (type(start) is not int or type(stop) is not int or not 0 < start < stop
+                    or not math.isclose((stop - start) / 1e9, row['elapsed_s'], rel_tol=1e-9, abs_tol=1e-9)):
+                raise ValueError('elapsed time is not bound to the declared measured interval')
+            expected = _storage_locations(row['variant']['root'], row['output_root'])
+            phases = []
+            for phase in ('before', 'after'):
+                value = env.get(phase)
+                if not isinstance(value, dict) or value.get('errors') != []:
+                    raise ValueError(phase + ' storage probe missing or incomplete')
+                nodes = value.get('nodes')
+                if not isinstance(nodes, list) or len(nodes) > 8:
+                    raise ValueError('bounded real-node filesystem evidence missing')
+                if row.get('provider') == 'local':
+                    if nodes: raise ValueError('local trial claims unrelated remote nodes')
+                else:
+                    actual = {item['node_id'] for item in row.get('ray_nodes', [])}
+                    observed = [item.get('node_id') for item in nodes]
+                    if not actual or len(set(observed)) != len(observed) or set(observed) != actual:
+                        raise ValueError('driver storage cannot stand in for actual Ray node storage')
+                hosts = []
+                for node in [value.get('driver'), *nodes]:
+                    if (not isinstance(node, dict) or node.get('status') != 'observed'
+                            or not node.get('hostname') or not node.get('mount_namespace')
+                            or not re.fullmatch(r'[0-9a-f-]{36}', node.get('boot_id', ''))):
+                        raise ValueError('host/boot/mount namespace evidence unavailable')
+                    locations = node.get('locations')
+                    if not isinstance(locations, dict) or set(locations) != set(_STORAGE_ROLES):
+                        raise ValueError('required source/data/temporary filesystem location absent')
+                    mounts = {}
+                    for role, item in locations.items():
+                        if (not isinstance(item, dict) or item.get('status') != 'observed'
+                                or type(item.get('path_exists')) is not bool
+                                or role in ('source_checkout', 'source_package', 'harness') and not item['path_exists']
+                                or not re.fullmatch(r'\d+:\d+', item.get('device', ''))
+                                or type(item.get('fsid')) is not int
+                                or not re.fullmatch(r'[0-9a-f]{64}', item.get('mount_record_sha256', ''))
+                                or any(not isinstance(item.get(k), str) or not item[k]
+                                       for k in ('fs_type', 'mount_source', 'mount_root', 'mount_point',
+                                                 'mount_id', 'resolved_path', 'observed_existing_path'))
+                                or any(not isinstance(item.get(k), list) or not item[k]
+                                       or any(type(option) is not str for option in item[k])
+                                       for k in ('mount_options', 'super_options'))):
+                            raise ValueError(role + ' actual filesystem identity incomplete')
+                        path = Path(item['resolved_path'])
+                        if (not path.is_absolute() or not path.is_relative_to(item['observed_existing_path'])
+                                or not path.is_relative_to(item['mount_point'])
+                                or role != 'harness' and str(path) != expected[role]):
+                            raise ValueError(role + ' filesystem observation does not bind to the actual trial path')
+                        mounts[role] = {key: item[key] for key in _MOUNT_IDENTITY}
+                    hosts.append({'host': (node['hostname'], node['boot_id'], node['mount_namespace']),
+                                  'locations': mounts})
+                # Node IDs may change when an owned cluster is recreated. The
+                # physical hosts, boots, namespaces and actual mounts must not.
+                phases.append({'driver': hosts[0], 'nodes': sorted(hosts[1:], key=_json)})
+            if phases[0] != phases[1]:
+                raise ValueError('filesystem deployment changed during the timed trial')
+            fingerprints.append(_json(phases[0]))
+        except (ValueError, TypeError, KeyError) as exc:
+            errors.append(label + ': ' + str(exc))
+    if len(set(fingerprints)) > 1:
+        errors.append('source/data/temporary physical deployment differs across arms or repetitions')
+    return errors
+
+
 def evaluate_report(report, *, required=None):
     """Fail closed on absent comparisons, invalid receipts or a >20% regression."""
-    failures, missing, comparisons = [], [], []
+    failures, missing, comparisons, incomparable = [], [], [], []
     declared = report.get('required_cells', [])
     required = list(required if required is not None else declared)
     if not required or len(set(required)) != len(required):
@@ -911,6 +1127,8 @@ def evaluate_report(report, *, required=None):
     plan = {spec['id']: spec for spec in json.loads(PLAN_PATH.read_text())['cases']}
     if report.get('baseline_policy') != json.loads(PLAN_PATH.read_text())['baseline_policy']:
         failures.append({'reason': 'baseline environment policy missing or changed'})
+    incomparable.extend(item for item in report.get('not_comparable_before_execution', [])
+                        if item.get('cell') in required)
     oracles = {}
     if set(required) - known:
         failures.append({'reason': 'unknown environment/workload cells', 'cells': sorted(set(required)-known)})
@@ -954,6 +1172,11 @@ def evaluate_report(report, *, required=None):
         if len(evidence) != 1 or any(not value for pair in evidence for value in pair):
             failures.append({'cell': cell, 'reason': 'harness/plan is not bound equally across arms'})
         if any(_receipt_errors(row) for row in rows): continue
+        storage_errors = _comparison_environment_errors(all_rows)
+        if storage_errors:
+            incomparable.append({'cell': cell, 'reasons': storage_errors,
+                'conclusion': 'not comparable; no relative performance or net code gain established'})
+            continue
         summary = {'cell': cell}
         for arm, samples in arms.items():
             values = [r['elapsed_s'] for r in samples]
@@ -966,8 +1189,9 @@ def evaluate_report(report, *, required=None):
             failures.append({'cell': cell, 'reason': 'performance regression >20%; profile/fix or final review required',
                              'p50_ratio': summary['p50_ratio'], 'p95_ratio': summary['p95_ratio']})
         comparisons.append(summary)
-    return {'status': 'failed' if failures else 'not_run' if missing else 'passed',
-            'failures': failures, 'missing': missing, 'comparisons': comparisons}
+    return {'status': 'failed' if failures else 'not_comparable' if incomparable else 'not_run' if missing else 'passed',
+            'failures': failures, 'missing': missing, 'comparisons': comparisons,
+            'not_comparable': incomparable}
 
 
 def run_comparison(plan, baseline_roots, candidate_root, output_root, *, cells=None, **settings):
@@ -988,7 +1212,8 @@ def run_comparison(plan, baseline_roots, candidate_root, output_root, *, cells=N
               'warmup_separate': True, 'environment_cells_not_run': sorted(set(all_cells)-set(cells)),
               'measurements': [], 'plan': plan,
               'baseline_policy': json.loads(PLAN_PATH.read_text())['baseline_policy'],
-              'historical_ray_data_performance': 'not_run; B1-Ray is not an old-Ray-Data performance comparison'}
+              'historical_ray_data_performance': 'not_run; B1-Ray is not an old-Ray-Data performance comparison',
+              'not_comparable_before_execution': []}
     for cell in cells:
         pieces = cell.split(':'); case_id, provider = pieces[:2]
         case = next(case for case in plan['cases'] if case['id'] == case_id)
@@ -998,6 +1223,24 @@ def run_comparison(plan, baseline_roots, candidate_root, output_root, *, cells=N
         baseline = baseline_roots.get(cell) or baseline_roots.get(baseline_role['key'])
         if baseline is None: continue
         variants = {'baseline': baseline, 'candidate': {'root': str(candidate_root), 'kind': 'candidate'}}
+        # Reject the exposed local-NVMe versus shared-source comparison before
+        # spending thirteen trials on it. Actual child/node probes remain
+        # mandatory: this driver preflight cannot prove remote deployment.
+        preflight = {arm: {role: filesystem_identity(path) for role, path in
+                     _storage_locations(variant['root'], output_root).items()
+                     if role in ('source_checkout', 'source_package')}
+                     for arm, variant in variants.items()}
+        valid = all(item.get('status') == 'observed' and item.get('path_exists') is True
+                    for locations in preflight.values()
+                    for item in locations.values())
+        keys = [{role: {key: item.get(key) for key in _MOUNT_IDENTITY}
+                 for role, item in locations.items()} for locations in preflight.values()]
+        if not valid or keys[0] != keys[1]:
+            report['not_comparable_before_execution'].append({'cell': cell,
+                'reasons': ['driver source filesystem unknown or physically different across arms'],
+                'evidence': preflight,
+                'conclusion': 'not comparable; no business trial or relative ratio produced'})
+            continue
         schedule = [('warmup', -1, arm) for arm in variants]
         for repeat in range(5):
             schedule += [('measure', repeat, arm) for arm in
