@@ -1,8 +1,8 @@
 """L016 · run_ray_chain — resource terminal on every exit.
 
-2026-11-16: the five marked Ray cases now exercise the actual v3 compatibility
+2026-11-16: the marked Ray cases now exercise the actual v3 compatibility
 entry, with the same six input rows, two CPUs, original checkpoint policy,
-physical actor death, original journal and resume. The old unmarked AST/fake
+physical actor death, original journal and resume. The old unmarked fake
 layer below is retained pending migration and is NOT claimed as passing.
 Historical layer description follows; it is not current implementation evidence.
 
@@ -95,144 +95,152 @@ def _in_finally(node, call):
     return False
 
 
-def test_layout_is_interpreted_from_the_sealed_plan():
-    fn = _function("run_ray_chain")
-    assert len(_calls(fn, "interpret_physical_plan")) == 1
-    assert len(_calls(fn, "load_sealed_plan")) == 1
-    assert len(_calls(fn, "load_execution_bindings")) == 1
-    placement = ast.unparse(_assigned(fn, "placement"))
-    assert "layout.workers" in placement
-    assert "group_id == 'chain-group'" in placement
+@pytest.mark.ray
+def test_layout_is_interpreted_from_the_sealed_plan(ray_chain_facts):
+    chain_contract.test_layout_is_interpreted_from_the_sealed_plan(ray_chain_facts)
 
 
-def test_worker_profile_comes_from_the_layout():
-    fn = _function("run_ray_chain")
-    assert ast.unparse(_assigned(fn, "sealed_profile")) == \
-        "ResourceProfile(**to_wire(placement.profile))"
-    requests = _calls(fn, "WorkerRequest")
-    assert len(requests) == 1
-    assert ast.unparse(requests[0].args[2]) == "sealed_profile"
+@pytest.mark.ray
+def test_worker_profile_comes_from_the_layout(ray_chain_facts):
+    chain_contract.test_worker_profile_comes_from_the_layout(ray_chain_facts)
 
 
-def test_stages_and_partitions_come_from_the_placement():
-    fn = _function("run_ray_chain")
-    assignment = _dict_literal(fn, "assignment")
-    assert ast.unparse(assignment["stages"]) == "list(placement.stage_ids)"
-    assert ast.unparse(assignment["partitions"]) == "list(placement.partition_ids)"
+@pytest.mark.ray
+def test_stages_and_partitions_come_from_the_placement(ray_chain_facts):
+    chain_contract.test_stages_and_partitions_come_from_the_placement(ray_chain_facts)
 
 
-def test_program_binding_comes_from_the_sealed_bindings():
-    fn = _function("run_ray_chain")
-    assert ast.unparse(_assigned(fn, "bindings_ref")) == "bindings['ref']"
-    launch = _dict_literal(fn, "launch_spec")
-    execution_plan = _dict_value(launch["execution_plan"])
-    assert ast.unparse(execution_plan["bindings_ref"]) == "bindings_ref"
-    assert ast.unparse(execution_plan["action_id"]) == "action.action_id"
+@pytest.mark.ray
+def test_program_binding_comes_from_the_sealed_bindings(ray_chain_facts):
+    chain_contract.test_program_binding_comes_from_the_sealed_bindings(ray_chain_facts)
 
 
-def test_assignment_channels_are_validated_against_the_layout():
-    from demiflow.execution import plan_interpreter
-    source = inspect.getsource(plan_interpreter.validate_worker_assignment)
-    assert "_group_channel_ids(layout, placement)" in source
-    assert "assignment input channels differ from the layout" in source
+@pytest.mark.ray
+def test_assignment_channels_are_validated_against_the_layout(ray_chain_facts):
+    chain_contract.test_assignment_channels_are_validated_against_the_layout(ray_chain_facts)
 
 
-def test_driver_holds_the_only_commit_authority():
-    fn = _function("run_ray_chain")
-    assert len(_calls(fn, "terminal.commit_cut")) == 1
-    assert _calls(fn, "CommitCoordinator") == []
-    assert len(_calls(fn, "terminal.finish")) == 1
-    assert len(_calls(fn, "DriverStreamTerminal")) == 1
+@pytest.mark.ray
+def test_driver_holds_the_only_commit_authority(ray_chain_facts):
+    chain_contract.test_driver_holds_the_only_commit_authority(ray_chain_facts)
 
 
-def test_no_local_capacity_double_charge():
-    fn = _function("run_ray_chain")
-    assert _calls(fn, "LocalCapacityPool") == []
-    assert len(_calls(fn, "RayResourceProvider")) == 1
+@pytest.mark.ray
+def test_no_local_capacity_double_charge(ray_chain_facts):
+    from demiflow.resources.ray import RayResourceProvider
+    facts = ray_chain_facts
+    manager = facts['execution']._services.resources
+    assert isinstance(manager.provider, RayResourceProvider)
+    assert manager.state.journal is facts['run'].journal
+    assert facts['local_reservations'] == []
 
 
-def test_actor_is_terminated_on_every_exit():
-    fn = _function("run_ray_chain")
-    for name in ("connector.terminate", "connector.close"):
-        calls = _calls(fn, name)
-        assert len(calls) == 1, name
-        assert _in_finally(fn, calls[0]), name + " must run on failure/cancel too"
+@pytest.mark.ray
+def test_actor_is_terminated_on_every_exit(ray_chain_facts, ray_local):
+    scopes, allocations, outstanding = _ledger(ray_chain_facts['run'])
+    assert scopes and all(s['state'] == 'CLOSED' for s in scopes)
+    assert allocations and all(a['cleanup'] == 'CONFIRMED' for a in allocations)
+    assert outstanding == 0
+    _assert_no_residual_actor(ray_local, allocations)
 
 
-def test_restore_point_comes_from_the_terminal_journal():
-    fn = _function("run_ray_chain")
-    assert ast.unparse(_assigned(fn, "restore")) == "terminal.restore_point()"
-    assignment = _dict_literal(fn, "assignment")
-    assert "restore" in ast.unparse(assignment["restore_point"])
+@pytest.mark.ray
+def test_restore_point_comes_from_the_terminal_journal(tmp_path, ray_local):
+    chain_contract.test_restore_point_comes_from_the_terminal_journal(tmp_path)
 
 
-def test_source_capture_is_backend_neutral():
-    fn = _function("run_ray_chain")
-    # D1: the fixed source is read with the local reader, never Ray Data.
-    assert len(_calls(fn, "capture_source")) == 1
-    assert len(_calls(fn, "freeze_source")) == 1
-    assert "ray.data" not in inspect.getsource(chain.run_ray_chain)
+@pytest.mark.ray
+def test_source_capture_is_backend_neutral(ray_chain_facts):
+    facts = ray_chain_facts
+    assert len(facts['graph'].sources) == 1
+    expected = {split.split_id for split in facts['physical'].splits}
+    actual = {split.split_id for assignment in facts['assignments'] for split in assignment.source_splits}
+    assert actual == expected and actual
+    assert facts['ray_data_imports'] == []
 
 
 # ---------------- structural: the unified resource terminal (the fix) ----------------
 
-def _close_payload(fn):
-    return _calls(fn, "manager.close")[0].args[1]
+@pytest.mark.ray
+def test_resource_terminal_runs_in_the_finally(tmp_path, ray_local):
+    chain_contract.test_failure_terminal_releases_the_resource_scope(tmp_path)
 
 
-def test_resource_terminal_runs_in_the_finally():
-    fn = _function("run_ray_chain")
-    closes = _calls(fn, "manager.close")
-    assert len(closes) == 1, "exactly one resource terminal, no second ledger"
-    assert _in_finally(fn, closes[0]), "scope close must run on failure/cancel too"
-    assert any(_in_finally(fn, call) for call in _calls(fn, "manager.reconcile_once"))
+@pytest.mark.ray
+def test_terminal_mode_follows_the_drain_flag(ray_chain_facts):
+    facts = ray_chain_facts
+    _assert_terminal_issued(facts['run'], 'DRAINED')
+    # Successful leases have a native DRAINED retirement before physical kill;
+    # whole-scope ABANDON only handles anything still remaining at close.
+    releases = [event for event in facts['terminal_events'] if event[0] == 'release']
+    assert releases and all(mode == 'DRAINED' for _, _, mode in releases)
 
 
-def test_terminal_mode_follows_the_drain_flag():
-    fn = _function("run_ray_chain")
-    body = next(item for item in ast.walk(fn) if isinstance(item, ast.Try))
-    names = [ast.unparse(stmt) for stmt in fn.body]
-    # armed before the try, so an early failure can never read it unset
-    assert "drained = False" in names
-    assert names.index("drained = False") < next(
-        i for i, text in enumerate(names) if text.startswith("try:"))
-    finishes = _calls(fn, "terminal.finish")
-    assert len(finishes) == 1
-    index = next(i for i, stmt in enumerate(body.body) if finishes[0] in ast.walk(stmt))
-    assert ast.unparse(body.body[index + 1]) == "drained = True"
-    payload = _dict_value(_close_payload(fn))
-    assert ast.unparse(payload["mode"]) == "'DRAINED' if drained else 'ABANDON'"
-    assert ast.unparse(payload["engine_receipt_ref"]) == \
-        "allocation_id + ('-drained' if drained else '-abandoned')"
-    assert ast.unparse(payload["reason"]) == "'chain drained' if drained else 'chain terminal cleanup'"
-    assert ast.unparse(payload["terminate_deadline_ms"]) == "5000"
+@pytest.mark.ray
+def test_actor_kill_stays_after_the_resource_terminal(ray_chain_facts):
+    events = ray_chain_facts['terminal_events']
+    killed = [(i, value[1]) for i, value in enumerate(events) if value[0] == 'kill']
+    assert killed
+    for index, allocation in killed:
+        assert any(value[0] == 'release' and value[1] == allocation for value in events[:index])
+        assert any(value[0] == 'connector_close' and value[1] == allocation for value in events[index + 1:])
 
 
-def test_actor_kill_stays_after_the_resource_terminal():
-    fn = _function("run_ray_chain")
-    body = next(item for item in ast.walk(fn) if isinstance(item, ast.Try))
-    texts = [ast.unparse(stmt) for stmt in body.finalbody]
-    terminal = next(i for i, text in enumerate(texts) if "manager.close" in text)
-    terminate = next(i for i, text in enumerate(texts) if "connector.terminate" in text)
-    close = next(i for i, text in enumerate(texts) if "connector.close" in text)
-    assert terminal < terminate < close
-    # guarded, so a cleanup failure cannot skip the actor kill
-    guarded = body.finalbody[terminal]
-    assert isinstance(guarded, ast.Try) and guarded.handlers
-
-
-def test_local_and_ray_share_one_terminal_protocol():
-    ray = _dict_value(_close_payload(_function("run_ray_chain")))
-    local = _dict_value(_close_payload(_function("run_local_chain")))
-    assert set(ray) == set(local)
-    for key in ray:
-        assert ast.unparse(ray[key]) == ast.unparse(local[key]), key
-    for name in ("run_local_chain", "run_ray_chain"):
+@pytest.mark.ray
+def test_local_and_ray_share_one_terminal_protocol(ray_chain_facts):
+    from demiflow.execution.dataflow import DataflowExecution
+    assert type(ray_chain_facts['execution']) is DataflowExecution
+    for name in ('run_local_chain', 'run_ray_chain'):
         fn = _function(name)
-        assert _in_finally(fn, _calls(fn, "manager.close")[0])
-        assert len(_calls(fn, "ResourceManager")) == 1
-        assert len(_calls(fn, "RunResourceState")) == 1
-        assert len(_calls(fn, "state.open_scope")) == 1
+        assert len(_calls(fn, 'run_dataset_action')) == 1
+        assert not _calls(fn, 'ResourceManager') and not _calls(fn, 'CommitCoordinator')
+
+
+
+import test_upgrade_v2_unit_L015 as chain_contract
+
+
+@pytest.fixture(scope='module')
+def ray_chain_facts(ray_local, tmp_path_factory):
+    import builtins
+    from demiflow.resources.capacity import LocalCapacityPool
+    from demiflow.execution.dataflow_hosts import DataflowRayConnector
+    events, reservations, imports = [], [], []
+    original_apply = ResourceManager.apply
+    original_kill, original_close = DataflowRayConnector.terminate, DataflowRayConnector.close
+    original_reserve, original_import = LocalCapacityPool.reserve, builtins.__import__
+    def apply(manager, context, plan):
+        result = original_apply(manager, context, plan)
+        for release in plan.retirements:
+            events.append(('release', release.allocation_id, release.mode))
+        return result
+    def terminate(connector, allocation_id):
+        events.append(('kill', allocation_id))
+        return original_kill(connector, allocation_id)
+    def close(connector, allocation_id):
+        events.append(('connector_close', allocation_id))
+        return original_close(connector, allocation_id)
+    def reserve(pool, *args, **kwargs):
+        reservations.append(args)
+        return original_reserve(pool, *args, **kwargs)
+    def importing(name, *args, **kwargs):
+        if name == 'ray.data' or name.startswith('ray.data.'):
+            imports.append(name)
+            raise AssertionError('Ray Data is not a unified execution backend')
+        return original_import(name, *args, **kwargs)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv('DEMIFLOW_V3_PROVIDER', 'ray_core')
+        patch.setattr(ResourceManager, 'apply', apply)
+        patch.setattr(DataflowRayConnector, 'terminate', terminate)
+        patch.setattr(DataflowRayConnector, 'close', close)
+        patch.setattr(LocalCapacityPool, 'reserve', reserve)
+        patch.setattr(builtins, '__import__', importing)
+        facts = next(source := chain_contract.actual_chain.__wrapped__(tmp_path_factory))
+        try:
+            facts.update(terminal_events=events, local_reservations=reservations, ray_data_imports=imports)
+            yield facts
+        finally:
+            source.close()
 
 
 # ---------------- runtime: real journal, injected provider/connector ----------------
@@ -608,14 +616,20 @@ def _assert_terminal_issued(run, mode):
         assert scope["state"] in ("CLOSING", "CLOSED")
     intents = _ray_intents(run)
     absent = [item for item in intents if item["kind"] == "ensure_absent"]
-    assert {item["allocation_id"] for item in absent} == {
-        allocation["allocation_id"] for allocation in allocations}
+    absent_ids = {item["allocation_id"] for item in absent}
+    allocation_ids = {item["allocation_id"] for item in allocations}
+    assert absent_ids <= allocation_ids
+    assert {a["allocation_id"] for a in allocations if a["cleanup"] != "CONFIRMED"} <= absent_ids
     assert all(item["status"] in ("claimed", "done") for item in absent)
     evidence = _ray_evidence(run)
     for allocation in allocations:
         assert allocation["terminal"]
         assert allocation["cleanup"] in ("CONFIRMED", "UNCONFIRMED")
-        assert evidence[allocation["allocation_id"]], allocation
+        proof = evidence[allocation["allocation_id"]]
+        assert proof and proof.startswith(("ray-actor-dead:", "ray-actor-alive:",
+            "ray-actor-unconfirmed:", "never-created:")), allocation
+        if allocation["cleanup"] == "CONFIRMED":
+            assert proof.startswith(("ray-actor-dead:", "never-created:")), allocation
     commits = run.journal.execution_commits("action-1")
     if mode == "DRAINED":
         assert commits and all(item["status"] == "acked" for item in commits)
