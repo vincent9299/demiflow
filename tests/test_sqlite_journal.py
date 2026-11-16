@@ -313,18 +313,22 @@ def test_cancel_waits_for_pending_journal_io():
 
 
 def test_concurrent_first_requests_verify_model_once(server, monkeypatch):
-    import httpx
+    from http.server import BaseHTTPRequestHandler
     from demiflow.data.api import DataAPI
     checks = []
-    original_send=httpx.AsyncClient.send
-    async def send(self, request, **kwargs):
-        if request.method!='GET' or request.url.path!='/v1/models':
-            return await original_send(self,request,**kwargs)
-        checks.append(str(request.url))
-        await asyncio.sleep(.04)
-        return httpx.Response(200, json={'data': [{'id': 'mock-model'}]},
-                              request=request)
-    monkeypatch.setattr(httpx.AsyncClient, 'send', send)
+    # The actual process worker cannot see a driver-local httpx monkeypatch.
+    # Observe the original protocol at the real loopback HTTP server instead.
+    def models(handler):
+        assert handler.path == '/v1/models'
+        checks.append(handler.path)
+        time.sleep(.04)
+        raw = json.dumps({'data': [{'id': 'mock-model'}]}).encode()
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'application/json')
+        handler.send_header('Content-Length', str(len(raw)))
+        handler.end_headers()
+        handler.wfile.write(raw)
+    monkeypatch.setattr(BaseHTTPRequestHandler, 'do_GET', models, raising=False)
     prompt(DataAPI().from_items([{'item': i} for i in range(8)]),
            options={'verify_model': True}, concurrency=8).materialize()
     assert len(checks) == 1 and len(server['requests']) == 8

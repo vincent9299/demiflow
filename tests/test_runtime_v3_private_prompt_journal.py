@@ -97,11 +97,48 @@ def test_private_prompt_unknown_never_resends(tmp_path, native_server):
     assert len(native_server) == 1
 
 
-def test_private_prompt_rejects_materialization_before_database(tmp_path, native_server):
+def test_private_prompt_materialization_reuses_original_committed_result(tmp_path, native_server):
     path = tmp_path/'private.sqlite'
-    with pytest.raises(RecoveryContractError, match='delivery-only'), RunContext.start(tmp_path/'run'), data.local_execution():
-        _pipeline(path).materialize()
-    assert not native_server and not path.exists()
+    with RunContext.start(tmp_path/'run') as run, data.local_execution():
+        saved = _pipeline(path).materialize()
+        try:
+            handle = saved._source.handle
+            original = handle._manifest_ref
+            expected = list(handle.rows())
+            assert [row['answer'] for row in expected] == ['ok', 'ok']
+            assert saved.take_all() == saved.take_all() == expected
+            assert handle._manifest_ref == original
+            assert len(native_server) == _charged(run) == 2
+            commits = run.journal.execution_commits('action-1')
+            assert commits and commits[-1]['status'] == 'acked'
+            assert run.journal.execution_action('action-1')['result'] is not None
+            assert run.journal.source_binding('action-1-state-recovery-restriction')['recovery'] == 'attempt_only'
+        finally:
+            saved.release()
+
+
+def test_interrupted_private_materialization_never_becomes_a_resumable_result(tmp_path, native_server, monkeypatch):
+    from demiflow.execution.dataflow import DataflowExecution
+    class Interrupted(Exception):
+        pass
+    pump = DataflowExecution.pump
+    def interrupt(execution, **kwargs):
+        status = pump(execution, **kwargs)
+        if execution._restore_image is not None and not execution._restore_image.cut.final:
+            raise Interrupted()
+        return status
+    with pytest.raises(Interrupted), RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 1}) as run, data.local_execution():
+        ref = run.ref
+        with monkeypatch.context() as patch:
+            patch.setattr(DataflowExecution, 'pump', interrupt)
+            _pipeline(tmp_path/'private.sqlite', items=tuple(str(i) for i in range(8))).materialize()
+    sent = len(native_server)
+    assert 0 < sent < 8
+    assert run.journal.execution_action('action-1')['result'] is None
+    assert run.journal.execution_commits('action-1') and all(c['status'] == 'acked' for c in run.journal.execution_commits('action-1'))
+    with pytest.raises(RecoveryContractError, match='attempt|recover|private'), RunContext.resume(ref):
+        _pipeline(tmp_path/'private.sqlite', items=tuple(str(i) for i in range(8))).materialize()
+    assert len(native_server) == sent
 
 
 def test_private_prompt_read_only_miss_does_not_send_or_charge(tmp_path, native_server):

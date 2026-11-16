@@ -1,7 +1,7 @@
 """Delivery-only Prompt caches, using the original driver-owned private SQLite.
 
-HTTP identities/results remain exclusively in that cache. RunJournal owns only
-finite execution admission and commits. The two databases are not an atomic
+HTTP identities/results remain exclusively in that cache. RunJournal owns
+finite execution admission and result commits. The two databases are not an atomic
 transaction: admission is retained across failures and crash resume is refused.
 """
 from dataclasses import replace
@@ -55,9 +55,13 @@ def bind_private_prompt_contracts(service, graph):
     if not nodes:
         return
     from .checked import current
-    if (service._action.declaration.get('kind') not in _DELIVERY or current() is not None
+    kind = service._action.declaration.get('kind')
+    # Ordinary Prompt may finish its current attempt into the ORIGINAL result
+    # manifest. A result commit does not make private HTTP intents resumable.
+    materialize = kind == 'materialize' and all(route is None for _, route in nodes)
+    if (kind not in _DELIVERY and not materialize or current() is not None
             or service._native is not None or any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes)):
-        raise RecoveryContractError('Private Prompt SQLite requires unmanaged delivery-only execution; native writes/recovery cannot coexist')
+        raise RecoveryContractError('Private Prompt SQLite requires unmanaged delivery or ordinary current-attempt materialization; managed writes/recovery cannot coexist')
     if service._action.replaying:
         raise RecoveryContractError('Cannot resume attempt-only private Prompt journal delivery')
     service._private_prompt_nodes = nodes

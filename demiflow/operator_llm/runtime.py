@@ -380,8 +380,11 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                     journal = getattr(recovery, 'journal', None)
                     if isinstance(journal, RemotePromptJournal):
                         native_journal = journal
-                client = (create_async_operator_llm_client(prompt.model,self.options,native_journal=native_journal)
-                          if self.options else create_async_operator_llm_client(prompt.model,native_journal=native_journal))
+                # Standalone transports retain their original factory call
+                # shape; only an actual native journal requires this binding.
+                native_options = {} if native_journal is None else {'native_journal': native_journal}
+                client = (create_async_operator_llm_client(prompt.model,self.options,**native_options)
+                          if self.options else create_async_operator_llm_client(prompt.model,**native_options))
                 if recovery is not None:
                     recovery.bind_client(client)
                 configure = getattr(client, 'configure_capacity', None)
