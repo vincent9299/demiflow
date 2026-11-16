@@ -425,8 +425,9 @@ class _EndpointBase:
             raise DataflowError('INVALID_CONTRACT', 'final observations must be a bounded list')
         for item in raw:
             event = _event_from_dict(item, bounds=self._services.bounds)
-            if event.kind != 'progress' or event.payload.get('actor_lifecycle') is None:
-                raise DataflowError('INVALID_CONTRACT', 'cleanup only carries actor progress')
+            if event.kind != 'progress' or not any(event.payload.get(field) is not None
+                    for field in ('actor_lifecycle', 'callback_observations', 'output_handoff')):
+                raise DataflowError('INVALID_CONTRACT', 'cleanup only carries actual worker progress')
             self._early_event(event)
 
     def take_cleanup_observations(self):
