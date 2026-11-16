@@ -385,3 +385,93 @@ def test_unversioned_history_is_not_reinterpreted():
             raise AssertionError('legacy validation attempted to inspect a new recipe')
     graph = SimpleNamespace(nodes=(SimpleNamespace(kernel=SimpleNamespace(configuration={})),))
     validate_shared_actor_binding(Refuse(), graph, bounds=None)
+
+
+@pytest.mark.parametrize('source_kind', ['items', 'iterable', 'sql'])
+@pytest.mark.parametrize('change_alias', [False, True])
+def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monkeypatch, source_kind, change_alias):
+    from demiflow.data.api import DataAPI
+    from demiflow.data.dataset import Dataset
+    from demiflow.data.plan import LogicalPlan
+    from demiflow.data.sources import ItemsSource, IterableSource, SqlSource
+    from demiflow.execution.contracts.dataflow import ActionRequest
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.planning.dataflow_compile import lower_action
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    calls = []
+    def refuse(*args, **kwargs):
+        calls.append('business-read')
+        raise AssertionError('alias admission executed business source')
+    class Factory:
+        def __new__(cls):
+            calls.append('construct')
+            raise AssertionError('alias admission instantiated a class actor')
+        def __call__(self, row):
+            return row
+    if source_kind == 'items':
+        source = ItemsSource(({'id': 0},))
+    elif source_kind == 'iterable':
+        source = IterableSource(refuse)
+    else:
+        source = SqlSource('SELECT * FROM must_not_connect', refuse, {})
+    executor = DataAPI()._executor
+    action = RunAction(_CompileContext(), 'alias-passive', {})
+    def request(shared):
+        actor = Counter(tmp_path/'events')
+        second = actor if shared else Counter(tmp_path/'events')
+        ds = Dataset(source, LogicalPlan(), executor).map(Factory).map_async(actor).map_async(second)
+        return ActionRequest(kind='take_all', source=ds._source, plan=ds._plan,
+            arguments={}, sink=None, programs=(), provider='local', action=action)
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    graph = lower_action(request(True), bounds=bounds).graph
+    # Guard every full-capture/row-schema path after the original plan exists.
+    import demiflow.planning.dataflow_compile as compiler
+    import demiflow.execution.dataflow_schema as schema
+    monkeypatch.setattr(compiler, 'lower_action', refuse)
+    monkeypatch.setattr(compiler, '_source_semantic_facts', refuse)
+    monkeypatch.setattr(schema, 'literal_schema', refuse)
+    if change_alias:
+        with pytest.raises(DataflowError, match='Actor instance sharing differs'):
+            validate_shared_actor_binding(request(False), graph, bounds=bounds)
+    else:
+        validate_shared_actor_binding(request(True), graph, bounds=bounds)
+    assert calls == []
+    assert not (tmp_path/'events').exists()
+
+
+@pytest.mark.parametrize('shape', ['union', 'prepend'])
+@pytest.mark.parametrize('changed', [False, True])
+def test_passive_actor_relation_matches_multi_input_occurrences(tmp_path, monkeypatch, shape, changed):
+    from demiflow.execution.contracts.dataflow import ActionRequest
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.planning.dataflow_compile import lower_action
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    action = RunAction(_CompileContext(), 'alias-multi-input', {})
+    def request(shared):
+        first = SyncCounter(tmp_path/'events')
+        second = first if shared else SyncCounter(tmp_path/'events')
+        base = data.from_items([{'id': 0}])
+        if shape == 'union':
+            ds = base.map(first).union(base.map(second))
+        else:
+            ds = base.map(first).prepend(data.from_items([{'id': 1}]).map(second), max_rows=1).map(first)
+        return ActionRequest(kind='take_all', source=ds._source, plan=ds._plan,
+            arguments={}, sink=None, programs=(), provider='local', action=action)
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    graph = lower_action(request(True), bounds=bounds).graph
+    import demiflow.execution.dataflow_schema as schema
+    def refuse(*args, **kwargs):
+        raise AssertionError('alias validation read business rows')
+    monkeypatch.setattr(schema, 'literal_schema', refuse)
+    if changed:
+        with pytest.raises(DataflowError, match='Actor instance sharing differs'):
+            validate_shared_actor_binding(request(False), graph, bounds=bounds)
+    else:
+        validate_shared_actor_binding(request(True), graph, bounds=bounds)
+    assert not (tmp_path/'events').exists()

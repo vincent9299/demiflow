@@ -113,5 +113,16 @@
     "recovery_rows follow-on",
     "whole engine acceptance",
     "single-worker class+union follow-on"
-  ]
+  ],
+  "passive_admission_followup": {
+    "base": "e4f7aeb02afa35e53ce81c701e79841c1aca474b",
+    "receipt": "/tmp/demiflow-shared-passive-admission-final/batch/receipt.json",
+    "sha256": "737a7e172d97299eb35330f512426bbe97b56761f0ff5df28ecc0abcd56f859f",
+    "passed": 15,
+    "source_unchanged": true,
+    "inputs": {
+      "demiflow/execution/dataflow_shared.py": "9a5152422c137e4f3997e718aee12cdc9775dc7f618431ae128126ceec1ca4c2",
+      "tests/test_dataflow_shared_actor.py": "cffad3e1edab61fbf588275f51ad23aa0ddba11f4418534fda407c37cc400efe"
+    }
+  }
 }
