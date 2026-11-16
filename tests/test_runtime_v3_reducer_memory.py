@@ -97,6 +97,8 @@ def test_state_resident_is_checked_before_platform_serialization(monkeypatch):
     monkeypatch.setattr(reducer_memory.pickle,'Pickler',forbidden)
     with pytest.raises(DataflowError,match='retained objects'):
         reducer_memory.check_state({'pad':b'x'*8192},memory,serialized_limit=4096)
+    with pytest.raises(DataflowError,match='max_state_bytes before encoding'):
+        reducer_memory.check_state({'pad':'é'*3000},{**memory,'state_resident_bytes':16384},serialized_limit=4096)
     assert calls==[]
 
 
@@ -164,7 +166,7 @@ def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
         grant=reducer_memory.resident_bytes(memory,budget)
         stage=make('StageSpec',resident_bytes=grant,profile=ResourceProfile(requests={'cpu_millis':1000,'memory_bytes':grant}))
         program=CallableSpec.create(reducer,fn_args=(initial,))
-        svc=SimpleNamespace(bounds=budget,assignment=SimpleNamespace(stages=(stage,)),
+        svc=SimpleNamespace(bounds=budget,store=None,assignment=SimpleNamespace(stages=(stage,)),
             programs={'reduce':LoadedProgram('callable',program,'0'*64)},check_stop=lambda:None)
         owner=OperatorKernel(spec,services=svc,partition_id='p0')
         rows=[{'k':i} for i in (1,2,3)]

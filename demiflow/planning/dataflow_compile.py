@@ -757,7 +757,7 @@ class _Capture:
             mergeable=False,
         )
         if reducer_memory is not None:
-            kernel = replace(kernel,configuration={**dict(kernel.configuration),FIELD:reducer_memory})
+            kernel = replace(kernel,configuration={**_plain(kernel.configuration),FIELD:reducer_memory})
         if isinstance(source, KeyedSource) and source.kind == "exclude_keys":
             configuration = _plain(kernel.configuration)
             configuration.update(lance_key_source=self.nodes[child_indices[0][0]].occurrence_id,

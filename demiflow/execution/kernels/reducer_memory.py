@@ -28,7 +28,7 @@ class TreeSize:
 
 
 def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
-                 additional_roots=(), excluded_roots=()):
+                 additional_roots=(), excluded_roots=(), max_encoded_atom_bytes=None):
     """Inspect a bounded object graph without running user sizing methods.
 
     Aliases count once. Known builtin container copies include conservative
@@ -53,6 +53,21 @@ def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
         seen.add(identifier)
         deepest = max(deepest, depth)
         kind = type(item)
+        if max_encoded_atom_bytes is not None and kind in (str,bytes,bytearray):
+            # Pickle may allocate UTF-8/bytearray data before calling write().
+            # Check that known scalar copy before serialization, without
+            # constructing the very encoding whose size is being admitted.
+            if kind is str and not item.isascii():
+                encoded = 0
+                for char in item:
+                    point=ord(char)
+                    encoded += 1 if point<128 else 2 if point<2048 else 3 if point<65536 else 4
+                    if encoded > max_encoded_atom_bytes:
+                        break
+            else:
+                encoded=len(item)
+            if encoded > max_encoded_atom_bytes:
+                raise _error('BUDGET_EXCEEDED','reducer state exceeds max_state_bytes before encoding')
         if kind in immutable:
             # None/bool are process constants; no accumulator-owned allocation.
             retained += 0 if kind in (type(None), bool) else sys.getsizeof(item)
@@ -182,7 +197,8 @@ def check_initial(initial, value):
 def check_state(state, value, *, serialized_limit):
     # Must precede pickle's frame/UTF-8/blob allocations. The caller reserves a
     # second state-sized window for the known encoding peak.
-    measure_tree(state, max_bytes=value['state_resident_bytes'],max_nodes=value['inspection_nodes'])
+    measure_tree(state, max_bytes=value['state_resident_bytes'],max_nodes=value['inspection_nodes'],
+                 max_encoded_atom_bytes=serialized_limit)
 
     class Counter:
         def __init__(self):
