@@ -20,7 +20,7 @@ def request(dataset):
         action=RunAction(_CompileContext(), 'codec-components', {}))
 
 
-@pytest.mark.parametrize('memory,row,batch', [(192,8,32),(256,16,32)])
+@pytest.mark.parametrize('memory,row,batch', [(192,8,32),(256,16,32),(80,8,20)])
 def test_fixed_payloads_and_terminal_metadata_fit_the_same_stream_group(memory,row,batch):
     policy,bounds=resolve_runtime_policy({}, {'memory_bytes':memory*1024,
         'max_row_bytes':row*1024,'max_batch_bytes':batch*1024}, provider='local')
@@ -57,7 +57,7 @@ def test_finite_boundary_does_not_charge_all_phases_or_activate_generator():
 def test_explicit_worker_memory_and_too_small_state_are_never_increased_or_redistributed():
     dataset=data.from_items([{'n':1}])
     operation=MapOp(CallableSpec.create(lambda row:row),
-        native_options=NativeOptions('local',worker_resources={'memory_bytes':128*1024}))
+        native_options=NativeOptions('ray',worker_resources={'memory_bytes':128*1024}))
     action=replace(request(dataset),plan=LogicalPlan((operation,)))
     _,bounds=resolve_runtime_policy({}, {'memory_bytes':192*1024,'max_row_bytes':8*1024,
         'max_batch_bytes':32*1024}, provider='local')

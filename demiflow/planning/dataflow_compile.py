@@ -683,7 +683,7 @@ class _Capture:
                           and self.codec_windows[i][1] == targets[i]}
             minima = {i: adjustable[i][0] if i in adjustable else targets[i] for i in members}
             floor, desired = sum(minima.values()), sum(targets.values())
-            if not adjustable or desired <= available or floor >= available:
+            if not adjustable or desired <= available or floor > available:
                 continue
             slack, demand = available - floor, desired - floor
             for index, (minimum, target) in adjustable.items():
