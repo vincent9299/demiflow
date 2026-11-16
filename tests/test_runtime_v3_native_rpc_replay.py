@@ -36,13 +36,14 @@ def interrupted_run(location, *, resume=False):
 @contextmanager
 def service(run, *, pending=4):
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
-    _, bounds = resolve_runtime_policy({}, run.limits, provider='local')
+    policy, bounds = resolve_runtime_policy({}, run.limits, provider='local')
     bounds = replace(bounds, max_pending_events=pending)
     run.journal.bind_execution_action(run.fence, 'action-1', {'kind': 'native-replay'})
     action = RunAction(run, 'action-1', {'kind': 'native-replay'})
     port = DriverArtifactPort(action, bounds=bounds)
     store = RunArtifactStore(root=run.directory / '.dataflow-store', store_id='native-store', journal=port, bounds=bounds)
     authority = DriverJournalService(action, store=store, bounds=bounds)
+    authority.bind_recovery_policy(policy)
     grant = store.put(iter([b'grant']), max_bytes=5, media_type='text/plain')
     lease = WorkerLease(allocation_id='worker-1', boot_id='boot-1', stage_id='stage-1', partition_ids=('p0',),
                         host_id='host-1', endpoint_ref='ep-1', grant_ref=grant,
