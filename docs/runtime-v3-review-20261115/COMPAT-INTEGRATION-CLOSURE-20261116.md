@@ -40,7 +40,7 @@ Local/Ray 对称性审查随后发现 Ray 低层 aggregate 仍将 `sum(id)` 结�
 
 - 旧显式 graph 入口此前忽略 target plans；修复正在独立 lane 实现。原 3-worker 小预算下已有初步实际分支结果，四种路由、恢复和最终集成尚未交付，不能据此关闭 L017。
 - 正式 V035 原先只有 collection 和泛称替代断言，正在接精确 nodeid、环境分类与真实执行回执；8119 条 collection 不等于通过。
-- 当前普通 CPU 案例约 14–15 秒，历史约 1.872 秒。启动导入优化的 7.92% 和 GC 小筛选的 5.17% 分别有原对照，未组合测量不能相加，更不代表正式五轮性能达标。启动原始输入另经 [根节点复核](STARTUP-PRIMARY-VERIFICATION.json)。
+- 当前普通 CPU 案例约 14–15 秒，历史约 1.872 秒。启动导入原筛选的7.92%现已确认存在基线/候选文件系统混杂，不能归为代码收益；GC小筛选的5.17%保留原范围，未组合测量不能相加，更不代表正式五轮性能达标。启动原始输入另经 [根节点复核](STARTUP-PRIMARY-VERIFICATION.json)。
 - 最终同版本 Dataset API/Local/Ray/工作台组合验收尚待剩余改动完成。已有 Notebook/SQL/Case/GPU/多机证据保留其准确版本和边界。
 
 主仓只读核对：`e40a6dd`、原 11 项 dirty 状态/18 份文件摘要保持；承重七件与 `49b666f` 逐字一致，见 [边界回执](MAIN-BOUNDARY-COMPAT-VERIFICATION.json)。没有 push、合入主仓或修改共享环境。

@@ -371,14 +371,13 @@ class Dataset:
         destination row fields. Use at most one of ``output`` and ``outputs``.
         Demiflow plans worker resources and parallelism at action time.
 
-        普通惰性动作按需向上游要行，算子同步组合、无级间队列；
-        流式动作使用每级 worker 协程及有界队列，支持级间并发与背压。
-        map 接收同步 callable；map_async 接收同步或异步 callable。
-        A map in a streaming chain defaults to one inline worker and one queued
-        row. Explicit concurrency/queue_depth/execution/catch/label/callable_scope
-        select local streaming execution, including a map-only run_stream().
-        Ordinary lazy actions and Ray reject explicit streaming options; local
-        materialize() and checkpoint actions bridge through run_stream().
+        map accepts a synchronous callable; map_async accepts synchronous or
+        asynchronous callables. Local and Ray Core use the same dataflow runtime
+        for lazy iteration, materialization and run_stream(). Explicit stream
+        options belong to the operator and are checked against the action's
+        capabilities and budgets. Worker placement and bounded handoff are
+        chosen from the complete plan. Resource-only backend options remain
+        supported; retired Ray Data compute/pool controls are rejected.
 
         execution='thread' moves synchronous calls to a stage-owned bounded
         thread pool. concurrency defaults to 1, queue_depth to concurrency,
