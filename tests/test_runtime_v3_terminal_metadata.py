@@ -11,8 +11,8 @@ def test_small_legal_arrow_batch_reaches_terminal_under_original_budget(tmp_path
     window = terminal['kernel']['configuration']['terminal_memory']
     # New plans include the measured codec workspace, while preserving the
     # original index capacity and unchanged 4-MiB total admission below.
-    assert window == {'payload_bytes': 10240, 'metadata_bytes': 3072}
-    assert terminal['kernel']['profile']['requests']['memory_bytes'] == 13312
+    assert window == {'payload_bytes': 128 * 1024, 'metadata_bytes': 3072}
+    assert terminal['kernel']['profile']['requests']['memory_bytes'] == 128 * 1024 + 3072
     assert observed['launches'] and observed['charged_peak']['memory_bytes'] <= 4 * 1024**2
 
 

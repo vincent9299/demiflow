@@ -262,8 +262,10 @@ def _payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
     """Provision codec room in a new plan without enlarging the run budget.
 
     The old batch + row window can be smaller than one near-limit row's
-    typed-document/JSONL decode. Six row windows plus fixed codec overhead
-    cover the usual scalar/bytes carriers; the runtime still measures actual
+    typed-document/JSONL decode. Small nested tuple/list rows also retain
+    Python containers far larger than their encoded bytes: give their codec
+    a 128-KiB default target, in addition to the scalar/bytes copy window.
+    The runtime still measures actual
     structure and rejects anything that cannot fit the sealed allocation.
     Small runs retain their original batch/row minimum and may use a smaller
     codec window, rather than losing all small-row execution capability.
@@ -271,7 +273,8 @@ def _payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
     payload = bounds.max_batch_bytes + bounds.max_row_bytes
     control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
     available = max(0, bounds.max_resident_bytes - control - metadata_bytes)
-    return max(payload, min(6 * bounds.max_row_bytes + 4096, available))
+    codec = max(128 * 1024, 6 * bounds.max_row_bytes + 4096)
+    return max(payload, min(codec, available))
 
 
 def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none") -> ResourceProfile:

@@ -231,17 +231,19 @@ class WorkspaceServer(ThreadingHTTPServer):
         from contextlib import ExitStack
         # Close admission and drain HTTP owners before retiring their shared
         # reader/services. ThreadingMixIn joins only non-daemon request threads.
-        super().server_close()
         try:
-            # Every independent owned resource is closed even if another
-            # cleanup reports unknown/pending; no live helper is dropped.
-            with ExitStack() as cleanup:
-                if self.development is not None:cleanup.callback(self.development.close)
-                if self.analysis is not None:cleanup.callback(self.analysis.close)
-                if hasattr(self,'media_tickets'):cleanup.callback(self.media_tickets.close)
-                cleanup.callback(self.native_reader.close)
+            super().server_close()
         finally:
-            self.development=None;self.analysis=None
+            try:
+                # Every independent owned resource is closed even if another
+                # cleanup reports unknown/pending; no live helper is dropped.
+                with ExitStack() as cleanup:
+                    if self.development is not None:cleanup.callback(self.development.close)
+                    if self.analysis is not None:cleanup.callback(self.analysis.close)
+                    if hasattr(self,'media_tickets'):cleanup.callback(self.media_tickets.close)
+                    cleanup.callback(self.native_reader.close)
+            finally:
+                self.development=None;self.analysis=None
 
     def serve_forever(self,poll_interval=.5):
         self.native_reader.begin_owner()
