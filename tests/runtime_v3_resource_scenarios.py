@@ -181,6 +181,64 @@ def lance_cast_preallocation(directory, *, provider='local', case='conversion_ne
     return result
 
 
+def equal_width_cast_residency(directory, *, rejected):
+    """Precise native commit seam: each equal-width copy fits, their sum does not.
+
+    Dataset cases above cover full public wiring. This additional original
+    coordinator/writer case isolates retained Arrow ownership from the earlier,
+    conservatively bounded Python-to-Arrow builder.
+    """
+    import pyarrow as pa
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.lance.model import LanceWriteSpec
+    directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
+    count = 4300 if rejected else 3000
+    incoming = pa.table({'value':pa.array(range(count), type=pa.uint64())})
+    limits = dict(memory_bytes=4*1024**2, max_row_bytes=65536,
+                  max_batch_bytes=65536, batch_rows=4300, max_state_bytes=512*1024)
+    target = directory/'output.lance'
+    previous = pa.default_memory_pool(); pool = pa.proxy_memory_pool(previous)
+    _ARROW_POOLS.append(pool); error = None
+    pa.set_memory_pool(pool)
+    try:
+        with RunContext.start(directory/'run', limits=limits) as run:
+            with run.action({'kind':'equal-width-native-commit'}) as action:
+                sink = LanceSink(action, LanceWriteSpec(uri=str(target), mode='create',
+                                 schema=pa.schema([('value',pa.float64())])))
+                CommitCoordinator(action).commit(1, outputs={'lance':(sink,[incoming])},
+                    position=SourcePosition('fixed',count))
+                action.complete({'rows':count})
+    except Exception as exc:
+        error = {'type':type(exc).__name__, 'text':str(exc)}
+    finally:
+        peak = pool.max_memory()
+        pa.set_memory_pool(previous)
+    result = {'rows':count,'limits':limits,'input_payload_bytes':incoming.get_total_buffer_size(),
+              'target_payload_bytes':count*8,'simultaneous_payload_lower_bound':incoming.get_total_buffer_size()+count*8,
+              'actual_arrow_peak_bytes':peak,'error':error,'journal':_journal(run),'target_exists':target.exists()}
+    _write(directory/'proof.json',result)
+    assert result['input_payload_bytes'] <= limits['max_batch_bytes']
+    assert result['target_payload_bytes'] <= limits['max_batch_bytes']
+    if rejected:
+        assert result['simultaneous_payload_lower_bound'] > limits['max_batch_bytes']
+        assert error is not None and 'before allocation' in error['text'],result
+        assert peak <= 128, 'equal-width target payload must never have been allocated'
+        assert not target.exists() and not any(c['status']=='acked' for c in result['journal']['commits'])
+    else:
+        import lance
+        assert error is None,result
+        actual = lance.dataset(str(target)).to_table()
+        assert actual.schema == pa.schema([('value',pa.float64())])
+        assert actual['value'].to_pylist() == [float(i) for i in range(count)]
+        assert result['journal']['commits'][-1]['status'] == 'acked'
+        result['actual_values_sha256'] = hashlib.sha256(json.dumps(actual.to_pylist()).encode()).hexdigest()
+        _write(directory/'proof.json',result)
+    return result
+
+
 def _event(directory, name, **values):
     path = Path(directory) / (name + '.json')
     if not path.exists():
@@ -607,6 +665,9 @@ def _child(scenario, provider, directory):
                         root/('state-output-'+str(rejected)),provider=provider,rejected=rejected)
                 for case in ('conversion_negative','conversion_positive','cast_negative','cast_positive'):
                     result[case]=lance_cast_preallocation(root/case,provider=provider,case=case)
+                for rejected in (True,False):
+                    result['equal_width_cast_'+str(rejected)]=equal_width_cast_residency(
+                        root/('equal-width-cast-'+str(rejected)),rejected=rejected)
                 result['rows']=result['wide_fanout']['rows']
                 assert result['rows']==16
             else:
@@ -632,9 +693,21 @@ def _child(scenario, provider, directory):
         assert len(allocation_paths) <= 1024
         allocations = [json.loads(p.read_text()) for p in allocation_paths]
         active = [v['allocation_id'] for v in allocations if v['state'] != 'RELEASED']
+        import sqlite3
+        databases = list(islice(root.glob('*/run/run.sqlite'), 33))
+        assert len(databases) <= 32
+        journal_allocations = {}; unconfirmed = []
+        for path in databases:
+            with sqlite3.connect('file:' + str(path) + '?mode=ro', uri=True) as db:
+                exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='resource_allocations'").fetchone()
+                states = dict(db.execute('SELECT cleanup,count(*) FROM resource_allocations GROUP BY cleanup')) if exists else {}
+            journal_allocations[str(path.relative_to(root))] = states
+            if any(state != 'CONFIRMED' for state in states):
+                unconfirmed.append(str(path.relative_to(root)))
         result['cleanup'] = {'children':[{'pid':p.pid,'birth':p.create_time()} for p in children],
-                             'original_pool_records':len(allocations),'active_allocations':active}
-        if (children or active) and error is None:
+                             'original_pool_records':len(allocations),'active_allocations':active,
+                             'original_journal_allocations':journal_allocations,'unconfirmed':unconfirmed}
+        if (children or active or unconfirmed) and error is None:
             error = {'type':'AssertionError','text':'original resource cleanup is not confirmed'}
         after=_snapshot()
         result.update(source_before=before,source_after=after,error=error,provider=provider,scenario=scenario)
