@@ -160,14 +160,34 @@ def test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout(tmp_p
 
 
 def test_range_prefix_uses_original_reader_and_exact_committed_rows(tmp_path):
-    from test_u3_graph_commit import _execute
+    from _native_receipt_fixtures import committed_rows
+    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.sealed_plans import load_sealed_plan
     spec, readers, count = _graph_spec(n=8, cut_rows=4, readers=('c0', 'c1'))
     spec['source'] = RangeSource(count)
     spec['ancestor']['plan'] = _stream_map(lambda row: {'x': row['id'] * 2})
-    run, action, result, facts, carriers, physical = _execute(
-        tmp_path, spec, readers, count, checkpoint_rows=4)
-    assert sorted({c['dataflow.sources.v3'][0]['next_sequence'] for c in carriers}) == [4, 8]
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    with RunContext.start(tmp_path/'run', limits={'memory_bytes': HISTORICAL_MEMORY,
+            'checkpoint_rows': 4, 'checkpoint_unconfirmed_rows': 4,
+            'checkpoint_interval_ms': 60000}) as run:
+        with run.action({'kind': 'materialize', 'fixture': 'range-prefix'}) as action:
+            result = executor.materialize_graph(spec)
+            action.complete({'kind': 'graph-materialized', 'egress': result['egress_rows']})
+        facts = run.journal.execution_commits(action.action_id)
+        assert facts and all(f['status'] == 'acked' for f in facts)
+        carriers = [StateArtifacts(run).read(f['prepared']['state']['dataflow-cut-v3']) for f in facts]
+        cursors = [c['dataflow.sources.v3'][0] for c in carriers]
+        # Range's actual original cursor is `next`; Items uses `index`.
+        assert sorted({c['next_sequence'] for c in cursors}) == [4, 8]
+        assert all(c['offset']['next'] == c['next_sequence'] for c in cursors)
+        assert cursors[-1]['end_of_input'] is True
+        rows = committed_rows(run, action.action_id, facts[-1])
+        assert len(rows) == count * len(readers)
+        for reader in readers:
+            assert [r['row'] for r in rows if r['reader_id'] == reader] == [{'x': i*2} for i in range(count)]
+        bundle = load_sealed_plan(run.directory, action.action_id, version='v3')
+        source = bundle['graph'].sources[0]
+        owner = next(s for s in bundle['physical'].stages if source in s.occurrences)
+        assert len(owner.occurrences) == 2 and owner.profile.requests['cpu_millis'] == 2000
     assert result['target_rows'] == {reader: count for reader in readers}
     assert result['egress_rows'] == count
-    assert any(len(stage.occurrences) == 2 and stage.profile.requests['cpu_millis'] == 2000
-               for stage in physical.stages)

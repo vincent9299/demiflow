@@ -116,7 +116,9 @@ def translate_graph(graph_spec):
         classes = {name: list(members) for name, members in classes.items()}
         prefix += (_map(_ClassTarget, fn_constructor_args=(field, classes)),)
         declaration.update(target_field=field, target_classes=classes)
-    router = _map(_unwrap if route == 'target' else _identity)
+    # This platform-only identity/unwrap has no async work or lifecycle. Keep
+    # its real reader partitions and routing, without a per-record call future.
+    router = MapOp(CallableSpec.create(_unwrap if route == 'target' else _identity))
     prefix += (router,)
     branches, ends = [], []
     for reader, target in zip(readers, targets):
