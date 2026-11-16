@@ -35,6 +35,8 @@ class WorkerGraphRunner:
         self._wake_generation = 0
         self._thread = None
         self._paused = False
+        self._park_requested = False
+        self._park_finish_pending = False
         self._idle_sent = False
         self._done_sent = False
         self._finished = set()
@@ -173,6 +175,59 @@ class WorkerGraphRunner:
         # Different source splits are polled one record at a time against the
         # same source-row counter, so the largest per-record width is enough.
         return max([1, *(memo[source] for source in sources)])
+
+    def _park_can_output(self, occurrence):
+        """Check one bounded output against the original live credit tables.
+
+        This is only a stop-before-next-step check, never a reservation. Actual
+        publication still reserves atomically. Unknown UDF expansion retains
+        the original per-invocation rejection; it is not assigned a made-up
+        multiplier. Traversal sums every static fork path and broadcast reader.
+        """
+        with self._condition:
+            if not self._credits:
+                # Even a window smaller than max_row_bytes can admit its first
+                # actual small row. Original reserve is the final authority.
+                return True
+            edges, terminals = {}, 0
+            pending = [occurrence]
+            owners = self.e._node_specs
+            while pending:
+                current = pending.pop()
+                if owners[current].kind == 'terminal':
+                    terminals += 1
+                for edge in self._outgoing.get(current, ()):
+                    if edge.edge_id in self._closed_outputs:
+                        continue
+                    if edge.consumer in owners:
+                        ports = owners[edge.consumer].kernel.inputs
+                        if not any(p.name == edge.input_port and p.requirement == 'finite_complete' for p in ports):
+                            pending.append(edge.consumer)
+                    else:
+                        spec = self._exchange[edge.edge_id]
+                        if spec.mode != 'finite_sealed':
+                            edges[edge.edge_id] = edges.get(edge.edge_id, 0) + 1
+                # Do not traverse exponentially many fork paths once even the
+                # minimum remaining static output cannot fit the fixed table.
+                if len(pending) + terminals + sum(edges.values()) > self._credit_limit:
+                    return False
+            slots, channel_bytes = terminals, 0
+            for edge_id, count in edges.items():
+                spec = self._exchange[edge_id]
+                recipients = len(spec.consumer_partitions) if spec.routing == 'broadcast' else 1
+                slots += count * recipients
+                channel_bytes += count * recipients * self.bounds.max_row_bytes
+                # Hash/target/rebalance may choose any declared reader; require
+                # enough room in every possible destination before advancing.
+                for reader in spec.consumer_partitions:
+                    credit = self.e._channels.reader_credit(spec.channel_id, reader)
+                    if credit['rows_left'] < count or credit['bytes_left'] < count * self.bounds.max_row_bytes:
+                        return False
+            if len(self._credits) + slots > self._credit_limit:
+                return False
+            leases = self.e._channels.outstanding_leases()
+            return (self.e._channels.resident_bytes + sum(x.size_bytes for x in leases)
+                    + channel_bytes <= self.bounds.max_resident_bytes)
 
     def start(self):
         if self._thread is not None:
@@ -316,9 +371,11 @@ class WorkerGraphRunner:
                 self._consumed_deliveries.intersection_update(command.get('retain_consumed', ()))
                 self._idle_sent = False
             elif kind in ('pause', 'park'):
+                self._park_requested = kind == 'park'
                 self._paused = True
                 self._idle_sent = False
             elif kind == 'resume':
+                self._park_requested = False
                 self._source_rows_since_cut = 0
                 self._consumed_deliveries.clear()
                 self._paused = False
@@ -445,6 +502,7 @@ class WorkerGraphRunner:
                 # An idle event may have raced with resume. The cut itself
                 # freezes admission before waiting for actual local obligations.
                 self._paused = True
+                self._park_requested = False
                 self._idle_sent = False
                 self._cut = command['request']
             elif command['kind'] == 'receipt':
@@ -457,12 +515,17 @@ class WorkerGraphRunner:
                 if split_id in self._finished_splits:
                     continue
                 self.services.check_stop()
+                source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
+                if self._park_mode and not self._park_can_output(source):
+                    self._paused = True
+                    break
                 poll = reader.next_record()
                 if poll.status == 'record':
                     source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
                     self._output(source, poll.record)
                     self._source_rows_since_cut += 1
-                    if self._source_rows_since_cut >= self._source_quantum:
+                    quantum = (self.e._physical.policy.checkpoint_rows if self._park_mode else self._source_quantum)
+                    if self._source_rows_since_cut >= quantum:
                         self._paused = True
                         self._flush_metrics()
                     processed += 1
@@ -485,6 +548,8 @@ class WorkerGraphRunner:
         done = set(self.e._node_specs).issubset(self._finished)
         with self._condition:
             quiet = (not self._queue and (not self._credits or self._parkable_credits())
+                     and not (getattr(self, '_park_requested', False)
+                              and getattr(self, '_park_finish_pending', False))
                      and all(k.checkpoint_ready for k in self.e._kernels.values())
                      and (not self._park_mode or not any(k.pending_calls for k in self.e._kernels.values())))
             notify_done = (done and quiet and not self._done_sent
@@ -785,6 +850,7 @@ class WorkerGraphRunner:
         # callback waits for another co-resident node's timer or output.
 
     def _advance_input_completions(self, *, max_records, deadline_ms):
+        self._park_finish_pending = False
         processed = 0
         outputs = 0
         deadline = time.monotonic() + deadline_ms / 1000
@@ -808,8 +874,15 @@ class WorkerGraphRunner:
                     if not all((edge.edge_id, p) in self._finished_inputs for p in producers):
                         continue
                     if kernel is not None and kernel.cooperative_finish:
-                        if self._paused and kernel.finish_replayable:
-                            continue
+                        if kernel.finish_replayable:
+                            if self._paused and (not self._park_requested or self._cut is not None):
+                                continue
+                            if self._park_mode and not self._park_can_output(occurrence):
+                                # Original ACK may resume a restored producer
+                                # before the next park command arrives. Bound
+                                # that interval too; never depend on timing.
+                                self._paused = True
+                                continue
                         iterator = self._active_finishes.get(edge.edge_id)
                         if iterator is None:
                             iterator = iter(kernel.finish(edge.input_port, wait_for_calls=False))
@@ -820,6 +893,8 @@ class WorkerGraphRunner:
                             self._active_finishes.pop(edge.edge_id)
                         else:
                             self._output(occurrence, out)
+                            if self._park_requested and kernel.finish_replayable:
+                                self._park_finish_pending = self._park_can_output(occurrence)
                             processed += 1
                             outputs += 1
                             advanced = True
