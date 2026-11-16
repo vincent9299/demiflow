@@ -16,13 +16,55 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def snapshot():
-    files = sorted((ROOT / 'demiflow').rglob('*.py')) + sorted((ROOT / 'tests').rglob('*.py'))
-    files += [ROOT / name for name in ('pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini',
-        'docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json',
-        'docs/unified-runtime-v3-20261114/evidence/regression-files.json') if (ROOT / name).is_file()]
-    assert len(files) <= 10000
+    """Hash actual source/fixtures, including UI assets and consumed contracts.
+
+    Git's tracked + non-ignored untracked inventory limits the walk to declared
+    source roots. Generated review evidence and unrelated repository data never
+    become input. File hashing uses bounded chunks; an oversized source fails
+    explicitly instead of silently disappearing from the provenance boundary.
+    """
+    package = 'docs/unified-runtime-v3-20261114/'
+    roots = ['demiflow', 'tests', 'examples', 'pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini',
+             package.rstrip('/')]
+    listed = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others',
+                                      '--exclude-standard', '--', *roots], cwd=ROOT)
+    if len(listed) > 4 * 2**20:
+        raise ValueError('source file inventory exceeds its bound')
+    evidence_inputs = {'historical-dispositions.json', 'regression-files.json',
+                       'frozen-files.json', 'source-inventory.json', 'intent-sources.json'}
+    names = []
+    for raw in set(listed.split(b'\0')) - {b''}:
+        name = os.fsdecode(raw)
+        if name.startswith(package):
+            tail = name[len(package):]
+            if tail.startswith('review-'):
+                continue
+            if tail.startswith('evidence/') and tail.split('/', 1)[1] not in evidence_inputs:
+                continue
+        names.append(name)
+    if len(names) > 10000:
+        raise ValueError('source file count exceeds its bound')
+    digests, total = {}, 0
+    for name in sorted(names):
+        path = ROOT / name
+        if not path.is_file() or not path.resolve().is_relative_to(ROOT.resolve()):
+            raise ValueError('source inventory contains a missing or external file: ' + name)
+        size = path.stat().st_size
+        total += size
+        if size > 64 * 2**20 or total > 512 * 2**20:
+            raise ValueError('source bytes exceed the explicit snapshot bound: ' + name)
+        digest, seen = hashlib.sha256(), 0
+        with path.open('rb') as stream:
+            while chunk := stream.read(64 * 1024):
+                seen += len(chunk)
+                if seen > size:
+                    raise ValueError('source grew while hashing: ' + name)
+                digest.update(chunk)
+        if seen != size:
+            raise ValueError('source changed size while hashing: ' + name)
+        digests[name] = digest.hexdigest()
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
-            'inputs': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}}
+            'inputs': digests}
 
 
 def assert_private():
@@ -81,7 +123,7 @@ def run(destination, args):
     result = {'kind': 'collection_only' if '--collect-only' in args else 'execution',
               'python': sys.executable, 'args': args, 'returncode': int(code),
               'environment': {k: os.environ.get(k) for k in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME',
-                               'DEMIFLOW_FORGE_DOMAIN', 'PYTHONPATH')},
+                               'DEMIFLOW_FORGE_DOMAIN', 'PYTHONPATH', 'TMPDIR')},
               'source_before': before, 'source_after': after, 'source_unchanged': before == after,
               'items': plugin.items, 'collection_problems': plugin.collection,
               'deselected': plugin.deselected, 'reports': plugin.reports}
@@ -97,8 +139,8 @@ def main():
     destination = Path(request['destination']).resolve()
     selectors = request['selectors']
     assert type(selectors) is list and 0 < len(selectors) <= 100000
-    assert all(type(n) is str and n.startswith('tests/') and '..' not in n.split('/')
-               and (('::' in n) or (request.get('collect_only') and n == 'tests/'))
+    assert all(type(n) is str and n.startswith('tests/') and '..' not in n.split('::', 1)[0].split('/')
+               and (('::' in n) or (request.get('collect_only') and (n == 'tests/' or n.endswith('.py'))))
                for n in selectors)
     args = ['-q', '--tb=short', '-p', 'no:cacheprovider',
             '--basetemp=' + str(destination / 'tmp'),

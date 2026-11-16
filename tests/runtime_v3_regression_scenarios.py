@@ -49,13 +49,15 @@ def _bound(receipt, inputs):
 def inventory_union(receipts, *, inputs):
     """Merge explicit environment collection; unresolved imports remain visible."""
     nodes, problems = {}, []
+    if not any({'tests', 'tests/'}.intersection(r.get('args', ())) for r in receipts):
+        raise ValueError('inventory must include complete repository collection')
     for receipt in receipts:
         if receipt.get('kind') != 'collection_only' or not _bound(receipt, inputs):
             raise ValueError('collection is not bound to the current candidate inputs')
         if receipt.get('returncode') != 0 or receipt.get('deselected'):
             raise ValueError('collection failed or silently deselected tests')
-        if '--collect-only' not in receipt.get('args', ()) or not {'tests', 'tests/'}.intersection(receipt.get('args', ())):
-            raise ValueError('inventory must collect the complete repository tests directory')
+        if '--collect-only' not in receipt.get('args', ()):
+            raise ValueError('inventory receipt lacks a real collection invocation')
         seen = set()
         for item in receipt['items']:
             node = item['nodeid']
@@ -73,8 +75,10 @@ def inventory_union(receipts, *, inputs):
     unresolved = [p for p in problems if p['outcome'] != 'skipped'
                   or not any(n.split('::')[0] == p['nodeid'] for n in nodes)]
     accounted_files = {item['file'] for item in nodes.values()} | {p['nodeid'] for p in unresolved}
-    for path in ROOT.joinpath('tests').rglob('test*.py'):
-        name = str(path.relative_to(ROOT))
+    expected_files = {str(path.relative_to(ROOT)) for path in ROOT.joinpath('tests').rglob('test*.py')}
+    baseline = read_json(ROOT / 'docs/unified-runtime-v3-20261114/evidence/regression-files.json')
+    expected_files.update(item['file'] for item in baseline['files'])
+    for name in sorted(expected_files):
         if name not in accounted_files:
             unresolved.append({'nodeid': name, 'outcome': 'uncollected',
                                'detail': 'repository test file absent from all environment collections'})
@@ -153,6 +157,17 @@ def validate_plan(plan, collections, *, inputs):
             raise ValueError('only the exact outer regression gate may avoid recursive execution')
         if entry['state'] == 'reviewed' and entry.get('environment') not in ENVIRONMENTS:
             raise ValueError('reviewed node has no known environment')
+    if META_NODE not in universe:
+        raise ValueError('full collection omitted the outer regression gate')
+    claimed = set()
+    for batch in plan.get('batches', []):
+        nodes, environment = batch.get('nodeids', []), batch.get('environment')
+        if (type(nodes) is not list or not nodes or environment not in ENVIRONMENTS
+                or len(set(nodes)) != len(nodes) or claimed.intersection(nodes)
+                or any(n not in bynode or bynode[n]['state'] != 'reviewed'
+                       or bynode[n]['environment'] != environment for n in nodes)):
+            raise ValueError('planned batch is unreviewed, recursive, duplicated or has wrong environment')
+        claimed.update(nodes)
     if plan.get('dispositions') != disposition_map(universe):
         raise ValueError('historical mapping must retain exact replacement assertions')
     return universe, bynode, problems
@@ -190,7 +205,7 @@ def evaluate(plan, collections, receipts, *, inputs):
             phases = reports[node]
             good = (len(phases) == 3 and Counter(p['when'] for p in phases)
                     == Counter({'setup': 1, 'call': 1, 'teardown': 1})
-                    and all(p['outcome'] == 'passed' and not p.get('wasxfail')
+                    and all(p['outcome'] == 'passed' and p.get('wasxfail') is None
                             and not p.get('rerun') for p in phases))
             (executed if good else failed)[node] = phases
         if receipt.get('returncode') != 0 and not any(n in failed for n in collected):
@@ -241,7 +256,10 @@ def execute_batch(batch, *, entries, destination, timeout=1800):
     request.write_text(json.dumps({'destination': str(destination), 'selectors': nodes}) + '\n')
     env = dict(os.environ)
     env.pop('PYTEST_ADDOPTS', None)
-    env.update(PYTHONPATH=str(ROOT) + os.pathsep + str(ROOT / 'tests'), PYTHONDONTWRITEBYTECODE='1')
+    scratch = destination / 'scratch'
+    scratch.mkdir()
+    env.update(PYTHONPATH=str(ROOT) + os.pathsep + str(ROOT / 'tests'),
+               PYTHONDONTWRITEBYTECODE='1', TMPDIR=str(scratch), TEMP=str(scratch), TMP=str(scratch))
     for key, suffix in [('DEMIFLOW_RESOURCE_ROOT', 'resources'), ('DEMIFLOW_RESOURCE_HOME', 'home'),
                         ('DEMIFLOW_FORGE_DOMAIN', 'forge')]:
         env[key] = str(destination / suffix)
@@ -283,6 +301,11 @@ def all_regressions(fx, fault):
         if sha256(item['path']) != item['sha256']:
             raise ValueError('execution receipt digest changed')
         receipts.append(read_json(item['path']))
+    # Validate retained reports and all overlaps before starting any side effect.
+    evaluate(plan, collections, receipts, inputs=inputs)
+    reused = {item['nodeid'] for receipt in receipts for item in receipt['items']}
+    if reused.intersection(n for batch in plan['batches'] for n in batch['nodeids']):
+        raise ValueError('planned execution duplicates an existing candidate receipt')
     batches = []
     for index, batch in enumerate(plan['batches']):
         result = execute_batch(batch, entries=entries, destination=fx.root / ('regressions-' + str(index)))

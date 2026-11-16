@@ -559,8 +559,10 @@ def _vectors(source,per_row):
     if per_row:
         out=data.from_items([{'q':[1.,0.]},{'q':[0.,1.]}]).search_vectors(query='q',output='hits',
             uri=uri,version=1,vector_column='vector',columns=['id'],top_k=1,metric='l2').take_all()
-        assert [r['hits'][0]['id'] for r in out]==[1,2]
-        assert all(r['hits'][0]['_distance']==0 for r in out)
+        # Native searches complete concurrently. Preserve the full row/query
+        # association and multiplicity without inventing an input-order promise.
+        _same([{'q':[1.,0.], 'hits':[{'id':1, '_distance':0.}]},
+               {'q':[0.,1.], 'hits':[{'id':2, '_distance':0.}]}], out, ordered=False)
     else:
         out=data.vector_search_lance(uri,[1.,0.],version=1,vector_column='vector',columns=['id'],top_k=1,metric='l2').take_all()
         assert len(out)==1 and out[0]['id']==1 and out[0]['_distance']==0

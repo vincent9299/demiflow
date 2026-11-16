@@ -2,8 +2,6 @@
 import pytest
 
 from demiflow import data
-from demiflow.errors import UnsupportedExecutionOptionError
-from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.run_context import RunContext
 
 
@@ -40,18 +38,15 @@ def test_take_streaming_single_action(monkeypatch):
     assert calls == ["take"]
 
 
-def test_take_zero_no_source_read(monkeypatch):
+def test_take_zero_no_source_read(monkeypatch, tmp_path):
     calls = _action_spy(monkeypatch)
-    reads = []
-
-    def spy(self, source, **kwargs):
-        reads.append(source)
-        raise AssertionError("take(0) must not read the source")
-
-    monkeypatch.setattr(LocalDatasetExecutor, "_iter_source", spy)
-    assert _plain().take(0) == []
-    assert reads == []
-    assert calls == ["take"]
+    marker = tmp_path / 'source-read'
+    def rows():
+        marker.write_text('read')
+        yield {'id': 1}
+    assert data.from_iter(rows).map(lambda row: row).take(0) == []
+    assert not marker.exists()
+    assert calls == ['take']
 
 
 def test_take_negative_rejected_before_action(monkeypatch):
@@ -61,7 +56,32 @@ def test_take_negative_rejected_before_action(monkeypatch):
     assert calls == []
 
 
-def test_take_ray_options_rejected(monkeypatch):
-    ds = data.from_items([{"id": 0}]).map(lambda r: r, backend_options={"ray": {}})
-    with pytest.raises(UnsupportedExecutionOptionError, match="backend_options"):
-        ds.take(1)
+def test_take_resource_only_backend_options_use_same_action(monkeypatch, tmp_path):
+    calls = _action_spy(monkeypatch)
+    with RunContext.start(tmp_path / 'run') as run:
+        ds = data.from_items([{'id': 0}]).map(lambda row: row, backend_options={'ray': {}})
+        assert ds.take(1) == [{'id': 0}]
+        assert calls == ['take']
+        assert run.journal.source_binding('action-1-dataflow-sealed') is not None
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+
+
+def test_take_retired_pool_options_rejected_before_source_or_user_call(monkeypatch, tmp_path):
+    calls = _action_spy(monkeypatch)
+    marker, called = tmp_path / 'source-read', tmp_path / 'udf-called'
+    def rows():
+        marker.write_text('read')
+        yield {'id': 0}
+    def transform(row):
+        called.write_text('called')
+        return row
+    with pytest.raises(ValueError, match='Ray Data compute/worker ranges'):
+        with RunContext.start(tmp_path / 'run') as run:
+            ds = data.from_iter(rows).map(transform, backend_options={'ray': {
+                'compute': {'kind': 'actor_pool', 'min_size': 2, 'initial_size': 2, 'max_size': 3}}})
+            ds.take(1)
+    assert not marker.exists() and not called.exists()
+    assert calls == ['take']
+    assert not run.journal.execution_commits('action-1')
+    with run.journal._connection() as connection:
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name='resource_allocations'").fetchall() == []
