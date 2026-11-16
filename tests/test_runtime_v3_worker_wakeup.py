@@ -110,3 +110,59 @@ def test_command_after_wait_started_wakes_original_condition():
         value.e._cancel_event.set()
         value.wake()
         worker.join(2)
+
+
+def test_publish_does_not_sleep_over_credit_ack_between_check_and_wait():
+    from test_runtime_v3_c import make, bounds
+    value = runner()
+    exhausted, acknowledged = threading.Event(), threading.Event()
+    operations, sent = [], []
+    class CreditTable(dict):
+        captured = False
+        def __len__(self):
+            count = super().__len__()
+            if count and not self.captured:
+                self.captured = True
+                exhausted.set()
+                assert acknowledged.wait(2)
+            # Real concurrency can release credit immediately after len() was
+            # evaluated, before the capacity error enters condition.wait().
+            return count
+    class NoDelayCondition(threading.Condition):
+        def __init__(self):
+            super().__init__(); self.waits = []
+        def wait(self, timeout=None):
+            self.waits.append(timeout)
+            return False
+    value._condition = NoDelayCondition()
+    value._credits = CreditTable({'old-delivery': (None, 'old-buffer')})
+    value._credit_payloads = {}
+    value._credit_limit = 1
+    value._park_mode = False
+    value.partition = 'partition'
+    value.bounds = bounds()
+    value.services = SimpleNamespace(check_stop=lambda: None)
+    value.e._next_operation_id = lambda kind: 'new-delivery'
+    value._peer = SimpleNamespace(
+        release=lambda key: operations.append(('release', key)),
+        put=lambda raw: operations.append(('put', raw)) or {'key':'new-buffer'})
+    value._send = lambda kind,payload: sent.append((kind,payload))
+    from demiflow.execution.kernels.dataflow import _row_bytes
+    row = {'row':1}
+    record = make('Record', inline=row, encoded_bytes=_row_bytes(row, max_bytes=value.bounds.max_row_bytes))
+    def ack():
+        assert exhausted.wait(2)
+        value.receive({'kind':'ack','delivery_id':'old-delivery'})
+        acknowledged.set()
+    thread = threading.Thread(target=ack); thread.start()
+    try:
+        value._publish(record)
+    finally:
+        acknowledged.set()
+        thread.join(2)
+    assert not thread.is_alive()
+    assert value._condition.waits == []
+    assert [operation[0] for operation in operations] == ['release','put']
+    assert list(value._credits) == ['new-delivery']
+    assert sent[0][0] == 'terminal'
+    assert sent[0][1]['delivery_id'] == 'new-delivery'

@@ -604,6 +604,8 @@ class WorkerGraphRunner:
             self.services.check_stop()
             if self.e._cancel_event.is_set():
                 raise DataflowError('CANCELLED', 'business execution cancelled')
+            with self._condition:
+                generation = self._wake_generation
             try:
                 if len(self._credits) >= self._credit_limit:
                     raise DataflowError('CAPACITY_PENDING', 'data credit exhausted', retryable=True)
@@ -619,7 +621,9 @@ class WorkerGraphRunner:
                 if time.monotonic() >= deadline:
                     raise DataflowError('DEADLINE_EXCEEDED', 'data delivery credit deadline') from exc
                 with self._condition:
-                    self._condition.wait(.01)
+                    if (generation == self._wake_generation
+                            and not self.e._cancel_event.is_set()):
+                        self._condition.wait(.01)
         payload = {'delivery_id': delivery, 'producer_partition': self.partition,
                    'target_partition': target, 'edge_id': edge.edge_id if edge else None,
                    'record_id': record.record_id, 'sequence': record.sequence}
