@@ -82,9 +82,13 @@ class ResidentModel:
         assert answer == row['n'] * 256
         measured = {'pid': os.getpid(), 'model_id': self.identity, 'n': row['n'],
             'answer': answer, 'allocated': torch.cuda.max_memory_allocated(),
-            'reserved': torch.cuda.max_memory_reserved()}
-        assert 0 < measured['allocated'] < 1024**2 and measured['reserved'] <= 8*1024**2
+            'reserved': torch.cuda.max_memory_reserved(), 'cuda_window':64*1024**2}
         _write(self.directory, 'gpu-' + str(row['n']), measured)
+        # Linear uses a real cuBLAS workspace (32 MiB in the pinned runtime),
+        # unlike the earlier pointwise CUDA fixture. This separate finite
+        # observation window is below the original 2 GiB worker reservation;
+        # it is not a claim that the allocator enforces a hard VRAM ceiling.
+        assert 0 < measured['allocated'] <= measured['reserved'] <= measured['cuda_window'], measured
         return {**row, 'gpu': measured}
 
     def snapshot_state(self):
