@@ -45,7 +45,9 @@ def test_routes_overlap_and_isolate_failed_provider(tmp_path, monkeypatch):
         graph = data.from_items(rows).map_prompt_async('enrich', config=parse_prompt_pack(PACK),
             routes=routes, route='route', isolate_route_failures=True, concurrency=5, queue_depth=1,
             inputs={'payload': 'item'}, output='answer', call_output='call', error_output='error')
-        saved = graph.checkpoint(tmp_path/'results.jsonl', version='v1').take_all()
+        # The explicit checkpoint facade was already retired in 267b914.
+        # This test exercises the original private delivery cache, not run recovery.
+        saved = graph.take_all()
         assert len(saved) == 5 and len(calls) == 5
         assert finished.index('slow') > finished.index('fast')
         assert all(value == 1 for value in peaks.values())
@@ -53,7 +55,7 @@ def test_routes_overlap_and_isolate_failed_provider(tmp_path, monkeypatch):
         error = next(r['error'] for r in saved if r['route'] == 'broken')
         assert error['route_unavailable'] is True
         assert all('reasoning_effort' not in c for c in calls)
-        replay = graph.checkpoint(tmp_path/'replay.jsonl', version='v1').take_all()
+        replay = graph.take_all()
         assert len(replay) == 5 and len(calls) == 5
     finally:
         server.shutdown(); server.server_close(); thread.join()
@@ -67,9 +69,9 @@ def test_unlimited_journal_keeps_old_calls_and_only_sends_missing_rows(server, t
             config=parse_prompt_pack(PACK), inputs={'payload':'item'}, output='answer',
             error_output='error', options={'trust_env':False,
                 'sqlite_journal': {'path':str(path), 'max_requests':limit}})
-    first = graph([1,2], 1).checkpoint(tmp_path/'limited.jsonl', version='1').take_all()
+    first = graph([1,2], 1).take_all()
     assert len(server['requests']) == 1 and sum('error' in r for r in first) == 1
-    resumed = graph([1,2,3], None).checkpoint(tmp_path/'unlimited.jsonl', version='1').take_all()
+    resumed = graph([1,2,3], None).take_all()
     assert len(server['requests']) == 3 and all(r['answer']=='ok' for r in resumed)
     with sqlite3.connect(path) as db:
         assert db.execute("select value from journal_state where name='request_count'").fetchone()[0] == '3'

@@ -107,6 +107,16 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
                   'response_format': prompt.response_format, 'model': _prompt_model_json(prompt.model),
                   'content_hash': operation.config.content_hash}
         kind, state, effect = 'prompt', 'none', 'journaled'
+        from .dataflow_prompt_journal import private_prompt_declaration
+        private = private_prompt_declaration(operation.options)
+        if private is not None:
+            if prompt.response_format == 'image' or prompt.model.deployment is not None:
+                raise DataflowError('UNSUPPORTED_CAPABILITY', 'Private Prompt cache requires external text HTTP delivery')
+            config['private_journal'] = private
+            config['collect_journal_totals'] = (operation.options or {}).get('collect_journal_totals', True)
+            if type(config['collect_journal_totals']) is not bool:
+                raise DataflowError('INVALID_CONTRACT', 'collect_journal_totals must be boolean')
+            state = 'nonrecoverable'
         ports = _input_ports(('main',))
     elif isinstance(operation, EmbeddingMapOp):
         config = {'inputs': _json_config(operation.inputs), 'output': operation.output,
@@ -341,7 +351,10 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
     if kind == 'prompt':
         if 'routes' in spec.configuration:
             from .dataflow_routed_prompt import bind_routed_prompt
-            bind_routed_prompt(instance, services=services, node_id=node_id)
+            bind_routed_prompt(instance, services=services, node_id=node_id, configuration=spec.configuration)
+        elif spec.configuration.get('private_journal') is not None:
+            from .dataflow_prompt_journal import bind_private_prompt_adapter
+            bind_private_prompt_adapter(instance, services=services, node_id=node_id, configuration=spec.configuration)
         elif spec.configuration.get('response_format') == 'image':
             journal.bind_media_adapter(instance, services=services, node_id=node_id)
         else:

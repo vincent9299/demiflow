@@ -76,7 +76,7 @@ def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
         'catch': [c.__module__ + '.' + c.__qualname__ for c in operation.catch]}
     configuration['node_id'] = identity(['routed-prompt', configuration])
     from .kernels.task_scope import function_residency_kind
-    state = 'none'
+    state = 'nonrecoverable' if any('private_journal' in model.configuration for model in models.values()) else 'none'
     for child in children.values():
         predicate = child.constructor_args[1].get('when')
         if predicate is not None and function_residency_kind(predicate) != 'none':
@@ -89,11 +89,16 @@ def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
             + (bounds.max_state_bytes if state != 'none' else 0)}))
 
 
-def bind_routed_prompt(actor, *, services, node_id):
+def bind_routed_prompt(actor, *, services, node_id, configuration):
     from .dataflow_model_journal import (make_native_action_view, RemotePromptRecovery,
                                         _rebuild_request_gate)
     action = make_native_action_view(services, node_id=node_id)
     for name, child in actor.actors.items():
+        if configuration['routes'][name].get('private_journal') is not None:
+            from .dataflow_prompt_journal import bind_private_prompt_adapter
+            bind_private_prompt_adapter(child, services=services, node_id=node_id,
+                                        configuration=configuration['routes'][name], route=name)
+            continue
         recovery = RemotePromptRecovery(child, action, node_id, services=services)
         journal = _RoutedPromptJournal(port=services.journal, action=action, bounds=services.bounds, route=name,
             group_limit=(action.context.limits['max_requests'] if actor.max_requests is None

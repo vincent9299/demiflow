@@ -274,14 +274,22 @@ class AsyncOperatorLLMClient:
         if verification is not True and verification is not False and verification != 'listed':
             raise ValueError('verify_model must be true, false, or listed')
         self.request_options=request_options(self.options)
-        self.journal=PromptJournal(self.options['journal_dir'],max_requests) if self.options.get('journal_dir') else None
-        if self.options.get('sqlite_journal'):
+        from demiflow.execution.dataflow_prompt_journal import RemotePrivatePromptJournal
+        private_remote = isinstance(native_journal, RemotePrivatePromptJournal)
+        if private_remote:
+            if (self.options.get('sqlite_journal') != native_journal.declaration
+                    or self.options.get('journal_dir')):
+                raise ValueError('Private remote journal differs from the original Prompt declaration')
+            self.journal = native_journal
+        else:
+            self.journal=PromptJournal(self.options['journal_dir'],max_requests) if self.options.get('journal_dir') else None
+        if self.options.get('sqlite_journal') and not private_remote:
             if self.journal: raise ValueError('Select one journal store')
             from .sqlite_journal import SQLitePromptJournal
             journal_options=dict(self.options['sqlite_journal'])
             durable_limit=journal_options.pop('max_requests',max_requests)
             self.journal = SQLitePromptJournal(**journal_options, max_requests=durable_limit)
-        if native_journal is not None:
+        if native_journal is not None and not private_remote:
             # Capability-verified remote native journal is assembled before the
             # http_error_retry guard. A private write journal must not silently
             # dual-write with native recovery; it stays as read-only history.

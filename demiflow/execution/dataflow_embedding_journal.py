@@ -130,7 +130,7 @@ def private_embedding_request(service, command, request):
 
 
 def close_private_embedding_journals(service, *, deadline):
-    if not hasattr(service, '_private_embedding_journals'):
+    if not hasattr(service, '_private_embedding_journals') and not hasattr(service, '_private_prompt_journals'):
         return
 
     def close_owned():
@@ -139,7 +139,9 @@ def close_private_embedding_journals(service, *, deadline):
         # physically_stopped is false while it is alive.
         for worker in service._workers:
             worker.join()
-        for journal in tuple(service._private_embedding_journals.values()):
+        journals = (*getattr(service, '_private_embedding_journals', {}).values(),
+                    *getattr(service, '_private_prompt_journals', {}).values())
+        for journal in journals:
             try:
                 journal.close()
             except BaseException as error:

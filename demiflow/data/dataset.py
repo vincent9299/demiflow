@@ -1613,8 +1613,10 @@ class Dataset:
         still stop the action. Upstream assignment must bound route backlog to
         avoid filling all workers with one route's waiting rows.
         """
-        if any(key in (options or {}) for key in ('sqlite_journal', 'journal_dir')):
+        if 'journal_dir' in (options or {}):
             raise ValueError('map_prompt_async recovery is execution-owned; remove journal options')
+        from ..execution.dataflow_prompt_journal import private_prompt_declaration
+        private_prompt_declaration(options)
         from ..operator_llm.parser import resolve_prompt
         if isinstance(config, (str, Path)):
             config = load_prompt_pack(Path(getattr(self._executor, 'resource_root', Path.cwd())) / config)

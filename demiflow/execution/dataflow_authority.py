@@ -670,6 +670,9 @@ class DriverJournalService:
         if command.node_id in getattr(self, '_private_embedding_nodes', {}):
             from .dataflow_embedding_journal import private_embedding_request
             return private_embedding_request(self, command, request)
+        from .dataflow_prompt_journal import is_private_prompt_request, private_prompt_request
+        if is_private_prompt_request(self, command, request):
+            return private_prompt_request(self, command, request)
         journal = self._native_journal()
         self._journal.bind_source(self._fence, self._action.action_id + '-native-model-journal',
                                   {'schema': 'demiflow.native_model_journal.v1',
