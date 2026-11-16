@@ -1,0 +1,78 @@
+{
+  "report": "/tmp/demiflow-gc-precheck-screen-r1/report.json",
+  "report_sha256": "1804ff966ccd2701ea07acf1c0fa51a8e71d5c68e40688ae4ffdac4327b1c79e",
+  "checked": [
+    {
+      "path": "/tmp/demiflow-gc-precheck-screen-r1/0-A-warmup/trial.json",
+      "sha256": "502ec16901e9cbdd57e04f5d2031345600722034d7765d5ba55cc2b0932dc716",
+      "head": "6e52d6e047d2048b914afb9a8cdc42fb790665e3",
+      "inputs": 1050,
+      "output_rows": 10000,
+      "cuts": 40,
+      "source_mismatches": [],
+      "elapsed_s": 16.056748239,
+      "cleanup": []
+    },
+    {
+      "path": "/tmp/demiflow-gc-precheck-screen-r1/1-B-warmup/trial.json",
+      "sha256": "bbedf8b4e581e49902a1cfc78e827c9719cf56b7917ee0e01e5bc76986ef886e",
+      "head": "c0b6871720ccbb08cdb358c0b2600bcb1df0b04c",
+      "inputs": 1050,
+      "output_rows": 10000,
+      "cuts": 40,
+      "source_mismatches": [],
+      "elapsed_s": 16.073944981,
+      "cleanup": []
+    },
+    {
+      "path": "/tmp/demiflow-gc-precheck-screen-r1/2-A-measure/trial.json",
+      "sha256": "fb5ac69b2b7cd471e1b78cc00b70d0fe7547d63a3f9c061b852e74ce3a848994",
+      "head": "6e52d6e047d2048b914afb9a8cdc42fb790665e3",
+      "inputs": 1050,
+      "output_rows": 10000,
+      "cuts": 40,
+      "source_mismatches": [],
+      "elapsed_s": 16.132551513,
+      "cleanup": []
+    },
+    {
+      "path": "/tmp/demiflow-gc-precheck-screen-r1/3-B-measure/trial.json",
+      "sha256": "99c52c9f15662acf2584c7998f70272702f33915fd26a3d9de97ff90b6ad9f5f",
+      "head": "c0b6871720ccbb08cdb358c0b2600bcb1df0b04c",
+      "inputs": 1050,
+      "output_rows": 10000,
+      "cuts": 40,
+      "source_mismatches": [],
+      "elapsed_s": 15.18122029,
+      "cleanup": []
+    },
+    {
+      "path": "/tmp/demiflow-gc-precheck-screen-r1/4-B-measure/trial.json",
+      "sha256": "9892297294297c724e5e109d925ad8ca4344d813747c3e8c583edc1132487923",
+      "head": "c0b6871720ccbb08cdb358c0b2600bcb1df0b04c",
+      "inputs": 1050,
+      "output_rows": 10000,
+      "cuts": 40,
+      "source_mismatches": [],
+      "elapsed_s": 15.184317442,
+      "cleanup": []
+    },
+    {
+      "path": "/tmp/demiflow-gc-precheck-screen-r1/5-A-measure/trial.json",
+      "sha256": "3960d58781bea1456c9d8df36963cb9da7706b6b153bea1acb147faa830410a0",
+      "head": "6e52d6e047d2048b914afb9a8cdc42fb790665e3",
+      "inputs": 1050,
+      "output_rows": 10000,
+      "cuts": 40,
+      "source_mismatches": [],
+      "elapsed_s": 15.889395989,
+      "cleanup": []
+    }
+  ],
+  "median_elapsed_s": {
+    "A": 16.010973751,
+    "B": 15.182768866
+  },
+  "candidate_relative": 0.9482726723633361,
+  "scope": "same-budget GC candidate screen; two warmups plus four alternating measurements, not full V034 or five-repeat acceptance"
+}
