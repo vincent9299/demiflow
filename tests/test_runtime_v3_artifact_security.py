@@ -16,12 +16,15 @@ def _guard_sample():
     return {'counterexamples':cases, 'positive':{'output':[
         {'value':2,'payload_bytes':98304},{'value':3,'payload_bytes':98304}],
         'commits':[{'status':'acked'}]}, 'launches':[{'bytes':1500,'reference_only':True}],
+        'control_frames':{'WorkerEvent:cut':{'count':1,'maximum_bytes':200,'bound':65536,
+                                         'business_payload_matches':0}},
         'current_main_reads':[], 'historical_recompiles':0,'original_objects_restored':True}
 
 
 @pytest.mark.parametrize('defect', ['empty','missing_case','accepted','missing_exception',
     'bootstrap_not_rejected','changed_original','wrong_output','missing_ack','not_acked',
-    'missing_launch','big_launch','inline_assignment','current_main','recompile','not_restored'])
+    'missing_launch','big_launch','inline_assignment','missing_control','control_payload',
+    'control_bound','current_main','recompile','not_restored'])
 def test_security_guard_rejects_incomplete_or_unbound_proof(defect):
     evidence = deepcopy(_guard_sample())
     if defect == 'empty': evidence = {}
@@ -36,6 +39,9 @@ def test_security_guard_rejects_incomplete_or_unbound_proof(defect):
     elif defect == 'missing_launch': evidence['launches'] = []
     elif defect == 'big_launch': evidence['launches'][0]['bytes'] = 65537
     elif defect == 'inline_assignment': evidence['launches'][0]['reference_only'] = False
+    elif defect == 'missing_control': evidence['control_frames'] = {}
+    elif defect == 'control_payload': evidence['control_frames']['WorkerEvent:cut']['business_payload_matches'] = 1
+    elif defect == 'control_bound': evidence['control_frames']['WorkerEvent:cut']['maximum_bytes'] = 65537
     elif defect == 'current_main': evidence['current_main_reads'] = ['/main/current.py']
     elif defect == 'recompile': evidence['historical_recompiles'] = 1
     elif defect == 'not_restored': evidence['original_objects_restored'] = False

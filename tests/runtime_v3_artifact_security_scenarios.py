@@ -234,6 +234,8 @@ def validate_evidence(evidence):
         {'value':2,'payload_bytes':98304}, {'value':3,'payload_bytes':98304}]
     assert evidence['positive']['commits'] and all(c['status']=='acked' for c in evidence['positive']['commits'])
     assert evidence['launches'] and all(x['bytes'] < 65536 and x['reference_only'] for x in evidence['launches'])
+    assert evidence['control_frames'] and all(x['count'] > 0 and x['maximum_bytes'] <= x['bound']
+        and x['business_payload_matches'] == 0 for x in evidence['control_frames'].values())
     assert evidence['current_main_reads'] == []
     assert evidence['historical_recompiles'] == 0
     assert evidence['original_objects_restored'] is True
@@ -243,7 +245,8 @@ def artifact_security(fx, fault=None):
     from demiflow import data
     from demiflow.execution.dataflow import DataflowExecution
     from demiflow.execution import dataflow as dataflow_module
-    from demiflow.execution.dataflow_hosts import _EndpointBase
+    from demiflow.execution.dataflow_hosts import _EndpointBase, LocalHostEndpoint, RayHostEndpoint
+    from demiflow.execution.contracts.dataflow_codec import encode_wire
     from demiflow.execution.worker.runtime import _decode_v3_assignment
     from demiflow.execution.recovery_contract import document
     from runtime_v3_residency_scenarios import _provider
@@ -254,7 +257,7 @@ def artifact_security(fx, fault=None):
     assert_tree_binding()
     root = fx.root/'security'
     root.mkdir()
-    cases, launches, executions = {}, [], []
+    cases, launches, executions, frames = {}, [], [], {}
     recompiles, main_reads = [], []
     main = Path('/yzp/zhaozy/yangzepeng/0905/demiflow')
     originals = DataflowExecution.prepare, DataflowExecution._assignment, _EndpointBase._build_launch
@@ -299,9 +302,28 @@ def artifact_security(fx, fault=None):
         launches.append({'bytes':len(raw), 'reference_only':True,
             'assignment_ref':config['assignment']['ref'], 'allocation_id':assigned.lease.allocation_id})
         return result
+    def frame(value, name, bounds):
+        raw = encode_wire(value, type_name=name, bounds=bounds)
+        assert b'x'*1024 not in raw, 'data payload travelled through the control channel'
+        key = name + ':' + (value.kind if name == 'WorkerEvent' else value.status)
+        facts = frames.setdefault(key, {'count':0,'maximum_bytes':0,
+            'bound':bounds.max_control_bytes,'business_payload_matches':0})
+        facts['count'] += 1
+        facts['maximum_bytes'] = max(facts['maximum_bytes'], len(raw))
+    endpoint_type = LocalHostEndpoint if fx.provider == 'local' else RayHostEndpoint
+    original_poll, original_reply = endpoint_type.poll, endpoint_type.deliver_reply
+    def poll(endpoint, **kwargs):
+        values = original_poll(endpoint, **kwargs)
+        for value in values:
+            frame(value, 'WorkerEvent', endpoint._services.bounds)
+        return values
+    def reply(endpoint, value):
+        frame(value, 'ControlReply', endpoint._services.bounds)
+        return original_reply(endpoint, value)
     with _provider(fx, workers=2), patch.object(DataflowExecution, 'prepare', prepare), \
             patch.object(DataflowExecution, '_assignment', assignment), \
             patch.object(_EndpointBase, '_build_launch', launch), \
+            patch.object(endpoint_type, 'poll', poll), patch.object(endpoint_type, 'deliver_reply', reply), \
             patch.object(dataflow_compile, 'lower_action', lower), \
             patch.object(dataflow_module, 'lower_action', lower), \
             patch.object(builtins, 'open', read_observer(builtins.open)), \
@@ -311,7 +333,7 @@ def artifact_security(fx, fault=None):
     execution = executions[0]
     cases['oversized_bootstrap'] = _bootstrap_attack(root)
     commits = execution._action.context.journal.execution_commits(execution._action.action_id)
-    evidence = {'counterexamples':cases, 'launches':launches,
+    evidence = {'counterexamples':cases, 'launches':launches, 'control_frames':frames,
         'positive':{'output':output, 'run_id':execution._run_id(),
             'action_id':execution._action.action_id, 'attempt':execution._attempt(),
             'dag_id':execution._graph.dag_id, 'plan_id':execution._physical.plan_id,
