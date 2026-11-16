@@ -1305,7 +1305,7 @@ class _OutputSubscription:
         return max(retained, getattr(self, '_working_bytes', 0))
 
     def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None):
-        from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH
+        from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH, peer_batch_limit
         from .exchange.dataflow_bridge import _decode_record_document
         from .dataflow_replay import record_encoded_bytes
         e = self.execution
@@ -1347,10 +1347,14 @@ class _OutputSubscription:
             from itertools import islice
             # A historical prefix stays before all newly produced records.
             while not self.closed and e._replay is None and e._terminal_queue and len(records) < max_records:
-                batch, size, endpoint = [], 0, None
+                batch, size, endpoint, limit = [], 0, None, MAX_PEER_BATCH
                 for payload in islice(e._terminal_queue, min(MAX_PEER_BATCH, max_records - len(records))):
                     peer = payload['peer']
-                    owner = (peer['host'], peer['port'], peer['token'])
+                    limit = min(limit, peer_batch_limit(peer))
+                    if len(batch) >= limit:
+                        break
+                    owner = (payload.get('producer_partition'), payload.get('edge_id'),
+                             payload.get('route_epoch'), peer['host'], peer['port'], peer['token'])
                     if endpoint is not None and owner != endpoint:
                         break
                     if (records or batch) and admitted + size + peer['bytes'] > byte_window:
