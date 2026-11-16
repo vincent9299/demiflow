@@ -109,4 +109,6 @@ def test_chain_rejects_a_foreign_binding_before_starting_workers(tmp_path, monke
             assert observed == []
             assert not run.journal.execution_commits('action-1')
             with run.journal._connection() as db:
-                assert db.execute('SELECT COUNT(*) FROM resource_allocations').fetchone() == (0,)
+                # Rejection precedes even initialization of the resource owner.
+                assert db.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                                  "AND name='resource_allocations'").fetchall() == []
