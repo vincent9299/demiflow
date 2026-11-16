@@ -4,13 +4,18 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
-- 函数状态修复 `f90b82b` 已集成；总控在 `18b6421` 独立跑真实 Ray 6 项全过，单/四 CPU 的 closure、显式参数与原 ACK 恢复保持一致。2104 个 owner 输入及1791个独立验收输入逐字节核对 0 不符，见 [FUNCTION-RAY-INDEPENDENT-18B6421.md](FUNCTION-RAY-INDEPENDENT-18B6421.md)。
-- Local/工作台/历史全组合固定版本 `f90b82b` 为 **109 passed / 1 failed**。唯一原慢消费者用例在原224MiB可驻留预算中被规划拒绝；原因是最终 thread_attempt 活引用程序仍按 owned 函数状态额外计快照。正在修，原测试/预算不动。此前106通过不能覆盖这项新回归。
-- 本机四张真实 GPU 的 normal/failure/cancel 已完成 **3 passed / 0 skipped**，12个原allocation全部释放，见 [PHYSICAL-FOUR-GPU-391AE6B.md](PHYSICAL-FOUR-GPU-391AE6B.md)。两机CPU四项此前已闭环。
-- 两宿主实际 GPU 绑定候选 `883cc5c` 已集成为 `e725af9`：Ray实际GPU grant先核宿主/UUID/内存，再在原DevicePool预约对应设备；资源层只接收注入的核验接口。CPU worker不见未授予CUDA，未知退出保留原计费，重建provider读取原journal核原actor。owner两宿主六张实际GPU normal/failure/cancel **3 passed / 168.92秒**；总控完整源审已完成，原始结果与journal尚待独立归档核验，不冒称最终验收。GPU远端actor-loss原ACK恢复正补验。
-- 原同预算性能工作负载计划已冻结，见 [PERFORMANCE-PLAN-20261116.md](PERFORMANCE-PLAN-20261116.md)。正在完成真实baseline预热和测量harness；正式五轮对比未执行，不以GPU能运行代替性能达标。
+当前隔离分支已集成至 `fd594c5`。这不是“全部完成”的版本：性能和部分正式验收门仍在收口，未推送或合入主仓。
 
-下文保留前一阶段精确版本的事实；标为“在途”的旧状态以上述更新为准。最新组合仍未全绿，不宣布两大意图全部完成。
+- **Dataset → 原提交 → 恢复**：函数状态修复、borrowed thread 状态预算修复均已集成。原慢消费者不改预算通过；40 项状态/原回归通过，见 [BORROWED-THREAD-STATE-CLOSURE.md](BORROWED-THREAD-STATE-CLOSURE.md)。新增纯辅助函数的不可变默认参数不再把队列生产误标为 attempt-only；可变默认值/闭包仍拒绝假恢复。
+- **真实 Ray**：总控在 `fdffa2e` 跑真实 1/4 CPU 函数状态与原 ACK 恢复，以及 Ray 公开 workers/native_resources，**13 passed / 0 skipped / 209.17秒**。此前 `9d3481f` 的98 API/168例矩阵与原GPU绑定合组6 passed；最后无RayData单项因夹具没有集群而红，同HEAD独立私有集群补跑1 passed，红回执保留。
+- **多机/真实GPU**：两宿主六GPU normal/failure/cancel 3 passed，远端GPU actor丢失后原ACK恢复1 passed。总控独立核三次1789输入摘要及880归档+17附件，0不符。恢复臂的96次CUDA运算在故障前已完成，恢复的是余下31条已封存缓冲，不能称“故障后又算了31次CUDA”；不是整机掉电/网络分区。见 [PHYSICAL-HOSTS-GPU-CLOSURE.md](PHYSICAL-HOSTS-GPU-CLOSURE.md)。
+- **有限存储与启动载体**：有限完整输入按原磁盘预算分配，传输credit不再错误地成为全输入容量上限；64MiB倾斜宽行正确得到128组，8MiB反例由原磁盘权威拒绝。启动assignment/recovery使用原store的有界不可变引用，保留64KiB启动上限、旧inline只读及null/并存/篡改拒绝；原GC仍为唯一引用追踪者。见 [SOURCE-FANOUT-LAUNCH-CLOSURE.md](SOURCE-FANOUT-LAUNCH-CLOSURE.md)，owner50真验含Ray原ACK恢复。
+- **大图性能**：原67逻辑节点、64源行、1024输出、4 process worker、256MiB与120秒预算，在 `b4263c7` 完整通过，13.292秒；旧实现同输入12.83秒。纯同步CPU后缀可在原总内存和单宿主grant内合并，源/GPU/异步边界保留。该单次诊断不等于正式五轮性能通过。
+- **轻量CPU仍慢**：仅减少重复codec及每cut后代pin写入后，20k→10k实测32.662秒；原实现1.872秒。保留全前缀SHA验证，pin由2514降到50。没有通过减少检查、调大预算或超时获得“达标”。正在实现并测有界控制消息批量；双宿主同负载原120秒仍红，实际actor/原journal/PID退出都已取证。
+- **容量池历史积累**：只在原池归档已RELEASED记录，保留原字节、重复release与ID不可重用，bounded scan不足时不准入；50项私有池测试通过。新布局不可与旧flat-only客户端混用，未部署共享池。测试误触共享池及精确恢复单独披露于下方及 [CAPACITY-HISTORY-CLOSURE-20261116.md](CAPACITY-HISTORY-CLOSURE-20261116.md)。
+- **本轮新组合失败闭环**：初次35节点为26 passed/7 failed/2 PG skipped；真实producer默认参数误拒已修，结果读取夹具改为观察原read_admitted路径，quota仍锁定原PromptBudgetExceededError及一次计费，进程测试runner加main guard。固定 `fd594c5` 12 passed/2 PG skipped，覆盖7个原失败与5个可变helper反例。原断言的数据/额度/ACK语义保留，未把PG跳过算通过。
+
+最新原始总控回执：`/tmp/demiflow-ray-launch-fdffa2-evidence/verification.json`、`/tmp/demiflow-native-closure-fd594-evidence/verification.json`、`/tmp/demiflow-largegraph-b426/large_graph/trial.json`。完整同HEAD终验待批量传输候选合并后进行。
 
 ## 两条原始意图与目前判断
 
@@ -49,21 +54,20 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 
 ## 当前仍在处理的核心项
 
-1. **函数状态在资源停车后丢失：真实业务语义缺陷。** 同一8行输入与同一算子，workers=1得到8个1，workers=4得到1…8。修复归原编译/函数状态适配器，原journal持有快照；必须隔离函数实例、默认参数和cells，不污染封存程序，不复制显式共享活对象。首轮正例修正不代表验收完成；旧F7中断/代码漂移拒绝、F9真实工作台及生命周期组合仍需通过。
-2. **跨机共享工件租约身份：实际Dataset被错误拒绝。** 同一锁文件两机st_dev不同（196/170），inode和fsid相同，共享锁互斥实测有效。修复使用原journal版本化身份及原物理锁，保留本端fstat/lstat、替换/symlink防护；旧v1历史不静默升级。修复已集成，原v1保护及真实双机租约/GC通过；总控独立恢复与历史21项通过，旧竞态夹具按v2修正后4项通过。见 [CROSS-HOST-LEASE-CLOSURE.md](CROSS-HOST-LEASE-CLOSURE.md)。两机Dataset原四例在固定候选原样通过，总控已独立核对1786输入及26份原journal归档，见 [PHYSICAL-HOSTS-CPU-CLOSURE.md](PHYSICAL-HOSTS-CPU-CLOSURE.md)。
-3. **跨宿主GPU绑定仍未交付。** 单宿主真实CUDA四例已通过；当前Ray适配仍只允许一台GPU宿主。实际Ray设备与原DevicePool预约必须一一对应，按宿主准入，不能只删除守卫。仅在授权的空闲设备和私有集群测试。
-4. **已完成项不重复扩张。** 转换前共驻预算、实际恢复读取窗口、提前关闭、原GC与FD/历史保护均已交付定向证据。后续按上述修复影响补验，不以反复全量测试替代核心修复。
-5. **诚实保留其它范围。** 外部PostgreSQL未连库，完整性能矩阵/长内核与真实主机故障仍未证明；工作台image/document Embedding授权、全部Notebook/Case产品验收不因引擎用例通过自动完成。正式门中disk_gc已接，其余16门原NotRun不能计为通过。
+1. **性能及及时交接**：轻量CPU和跨机逐条RPC开销，40k宽行iter_rows原120秒仍未闭环。批量传输只合并已就绪的有界消息，不等待凑满，不减少fence/credit/ACK/行字节校验。九类Local及Ray/两机正式五轮矩阵未完成。
+2. **正式门接线与完整组合**：multiworker barrier、route recovery、driver restart、actor lifecycle正在复用真实链路接回原门。target/broadcast的C层能力不能冒充公开Dataset lowering；尚缺公开端到端触发证据。原其余NotRun按实际缺口保留，不能拿专项测试数顶替。
+3. **产品与真实业务**：最终同HEAD工作台实际图/来源/运行/停止/恢复，以及Notebook/Case已承诺范围组合。image/document Embedding工作台的object-read授权仍未开放；不移除守卫冒充完成。外部PostgreSQL没有测试DSN，继续明确未验。
+4. **历史与权威**：原RunJournal/CommitCoordinator、code-pin、旧来源/提交/unknown效果边界不变。已验证多机actor损失不代替整机/网络故障，旧布局容量客户端不自动获得新布局兼容保证。
 
 ## 对齐意图，而不是用测试数量折算百分比
 
 | 原意图 | 当前可依赖的结论 | 仍需保留的边界 |
 | --- | --- | --- |
-| I01/I02 同一Dataset、Ray Core承载 | ab1 Local/Ray各168例；无Ray Data调用，真实全矩阵禁止导入 | 转换/回读已定向验收；函数状态与跨机租约修复仍在途 |
+| I01/I02 同一Dataset、Ray Core承载 | ab1 Local/Ray各168例；无Ray Data调用，真实全矩阵禁止导入 | 函数状态、双机租约与最新Ray原ACK恢复已真验；完整终验仍需匹配最终代码 |
 | I03/I05/I06 交接、共享、多输入、及时背压 | 内存/持久增量/有限封存、实际共享图及join、限流与提前结束有真实专项 | 跨宿主完整路由故障矩阵未验 |
-| I04 CPU/GPU独立 | 来源保持独立；纯CPU后缀可在真实容量允许时融合，GPU/显式隔离不被吸收 | 真实单卡张量峰值及释放有证据；多台GPU宿主仍明确拒绝 |
+| I04 CPU/GPU独立 | 来源保持独立；纯CPU后缀可在真实容量允许时融合，GPU/显式隔离不被吸收 | 本机四卡及两宿主六卡实际CUDA/释放通过；不声称fractional/MIG或硬VRAM上限 |
 | I07/I10/I13 单一权威及历史 | 原RunJournal/CommitCoordinator/真实ACK与恢复，未知效果不重发，原封存/代码来源保护 | 不把局部历史兼容推定为任意旧版本兼容；完整GC需保历史根 |
-| I08 有限资源和性能 | 原预算反例保持，31行退步、GC/FD、driver累计返回已修且真验 | 40k通过但余量小；转换前共驻与恢复回读已修，完整性能/峰值矩阵未交付 |
+| I08 有限资源和性能 | 原预算反例保持，31行退步、GC/FD、driver累计返回已修且真验 | 原take_all压力通过不代替iter_rows压力；大图通过，轻量CPU/两机及完整性能矩阵未达标 |
 | I09 真实业务 | Local模型/队列/fetch/Save及恢复有实际链路；外部模型仅本地transport替身 | 外部PostgreSQL未连库，工作台image/document Embedding授权未开放 |
 | I11 多机 | 真实两宿主Dataset、原生结果/ACK、共享源与actor恢复通过 | 真实两宿主Dataset及远端actor损失恢复通过；整机失效/网络分区未完成 |
 | I12 产品 | 工作台看原执行图/来源、真实运行/结果/恢复，Notebook/Case已有专项回归 | 既有产品专项并非最新同HEAD全产品验收；引擎不代表全部产品root |
@@ -74,3 +78,6 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 主仓仍为 `e40a6dd`，原11处文档dirty保持；未在主仓运行测试、未push/合主仓、未接管在运服务。承重七件相对 `362d8528` 字节未变。
 
 必须单独披露一次失误：诊断浏览器测试曾使用旧fixture默认目录，覆盖历史 `P1/screenshots/logical-source-unchecked.png` 一张图片。原字节未恢复；较早归档不能证明与原图相同，未冒充原件回填。主仓代码和业务数据未受影响。fixture默认已改为独立`/tmp`，后续截图显式隔离。详情 [BROWSER-EVIDENCE-INCIDENT.json](BROWSER-EVIDENCE-INCIDENT.json)。
+
+
+2026-11-16另一次测试边界失误：容量回归漏设DEMIFLOW_RESOURCE_ROOT，触发共享默认池1019条已RELEASED历史归档和2条本测试预约。经原锁/测试时间窗/inode/字节验证，1019原名字已精确恢复；总1028现存记录与事故首次取证摘要全等，原5 BOUND未动，2测试预约已原协议释放且保留历史。总控独立再次逐条核对0不符。没有删除历史或退款其他owner；没有先前逐文件摘要，故不宣称整个事故与事故前字节证明已齐。今后入口强制私有pool，不将候选归档布局用于在运共享客户端。

@@ -1,0 +1,31 @@
+{
+  "report_sha256": "d0027aa637467d25d2e9f3e7d4df8495c1b9a57c68dd8e2dd8fef844eefffed9",
+  "file_counts": {
+    "archive": 880,
+    "artifacts": 17
+  },
+  "mismatches": [],
+  "sources": {
+    "gpu-r1": {
+      "head": "883cc5c0cb6b3ad12701464a21377818679f41f7",
+      "count": 1789,
+      "mismatches": [],
+      "changed_inputs": [],
+      "pytest_exit": 0
+    },
+    "gpu-r2-recovery": {
+      "head": "a2013ac39dba586c1c5fd7f67f1830e1b5c495d8",
+      "count": 1789,
+      "mismatches": [],
+      "changed_inputs": [],
+      "pytest_exit": 1
+    },
+    "gpu-r3-recovery": {
+      "head": "52d94576343026e27609339dddcdd3e62dd90ed8",
+      "count": 1789,
+      "mismatches": [],
+      "changed_inputs": [],
+      "pytest_exit": 0
+    }
+  }
+}
