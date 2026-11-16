@@ -146,9 +146,13 @@ def test_real_source_split_coverage_with_fewer_active_workers(tmp_path, monkeypa
 def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_path, monkeypatch):
     class Interrupted(Exception):
         pass
-    original = DataflowExecution._retire_phase
+    # A pure synchronous map may legitimately fuse with its terminal. Use a
+    # real finite boundary so the first ACK precedes an unstarted result phase;
+    # the test still proves 2 -> 1 workers without rewriting the sealed plan.
+    pipeline = _three_stage_dataset().sort('n')
     seen = []
     def stop(execution, image):
+        assert not image.cut.final
         seen.append(execution._physical)
         raise Interrupted()
     with pytest.raises(Interrupted):
@@ -156,7 +160,7 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
             ref = run.ref
             with monkeypatch.context() as patch:
                 patch.setattr(DataflowExecution, '_retire_phase', stop)
-                _three_stage_dataset().take_all()
+                pipeline.take_all()
     frozen = seen[0]
     assert frozen.policy.max_active_workers == 2
     original_place = DataflowExecution._place_hosts
@@ -169,6 +173,6 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
     with RunContext.resume(ref), data.local_execution(workers=1) as session:
         with monkeypatch.context() as patch:
             patch.setattr(DataflowExecution, '_place_hosts', place)
-            assert _three_stage_dataset().take_all() == [{'n': n} for n in range(1, 9)]
+            assert pipeline.take_all() == [{'n': n} for n in range(1, 9)]
 
         assert session.stats['admitted_bounds']['max_active_workers'] == 1

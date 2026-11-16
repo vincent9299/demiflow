@@ -21,6 +21,25 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
         outgoing.setdefault(edge.producer, []).append(edge)
     over_workers = (policy.max_active_workers is not None
         and sum(len(stage.partitions) for stage in stages) > policy.max_active_workers)
+    # Ordinary synchronous CPU DAGs execute their kernels serially inside the
+    # existing GraphRunner. Keep the source independent, but avoid a durable
+    # worker handoff for every tiny map when the declared worker ceiling would
+    # otherwise split the graph. Stateful/asynchronous/device/finite kernels
+    # retain their existing independent scheduling and resource contracts.
+    pure_dag_suffix = (policy.max_active_workers is not None
+        and policy.max_active_workers >= 2 and over_workers
+        and len(graph.terminals) == 1
+        and all(nodes[t].kernel.effect == 'pure' and nodes[t].kernel.state == 'none'
+                and nodes[t].kernel.resource_role == 'cpu' for t in graph.terminals)
+        and all(n.kind in {'source', 'terminal'} or (
+            n.kernel.effect == 'pure' and n.kernel.state == 'none'
+            and n.kernel.resource_role == 'cpu'
+            and (n.kind == 'transform' and n.kernel.mergeable
+                 or n.kind == 'relational' and n.kernel.kind == 'union')
+            and all(p.requirement == 'incremental' for p in n.kernel.inputs)
+            and n.kernel.configuration.get('concurrency', 1) == 1
+            and not n.kernel.configuration.get('streaming_map')
+            and not n.kernel.configuration.get('flush_interval')) for n in graph.nodes))
     # A default four-worker linear pipeline must not park every pure map just
     # because it has more than four logical stages. Reuse the already supported
     # source + suffix ownership, preserving every original logical kernel.
@@ -35,7 +54,7 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
     # Small-worker pipelines need the same source + suffix layout for ordinary
     # per-task transforms. Co-location keeps each original kernel's task/state
     # boundaries, including atomic expansion into a downstream batch consumer.
-    bounded_suffix = linear_suffix or (policy.provider == 'local' and policy.max_active_workers == 2
+    bounded_suffix = pure_dag_suffix or linear_suffix or (policy.provider == 'local' and policy.max_active_workers == 2
         and over_workers)
     # A shared upstream feeding both prepend ports must run once. Preserve all
     # input owners/ports, but put the prepend and its result consumer together
@@ -99,7 +118,10 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
         resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in members)
         if resident > bounds.max_resident_bytes - max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)):
             continue
-        cpu = sum(s.profile.requests['cpu_millis'] for s in members)
+        # All pure synchronous kernels share one business thread: their CPU
+        # time does not overlap. Memory windows still coexist and are summed.
+        # Concurrent/stateful suffixes keep the original summed CPU admission.
+        cpu = (max if pure_dag_suffix else sum)(s.profile.requests['cpu_millis'] for s in members)
         # Cluster totals do not prove that a single fused owner fits one host.
         # Keep independently placeable stages when no verified host fits.
         if not any(cpu <= host.logical_resources.get('cpu_millis',

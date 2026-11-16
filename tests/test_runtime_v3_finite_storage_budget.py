@@ -33,17 +33,18 @@ def test_wide_hot_key_uses_original_disk_budget(tmp_path, monkeypatch, disk_byte
         max_batch_bytes=262144, max_scratch_bytes=disk_bytes,
         max_state_bytes=2*1024**2, max_output_rows=1000000,
         checkpoint_rows=512, checkpoint_interval_ms=1000, timeout_s=120)
-    with RunContext.start(tmp_path/'run', limits=limits) as run:
-        if disk_bytes < 64*1024**2:
-            with pytest.raises((DataflowError, ExecutionBudgetExceeded)) as error:
+    if disk_bytes < 64*1024**2:
+        with pytest.raises((DataflowError, ExecutionBudgetExceeded)) as error:
+            with RunContext.start(tmp_path/'run', limits=limits):
                 data.from_iter(_rows).reduce_by_key('k', _reduce).take_all()
-            if isinstance(error.value, DataflowError):
-                assert error.value.code == 'BUDGET_EXCEEDED'
-            else:
-                assert str(error.value) == 'Execution budget exhausted: artifact_staging_bytes'
-            assert not any(e._restore_image is not None and e._restore_image.cut.final
-                           for e in executions)
+        if isinstance(error.value, DataflowError):
+            assert error.value.code == 'BUDGET_EXCEEDED'
         else:
+            assert str(error.value) == 'Execution budget exhausted: artifact_staging_bytes'
+        assert not any(e._restore_image is not None and e._restore_image.cut.final
+                       for e in executions)
+    else:
+        with RunContext.start(tmp_path/'run', limits=limits) as run:
             actual = data.from_iter(_rows).reduce_by_key('k', _reduce).take_all()
             expected = {}
             for row in _rows():
