@@ -205,6 +205,20 @@ class RemotePromptJournal:
         self._waiters.clear()
 
 
+class RemotePrivateEmbeddingJournal(RemotePromptJournal):
+    """Explicit delivery cache; the driver owns the original private database."""
+    def __init__(self, *, services, action, node_id, declaration):
+        super().__init__(port=services.journal, action=action, bounds=services.bounds)
+        self._bind(node_id, services.store)
+        self.read_only = declaration.get('read_only', False)
+        self.timeout_s = min(self.timeout_s, declaration.get('timeout_s', 30))
+
+    def reserve(self, request):
+        # The driver derives ceilings and the stable action/node/key admission.
+        # No caller-supplied path, charge or native request reservation crosses.
+        return bool(self._rpc(self._command('reserve', request)))
+
+
 class RemotePromptRecovery(NativePromptRecovery):
     """Prompt recovery backed by the driver native journal, not a local SQLite.
 

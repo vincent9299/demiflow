@@ -563,16 +563,35 @@ class _SQLiteJournalShard:
         """Read the result and its attempt in one SQLite statement snapshot."""
         return self._lookup(request, with_references=True)
 
-    def _lookup(self, request, *, with_references):
+    def _lookup(self, request, *, with_references, max_bytes=None):
         key = request_key(request)
         fields = 'response_json, legacy_refs_json, request_json IS NULL, error_json'
+        parameters = ()
+        if max_bytes is not None:
+            if type(max_bytes) is not int or max_bytes < 1:
+                raise ValueError('Journal lookup max_bytes must be a positive integer')
+            # One SQLite statement decides the UTF-8 byte bound and projects
+            # only admitted fields. Never return an oversized historical JSON
+            # document to Python and then check its length after allocation.
+            size = '+'.join('COALESCE(length(CAST(' + column + ' AS BLOB)),0)'
+                            for column in ('response_json', 'legacy_refs_json', 'error_json'))
+            bounded = lambda column: 'CASE WHEN (' + size + ')<=? THEN ' + column + ' ELSE NULL END'
+            fields = ','.join((bounded('response_json'), bounded('legacy_refs_json'),
+                               'request_json IS NULL', bounded('error_json')))
+            parameters = (max_bytes,) * 3
         if with_references:
             fields += (', (SELECT COALESCE(MAX(attempt),0)+1 FROM recovery_events '
                        'WHERE recovery_events.request_key=calls.request_key)')
+        if max_bytes is not None:
+            fields += ',(' + size + ')'
         with self._lock:
             db = self._connect()
             row = db.execute(
-                'SELECT ' + fields + ' FROM calls WHERE request_key=?', (key,)).fetchone()
+                'SELECT ' + fields + ' FROM calls WHERE request_key=?', parameters + (key,)).fetchone()
+            if row is not None and max_bytes is not None:
+                if row[-1] > max_bytes:
+                    raise ValueError('Journal lookup exceeds max_bytes before JSON decoding')
+                row = row[:-1]
             if row is not None and row[2] and not self.read_only:
                 # A legacy import deliberately skipped full request payloads.
                 # The caller now supplies this exact identity; store its compact
@@ -1215,6 +1234,14 @@ class SQLitePromptJournal:
 
     def lookup_with_references(self, request):
         return self._for_request(request).lookup_with_references(request)
+
+    def lookup_bounded(self, request, *, max_bytes, with_references=False):
+        """Bound the combined stored JSON before returning it from SQLite."""
+        if type(with_references) is not bool:
+            raise ValueError('Journal with_references must be boolean')
+        value, references = self._for_request(request)._lookup(
+            request, with_references=with_references, max_bytes=max_bytes)
+        return (value, references) if with_references else value
 
     def reserve(self, request):
         key = request_key(request)

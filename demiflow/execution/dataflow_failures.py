@@ -30,6 +30,33 @@ from ..data.runtime_contract import RuntimeContractError
 _KNOWN[RuntimeContractError.__module__ + "." + RuntimeContractError.__qualname__] = RuntimeContractError
 from ..operator_llm.errors import PromptBudgetExceededError
 _KNOWN[PromptBudgetExceededError.__module__ + '.' + PromptBudgetExceededError.__qualname__] = PromptBudgetExceededError
+from ..operator_llm.journal import UncertainPromptCall
+from ..embeddings.payload import EmbeddingProtocolError
+_KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls
+               for cls in (UncertainPromptCall, EmbeddingProtocolError)})
+_HTTP_TYPE = 'httpx.HTTPStatusError'
+
+
+def _http_status_fields(value, *, redact=False):
+    from urllib.parse import urlsplit, urlunsplit
+    if (not isinstance(value, Mapping) or set(value) != {'method', 'url', 'status'}
+            or type(value['method']) is not str or not re.fullmatch(r'[A-Z]{1,16}', value['method'])
+            or type(value['status']) is not int or not 100 <= value['status'] <= 599
+            or type(value['url']) is not str or len(value['url']) > 4096):
+        raise DataflowError('INVALID_CONTRACT', 'Invalid bounded HTTP failure fields')
+    try:
+        parts = urlsplit(value['url'])
+        if parts.scheme not in {'http', 'https'} or not parts.hostname:
+            raise ValueError('HTTP URL required')
+        host = '[' + parts.hostname + ']' if ':' in parts.hostname else parts.hostname
+        if parts.port is not None:
+            host += ':' + str(parts.port)
+        safe = urlunsplit((parts.scheme, host, parts.path, '', ''))
+        if not redact and safe != value['url']:
+            raise ValueError('HTTP failure URL contains nonpublic components')
+    except (ValueError, UnicodeError) as error:
+        raise DataflowError('INVALID_CONTRACT', 'Invalid public HTTP failure URL') from error
+    return {'method': value['method'], 'url': safe, 'status': value['status']}
 
 
 def failure_payload(exc, *, _depth=0, _budget=None):
@@ -40,6 +67,15 @@ def failure_payload(exc, *, _depth=0, _budget=None):
     payload = {'code': getattr(exc, 'code', 'INTERNAL_PROTOCOL'),
             'error_type': name if name in _KNOWN or name in {_RECOVERY_TYPE, _UNRESOLVED_TYPE, _BUDGET_TYPE} else None,
             'message': message[:2048], 'traceback': traceback.format_exc()[-8000:]}
+    if name == _HTTP_TYPE:
+        fields = _http_status_fields({'method': exc.request.method, 'url': str(exc.request.url),
+                                     'status': exc.response.status_code}, redact=True)
+        # Exception text/traceback can contain headers, credentials or provider
+        # body excerpts. HTTP diagnostics carry only the whitelisted public fact.
+        payload.update(error_type=_HTTP_TYPE, http=fields, traceback='',
+                       message=f"HTTP {fields['status']} for {fields['method']} {fields['url']}")
+    if isinstance(exc, UncertainPromptCall):
+        payload['code'] = 'UNKNOWN_EFFECT'
     if isinstance(exc, UnresolvedCommit):
         payload.update(code='UNKNOWN_EFFECT', error_type=_UNRESOLVED_TYPE)
     if type(exc) is ExecutionBudgetExceeded:
@@ -54,6 +90,11 @@ def failure_payload(exc, *, _depth=0, _budget=None):
                 break
             children.append(failure_payload(child, _depth=_depth + 1, _budget=_budget))
         payload['children'] = children
+        def contains_http(value):
+            return value.get('error_type') == _HTTP_TYPE or any(
+                contains_http(child) for child in value.get('children', ()))
+        if any(contains_http(child) for child in children):
+            payload.update(message='Worker exception group with HTTP status failure', traceback='')
         if len(children) != len(exc.exceptions):
             payload['message'] += ' [additional cleanup errors truncated by control budget]'
     if type(exc) is HistoryReadLimit:
@@ -97,6 +138,18 @@ def restore_failure(payload, *, _depth=0, _budget=None):
         if code != 'BUDGET_EXCEEDED':
             raise DataflowError('INVALID_CONTRACT', 'unknown failure cannot be promoted to a definite budget rejection')
         error = ExecutionBudgetExceeded(_budget_name(payload.get('budget')), message=message)
+    elif payload.get('error_type') == _HTTP_TYPE:
+        import httpx
+        fields = _http_status_fields(payload.get('http'))
+        request = httpx.Request(fields['method'], fields['url'])
+        # Ignore remote text/traceback for this type even if a sender forges it.
+        message = f"HTTP {fields['status']} for {fields['method']} {fields['url']}"
+        error = httpx.HTTPStatusError(message, request=request,
+                                    response=httpx.Response(fields['status'], request=request))
+    elif cls is UncertainPromptCall:
+        if code != 'UNKNOWN_EFFECT':
+            raise DataflowError('INVALID_CONTRACT', 'Uncertain request must retain UNKNOWN_EFFECT')
+        error = cls(message)
     elif cls is UnresolvedCommit:
         # Compatibility with an older host's fixed legacy exception tag.
         error = DataflowUnresolvedCommit(message)
@@ -104,6 +157,6 @@ def restore_failure(payload, *, _depth=0, _budget=None):
         error = cls(message)
     else:
         error = DataflowError(code if code in DATAFLOW_ERROR_CODES else 'INTERNAL_PROTOCOL', message)
-    if payload.get('traceback'):
+    if payload.get('traceback') and payload.get('error_type') != _HTTP_TYPE:
         error.add_note(str(payload['traceback'])[-8000:])
     return error

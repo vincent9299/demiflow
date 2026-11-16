@@ -466,6 +466,8 @@ class DataflowExecution:
             self._services.journal_service.bind_queue(self._acquisition)
         from .dataflow_batch_membership import bind_contracts
         bind_contracts(self._services.journal_service, graph, physical)
+        from .dataflow_embedding_journal import bind_private_embedding_contracts
+        bind_private_embedding_contracts(self._services.journal_service, graph)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
             from .dataflow_stream_lance import NativeStreamLanceService

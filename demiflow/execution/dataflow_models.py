@@ -113,6 +113,16 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
                   'max_batch': operation.max_batch, 'flush_interval': operation.flush_interval,
                   'concurrency': operation.concurrency, 'model_contract': _json_config(operation.model_contract)}
         kind, state, effect, role = 'embedding', 'none', 'journaled', 'remote_api'
+        actor = getattr(operation.callable.target, '__self__', None)
+        private = getattr(actor, 'options', {}).get('sqlite_journal')
+        if private is not None:
+            from ..embeddings.flow_contract import embedding_facts
+            declared = embedding_facts(operation)['arguments']
+            # Only explicit legacy cache declarations add fields. Existing
+            # native configuration/identity bytes remain unchanged.
+            config['private_journal'] = _json_config(declared['options']['sqlite_journal'])
+            config['max_requests'] = declared['max_requests']
+            state = 'nonrecoverable'
         ports = _input_ports(('main',))
     elif isinstance(operation, AgentMapOp):
         environment = operation.environment
@@ -325,7 +335,12 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
     elif kind == 'embedding':
         # Embedding owns its NativeEmbeddingRecovery and atomic budget; it has no
         # Prompt coordinator and never borrows bind_client.
-        journal.bind_embedding_adapter(instance, services=services, node_id=node_id)
+        if spec.configuration.get('private_journal') is not None:
+            from .dataflow_embedding_journal import bind_private_embedding_adapter
+            bind_private_embedding_adapter(instance, services=services, node_id=node_id,
+                                            configuration=spec.configuration)
+        else:
+            journal.bind_embedding_adapter(instance, services=services, node_id=node_id)
     elif kind == 'agent':
         journal.bind_agent_adapter(instance, services=services, node_id=node_id)
     elif kind in ('fetch', 'document'):

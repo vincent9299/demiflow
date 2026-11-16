@@ -35,12 +35,14 @@ def test_native_document_payload_and_replay(server, tmp_path):
                           {'id': 'bad', 'document_input': bad}]).document_embeddings(
         model=server['model'], batch_size=2, error_output='error', call_output='call',
         options={'sqlite_journal': {'path': str(tmp_path / 'journal.sqlite')}})
-    rows = ds.materialize().take_all()
+    # M004 and the pre-v3 native recovery guard already forbid materialize +
+    # private SQLite. Delivery retains the original explicit request-cache mode.
+    rows = ds.take_all()
     assert server['bodies'][0]['input'] == [text]
     assert len(server['bodies']) == 1
     assert next(r for r in rows if r['id'] == 'bad')['embedding'] is None
     assert next(r for r in rows if r['id'] == 'ok')['call']['input_text_sha256'] == value['text_sha256']
-    ds.materialize()
+    ds.take_all()
     assert len(server['bodies']) == 1
     assert ds._stages[-1]._document_reader is None
 

@@ -423,13 +423,18 @@ class DriverJournalService:
             close = getattr(self._native, "close", None)
             if callable(close):
                 close()
+        from .dataflow_embedding_journal import close_private_embedding_journals
+        close_private_embedding_journals(self, deadline=deadline)
 
     def physically_stopped(self):
         """A stop request or empty inflight dictionary is not thread exit proof."""
         native = getattr(getattr(self, '_native', None), 'native_journal', None)
         thread = getattr(native, '_batch_thread', None)
         return (self._closed and all(not worker.is_alive() for worker in self._workers)
-                and not (thread is not None and thread.is_alive()))
+                and not (thread is not None and thread.is_alive())
+                and not (getattr(self, '_private_close_thread', None) is not None
+                         and self._private_close_thread.is_alive())
+                and getattr(self, '_private_close_error', None) is None)
 
     def bind_queue(self, service: object) -> None:
         if self._closed:
@@ -645,6 +650,9 @@ class DriverJournalService:
         if command.operation == 'offline_lookup':
             from .dataflow_offline import offline_lookup
             return offline_lookup(self, command, request)
+        if command.node_id in getattr(self, '_private_embedding_nodes', {}):
+            from .dataflow_embedding_journal import private_embedding_request
+            return private_embedding_request(self, command, request)
         journal = self._native_journal()
         self._journal.bind_source(self._fence, self._action.action_id + '-native-model-journal',
                                   {'schema': 'demiflow.native_model_journal.v1',

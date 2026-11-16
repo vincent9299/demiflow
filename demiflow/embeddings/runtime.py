@@ -81,6 +81,7 @@ class EmbeddingActor:
         self._response_pool = None
         self._document_reader = None
         self._native_recovery = None
+        self._journal_binding = None
 
     def native_stream_recovery(self, action, node_id):
         from .stream_recovery import NativeEmbeddingRecovery
@@ -113,7 +114,8 @@ class EmbeddingActor:
         self._prepare_pool = BlockingIOPool(self.options['prepare_workers'], name='demiflow-embeddings-prepare')
         self._response_pool = BlockingIOPool(self.options['response_workers'], name='demiflow-embeddings-response')
         self._request_slots = asyncio.Semaphore(self.concurrency)
-        self._journal = (SQLitePromptJournal(max_requests=self.max_requests,
+        self._journal = (self._journal_binding if self._journal_binding is not None else
+                         SQLitePromptJournal(max_requests=self.max_requests,
                           **self.options['sqlite_journal']) if self.options['sqlite_journal'] else None)
         self._owner = self.service.bind(self.model) if self.service is not None else None
         headers = {'Content-Type': 'application/json'}
