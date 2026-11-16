@@ -358,6 +358,7 @@ def _classify_dependency_module(module):
     refuses rather than silently leaving an unpinned business dependency.
     """
     import inspect
+    import os
     import sys
     import sysconfig
     from pathlib import Path
@@ -370,7 +371,8 @@ def _classify_dependency_module(module):
         filename = inspect.getsourcefile(module)
     except (TypeError, OSError):
         filename = None
-    filename = filename or getattr(module, "__file__", None)
+    module_filename = getattr(module, "__file__", None)
+    filename = filename or module_filename
     if filename:
         path = Path(filename)
         try:
@@ -383,6 +385,16 @@ def _classify_dependency_module(module):
             base = sysconfig.get_path(key)
             if base and resolved.is_relative_to(Path(base).resolve()):
                 return None
+            if base and module_filename:
+                # An installation may link a package to shared wheel files.
+                # Keep its original installation ownership before following
+                # that link; arbitrary sys.path entries are not installation
+                # roots. Both source and module metadata must agree. Editable
+                # sources outside this root remain business code to be pinned.
+                installed = Path(os.path.abspath(base))
+                if all(Path(os.path.abspath(value)).is_relative_to(installed)
+                       for value in (filename, module_filename)):
+                    return None
         if resolved.suffix == ".py" and resolved.is_file():
             return resolved
         return None
