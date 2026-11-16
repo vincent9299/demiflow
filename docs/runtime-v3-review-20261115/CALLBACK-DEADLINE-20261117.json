@@ -1,0 +1,25 @@
+{
+  "evidence": [
+    {
+      "path": "/tmp/demiflow-callback-deadline-r1/batch/receipt.json",
+      "sha256": "92c5a06c4891004850b8ca65ee034ae508821530bcb78fb0d51330c3d2ed27cc",
+      "returncode": 0,
+      "calls": {
+        "passed": 9,
+        "failed": 0
+      }
+    },
+    {
+      "path": "/tmp/demiflow-callback-deadline-r2/batch/receipt.json",
+      "sha256": "07dede87e53babb4c3a6e256127cbbfe297deb1836442058e64041b9372489d8",
+      "returncode": 1,
+      "calls": {
+        "passed": 17,
+        "failed": 4
+      }
+    }
+  ],
+  "not_run": [
+    "test_real_stream_deadline_preserves_catch_statistics_and_dead_rows"
+  ]
+}

@@ -469,12 +469,14 @@ class OperatorKernel:
                 raise _err('CORRUPT_ARTIFACT', 'Shared actor call resolved to a different owner')
             instance = self._shared_actor.acquire(self._occurrence, instance, self._services,
                 lifecycle=lifecycle, timeout=self._spec.configuration.get('hard_timeout'),
-                await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'})
+                await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'}
+                    and self._spec.configuration.get('execution') != 'thread')
         else:
             instance = AsyncInstance(instance, self._services,
                                      owner=owner, lifecycle=lifecycle,
                                      timeout=self._spec.configuration.get('hard_timeout'),
-                                     await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'})
+                                     await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'}
+                    and self._spec.configuration.get('execution') != 'thread')
         instance.native_scope = (self._occurrence, self._partition_id) + ((slot,) if self._worker_scope else ())
         self._instances[slot] = instance
         if slot == 0:
@@ -746,10 +748,12 @@ class OperatorKernel:
         self._batch_ordinal += 1
         if self._calls is None:
             yield from self._emit(preserve_block(invoke_batch(self._spec, batch,
-                instance=self._slot_instance(0), services=self._services, schemas=self._schemas), batch[0].block_partition))
+                instance=self._slot_instance(0), services=self._services, schemas=self._schemas,
+                observe=self.observations.observe, observe_dead=self.observations.dead_batch), batch[0].block_partition))
         else:
             yield from self._emit(self._calls.submit(lambda slot: preserve_block(invoke_batch(self._spec, batch,
-                instance=self._slot_instance(slot), services=self._services, schemas=self._schemas), batch[0].block_partition), scope=self._call_scope, input=batch))
+                instance=self._slot_instance(slot), services=self._services, schemas=self._schemas,
+                observe=self.observations.observe, observe_dead=self.observations.dead_batch), batch[0].block_partition), scope=self._call_scope, input=batch))
 
     def _group_limits(self):
         # Retained groups occupy the original batch/state grants; one emitted
@@ -1226,7 +1230,9 @@ class OperatorKernel:
             def compute(slot, input):
                 instance = self._slot_instance(slot)
                 invoke = invoke_batch if type(input) is tuple else invoke_unary
-                options = {} if type(input) is tuple else {'observe': self.observations.observe}
+                options = {'observe': self.observations.observe}
+                if type(input) is tuple:
+                    options['observe_dead'] = self.observations.dead_batch
                 return invoke(self._spec, input, instance=instance, services=self._services, schemas=self._schemas, **options)
             self._calls.restore(inflight, slots=image.get('call_slots'), compute=compute)
         elif inflight:

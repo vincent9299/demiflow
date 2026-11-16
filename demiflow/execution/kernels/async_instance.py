@@ -5,10 +5,33 @@ import asyncio
 import concurrent.futures
 import inspect
 import threading
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 import time
 
 from ..contracts.dataflow_errors import DataflowError
+
+
+class CallbackDeadlineExceeded(DataflowError):
+    """Only an explicit callback deadline whose owned work has fully drained."""
+    def __init__(self):
+        super().__init__('DEADLINE_EXCEEDED', 'operator callback exceeded hard_timeout')
+
+
+_CALLBACK_WORK = ContextVar('demiflow_callback_work', default=None)
+
+
+class _CallbackWork:
+    def __init__(self):
+        self.tasks = set()
+
+
+def _owned_task(loop, coroutine, *, context=None):
+    task = asyncio.Task(coroutine, loop=loop, context=context)
+    owner = context.get(_CALLBACK_WORK) if context is not None else _CALLBACK_WORK.get()
+    if owner is not None:
+        owner.tasks.add(task)
+        task.add_done_callback(owner.tasks.discard)
+    return task
 
 
 class _CancelledCall:
@@ -21,7 +44,7 @@ class _AsyncWorkPool(concurrent.futures.ThreadPoolExecutor):
     """Keep the real futures that cancelling asyncio.to_thread cannot stop."""
     def __init__(self):
         super().__init__(thread_name_prefix="demiflow-operator-async-work")
-        self._active = set()
+        self._active = {}
         self._active_lock = threading.Lock()
 
     def submit(self, fn, /, *args, **kwargs):
@@ -30,12 +53,16 @@ class _AsyncWorkPool(concurrent.futures.ThreadPoolExecutor):
         for thread in tuple(self._threads):
             track_owned_thread(thread)
         with self._active_lock:
-            self._active.add(future)
+            self._active[future] = _CALLBACK_WORK.get()
         def done(completed):
             with self._active_lock:
-                self._active.discard(completed)
+                self._active.pop(completed, None)
         future.add_done_callback(done)
         return future
+
+    def pending_for(self, owner):
+        with self._active_lock:
+            return any(value is owner for value in self._active.values())
 
     def drain(self, timeout):
         deadline = time.monotonic() + timeout
@@ -56,7 +83,8 @@ class AsyncInstance:
         self.owner = target if owner is None else owner
         self.services = services
         self.await_calls = await_calls
-        self.timeout = timeout or services.bounds.timeout_ms / 1000
+        self.timeout = services.bounds.timeout_ms / 1000
+        self.callback_timeout = timeout
         self.loop = None
         self.thread = None
         self._loop_lock = threading.Lock()
@@ -83,9 +111,10 @@ class AsyncInstance:
     def __getattr__(self, name):
         return getattr(self.target, name)
 
-    def resolve(self, value, *, closing=False, timeout=None):
+    def resolve(self, value, *, closing=False, timeout=None, callback_timeout=None):
         if self._shared is not None:
-            return self._shared.base.resolve(value, closing=closing, timeout=self.timeout)
+            return self._shared.base.resolve(value, closing=closing, timeout=timeout,
+                                             callback_timeout=callback_timeout)
         if not closing:
             try:
                 self.check_lifecycle()
@@ -99,6 +128,7 @@ class AsyncInstance:
             with self._loop_lock:
                 if self.loop is None:
                     self.loop = asyncio.new_event_loop()
+                    self.loop.set_task_factory(_owned_task)
                     self._async_work = _AsyncWorkPool()
                     self.loop.set_default_executor(self._async_work)
                     self.thread = threading.Thread(target=copy_context().run, args=(self.loop.run_forever,),
@@ -115,6 +145,8 @@ class AsyncInstance:
                     if inspect.iscoroutine(value):
                         value.close()
                     raise DataflowError("CANCELLED", "operator is stopping")
+                if callback_timeout is not None and not closing:
+                    return await self._timed_callback(value, callback_timeout)
                 return await value
             except asyncio.CancelledError as exc:
                 # asyncio's Future bridge otherwise replaces this with an empty
@@ -152,6 +184,51 @@ class AsyncInstance:
             else:
                 future.cancel()
             raise
+
+    async def _timed_callback(self, value, timeout):
+        # A shared actor can be serving another occurrence concurrently. Own
+        # only this invocation's tasks/to_thread work; never cancel all calls.
+        owner = _CallbackWork()
+        token = _CALLBACK_WORK.set(owner)
+        cleanup = True
+        try:
+            call = asyncio.ensure_future(value)
+            done, _ = await asyncio.wait((call,), timeout=timeout)
+            if done:
+                result = call.result()
+                cleanup = False
+                return result
+            call.cancel()
+            try:
+                result = await call
+            except asyncio.CancelledError as exc:
+                raise CallbackDeadlineExceeded() from exc
+            # Match wait_for: a callback may intentionally handle cancel and
+            # return, or translate it into its own business exception.
+            return result
+        finally:
+            try:
+                if cleanup:
+                    deadline = time.monotonic() + self.timeout
+                    while True:
+                        pending = tuple(t for t in owner.tasks if not t.done())
+                        for task in pending:
+                            if not task.cancelling():
+                                task.cancel()
+                        if not pending and not self._async_work.pending_for(owner):
+                            break
+                        if time.monotonic() >= deadline:
+                            raise DataflowError('DEADLINE_EXCEEDED',
+                                'callback work did not drain within original execution deadline')
+                        if pending:
+                            done, _ = await asyncio.wait(pending, timeout=.01)
+                            for task in done:
+                                if not task.cancelled():
+                                    task.exception()  # Retire cancelled background work.
+                        else:
+                            await asyncio.sleep(.01)
+            finally:
+                _CALLBACK_WORK.reset(token)
 
     def start(self):
         if self._shared is not None:
@@ -206,7 +283,7 @@ class AsyncInstance:
             if inspect.iscoroutine(result):
                 result.close()
             raise TypeError('map synchronous callable returned an awaitable; use map_async')
-        result = self.resolve(result)
+        result = self.resolve(result, callback_timeout=self.callback_timeout)
         return self.validation.output(result) if self.validation is not None else result
 
     def request_stop(self, reason=None):
