@@ -185,10 +185,41 @@ def _event(directory, name, **values):
         _write(path, {'at_ns': time.time_ns(), 'pid': os.getpid(), **values})
 
 
+class CreditObservation:
+    """Worker-local read-only observation, installed only by test actors."""
+    def __init__(self, directory, name):
+        from demiflow.execution.exchange.dataflow_state import ChannelSetState
+        self.directory, self.name = directory, name
+        self.original = ChannelSetState.reserve
+        self.samples = self.peak_bytes = self.peak_rows = 0
+        original = self.original
+        def observe(state, *args, **kwargs):
+            value = original(state, *args, **kwargs)
+            with state._lock:
+                resident = state._resident_bytes + state._lease_bytes
+                rows = sum(lease.rows for lease in state._leases.values())
+                assert resident <= state.bounds.max_resident_bytes
+                assert len(state._leases) <= state.bounds.max_pending_events
+            self.samples += 1
+            self.peak_bytes = max(self.peak_bytes, resident)
+            self.peak_rows = max(self.peak_rows, rows)
+            return value
+        self.observe = observe
+        ChannelSetState.reserve = observe
+
+    def close(self):
+        from demiflow.execution.exchange.dataflow_state import ChannelSetState
+        assert ChannelSetState.reserve is self.observe
+        ChannelSetState.reserve = self.original
+        _write(Path(self.directory) / ('credit-' + self.name + '-' + str(os.getpid()) + '.json'),
+               {'pid':os.getpid(),'samples':self.samples,'peak_bytes':self.peak_bytes,'peak_rows':self.peak_rows})
+
+
 class SlowBranch:
     def __init__(self, directory, name, delay):
         self.directory, self.name, self.delay = directory, name, delay
         self.count = 0
+        self.credit = CreditObservation(directory, name)
     def __call__(self, row):
         _event(self.directory, self.name + '-started')
         time.sleep(self.delay)
@@ -199,6 +230,7 @@ class SlowBranch:
     def restore_state(self, state):
         self.count = state['count']
     def close(self):
+        self.credit.close()
         _write(Path(self.directory) / (self.name + '-closed.json'),
             {'at_ns': time.time_ns(), 'pid': os.getpid(), 'count': self.count})
 
@@ -363,9 +395,11 @@ def _journal(run):
     with run.journal._connection() as db:
         budgets = {name: {'consumed': used, 'ceiling': ceiling}
                    for name, used, ceiling in db.execute('SELECT name,consumed,ceiling FROM runtime_budgets')}
-        allocations = [dict(zip(('allocation_id','cleanup'), row))
-                       for row in db.execute('SELECT allocation_id,cleanup FROM resource_allocations')]
-    return {'commits': run.journal.execution_commits('action-1'), 'budgets': budgets, 'allocations': allocations}
+        allocated = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resource_allocations'").fetchone() is not None
+        allocations = ([dict(zip(('allocation_id','cleanup'), row))
+                       for row in db.execute('SELECT allocation_id,cleanup FROM resource_allocations')] if allocated else [])
+    return {'commits': run.journal.execution_commits('action-1'), 'budgets': budgets,
+            'allocation_table_exists':allocated, 'allocations': allocations}
 
 
 def _source_rows(count, width, directory):
@@ -409,7 +443,8 @@ def fanout_slow_sink(directory, *, provider='local', partial=False):
     except Exception as exc:
         error = {'type': type(exc).__name__, 'text': str(exc), 'code': getattr(exc, 'code', None)}
         if 'run' in locals(): facts = _journal(run)
-    report = {'error':error,'rows':len(rows),'input_rows':count,'row_payload_bytes':width,'limits':limits,
+    credit = [json.loads(p.read_text()) for p in directory.glob('credit-*.json')]
+    report = {'worker_credit_observations':credit,'error':error,'rows':len(rows),'input_rows':count,'row_payload_bytes':width,'limits':limits,
               'first_result_s':first,'elapsed_s':time.monotonic()-started,
               'original_execution':observed,'original_journal':facts,'capacity_holder':holder,
               'markers':{p.name:json.loads(p.read_text()) for p in directory.glob('*-start*.json')}}
@@ -417,7 +452,9 @@ def fanout_slow_sink(directory, *, provider='local', partial=False):
     assert error is None, report
     assert sorted(rows) == sorted((side,i) for side in ('fast','slow') for i in range(count))
     assert facts['commits'] and all(c['status']=='acked' for c in facts['commits'])
-    assert observed['charged_peak']['workers'] > 0 and observed['credit_samples'] > 0
+    assert observed['charged_peak']['workers'] > 0
+    assert credit and sum(v['samples'] for v in credit) > 0
+    assert max(v['peak_bytes'] for v in credit) <= limits['memory_bytes']
     if partial:
         assert len(observed['launches']) >= 3
         assert any(e['mode']=='durable_incremental' for p in observed['plans'] for e in p['physical']['exchanges'])

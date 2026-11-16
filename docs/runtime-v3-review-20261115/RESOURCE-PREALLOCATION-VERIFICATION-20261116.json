@@ -1120,6 +1120,10 @@
     "/tmp/demiflow-resource-arrow-final-tests/test_small_legal_arrow_batch_rcurrent/proof.json": {
       "sha256": "2c4ae91e43a91e257190f8810450725d7b2cdd8da4a0db319010a3d85c46141b",
       "bytes": 370
+    },
+    "/tmp/demiflow-resource-terminal-reg.xml": {
+      "sha256": "a7bf094aac68c883d7e9ed990928314d861cf8a5515090e909c1a29fd0d77e94",
+      "bytes": 10848
     }
   },
   "validation": {
@@ -1129,7 +1133,13 @@
       "failed": 0,
       "duration_s": 30.88
     },
-    "terminal_regressions": "running; no completion claim",
+    "terminal_regressions": {
+      "passed": 115,
+      "failed": 0,
+      "duration_s": 387.28,
+      "junit": "/tmp/demiflow-resource-terminal-reg.xml",
+      "note": "42-row completed-branch recovery passed but required 164 worker allocations and 163 ACKs; scheduling-cost defect remains open"
+    },
     "V012": "red: original one-worker 64-row fanout exceeds original 120s",
     "V023": "component proofs passed; whole Local/Ray combination not yet run",
     "Ray": "not_run for current fixes"
