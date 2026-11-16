@@ -250,7 +250,7 @@ def test_multi_host_remote_gpu_actor_loss_resumes_original_ack(tmp_path, monkeyp
                         break
                     record = _decode_record_document(raw, record_id=ident, sequence=sequence,
                                                      max_bytes=execution._bounds.max_row_bytes)
-                    prefix.append([record.payload['n'], record.payload['gpu']['lane']])
+                    prefix.append([record.inline['n'], record.inline['gpu']['lane']])
                     assert len(prefix) <= 96
             finally:
                 reader.close()
