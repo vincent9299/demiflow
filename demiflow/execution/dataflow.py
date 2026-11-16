@@ -938,6 +938,8 @@ class DataflowExecution:
             observe_models(self, event, payload)
             from .dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)
+            from ..planning.dataflow_graph_adapter import observe_graph_progress
+            observe_graph_progress(self, event, payload)
             key = self._report_keys.get(occ)
             if key is not None:
                 self._checked.progress(key, **{k: metrics[k] - old[k] for k in metrics})

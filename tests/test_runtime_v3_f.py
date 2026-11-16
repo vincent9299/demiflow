@@ -538,28 +538,37 @@ def _graph_spec():
 def test_f015(fake_action, monkeypatch):
     _binding_assertion()
     import demiflow.execution.graph as graph
-    import demiflow.execution.executors.local as local_mod
-    monkeypatch.setattr(local_mod, "LocalDatasetExecutor", _FakeExecutor)
-    STATE.handle = _FakeActionHandle(result_value={"target_rows": {"r0": 1}})
-    out = graph.run_local_graph(_graph_spec())
-    assert out == {"target_rows": {"r0": 1}}
-    assert STATE.execute_calls[0]["request"].kind == "materialize"
+    executor = _FakeExecutor("local")
+    declaration = _graph_spec()
+    seen = []
+    def forwarded(spec, caller, *, control_timeout_s):
+        seen.append((spec, caller, control_timeout_s))
+        return {"native_graph_result": True}
+    monkeypatch.setattr(graph, "_run_graph", forwarded)
+    assert graph.run_local_graph(declaration, _executor=executor) == {"native_graph_result": True}
+    assert seen == [(declaration, executor, 120)]
+    assert seen[0][0] is declaration
 
 
 def test_f016(fake_action, monkeypatch):
     _binding_assertion()
     import demiflow.execution.graph as graph
-    # ray is not installed in this environment; the graph entry imports the Ray
-    # executor lazily, so bind a test-domain fake module (recorded as a double).
+    # Unit boundary only: real Ray graph routing/recovery has separate tests.
     if not _real_module_available("demiflow.execution.executors.ray"):
         fake_ray = types.ModuleType("demiflow.execution.executors.ray")
         fake_ray.RayDatasetExecutor = lambda: _FakeExecutor("ray")
         monkeypatch.setitem(sys.modules, "demiflow.execution.executors.ray", fake_ray)
         TEST_DOUBLES.append("demiflow.execution.executors.ray")
-    STATE.handle = _FakeActionHandle(result_value={"target_rows": {"r0": 2}})
-    out = graph.run_ray_graph(_graph_spec())
-    assert out == {"target_rows": {"r0": 2}}
-    assert STATE.execute_calls[0]["request"].provider == "ray_core"
+    executor = _FakeExecutor("ray")
+    declaration = _graph_spec()
+    seen = []
+    def forwarded(spec, caller, *, control_timeout_s):
+        seen.append((spec, caller, control_timeout_s))
+        return {"native_graph_result": True}
+    monkeypatch.setattr(graph, "_run_graph", forwarded)
+    assert graph.run_ray_graph(declaration, _executor=executor) == {"native_graph_result": True}
+    assert seen == [(declaration, executor, 120)]
+    assert seen[0][0] is declaration
 
 
 def test_f017(fake_action):

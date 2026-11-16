@@ -1,19 +1,9 @@
-"""Static multi-worker graph orchestration (U3/S3-S4, Local; exit gates 1-3).
+"""Compatibility graph declarations translated into the unified v3 engine.
 
-The driver compiles a fixed stage->partition->worker placement, provisions one
-managed Local worker per node partition through the real ResourceManager, wires
-1:1 physical data channels between them (socketpair fds inherited via the existing
-process-unit hook), runs the frozen K3 lifecycle per worker, then schedules global
-cuts: each worker contributes its K6 fragment, the driver commits the whole group
-once through GraphCommitTerminal (full-coverage CheckpointManifest) and acks with a
-receipt that releases the workers. Business payloads flow worker->worker over the
-data sockets and never transit the driver; the shared ancestor computes each record
-once and replicates at egress (broadcast/fan_out).
-
-S3 proves the multi-worker data plane + lifecycle (exit gate 1); S4 adds the single
-CommitCoordinator commit, full K6 assembly, whole-graph restore and segment GC
-(exit gates 2/3). chain.py (U2) and the dataset API stay untouched; this is selected
-only by the opt-in ``unified_graph`` executor seam (D6).
+Shared ancestors, target programs and routing are sealed as actual v3 nodes and
+channels. The original dataflow runtime owns workers, source snapshots, credits,
+checkpointing and commits. Legacy classes below remain import-compatible for
+historical readers; the public graph entry points do not run their old driver.
 """
 import logging
 import select
@@ -501,58 +491,62 @@ class GraphCommitTerminal:
 
 def _graph_action_request(graph_spec, executor):
     from .dataflow_api import make_action_request
-
-    ancestor = graph_spec["ancestor"]
-    targets = graph_spec["targets"]
-    arguments = {
-        "source_id": graph_spec["source_id"],
-        "routing": graph_spec.get("routing", "broadcast"),
-        "exchange_mode": graph_spec.get("exchange_mode", "memory_incremental"),
-        "target_reader_ids": [target["reader_id"] for target in targets],
-        "key_fields": graph_spec.get("key_fields"),
-        "target_classes": graph_spec.get("target_classes"),
-        "target_field": graph_spec.get("target_field"),
-    }
-    return make_action_request(
-        executor, graph_spec["source"], ancestor["plan"],
-        kind="materialize", arguments=arguments)
+    from ..data.plan import LogicalPlan
+    from ..planning.dataflow_graph_adapter import translate_graph
+    source = translate_graph(graph_spec)
+    return make_action_request(executor, source, LogicalPlan(), kind='materialize',
+                               arguments={'graph': source.declaration})
 
 
-def run_local_graph(graph_spec, *, host_id="local", resource_root=None, control_timeout_s=120):
-    """Compat entry: translate the legacy Local ancestor->targets graph into v3 actions.
-
-    The independent driver resource/scheduling/global-cut commit loop is retired;
-    the fan-out graph now runs through the unified ``execute_action`` runtime
-    (E001), which materializes the shared ancestor once and reads each target
-    from the sealed result. The graph terminal summary is returned unchanged.
-    """
+def _run_graph(graph_spec, executor, *, control_timeout_s):
+    from dataclasses import replace
     from .dataflow import execute_action
-    from ..planning.dataflow_policy import resolve_runtime_policy
+    from .dataflow_api import resolve_action_runtime, record_execution_metadata
+    from ..planning.dataflow_graph_adapter import graph_credit, graph_result, validate_graph_replay
+    if current_action() is None:
+        raise RuntimeError('Graph materialization requires the native action context')
+    request = _graph_action_request(graph_spec, executor)
+    policy, bounds = resolve_action_runtime(request)
+    declaration = request.source.declaration
+    if 'queue_depth' in declaration:
+        depth = declaration['queue_depth']
+        if type(depth) is not int or depth < 1:
+            raise ValueError('graph queue_depth must be a positive integer')
+        bounds = replace(bounds, max_pending_events=min(bounds.max_pending_events, depth))
+    if 'cut_rows' in declaration:
+        rows = declaration['cut_rows']
+        if type(rows) is not int or rows < 1:
+            raise ValueError('graph cut_rows must be a positive integer')
+        policy = replace(policy, checkpoint_rows=min(policy.checkpoint_rows, rows))
+    if type(control_timeout_s) not in (int, float) or control_timeout_s <= 0:
+        raise ValueError('graph control timeout must be positive')
+    policy = replace(policy, control_timeout_ms=min(policy.control_timeout_ms, int(control_timeout_s * 1000)))
+    # Credit rejection precedes source snapshot/read, program construction and
+    # worker provisioning. The same solver seals the actual exchange windows.
+    graph_credit(declaration, bounds=bounds)
+    validate_graph_replay(request, bounds=bounds)
+    handle = execute_action(request, policy=policy, bounds=bounds)
+    try:
+        handle.result()
+        return graph_result(handle._execution)
+    finally:
+        try:
+            record_execution_metadata(request, handle._execution)
+        finally:
+            handle.close()
+
+
+def run_local_graph(graph_spec, *, host_id='local', resource_root=None,
+                    control_timeout_s=120, _executor=None):
+    """Run the complete graph through the original Local v3 action authority."""
     from .executors.local import LocalDatasetExecutor
-    from .run_context import current_action
-
-    if current_action() is None:
-        raise RuntimeError("Graph materialization requires the native action context")
-    executor = LocalDatasetExecutor(workers=1)
-    request = _graph_action_request(graph_spec, executor)
-    policy, bounds = resolve_runtime_policy({}, {}, provider="local")
-    return execute_action(request, policy=policy, bounds=bounds).result()
+    executor = _executor if _executor is not None else LocalDatasetExecutor()
+    return _run_graph(graph_spec, executor, control_timeout_s=control_timeout_s)
 
 
-def run_ray_graph(graph_spec, *, host_id="local", resource_root=None, control_timeout_s=120):
-    """Compat entry: translate the legacy Ray ancestor->targets graph into v3 actions.
-
-    Same unified ``execute_action`` runtime as ``run_local_graph``; only the
-    provider differs. The independent Ray actor resource/global-cut loop is retired.
-    """
-    from .dataflow import execute_action
-    from ..planning.dataflow_policy import resolve_runtime_policy
+def run_ray_graph(graph_spec, *, host_id='local', resource_root=None,
+                  control_timeout_s=120, _executor=None):
+    """Run the same graph through Ray Core, retaining its caller's envelope."""
     from .executors.ray import RayDatasetExecutor
-    from .run_context import current_action
-
-    if current_action() is None:
-        raise RuntimeError("Graph materialization requires the native action context")
-    executor = RayDatasetExecutor()
-    request = _graph_action_request(graph_spec, executor)
-    policy, bounds = resolve_runtime_policy({}, {}, provider="ray_core")
-    return execute_action(request, policy=policy, bounds=bounds).result()
+    executor = _executor if _executor is not None else RayDatasetExecutor()
+    return _run_graph(graph_spec, executor, control_timeout_s=control_timeout_s)

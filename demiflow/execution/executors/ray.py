@@ -138,19 +138,8 @@ class RayDatasetExecutor(DatasetExecutor):
         return self._run(selected_source, selected_plan, "materialize", {})
 
     def materialize_graph(self, graph_spec):
-        # The explicit fan-out graph_spec is translated to a standard v3 request
-        # and forwarded to the same execute_action entry (F lane seam, parallel to
-        # Local run_local_graph); there is no independent graph driver here.
-        source = graph_spec["source"]
-        plan = graph_spec["ancestor"]["plan"]
-        arguments: dict[str, Any] = {
-            "routing": graph_spec.get("routing", "broadcast"),
-            "exchange_mode": graph_spec.get("exchange_mode", "memory_incremental"),
-        }
-        for key in ("key_fields", "target_field"):
-            if graph_spec.get(key) is not None:
-                arguments[key] = graph_spec[key]
-        return self._run(source, plan, "materialize", arguments)
+        from ..graph import run_ray_graph
+        return run_ray_graph(graph_spec, _executor=self)
 
     def take(
         self, source: SourcePlan, plan: LogicalPlan, limit: int,

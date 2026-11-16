@@ -623,7 +623,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         from ..run_context import current_action
         if current_action() is None:
             raise RuntimeError("Graph materialization requires the native action context")
-        return run_local_graph(graph_spec)
+        return run_local_graph(graph_spec, _executor=self)
 
     def _materialize_blocks(self, source, execute) -> _LocalMaterializedHandle:
         """通用块缓存；失败时清理本次溢写，不返回部分结果或删除其他缓存。"""

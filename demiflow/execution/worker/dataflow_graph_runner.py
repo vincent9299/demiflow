@@ -76,8 +76,11 @@ class WorkerGraphRunner:
         self._incoming = {}
         self._exchange = {x.edge_id: x for x in executor._physical.exchanges}
         for edge in executor._graph.edges:
-            self._outgoing.setdefault(edge.producer, []).append(edge)
-            self._incoming.setdefault(edge.consumer, []).append(edge)
+            spec = self._exchange[edge.edge_id]
+            if (edge.producer not in executor._node_specs or self.partition in spec.producer_partitions):
+                self._outgoing.setdefault(edge.producer, []).append(edge)
+            if (edge.consumer not in executor._node_specs or self.partition in spec.consumer_partitions):
+                self._incoming.setdefault(edge.consumer, []).append(edge)
         # Every source row can occupy several delivery slots at once. Each
         # channel fitting its own window does not prove the aggregate fits the
         # same worker's bounded outstanding-delivery table. Stop between source
@@ -936,6 +939,10 @@ class WorkerGraphRunner:
         self._finished.add(occurrence)
         self._dirty_metrics.add(occurrence)
         self._flush_metrics()
+        if self.e._node_specs[occurrence].kernel.configuration.get('graph_observe'):
+            payload = self._metrics_payload(occurrence)
+            payload['node_finished'] = True
+            self._send('progress', payload)
         for edge in self._outgoing.get(occurrence, ()):
             if edge.edge_id in self._closed_outputs:
                 continue

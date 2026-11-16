@@ -896,6 +896,8 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
     capture = _Capture(request, bounds)
     producer = capture.capture_chain(request.source, request.plan, ())
     terminal = capture.capture_terminal(producer)
+    from .dataflow_graph_adapter import decorate_graph_capture
+    terminal = decorate_graph_capture(capture, request, terminal=terminal)
     # DTO constructors validate identities. Keep integer graph indices private;
     # never construct invalid public DTOs merely to replace their IDs later.
     bound_nodes = tuple(capture.nodes)

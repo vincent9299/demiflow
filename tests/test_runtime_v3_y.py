@@ -646,21 +646,22 @@ def test_y025(executor, source, plan):
     assert ENGINE.run_calls == [request]
 
 
-def test_y026(executor, source, plan):
-    graph_spec = {
-        "source": source, "source_id": "s0",
-        "ancestor": {"plan": plan}, "targets": [],
-        "routing": "hash", "key_fields": ["id"], "exchange_mode": "durable",
-    }
-    ENGINE.reset()
-    executor.materialize_graph(graph_spec)
-    request = ENGINE.requests[0]
-    assert request.kind == "materialize"
-    assert request.source is source and request.plan is plan
-    assert request.arguments["routing"] == "hash"
-    assert request.arguments["exchange_mode"] == "durable"
-    assert request.arguments["key_fields"] == ["id"]
-    assert ENGINE.run_calls == [request]
+def test_y026(executor, source, plan, monkeypatch):
+    import demiflow.execution.graph as graph_module
+    observed = []
+    result = {'target_rows': {'reader': 1}}
+    def graph_entry(spec, **kwargs):
+        observed.append((spec, kwargs))
+        return result
+    monkeypatch.setattr(graph_module, 'run_ray_graph', graph_entry)
+    graph_spec = {'source': source, 'source_id': 's0',
+        'ancestor': {'plan': plan},
+        'targets': [{'reader_id': 'reader', 'plan': plan}],
+        'routing': 'hash', 'key_fields': ['id'], 'exchange_mode': 'durable_incremental'}
+    assert executor.materialize_graph(graph_spec) is result
+    assert observed == [(graph_spec, {'_executor': executor})]
+    # Actual program execution, channels and recovery are checked by the real
+    # graph adapter tests under both Local and Ray Core, not this unit seam.
 
 
 # --- Y027-Y037: retirement evidence (symbol absent + no Ray Data import) ---

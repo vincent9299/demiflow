@@ -73,7 +73,7 @@ def _model_server():
         assert not thread.is_alive()
 
 
-def _channel_images(coordinator,image):
+def _channel_images(coordinator,image,*,parked=False):
     from demiflow.execution.contracts.dataflow import ArtifactRef
     values=[]
     for contribution in image.contributions:
@@ -81,7 +81,8 @@ def _channel_images(coordinator,image):
             ref=ArtifactRef(**dict(document))
             raw=b''.join(coordinator._store.read(ref,max_bytes=coordinator._physical.bounds.max_control_bytes))
             state=json.loads(raw)
-            assert state['cut_id']==image.cut.cut_id and state['channel_id']==name
+            origin = contribution.cut_id if parked else image.cut.cut_id
+            assert state['cut_id']==origin and state['channel_id']==name
             values.append({'participant':contribution.participant_id,'ref':asdict(ref),'state':state})
     return values
 
@@ -114,7 +115,7 @@ def _kill_owned_worker(execution,fx):
     return fact
 
 
-def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None):
+def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False):
     from demiflow.execution.dataflow import DataflowExecution
     from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import thaw_record_value
@@ -131,7 +132,7 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None):
     def committed(coordinator,*args,**kwargs):
         image=commit(coordinator,*args,**kwargs)
         facts=_cut_facts(coordinator,image)
-        facts['channels']=_channel_images(coordinator,image)
+        facts['channels']=_channel_images(coordinator,image,parked=parked)
         facts['attempt']=coordinator._action.context.attempt
         cuts.append(facts)
         return image
@@ -154,14 +155,32 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None):
             assert len(events)<4096,'finite route evidence budget exceeded'
             events.append({'kind':event.kind,'attempt':event.attempt,'allocation_id':event.allocation_id,
                            'boot_id':event.boot_id,'payload':value,'row':row})
-        if event.kind=='data' and not duplicates and value['delivery_id'] in execution._deliveries:
+        durable = execution._durable_residency if parked else None
+        stored = (durable.entries.get(value['delivery_id'])
+                  if event.kind=='data' and durable is not None else None)
+        if event.kind=='data' and not duplicates and (stored is not None or value['delivery_id'] in execution._deliveries):
+            from copy import deepcopy
             before=dict(execution._deliveries)
+            retained=deepcopy(durable.entries) if durable is not None else None
+            counters=(execution._confirmed_rows,execution._terminal_seen)
+            action=execution.request.action
+            prefix=action.context.journal.execution_commits(action.action_id)
+            if stored is not None:
+                # Replay exactly the data envelope already owned by the native
+                # durable ledger, never invent an absent duplicate sample.
+                assert stored['payload']==value
             try:handle(execution,event)
             except DataflowError as error:
                 assert error.code=='INVALID_CONTRACT' and 'duplicate' in str(error)
                 assert execution._deliveries==before
+                assert durable is None or durable.entries==retained
+                assert (execution._confirmed_rows,execution._terminal_seen)==counters
+                assert action.context.journal.execution_commits(action.action_id)==prefix
                 duplicates.append({'delivery_id':value['delivery_id'],'error':str(error),
-                                   'outstanding_unchanged':len(before)})
+                    'source':'native durable entries' if stored is not None else 'native in-flight deliveries',
+                    'outstanding_unchanged':len(before),'durable_entries_unchanged':len(retained) if retained is not None else None,
+                    'confirmed_rows_unchanged':counters[0],'terminal_seen_unchanged':counters[1],
+                    'commit_prefix_unchanged':len(prefix)})
             else:raise AssertionError('duplicate real in-flight delivery admitted')
         return result
     def boundary(execution):

@@ -839,9 +839,15 @@ def compile_physical_dataflow(
     from .dataflow_finite_fusion import fuse_finite_suffix
     stages = fuse_finite_suffix(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     stages = select_fusion_groups(graph, stages, policy=policy)
+    from .dataflow_graph_adapter import specialize_graph_stages, specialize_graph_exchanges
+    stages = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds)
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
+    exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)
+    exchanges = _share_exchange_storage(exchanges, bounds)
     exchanges, residency = _select_budgeted_residency(
         graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
+    from .dataflow_graph_adapter import tighten_graph_credits
+    exchanges = tighten_graph_credits(graph, exchanges, bounds=bounds)
     capability = infer_recovery(graph, snapshots, policy=policy)
     if not capability.supported:
         raise _error(
