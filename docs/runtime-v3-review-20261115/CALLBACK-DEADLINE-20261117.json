@@ -19,7 +19,11 @@
       }
     }
   ],
-  "not_run": [
-    "test_real_stream_deadline_preserves_catch_statistics_and_dead_rows"
-  ]
+  "not_run": [],
+  "final": {
+    "path": "/tmp/demiflow-callback-placement-final/batch/receipt.json",
+    "sha256": "00cebf4dfcbaaab69ac1fea798af4fcf2d1d9f5763e89891d01a61fba999d38d",
+    "passed": 18,
+    "source_unchanged": true
+  }
 }

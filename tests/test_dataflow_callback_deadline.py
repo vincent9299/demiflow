@@ -160,3 +160,32 @@ def test_real_stream_deadline_preserves_catch_statistics_and_dead_rows(tmp_path,
         assert [v['rows'] for v in stats.dead_batches]==[[{'id':0},{'id':1}],[{'id':2}]]
     else:
         assert stats.dead_batches==[]
+
+
+@pytest.mark.parametrize('reason,settled', [('cooperative:operator_stop_file',True),('cancel',False),('cooperative:other',False),(None,False)])
+def test_explicit_deadline_preserves_only_original_cooperative_paid_drain(reason, settled):
+    from demiflow.execution.request_limits import drain_on_service_stop, COOPERATIVE_STOP_REASON
+    if settled:
+        reason=COOPERATIVE_STOP_REASON
+    entered,finished,cancelled=threading.Event(),threading.Event(),threading.Event()
+    async def exchange():
+        entered.set()
+        try:
+            await asyncio.sleep(.08)
+            finished.set()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+    async def call(row):
+        await drain_on_service_stop(exchange(),enabled=True)
+    instance=AsyncInstance(call,services(),timeout=.5)
+    with ThreadPoolExecutor(1) as pool:
+        task=pool.submit(instance,None)
+        assert entered.wait(1)
+        instance.request_stop(reason)
+        with pytest.raises((DataflowError,asyncio.CancelledError)):
+            task.result(2)
+        instance.close()
+    assert finished.is_set()==settled
+    assert cancelled.is_set()!=settled
+    assert not instance.thread.is_alive()

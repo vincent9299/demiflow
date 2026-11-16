@@ -193,15 +193,19 @@ class AsyncInstance:
         cleanup = True
         try:
             call = asyncio.ensure_future(value)
+            self._tasks.add(call)
+            call.add_done_callback(self._tasks.discard)
             done, _ = await asyncio.wait((call,), timeout=timeout)
             if done:
                 result = call.result()
                 cleanup = False
                 return result
-            call.cancel()
+            call.cancel(self._cancellation_reason())
             try:
                 result = await call
             except asyncio.CancelledError as exc:
+                if self._stopping.is_set():
+                    raise
                 raise CallbackDeadlineExceeded() from exc
             # Match wait_for: a callback may intentionally handle cancel and
             # return, or translate it into its own business exception.
@@ -210,11 +214,21 @@ class AsyncInstance:
             try:
                 if cleanup:
                     deadline = time.monotonic() + self.timeout
+                    # First drain the root call. It may be shielding an already
+                    # admitted paid exchange on the fixed service-stop reason;
+                    # cancelling descendants here would bypass that protocol.
+                    if not call.done() and not call.cancelling():
+                        call.cancel(self._cancellation_reason())
+                    while not call.done():
+                        if time.monotonic() >= deadline:
+                            raise DataflowError('DEADLINE_EXCEEDED',
+                                'callback cancellation did not drain within original execution deadline')
+                        await asyncio.wait((call,), timeout=.01)
                     while True:
                         pending = tuple(t for t in owner.tasks if not t.done())
                         for task in pending:
                             if not task.cancelling():
-                                task.cancel()
+                                task.cancel(self._cancellation_reason())
                         if not pending and not self._async_work.pending_for(owner):
                             break
                         if time.monotonic() >= deadline:
@@ -229,6 +243,10 @@ class AsyncInstance:
                             await asyncio.sleep(.01)
             finally:
                 _CALLBACK_WORK.reset(token)
+
+    def _cancellation_reason(self):
+        from ..request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
+        return ServiceStopped('operator_stop_file') if self._stop_reason == COOPERATIVE_STOP_REASON else None
 
     def start(self):
         if self._shared is not None:
