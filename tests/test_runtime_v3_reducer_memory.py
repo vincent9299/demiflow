@@ -96,7 +96,7 @@ def test_state_resident_is_checked_before_platform_serialization(monkeypatch):
         raise AssertionError('serialization must not start before resident admission')
     monkeypatch.setattr(reducer_memory.pickle,'Pickler',forbidden)
     with pytest.raises(DataflowError,match='retained objects'):
-        reducer_memory.check_state({'pad':b'x'*8192},memory,serialized_limit=4096)
+        reducer_memory.check_state({'pad':b'x'*8192},memory,serialized_limit=16384)
     with pytest.raises(DataflowError,match='max_state_bytes before encoding'):
         reducer_memory.check_state({'pad':'é'*3000},{**memory,'state_resident_bytes':16384},serialized_limit=4096)
     assert calls==[]
