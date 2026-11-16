@@ -17,7 +17,10 @@ def collect_before_commit(dataset, directory, monkeypatch):
         pass
 
     rows = []
-    read = _OutputSubscription.read
+    # ResultHandle uses read_admitted so its simultaneous output/workspace
+    # admission is preserved. Observe the actual read path; patching only the
+    # compatibility read() entry misses every row in the bounded collector.
+    read = _OutputSubscription.read_admitted
 
     def observed(subscription, **kwargs):
         records = read(subscription, **kwargs)
@@ -33,7 +36,7 @@ def collect_before_commit(dataset, directory, monkeypatch):
         with RunContext.start(directory) as run, data.local_execution():
             reference = run.ref
             with monkeypatch.context() as fault:
-                fault.setattr(_OutputSubscription, 'read', observed)
+                fault.setattr(_OutputSubscription, 'read_admitted', observed)
                 fault.setattr(DataflowCheckpointCoordinator, 'commit', interrupted)
                 dataset.take_all()
     assert rows, 'the real worker must have produced a row before the injected interruption'
