@@ -1496,18 +1496,21 @@ def run_local_chain(executor, dataset, *, source=None, plan=None, host_id="local
     legacy ``host_id``/``resource_root``/``control_timeout_s`` parameters are kept
     for signature compatibility and no longer select a separate worker host.
     """
-    from .dataflow import execute_action
-    from .dataflow_api import make_action_request
-    from ..planning.dataflow_policy import resolve_runtime_policy
+    from .dataflow_api import declare_action_v3, make_action_request, run_dataset_action
+    from .contracts.dataflow_errors import DataflowError
     from .run_context import current_action
 
     if current_action() is None:
         raise RuntimeError("Chain materialization requires the native action context")
     plan = dataset._plan if plan is None else plan
     source = dataset._source if source is None else source
+    declared = declare_action_v3(source, plan, kind='materialize', arguments={}, sink_declaration=None)
+    if any(current_action().declaration.get(key) != declared[key] for key in ('source', 'operations')):
+        raise DataflowError('INVALID_CONTRACT', 'Chain source/plan differs from its active action')
     request = make_action_request(executor, source, plan, kind="materialize", arguments={})
-    policy, bounds = resolve_runtime_policy({}, {}, provider="local")
-    return execute_action(request, policy=policy, bounds=bounds).result()
+    if request.provider != 'local':
+        raise DataflowError('INVALID_CONTRACT', 'Local chain requires its Local executor')
+    return run_dataset_action(request)
 
 
 def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
@@ -1517,15 +1520,18 @@ def run_ray_chain(executor, dataset, *, source=None, plan=None, host_id="local",
     Same unified ``execute_action`` runtime as ``run_local_chain``; only the
     provider differs. The independent Ray actor resource/commit loop is retired.
     """
-    from .dataflow import execute_action
-    from .dataflow_api import make_action_request
-    from ..planning.dataflow_policy import resolve_runtime_policy
+    from .dataflow_api import declare_action_v3, make_action_request, run_dataset_action
+    from .contracts.dataflow_errors import DataflowError
     from .run_context import current_action
 
     if current_action() is None:
         raise RuntimeError("Chain materialization requires the native action context")
     plan = dataset._plan if plan is None else plan
     source = dataset._source if source is None else source
+    declared = declare_action_v3(source, plan, kind='materialize', arguments={}, sink_declaration=None)
+    if any(current_action().declaration.get(key) != declared[key] for key in ('source', 'operations')):
+        raise DataflowError('INVALID_CONTRACT', 'Chain source/plan differs from its active action')
     request = make_action_request(executor, source, plan, kind="materialize", arguments={})
-    policy, bounds = resolve_runtime_policy({}, {}, provider="ray_core")
-    return execute_action(request, policy=policy, bounds=bounds).result()
+    if request.provider != 'ray_core':
+        raise DataflowError('INVALID_CONTRACT', 'Ray chain requires its Ray executor')
+    return run_dataset_action(request)
