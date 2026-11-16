@@ -70,14 +70,17 @@ async def batch_identity(rows):
 
 
 def test_fixed_batch_spans_barriers_without_checkpoint_flush(tmp_path):
-    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}):
+    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}) as run:
         result = data.from_items([{'id': i} for i in range(11)]).batch_map(
             batch_identity, max_batch=3, concurrency=1).materialize().take_all()
     assert result == [{'id': i, 'group': list(range(i//3*3, min(11, i//3*3+3)))} for i in range(11)]
     facts = RunJournal(tmp_path/'run').execution_commits('action-1')
     assert 2 <= len(facts) <= 6
-    assert facts[0]['receipts']['output']['data']['rows'] == 0
-    assert facts[0]['intent']['position']['next_ordinal'] == 2
+    assert facts[0]['receipts']['materialize']['data']['rows'] == 0
+    # The original scalar now sequences global cuts; the original journal's
+    # source vector, not that scalar, proves the precise two-row frontier.
+    saved = StateArtifacts(run).read(facts[0]['prepared']['state']['dataflow-cut-v3'])
+    assert saved['dataflow.sources.v3'][0]['offset']['index'] == 2
 
 
 class SharedCounter:
@@ -187,30 +190,64 @@ def test_snapshot_failure_stops_without_confirming_output(tmp_path):
     assert RunJournal(tmp_path/'run').execution_commits('action-1') == []
 
 
+class ObservedCounter:
+    """Observe the real worker, rather than its unmodified driver-side clone."""
+    def __init__(self, path):
+        self.path, self.count = path, 0
+
+    async def __call__(self, row):
+        self.count += 1
+        Path(self.path).write_text(str(self.count))
+        return row
+
+    def snapshot_state(self):
+        return {'count': self.count}
+
+    def restore_state(self, state):
+        self.count = state['count']
+
+
 def test_direct_lance_prepares_before_source_finishes_and_publishes_once(tmp_path, monkeypatch):
     import lance
     from demiflow.execution.lance_sink import LanceSink
-    counter = NestedCounter()
-    original = LanceSink.prepare
-    observed = []
-    def prepare(sink, blocks, context):
-        blocks = iter(blocks)
-        first = next(blocks)
-        observed.append(len(counter.state['seen']))
-        assert observed[-1] < 1024
-        def batches():
-            yield first
-            yield from blocks
-        return original(sink, batches(), context)
-    monkeypatch.setattr(LanceSink, 'prepare', prepare)
+    from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    progress = tmp_path/'actual-worker-count'
+    original = _DataflowArtifactSink.prepare
+    native_commit = LanceSink.commit
+    observed, publications = [], []
+    def prepare(sink, manifest, context):
+        prepared = original(sink, manifest, context)
+        if not observed:
+            # The unified terminal stages immutable data before the input is
+            # exhausted. Native Lance encoding/publication happens at final
+            # commit; the early durable prefix is the actual bounded handoff.
+            seen = int(progress.read_text())
+            assert 0 < seen < 1024
+            assert 0 < prepared['rows'] <= seen
+            assert sink._store.inspect(ArtifactRef(**prepared['ref']))
+            observed.append(seen)
+        return prepared
+    def publish(sink, prepared, context):
+        result = native_commit(sink, prepared, context)
+        publications.append(context.commit_id)
+        return result
+    monkeypatch.setattr(_DataflowArtifactSink, 'prepare', prepare)
+    monkeypatch.setattr(LanceSink, 'commit', publish)
     with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 64, 'checkpoint_interval_ms': 60000}):
-        data.from_items([{'id': i} for i in range(1024)]).map_async(counter).write_lance(
+        data.from_items([{'id': i} for i in range(1024)]).map_async(ObservedCounter(str(progress))).write_lance(
             str(tmp_path/'out.lance'), mode='overwrite')
-    assert observed
+    assert observed and int(progress.read_text()) == 1024
     dataset = lance.dataset(str(tmp_path/'out.lance'))
     assert dataset.version == 1 and dataset.count_rows() == 1024
-    facts = RunJournal(tmp_path/'run').execution_commits('action-1-stream')
-    assert 2 <= len(facts) <= 16 and all(f['status'] == 'acked' for f in facts)
+    assert dataset.to_table().to_pylist() == [{'id': i} for i in range(1024)]
+    facts = RunJournal(tmp_path/'run').execution_commits('action-1')
+    assert 2 <= len(facts) <= 17 and all(f['status'] == 'acked' for f in facts)
+    # An exact multiple may need its own final EOF cut; it cannot publish twice.
+    receipts = [f['receipts']['write_lance']['data'] for f in facts]
+    assert all('native_receipt' not in value for value in receipts[:-1])
+    assert receipts[-1]['native_receipt']['data']['committed_version'] == 1
+    assert publications == [facts[-1]['commit_id']]
 
 
 def test_temporary_release_rejects_live_files_and_stale_fence(tmp_path):
@@ -232,19 +269,24 @@ def test_temporary_release_rejects_live_files_and_stale_fence(tmp_path):
 
 def test_enospc_does_not_confirm_checkpoint_or_return_partial_result(tmp_path, monkeypatch):
     import errno
-    import demiflow.execution.block_sink as blocks
-    original = blocks.atomic_bytes
+    import demiflow.execution.dataflow_sinks as sinks
+    original = sinks.atomic_bytes
     def fail(path, raw):
-        if '/action-1/output/' in str(path):
+        if '/dataflow-sinks/materialize/.receipts/' in str(path):
             raise OSError(errno.ENOSPC, 'controlled full disk')
         return original(path, raw)
-    monkeypatch.setattr(blocks, 'atomic_bytes', fail)
+    monkeypatch.setattr(sinks, 'atomic_bytes', fail)
     with pytest.raises(OSError, match='full disk'):
         with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2}):
             data.from_items([{'id': i} for i in range(8)]).map_async(identity).materialize()
-    facts = RunJournal(tmp_path/'run').execution_commits('action-1')
-    assert len(facts) == 1 and facts[0]['status'] == 'pending'
-    assert not list((tmp_path/'run'/'materializations'/'action-1'/'output').rglob('*.pkl'))
+    journal = RunJournal(tmp_path/'run')
+    facts = journal.execution_commits('action-1')
+    # Immutable prepared input survives for explicit recovery, but no sink
+    # publication, receipt, ACK or successful result may escape the failed I/O.
+    assert len(facts) == 1 and facts[0]['status'] == 'prepared'
+    assert facts[0]['receipts'] == {}
+    assert journal.execution_action('action-1')['result'] is None
+    assert not list((tmp_path/'run'/'materializations'/'dataflow-sinks'/'materialize'/'.receipts').glob('*.json'))
 
 
 def test_checkpoint_deadline_fails_and_drains_publication_thread(tmp_path, monkeypatch):
