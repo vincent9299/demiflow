@@ -34,10 +34,6 @@ def freeze_managed_http(service):
     values = vars(service)
     if set(values) != _FIELDS:
         raise _invalid('Managed HTTP service contains modified methods or unknown live state')
-    if values['gpus']:
-        # A legacy GPU index/flock is not a V3 worker device grant. Local physical
-        # index -> DevicePool placement remains a separately admitted extension.
-        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed embedding GPU service has no declared worker device grant')
     if values['log'] is not None:
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed embedding service log callbacks require a code-bound declaration')
     parameters = {}
@@ -82,11 +78,29 @@ def restore_worker_managed_http(value):
     class WorkerOwner(_HTTPOwner):
         def _spawn_process(self, env):
             from .dataflow_managed_http_child import spawn_owned_service
-            return spawn_owned_service(self.declaration, env=env)
+            return spawn_owned_service(self.declaration, env=env, resource_fds=self._resource_fds)
+
+        async def _release(self):
+            from .dataflow_managed_http_child import close_owned_service
+            await close_owned_service(self)
+
+        async def aclose(self):
+            if self._closed and self._process is not None:
+                await self._release()  # A prior unknown close can be retried.
+            else:
+                await super().aclose()
 
     class WorkerService(ManagedHTTPService):
         def bind(self, model=None):
             super().bind(model)  # Original endpoint/model validation, no spawn.
+            if self.gpus:
+                # Original DevicePool is the only GPU allocator. This owner
+                # keeps only port locks; the child receives its verified grant.
+                cpu = ManagedHTTPService(**dict(value['parameters'], gpus=[]))
+                cpu._worker_gpu_requested = True
+                cpu._worker_device_binding = getattr(self, '_worker_device_binding', None)
+                cpu._worker_device_check = getattr(self, '_worker_device_check', None)
+                return WorkerOwner(cpu)
             return WorkerOwner(self)
 
     return WorkerService(**value['parameters'])

@@ -375,7 +375,7 @@ def _generate_constants(graph: DataflowGraph) -> dict:
     return constants
 
 
-def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, store) -> ArtifactRef:
+def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, store, policy=None) -> ArtifactRef:
     if not isinstance(graph, DataflowGraph):
         raise DataflowError("INVALID_CONTRACT", "resolve_execution_constants requires a DataflowGraph")
     if not isinstance(action, RunAction):
@@ -387,6 +387,9 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
         # Recovery reads the original constants; never re-generate seed=None.
         return _artifact_from_json(existing)
     constants = _generate_constants(graph)
+    from .dataflow_managed_devices import service_constants
+    for occurrence, value in service_constants(graph, policy=policy).items():
+        constants.setdefault(occurrence, {}).update(value)
     raw = document({"schema": CONSTANTS_SCHEMA, "action_id": action.action_id,
                     "dag_id": graph.dag_id, "constants": constants},
                    action.context.limits["max_state_bytes"])

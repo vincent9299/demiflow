@@ -367,7 +367,8 @@ class DataflowExecution:
                         target_partitions=self._policy.default_partitions, bounds=self._bounds)
                 snapshots.append(snapshot)
                 splits.extend(source_splits)
-            constants_ref = resolve_execution_constants(graph, action=self._action, store=self._store)
+            constants_ref = resolve_execution_constants(graph, action=self._action, store=self._store,
+                                                        policy=self._policy)
             physical = compile_physical_dataflow(
                 graph, tuple(snapshots), tuple(splits), policy=self._policy, hosts=self._services.hosts,
                 bounds=self._bounds, constants_ref=constants_ref)
@@ -426,7 +427,10 @@ class DataflowExecution:
         limits = [v for v in (self._active_worker_limit, physical.policy.max_active_workers) if v is not None]
         self._active_worker_limit = min(limits) if limits else None
         self._sealed = sealed
-        self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed)
+        from .dataflow_managed_devices import sealed_service_placements
+        placements = sealed_service_placements(graph, physical, store=self._store)
+        self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed,
+                                            placements=placements)
         self._scheduler._policy = live_policy
         from .contracts.dataflow_codec import runtime_scope_id
         self._scheduler.scope_id = runtime_scope_id(physical.plan_id, self._attempt())

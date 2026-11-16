@@ -28,16 +28,54 @@ from .contracts.dataflow_errors import DataflowError
 from .recovery_contract import document
 
 
-def spawn_owned_service(spec, *, env):
+async def close_owned_service(owner):
+    """Bound control wait; unknown tree ownership retains its original unit."""
+    import asyncio
+    from ..services.contracts import ModelServiceError
+    process = owner._process
+    if process is not None:
+        try:
+            os.kill(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + owner.declaration.shutdown_timeout_s
+        while process.poll() is None and time.monotonic() < deadline:
+            await asyncio.sleep(min(.01, max(0, deadline - time.monotonic())))
+        if process.poll() is None:
+            # Never turn failed observation into a synthetic exit by killing
+            # its guardian. The guardian owns the same FD while it retries.
+            raise ModelServiceError('Managed service cleanup is unconfirmed; original unit and port ownership retained')
+        process.wait(timeout=0)
+        owner._process = None
+    if owner._log_pump is not None:
+        pump, owner._log_pump = owner._log_pump, None
+        await asyncio.to_thread(pump.close)
+    owner._stack.close()
+
+
+def spawn_owned_service(spec, *, env, resource_fds=()):
+    binding = None
+    if getattr(spec, '_worker_gpu_requested', False):
+        check = getattr(spec, '_worker_device_check', None)
+        if check is None:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU service has no original worker device grant')
+        binding = check()
+        env = {**env, 'CUDA_VISIBLE_DEVICES': ','.join(binding['device_ids']),
+               'CUDA_DEVICE_ORDER': 'PCI_BUS_ID'}
     unit = inherited_unit()
     if not unit:
         raise DataflowError('UNSUPPORTED_CAPABILITY',
                             'Managed worker services require an owned process unit')
     declaration = {'parent': os.getpid(), 'birth': birth_start(os.getpid()),
                    'command': list(spec.command), 'shutdown_timeout_s': spec.shutdown_timeout_s}
+    if binding is not None:
+        declaration['max_rss_bytes'] = binding['max_rss_bytes']
     raw = document(declaration, 65536).decode('utf-8')
+    # Keep the original port flock open through worker death and unknown
+    # cleanup. The guardian receives the same open files, never another lock.
+    inherited = tuple(dict.fromkeys((*unit, *resource_fds)))
     return subprocess.Popen([sys.executable, '-I', '-B', str(Path(__file__).resolve()), raw],
-        cwd=spec.root, env={**env, UNIT_ENV: str(unit[0])}, pass_fds=unit,
+        cwd=spec.root, env={**env, UNIT_ENV: str(unit[0])}, pass_fds=inherited,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         start_new_session=True)
 
@@ -76,21 +114,31 @@ def main(raw):
                 break
             # Bounded original descendant traversal also rejects runaway trees.
             descendants(os.getpid())
+            if 'max_rss_bytes' in declaration:
+                # One admitted worker + guardian + service tree, no second
+                # reservation. This sampled ceiling is not an OS hard cap.
+                tree = descendants(parent, include_owner=True)
+                if sum(row['rss_bytes'] for row in tree.values()) > declaration['max_rss_bytes']:
+                    raise RuntimeError('Managed model worker/service tree exceeds its original max_rss_bytes grant')
             time.sleep(.02)
     finally:
         if child is not None:
-            signal_owned(os.getpid(), signal.SIGTERM)
             grace = min(1., declaration['shutdown_timeout_s'] / 2)
-            deadline = time.monotonic() + grace
-            while child.poll() is None and time.monotonic() < deadline:
-                time.sleep(min(.01, max(0, deadline - time.monotonic())))
-            # Never return merely because the direct command exited. Adopt and
-            # reap children from every session before releasing the unit FD.
-            while not drain_owned(child, timeout_s=max(.02, grace)):
-                # Unknown/stuck descendants keep the original lock charged.
-                # The outer owner may terminate this guardian; descendants
-                # still inherit the same lock rather than falsely refunding it.
-                time.sleep(.02)
+            while True:
+                try:
+                    signal_owned(os.getpid(), signal.SIGTERM)
+                    deadline = time.monotonic() + grace
+                    while child.poll() is None and time.monotonic() < deadline:
+                        time.sleep(min(.01, max(0, deadline - time.monotonic())))
+                    # Never return merely because the direct command exited.
+                    if drain_owned(child, timeout_s=max(.02, grace)):
+                        break
+                except Exception:
+                    # /proc limits and transient observation failures are
+                    # unknown ownership. Keep the same FD and retry rather
+                    # than letting a finally error manufacture an exit proof.
+                    pass
+                time.sleep(.1)
     return child.returncode if child is not None and child.returncode is not None else 1
 
 

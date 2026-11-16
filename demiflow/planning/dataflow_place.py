@@ -163,11 +163,13 @@ def partition_stages(
         # and any state ceiling co-reside inside the provisioned worker.
         resident = bounds.max_batch_bytes + kernel.output_bound_bytes + state_bytes
         replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
+        from ..execution.dataflow_managed_devices import service_profile
+        profile = service_profile(kernel, policy=policy, bounds=bounds)
         stages.append(StageSpec(
             stage_id=stage_id,
             occurrences=(occ,),
             partitions=_partition_ids(stage_id, replica_target),
-            profile=kernel.profile,
+            profile=profile,
             replica_min=replica_min,
             replica_target=replica_target,
             replica_max=replica_max,

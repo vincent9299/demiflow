@@ -118,6 +118,7 @@ class _HTTPOwner:
         self.declaration = declaration
         self._stack,self._process,self._startup = ExitStack(),None,None
         self._closed = False
+        self._resource_fds = ()
         self._log_pump = None
         self._slots = (asyncio.Semaphore(declaration.request_concurrency)
                        if declaration.request_concurrency is not None else None)
@@ -159,12 +160,14 @@ class _HTTPOwner:
         resources = [*(f'gpu_{g}' for g in sorted(spec.gpus)), f'port_{port}']
         while True:
             blocked = None
+            acquired_fds = []
             with ExitStack() as attempt:
                 for directory in controls:
                     for resource in resources:
                         stream = attempt.enter_context((directory/(resource+'.lock')).open('a'))
                         try:
                             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            acquired_fds.append(stream.fileno())
                         except BlockingIOError:
                             blocked = 'Model resource ' + resource + ' is occupied'
                             break
@@ -175,6 +178,7 @@ class _HTTPOwner:
                             blocked = 'HTTP port is already occupied; refusing to attach or terminate its owner'
                 if blocked is None:
                     self._stack.enter_context(attempt.pop_all())
+                    self._resource_fds = tuple(acquired_fds)
                     return
             elapsed = time.monotonic() - started
             remaining = spec.resource_wait_timeout_s - elapsed

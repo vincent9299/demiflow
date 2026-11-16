@@ -62,8 +62,12 @@ def test_overridden_native_class_method_and_ungranted_gpu_are_rejected(tmp_path,
         with pytest.raises(Exception, match='methods differ'):
             freeze_managed_http(fixture['service'])
     fixture['service'].gpus = (0,)
+    # Numeric GPUs are now a passive declaration, never a runtime grant.
+    operation = dataset(fixture, tmp_path)._plan.operations[-1]
+    worker = native_model_declaration(operation).instantiate()
+    import asyncio
     with pytest.raises(Exception, match='device grant'):
-        freeze_managed_http(fixture['service'])
+        asyncio.run(worker.service.bind(worker.model).ensure_ready())
     assert events(fixture) == []
 
 

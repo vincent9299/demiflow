@@ -114,6 +114,11 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
                   'concurrency': operation.concurrency, 'model_contract': _json_config(operation.model_contract)}
         kind, state, effect, role = 'embedding', 'none', 'journaled', 'remote_api'
         actor = getattr(operation.callable.target, '__self__', None)
+        service = getattr(actor, 'service', None)
+        if service is not None and service.gpus:
+            config['managed_http_devices'] = {'indices': list(service.gpus),
+                'device_order': service.env.get('CUDA_DEVICE_ORDER')}
+            role = 'gpu'
         private = getattr(actor, 'options', {}).get('sqlite_journal')
         if private is not None:
             from ..embeddings.flow_contract import embedding_facts
@@ -153,8 +158,13 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
 
     node_id = getattr(operation, 'node_id', None) or identity(['model-node', kind, config])
     config['node_id'] = node_id
+    profile = _model_profile(role, bounds, config.get('concurrency', 1), state)
+    if kind == 'embedding' and config.get('managed_http_devices'):
+        from dataclasses import replace
+        profile = replace(profile, requests={**profile.requests, 'accelerators': [
+            {'type': 'gpu', 'count': len(config['managed_http_devices']['indices'])}]})
     return KernelSpec(kind=kind, implementation_ref=program_ref, configuration=config, inputs=ports,
-                      state=state, effect=effect, resource_role=role, profile=_model_profile(role, bounds, config.get("concurrency", 1), state),
+                      state=state, effect=effect, resource_role=role, profile=profile,
                       output_bound_bytes=bounds.max_row_bytes, mergeable=False)
 
 
@@ -337,6 +347,8 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
         else:
             journal.bind_prompt_adapter(instance, services=services, node_id=node_id)
     elif kind == 'embedding':
+        from .dataflow_managed_devices import bind_worker_service
+        bind_worker_service(instance, spec, services=services, node_id=node_id)
         # Embedding owns its NativeEmbeddingRecovery and atomic budget; it has no
         # Prompt coordinator and never borrows bind_client.
         if spec.configuration.get('private_journal') is not None:

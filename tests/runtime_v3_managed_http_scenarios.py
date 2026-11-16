@@ -15,8 +15,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import psutil
 port, ledger, mode = int(__import__('sys').argv[1]), Path(__import__('sys').argv[2]), __import__('sys').argv[3]
-def record(event):
+def record(event, **fields):
     entry = dict(event=event, pid=os.getpid(), birth=psutil.Process().create_time(), cuda=os.environ.get('CUDA_VISIBLE_DEVICES'), at_ns=time.time_ns())
+    entry.update(fields)
     fd=os.open(ledger, os.O_WRONLY|os.O_CREAT|os.O_APPEND, 0o600)
     try: os.write(fd, (json.dumps(entry)+'\\n').encode()); os.fsync(fd)
     finally: os.close(fd)
@@ -27,13 +28,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         record('request')
-        if mode=='slow': time.sleep(2)
+        if mode in ('slow','cuda_slow'): time.sleep(2)
+        if mode=='cuda_overrss':
+            blocks=[]
+            for _ in range(64):
+                blocks.append(bytearray(32*1024**2)); time.sleep(.02)
+        if mode=='cuda_wait':
+            deadline=time.monotonic()+20
+            while not ledger.with_suffix('.release').exists() and time.monotonic()<deadline: time.sleep(.01)
         self.send_response(503 if mode=='failure' else 200); self.end_headers()
         try:
             self.wfile.write(json.dumps({'model':'fixture','data':[
-                {'index':i,'embedding':[3,4,0]} for i in range(len(body['input']))]}).encode())
+                {'index':i,'embedding':gpu_vector if mode.startswith('cuda') else [3,4,0]} for i in range(len(body['input']))]}).encode())
         except (BrokenPipeError, ConnectionResetError): pass
     def log_message(self,*args): pass
+if mode.startswith('cuda'):
+    import torch
+    tensor=torch.tensor([3.,4.,0.],device='cuda')
+    gpu_vector=tensor.cpu().tolist()
+    torch.cuda.synchronize()
 server=ThreadingHTTPServer(('127.0.0.1',port),Handler)
 if mode=='detached':
     # Default close_fds intentionally drops the unit FD. The living subreaper
@@ -45,6 +58,7 @@ def stop(*args):
     threading.Thread(target=server.shutdown,daemon=True).start()
 signal.signal(signal.SIGTERM,stop)
 record('start')
+if mode.startswith('cuda'): record('cuda', devices=torch.cuda.device_count(), values=gpu_vector, allocated=torch.cuda.memory_allocated())
 try: server.serve_forever(poll_interval=.02)
 finally: server.server_close(); record('exit')
 '''

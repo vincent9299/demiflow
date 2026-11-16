@@ -41,7 +41,7 @@ def _grant_bytes(document_value: dict) -> bytes:
 
 
 class DataflowScheduler:
-    def __init__(self, physical: PhysicalDataflow, *, resources: ResourceManager, sealed=None) -> None:
+    def __init__(self, physical: PhysicalDataflow, *, resources: ResourceManager, sealed=None, placements=None) -> None:
         if not isinstance(physical, PhysicalDataflow):
             raise DataflowError("INVALID_CONTRACT", "scheduler requires a sealed PhysicalDataflow")
         if resources is None:
@@ -58,6 +58,9 @@ class DataflowScheduler:
         self.scope_id = "df-" + physical.plan_id
         identifier(self.scope_id)
         self._stages = {stage.stage_id: stage for stage in physical.stages}
+        self._placements = dict(placements or {})
+        if set(self._placements) - self._stages.keys():
+            raise DataflowError('INVALID_CONTRACT', 'Worker placement names an unsealed stage')
         if len(self._stages) != len(physical.stages):
             raise DataflowError("INVALID_CONTRACT", "duplicate stage_id in physical plan")
         self._residency = physical.residency
@@ -252,7 +255,7 @@ class DataflowScheduler:
             from .dataflow_native_limits import admission_timeout_ms
             request = WorkerRequest(uuid.uuid4().hex, allocation_id, stage.profile,
                 self._launch_spec(stage), provision_deadline_ms=admission_timeout_ms(self._policy),
-                placement=None, reservation_group=work.stage_id)
+                placement=self._placements.get(work.stage_id), reservation_group=work.stage_id)
             desired = (*self._requests.values(), request)
             accepted = self._resources.apply(self._context(uuid.uuid4().hex),
                                              ResourcePlan(self.scope_id, desired, tuple(self._retirements.values())))
