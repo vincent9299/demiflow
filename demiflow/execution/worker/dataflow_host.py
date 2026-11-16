@@ -73,6 +73,7 @@ class HostedDataflowWorker:
     def __init__(self, launch_spec: dict, spec_hash: str, boot_id: str):
         self._spec_hash = spec_hash
         self._boot_id = boot_id
+        self._resource_envelope = None
         self._closed = False
         self._activated = False
         self._cancel_event = threading.Event()
@@ -80,6 +81,8 @@ class HostedDataflowWorker:
         self._control_outbox: deque = deque()
         config = dict(launch_spec.get("dataflow_v3") or {})
         self._ray_host = str(config.get('host_id', '')).startswith('ray-')
+        self._resource_directory = (str(Path(config['cache']) / launch_spec['allocation_id'])
+                                    if self._ray_host else None)
         if self._ray_host:
             import ray
             import os
@@ -168,7 +171,48 @@ class HostedDataflowWorker:
         events = getattr(executor, '_final_progress', ())
         return {'final_progress': list(events)} if events else {}
 
-    def handle(self, message: dict) -> dict:
+    def _bind_resource_envelope(self, value):
+        """Project the existing allocation; this grants no new resources."""
+        from ...resources.capacity import allocation_envelope
+        if not self._ray_host:
+            raise DataflowError('FENCED', 'only the Ray host borrows a delivered resource envelope')
+        with allocation_envelope(value):  # original closed shape and byte bound
+            if (value['allocation_id'] != self._runtime.allocation_id
+                    or value['spec_hash'] != self._spec_hash
+                    or value['resource_directory'] != self._resource_directory):
+                raise DataflowError('FENCED', 'Ray envelope differs from original allocation identity')
+            import ray
+            actual = ray.get_runtime_context().get_assigned_resources()
+            if (type(value['cpu_millis']) is not int or value['cpu_millis'] <= 0
+                    or type(value['memory_bytes']) is not int or value['memory_bytes'] <= 0
+                    or value['cpu_millis'] != round(actual.get('CPU', 0) * 1000)
+                    or value['memory_bytes'] != actual.get('memory', 0)):
+                raise DataflowError('FENCED', 'Ray envelope differs from actual assigned CPU or memory')
+        with self._lock:
+            if self._closed:
+                raise DataflowError('FENCED', 'Ray resource envelope belongs to a closed worker')
+            if self._resource_envelope is not None and self._resource_envelope != value:
+                raise DataflowError('FENCED', 'Ray resource envelope changed after binding')
+            self._resource_envelope = dict(value)
+
+    def _allocation_context(self):
+        from contextlib import nullcontext
+        from ...resources.capacity import allocation_envelope
+        return (allocation_envelope(self._resource_envelope)
+                if self._resource_envelope is not None else nullcontext())
+
+    def handle(self, message: dict, *, resource_envelope=None) -> dict:
+        if resource_envelope is not None:
+            self._bind_resource_envelope(resource_envelope)
+        if (self._ray_host and self._resource_envelope is None
+                and message.get('kind') in {'VerifyArtifactAndCapabilities', 'Restore', 'Activate', 'Assign'}):
+            raise DataflowError('FENCED', 'Ray business activation requires its original resource envelope')
+        # GraphRunner copies this context into its business thread. Ray's actor
+        # pool threads return to their previous context after each command.
+        with self._allocation_context():
+            return self._handle(message)
+
+    def _handle(self, message: dict) -> dict:
         response_to = message.get("response_to")
         if response_to is not None:
             self.deliver_receipt(message.get("receipt", {}))
@@ -268,6 +312,8 @@ class HostedDataflowWorker:
         self._cancel_event.set()
         self._mailbox.close()
         try:
-            self._runtime.close()
+            with self._allocation_context():
+                self._runtime.close()
         finally:
             self._control_outbox.clear()
+            self._resource_envelope = None

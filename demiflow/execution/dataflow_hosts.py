@@ -727,6 +727,17 @@ class RayHostEndpoint(_EndpointBase):
         from .worker.dataflow_host import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError("FENCED", "worker assignment was not staged before allocation")
+        binding = self._services.resources.state.read_allocation_identity(self._scope_id, self._allocation_id)
+        observed = binding['observation'] if binding is not None else None
+        if (observed is None or observed.get('phase') != 'RUNNING'
+                or observed.get('boot_id') != self._boot_id
+                or observed.get('allocation_id') != self._allocation_id):
+            raise DataflowError('FENCED', 'Ray worker lacks its original running allocation')
+        effective = observed['effective_resources']
+        self._allocation_envelope = {'allocation_id': self._allocation_id,
+            'spec_hash': binding['spec_hash'], 'cpu_millis': effective['cpu_millis'],
+            'memory_bytes': effective['memory_bytes'],
+            'resource_directory': str(self._services.action.context.directory / 'worker-cache' / self._allocation_id)}
         _, grant, manifest_ref = self._build_launch(assignment)
         control = make_worker_control_assignment(assignment, grant=grant, manifest_ref=manifest_ref,
                                                  ready_deadline_ms=60000)
@@ -743,7 +754,8 @@ class RayHostEndpoint(_EndpointBase):
     def _send_k3(self, kind: str, payload: dict) -> dict:
         self.flush_business()
         actor = self._connector._actor(self._allocation_id)
-        command = actor.handle.remote(self._k3_envelope(kind, payload))
+        command = actor.handle.remote(self._k3_envelope(kind, payload),
+            resource_envelope=getattr(self, '_allocation_envelope', None))
         deadline = time.monotonic() + self._services.policy.control_timeout_ms / 1000
         while True:
             ready, _ = ray.wait([command], timeout=0.01)
