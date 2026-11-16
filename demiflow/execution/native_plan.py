@@ -334,7 +334,7 @@ def execute_native_plan(executor, source, plan, *, layout, execution_id,
         if arrow:
             from .dataset_native import execute as backend_execute
             iterator = backend_execute(executor, source, plan, arrow=True,
-                sink_schema=sink_schema, execution=placement)
+                sink_schema=sink_schema, execution=placement, limit=limit)
         else:
             iterator = iter_stream_rows(executor, source, plan, action=action,
                 execution=placement, limit=limit)
