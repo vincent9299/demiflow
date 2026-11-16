@@ -966,7 +966,11 @@ class DataflowExecution:
 
     def _handle_event(self, event):
         from .contracts.dataflow import thaw_record_value
-        payload = thaw_record_value(event.payload) if event.payload is not None else {}
+        # WorkerEvent carries finite Json, whose immutable arrays are tuples.
+        # Business-record thawing intentionally preserves tuples and is wrong
+        # here (e.g. bounded dead-batch diagnostics are Json arrays).
+        from .contracts.dataflow_codec import _thaw_json
+        payload = _thaw_json(event.payload) if event.payload is not None else {}
         endpoint = self._endpoints[event.allocation_id]
         lease = self._scheduler.leases[event.allocation_id]
         if event.kind == 'ready':
