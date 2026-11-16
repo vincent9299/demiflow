@@ -4,6 +4,7 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **资源、原模型完整文件及真实驻留 GPU**：原 Embedding/inference/SQLite 三个完整文件在 `0712606` 共100 passed；Arrow/terminal/工件/Prompt服务组合在 `ba4fd42` 18 passed。V011现为真实 CPU→CUDA Linear→IO：Local `2f5fa42`、Ray `abeaa7b` 均64行同一模型、不同CPU/GPU/IO进程；慢IO时仅2行GPU/3行CPU准备，原credit与ACK/释放均实测。停驻修复 `3ce2e06` 已合入，原1worker/16MiB/120s公平案例128行通过、35原分配全释放。证据及仍未关闭项见 [RESOURCE-AND-GPU-INTEGRATION-20261116.md](RESOURCE-AND-GPU-INTEGRATION-20261116.md)。下文“原模型完整文件待跑”已由本项取代，完整最终矩阵仍未宣称通过。
 - **最后私有模型准入与真实Ray组合**：`492c2b8` 让新Prompt row scope/Embedding batch＋part必须重新准入，原HTTP/cache键不变，同一RPC仍幂等；总控核owner9组源码与40附件零不符。固定`91c8658`真实Ray Core9 passed/0 skipped/121.65秒，含模型缓存、结果重读、回执后强杀、driver restart/FENCED。原模型全文件最终组合尚待补跑，不拼接不同版本冒称全门绿。
 - **新压力红保留**：仅余1CPU、64×4KiB共享双分支在120秒内未完成，记录79个ACK/80次worker启动；不是无消费者死锁，仍是不可接受的调度性能问题。没有缩样或扩时间，性能lane正在定位。Arrow与终端索引元数据必须一同做分配前准入，修复在途。
 

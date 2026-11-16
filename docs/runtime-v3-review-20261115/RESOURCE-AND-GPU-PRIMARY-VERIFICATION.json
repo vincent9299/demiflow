@@ -1,0 +1,90 @@
+{
+  "runs": {
+    "demiflow-original-models-combined": {
+      "head": "07126063e12659aa33b6feead1989f9ab06d3c17",
+      "source_inputs": 1856,
+      "receipt": "/tmp/demiflow-original-models-combined-evidence/verification.json",
+      "receipt_sha256": "c64f33362a68e749b5ab84c90c123f8c73094a3b6db6390b44fc62853b76b1e4",
+      "junit": "/tmp/demiflow-original-models-combined.xml",
+      "junit_sha256": "f24a85d47af01311d9d445ba40252721fbeffe2d42ab007c57cdc4d9dadb899c",
+      "result": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "100",
+        "time": "339.708",
+        "timestamp": "2026-11-16T15:37:18.955660+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "scenario_proofs": {}
+    },
+    "demiflow-root-resource-security": {
+      "head": "ba4fd423ce7859582237f179ccc3f24fd79a7817",
+      "source_inputs": 1861,
+      "receipt": "/tmp/demiflow-root-resource-security-evidence/verification.json",
+      "receipt_sha256": "749a33c64baa3c1b63e33e71410562b166ac5c71584ce1891cbb68af0562bfc2",
+      "junit": "/tmp/demiflow-root-resource-security.xml",
+      "junit_sha256": "ba28a1997106a29c6e9454a0cffbf9728b256f24d43ca39a793fe6ca5716ac02",
+      "result": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "18",
+        "time": "88.983",
+        "timestamp": "2026-11-16T15:51:19.394198+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "scenario_proofs": {}
+    },
+    "demiflow-gpu-overlap-local3": {
+      "head": "2f5fa423888cd019ec34540933ae3cd7e197e7e9",
+      "source_inputs": 1862,
+      "receipt": "/tmp/demiflow-gpu-overlap-local3-evidence/verification.json",
+      "receipt_sha256": "9ca842a68583798db43909fb13afbe1294c83f73577988537645fda9b23dcd9e",
+      "junit": "/tmp/demiflow-gpu-overlap-local3.xml",
+      "junit_sha256": "c11d20b4457b7ddf179ef4f0d70262b7e8516472ac8e8eb4f508b338adb20d7f",
+      "result": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "1",
+        "time": "23.085",
+        "timestamp": "2026-11-16T16:05:17.515588+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "scenario_proofs": {
+        "/tmp/demiflow-gpu-overlap-local3-evidence/c81b29a575e9b827/gpu-native.json": "0f54b565e7c9202f526e57fb6e96405f32620bd56caae6fd97bf117656eed757"
+      }
+    },
+    "demiflow-gpu-overlap-ray2": {
+      "head": "abeaa7b2a65c7cc700eff21fb916c64f485cb40f",
+      "source_inputs": 1863,
+      "receipt": "/tmp/demiflow-gpu-overlap-ray2-evidence/verification.json",
+      "receipt_sha256": "460e155268e67d0f5efc7455f6a56b17f5c12ec6c386720b629f517befb41885",
+      "junit": "/tmp/demiflow-gpu-overlap-ray2.xml",
+      "junit_sha256": "bca197febb71f5f7219b6cec06dcbe37ca7f0ca5009a81314a10c818245ccb3e",
+      "result": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "6",
+        "time": "29.163",
+        "timestamp": "2026-11-16T16:12:17.861689+08:00",
+        "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+      },
+      "scenario_proofs": {
+        "/tmp/demiflow-gpu-overlap-ray2-evidence/c81b29a575e9b827/gpu-native.json": "91dd9f066a63455f171851fe62d4ad363c9c7e2df4571a6b6d713d523039d7cf"
+      }
+    }
+  },
+  "independent_reviews": {
+    "/tmp/demiflow-resource-root-review-100aca1.json": "5ced7a9788133aa1da31b745ba8fd22e29da79bff15f687e38fbbd4c3ce31217",
+    "/tmp/demiflow-v033-root-review.json": "36335db0e6e946957ddd249d6d7400d2f87d1e5be64e1b76897d59075003d88f",
+    "/tmp/demiflow-park-root-review.json": "140216b230cbc94df4c12e3b053bccea2760fccde71e604b1b231448b7ecb2e1",
+    "/tmp/demiflow-main-boundary-abeaa7b.json": "a4074c1d94c593276a0a2e29373c9bfed53ad6363faaec7ab8d81bfc85555302"
+  }
+}
