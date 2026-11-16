@@ -178,16 +178,18 @@ def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeyp
     from demiflow.operator_llm import journal as module
     from demiflow.operator_llm.client import AsyncOperatorLLMClient
     from demiflow.execution import dataflow_api
+    from demiflow.execution.dataflow_authority import DriverJournalService
     from contextvars import ContextVar
     path = tmp_path / 'calls.sqlite'
     encoded = 'data:image/png;base64,' + 'YWJj' * 400000
     pack = PACK.replace('{{ payload | json }}', '{{ payload | image }}')
     original = module.canonical
-    hashes, driver_verifications = [], []
+    hashes, driver_verifications, wire_serializations = [], [], []
     # Observe the original client hashing phase in a real thread worker. A
     # driver-only patch cannot see a spawned worker, and the driver's separate
     # authenticated request decoding is not the original preparation cache.
     preparing = ContextVar('test_actual_client_preparation', default=False)
+    authenticating = ContextVar('test_actual_driver_authentication', default=False)
     prepare = AsyncOperatorLLMClient.prepare
     def observed_prepare(client, request):
         token = preparing.set(True)
@@ -195,14 +197,23 @@ def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeyp
             return prepare(client, request)
         finally:
             preparing.reset(token)
+    authenticate = DriverJournalService.native_request
+    def observed_authentication(service, *args, **kwargs):
+        token = authenticating.set(True)
+        try:
+            return authenticate(service, *args, **kwargs)
+        finally:
+            authenticating.reset(token)
     resolve = dataflow_api.resolve_runtime_policy
     def thread_policy(options, limits, **kwargs):
         return resolve({**options, 'worker_mode': 'thread'}, limits, **kwargs)
     monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', thread_policy)
     monkeypatch.setattr(AsyncOperatorLLMClient, 'prepare', observed_prepare)
+    monkeypatch.setattr(DriverJournalService, 'native_request', observed_authentication)
     def counted(value):
         if isinstance(value, module.RequestRecord):
-            (hashes if preparing.get() else driver_verifications).append(threading.get_ident())
+            target = hashes if preparing.get() else driver_verifications if authenticating.get() else wire_serializations
+            target.append(threading.get_ident())
         return original(value)
     monkeypatch.setattr(module, 'canonical', counted)
     for limit in (1, 0):
@@ -219,6 +230,7 @@ def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeyp
     record_property('actual_worker_mode', 'thread')
     record_property('client_exact_request_hashes', len(hashes))
     record_property('driver_request_authentication_hashes', len(driver_verifications))
+    record_property('worker_rpc_request_serializations', len(wire_serializations))
     assert path.stat().st_size < 100000
     with sqlite3.connect(path) as db:
         saved = db.execute('SELECT request_json FROM calls').fetchone()[0]
