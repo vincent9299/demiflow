@@ -20,9 +20,11 @@ from test_runtime_v3_codec_profile_groups import request
 def test_real_wide_prompt_keeps_payload_and_paid_effect_on_final_replay(tmp_path, server):
     # The original failing payload, default limits and real native materialize
     # followed by Lance publication. No worker/source grant is borrowed.
-    with RunContext.start(tmp_path / 'run') as run:
-        reference, limits = run.ref, dict(run.limits)
-        receipt = wide_graph(tmp_path)
+    with pytest.raises(RuntimeError, match='controlled interruption after action ACK'):
+        with RunContext.start(tmp_path / 'run') as run:
+            reference, limits = run.ref, dict(run.limits)
+            receipt = wide_graph(tmp_path)
+            raise RuntimeError('controlled interruption after action ACK')
     assert len(server['requests']) == 1
     assert receipt.committed_version == 1
     expected = [{'id': 1, 'payload': b'wide\x00original' * 750000, 'answer': 'ok'}]
@@ -61,7 +63,7 @@ def test_explicit_native_model_grant_is_not_enlarged_and_still_rejects_real_peak
     model = next(n.kernel for n in lower_action(request(dataset), bounds=bounds).graph.nodes
                  if n.kernel.kind == 'prompt')
     assert model.profile.requests == {'cpu_millis': 250, 'memory_bytes': 32 * 1024**2}
-    with pytest.raises(DataflowError, match='budget') as error:
+    with pytest.raises(DataflowError, match='record frame codec workspace exceeds original resident budget') as error:
         with RunContext.start(tmp_path / 'run'):
             dataset.materialize()
     assert error.value.code == 'BUDGET_EXCEEDED'
@@ -85,9 +87,11 @@ def test_real_wide_materialized_model_reuses_its_original_ack(tmp_path, server):
             'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'id'}, output='answer',
             concurrency=1, queue_depth=1, max_requests=1).materialize().take_all()
     expected = [{'id': 1, 'payload': payload, 'answer': 'ok'}]
-    with RunContext.start(tmp_path / 'run') as run:
-        reference, limits = run.ref, dict(run.limits)
-        assert execute() == expected
+    with pytest.raises(RuntimeError, match='controlled interruption after action ACK'):
+        with RunContext.start(tmp_path / 'run') as run:
+            reference, limits = run.ref, dict(run.limits)
+            assert execute() == expected
+            raise RuntimeError('controlled interruption after action ACK')
     assert len(server['requests']) == 1
     journal = RunJournal(reference.directory)
     before = journal.execution_commits('action-1')
