@@ -188,22 +188,21 @@ def test_adaptive_gate_bounds_fresh_requests_and_excludes_replay(server, tmp_pat
         started_gates.append(actor.request_gate)
 
     monkeypatch.setattr(EmbeddingActor, 'astart', observe_start)
-    ds = node(server, tmp_path, [{'text': str(i)} for i in range(9)],
-              batch_size=1, concurrency=3, queue_depth=1, request_policy=policy)
-    # A worker owns its admission state. Observe the real worker gate through
-    # the supported thread provider; never pickle a caller-owned live gate.
+    # Bind the Dataset while entering the provider, then observe the actual
+    # worker-owned gates. Existing Datasets retain their original executor.
     with data.local_execution(worker_mode='thread'):
+        ds = node(server, tmp_path, [{'text': str(i)} for i in range(9)],
+                  batch_size=1, concurrency=3, queue_depth=1, request_policy=policy)
         ds.take_all()
-    assert len(started_gates) == 1
-    gate = started_gates[0]
-    assert 1 < server['peak'] <= 3 and gate.capacity == 3 and gate.admitted == 9
-    assert gate.fresh_responses == 9 and len(server['bodies']) == 9
-    with data.local_execution(worker_mode='thread'):
+        assert len(started_gates) == 1
+        gate = started_gates[0]
+        assert 1 < server['peak'] <= 3 and gate.capacity == 3 and gate.admitted == 9
+        assert gate.fresh_responses == 9 and len(server['bodies']) == 9
         ds.take_all()
-    assert len(started_gates) == 2 and started_gates[1] is not gate
-    gate = started_gates[1]
-    assert gate.admitted == 0 and gate.fresh_responses == 0
-    assert len(server['bodies']) == 9
+        assert len(started_gates) == 2 and started_gates[1] is not gate
+        gate = started_gates[1]
+        assert gate.admitted == 0 and gate.fresh_responses == 0
+        assert len(server['bodies']) == 9
 
 
 def test_caller_owned_adaptive_gate_is_not_silently_replaced(server, tmp_path):
@@ -328,9 +327,10 @@ def test_budget_and_blocking_io_stay_bounded(server, tmp_path, monkeypatch):
         finally:
             with lock: state['active'] -= 1
     monkeypatch.setattr(runtime, 'prepare', slow_prepare)
-    ds = node(server, tmp_path, batch_size=1, concurrency=4, max_requests=2)
-    with data.local_execution(worker_mode='thread'):
-        with pytest.raises(PromptBudgetExceededError): ds.take_all()
+    with pytest.raises(PromptBudgetExceededError):
+        with data.local_execution(worker_mode='thread'):
+            ds = node(server, tmp_path, batch_size=1, concurrency=4, max_requests=2)
+            ds.take_all()
     assert len(server['bodies']) <= 2 and 0 < state['peak'] <= 2
     assert state['threads']
     assert all(name.startswith('demiflow-embeddings') for name in state['threads'])
@@ -549,14 +549,13 @@ def test_prefetch_overlaps_cpu_http_and_profiles_without_exceeding_request_limit
     server['on_request'] = request
     monkeypatch.setattr(runtime, 'prepare', prepare)
     profile = tmp_path / 'profile.json'
-    ds = data.from_items([{'text': 'first'}, {'text': 'second'}, {'text': 'third'}]).map_embeddings(
-        model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=1,
-        prefetch_batches=1, call_output='call', options={'prepare_workers': 1, 'io_workers': 1,
-            'profile_path': str(profile), 'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}})
-    # This test observes in-memory preparation/HTTP overlap. The native thread
-    # host keeps that observer in the actual worker's process; process-host
-    # coverage uses HTTP/journal facts rather than a parent's monkeypatch.
+    # Bind creation as well as execution to this actual thread worker so the
+    # preparation and HTTP observers see the same in-memory events.
     with data.local_execution(worker_mode='thread'):
+        ds = data.from_items([{'text': 'first'}, {'text': 'second'}, {'text': 'third'}]).map_embeddings(
+            model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=1,
+            prefetch_batches=1, call_output='call', options={'prepare_workers': 1, 'io_workers': 1,
+                'profile_path': str(profile), 'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}})
         rows = ds.take_all()
     assert overlaps == [True] and server['peak'] == 1 and len(rows) == 3
     assert all(row['call']['timings']['prepare_s'] >= 0 for row in rows)
