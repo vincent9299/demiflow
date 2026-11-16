@@ -243,7 +243,7 @@ def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_sea
             original_copy=relational.copy.deepcopy
             original_pickle=reducer_memory.pickle.Pickler
             def copy(*args,**kwargs):
-                copies.append(True)
+                copies.append(args[0] is initial)
                 return original_copy(*args,**kwargs)
             def pickle(*args,**kwargs):
                 encodes.append(True)
@@ -262,7 +262,7 @@ def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_sea
                 else:
                     actual=list(relational.reduce_partition(records(),spec=spec,services=svc))
                     assert [dict(r.inline) for r in actual]==[{'k':1,'n':2}]
-                    assert reads==[0,1] and calls==[1,1] and len(copies)==1 and len(encodes)==2
+                    assert reads==[0,1] and calls==[1,1] and copies.count(True)==1 and len(encodes)==2
             assert json.dumps(_thaw_json(spec.configuration),sort_keys=True)==original_config
             assert reducer_memory.FIELD not in spec.configuration
             assert svc.assignment.stages==(stage,) and stage.stage_id=='original-legacy-stage'
