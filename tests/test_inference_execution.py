@@ -154,7 +154,7 @@ async def test_prompt_response_pool_progresses_while_journal_pool_is_busy(prompt
 
 def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_server, tmp_path, monkeypatch):
     from demiflow.operator_llm import client as clients, call_ref
-    from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
+    from demiflow.execution.dataflow_model_journal import RemotePromptJournal
     observed, closed = {}, []
     def record(name, function):
         def wrapped(*args, **kwargs):
@@ -164,7 +164,9 @@ def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_serv
     monkeypatch.setattr(clients.AsyncOperatorLLMClient, 'prepare', record('prepare', clients.AsyncOperatorLLMClient.prepare))
     monkeypatch.setattr(clients.AsyncOperatorLLMClient, 'decode', record('decode', clients.AsyncOperatorLLMClient.decode))
     monkeypatch.setattr(clients, '_response_body', record('parse', clients._response_body))
-    monkeypatch.setattr(_SQLiteJournalShard, 'reserve', record('reserve', _SQLiteJournalShard.reserve))
+    # The worker's journal pool now calls the native driver-owned journal port.
+    # Observe that actual call, rather than an unused private SQLite adapter.
+    monkeypatch.setattr(RemotePromptJournal, 'reserve', record('reserve', RemotePromptJournal.reserve))
     original_close = clients.AsyncOperatorLLMClient.aclose
     async def close(client):
         await original_close(client)
@@ -173,8 +175,10 @@ def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_serv
     def forbidden(*args, **kwargs):
         raise AssertionError('Historical journal audit was not requested')
     monkeypatch.setattr(call_ref, 'journal_totals', forbidden)
-    ds = prompt(data.from_items([{'item': i} for i in range(2)]), concurrency=2)
-    with RunContext.start(tmp_path/'run'):
+    # Bind the thread provider at Dataset construction so these observers see
+    # the real worker pools; all RPCs and the original journal still execute.
+    with RunContext.start(tmp_path/'run'), data.local_execution(worker_mode='thread'):
+        ds = prompt(data.from_items([{'item': i} for i in range(2)]), concurrency=2)
         assert len(ds.materialize().take_all()) == 2
     # Repeat-action reuse is execution-owned recovery now; see
     # test_prompt_stream_recovery.py:133-137 (resume reuses, each row called once).

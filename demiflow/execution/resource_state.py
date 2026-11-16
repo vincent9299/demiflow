@@ -586,6 +586,14 @@ class RunResourceState:
                                (int(time.time() * 1000) + min(100, self.claim_lease_ms), entry['allocation_id']))
                 if merged["cleanup"] == "CONFIRMED":
                     self._finish_intents(db, scope_id, entry["allocation_id"], "ensure_absent")
+                elif kind == 'cleanup' and entry['cleanup'] == 'UNCONFIRMED':
+                    # Provider I/O has returned; retain the cleanup obligation
+                    # and all charges, but do not hold its crash-recovery lease
+                    # until the execution's equal-length close deadline. This
+                    # is a retry of the original exit proof, never a refund.
+                    db.execute("UPDATE resource_intents SET claimed_until_ms=? "
+                               "WHERE allocation_id=? AND kind='ensure_absent' AND status='claimed'",
+                               (int(time.time() * 1000) + min(100, self.claim_lease_ms), entry['allocation_id']))
                 self._emit_event(db, scope_id, kind, allocation_id=entry["allocation_id"],
                                  observation_revision=revision,
                                  reason=";".join(merged.get("conditions") or [])[:256],

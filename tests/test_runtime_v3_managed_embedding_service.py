@@ -165,6 +165,15 @@ def test_worker_sigkill_retains_unit_until_actual_service_tree_exits(tmp_path, m
     assert proof['kill'] and not thread.is_alive()
     assert proof['charged_while_child_alive'] and not proof['premature_release']
     assert_reaped(fixture)
+    # No early refund is only half the contract. Once all owned processes have
+    # exited, the original close path must actually confirm and release them.
+    import sqlite3
+    with sqlite3.connect(f'file:{tmp_path / "run/run.sqlite"}?mode=ro', uri=True) as db:
+        allocations = db.execute('SELECT allocation_id,cleanup FROM resource_allocations').fetchall()
+    assert allocations and all(cleanup == 'CONFIRMED' for _, cleanup in allocations)
+    records = Path(os.environ['DEMIFLOW_RESOURCE_ROOT']) / 'capacity/allocations'
+    assert all(json.loads((records / (allocation + '.json')).read_text())['state'] == 'RELEASED'
+               for allocation, _ in allocations)
 
 
 def test_guardian_observer_exception_reaps_detached_closefd_descendant(tmp_path, monkeypatch, request):
