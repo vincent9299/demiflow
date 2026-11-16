@@ -105,7 +105,12 @@ def test_finite_join_memory_transport_does_not_accumulate_per_row_history(tmp_pa
         # channel bound and every original multiplicity/frontier assertion.
         return replace(policy,fusion=False),replace(bounds,max_pending_events=64)
     monkeypatch.setattr(dataflow_api,'resolve_runtime_policy',bounded)
+    # Explicit small-row windows keep both real workers resident inside the
+    # unchanged 256 MiB total. Disabling fusion alone permits a legal finite
+    # fallback with the much larger implicit codec windows; that would never
+    # exercise this memory-channel counterexample. Inputs/64-event cap stay.
     with RunContext.start(tmp_path/'run',limits={'checkpoint_rows':512,
+            'max_row_bytes':64*1024,'max_batch_bytes':256*1024,
             'checkpoint_interval_ms':60000,'timeout_s':60}) as run,data.local_execution(workers=4):
         rows=pipeline(16,16).take_all()
         assert sorted((r['i'],r['j']) for r in rows)==[(i,j) for i in range(16) for j in range(16)]
@@ -152,7 +157,10 @@ def test_duplicate_memory_delivery_is_rejected_before_second_business_call(tmp_p
         return original(runner,command)
     monkeypatch.setattr(WorkerGraphRunner,'_receive_data',receive)
     with pytest.raises(DataflowError,match='duplicate or reordered memory delivery'):
-        with RunContext.start(tmp_path/'run'),data.local_execution(workers=5,worker_mode='thread'):
+        # Tighten only the payload windows to require the intended real memory
+        # delivery within the original total budget; never mutate a sealed plan.
+        with RunContext.start(tmp_path/'run',limits={'max_row_bytes':64*1024,
+                'max_batch_bytes':256*1024}),data.local_execution(workers=5,worker_mode='thread'):
             pipeline(1,1).map(observe).take_all()
     assert len(injected)==1
     assert events(path)==[{'event':'call','pid':os.getpid(),'i':0,'j':0}]
