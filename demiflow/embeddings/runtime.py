@@ -188,7 +188,15 @@ class EmbeddingActor:
                     # the run journal applies it in the same savepoint as intent.
                     with native_request_budget(native.action.context, node_id=native.node_id,
                                                max_requests=self.max_requests) as reservation:
-                        reserved = await io(journal.reserve, request)
+                        try:
+                            reserved = await io(journal.reserve, request)
+                        except PromptBudgetExceededError as error:
+                            # The shared journal exposes Prompt's row-error
+                            # vocabulary. Native Embedding historically raises
+                            # an execution budget failure; preserve that API
+                            # without changing the atomic reservation itself.
+                            from demiflow.execution.recovery_contract import RecoveryContractError
+                            raise RecoveryContractError('Execution budget exhausted: embedding requests') from error
                         if not reserved:
                             record = await io(journal.lookup, request)
                             reused = True

@@ -338,10 +338,14 @@ async def test_cancellation_drains_journal_and_closes_pool(server, tmp_path):
     server['delay'] = 1
     ds = node(server, tmp_path, [{'text': 'a'}])
     resources = StreamResources(ds._stages)
+    # Validate the passive declaration before starting its actor, matching
+    # run_stream's materialize -> on_start -> _arun lifecycle. A started client
+    # cannot be reinterpreted as a fresh serializable factory declaration.
+    stages = _materialize(ds._plan)
     async def execute():
         try:
             await resources.prepare()
-            await _arun(iter([{'text': 'a'}]), _materialize(ds._plan), StreamStats(),
+            await _arun(iter([{'text': 'a'}]), stages, StreamStats(),
                         on_progress=None, on_drain=None, log_every=0, cancellation=None)
         finally:
             await resources.close()
@@ -515,7 +519,11 @@ def test_prefetch_overlaps_cpu_http_and_profiles_without_exceeding_request_limit
         model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=1,
         prefetch_batches=1, call_output='call', options={'prepare_workers': 1, 'io_workers': 1,
             'profile_path': str(profile), 'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite')}})
-    rows = ds.take_all()
+    # This test observes in-memory preparation/HTTP overlap. The native thread
+    # host keeps that observer in the actual worker's process; process-host
+    # coverage uses HTTP/journal facts rather than a parent's monkeypatch.
+    with data.local_execution(worker_mode='thread'):
+        rows = ds.take_all()
     assert overlaps == [True] and server['peak'] == 1 and len(rows) == 3
     assert all(row['call']['timings']['prepare_s'] >= 0 for row in rows)
     report = json.loads(profile.read_text())
@@ -621,9 +629,10 @@ def test_byte_packing_decodes_each_image_once_and_preserves_pixels(server, tmp_p
         Image.effect_noise((size,size),100).convert('RGB').save(path)
         rows.append({'id':i, 'image':{'uri':path.as_uri(),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}})
     model=replace(server['model'], input_format='chat', image_transport='original_if_compatible')
-    result=data.from_items(rows).map_embeddings(model=model, inputs={'image':'image'},
-        batch_size=5, call_output='call', error_output='error',
-        options={'batch_request_bytes':8000,'max_request_bytes':128*1024}).materialize().take_all()
+    with data.local_execution(worker_mode='thread'):
+        result=data.from_items(rows).map_embeddings(model=model, inputs={'image':'image'},
+            batch_size=5, call_output='call', error_output='error',
+            options={'batch_request_bytes':8000,'max_request_bytes':128*1024}).materialize().take_all()
     assert len(result)==len(seen)==5 and all(r['error'] is None for r in result)
     payloads=[base64.b64decode(m[0]['content'][0]['image_url']['url'].split(',')[1])
               for b in server['bodies'] for m in b['messages']]
