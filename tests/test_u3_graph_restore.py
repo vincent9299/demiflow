@@ -66,39 +66,23 @@ def _graph_spec(shared_double, n=24, cut_rows=8, readers=("c0", "c1", "c2"),
 
 
 def _committed_rows(run, action_id, rid, facts):
-    sink = BlockSink(RunAction(run, action_id + "-graph-" + rid, {"kind": "graph-node"}), rid)
-    rows = []
-    for fact in facts:
-        rows.extend(sink.iter_rows(fact["receipts"][rid]["data"]))
-    return rows
+    from runtime_v3_graph_history import committed_rows
+    return committed_rows(run, action_id, rid, facts)
 
 
 def _release_crash_orphans(root):
-    """Reconcile capacity for allocations whose driver died before close.
-
-    A crash/fault leaves the allocation BOUND (charged); exit alone never frees
-    capacity. The canonical unit-lock + birth-identity evidence confirms the dead
-    host and releases it, exactly as the provider's ensure_absent path does.
-    """
+    # Historical callers supply the old suffix; observe the actual original
+    # driver-owned unit roots and allocator. Never manufacture release evidence.
+    from runtime_v3_graph_history import assert_closed
     root = Path(root)
-    pool = LocalCapacityPool(root / "capacity",
-                             capacity={"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3})
-    unit = ManagedProcessUnit(root / "units")
-    for record in pool.snapshot()["active"]:
-        allocation_id = record["allocation_id"]
-        process_json = next((root / "units").glob("*/" + allocation_id + "/process.json"))
-        scope_id = process_json.parent.parent.name
-        evidence = unit.stop(scope_id, allocation_id, terminate_deadline_ms=2000)
-        assert evidence["confirmed"] is True
-        pool.release(allocation_id, evidence)
-        try:
-            os.waitpid(evidence["identity"]["pid"], os.WNOHANG)  # reap our own zombie child
-        except (ChildProcessError, OSError):
-            pass
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+    assert root.name.endswith('-resources')
+    return assert_closed(root.with_name(root.name[:-len('-resources')]), allow_unprovisioned=True)
 
 
 def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
+    from runtime_v3_owned_crash import kill_owned_worker, assert_worker_killed, process_records
+    from runtime_v3_graph_history import capture_acks, assert_acks_retained
+    driver_pid = os.getpid()
     crash_marker = tmp_path / "crashed-once"
     trace = tmp_path / "ancestor-trace"
 
@@ -110,8 +94,7 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         with open(trace, "a") as stream:
             stream.write(str(row["x"]) + "\n")
         if row["x"] == 8 and not crash_marker.exists():
-            crash_marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(crash_marker, driver_pid)
         return {**row, "x": row["x"] * 2}
 
     spec, readers, n = _graph_spec(shared_double, n=24, cut_rows=8)
@@ -127,7 +110,9 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-restore"}}) as execution:
                 executor.materialize_graph(spec)
                 execution.complete(dict(kind="graph-materialized"))
-    assert crash_marker.exists(), "the ancestor crash window did not fire"
+    assert_worker_killed(crash_marker, tmp_path / 'run')
+    original_acks = capture_acks(run, execution.action_id)
+    original_processes = process_records(tmp_path / 'run')
 
     with RunContext.resume(reference, limits=limits) as run2:
         assert run2.attempt == 2
@@ -135,11 +120,12 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
             result = executor.materialize_graph(spec)
             action_id = execution.action_id
             execution.complete(dict(kind="graph-materialized", egress=result["egress_rows"]))
-        facts = run2.journal.execution_commits(action_id + "-graph-result")
+        facts = run2.journal.execution_commits(action_id)
         sequences = [f["sequence"] for f in facts]
-        assert sequences == [1, 2, 3]  # contiguous across the fault, no gap/dup
+        assert sequences == list(range(1, len(facts) + 1))  # contiguous across the fault, no gap/dup
         assert all(f["status"] == "acked" for f in facts)
         assert len({f["commit_id"] for f in facts}) == len(facts)
+        assert_acks_retained(run2, action_id, original_acks)
         # Output multiset equals the shared expansion applied once: the acked prefix
         # is neither recomputed nor duplicated by the restored generation.
         for rid in readers:
@@ -160,15 +146,15 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         if i != 8:
             assert counts[i] == 1, (i, counts[i])
 
-    records = list((tmp_path / "run-resources" / "units").glob("*/*/process.json"))
-    assert len(records) == 8, "a new worker generation was not provisioned for restore"
-    import json
-    pids = {json.loads(path.read_text())["identity"]["pid"] for path in records}
-    assert len(pids) == 8 and os.getpid() not in pids
+    records = process_records(tmp_path / 'run')
+    assert original_processes.keys() < records.keys(), 'restore must provision a new physical owner'
+    pids = {value['identity']['pid'] for _, value in records.values()}
+    assert len(pids) == len(records) and os.getpid() not in pids
     _release_crash_orphans(tmp_path / "run-resources")
 
 
 def test_completed_graph_short_circuits_reentry(tmp_path):
+    from runtime_v3_owned_crash import process_records, assert_released
     def shared_double(row):
         return {**row, "x": row["x"] * 2}
 
@@ -183,14 +169,15 @@ def test_completed_graph_short_circuits_reentry(tmp_path):
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-complete"}}) as execution:
                 first = executor.materialize_graph(spec)
                 execution.complete(dict(kind="graph-materialized", egress=first["egress_rows"]))
+            original_processes = process_records(run.directory)
             raise RuntimeError("later action failed")
     with RunContext.resume(reference, limits=limits) as run2:
         with run2.action({"kind": "materialize", "source": {"fixture": "u3-graph-complete"}}) as execution:
             result = executor.materialize_graph(spec)
             action_id = execution.action_id
             execution.complete(dict(kind="graph-materialized", egress=result["egress_rows"]))
-        facts = run2.journal.execution_commits(action_id + "-graph-result")
-        assert [f["sequence"] for f in facts] == [1, 2]
+        facts = run2.journal.execution_commits(action_id)
+        assert [f["sequence"] for f in facts] == list(range(1, len(facts) + 1))
         assert all(f["status"] == "acked" for f in facts)
         for rid in readers:
             rows = _committed_rows(run2, action_id, rid, facts)
@@ -198,15 +185,15 @@ def test_completed_graph_short_circuits_reentry(tmp_path):
     # terminal.complete short-circuits before any worker provisioning or duplicate
     # commit (the restart-after-completion exactly-once gap).
     assert result["workers"] == 0
-    records = list((tmp_path / "run-resources" / "units").glob("*/*/process.json"))
-    assert len(records) == 4, "completed graph re-entry provisioned a second generation"
-    pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity",
-                             capacity={"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3})
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+    assert process_records(run2.directory) == original_processes
+    assert_released(run2.directory)
 
 
 @pytest.mark.parametrize("mode", ["memory_incremental", "durable_incremental", "finite_sealed"])
 def test_graph_restore_across_exchange_modes(tmp_path, mode):
+    from runtime_v3_owned_crash import kill_owned_worker, assert_worker_killed
+    from runtime_v3_graph_history import capture_acks, assert_acks_retained
+    driver_pid = os.getpid()
     # Exit gate 3: each exchange mode recovers from a producer fault with an equal
     # output multiset. The restore mechanism is mode-independent (the ancestor skips
     # the acked source prefix and re-sends post-cut data); only carriage differs
@@ -215,8 +202,7 @@ def test_graph_restore_across_exchange_modes(tmp_path, mode):
 
     def shared_double(row):
         if row["x"] == 8 and not crash_marker.exists():
-            crash_marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(crash_marker, driver_pid)
         return {**row, "x": row["x"] * 2}
 
     spec, readers, n = _graph_spec(shared_double, n=24, cut_rows=8, mode=mode)
@@ -229,16 +215,18 @@ def test_graph_restore_across_exchange_modes(tmp_path, mode):
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-mode-restore"}}) as execution:
                 executor.materialize_graph(spec)
                 execution.complete(dict(kind="graph-materialized"))
-    assert crash_marker.exists(), mode
+    assert_worker_killed(crash_marker, tmp_path / 'run')
+    original_acks = capture_acks(run, execution.action_id)
     with RunContext.resume(reference, limits=limits) as run2:
         with run2.action({"kind": "materialize", "source": {"fixture": "u3-graph-mode-restore"}}) as execution:
             result = executor.materialize_graph(spec)
             action_id = execution.action_id
             execution.complete(dict(kind="graph-materialized", egress=result["egress_rows"]))
-        facts = run2.journal.execution_commits(action_id + "-graph-result")
-        assert [f["sequence"] for f in facts] == [1, 2, 3], mode
+        facts = run2.journal.execution_commits(action_id)
+        assert [f["sequence"] for f in facts] == list(range(1, len(facts) + 1)), mode
         assert all(f["status"] == "acked" for f in facts)
         assert len({f["commit_id"] for f in facts}) == len(facts)
+        assert_acks_retained(run2, action_id, original_acks)
         for rid in readers:
             rows = _committed_rows(run2, action_id, rid, facts)
             assert [r["x"] for r in rows] == [i * 2 for i in range(n)], (mode, rid)

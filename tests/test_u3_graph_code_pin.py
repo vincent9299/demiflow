@@ -181,7 +181,7 @@ def test_graph_end_to_end_by_reference_udf_succeeds(tmp_path, monkeypatch):
                 action_id = execution.action_id
                 result = run_local_graph(spec, control_timeout_s=15)
                 execution.complete(dict(kind="graph-materialized"))
-            facts = run.journal.execution_commits(action_id + "-graph-result")
+            facts = run.journal.execution_commits(action_id)
             for rid in readers:
                 rows = _committed_rows(run, action_id, rid, facts)
                 assert [r["x"] for r in rows] == [i + 1 for i in range(n)], rid
@@ -193,6 +193,8 @@ def test_graph_end_to_end_by_reference_udf_succeeds(tmp_path, monkeypatch):
 # --- end-to-end: crash -> edit helper -> resume refuses (same-Run code mixing) ---
 
 def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
+    from runtime_v3_owned_crash import kill_owned_worker, assert_worker_killed, process_records
+    driver_pid = os.getpid()
     helper_mod, paths, helper = _helper(tmp_path, monkeypatch, "gcpcrash")
     crash_marker = tmp_path / "target-crashed-once"
 
@@ -203,11 +205,9 @@ def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
         # Crash exactly one target once, on the first POST-cut row (x==9 after cut_rows=8).
         if row["x"] == 9:
             try:
-                fd = os.open(crash_marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(fd)
+                kill_owned_worker(crash_marker, driver_pid)
             except FileExistsError:
                 return row
-            os.kill(os.getpid(), signal.SIGKILL)
         return row
 
     def passthrough(row):
@@ -229,7 +229,8 @@ def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
                                  "source": {"fixture": "graph-codepin-crash"}}) as execution:
                     executor.materialize_graph(spec)
                     execution.complete(dict(kind="graph-materialized"))
-        assert crash_marker.exists(), "the consumer crash window did not fire"
+        assert_worker_killed(crash_marker, root)
+        original_records = process_records(root)
         # Edit ONLY the captured helper; the closure's own source + pickle bytes unchanged.
         paths[helper].write_text("def delta():\n    return 9999\n")
         importlib.reload(sys.modules[helper])
@@ -241,5 +242,6 @@ def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
                     executor.materialize_graph(spec)
                     execution.complete(dict(kind="graph-materialized"))
         assert not isinstance(excinfo.value, TimeoutError)
+        assert process_records(root) == original_records, 'code drift must refuse before a new worker launches'
     finally:
         _release_crash_orphans(tmp_path / "run-resources")

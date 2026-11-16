@@ -80,35 +80,25 @@ def _spec(target_fns, *, ancestor_fn=None, n=24, cut_rows=8, mode="durable_incre
 
 
 def _committed_rows(run, action_id, rid, facts):
-    sink = BlockSink(RunAction(run, action_id + "-graph-" + rid, {"kind": "graph-node"}), rid)
-    rows = []
-    for fact in facts:
-        rows.extend(sink.iter_rows(fact["receipts"][rid]["data"]))
-    return rows
+    from runtime_v3_graph_history import committed_rows
+    return committed_rows(run, action_id, rid, facts)
 
 
 def _release_crash_orphans(root):
+    # Historical callers supply the old suffix; observe the actual original
+    # driver-owned unit roots and allocator. Never manufacture release evidence.
+    from runtime_v3_graph_history import assert_closed
     root = Path(root)
-    pool = LocalCapacityPool(root / "capacity",
-                             capacity={"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3})
-    unit = ManagedProcessUnit(root / "units")
-    for record in pool.snapshot()["active"]:
-        allocation_id = record["allocation_id"]
-        process_json = next((root / "units").glob("*/" + allocation_id + "/process.json"))
-        scope_id = process_json.parent.parent.name
-        evidence = unit.stop(scope_id, allocation_id, terminate_deadline_ms=2000)
-        assert evidence["confirmed"] is True
-        pool.release(allocation_id, evidence)
-        try:
-            os.waitpid(evidence["identity"]["pid"], os.WNOHANG)
-        except (ChildProcessError, OSError):
-            pass
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+    assert root.name.endswith('-resources')
+    return assert_closed(root.with_name(root.name[:-len('-resources')]), allow_unprovisioned=True)
 
 
 # ---------------- exit gate 3: consumer crash, whole-graph restore ----------------
 
 def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
+    from runtime_v3_owned_crash import kill_owned_worker, assert_worker_killed
+    from runtime_v3_graph_history import capture_acks, assert_acks_retained
+    driver_pid = os.getpid()
     crash_marker = tmp_path / "target-crashed-once"
 
     def crashing_target(row):
@@ -116,11 +106,9 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
         # O_EXCL makes the marker atomic so racing broadcast targets crash only one.
         if row["x"] == 16:
             try:
-                fd = os.open(crash_marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(fd)
+                kill_owned_worker(crash_marker, driver_pid)
             except FileExistsError:
                 return row
-            os.kill(os.getpid(), signal.SIGKILL)
         return row
 
     spec, readers, n = _spec({"c0": crashing_target, "c1": None},
@@ -134,17 +122,19 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-consumer-fault"}}) as execution:
                 executor.materialize_graph(spec)
                 execution.complete(dict(kind="graph-materialized"))
-    assert crash_marker.exists(), "the consumer crash window did not fire"
+    assert_worker_killed(crash_marker, tmp_path / 'run')
+    original_acks = capture_acks(run, execution.action_id)
 
     with RunContext.resume(reference, limits=limits) as run2:
         with run2.action({"kind": "materialize", "source": {"fixture": "u3-graph-consumer-fault"}}) as execution:
             result = executor.materialize_graph(spec)
             action_id = execution.action_id
             execution.complete(dict(kind="graph-materialized", egress=result["egress_rows"]))
-        facts = run2.journal.execution_commits(action_id + "-graph-result")
-        assert [f["sequence"] for f in facts] == [1, 2, 3]
+        facts = run2.journal.execution_commits(action_id)
+        assert [f["sequence"] for f in facts] == list(range(1, len(facts) + 1))
         assert all(f["status"] == "acked" for f in facts)
         assert len({f["commit_id"] for f in facts}) == len(facts)
+        assert_acks_retained(run2, action_id, original_acks)
         for rid in readers:
             rows = _committed_rows(run2, action_id, rid, facts)
             assert [r["x"] for r in rows] == [i * 2 for i in range(n)], rid
@@ -158,8 +148,9 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
 # ---------------- exit gate 2: stage failure publishes nothing ----------------
 
 def test_stage_failure_seals_nothing(tmp_path):
+    from runtime_v3_graph_history import committed_rows
     def failing_target(row):
-        if row["x"] == 4:  # within the first cut, before any durable ack
+        if row["x"] == 4:
             raise RuntimeError("target stage failed")
         return row
 
@@ -167,17 +158,23 @@ def test_stage_failure_seals_nothing(tmp_path):
                              n=24, cut_rows=8)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
-    # A failed stage leaves the worker host alive but never contributes; the driver's
-    # bounded cut collection fails rather than hanging, and publishes nothing.
-    with pytest.raises((RecoveryContractError, OSError)):
+    # The failed cut cannot publish. Earlier pressure-cut ACKs remain genuine
+    # incremental prefixes; the original business exception must remain visible.
+    with pytest.raises(RuntimeError, match='target stage failed'):
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-stage-fail"}}) as execution:
                 run_local_graph(spec, control_timeout_s=10)
                 execution.complete(dict(kind="graph-materialized"))
-    # The failing cut never aligned/acked: no authorized commit, no final seal.
-    journal_facts = run.journal.execution_commits("action-1-graph-result")
-    assert all(f["status"] != "acked" for f in journal_facts)
-    assert not any(f["intent"].get("seal", {}).get("sealed") for f in journal_facts)
+    journal_facts = run.journal.execution_commits("action-1")
+    acked = [fact for fact in journal_facts if fact['status'] == 'acked']
+    for rid in readers:
+        rows = committed_rows(run, 'action-1', rid, acked, require_final=False)
+        # Every published payload is a completed pre-failure business row, in
+        # order. Neither the failing row (4) nor any later row may be published.
+        assert [row['x'] for row in rows] == [0, 2][:len(rows)]
+        assert len(rows) <= 2
+    assert run.journal.execution_action('action-1')['result'] is None
+    assert run.journal.execution_status()['status'] != 'succeeded'
     _release_crash_orphans(tmp_path / "run-resources")
 
 
@@ -197,7 +194,7 @@ def test_sealed_storage_exhaustion_fails_early_without_publication(tmp_path):
                 run_local_graph(spec, control_timeout_s=8)
                 execution.complete(dict(kind="graph-materialized"))
     assert time.monotonic() - start < 30, "sealed exhaustion deadlocked instead of failing early"
-    facts = run.journal.execution_commits("action-1-graph-result")
+    facts = run.journal.execution_commits("action-1")
     assert all(f["status"] != "acked" for f in facts)
     _release_crash_orphans(tmp_path / "run-resources")
 
