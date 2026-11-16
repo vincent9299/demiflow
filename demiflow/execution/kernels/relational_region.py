@@ -99,7 +99,12 @@ class RelationalRegionRuntime:
                              partition_builds=0, intermediate_key_rebuilds=0)
         self.completed = None
         self.on_complete_member = None
+        self.on_input_member = None
         self.active = False
+        from ...planning.dataflow_relational_regions import region_resident_bytes
+        stage = next(s for s in services.assignment.stages if s.stage_id == plan.region_id)
+        if min(stage.resident_bytes, stage.profile.requests['memory_bytes']) < region_resident_bytes(plan, services.bounds):
+            raise _err('RESOURCE_INFEASIBLE', 'region lacks its admitted live-object window')
         previous = (self.root._image or {}).get('relational_region')
         if previous is not None:
             if (type(previous) is not dict or set(previous) != {'region_id', 'counters'}
@@ -145,6 +150,10 @@ class RelationalRegionRuntime:
                     relations[(entry.consumer, entry.port)] = chains
                 for index, occurrence in enumerate(self.plan.occurrences):
                     spec = specs[index]
+                    if self.on_input_member is not None:
+                        self.on_input_member(occurrence, sum(chain.count
+                            for port in self.kernels[occurrence]._port_order
+                            for chain in relations[(occurrence, port)]))
                     if spec.kind == 'reduce':
                         source = relations[(occurrence, 'left')]
                         yield from self._reduce(arena, source, spec)

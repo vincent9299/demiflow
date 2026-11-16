@@ -94,6 +94,7 @@ class WorkerGraphRunner:
                                 for occ in region.plan.occurrences}
         for region in self._relational_regions.values():
             region.on_complete_member = self._region_member_completed
+            region.on_input_member = self._region_member_inputs
         # Every source row can occupy several delivery slots at once. Each
         # channel fitting its own window does not prove the aggregate fits the
         # same worker's bounded outstanding-delivery table. Stop between source
@@ -987,6 +988,10 @@ class WorkerGraphRunner:
         self._finished_inputs.add((edge_id, producer_partition))
         # EOI is an input fact, not permission to block this runner while a
         # callback waits for another co-resident node's timer or output.
+
+    def _region_member_inputs(self, occurrence, inputs):
+        self._metrics[occurrence]['rows_input'] = inputs
+        self._dirty_metrics.add(occurrence)
 
     def _region_member_completed(self, occurrence, outputs, inputs):
         self._metrics[occurrence]['rows_input'] = inputs
