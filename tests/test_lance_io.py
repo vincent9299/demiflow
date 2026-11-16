@@ -240,8 +240,9 @@ def test_checkpoint_retry_after_partial_attempt(tmp_path):
         yield
     # The current native preflight exposes Lance's lookup ValueError; the
     # retired checkpoint wrapper used LanceExecutionError for this refusal.
-    with pytest.raises((LanceExecutionError, LanceWriteConflict, ValueError),
-                       match='not found|exists|target'):
+    import re
+    missing_path = re.escape(str(Path(uri)).lstrip('/'))
+    with pytest.raises(ValueError, match=rf'Dataset at path /?{missing_path} was not found:'):
         _write_pinned(DataAPI().from_iter(forbidden), uri)
     assert foreign.read_bytes() == b'partial attempt without original ownership'
     assert list(Path(uri).iterdir()) == [foreign]
