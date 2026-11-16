@@ -100,7 +100,9 @@ def _fixture(root, catalog, endpoint, modality, *, registration=True, binding=Tr
         expected = (42, 0, 0)
     table = pa.Table.from_pylist([{'id': 1, 'input': value}])
     table = table.cast(pa.schema([pa.field(f.name, _nonnullable(f.type), nullable=False) for f in table.schema]))
-    source, target = root / 'input.lance', root / 'output.lance'
+    tables = root / 'data'; tables.mkdir()
+    ws.add_location(root, 'local', tables, writable=True)
+    source, target = tables / 'input.lance', tables / 'output.lance'
     lance.write_dataset(table, str(source))
     options = dict(max_image_bytes=65536, max_decode_pixels=1024,
         max_document_bytes=65536, max_document_text_bytes=4096, document_cache_bytes=65536,
@@ -173,3 +175,49 @@ def test_managed_object_access_is_rejected_before_http(tmp_path, catalog, server
         registration=fault != 'unregistered', binding=fault != 'undeclared')
     assert report['status'] != 'checked'
     assert not server['bodies'] and not Path(args['target']).exists()
+
+
+@pytest.mark.parametrize('modality', ['image', 'document'])
+@pytest.mark.parametrize('corrupt', [False, True])
+def test_workbench_prepare_start_uses_registered_objects_and_sealed_native_plan(
+        tmp_path, catalog, server, modality, corrupt, monkeypatch, record_property):
+    from urllib.parse import urlsplit, unquote
+    from demiflow.workbench.runs import manager as runs
+    from test_forge_runs import execute
+    from runtime_v3_product_scenarios import read_native_execution
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))
+    root = tmp_path / 'workspace'
+    path, args, report, _ = _fixture(root, catalog, server['model'].base_url, modality)
+    assert report['status'] == 'checked', report['diagnostics']
+    ws.attach_table(root, 'inputs', relative_uri='input.lance', version=1,
+        location_id='local', dataset_id='embedding-inputs', schema_name='embedding-inputs', schema_version='1')
+    path.write_text(path.read_text().replace('data.read_lance(source, version=1)',
+        "data.read_lance(source['uri'], version=source['version'])").replace(
+        'write_lance(target,', "write_lance(target['uri'],"))
+    parameters = {'format': 'demiflow_forge_flow_parameters_v1', 'arguments': {
+        'source': {'kind': 'table', 'alias': 'inputs'},
+        'target': {'kind': 'output', 'location_id': 'local', 'relative_uri': 'output.lance'},
+        'endpoint': args['endpoint']}}
+    (root / 'flows/objects.json').write_text(json.dumps(parameters))
+    ws.register_flow(root, 'flows/object_embedding.py:run', params='flows/objects.json')
+    prepared = runs.prepare(root, 'flows/object_embedding.py:run', params='flows/objects.json')
+    assert prepared['status'] == 'prepared' and not server['bodies']
+    if corrupt:
+        value = lance.dataset(args['source']).to_table().to_pylist()[0]['input']
+        ref = value if modality == 'image' else value['document_ref']
+        Path(unquote(urlsplit(ref['uri']).path)).write_bytes(b'changed after sealing')
+    result = execute(root, prepared)
+    if corrupt:
+        assert result['status'] == 'failed', result
+        assert not server['bodies'] and not Path(prepared['outputs'][0]['uri']).exists()
+        from demiflow.execution.run_journal import RunJournal
+        journal = RunJournal(runs.directory(root, result['run_id']))
+        assert not any(c['status'] == 'acked' for action in report['actions']
+                       for c in journal.execution_commits(action))
+    else:
+        assert result['status'] == 'succeeded', (result, runs.logs(root, result['run_id']))
+        owner = next(p for p in root.parents if p.parent == Path('/tmp') and p.name.startswith('demiflow-'))
+        proof = read_native_execution(root, result['run_id'], attempt=result['attempt'], owned_root=owner)
+        assert len(proof['plans']) == len(proof['outputs']) == len(server['bodies']) == 1
+        assert proof['outputs'][0]['rows'][0]['embedding'] == pytest.approx([.6, .8, 0.])
+        record_property('original_native_execution', proof)
