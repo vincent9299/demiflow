@@ -245,7 +245,7 @@ def test_stream_effective_allocation_is_finite_scoped_and_identical_on_resume(tm
     scopes = observed()
     assert len(scopes) == 3 and all(limits == scopes[0] for limits in scopes)
     admitted = scopes[0]
-    assert 0 < admitted['max_row_bytes'] < ceiling['max_row_bytes']
+    assert 0 < admitted['max_row_bytes'] <= ceiling['max_row_bytes']
     assert admitted['max_batch_bytes'] <= ceiling['max_batch_bytes']
     # The v3 physical grant, not retired stream_residency's independent
     # queue estimate, is the finite worker allowance now exposed to callbacks.

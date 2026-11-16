@@ -39,8 +39,9 @@ def source_run_view(services, *, limits=None):
     limits = dict(limits or {})
     for name, value in (services.constants.get('native_limits') or {}).items():
         limits[name] = min(limits.get(name, value), value)
+    from .dataflow_record_frames import resident_limit
     for name, bound in (
-        ('memory_bytes', services.bounds.max_resident_bytes),
+        ('memory_bytes', resident_limit(services.bounds, services)),
         ('max_row_bytes', services.bounds.max_row_bytes),
         ('max_batch_bytes', services.bounds.max_batch_bytes),
     ):
