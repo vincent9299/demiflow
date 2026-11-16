@@ -1673,7 +1673,8 @@ class Dataset:
                 limits[name] = capacity
             if type(concurrency) is not int or not 1 <= concurrency <= 512:
                 raise ValueError('Routed prompt total concurrency must be 1..512')
-            actor = RoutedPromptActor(actors, limits, route, isolate_failures=isolate_route_failures)
+            actor = RoutedPromptActor(actors, limits, route, isolate_failures=isolate_route_failures,
+                                      max_requests=max_requests)
             declared = self.map_async(actor, concurrency=concurrency, queue_depth=queue_depth,
                 catch=catch, label=label)
             return Dataset(declared._source, declared._plan, declared._executor,

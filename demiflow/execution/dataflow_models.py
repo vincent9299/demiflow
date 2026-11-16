@@ -328,7 +328,10 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
     node_id = spec.configuration.get('occurrence_id', spec.configuration.get('node_id'))
     kind = spec.kind
     if kind == 'prompt':
-        if spec.configuration.get('response_format') == 'image':
+        if 'routes' in spec.configuration:
+            from .dataflow_routed_prompt import bind_routed_prompt
+            bind_routed_prompt(instance, services=services, node_id=node_id)
+        elif spec.configuration.get('response_format') == 'image':
             journal.bind_media_adapter(instance, services=services, node_id=node_id)
         else:
             journal.bind_prompt_adapter(instance, services=services, node_id=node_id)

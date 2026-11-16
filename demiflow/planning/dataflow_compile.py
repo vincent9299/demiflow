@@ -311,8 +311,11 @@ def compile_kernel_spec(
     definition = registry.get(kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator kind is not registered: " + kind)
-    from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory
+    from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory, RoutedPromptFactory
     native_declaration = native_model_declaration(operation)
+    if native_declaration is not None and native_declaration.target is RoutedPromptFactory:
+        from ..execution.dataflow_routed_prompt import compile_routed_prompt
+        return compile_routed_prompt(operation, native_declaration, program_ref=program_ref, bounds=bounds)
     if native_declaration is not None and native_declaration.target is PromptFactory:
         from ..execution.dataflow_models import build_model_factory
         native_op, settings = native_declaration.constructor_args

@@ -12,9 +12,10 @@ from ..services import ModelServiceError
 class RoutedPromptActor:
     label = 'routed_prompt'
 
-    def __init__(self, actors, limits, route, *, isolate_failures=False):
+    def __init__(self, actors, limits, route, *, isolate_failures=False, max_requests=None):
         self.actors, self.limits, self.route = actors, limits, route
         self.isolate_failures = isolate_failures
+        self.max_requests = max_requests
         self.gates = {}
 
     @property
@@ -23,6 +24,24 @@ class RoutedPromptActor:
 
     async def astart(self):
         self.gates = {key: asyncio.Semaphore(n) for key, n in self.limits.items()}
+        for actor in self.actors.values():
+            await actor.astart()
+
+    async def aclose(self):
+        # Each child owns its clients/coordinator. Drain every route even when
+        # another child's close fails; the original native journal is borrowed.
+        failure = None
+        for actor in self.actors.values():
+            try:
+                await actor.aclose()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+                else:
+                    failure.add_note('routed prompt cleanup: ' + str(exc))
+        self.gates.clear()
+        if failure is not None:
+            raise failure
 
     async def __call__(self, row):
         key = row[self.route]

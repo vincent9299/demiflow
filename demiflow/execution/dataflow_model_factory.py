@@ -29,6 +29,13 @@ class EmbeddingFactory:
         return actor
 
 
+class RoutedPromptFactory:
+    def __new__(cls, declarations, limits, route, isolate_failures, max_requests):
+        from ..operator_llm.routed import RoutedPromptActor
+        return RoutedPromptActor({name: value.instantiate() for name, value in declarations.items()},
+            limits, route, isolate_failures=isolate_failures, max_requests=max_requests)
+
+
 class CacheFactory:
     def __new__(cls, declaration, directory, version, options, synchronous):
         from ..data.result_cache import CachedMap, CachedSyncMap
@@ -118,6 +125,10 @@ def native_model_declaration(operation):
                        max_entries=actor.store.max_entries, max_cache_bytes=actor.store.max_bytes)
         return CallableSpec.create(CacheFactory, fn_constructor_args=(wrapped, str(actor.directory),
             actor.version, options, type(actor) is CachedSyncMap))
+    from ..operator_llm.routed import RoutedPromptActor
+    if type(actor) is RoutedPromptActor:
+        from .dataflow_routed_prompt import routed_declaration
+        return routed_declaration(actor, target)
     from ..operator_llm.runtime import PromptActor
     if type(actor) is PromptActor:
         from ..operator_llm.flow_contract import prompt_facts, agent_facts
