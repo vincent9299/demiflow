@@ -271,6 +271,10 @@ class _BatchSink:
     def inspect(self, prepared, context):
         if prepared['request_key']!=self.declaration['request_key']:
             raise DataflowError('CORRUPT_ARTIFACT','Stream prepared request differs')
+        if prepared['reference'] != self.declaration['reference']:
+            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared reference differs from its declaration')
+        if (prepared['native'] is None) != (self.native is None):
+            raise DataflowError('CORRUPT_ARTIFACT','Stream prepared native sink differs from its declaration')
         if self.native:
             receipt=self.native.inspect(prepared['native'],context)
             if receipt is None:return None
@@ -362,6 +366,23 @@ class NativeStreamLanceService:
         return json.loads(row[1])
 
     def _coordinator(self, key, declaration):
+        # A recovered scope must retain the target/schema from the original
+        # sealed writer. Validate before constructing a sink or opening ANY
+        # table, including reference-only invocations with no native publish.
+        from ..lance.schema import schema_identity
+        from .lance_sink import spec_from_identity
+        writer = self.writers.get(declaration['node_id'])
+        if writer is None or declaration['schema_identity'] != schema_identity(writer.schema):
+            raise DataflowError('CORRUPT_ARTIFACT','Stream scope differs from its declared writer schema')
+        reference = declaration['reference']
+        if reference is not None and (type(reference) is not dict or set(reference) != {'uri','version'}
+                or reference['uri'] != writer.uri or type(reference['version']) is not int
+                or reference['version'] < 1):
+            raise DataflowError('CORRUPT_ARTIFACT','Stream declared reference differs from its sealed writer')
+        if declaration['spec'] is not None:
+            spec = spec_from_identity(declaration['spec'])
+            if spec.uri != writer.uri or schema_identity(spec.schema) != schema_identity(writer.schema):
+                raise DataflowError('CORRUPT_ARTIFACT','Stream native spec differs from its sealed writer')
         scope=RunAction(self.run,key,declaration)
         return CommitCoordinator(scope),_BatchSink(scope,declaration)
 

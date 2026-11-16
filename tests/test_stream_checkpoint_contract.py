@@ -84,20 +84,21 @@ def test_checkpoint_rejects_redirect_before_opening_table(tmp_path, monkeypatch)
         db.execute('UPDATE runtime_commits SET prepared=? WHERE commit_id=?',
                    (json.dumps(prepared), fact['commit_id']))
     opened = []
-    original = lance.dataset
+    from demiflow.lance import storage
+    original = storage.open_lance_dataset
     def guarded(uri=None, *args, **kwargs):
         target = uri or kwargs.get('uri')
         if target == str(foreign):
             opened.append(target)
             pytest.fail('unowned URI was opened before native reference ownership validation')
         return original(uri, *args, **kwargs)
-    monkeypatch.setattr(lance, 'dataset', guarded)
+    monkeypatch.setattr(storage, 'open_lance_dataset', guarded)
     with pytest.raises(DataflowError, match='reference.*declaration|declared.*reference') as failure:
         with RunContext.resume(reference):
             execute()
     assert failure.value.code == 'CORRUPT_ARTIFACT'
     assert opened == [] and not foreign.exists()
-    assert original(outputs['out']['uri']).to_table().to_pylist() == [{'id': 'a'}]
+    assert lance.dataset(outputs['out']['uri']).to_table().to_pylist() == [{'id': 'a'}]
 
 
 def test_checkpoint_schema_change_and_symlink_are_rejected(tmp_path):
