@@ -868,7 +868,7 @@ class _Capture:
         # The first terminal block and its first forest root occupy 3 KiB
         # while the input/output payload is still resident. Seal both windows
         # into the original profile; do not borrow half of that payload grant.
-        payload = _payload_workspace(self.bounds, metadata_bytes=3072)
+        payload = self.bounds.max_batch_bytes + self.bounds.max_row_bytes
         # A larger index is optional. Keep the exact control reservation used
         # by solve_residency and the whole live payload; cap only this new-plan
         # metadata window by the remaining single-worker space. The original
@@ -879,6 +879,9 @@ class _Capture:
                        self.bounds.max_resident_bytes - control - payload)
         if metadata < 3072:
             raise _error("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root")
+        # Retain the already promised index capacity. Codec room uses only
+        # remaining capacity, never space borrowed from that index or control.
+        payload = _payload_workspace(self.bounds, metadata_bytes=metadata)
         profile = _default_profile(None, bounds=self.bounds)
         profile = replace(profile, requests={**profile.requests, "memory_bytes": payload + metadata})
         configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
