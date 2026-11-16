@@ -156,16 +156,16 @@ def test_region_semi_anti_keeps_original_arrow_schema(tmp_path):
         assert len(counts)==1 and counts[0]['intermediate_payload_bytes']==0
 
 
-def test_region_small_budget_multirun_wide_key_nonassociative_fold(tmp_path):
+def _small_budget_region(tmp_path, row_bytes, key_bytes):
     from _native_relational_fixtures import native_region_evidence,oracle_join
-    keys=['a'*400,'b'*400,None]
+    keys=['a'*key_bytes,'b'*key_bytes,None]
     left=[{'k':keys[i%3],'v':i} for i in range(24)]
     right=[{'k':key,'r':j} for key in keys for j in range(2)]
     last=[{'k':key,'z':j} for key in keys for j in range(2)]
     expected={}
     for row in oracle_join(oracle_join(left,right,how='left'),last,how='left'):
         expected.setdefault(row['k'],[]).append((row['v'],row.get('r'),row.get('z')))
-    limits={'memory_bytes':1024*1024,'max_row_bytes':4096,'max_batch_bytes':8192,
+    limits={'memory_bytes':256*row_bytes,'max_row_bytes':row_bytes,'max_batch_bytes':2*row_bytes,
             'max_state_bytes':32768,'checkpoint_rows':64}
     with RunContext.start(tmp_path/'run',limits=limits),data.local_execution(workers=2) as local:
         actual=data.from_items(left).join(data.from_items(right),on='k',how='left').join(
@@ -176,14 +176,19 @@ def test_region_small_budget_multirun_wide_key_nonassociative_fold(tmp_path):
         assert len(counts)==1
         measured=counts[0]
         assert measured['sort_runs']>2 and measured['sort_fan_in_limit']==2
-        assert measured['sort_window_bytes']==8*4096
-        assert measured['sort_run_bytes']==2*4096
+        assert measured['sort_window_bytes']==8*row_bytes
+        assert measured['sort_run_bytes']==2*row_bytes
         assert 2*(3*measured['sort_frame_bytes']+measured['sort_read_chunk_bytes'])+2*measured['sort_frame_bytes']<=measured['sort_window_bytes']
         region=next(stage for stage in physical.stages if stage.stage_id.startswith('relational-v1-'))
-        assert measured['sort_window_bytes']+32768+8192+3*4096+65536==region.resident_bytes
+        assert measured['sort_window_bytes']+32768+2*row_bytes+3*row_bytes+16*row_bytes==region.resident_bytes
         assert region.resident_bytes<physical.bounds.max_resident_bytes
         assert measured['partition_builds']==3 and measured['intermediate_key_rebuilds']==0
         assert measured['intermediate_payload_bytes']==0
+
+
+def test_region_small_budget_multirun_wide_key_nonassociative_fold(tmp_path):
+    _small_budget_region(tmp_path/'small',4096,400)
+    _small_budget_region(tmp_path/'wide',16384,6144)
 
 
 def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypatch):

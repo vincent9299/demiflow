@@ -199,9 +199,12 @@ def _record_sort_key(
     raise _err("INVALID_CONTRACT", "kind is not an ordering kernel", kind=kind)
 
 
-def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes) -> bytes:
-    key_bytes = _encode_payload({"value": key}, max_bytes=len(rec_bytes) * 4 + 1024)
-    prov_bytes = _encode_payload({"value": prov}, max_bytes=len(rec_bytes) * 4 + 1024)
+def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes, *, frame_limit=None) -> bytes:
+    limit = len(rec_bytes) * 4 + 1024 if frame_limit is None else frame_limit
+    key_bytes = _encode_payload({"value": key}, max_bytes=limit)
+    prov_bytes = _encode_payload({"value": prov}, max_bytes=limit)
+    if frame_limit is not None and len(key_bytes)+len(prov_bytes)+len(rec_bytes)+12+_FRAME_OVERHEAD > frame_limit:
+        raise _err('BUDGET_EXCEEDED', 'single sort frame exceeds the resident budget')
     return (
         struct.pack(">I", len(key_bytes)) + key_bytes
         + struct.pack(">I", len(prov_bytes)) + prov_bytes
@@ -209,11 +212,11 @@ def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes) -> bytes:
     )
 
 
-def _encode_frame(key: tuple, prov: tuple, record: Record, *, max_bytes: int) -> bytes:
+def _encode_frame(key: tuple, prov: tuple, record: Record, *, max_bytes: int, frame_limit=None) -> bytes:
     raw = _encode_record_document(record, max_bytes=max_bytes)
     encoded = _encode_payload({"record_id": record.record_id, "sequence": record.sequence,
                                "document": raw}, max_bytes=max_bytes * 4 + 1024)
-    return _frame_bytes(key, prov, encoded)
+    return _frame_bytes(key, prov, encoded, frame_limit=frame_limit)
 
 
 class _FrameReader:
@@ -332,7 +335,8 @@ def build_sort_runs(
                 # encoded in the comparator frame and need not be stored twice.
                 saved_record = replace(record, payload_ref=None, inline={},
                     encoded_bytes=len(_encode_payload({}, max_bytes=bounds.max_row_bytes)), schema_ref=None)
-            encoded = _encode_frame(key, prov, saved_record, max_bytes=bounds.max_row_bytes)
+            encoded = _encode_frame(key, prov, saved_record, max_bytes=bounds.max_row_bytes,
+                                    frame_limit=None if window is None else window.frame_bytes)
             frame_bytes = len(encoded) + _FRAME_OVERHEAD
             if frame_bytes > (run_budget if window is None else window.frame_bytes):
                 raise _err("BUDGET_EXCEEDED", "single sort frame exceeds the resident budget")
@@ -400,7 +404,8 @@ def merge_sort_runs(
 
                 def frames() -> Iterator[bytes]:
                     for key, prov, rec_bytes in _merge_into(group, services, window):
-                        yield _frame_bytes(key, prov, rec_bytes)
+                        yield _frame_bytes(key, prov, rec_bytes,
+                                           frame_limit=None if window is None else window.frame_bytes)
 
                 ref = services.store.put(frames(), max_bytes=remaining, media_type=RECORD_MEDIA_TYPE)
                 owned.append(ref)
