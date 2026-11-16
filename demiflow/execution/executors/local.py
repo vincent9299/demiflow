@@ -37,7 +37,6 @@ from ...data.plan import (
     LogicalPlan, MapBatchesOp, StandardCallable,
     reject_streaming_map_options,
 )
-from ...operator_llm.runtime import InProcessOperatorLLMCoordinator
 from ...data.sources import DatasourceSource, FileSource, IterableSource, ItemsSource, LanceSource, MaterializedSource, RangeSource, SourcePlan, SqlSource
 from ...data.constraints import SourceReadConstraints
 from ...observability import current_action_observer
@@ -164,6 +163,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         self._usage_callback = usage_callback
 
     def _prompt_coordinator(self, operation):
+        from ...operator_llm.runtime import InProcessOperatorLLMCoordinator
         # Workers of one node share accounting; different nodes never share limits.
         return self._prompt_coordinators.setdefault(
             operation.node_id,

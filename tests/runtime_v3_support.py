@@ -534,7 +534,13 @@ class RuntimeV3Fixture:
         # runs locally and declares any specific need via require_environment.
         selected = "ray" if self.provider == "ray_core" else "local"
         self.require_environment(selected)
-        self.require_environment(*(e for e in envs if e not in {"local", "ray", "all"}))
+        # Environment lists describe the scenario matrix, not simultaneous
+        # prerequisites. A local driver-restart proof needs no second host;
+        # dedicated multi-host scenarios must still prove actual two hosts.
+        optional = {"local", "ray", "all"}
+        if scenario not in {'two_hosts', 'node_loss'}:
+            optional.add('two_hosts')
+        self.require_environment(*(e for e in envs if e not in optional))
         self.require_modules(scenario)
         func = _SCENARIO_FUNCS[scenario]
         from demiflow.data.api import _use_executor
@@ -543,7 +549,8 @@ class RuntimeV3Fixture:
         from demiflow.execution.run_context import RunContext
         executor = LocalDatasetExecutor() if self.provider == "local" else RayDatasetExecutor()
         from contextlib import nullcontext
-        self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix'}
+        self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix',
+            'multiworker_barrier', 'route_recovery', 'driver_restart', 'actor_state_lifecycle', 'performance'}
         scope = nullcontext() if self_managed else RunContext.start(self.journal_dir / scenario)
         try:
             with scope, _use_executor(executor):

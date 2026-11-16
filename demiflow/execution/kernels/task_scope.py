@@ -154,7 +154,13 @@ def _resident_slots(target, *, call_args=(), call_kwargs=None):
         if inspect.isbuiltin(value):
             return value.__self__ is None or type(value.__self__) is types.ModuleType
         if inspect.isfunction(value):
-            return not value.__closure__ and not value.__defaults__ and not value.__kwdefaults__ and not value.__dict__
+            # Immutable default values are part of a sealed declaration, e.g.
+            # task_message(..., pool='default'). They do not make its caller
+            # own mutable helper state. Mutable defaults/closures/attributes
+            # still need an explicit owner and cannot silently be restored.
+            return (not value.__closure__ and not value.__dict__
+                    and all(dependency(item, depth + 1) for item in value.__defaults__ or ())
+                    and all(dependency(item, depth + 1) for item in (value.__kwdefaults__ or {}).values()))
         if type(value) is tuple:
             return all(dependency(item, depth + 1) for item in value)
         return False
