@@ -57,7 +57,8 @@ def test_stateless_actor_field_binding_and_projection_settle(channel,tmp_path,mo
     from demiflow.objects import LocalObjectStore
     from _worker_event_fixtures import emit, events
     lifecycle = str(tmp_path/'lifecycle-events')
-    class ObservedAnnotation(PureAnnotation):
+    class ObservedAnnotation:
+        __call__ = PureAnnotation.__call__
         async def astart(self):
             emit(lifecycle,'astart')
         async def astop(self):
