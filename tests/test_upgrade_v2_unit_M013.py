@@ -7,6 +7,7 @@ forbids fresh dispatch, and the ContextVar is always restored on exit.
 import pytest
 
 from demiflow.execution.run_context import RunContext
+from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
 from demiflow.operator_llm.stream_recovery import (
     native_request_budget, CALL_RESERVATION, RunPromptJournal)
@@ -43,7 +44,7 @@ def test_zero_ceiling_rejects_reserve_without_intent(tmp_path):
         journal = run._native_prompt_journal = RunPromptJournal(run)
         request = _request()
         with native_request_budget(run, node_id='n', max_requests=0):
-            with pytest.raises(RecoveryContractError, match='Execution budget exhausted'):
+            with pytest.raises(PromptBudgetExceededError, match='Operator LLM request budget exhausted'):
                 journal.reserve(request)
         assert journal.lookup(request) is None
         assert run.journal.budget_consumed('requests') == 0

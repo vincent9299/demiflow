@@ -1,6 +1,16 @@
 """A019 · take_batch delegates to take (which admits) and shapes the batch."""
 from demiflow import data
 from demiflow.execution.executors.local import LocalDatasetExecutor
+from demiflow.execution.run_context import RunContext
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def execution_scope(tmp_path):
+    # Direct executor adapters require the same original run authority normally
+    # supplied by Dataset's public terminal. No alternative engine is restored.
+    with RunContext.start(tmp_path / 'execution'):
+        yield
 
 
 def _plain():

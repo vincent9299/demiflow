@@ -48,6 +48,7 @@ def test_schema_true_single_action(monkeypatch):
     assert calls == ["schema"]
 
 
-def test_schema_streaming_rejected(monkeypatch):
-    with pytest.raises(UnsupportedExecutionOptionError, match="streaming"):
-        _stream().schema()
+def test_schema_streaming_uses_one_real_action(monkeypatch):
+    calls = _action_spy(monkeypatch)
+    assert _stream().schema().names == ['id']
+    assert calls == ['schema']

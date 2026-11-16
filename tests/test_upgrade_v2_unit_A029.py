@@ -54,6 +54,9 @@ def test_write_parquet_single_action(tmp_path, monkeypatch):
     assert pq.read_table(target).num_rows == 3
 
 
-def test_write_file_streaming_rejected(tmp_path, monkeypatch):
-    with pytest.raises(UnsupportedExecutionOptionError, match="streaming"):
-        _stream().write_json(str(tmp_path / "s.json"))
+def test_write_file_streaming_uses_one_action_and_preserves_rows(tmp_path, monkeypatch):
+    calls = _action_spy(monkeypatch)
+    target = tmp_path / 's.json'
+    assert _stream().write_json(str(target)) is None
+    assert [json.loads(line)['id'] for line in target.read_text().splitlines()] == [0, 1, 2]
+    assert calls == ['write_file']

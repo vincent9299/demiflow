@@ -6,6 +6,15 @@ from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import CallableSpec, MapOp
 from demiflow.errors import UnsupportedExecutionOptionError
 from demiflow.execution.executors.local import LocalDatasetExecutor
+from demiflow.execution.run_context import RunContext
+
+
+@pytest.fixture(autouse=True)
+def execution_scope(tmp_path):
+    # Direct executor adapters require the same original run authority normally
+    # supplied by Dataset's public terminal. No alternative engine is restored.
+    with RunContext.start(tmp_path / 'execution'):
+        yield
 
 
 def _plain():

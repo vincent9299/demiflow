@@ -1,4 +1,4 @@
-"""A027 · Dataset.aggregate validates inputs before one checked.action; streaming is rejected."""
+"""A027 · Dataset.aggregate validates inputs before one checked.action; streaming uses the same result contract."""
 import pytest
 
 from demiflow import data
@@ -48,6 +48,7 @@ def test_aggregate_rejects_non_aggregate_before_action(monkeypatch):
     assert calls == []
 
 
-def test_aggregate_streaming_rejected(monkeypatch):
-    with pytest.raises(UnsupportedExecutionOptionError, match="streaming"):
-        _stream().aggregate(Sum("id"))
+def test_aggregate_streaming_uses_one_real_action(monkeypatch):
+    calls = _action_spy(monkeypatch)
+    assert _stream().aggregate(Sum('id')) == {'sum(id)': 10}
+    assert calls == ['aggregate']

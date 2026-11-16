@@ -1,4 +1,4 @@
-"""A028 · Dataset.size_bytes opens one checked.action; streaming plans are rejected."""
+"""A028 · Dataset.size_bytes opens one checked.action; streaming uses the same size semantics."""
 import pytest
 
 from demiflow import data
@@ -33,6 +33,8 @@ def test_size_bytes_single_action(monkeypatch):
     assert calls == ["size_bytes"]
 
 
-def test_size_bytes_streaming_rejected(monkeypatch):
-    with pytest.raises(UnsupportedExecutionOptionError, match="streaming"):
-        _stream().size_bytes()
+def test_size_bytes_streaming_matches_same_plain_rows(monkeypatch):
+    expected = _plain().size_bytes()
+    calls = _action_spy(monkeypatch)
+    assert _stream().size_bytes() == expected and expected > 0
+    assert calls == ['size_bytes']
