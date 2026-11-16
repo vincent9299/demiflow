@@ -185,12 +185,14 @@ def _source_identity(source):
                 'right': (plan_identity('input', source.right.source, source.right.plan)
                           if source.right is not None else None)}
     if isinstance(source, ItemsSource):
-        return {'literal_source': identity(describe(source)), 'rows': len(source.items)}
+        from .literal_source_identity import literal_source_digest
+        return {'literal_source': literal_source_digest(source), 'rows': len(source.items)}
     if isinstance(source, MaterializedSource):
         ref = getattr(source.handle, "recovery_reference", None)
         if ref is not None:
             return {"materialized": ref}
-        return {'literal_materialization': identity(describe(source.handle.blocks)),
+        from .literal_source_identity import literal_source_digest
+        return {'literal_materialization': literal_source_digest(source.handle.blocks),
                 'rows': source.handle.row_count}
     if isinstance(source, DatasourceSource):
         from .queue_source import QueueDatasource
