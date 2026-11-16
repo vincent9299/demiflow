@@ -1,0 +1,11 @@
+{
+  "source_head": "d8d241e",
+  "evidence_sha256": {
+    "/tmp/demiflow-control-batching-bound-r5-evidence/verification.json": "41fda5c94a6c345144f728a09f84f91abc0c52963ed7b08708b27be8bbeb7739",
+    "/tmp/demiflow-control-batching-ray-count-r1-evidence/verification.json": "7f7e1ff7197da0225500c75ec41e464c9049f5138730a01b002ccb12f6af5d17",
+    "/tmp/demiflow-control-batching-ray-count-r1-evidence/actual-terminal-ack-rpcs.json": "bf809cb6b939af4584f624e20dbc781c10b6c2bd26cf64d82170bf14860f3ae9",
+    "/tmp/demiflow-pr-batched-fast-r1/fast_cpu/trial.json": "0d16c93f380cf27fc9b7fd6ce7079d17e9eb268c1cdb00d531362ef161a8fd50",
+    "/yzp/zhaozy/yangzepeng/0905/_demiflow/physical-host-tests/ctrl-batch-fast-20261116-r1/fast_cpu/trial.json": "589f2d437ad47fbdc2849c6bd7de7ac24f6a43e91910c7038e2a76b72147e3b4",
+    "/tmp/demiflow-perf-control-batching-r1/fast_cpu/trial.json": "c63f264dac6f70cb149145f1efdb8d1c8abeeab92b95c352705139969a3db002"
+  }
+}
