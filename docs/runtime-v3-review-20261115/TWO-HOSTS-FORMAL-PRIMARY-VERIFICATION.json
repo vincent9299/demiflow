@@ -1,0 +1,110 @@
+{
+  "candidate": "f5669fbf0ec9e4a5c45c95efdb420557edf16fd1",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115",
+  "source_inputs_compared_to_commit": 1866,
+  "source_mismatches": [],
+  "source_unchanged": true,
+  "formal_result": {
+    "tests": 1,
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 154.083
+  },
+  "hosts": [
+    "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n",
+    "job-bb1b7400ff7f-20260828124445-68db7f5c68-hfxcn"
+  ],
+  "nodes": [
+    "15adc3b2a338e58307910347cc211e2efb86aefe46030f3741ea509e",
+    "c60a6b14aaa72964726dada811752669fbc69d06f035d4d0893dd084"
+  ],
+  "original_business_cases": {
+    "test_unshared_tmp_domain_is_rejected_before_execution": {
+      "phases": 0,
+      "cuts": 0,
+      "rows": null
+    },
+    "test_dataset_cross_host_source_transform_sink_ack": {
+      "phases": 1,
+      "cuts": 1,
+      "rows": 12
+    },
+    "test_owned_remote_actor_loss_resumes_original_cut": {
+      "phases": 2,
+      "cuts": 4,
+      "rows": 12
+    },
+    "test_shared_source_union_routes_preserve_multiplicity": {
+      "phases": 2,
+      "cuts": 3,
+      "rows": 16
+    }
+  },
+  "worker_cache_observations": 5,
+  "read_domain_proofs": 9,
+  "different_bytes": {
+    "code": "CORRUPT_ARTIFACT",
+    "message": "CORRUPT_ARTIFACT: Remote read-domain challenge differs",
+    "node_id": "15adc3b2a338e58307910347cc211e2efb86aefe46030f3741ea509e",
+    "path": "/tmp/demiflow-v3-5hjuhz1n/different-domain-bytes/.dataflow-store/local/objects/e7b95ce4167905357ca1f74d86f66b1b36e4ccd51d74d6e9d7d2f117687d3ece"
+  },
+  "ray_data_import_attempts": [],
+  "actual_execute_action_calls": [
+    {
+      "observation_id": "cb2f0c4981634f9a8865303b6ddb2c44",
+      "observer_pid": 62988,
+      "provider": "ray_core",
+      "terminal_kind": "write_lance",
+      "action_id": "action-1",
+      "plan_id": "d0163b36e972bf6b759ba3913bcd2755faab5e1c6638912b90a0fbebe0b44041"
+    },
+    {
+      "observation_id": "e94f67264d1e4ddaa178a618efa7e911",
+      "observer_pid": 62988,
+      "provider": "ray_core",
+      "terminal_kind": "write_lance",
+      "action_id": "action-1",
+      "plan_id": "b00a8fa6ed9602d1ceb35929cad42e2b07891e5a2ed213a6b5f4dddb9473a0e0"
+    },
+    {
+      "observation_id": "5558a92cb4b5476c8d737d18113c3055",
+      "observer_pid": 62988,
+      "provider": "ray_core",
+      "terminal_kind": "write_lance",
+      "action_id": "action-1",
+      "plan_id": "b00a8fa6ed9602d1ceb35929cad42e2b07891e5a2ed213a6b5f4dddb9473a0e0"
+    },
+    {
+      "observation_id": "07599928a1fa47af8f88b79739dab0ca",
+      "observer_pid": 62988,
+      "provider": "ray_core",
+      "terminal_kind": "take_all",
+      "action_id": "action-1",
+      "plan_id": "7c54a8f0570e47963a7625b2d1a05da34cf3284d1ad6a2c5f9878cc17c7a4182"
+    }
+  ],
+  "cleanup": {
+    "local_children": [],
+    "ray_initialized": false,
+    "remote_exit": 0,
+    "remote_close": {
+      "kind": "closed",
+      "hostname": "job-bb1b7400ff7f-20260828124445-68db7f5c68-hfxcn",
+      "children": []
+    }
+  },
+  "evidence": {
+    "/tmp/demiflow-root-two-host-formal-r2/actual-two-hosts.json": "a063661f4584016f0b70024cebcf7773aecfa67e1dfd107e6a8c08a7e153d5fb",
+    "/tmp/demiflow-root-two-host-formal-r2/started.json": "c3bf188277ea78188b1d243f20ce21cd8928971200339cdda3b06f25b21b3ede",
+    "/tmp/demiflow-root-two-host-formal-r2/test_unshared_tmp_domain_is_rejected_before_execution.json": "52b8fcff1bc3e62dec61c5a5205341ae2ebca8d78c8c06380cb3527de39b5b30",
+    "/tmp/demiflow-root-two-host-formal-r2/test_dataset_cross_host_source_transform_sink_ack.json": "2b4ee1ad836582c054b0f8a4e43892b46bccd10c5f18d28c623b72ffa87372bd",
+    "/tmp/demiflow-root-two-host-formal-r2/test_owned_remote_actor_loss_resumes_original_cut.json": "9c66778869a9040de1900c8877bc9f4a9ece994bd4794d2a4b6ea3355947ea5f",
+    "/tmp/demiflow-root-two-host-formal-r2/test_shared_source_union_routes_preserve_multiplicity.json": "733fe7cc5ede5c7f2ce2a6fff1d1cc53c22b538975b9f9ef4ada88a1d4d35baf",
+    "/tmp/demiflow-root-two-host-formal-r2/scenario-two_hosts-components.json": "36ec29672d897775cf3a3212798be1c0de1fdedd0eb6ac0a467f7bd60dae49ff",
+    "/tmp/demiflow-root-two-host-formal-r2/scenario-two_hosts.json": "93329b0dd1abff0e035e7799e512a0419ca85406600f3f58ca2a41c4b83e4c22",
+    "/tmp/demiflow-root-two-host-formal-r2/result.xml": "0fa7287dbab00183e2bcdaddf0c52cb6c106066a108d46b486d5ca127c9ff72f",
+    "/tmp/demiflow-root-two-host-formal-r2/cluster-smoke.json": "50a3abd252a63605f9c14a69f1f0b59bebb929474f26dd6d834281549661514b"
+  },
+  "scope": "Original owned-actor loss on two physical hosts; no whole-host shutdown or network partition. r1 fixture-length failure remains recorded separately."
+}
