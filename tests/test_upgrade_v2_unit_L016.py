@@ -22,9 +22,8 @@ from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext
 from demiflow.resources.manager import ResourceManager
 
-# These assertions still describe the retired v2 driver and are intentionally
-# not converted into passing v3 evidence here. Keep their readers local so an
-# obsolete assertion fails as a test instead of aborting repository collection.
+# Only the facade single-authority check needs the current function AST.
+# Placement, lifecycle, failure and recovery assertions use real runtime facts.
 import textwrap
 
 
@@ -44,30 +43,10 @@ def _calls(node, name):
     return [item for item in ast.walk(node)
             if isinstance(item, ast.Call) and _dotted(item.func) == name]
 
-def _assigned(node, name):
-    for item in ast.walk(node):
-        if isinstance(item, ast.Assign) and any(
-                isinstance(target, ast.Name) and target.id == name for target in item.targets):
-            return item.value
-    raise AssertionError("no assignment to " + name)
 
-def _dict_value(value):
-    assert isinstance(value, ast.Dict), "not a dict literal"
-    return {_dotted_key(key): val for key, val in zip(value.keys, value.values)}
 
-def _dict_literal(node, name):
-    return _dict_value(_assigned(node, name))
 
-def _dotted_key(key):
-    return key.value if isinstance(key, ast.Constant) else _dotted(key)
 
-def _in_finally(node, call):
-    for item in ast.walk(node):
-        if isinstance(item, ast.Try):
-            for statement in item.finalbody:
-                if call in ast.walk(statement):
-                    return True
-    return False
 
 
 @pytest.mark.ray
@@ -247,12 +226,14 @@ def _repair_owned_resource_terminal(execution):
     if scheduler is None or not execution._scope_open:
         return
     manager = execution._services.resources
-    state = manager.get(scheduler.scope_id)
-    if state['state'] == 'OPEN':
+    def scope_state():
+        return next(scope['state'] for scope in _ledger(execution._action.context)[0]
+                    if scope['scope_id'] == scheduler.scope_id)
+    if scope_state() == 'OPEN':
         scheduler.close(deadline_ms=45000)
         return
     deadline = time.monotonic() + 45
-    while manager.get(scheduler.scope_id)['state'] != 'CLOSED':
+    while scope_state() != 'CLOSED':
         assert time.monotonic() < deadline, 'owned failure fixture did not clean up'
         manager.reconcile_once(execution._fence(), deadline, 16)
         time.sleep(.02)
@@ -343,8 +324,9 @@ def _ray_failure(tmp_path, ray, *, mode, reference=None):
                     snapshot = _ledger(run)
                     actors = tuple(ray.util.list_named_actors(all_namespaces=True))
                     if executions:
-                        charged = executions[-1]._services.resources.get(
-                            executions[-1]._scheduler.scope_id)['charged_resources']
+                        manager = executions[-1]._services.resources
+                        with run.journal._connection() as db:
+                            charged = manager.state._charged(db, executions[-1]._scheduler.scope_id)
                     else:
                         charged = None
                     raise
