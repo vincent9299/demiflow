@@ -56,7 +56,9 @@ class TerminalBlocks:
                     or any(type(v) is not int for v in budget.values())):
                 raise DataflowError('INVALID_CONTRACT', 'invalid sealed terminal memory windows')
             payload, metadata = budget['payload_bytes'], budget['metadata_bytes']
-            if (payload != self.bounds.max_batch_bytes + self.bounds.max_row_bytes
+            # New plans may reserve a larger codec workspace within the same
+            # grant; historical plans retain their original batch/row window.
+            if (payload < self.bounds.max_batch_bytes + self.bounds.max_row_bytes
                     or not 3072 <= metadata <= self.bounds.max_state_bytes
                     or payload + metadata > granted):
                 raise DataflowError('RESOURCE_INFEASIBLE', 'terminal payload and metadata exceed the original grant')
