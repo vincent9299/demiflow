@@ -1,6 +1,6 @@
 # 同键 join/reduce 原生复用：实施与验收交接
 
-本任务范围已完成：**48 项 Local、1 项真实私有 Ray Core，49 项全部通过**。保留原 `test_local_join_chain.py` 19 个 selector，改用独立业务 oracle、真实封存图和原 ACK 中的实际工作量；没有填造 `datafusion` 统计、删除失败用例或恢复第二执行器。本文不代表整个平台完成度或全局性能达标。
+**历史功能验收：48 项 Local、1 项真实私有 Ray Core，49 项通过；本文件原 §3 的单 S 预算证明已被真实反例否定。** 最终 reducer 预算、历史准入及新增验收以 [REDUCER-BUDGET-CLOSURE-20261117.md](REDUCER-BUDGET-CLOSURE-20261117.md) 为准。49 项原回执保留，不再用它证明预算闭合。保留原 `test_local_join_chain.py` 19 个 selector，改用独立业务 oracle、真实封存图和原 ACK 中的实际工作量；没有填造 `datafusion` 统计、删除失败用例或恢复第二执行器。本文不代表整个平台完成度或全局性能达标。
 
 - 工作树：`/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117`
 - 分支：`engine/gpt-native-join-reuse-20261117`
@@ -39,7 +39,7 @@
 
 本轮新增的唯一原审批清单外接缝为 `ordering.py`，已获总控明确同意。最终共 8 个生产文件变更。测试变更为原 19 项文件、一个只读原 seal/ACK helper、7 项 region 验收文件和 1 项 Ray 文件。
 
-## 3. 实际资源窗口，按同时存活阶段解释
+## 3. 初版资源窗口（历史记录，已被补充文档替代）
 
 记 `R=max_row_bytes`、`B=max_batch_bytes`（原契约 `B≥R`）、`S=max_state_bytes`、`d≤2`，`M=min(4MiB,max(4KiB,min(max_control_bytes,max_resident_bytes)/16))`。
 
@@ -57,7 +57,7 @@ join-only 计划请求 `B+(d+4)R+M`。带 reduce 的计划请求 `B+(d+9)R+S+M`�
 
 这些是原资源契约内的行/编码窗口与实际保留容器计量，**不是 Python RSS 的数学硬上界**。任意用户 callback 的 Python 分配、对象实现差异仍受原 runtime/RSS 保护；本文不将 serialized row size 等同于进程实际 RSS。
 
-## 4. 原 ACK 读取到的实际工作量
+## 4. 首轮原 ACK 读取到的实际工作量（1f6f0f7）
 
 下表来自真实运行的最终 ACK image，经原只读 StateArtifacts/RunArtifactStore 解码，原始提取为 `/tmp/demiflow-join-region-final-measurements.json`，完整值已写入配套 JSON。
 
@@ -71,7 +71,7 @@ join-only 计划请求 `B+(d+4)R+M`。带 reduce 的计划请求 `B+(d+9)R+S+M`�
 
 **保留的开销**：中间引用仍复制 key bytes，所以宽 key 的引用体积可以大于叶 payload；中间输出仍作瞬时编码，以保留原行大小/字段碰撞/输出预算检查。没有将其宣传为零拷贝、零编码或已测得某个吞吐倍数。总控明确本轮先收口，key offset 引用留作后续优化。
 
-## 5. 最终固定验收
+## 5. 首轮固定功能验收（1f6f0f7）
 
 统一固定 HEAD `1f6f0f7`，四份回执各自 **2,954 个输入摘要逐字节复核一致**，运行前后快照一致。每一 selector 恰好通过原 setup/call/teardown 守卫；无 skip/xfail/rerun/遗漏，147 个主阶段通过。
 

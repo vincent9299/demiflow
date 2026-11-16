@@ -1,6 +1,6 @@
 {
   "schema": "demiflow.relational-region-closure.v1",
-  "status": "scope_complete_49_passed",
+  "status": "historical_49_functional_passes_budget_claim_superseded",
   "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_join_reuse_20261117",
   "branch": "engine/gpt-native-join-reuse-20261117",
   "tested_head": "1f6f0f7096f57d4b0dfdfbb0b79e6049c8a73a25",
@@ -385,5 +385,6 @@
     "Sort row/frame windows do not claim a hard Python RSS ceiling.",
     "The original terminal row/provenance envelope refusal from r5 is assigned to root/historical_finish; this lane does not modify terminal production code.",
     "No whole-platform or multi-host/GPU performance claim is made by these 49 tests."
-  ]
+  ],
+  "budget_superseded_by": "REDUCER-BUDGET-CLOSURE-20261117.json"
 }
