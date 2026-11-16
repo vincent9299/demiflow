@@ -23,6 +23,9 @@ class EmbeddingFactory:
     def __new__(cls, declaration, policy):
         from ..embeddings.runtime import EmbeddingActor
         from ..inference import _resolve_request_gate
+        if declaration.get('service') is not None:
+            from .dataflow_managed_http import restore_managed_http
+            declaration = dict(declaration, service=restore_managed_http(declaration['service']))
         actor = EmbeddingActor(**declaration, request_gate=_resolve_request_gate(
             policy=policy, gate=None, concurrency=declaration['concurrency']))
         actor._request_policy = policy
@@ -145,8 +148,18 @@ def native_model_declaration(operation):
         from ..embeddings.flow_contract import embedding_facts
         from .contracts.dataflow_errors import DataflowError
         embedding_facts(operation)
-        if actor._started or actor.service is not None:
-            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Embedding factory requires an unstarted external-service declaration')
+        if actor._started or any(getattr(actor, name, None) is not None for name in (
+                '_pool', '_prepare_pool', '_response_pool', '_client', '_owner',
+                '_journal', '_document_reader', '_native_recovery')):
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Embedding factory requires an unstarted passive declaration')
+        service = None
+        if actor.service is not None:
+            from .dataflow_managed_http import freeze_managed_http, managed_http_digest
+            if getattr(actor, '_sealed_service_declaration', None) != managed_http_digest(actor.service):
+                raise DataflowError('INVALID_CONTRACT', 'Managed embedding service differs from its sealed declaration')
+            service = freeze_managed_http(actor.service)
+        elif hasattr(actor, '_sealed_service_declaration'):
+            raise DataflowError('INVALID_CONTRACT', 'Managed embedding service was removed after declaration')
         policy = getattr(actor, '_request_policy', None)
         # Caller-owned gates have live state and cannot be silently discarded.
         from ..inference import _resolve_request_gate
@@ -159,5 +172,6 @@ def native_model_declaration(operation):
         declaration = {name: getattr(actor, name) for name in (
             'model', 'inputs', 'output', 'call_output', 'error_output', 'concurrency',
             'label', 'options', 'max_requests', 'service')}
+        declaration['service'] = service
         return CallableSpec.create(EmbeddingFactory, fn_constructor_args=(declaration, policy))
     return None

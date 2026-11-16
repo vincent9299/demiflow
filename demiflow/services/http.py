@@ -108,6 +108,11 @@ class ManagedHTTPService:
         return _HTTPOwner(self)
 
 
+# Keep the original methods available to the worker-declaration validator. An
+# overridden instance/class method must not silently become a native service.
+_NATIVE_MANAGED_HTTP_METHODS = (ManagedHTTPService.__init__, ManagedHTTPService.bind)
+
+
 class _HTTPOwner:
     def __init__(self, declaration):
         self.declaration = declaration

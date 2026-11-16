@@ -246,68 +246,30 @@ def test_cached_requests_need_no_credentials_and_missing_key_is_not_reserved(ser
         assert db.execute('SELECT count(*) FROM calls').fetchone()[0] == 1
 
 
-def test_service_cleanup_and_cached_only_no_start(server, tmp_path, monkeypatch):
-    from demiflow.services import ManagedHTTPService
-    state = dict(started=0, closed=0)
-    class Owner:
-        async def ensure_ready(self): state['started'] += 1
-        async def aclose(self): state['closed'] += 1
-    service = ManagedHTTPService(['unused'], base_url=server['model'].base_url, root=tmp_path)
-    monkeypatch.setattr(service, 'bind', lambda _: Owner())
-    ds = node(server, tmp_path, [{'text': 'a'}], service=service)
-    ds.take_all()
-    ds.take_all()
-    assert state == dict(started=1, closed=2)
+def test_service_cleanup_and_cached_only_no_start(server, tmp_path, monkeypatch, request):
+    from runtime_v3_managed_http_scenarios import managed_fixture, assert_reaped
+    fixture = managed_fixture(tmp_path, monkeypatch, request=request)
+    ds = node(fixture, tmp_path, [{'text': 'a'}], service=fixture['service'])
+    first = ds.take_all()
+    assert len(first) == 1 and not first[0]['call']['reused']
+    assert_reaped(fixture)
+    # A miss would now fail to launch. The replay must use the original cache
+    # without even opening the service command or acquiring its port.
+    fixture['script'].unlink()
+    replay = ds.take_all()
+    assert replay[0]['call']['reused'] and replay[0]['embedding'] == first[0]['embedding']
+    assert_reaped(fixture)
 
 
-def test_real_managed_process_is_reaped_and_replay_does_not_spawn(tmp_path, monkeypatch):
-    import os
-    import signal
-    import socket
-    import sys
-    from demiflow.services import ManagedHTTPService
-    from demiflow.services import http as service_module
-    with socket.socket() as probe:
-        probe.bind(('127.0.0.1', 0))
-        port = probe.getsockname()[1]
-    script = tmp_path / 'embedding_server.py'
-    script.write_text('''import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200); self.end_headers()
-        self.wfile.write(b'{"data":[{"id":"fixture"}]}')
-    def do_POST(self):
-        body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        self.send_response(200); self.end_headers()
-        self.wfile.write(json.dumps({'model':'fixture','data':[
-            {'index':i,'embedding':[3,4,0]} for i in range(len(body['input']))]}).encode())
-    def log_message(self,*args): pass
-ThreadingHTTPServer(('127.0.0.1', ''' + str(port) + '''), Handler).serve_forever()
-''')
-    endpoint = f'http://127.0.0.1:{port}/v1'
-    service = ManagedHTTPService([sys.executable, str(script)], base_url=endpoint,
-        expected_model='fixture', root=tmp_path, startup_timeout_s=5,
-        shutdown_timeout_s=.5, poll_interval_s=.01)
-    processes = []
-    original = service_module.subprocess.Popen
-    def spawn(*args, **kwargs):
-        process = original(*args, **kwargs)
-        processes.append(process)
-        return process
-    monkeypatch.setattr(service_module.subprocess, 'Popen', spawn)
-    try:
-        fixture = {'model': EmbeddingModel('fixture', 'fixed', 3, endpoint)}
-        ds = node(fixture, tmp_path, [{'text': 'a'}], service=service)
-        assert len(ds.take_all()) == 1
-        assert len(processes) == 1 and processes[0].poll() is not None
-        assert ds.take_all()[0]['call']['reused']
-        assert len(processes) == 1
-    finally:
-        for process in processes:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+def test_real_managed_process_is_reaped_and_replay_does_not_spawn(tmp_path, monkeypatch, request):
+    from runtime_v3_managed_http_scenarios import managed_fixture, assert_reaped
+    fixture = managed_fixture(tmp_path, monkeypatch, request=request)
+    ds = node(fixture, tmp_path, [{'text': 'a'}], service=fixture['service'])
+    assert len(ds.take_all()) == 1
+    rows = assert_reaped(fixture)
+    assert any(row['event'] == 'terminate' for row in rows)
+    assert ds.take_all()[0]['call']['reused']
+    assert_reaped(fixture)
 
 
 def test_budget_and_blocking_io_stay_bounded(server, tmp_path, monkeypatch):

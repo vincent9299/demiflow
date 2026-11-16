@@ -18,6 +18,11 @@ def actor_declaration(actor):
 def freeze_declaration(actor):
     actor._sealed_declaration = json.dumps(actor_declaration(actor), sort_keys=True,
                                           separators=(',', ':'), allow_nan=False)
+    if actor.service is not None:
+        # Deployment identity is separate from the historical vector/request
+        # identity. Default service=None facts stay byte-for-byte unchanged.
+        from ..execution.dataflow_managed_http import managed_http_digest
+        actor._sealed_service_declaration = managed_http_digest(actor.service)
 
 
 def embedding_facts(operation):

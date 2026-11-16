@@ -1,0 +1,214 @@
+{
+  "schema": "demiflow.test_boundary_deviation.v1",
+  "recorded_utc": "2026-11-16T06:00:03.862298+00:00",
+  "domain": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n",
+  "incident": "Original HTTP owner tests were started with a private RESOURCE_ROOT but missing explicit RESOURCE_HOME. They acquired legacy port/GPU flock names in default HOME. Interrupted after detection; no deletion/restoration attempted.",
+  "tool_session_id": 69636,
+  "pytest_pid": null,
+  "pytest_pid_limitation": "Launcher did not record its PID; cannot reconstruct it after exit. Four service Popen child PIDs likewise only existed in original test in-memory assertions.",
+  "known_supervisor": {
+    "base_url": "http://127.0.0.1:50715/v1",
+    "child_pid": 35916,
+    "configuration_sha256": "c9ce9588fe45782ae03dd5ced6efd2c6430019f6b4559181de15519339e3b643",
+    "finished_at": 1794808629.3258553,
+    "host": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n",
+    "launch_id": "43c7676a1d054b3084c55e71be743c2e",
+    "manager_pid": 35915,
+    "manager_start": "1999361405",
+    "name": "fixture",
+    "ready_at": 1794808629.2678359,
+    "ready_url": "http://127.0.0.1:50715/health",
+    "started_at": 1794808628.8190563,
+    "state": "stopped"
+  },
+  "files": [
+    {
+      "path": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n/port_36681.lock",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mtime_utc": "2026-11-16T05:57:08.343516+00:00",
+      "inode": 5404299179,
+      "matching_proc_locks": []
+    },
+    {
+      "path": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n/port_38103.lock",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mtime_utc": "2026-11-16T05:57:08.507517+00:00",
+      "inode": 5404299180,
+      "matching_proc_locks": []
+    },
+    {
+      "path": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n/port_44779.lock",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mtime_utc": "2026-11-16T05:57:08.663517+00:00",
+      "inode": 5404299181,
+      "matching_proc_locks": []
+    },
+    {
+      "path": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n/port_46131.lock",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mtime_utc": "2026-11-16T05:57:08.727517+00:00",
+      "inode": 5404299182,
+      "matching_proc_locks": []
+    },
+    {
+      "path": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n/port_50715.lock",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mtime_utc": "2026-11-16T05:57:09.151519+00:00",
+      "inode": 5404299185,
+      "matching_proc_locks": []
+    },
+    {
+      "path": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n/gpu_2.lock",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mtime_utc": "2026-10-31T13:30:00.676027+00:00",
+      "inode": 5377825888,
+      "matching_proc_locks": []
+    },
+    {
+      "path": "/root/.cache/demiflow/resources/job-09b54ebad3bd-20260629073159-5584d65864-wcm7n/gpu_3.lock",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mtime_utc": "2026-10-31T13:50:51.500581+00:00",
+      "inode": 5377825856,
+      "matching_proc_locks": []
+    }
+  ],
+  "known_pids_still_present": [],
+  "owned_private_allocations": [
+    {
+      "allocation_id": "c83f42f8f6dd4c78a36588b5991c1123",
+      "created_ms": 1794808630263,
+      "deadline_ms": 30000,
+      "effective": {
+        "cpu_millis": 1000,
+        "memory_bytes": 33554432
+      },
+      "identity": {
+        "pid": 35992,
+        "start": "1999361550",
+        "unit": {
+          "device": 66318,
+          "inode": 6880534282
+        }
+      },
+      "release_evidence": "df-resource-evidence:v1:9f327e10e1d3d3f089bef1550142a4f683d610aa3e3f95c56b50b32e24597eb6:cleanup.json",
+      "released_ms": 1794808634476,
+      "spec_hash": "fe20afaf7913f1fa62ed3ff8ce6956d2b80231eab35501c54996bb709fa04dad",
+      "state": "RELEASED"
+    },
+    {
+      "allocation_id": "9783535f905b484d8d162c24c2b9d8a3",
+      "created_ms": 1794808630278,
+      "deadline_ms": 30000,
+      "effective": {
+        "cpu_millis": 1000,
+        "memory_bytes": 33554432
+      },
+      "identity": {
+        "pid": 35993,
+        "start": "1999361551",
+        "unit": {
+          "device": 66318,
+          "inode": 7001556165
+        }
+      },
+      "release_evidence": "df-resource-evidence:v1:443c749ae15df4d0c5332e9225e9df9e9c839be62799cf61dcd24c1529e07dcf:cleanup.json",
+      "released_ms": 1794808634475,
+      "spec_hash": "35b34d1b98fc081d942e733bf1de6787cff3870417b1e5a602fbd4bbb77a9598",
+      "state": "RELEASED"
+    },
+    {
+      "allocation_id": "39dbcfca19de413e9a59801b1d251fca",
+      "created_ms": 1794808630292,
+      "deadline_ms": 30000,
+      "effective": {
+        "cpu_millis": 100,
+        "memory_bytes": 50331648
+      },
+      "identity": {
+        "pid": 35994,
+        "start": "1999361553",
+        "unit": {
+          "device": 66318,
+          "inode": 7267857037
+        }
+      },
+      "release_evidence": "df-resource-evidence:v1:3fcf0db64817a80973ee58bc19d88f4b7d5feed1a810e05a7b6f2a942c9c96fe:cleanup.json",
+      "released_ms": 1794808634474,
+      "spec_hash": "6394bc39a37432c585228c0bc0987f8d151e61eada386aafd30322ba954ff220",
+      "state": "RELEASED"
+    },
+    {
+      "allocation_id": "f912365ceee14721b661859e91d14c65",
+      "created_ms": 1794808635164,
+      "deadline_ms": 30000,
+      "effective": {
+        "cpu_millis": 1000,
+        "memory_bytes": 33554432
+      },
+      "identity": {
+        "pid": 36323,
+        "start": "1999362040",
+        "unit": {
+          "device": 66318,
+          "inode": 8510755582
+        }
+      },
+      "release_evidence": "df-resource-evidence:v1:fab5d38aa05ba1f55753b585cbd6cbddc1d96de1f38de31ec2dc3ca6bd8298e4:cleanup.json",
+      "released_ms": 1794808639341,
+      "spec_hash": "330a98f8ecfe37e90b2f4528e37f654ef435f94e520fbedab17b8e81e29dc6a6",
+      "state": "RELEASED"
+    },
+    {
+      "allocation_id": "5ceb9ca22fe145e381958face81f9640",
+      "created_ms": 1794808635180,
+      "deadline_ms": 30000,
+      "effective": {
+        "cpu_millis": 1000,
+        "memory_bytes": 33554432
+      },
+      "identity": {
+        "pid": 36324,
+        "start": "1999362042",
+        "unit": {
+          "device": 66318,
+          "inode": 30149207
+        }
+      },
+      "release_evidence": "df-resource-evidence:v1:3e19ae66dabdf9bcd5c9f7fbe0255f698ebb4c9a3318fc93e27fafe6494d3c58:cleanup.json",
+      "released_ms": 1794808639340,
+      "spec_hash": "8de692921e4713a1027db61df822d22035f97f6ab33b80c18a5bba5a77cdcc1c",
+      "state": "RELEASED"
+    },
+    {
+      "allocation_id": "41d82b2cd20540d5be1ec355ef909c82",
+      "created_ms": 1794808635196,
+      "deadline_ms": 30000,
+      "effective": {
+        "cpu_millis": 100,
+        "memory_bytes": 50331648
+      },
+      "identity": {
+        "pid": 36325,
+        "start": "1999362043",
+        "unit": {
+          "device": 66318,
+          "inode": 279471870
+        }
+      },
+      "release_evidence": "df-resource-evidence:v1:6b4022a7b083d782fd222566b9a9714381a1bcbdb450e980179ea88285c4f97f:cleanup.json",
+      "released_ms": 1794808639339,
+      "spec_hash": "50036dd17f75e38e2a6b0a8a4455396e390a86ef6b886bb19260879bb5872ccf",
+      "state": "RELEASED"
+    }
+  ],
+  "preincident_snapshot": null,
+  "preincident_limitation": "No claim of byte equality with preincident state. Five recent zero-byte port names correlate with tested ports/timestamps; prior existence not independently captured.",
+  "cleanup_evidence": "All six owner tests passed original assert_reaped checks. Supervisor state stopped, known PIDs absent, no matching live locks. Default files left untouched."
+}
