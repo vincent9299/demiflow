@@ -1,0 +1,110 @@
+{
+  "receipt": "/tmp/demiflow-lance-cas-early-r1/receipt.json",
+  "sha256": "9cd48369a78bdd51936374c52e726d510710396fa2b1dde1e3aeaa84fa6fbb2d",
+  "head": "dcc85c861abf00e59f9e2a30c70a27437ea19bb6",
+  "inputs_digest": "b8641729f764fcac355d537aa78e08c5e59cbf09ad3a456928ce87dcd6532acc",
+  "args": [
+    "-q",
+    "--tb=short",
+    "-p",
+    "no:cacheprovider",
+    "--basetemp=/tmp/demiflow-lance-cas-early-r1/tmp",
+    "--junitxml=/tmp/demiflow-lance-cas-early-r1/result.xml",
+    "tests/test_lance_write_modes.py::test_stale_version_and_invalid_mode_do_not_consume_input",
+    "tests/test_lance_write_modes.py::test_concurrent_commit_is_not_lost_during_overwrite",
+    "tests/test_runtime_v3_lance_admission.py"
+  ],
+  "python": "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+  "environment": {
+    "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-lance-cas-early-r1/resources",
+    "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-lance-cas-early-r1/home",
+    "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-lance-cas-early-r1/forge",
+    "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115/tests",
+    "TMPDIR": "/tmp/demiflow-lance-cas-early-r1/scratch"
+  },
+  "source_unchanged": true,
+  "reports": [
+    {
+      "nodeid": "tests/test_lance_write_modes.py::test_stale_version_and_invalid_mode_do_not_consume_input",
+      "when": "setup",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 0.0007072500884532928,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_lance_write_modes.py::test_stale_version_and_invalid_mode_do_not_consume_input",
+      "when": "call",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 7.6131457313895226,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_lance_write_modes.py::test_stale_version_and_invalid_mode_do_not_consume_input",
+      "when": "teardown",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 0.00015000253915786743,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_lance_write_modes.py::test_concurrent_commit_is_not_lost_during_overwrite",
+      "when": "setup",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 0.0005371682345867157,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_lance_write_modes.py::test_concurrent_commit_is_not_lost_during_overwrite",
+      "when": "call",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 4.621377248317003,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_lance_write_modes.py::test_concurrent_commit_is_not_lost_during_overwrite",
+      "when": "teardown",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 0.00015426427125930786,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_lance_admission.py::test_completed_overwrite_replay_uses_original_receipt_after_newer_head",
+      "when": "setup",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 0.000566631555557251,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_lance_admission.py::test_completed_overwrite_replay_uses_original_receipt_after_newer_head",
+      "when": "call",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 3.6261694841086864,
+      "detail": null
+    },
+    {
+      "nodeid": "tests/test_runtime_v3_lance_admission.py::test_completed_overwrite_replay_uses_original_receipt_after_newer_head",
+      "when": "teardown",
+      "outcome": "passed",
+      "wasxfail": null,
+      "rerun": 0,
+      "seconds": 0.0002360306680202484,
+      "detail": null
+    }
+  ],
+  "note": "Narrow standalone early-CAS fix. Tests ran with the source-bound in-progress Arrow candidate present; no claim that the entire candidate or clean commit suite passed."
+}

@@ -477,6 +477,15 @@ def make_native_terminal_sink(spec, *, request, services):
         declaration = next((p.value for p in request.programs if p.name == 'write_lance'), None)
         if not isinstance(declaration, LanceWriteSpec):
             raise DataflowError('INVALID_CONTRACT', 'write_lance requires its sealed LanceWriteSpec')
+        if declaration.expected_version is not None and not services.action.replaying:
+            from ..lance.storage import inspect_lance
+            from ..errors import LanceWriteConflict
+            current = inspect_lance(declaration.uri, None, declaration.storage_options)
+            if current.resolved_version != declaration.expected_version:
+                raise LanceWriteConflict('Lance CAS baseline changed before source execution')
+        # Historical final ACKs are inspected at their original committed
+        # version. A later destination head must not reject that replay.
+        # Native prepare and commit still enforce the actual publication CAS.
         from ..data.sources import LanceSource
         from ..lance.model import LanceScanSpec
         # The sealed request identifies an exact scan; its already staged
