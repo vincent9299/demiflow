@@ -40,7 +40,7 @@ TIMING_BOUNDARY = {
                  'HTTP/Ray observer setup/teardown', 'filesystem probes', 'source snapshots'],
 }
 _STORAGE_ROLES = ('source_checkout', 'source_package', 'harness', 'trial_root',
-                  'run_directory', 'capacity', 'resource_home', 'forge_domain',
+                  'run_directory', 'capacity', 'resource_home', 'forge_domain', 'location_cache',
                   'temporary', 'tmp')
 _MOUNT_IDENTITY = ('device', 'fsid', 'fs_type', 'mount_source', 'mount_root',
                    'mount_point', 'mount_options', 'super_options')
@@ -98,6 +98,7 @@ def _storage_locations(source_root, output_root):
         harness=str(Path(__file__).resolve()), trial_root=str(output),
         run_directory=str(output / 'run'), capacity=str(output / 'capacity'),
         resource_home=str(output / 'resource-home'), forge_domain=str(output / 'forge-domain'),
+        location_cache=str(output / 'locations'),
         temporary=str(output / 'temporary'), tmp=str(output / 'tmp'))
 
 
@@ -653,6 +654,7 @@ def run_child(config):
         'DEMIFLOW_RESOURCE_ROOT': str(root / 'capacity'),
         'DEMIFLOW_RESOURCE_HOME': str(root / 'resource-home'),
         'DEMIFLOW_FORGE_DOMAIN': str(root / 'forge-domain'),
+        'DEMIFLOW_LOCATION_CACHE': str(root / 'locations'),
     }
     for name, value in private_environment.items():
         assert os.environ.get(name) == value, f'{name} must belong to this trial'
@@ -862,6 +864,7 @@ def measure_trial(spec, variant, phase, repetition, provider, output_root, **set
                DEMIFLOW_RESOURCE_ROOT=str(output_root / 'capacity'),
                DEMIFLOW_RESOURCE_HOME=str(output_root / 'resource-home'),
                DEMIFLOW_FORGE_DOMAIN=str(output_root / 'forge-domain'),
+               DEMIFLOW_LOCATION_CACHE=str(output_root / 'locations'),
                TMPDIR=str(output_root / 'tmp'))
     Path(env['TMPDIR']).mkdir()
     selected_gpu = None

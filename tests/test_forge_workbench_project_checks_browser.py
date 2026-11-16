@@ -1,6 +1,5 @@
 """A delayed status read cannot replace the result of a newer explicit check."""
 import json
-from pathlib import Path
 import pytest
 
 from playwright.sync_api import expect
@@ -46,7 +45,8 @@ def test_late_project_status_cannot_replace_newer_check_result(project,browser,m
         evidence=dict(old_status=old['status'],old_static_status=old['static_status'],
                       explicit_check_status=fresh['status'],explicit_static_status=fresh['static_status'],
                       shown=page.locator('.workbench > details').last.inner_text())
-        out=Path('/yzp/zhaozy/yangzepeng/0905/_demiflow/forge_coordination_20261104/workflow_workbench_20261105/P1')
+        out=tmp_path/'evidence'
+        out.mkdir(exist_ok=True)
         (out/('project-check-status-'+('error' if late_error else 'success')+'.json')).write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
         expect(page.get_by_text('整体：不符合规范；静态检查：不符合规范',exact=True)).to_be_visible(timeout=5000)
         expect(page.locator('.wb-notice')).not_to_contain_text('owned old project status fault')

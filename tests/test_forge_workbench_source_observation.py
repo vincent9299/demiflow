@@ -1,8 +1,6 @@
 """Source observation remains useful when strict compute admission is incomplete."""
 import hashlib
 import json
-import os
-from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
@@ -15,8 +13,6 @@ from test_forge_project_discovery import original, business_bytes
 from test_forge_public_api import service
 from test_forge_markdown_reading import browser
 from test_forge_workbench_browser import page_for, pipeline
-
-EVIDENCE=Path(os.environ.get('FORGE_WORKBENCH_EVIDENCE','/yzp/zhaozy/yangzepeng/0905/_demiflow/forge_coordination_20261104/workflow_workbench_20261105/P1/R9'))
 
 
 def author(root, *, calls=True):
@@ -78,8 +74,9 @@ def test_browser_unadmitted_source_and_empty_graph_finish_with_explicit_state(or
         page.get_by_role('button',name='检查问题',exact=True).click()
         expect(page.locator('.wb-check-issues')).to_contain_text('OP-06')
         assert not errors and not posts and business_bytes(original)==before
-        EVIDENCE.mkdir(exist_ok=True)
-        page.screenshot(path=str(EVIDENCE/('source-observation-'+('cached-dependency' if calls=='cached' else 'calls' if calls else 'empty')+'.png')),full_page=True)
+        evidence=tmp_path/'evidence'
+        evidence.mkdir(exist_ok=True)
+        page.screenshot(path=str(evidence/('source-observation-'+('cached-dependency' if calls=='cached' else 'calls' if calls else 'empty')+'.png')),full_page=True)
 
 
 @pytest.mark.parametrize('text,limits,rule',[

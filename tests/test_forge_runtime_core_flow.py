@@ -87,7 +87,7 @@ def test_http_registration_permissions_cas_and_no_execution(unregistered, tmp_pa
         assert not list((unregistered/'.forge/runs').glob('*'))
 
 
-def register_from_page(page, entry, params):
+def register_from_page(page, entry, params, *, evidence_dir):
     settings=page.locator('.wb-settings')
     if not settings.is_visible():page.get_by_role('button',name='接入与权限',exact=True).click()
     settings.get_by_label('登记流程入口',exact=True).fill(entry)
@@ -100,7 +100,8 @@ def register_from_page(page, entry, params):
     except AssertionError:
         evidence=dict(registration_status=registered.value.status,registration=registered.value.json(),
                       notice=page.locator('.wb-notice').inner_text(),body=page.locator('main').inner_text()[:6400])
-        Path('/yzp/zhaozy/yangzepeng/0905/_demiflow/forge_coordination_20261104/workflow_workbench_20261105/P1/registration-failure-R2.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
+        evidence_dir.mkdir(parents=True,exist_ok=True)
+        (evidence_dir/'registration-failure-R2.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
         raise
     expect(page.get_by_label('流程',exact=True)).to_have_value(entry,timeout=65000)
     page.locator('.wb-node').first.wait_for()
@@ -134,7 +135,7 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
             settings.get_by_label(name, exact=True).check()
         settings.get_by_role('button', name='保存运行权限', exact=True).click()
         expect(page.locator('.wb-notice')).to_contain_text('运行权限已更新')
-        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
         for width in (1440, 390, 320):
             page.set_viewport_size({'width': width, 'height': 1000})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
@@ -150,7 +151,7 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
         page.get_by_role('button', name='查看固定结果', exact=True).click()
         page.get_by_text('c01', exact=True).first.wait_for()
         navigate(page, '管道')
-        register_from_page(page, 'flows/waiting.py:run', 'flows/waiting.json')
+        register_from_page(page, 'flows/waiting.py:run', 'flows/waiting.json', evidence_dir=tmp_path/'evidence')
         expect(page.get_by_label('配置', exact=True)).to_have_value('flows/waiting.json')
         page.get_by_text('本次运行设置',exact=True).click()
         page.get_by_label('本次运行秒数上限', exact=True).fill('90')
@@ -180,11 +181,11 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
         assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == digest
 
 
-def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser):
+def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser, tmp_path):
     with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(65000)
         navigate(page, '管道')
-        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
         identities = []
         page.on('request', lambda r: identities.append(r.post_data_json['request_id']) if r.method == 'POST' and r.url.endswith('/run-prepare') else None)
 
@@ -215,12 +216,12 @@ def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser):
         assert runs.show(unregistered, run_id)['status'] == 'succeeded'
 
 
-def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser):
+def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, tmp_path):
     with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(65000)
         navigate(page, '管道')
         # The file exists, but its arguments do not match this Flow signature.
-        register_from_page(page, 'flows/questions.py:select', 'flows/waiting.json')
+        register_from_page(page, 'flows/questions.py:select', 'flows/waiting.json', evidence_dir=tmp_path/'evidence')
         page.get_by_role('button', name='运行', exact=True).click()
         page.locator('.error-box').last.wait_for()
         saved = page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))")
@@ -231,7 +232,7 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser):
         page.get_by_role('button', name='结束此失败请求', exact=True).click()
         assert page.evaluate("JSON.parse(sessionStorage.getItem('demiflow-workbench-run-intents-v1'))") == []
         assert not list((unregistered/'.forge/runs').glob('*'))
-        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
         expect(page.get_by_label('配置', exact=True)).to_have_value('flows/select_a.json')
         page.get_by_role('button', name='运行', exact=True).click()
         finished(page)
@@ -240,11 +241,11 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser):
         assert len(list((unregistered/'.forge/runs').iterdir())) == 1
 
 
-def test_reload_during_start(unregistered, browser):
+def test_reload_during_start(unregistered, browser, tmp_path):
     with service(unregistered, enable_runs=True) as app, opened(browser, app) as (page, _):
         page.set_default_timeout(65000)
         navigate(page, '管道')
-        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json')
+        register_from_page(page, 'flows/questions.py:select', 'flows/select_a.json', evidence_dir=tmp_path/'evidence')
         held=[]
         page.route('**/run-start', lambda route: held.append(route))
         with page.expect_request('**/run-start'):

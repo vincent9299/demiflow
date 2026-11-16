@@ -154,7 +154,7 @@ def test_actual_small_dataset_uses_original_route_ack_and_process_cleanup(tmp_pa
     # tmp_path is controlled by --basetemp=/tmp/demiflow-* in the exact command.
     spec = next(item for item in json.loads(PLAN_PATH.read_text())['cases'] if item['id'] == 'small_data')
     inherited = tmp_path / 'must-not-use-parent-domain'
-    for name in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN'):
+    for name in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN', 'DEMIFLOW_LOCATION_CACHE'):
         monkeypatch.setenv(name, str(inherited / name))
     trial = measure_trial(spec, {'root': str(OWN_TREE), 'kind': 'candidate'},
                           'warmup', -1, 'local', tmp_path / 'actual')
@@ -169,6 +169,7 @@ def test_actual_small_dataset_uses_original_route_ack_and_process_cleanup(tmp_pa
         'DEMIFLOW_RESOURCE_ROOT': str(tmp_path / 'actual' / 'capacity'),
         'DEMIFLOW_RESOURCE_HOME': str(tmp_path / 'actual' / 'resource-home'),
         'DEMIFLOW_FORGE_DOMAIN': str(tmp_path / 'actual' / 'forge-domain'),
+        'DEMIFLOW_LOCATION_CACHE': str(tmp_path / 'actual' / 'locations'),
     }
     # This is one real functional trial, not a synthetic five-round result.
     assert _comparison_environment_errors([trial]) == []
@@ -184,7 +185,7 @@ def test_ordered_small_pipeline_cannot_pass_after_result_permutation():
 
 
 @pytest.mark.parametrize('damage', ['missing', 'source_fs', 'source_device', 'data_fs',
-    'tmp_mount', 'unknown', 'after_missing', 'during_change', 'repetition_change',
+    'tmp_mount', 'location_cache_mount', 'location_cache_missing', 'unknown', 'after_missing', 'during_change', 'repetition_change',
     'different_host', 'wrong_path', 'timing_boundary', 'timing_interval', 'profile'])
 def test_unmatched_or_unobserved_storage_never_produces_net_code_gain(damage):
     report = receipt_report()
@@ -205,6 +206,8 @@ def test_unmatched_or_unobserved_storage_never_produces_net_code_gain(damage):
             elif damage == 'source_device': locations['source_package']['device'] = '8:2'
             elif damage == 'data_fs': locations['run_directory']['fs_type'] = 'dpc'
             elif damage == 'tmp_mount': locations['temporary']['mount_options'] = ['rw', 'sync']
+            elif damage == 'location_cache_mount': locations['location_cache']['fs_type'] = 'nfs'
+            elif damage == 'location_cache_missing': del locations['location_cache']
             elif damage == 'unknown': locations['harness']['status'] = 'unknown'
             elif damage == 'wrong_path': locations['capacity']['resolved_path'] = '/unobserved-other-root'
             else: locations['source_checkout']['device'] = '8:2'
