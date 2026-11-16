@@ -1,0 +1,213 @@
+{
+  "schema": "demiflow.performance.plan.v1",
+  "status": "coordinator_approved_harness_and_baseline_preflight",
+  "historical_baseline": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+  "new_capability_reference": "5ff5da9",
+  "candidate": "formal measurements wait for final coordinator revision",
+  "warmup_per_arm": 1,
+  "measured_repetitions": 5,
+  "trial_order": "alternate baseline/candidate by repetition",
+  "resource_sampling_ms": {
+    "process_tree_rss_fd": 50,
+    "disk_and_original_pool": 500
+  },
+  "maximum_regression_ratio": 1.2,
+  "cases": [
+    {
+      "id": "fast_cpu",
+      "input_rows": 20000,
+      "row_shape": "id:int, v:int, text:32 UTF-8 bytes",
+      "program": "map arithmetic -> filter odd -> map projection -> iter_rows",
+      "expected_rows": 10000,
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 268435456,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      }
+    },
+    {
+      "id": "small_data",
+      "input_rows": 31,
+      "program": "original narrow chain: map -> flat_map two -> even filter -> pandas batch_size5 -> limit3 -> take_all",
+      "expected_rows": 3,
+      "workers": 2,
+      "worker_mode": "thread",
+      "batch_rows": 7,
+      "limits": {
+        "memory_bytes": 268435456,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      },
+      "origin": "tests/test_local_kernel.py::test_narrow_chain_batch_boundaries_and_limit_match_serial"
+    },
+    {
+      "id": "slow_api",
+      "input_rows": 64,
+      "program": "actual native EmbeddingActor against owned HTTP fixture, batch_size1, concurrency4, max_requests64",
+      "expected_rows": 64,
+      "transport_delay_ms": 30,
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 268435456,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      }
+    },
+    {
+      "id": "cpu_gpu",
+      "input_rows": 32,
+      "program": "CPU map -> actual one-GPU CUDA 4096 float32 arithmetic/synchronize -> CPU map -> iter_rows",
+      "expected_rows": 32,
+      "workers": 5,
+      "worker_mode": "process",
+      "limits": {
+        "memory_bytes": 8589934592,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      },
+      "worker_gpu": 1,
+      "worker_memory_bytes": 2147483648,
+      "requires": "GPU scheduling window released by coordinator"
+    },
+    {
+      "id": "expand_100x100",
+      "input_rows": 100,
+      "program": "flat_map 100 child records per parent -> map checksum -> iter_rows",
+      "expected_rows": 10000,
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 268435456,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      }
+    },
+    {
+      "id": "uneven_model",
+      "input_rows": 64,
+      "program": "actual native EmbeddingActor batch_size1/concurrency8/max_requests64",
+      "expected_rows": 64,
+      "transport_delays_ms": {
+        "id_multiple_of_16": 250,
+        "other": 10
+      },
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 268435456,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      }
+    },
+    {
+      "id": "hot_key",
+      "input_rows": 16384,
+      "row_payload_bytes": 4096,
+      "program": "90 percent key0, remaining deterministic 127 keys -> reduce_by_key bounded count/sum -> iter_rows",
+      "expected_rows": 128,
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 67108864,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      }
+    },
+    {
+      "id": "large_graph",
+      "input_rows": 64,
+      "program": "shared source -> 16 distinct branches each 4 maps -> union -> iter_rows",
+      "expected_rows": 1024,
+      "minimum_logical_nodes": 65,
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 268435456,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      }
+    },
+    {
+      "id": "finite_sealed",
+      "input_rows": 80002,
+      "row_payload_bytes": 8192,
+      "program": "original wide left join and payload verification/projection; 40000 regular rows per side, null-left and duplicate-right -> iter_rows companion, original take_all regression preserved",
+      "expected_rows": 40002,
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 268435456,
+        "timeout_s": 120
+      },
+      "native_resources": {
+        "memory_bytes": 268435456,
+        "max_rss_bytes": 2147483648,
+        "threads": 2,
+        "partitions": [
+          1,
+          2
+        ],
+        "timeout_s": 120
+      },
+      "origin": "tests/test_dataset_large_payload.py::test_wide_join_hydrates_after_key_only_join_under_small_pool",
+      "budget_note": "Keep the original native declaration exactly; record effective row/batch/state partitions rather than silently change the original workload envelope."
+    }
+  ],
+  "environment_plan": {
+    "local": "all applicable nine, GPU separately coordinated",
+    "ray": [
+      "fast_cpu",
+      "slow_api",
+      "finite_sealed"
+    ],
+    "two_hosts": [
+      "fast_cpu",
+      "slow_api",
+      "finite_sealed"
+    ]
+  },
+  "unexecuted_environment_cells": "not_run, never inferred from Local",
+  "interfaces": {
+    "performance": "performance(fx, fault=None) -> dict; measurements has five rounds each containing named cases, warmup_separate, genuine child_execute_action_calls",
+    "run_comparison": "run_comparison(plan, baseline_roots, candidate_root, output_root) -> structured report",
+    "measure_trial": "measure_trial(spec, variant, phase, repetition, provider, output_root) -> actual child receipt",
+    "evaluate_report": "evaluate_report(report) -> pass/fail/not_run with exact reasons"
+  },
+  "protected": [
+    "no production edits",
+    "no existing runtime_v3_support route edits",
+    "no budget/timeout threshold widening",
+    "no baseline in main checkout",
+    "no installs or unrelated services",
+    "no GPU use while residency owns window",
+    "copy bytes are observed codec/transport boundaries, not guessed third-party internals"
+  ]
+}
