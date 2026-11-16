@@ -82,6 +82,8 @@ class StreamStats:
     @property
     def emitted(self) -> int:
         """末级产出行数（管线最终输出；per-stage 细账看 stage(name)/stages）。"""
+        if hasattr(self, '_committed_output'):
+            return self._committed_output
         if not self.stages:
             return 0
         return next(reversed(self.stages.values()))["emitted"]

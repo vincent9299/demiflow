@@ -29,6 +29,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
     stats, handle, failure = StreamStats(), None, None
     tick = time.monotonic()
     previous, reported = 0, 0
+    request.action._observation_rows = log_every if on_progress is not None else 0
 
     def observe():
         if handle is None:
@@ -46,15 +47,25 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
                 continue
             rows_in = sum(value['rows_input'] for value in counters)
             rows_out = sum(value['rows_output'] for value in counters)
-            stats.stages[node.occurrence_id] = {'in': rows_in, 'emitted': rows_out}
             total += rows_in + rows_out
         return total
+
+    def report_progress():
+        nonlocal reported
+        observe()
+        # Use the actual first business input frontier, not the sum of every
+        # physical edge. Worker progress events preserve intermediate samples.
+        frontier = next(iter(stats.stages.values()), {'in': 0})['in']
+        if on_progress is not None and log_every and frontier - reported >= log_every:
+            callbacks.resolve(on_progress(stats))
+            reported = frontier
 
     try:
         if stop_file is not None and Path(stop_file).exists():
             raise ServiceStopped('operator_stop_file')
         handle = execute_action(request, policy=policy, bounds=bounds)
         execution = handle._execution
+        execution._observe_progress = report_progress
         while True:
             if stop_file is not None and Path(stop_file).exists():
                 raise ServiceStopped('operator_stop_file')
@@ -67,9 +78,8 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             elif stall_timeout is not None and time.monotonic() - tick >= stall_timeout:
                 from ..errors import StallError
                 raise StallError('unified stream made no observed progress')
-            if on_progress is not None and (log_every == 0 or total - reported >= log_every):
+            if on_progress is not None and log_every == 0:
                 callbacks.resolve(on_progress(stats))
-                reported = total
             if status.state in ('succeeded', 'failed', 'cancelled'):
                 break
         result = handle.result()
@@ -77,7 +87,8 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             stats.metrics['resources'] = execution._acquisition.search_metrics()
         # The committed terminal receipt supplies the final count, including
         # an earlier attempt's prefix; no counter is inferred from the plan.
-        stats.stage('committed_output')['emitted'] = result.rows or 0
+        stats._committed_output = result.rows or 0
+        stats.metrics['committed_output'] = {'rows': result.rows or 0}
         return stats
     except BaseException as exc:
         failure = exc
@@ -89,6 +100,9 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
                 failure.add_note('cooperative stop: ' + str(cleanup))
         raise
     finally:
+        if handle is not None:
+            handle._execution._observe_progress = None
+        request.action._observation_rows = 0
         observe()
         if handle is not None:
             from .dataflow_api import record_execution_metadata

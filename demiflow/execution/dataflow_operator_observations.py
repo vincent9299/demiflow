@@ -27,7 +27,7 @@ def empty():
 
 def validated(value):
     fields = {'count', 'total_ns', 'min_ns', 'max_ns', 'miss'}
-    if (type(value) is not dict or set(value) != fields
+    if (type(value) is not dict or set(value) - {'dead_batches', 'dead_batches_dropped'} != fields
             or any(type(value[k]) is not int or value[k] < 0 for k in fields - {'miss'})
             or type(value['miss']) is not dict or len(value['miss']) > 33
             or any(type(k) is not str or not k or len(k) > 128
@@ -37,7 +37,20 @@ def validated(value):
             or value['max_ns'] > value['total_ns']
             or value['count'] == 0 and any(value[k] for k in ('total_ns', 'min_ns', 'max_ns'))):
         raise DataflowError('INVALID_CONTRACT', 'invalid callback observation')
-    return {**value, 'miss': dict(value['miss'])}
+    dead = value.get('dead_batches', [])
+    dropped = value.get('dead_batches_dropped', 0)
+    if (type(dead) is not list or len(dead) > 32 or type(dropped) is not int or dropped < 0
+            or any(type(item) is not dict or set(item) != {'reason', 'row_count', 'payload'}
+                or type(item['reason']) is not str or not 1 <= len(item['reason']) <= 128
+                or type(item['row_count']) is not int or item['row_count'] < 1
+                or item['payload'] is not None and (type(item['payload']) is not str
+                    or len(item['payload']) > 32768) for item in dead)
+            or sum(len(item['payload'] or '') + 256 for item in dead) > 32768):
+        raise DataflowError('INVALID_CONTRACT', 'invalid bounded dead batch observations')
+    result = {**value, 'miss': dict(value['miss'])}
+    if 'dead_batches' in value:
+        result['dead_batches'] = [dict(item) for item in dead]
+    return result
 
 
 class CallbackObservations:
@@ -87,7 +100,25 @@ class CallbackObservations:
 
     def snapshot(self):
         with self._lock:
-            return {**self._value, 'miss': dict(self._value['miss'])}
+            return validated(self._value)
+
+    def dead_batch(self, rows, reason, *, max_bytes):
+        """Small diagnostics only; failed business payload is not a retry ledger."""
+        from .exchange.dataflow_bridge import _encode_payload
+        payload = None
+        if max_bytes >= 512:
+            try:
+                payload = _encode_payload({'rows': rows}, max_bytes=max_bytes // 2).hex()
+            except DataflowError as error:
+                if error.code != 'BUDGET_EXCEEDED':
+                    raise
+        with self._lock:
+            dead = self._value.setdefault('dead_batches', [])
+            retained = sum(len(item['payload'] or '') + 256 for item in dead)
+            if len(dead) < 32 and retained + len(payload or '') + 256 <= min(32768, max_bytes):
+                dead.append({'reason': reason[:128], 'row_count': len(rows), 'payload': payload})
+            else:
+                self._value['dead_batches_dropped'] = self._value.get('dead_batches_dropped', 0) + 1
 
     def restore(self, value):
         with self._lock:
@@ -173,6 +204,21 @@ def restore_operator_observations(execution, image):
     execution._operator_observations = slots
 
 
+class _ObservedTiming:
+    def __init__(self, value):
+        self.value = dict(value)
+
+    def summary(self):
+        # Older cut observations contain aggregates, not a histogram. The
+        # observed maximum is an honest conservative quantile upper bound;
+        # never fabricate samples or a finer histogram from an average.
+        v = self.value
+        upper = v['max_ns'] / 1e9 if v['count'] else None
+        return {'count': v['count'], 'total_s': v['total_ns'] / 1e9,
+                'p50_upper_s': upper, 'p95_upper_s': upper,
+                'method': 'observed_maximum_upper_bound'}
+
+
 def stream_observations(execution, stats):
     from .recovery_contract import document
     nodes = {node.occurrence_id: node for node in execution._graph.nodes}
@@ -187,6 +233,20 @@ def stream_observations(execution, stats):
         document(labels, execution._bounds.max_control_bytes)
         execution._observation_labels = labels
     policies, totals, misses = {}, {}, {}
+    # Order and names come from the SAME sealed graph, including repeated
+    # occurrences. Source/terminal control nodes are not business stages.
+    stages = {}
+    for occurrence in nodes:
+        if occurrence in labels:
+            counters = [v for (o, _), v in execution._node_metrics.items() if o == occurrence]
+            stages[labels[occurrence]] = {
+                'in': sum(v['rows_input'] for v in counters),
+                'emitted': sum(v['rows_output'] for v in counters)}
+    if not stages:
+        terminals = set(execution._graph.terminals)
+        stages['output'] = {'in': 0, 'emitted': sum(
+            v['rows_input'] for (o, _), v in execution._node_metrics.items() if o in terminals)}
+    stats.stages = stages
     for occurrence, node in nodes.items():
         name = labels.get(occurrence, occurrence)
         cfg = node.kernel.configuration
@@ -205,6 +265,30 @@ def stream_observations(execution, stats):
             key = name + ':' + reason
             misses[key] = misses.get(key, 0) + count
     stats.miss = misses
+    stats.timings = {name: _ObservedTiming(value) for name, value in totals.items()}
+    stats.dead_batches = []
+    stats.dead_batches_dropped = 0
+    remaining = min(32768, execution._bounds.max_control_bytes // 2)
+    from .exchange.dataflow_bridge import _decode_payload
+    for (occurrence, _), (_, value) in getattr(execution, '_operator_observations', {}).items():
+        stats.dead_batches_dropped += value.get('dead_batches_dropped', 0)
+        for item in value.get('dead_batches', ()):
+            if len(stats.dead_batches) >= 32:
+                stats.dead_batches_dropped += 1
+                continue
+            diagnostic = {'stage': labels.get(occurrence, occurrence), 'reason': item['reason'],
+                          'row_count': item['row_count'], 'payload': 'not_retained'}
+            payload = item['payload']
+            if payload is not None and len(payload) <= remaining:
+                try:
+                    rows = _decode_payload(bytes.fromhex(payload), max_bytes=len(payload))['rows']
+                except (ValueError, KeyError) as error:
+                    raise DataflowError('INVALID_CONTRACT', 'invalid dead batch payload') from error
+                if type(rows) is not list or len(rows) != item['row_count']:
+                    raise DataflowError('INVALID_CONTRACT', 'dead batch row count differs')
+                diagnostic.update(rows=rows, payload='retained')
+                remaining -= len(payload)
+            stats.dead_batches.append(diagnostic)
     stats.stage_policies = policies
     stats.metrics['stage_policies'] = policies
     # The compatibility collection names the ACTUAL mechanism. A synchronous

@@ -168,14 +168,14 @@ def _code_identity_from_value(kind, value):
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
                        live_binding=None, force_live=False, shared_payload=None) -> ArtifactRef:
-    import cloudpickle
+    from .dataflow_program_pickle import dumps
     kind = _program_kind(declaration)
     value = _program_value(declaration)
     code_identity = _code_identity_from_value(kind, value)
     manifest = {"schema": PROGRAM_SCHEMA, "occurrence_id": declaration.occurrence_id,
                 "kind": kind, "code_identity": code_identity}
     try:
-        payload = None if force_live or shared_payload is not None else cloudpickle.dumps(value)
+        payload = None if force_live or shared_payload is not None else dumps(value)
     except Exception as exc:
         if live_binding is None:
             raise DataflowError("INVALID_CONTRACT",
@@ -281,7 +281,8 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                 return super().write(chunk)
         stream = BoundedPayload()
         try:
-            cloudpickle.dump(tuple(_program_value(declarations[o]) for o in binding['members']), stream)
+            from .dataflow_program_pickle import ProgramPickler
+            ProgramPickler(stream).dump(tuple(_program_value(declarations[o]) for o in binding['members']))
         except DataflowError:
             raise
         except Exception as exc:

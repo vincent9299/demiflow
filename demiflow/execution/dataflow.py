@@ -1014,6 +1014,9 @@ class DataflowExecution:
             if key is not None:
                 self._checked.progress(key, **{k: metrics[k] - old[k] for k in metrics})
                 self._checked.flush_observations()
+            observer = getattr(self, '_observe_progress', None)
+            if observer is not None:
+                observer()
             return
         if event.kind in ("data", "terminal"):
             if payload["producer_partition"] not in lease.partition_ids:
@@ -1365,6 +1368,7 @@ class DataflowExecution:
         self._idle.clear()
         for key, endpoint in self._endpoints.items():
             endpoint.send_business({'kind': 'resume', 'publishing': publishing,
+                'observation_rows': getattr(self._action, '_observation_rows', 0),
                 'source_credit': shares.get(key, {'rows': 0, 'bytes': 0})})
 
     def _start_publication(self):

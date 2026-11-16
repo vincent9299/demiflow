@@ -266,6 +266,25 @@ def _invoke_scoped(instance, value, records, spec):
         set_row_scope(previous)
 
 
+def _business_miss(exc, cfg):
+    from ...data.runtime_contract import RuntimeContractError
+    from ..recovery_contract import RecoveryContractError
+    from ..request_limits import ServiceStopped
+    from ...operator_llm.journal import UncertainPromptCall
+    # Only the callback deadline class certifies that cancellation drained;
+    # ordinary control/budget/unknown-effect failures can never become a miss.
+    from . import async_instance
+    callback_timeout = getattr(async_instance, 'CallbackDeadlineExceeded', None)
+    if callback_timeout is not None and isinstance(exc, callback_timeout):
+        return 'hard_timeout'
+    if isinstance(exc, (RuntimeContractError, DataflowError,
+                        RecoveryContractError, ServiceStopped, UncertainPromptCall)):
+        return None
+    admitted = set(cfg.get('catch', ()))
+    names = {cls.__module__ + '.' + cls.__qualname__ for cls in type(exc).__mro__}
+    return type(exc).__name__ if admitted & names else None
+
+
 def invoke_unary(
     spec: KernelSpec,
     record: Record,
@@ -335,22 +354,9 @@ def invoke_unary(
             try:
                 result = _invoke_scoped(instance, row, (record,), spec)
             except Exception as exc:
-                from ...data.runtime_contract import RuntimeContractError
-                from ..recovery_contract import RecoveryContractError
-                from ..request_limits import ServiceStopped
-                from ...operator_llm.journal import UncertainPromptCall
-                # Business miss policies cannot turn failed validation, lost
-                # admission, cancellation or an unknown effect into an ACKed
-                # dropped row. Validation runs after the actual await here.
-                if isinstance(exc, (RuntimeContractError, DataflowError,
-                                    RecoveryContractError, ServiceStopped,
-                                    UncertainPromptCall)):
+                miss = _business_miss(exc, cfg)
+                if miss is None:
                     raise
-                admitted = set(cfg.get("catch", ()))
-                names = {cls.__module__ + "." + cls.__qualname__ for cls in type(exc).__mro__}
-                if not (admitted & names):
-                    raise
-                miss = type(exc).__name__
                 return
             if result is None:
                 miss = 'drop'
@@ -507,6 +513,8 @@ def invoke_batch(
     instance: CallableInstance,
     services: RuntimeServices,
     schemas=None,
+    observe=None,
+    observe_dead=None,
 ) -> Iterator[Record]:
     """K003: map_batches (format/zero-copy) and batch_map (max_batch) semantics."""
     _check_stop(services)
@@ -563,7 +571,24 @@ def invoke_batch(
                 from ..dataflow_schema import stream_lance_output_schema
                 output_schema(stream_lance_output_schema(schema, cfg.get("output_ref")))
                 instance.bind_records(tuple(record.record_id for record in records), instance.native_call_ordinal)
-            result = _invoke_scoped(instance, rows, records, spec)
+            import time
+            started, miss = time.perf_counter_ns(), None
+            try:
+                try:
+                    result = _invoke_scoped(instance, rows, records, spec)
+                except Exception as exc:
+                    miss = _business_miss(exc, cfg)
+                    if miss is None:
+                        raise
+                    if observe_dead is not None:
+                        observe_dead(rows, miss, max_bytes=min(16384, services.bounds.max_control_bytes // 16))
+                    return
+                if result is None:
+                    miss = 'drop'
+                    return
+            finally:
+                if observe is not None:
+                    observe(time.perf_counter_ns() - started, miss)
             out_rows = _batch_to_rows(result, "rows")
     else:
         raise _err("INVALID_CONTRACT", "kind is not a batch kernel", kind=kind)

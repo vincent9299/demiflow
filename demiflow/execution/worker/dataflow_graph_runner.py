@@ -49,6 +49,7 @@ class WorkerGraphRunner:
         self._metrics = {occ: {'rows_input': 0, 'rows_output': 0} for occ in executor._node_specs}
         self._dirty_metrics = set()
         self._metrics_at = time.monotonic()
+        self._observation_rows = 0
         self._source_rows_since_cut = 0
         self._finished_splits = set()
         self._finished_inputs = set()
@@ -438,6 +439,10 @@ class WorkerGraphRunner:
                 self._paused = True
                 self._idle_sent = False
             elif kind == 'resume':
+                observation_rows = command.get('observation_rows', 0)
+                if type(observation_rows) is not int or observation_rows < 0:
+                    raise DataflowError('INVALID_CONTRACT', 'invalid progress observation interval')
+                self._observation_rows = observation_rows
                 credit = command.get('source_credit')
                 if credit is not None:
                     if (type(credit) is not dict or set(credit) != {'rows', 'bytes'}
@@ -853,6 +858,9 @@ class WorkerGraphRunner:
             return
         self._metrics[occ]['rows_input'] += 1
         self._dirty_metrics.add(occ)
+        if (self._observation_rows and self.e._node_specs[occ].kind == 'transform'
+                and self._metrics[occ]['rows_input'] % self._observation_rows == 0):
+            self._send('progress', self._metrics_payload(occ))
         if self.e._node_specs[occ].kind == 'terminal':
             if self._terminal_spec.kind == 'take_all':
                 maximum = self._terminal_spec.configuration['arguments'].get('limit')
