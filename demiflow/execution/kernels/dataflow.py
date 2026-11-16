@@ -335,6 +335,17 @@ def invoke_unary(
             try:
                 result = _invoke_scoped(instance, row, (record,), spec)
             except Exception as exc:
+                from ...data.runtime_contract import RuntimeContractError
+                from ..recovery_contract import RecoveryContractError
+                from ..request_limits import ServiceStopped
+                from ...operator_llm.journal import UncertainPromptCall
+                # Business miss policies cannot turn failed validation, lost
+                # admission, cancellation or an unknown effect into an ACKed
+                # dropped row. Validation runs after the actual await here.
+                if isinstance(exc, (RuntimeContractError, DataflowError,
+                                    RecoveryContractError, ServiceStopped,
+                                    UncertainPromptCall)):
+                    raise
                 admitted = set(cfg.get("catch", ()))
                 names = {cls.__module__ + "." + cls.__qualname__ for cls in type(exc).__mro__}
                 if not (admitted & names):
