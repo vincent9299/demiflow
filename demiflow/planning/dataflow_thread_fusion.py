@@ -68,7 +68,7 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
     # ceiling. The per-host and explicit-profile checks below still apply.
     async_suffix = (policy.max_active_workers is not None
         and sum(len(s.partitions) for s in stages) > policy.max_active_workers
-        and any(n.kernel.kind == 'AsyncMapOp' for n in graph.nodes))
+        and any(n.kernel.kind in {'AsyncMapOp', 'DeduplicateOp', 'SaveLanceOp'} for n in graph.nodes))
     if policy.worker_mode != 'thread' and not bounded_suffix and not prepend_tail and not async_suffix:
         return stages
     owner = {occ: stage for stage in stages for occ in stage.occurrences}
@@ -91,14 +91,15 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
                     continue
                 node, stage = nodes[candidate], owner[candidate]
                 kernel = node.kernel
-                native_save = (kernel.kind == 'SaveLanceOp' and kernel.effect == 'journaled'
-                               and kernel.state in {'adapter', 'nonrecoverable'}
-                               and kernel.resource_role == 'io')
+                native_journaled = (kernel.effect == 'journaled'
+                    and kernel.state in {'adapter', 'auto_json', 'nonrecoverable'}
+                    and (kernel.kind == 'SaveLanceOp' and kernel.resource_role == 'io'
+                         or kernel.kind == 'DeduplicateOp' and kernel.resource_role == 'cpu'))
                 prepend = (prepend_tail and kernel.kind == 'StreamPrependOp'
                            and {port.name: port.requirement for port in kernel.inputs}
                            == {'main': 'incremental', 'prefix': 'finite_complete'})
                 if (not (node.kind == 'transform' or node.kind == 'relational' and kernel.kind == 'union')
-                        or not (kernel.effect == 'pure' and kernel.resource_role == 'cpu' or native_save)
+                        or not (kernel.effect == 'pure' and kernel.resource_role == 'cpu' or native_journaled)
                         or not (prepend or kernel.inputs
                                 and all(port.requirement == 'incremental' for port in kernel.inputs))
                         or not bounded_suffix and len(outgoing.get(candidate, ())) != 1
@@ -116,7 +117,7 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
                     or s.profile.limits or s.profile.requirements
                     or set(s.profile.requests) - {'cpu_millis', 'memory_bytes'} for s in members)
                 or not (bounded_suffix or any(nodes[o].kernel.configuration.get('streaming_map')
-                           or nodes[o].kernel.kind == 'AsyncMapOp'
+                           or nodes[o].kernel.kind in {'AsyncMapOp', 'DeduplicateOp', 'SaveLanceOp'}
                            or prepend_tail and nodes[o].kernel.kind == 'StreamPrependOp' for o in suffix))):
             continue
         resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in members)

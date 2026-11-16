@@ -273,7 +273,7 @@ def resolve_action_runtime(request: ActionRequest):
             options['memory_bytes'] = min(options.get('memory_bytes', limits['memory_bytes']), native['memory_bytes'])
     policy, bounds = resolve_runtime_policy(options, limits, provider=request.provider,
                                            explicit_limits=tuple(explicit))
-    if local is None and not request.action.replaying:
+    if not request.action.replaying:
         from ..planning.dataflow_policy import fit_default_stream_windows
         bounds = fit_default_stream_windows(request, policy=policy, bounds=bounds,
                                             explicit_limits=tuple(explicit))

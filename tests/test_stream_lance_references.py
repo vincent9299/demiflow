@@ -17,7 +17,11 @@ def test_microbatch_references_allow_downstream_before_final_commit(tmp_path):
         .map(verify)
         .save_lance(tmp_path/'second.lance',schema=pa.schema([*schema,('source',pa.struct([('uri',pa.string()),('version',pa.int64())]))]),key='id',stage='second',max_batch=1)
         .run_stream())
-    assert [(e['id'],e['version']) for e in events(seen)]==[('a',2),('b',3)]
+    # The first real microbatch creates v1; no empty initialization publication.
+    assert [(e['id'],e['version']) for e in events(seen)]==[('a',1),('b',2)]
+    assert lance.dataset(str(tmp_path/'first.lance'),version=1).to_table()['id'].to_pylist()==['a']
+    assert lance.dataset(str(tmp_path/'first.lance'),version=2).to_table()['id'].to_pylist()==['a','b']
+    assert lance.dataset(str(tmp_path/'first.lance')).version==2
     assert lance.dataset(**stats.outputs['second']).count_rows()==2
 
 

@@ -191,8 +191,9 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
     """Size implicit streaming windows from the actual simultaneous workload.
 
     This runs before staging programs or starting actors. Explicit payload
-    ceilings and caller-configured LocalKernelOptions are never rewritten. A
-    finite-input graph retains its independent, already bounded phase planning.
+    ceilings and the caller's total Local memory envelope are never rewritten.
+    Finite-input graphs retain independent phases except a one-worker DAG,
+    whose synchronous kernels must coexist with all original state windows.
     The allocator still makes the admission decision on the resulting profiles.
     """
     from dataclasses import replace
@@ -203,7 +204,7 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
         return bounds
     for _ in range(8):
         graph = lower_action(request, bounds=bounds).graph
-        if any(port.requirement == 'finite_complete' for node in graph.nodes for port in node.kernel.inputs):
+        if policy.max_active_workers != 1 and any(port.requirement == 'finite_complete' for node in graph.nodes for port in node.kernel.inputs):
             return bounds
         stages = partition_stages(graph, policy=policy, bounds=bounds)
         resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
