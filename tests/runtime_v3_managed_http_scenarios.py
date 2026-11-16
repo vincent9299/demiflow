@@ -10,13 +10,13 @@ from demiflow.embeddings import EmbeddingModel
 from demiflow.services import ManagedHTTPService
 
 
-_SERVER = '''import json, os, signal, threading, time
+_SERVER = '''import json, os, signal, threading, time, subprocess, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import psutil
 port, ledger, mode = int(__import__('sys').argv[1]), Path(__import__('sys').argv[2]), __import__('sys').argv[3]
 def record(event):
-    entry = dict(event=event, pid=os.getpid(), birth=psutil.Process().create_time(), cuda=os.environ.get('CUDA_VISIBLE_DEVICES'))
+    entry = dict(event=event, pid=os.getpid(), birth=psutil.Process().create_time(), cuda=os.environ.get('CUDA_VISIBLE_DEVICES'), at_ns=time.time_ns())
     fd=os.open(ledger, os.O_WRONLY|os.O_CREAT|os.O_APPEND, 0o600)
     try: os.write(fd, (json.dumps(entry)+'\\n').encode()); os.fsync(fd)
     finally: os.close(fd)
@@ -35,6 +35,11 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError): pass
     def log_message(self,*args): pass
 server=ThreadingHTTPServer(('127.0.0.1',port),Handler)
+if mode=='detached':
+    # Default close_fds intentionally drops the unit FD. The living subreaper
+    # must retain ownership and find this separate-session descendant itself.
+    child_code="import json,os,psutil,signal,sys,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); fd=os.open(sys.argv[1],os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600); os.write(fd,(json.dumps(dict(event='descendant',pid=os.getpid(),birth=psutil.Process().create_time(),cuda=os.environ.get('CUDA_VISIBLE_DEVICES'),at_ns=time.time_ns()))+'\\\\n').encode()); os.fsync(fd); os.close(fd); time.sleep(60)"
+    subprocess.Popen([sys.executable,'-c',child_code,str(ledger)],start_new_session=True)
 def stop(*args):
     record('terminate')
     threading.Thread(target=server.shutdown,daemon=True).start()
@@ -57,7 +62,7 @@ def managed_fixture(root, monkeypatch, *, mode='success', port=None, request=Non
     endpoint = f'http://127.0.0.1:{port}/v1'
     service = ManagedHTTPService([sys.executable, str(script), str(port), str(ledger), mode],
         base_url=endpoint, expected_model='fixture', root=root,
-        startup_timeout_s=.3 if mode == 'unready' else 5,
+        startup_timeout_s=5,
         shutdown_timeout_s=.5, readiness_timeout_s=.2, poll_interval_s=.01,
         resource_directory=root / 'port-locks')
     fixture = {'model': EmbeddingModel('fixture', 'fixed', 3, endpoint),
@@ -77,7 +82,7 @@ def cleanup_owned(fixture):
     import os
     import signal
     for item in events(fixture):
-        if item['event'] != 'start':
+        if item['event'] not in ('start', 'descendant'):
             continue
         try:
             process = psutil.Process(item['pid'])
@@ -98,7 +103,7 @@ def assert_reaped(fixture, *, starts=1, requests=1):
     launched = [item for item in rows if item['event'] == 'start']
     assert len(launched) == starts, rows
     assert sum(item['event'] == 'request' for item in rows) == requests, rows
-    for item in launched:
+    for item in [row for row in rows if row['event'] in ('start', 'descendant')]:
         assert item['cuda'] == ''  # CPU service cannot claim any host GPU.
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:

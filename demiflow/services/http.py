@@ -221,8 +221,7 @@ class _HTTPOwner:
             await self._acquire_resources(url.port)
             spec.log_path.parent.mkdir(parents=True,exist_ok=True)
             env = {**os.environ,**spec.env,'CUDA_VISIBLE_DEVICES':','.join(map(str,spec.gpus)), 'PYTHONUNBUFFERED':'1'}
-            self._process = subprocess.Popen(spec.command,cwd=spec.root,env=env,stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
+            self._process = self._spawn_process(env)
             from .process_log import ProcessLog
             self._log_pump=ProcessLog(self._process.stdout,spec.log_path,spec.log_max_bytes)
             deadline = time.monotonic()+spec.startup_timeout_s
@@ -255,6 +254,10 @@ class _HTTPOwner:
             if isinstance(error,(asyncio.CancelledError,ModelServiceError)):
                 raise
             raise ModelServiceError(str(error)) from error
+
+    def _spawn_process(self, env):
+        return subprocess.Popen(self.declaration.command,cwd=self.declaration.root,env=env,
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
 
     async def aclose(self):
         if self._closed:

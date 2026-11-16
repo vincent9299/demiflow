@@ -72,3 +72,21 @@ def restore_managed_http(value):
 def managed_http_digest(service):
     import hashlib
     return hashlib.sha256(document(freeze_managed_http(service), _MAX_BYTES)).hexdigest()
+
+
+def restore_worker_managed_http(value):
+    """Only admitted workers instantiate the owner with original unit custody."""
+    from ..services.http import ManagedHTTPService, _HTTPOwner
+    restore_managed_http(value)  # Revalidate the original canonical declaration.
+
+    class WorkerOwner(_HTTPOwner):
+        def _spawn_process(self, env):
+            from .dataflow_managed_http_child import spawn_owned_service
+            return spawn_owned_service(self.declaration, env=env)
+
+    class WorkerService(ManagedHTTPService):
+        def bind(self, model=None):
+            super().bind(model)  # Original endpoint/model validation, no spawn.
+            return WorkerOwner(self)
+
+    return WorkerService(**value['parameters'])

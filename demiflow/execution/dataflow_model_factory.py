@@ -24,8 +24,8 @@ class EmbeddingFactory:
         from ..embeddings.runtime import EmbeddingActor
         from ..inference import _resolve_request_gate
         if declaration.get('service') is not None:
-            from .dataflow_managed_http import restore_managed_http
-            declaration = dict(declaration, service=restore_managed_http(declaration['service']))
+            from .dataflow_managed_http import restore_worker_managed_http
+            declaration = dict(declaration, service=restore_worker_managed_http(declaration['service']))
         actor = EmbeddingActor(**declaration, request_gate=_resolve_request_gate(
             policy=policy, gate=None, concurrency=declaration['concurrency']))
         actor._request_policy = policy

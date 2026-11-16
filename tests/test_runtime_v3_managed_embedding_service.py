@@ -105,3 +105,100 @@ def test_cancel_reaps_actual_worker_owned_service(tmp_path, monkeypatch, request
                 thread.join(16)
     assert cancelled.is_set() and not thread.is_alive()
     assert_reaped(fixture)
+
+
+@pytest.mark.parametrize('mode', ['slow', 'detached'])
+def test_worker_sigkill_retains_unit_until_actual_service_tree_exits(tmp_path, monkeypatch, request, mode):
+    import os
+    from pathlib import Path
+    import psutil
+    fixture = managed_fixture(tmp_path, monkeypatch, request=request, mode=mode)
+    proof = {'premature_release': [], 'kill': None, 'charged_while_child_alive': False}
+
+    def alive(item):
+        try:
+            proc = psutil.Process(item['pid'])
+            return proc.create_time() == item['birth'] and proc.status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
+
+    def kill():
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            rows = events(fixture)
+            if any(r['event'] == 'request' for r in rows) and (
+                    mode != 'detached' or any(r['event'] == 'descendant' for r in rows)):
+                service = next(r for r in rows if r['event'] == 'start')
+                worker = psutil.Process(service['pid']).parent()
+                for _ in range(3):
+                    if 'demiflow.execution.worker.bootstrap' in worker.cmdline():
+                        break
+                    worker = worker.parent()
+                assert 'demiflow.execution.worker.bootstrap' in worker.cmdline()
+                proof['kill'] = {'pid': worker.pid, 'birth': worker.create_time()}
+                worker.kill()
+                records = Path(os.environ['DEMIFLOW_RESOURCE_ROOT']) / 'capacity/allocations'
+                while time.monotonic() < deadline:
+                    living = [r for r in rows if r['event'] in ('start', 'descendant') and alive(r)]
+                    for path in records.glob('*.json'):
+                        record = json.loads(path.read_text())
+                        if (record.get('identity') or {}).get('pid') == worker.pid and living:
+                            if record['state'] == 'RELEASED':
+                                proof['premature_release'].append(record)
+                            else:
+                                proof['charged_while_child_alive'] = True
+                    if not living:
+                        return
+                    time.sleep(.005)
+                return
+            time.sleep(.01)
+
+    thread = threading.Thread(target=kill)
+    thread.start()
+    try:
+        with pytest.raises(Exception, match='UNKNOWN_EFFECT|worker connection closed|Connection reset by peer'):
+            with RunContext.start(tmp_path / 'run', limits={'timeout_s': 25}):
+                dataset(fixture, tmp_path, cached=False).take_all()
+    finally:
+        thread.join(16)
+        (tmp_path / 'worker-kill-proof.json').write_text(json.dumps(proof, indent=2))
+    assert proof['kill'] and not thread.is_alive()
+    assert proof['charged_while_child_alive'] and not proof['premature_release']
+    assert_reaped(fixture)
+
+
+def test_guardian_observer_exception_reaps_detached_closefd_descendant(tmp_path, monkeypatch, request):
+    """Inject only an observer fault inside the real original managed unit."""
+    import os
+    import sys
+    from demiflow.resources.process_unit import ManagedProcessUnit, birth_start
+    fixture = managed_fixture(tmp_path, monkeypatch, request=request, mode='detached')
+    declaration = {'parent': os.getpid(), 'birth': birth_start(os.getpid()),
+        'command': list(fixture['service'].command), 'shutdown_timeout_s': .5}
+    script = '''import json,sys
+from pathlib import Path
+from demiflow.execution import dataflow_managed_http_child as child
+original=child.descendants
+def failed_observer(owner):
+    rows=original(owner)
+    path=Path(sys.argv[2])
+    if path.exists() and any(json.loads(line)['event']=='descendant' for line in path.read_text().splitlines()):
+        raise RuntimeError('injected-guardian-observer-failure')
+    return rows
+child.descendants=failed_observer
+child.main(sys.argv[1])
+'''
+    unit = ManagedProcessUnit(tmp_path / 'units')
+    spawned = unit.spawn('service', 'guardian', 'a' * 64,
+        [sys.executable, '-B', '-c', script, json.dumps(declaration), str(fixture['events'])],
+        log_path=tmp_path / 'guardian.log', extra_env={'CUDA_VISIBLE_DEVICES': ''})
+    process = spawned['process']
+    try:
+        assert process.wait(timeout=12) != 0
+        assert 'injected-guardian-observer-failure' in (tmp_path / 'guardian.log').read_text()
+        assert any(row['event'] == 'descendant' for row in events(fixture))
+        assert_reaped(fixture, requests=0)
+        assert unit.stop('service', 'guardian', terminate_deadline_ms=1000, process=process)['confirmed']
+    finally:
+        if process.poll() is None:
+            unit.stop('service', 'guardian', terminate_deadline_ms=2000, process=process)
