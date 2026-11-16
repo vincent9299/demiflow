@@ -235,9 +235,16 @@ def test_checkpoint_retry_after_partial_attempt(tmp_path):
     Path(uri).mkdir()
     foreign = Path(uri)/'junk.bin'
     foreign.write_bytes(b'partial attempt without original ownership')
-    with pytest.raises((LanceExecutionError, LanceWriteConflict)):
-        _write_pinned(ds([{'k':'a','n':1}]), uri)
+    def forbidden():
+        raise AssertionError('an unowned target must reject before input')
+        yield
+    # The current native preflight exposes Lance's lookup ValueError; the
+    # retired checkpoint wrapper used LanceExecutionError for this refusal.
+    with pytest.raises((LanceExecutionError, LanceWriteConflict, ValueError),
+                       match='not found|exists|target'):
+        _write_pinned(DataAPI().from_iter(forbidden), uri)
     assert foreign.read_bytes() == b'partial attempt without original ownership'
+    assert list(Path(uri).iterdir()) == [foreign]
 
 
 def test_checkpoint_never_overwrites_plain_written_table(tmp_path):
