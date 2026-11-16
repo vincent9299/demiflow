@@ -1,5 +1,7 @@
 # I09 / V022：原生队列完整业务与 producer 跨阶段恢复
 
+本文件保留第一阶段的真实结果。其 Ray 显式 ACK 阻塞已由[后续完整 Ray 五组验收](QUEUE-BUSINESS-RAY-CLOSURE-20261116.md)关闭；下文失败记录不回写为成功。
+
 本轮结果是 **Local 全部通过，Ray 正常与恢复通过，Ray 显式 ACK 的物理规划仍有阻塞**。不能把它描述为 I09 已全部闭环。生产修复提交 `471b7285717e3805e1bf2b1c095d0a1d561ee5b5`，只改 `dataflow.py`、`dataflow_producer.py`、`queue_producer.py`，45 行增加 / 6 行删除。隔离树为 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_artifact_recovery_20261115`，分支 `engine/gpt-v3-artifact-recovery-20261115`。依赖总控已交付的 durable credit `763b973` 和 immutable helper `92d9474`，本树对应 `328fdb2` / `eb24a78`。
 
 [机器证据](QUEUE-BUSINESS-20261116.json)绑定 1040 份源码/测试载体的 SHA256、原始业务报告和 JUnit 字节、全部原 run journal 分配记录及七份冻结文件。测试时 HEAD 为 eb24a78，生产及 harness 是当时的明确 dirty 内容；逐份摘要已核实与交付文件相等。没有把 dirty 测试冒称当时已提交，也没有在主仓测试、安装依赖、推送或改共享服务。
