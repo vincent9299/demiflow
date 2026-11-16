@@ -1124,15 +1124,13 @@ def _s_source_snapshots(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, An
 
 
 def _s_multiworker_barrier(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must collect every real worker contribution and interrupt pending batch/flatmap output'}
-    fx._record_not_run('multiworker_barrier', detail)
-    raise NotRunError('multiworker_barrier', detail)
+    from runtime_v3_residency_scenarios import multiworker_barrier
+    return multiworker_barrier(fx, fault)
 
 
 def _s_route_recovery(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must interrupt and resume, comparing route counters and exact suffix deliveries'}
-    fx._record_not_run('route_recovery', detail)
-    raise NotRunError('route_recovery', detail)
+    from runtime_v3_residency_scenarios import route_recovery
+    return route_recovery(fx, fault)
 
 
 def _s_commit_crash_matrix(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
@@ -1146,9 +1144,8 @@ def _s_model_effect_recovery(fx: RuntimeV3Fixture, fault: str | None) -> dict[st
 
 
 def _s_actor_state_lifecycle(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must validate state restoration and lifecycle on success/failure/cancel across real workers'}
-    fx._record_not_run('actor_state_lifecycle', detail)
-    raise NotRunError('actor_state_lifecycle', detail)
+    from runtime_v3_residency_scenarios import actor_state_lifecycle
+    return actor_state_lifecycle(fx, fault)
 
 
 def _s_cache_materialize(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
@@ -1201,9 +1198,8 @@ def _s_node_loss(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 
 def _s_driver_restart(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must kill and replace the driver, asserting new fence and late-message rejection'}
-    fx._record_not_run('driver_restart', detail)
-    raise NotRunError('driver_restart', detail)
+    from runtime_v3_recovery_scenarios import driver_restart
+    return driver_restart(fx, fault)
 
 
 def _s_history_identity(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
