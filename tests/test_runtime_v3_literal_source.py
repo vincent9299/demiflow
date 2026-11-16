@@ -116,7 +116,8 @@ def test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure(t
         split=plan_source_splits(snapshot,source,target_partitions=1,bounds=bounds)[0]
         reader=open_source_reader(snapshot,split,cursor=None,services=services)
         runner=WorkerGraphRunner.__new__(WorkerGraphRunner)
-        held=NS(retained_resident_bytes=0)
+        from test_runtime_v3_finite_reader_credit import HeldState
+        held=HeldState()
         runner.e=NS(_readers={'source':reader},_kernels={'held':held})
         runner.services,runner.bounds=services,bounds
         runner._condition=threading.Condition();runner._wake_generation=0
@@ -124,7 +125,7 @@ def test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure(t
         reader._shared_frame_call=runner._frame_call
         assert reader.next_record().status=='record'
         assert reader.retained_bytes>0
-        held.retained_resident_bytes=bounds.max_resident_bytes-32
+        held.retain(bounds.max_resident_bytes-32)
         with pytest.raises(DataflowError,match='resident budget'):
             reader.next_record()
         assert reader.retained_bytes==0
@@ -176,3 +177,71 @@ def test_materialized_literal_uses_original_handle_digest_and_declared_schema(tm
         else:
             assert rows==values
         assert all(ref is not None for ref in schemas) if format in ('arrow','pandas') else all(ref is None for ref in schemas)
+
+
+class InterruptedLiteral(Exception):
+    pass
+
+
+def test_real_dataset_literal_original_ack_gc_and_resume(tmp_path,monkeypatch):
+    from demiflow import data
+    from demiflow.execution import RunContext
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    from demiflow.execution.dataflow_segments import tree_refs
+    rows=list(example())
+    limits={'memory_bytes':64*1024**2,'max_row_bytes':8192,'max_batch_bytes':16384,
+            'checkpoint_rows':8,'checkpoint_interval_ms':60000}
+    prepare,close,commit=DataflowExecution.prepare,DataflowExecution.close,DataflowCheckpointCoordinator.commit
+    first={};boundary={}
+    def prepared(execution):
+        result=prepare(execution)
+        if not first:
+            source,=execution._physical.sources
+            assert source.kind=='materialized' and source.manifest_ref is not None
+            manifest=json.loads(b''.join(execution._store.read(source.manifest_ref,
+                        max_bytes=execution._bounds.max_control_bytes)))
+            root=ArtifactRef(**manifest['data_ref'])
+            refs=[source.manifest_ref,*tree_refs(execution._store,root,execution._bounds)]
+            orphan=execution._store.put(iter((b'unrooted-literal-test',)),max_bytes=1024,
+                                        media_type='application/octet-stream')
+            first.update(execution=execution,refs=refs,orphan=orphan,plan_id=execution._physical.plan_id)
+        return result
+    def closed(execution):
+        try:return close(execution)
+        finally:
+            if execution is first.get('execution'):first['gc']=getattr(execution,'_published_gc',None)
+    def committed(coordinator,*args,**kwargs):
+        image=commit(coordinator,*args,**kwargs)
+        if not image.cut.final and not boundary:
+            publication=first['execution']._publication(image)
+            prefix=publication['manifest']['total_rows']
+            assert 0<prefix<len(rows)
+            fact=coordinator._action.context.journal.execution_commit(image.commit_id)
+            assert fact['status']=='acked'
+            boundary.update(commit_id=image.commit_id,fact=fact,prefix=prefix)
+            raise InterruptedLiteral('original literal ACK')
+        return image
+    with monkeypatch.context() as patch:
+        patch.setattr(DataflowExecution,'prepare',prepared)
+        patch.setattr(DataflowExecution,'close',closed)
+        patch.setattr(DataflowCheckpointCoordinator,'commit',committed)
+        with pytest.raises(InterruptedLiteral,match='original literal ACK'):
+            with RunContext.start(tmp_path/'run',limits=limits) as run:
+                reference=run.ref
+                data.from_items(rows).take_all()
+    assert boundary and first['gc']['blocked'] is None and first['gc']['removed']>=1
+    assert not first['execution']._store.inspect(first['orphan'])
+    assert all(first['execution']._store.inspect(ref) for ref in first['refs'])
+    with RunContext.resume(reference) as run:
+        assert run.journal.execution_commit(boundary['commit_id'])==boundary['fact']
+        actual=data.from_items(rows).take_all()
+    assert actual==rows
+    assert all(math.copysign(1,r['typed'][1][1])==-1 for r in actual)
+    # The original final ACK is a read-only result on a subsequent resume.
+    def forbidden(*_args,**_kwargs):pytest.fail('completed literal result launched a worker')
+    with monkeypatch.context() as patch:
+        patch.setattr(DataflowExecution,'_prepare_launch',forbidden)
+        with RunContext.resume(reference):
+            assert data.from_items(rows).take_all()==rows
