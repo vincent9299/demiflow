@@ -41,9 +41,52 @@ from demiflow.execution.run_context import RunContext
 from demiflow.resources.contracts import spec_hash, validate_observation
 from demiflow.resources.manager import ResourceManager
 
-from test_upgrade_v2_unit_L015 import (
-    _assigned, _calls, _dict_literal, _dict_value, _function, _in_finally,
-)
+# These assertions still describe the retired v2 driver and are intentionally
+# not converted into passing v3 evidence here. Keep their readers local so an
+# obsolete assertion fails as a test instead of aborting repository collection.
+import textwrap
+
+
+def _function(name):
+    return ast.parse(textwrap.dedent(inspect.getsource(getattr(chain, name)))).body[0]
+
+def _dotted(node):
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+def _calls(node, name):
+    return [item for item in ast.walk(node)
+            if isinstance(item, ast.Call) and _dotted(item.func) == name]
+
+def _assigned(node, name):
+    for item in ast.walk(node):
+        if isinstance(item, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == name for target in item.targets):
+            return item.value
+    raise AssertionError("no assignment to " + name)
+
+def _dict_value(value):
+    assert isinstance(value, ast.Dict), "not a dict literal"
+    return {_dotted_key(key): val for key, val in zip(value.keys, value.values)}
+
+def _dict_literal(node, name):
+    return _dict_value(_assigned(node, name))
+
+def _dotted_key(key):
+    return key.value if isinstance(key, ast.Constant) else _dotted(key)
+
+def _in_finally(node, call):
+    for item in ast.walk(node):
+        if isinstance(item, ast.Try):
+            for statement in item.finalbody:
+                if call in ast.walk(statement):
+                    return True
+    return False
 
 
 def test_layout_is_interpreted_from_the_sealed_plan():
