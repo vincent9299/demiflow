@@ -66,13 +66,19 @@ def test_real_compiler_seal_roundtrip(tmp_path):
 
 
 def test_two_sources_bound_to_their_graph_occurrences(tmp_path):
-    with data.local_execution():
-        left = data.from_iter(lambda: iter([{"x": 1}]))
-        right = data.from_iter(lambda: iter([{"x": 2}]))
-    with prepared(tmp_path, left.union(right)) as (ex, services):
-        assert len(ex._physical.sources) == 2
-        assert {s.source_id for s in ex._physical.sources} == set(ex._graph.sources)
-        assert {s.source_id for s in ex._physical.splits} == set(ex._graph.sources)
+    from demiflow.data.api import DataAPI
+    from demiflow.execution.executors.local import LocalDatasetExecutor
+    executor = LocalDatasetExecutor(resource_root=tmp_path)
+    source = DataAPI(executor)
+    left = source.from_iter(lambda: iter([{"x": 1}]))
+    right = source.from_iter(lambda: iter([{"x": 2}]))
+    try:
+        with prepared(tmp_path, left.union(right)) as (ex, services):
+            assert len(ex._physical.sources) == 2
+            assert {s.source_id for s in ex._physical.sources} == set(ex._graph.sources)
+            assert {s.source_id for s in ex._physical.splits} == set(ex._graph.sources)
+    finally:
+        executor.close()
 
 
 def test_take_zero_never_reads_or_serializes_original_source(tmp_path):

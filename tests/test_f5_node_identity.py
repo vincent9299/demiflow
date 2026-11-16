@@ -186,33 +186,50 @@ def test_chain_sealing_input_distinguishes_repeated_async_map():
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"),
                     reason="Local managed units require Linux")
-def test_unified_chain_repeated_map_async_runs_end_to_end(tmp_path):
+@pytest.mark.parametrize("mode", ["process", "thread"])
+def test_unified_chain_repeated_map_async_runs_end_to_end(tmp_path, mode):
+    from _worker_event_fixtures import emit, events
+    from demiflow.execution.sealed_plans import load_sealed_plan
     from demiflow.resources.process_observation import require_pidfds
     try:
         require_pidfds()
     except (OSError, RuntimeError) as exc:
         pytest.skip("pidfd exit evidence unavailable: " + str(exc))
-
-    # Local closure: cloudpickle serializes by value so the managed worker need
-    # not import this test module. Two identical map_async stages exercise the
-    # repeated-operator chain that the F5 defect would have corrupted.
+    evidence = tmp_path / 'operator-calls.jsonl'
     def inc(row):
+        emit(evidence, 'call', x=row['x'])
         return {**row, "x": row["x"] + 1}
 
     limits = {"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}
-    with RunContext.start(tmp_path / "run", limits=limits):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+    with RunContext.start(tmp_path / "run", limits=limits) as run:
+        with data.local_execution(workers=1, worker_mode=mode, partitions=1,
                                   unified_chain=True):
             handle = (data.from_items([{"x": i} for i in range(8)])
                       .map_async(inc, concurrency=1)
                       .map_async(inc, concurrency=1)
                       .materialize())
+            sealed = load_sealed_plan(run.directory, 'action-1', version='v3')
+            graph = sealed['graph']
+            nodes = [node for node in graph.nodes if node.kernel.kind == 'AsyncMapOp']
+            assert len(nodes) == 2
+            assert nodes[0].semantic_id == nodes[1].semantic_id
+            assert nodes[0].occurrence_id != nodes[1].occurrence_id
+            assert all(edge.producer != edge.consumer for edge in graph.edges)
+            assert any(edge.producer == nodes[0].occurrence_id and
+                       edge.consumer == nodes[1].occurrence_id for edge in graph.edges)
+            assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
             rows = handle.take_all()
+            handle.release()
     assert sorted(rows, key=lambda r: r["x"]) == [{"x": i + 2} for i in range(8)]
-    records = list((tmp_path / "run-resources" / "units").glob("*/*/process.json"))
-    assert records, "unified chain did not provision a managed worker"
-    pids = {json.loads(path.read_text())["identity"]["pid"] for path in records}
-    assert os.getpid() not in pids
+    calls = events(evidence)
+    assert len(calls) == 16
+    assert sorted(event['x'] for event in calls) == sorted([*range(8), *range(1, 9)])
+    pids = {event['pid'] for event in calls}
+    assert pids
+    if mode == 'process':
+        assert os.getpid() not in pids
+    else:
+        assert pids == {os.getpid()}
 
 
 # --- (5) dag_id stability and worker-count independence ------------------------
