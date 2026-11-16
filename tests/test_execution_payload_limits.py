@@ -77,10 +77,13 @@ def test_small_row_budget_rejects_before_http_and_cannot_be_raised_on_resume(tmp
                 .map_prompt_async('enrich', config=parse_prompt_pack(PACK), inputs=['payload'],
                                   output='answer', concurrency=1, queue_depth=1, max_requests=1).materialize())
     small = dict(max_row_bytes=1024, max_batch_bytes=2048)
-    with pytest.raises(RuntimeContractError, match='byte budget'):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with pytest.raises(DataflowError, match='byte budget') as rejected:
         with RunContext.start(tmp_path / 'small', limits=small) as run:
             reference = run.ref
             graph()
+    assert rejected.value.code == 'BUDGET_EXCEEDED'
+    assert not rejected.value.retryable
     assert not server['requests']
     assert RunJournal(reference.directory).execution_status()['status'] == 'failed'
     with pytest.raises(RecoveryContractError, match='limits changed'):
@@ -107,7 +110,7 @@ def test_wide_model_output_recovers_with_identical_budget_without_repeating_effe
     original = LanceSink.commit
     def fault(name, commit_id):
         fact = current_run().journal.execution_commit(commit_id)
-        if name == 'after_prepared' and fact['intent']['sinks'] == ['output']:
+        if name == 'after_prepared' and fact['intent']['sinks'] == ['write_lance']:
             if window == 'cancel_after_prepared':
                 RunContext.cancel(current_run().ref)
             elif window == 'prepared_failure':
@@ -128,7 +131,8 @@ def test_wide_model_output_recovers_with_identical_budget_without_repeating_effe
     assert len(server['requests']) == 1
     journal = RunJournal(reference.directory)
     assert journal.execution_status()['status'] == ('cancelled' if window == 'cancel_after_prepared' else 'failed')
-    assert journal.execution_commits('action-1')[0]['status'] == ('acked' if window == 'native_return_loss' else 'prepared')
+    assert journal.execution_commits('action-1')[-1]['status'] == 'acked'  # original materialize
+    assert journal.execution_commits('action-2')[-1]['status'] == ('acked' if window == 'native_return_loss' else 'prepared')
     if window == 'native_return_loss':assert lance.dataset(str(tmp_path / 'wide.lance')).version == 1
     else:assert not (tmp_path / 'wide.lance').exists()
     monkeypatch.setattr(protocol, 'fault_point', lambda *_: None)
@@ -164,7 +168,7 @@ def test_native_small_explicit_budgets_preserve_duplicates_nulls_and_worker_limi
     source = DataAPI(executor)
     try:
         with RunContext.start(tmp_path / 'run', limits=dict(memory_bytes=64 * 2**20,
-                max_row_bytes=8192, max_batch_bytes=16384, batch_rows=2)):
+                max_row_bytes=8192, max_batch_bytes=16384, batch_rows=2)) as run:
             left = source.from_items([{'k': 1, 'payload': b'full\x00' * 400}] * 2 + [{'k': 2, 'payload': None}])
             right = source.from_items([{'k': 1, 'tag': 'a'}, {'k': 1, 'tag': 'b'}])
             result = left.join(right, on='k', how='left')
@@ -174,8 +178,17 @@ def test_native_small_explicit_budgets_preserve_duplicates_nulls_and_worker_limi
             rows = lance.dataset(str(target)).to_table().to_pylist()
             assert sorted((r['k'], r['tag'] or '') for r in rows) == [(1, 'a'), (1, 'a'), (1, 'b'), (1, 'b'), (2, '')]
             assert all(r['payload'] == b'full\x00' * 400 for r in rows if r['k'] == 1)
-            reports = [json.loads((Path(stage['query']) / 'result.json').read_text()) for stage in result.execution_metadata().diagnostics['stages'] if stage['name'] == 'datafusion']
-            assert reports and all(r['options']['max_row_bytes'] == 8192 and r['options']['batch_rows'] == 2 and r['options']['memory_bytes'] <= 64 * 2**20 for r in reports)
+            from demiflow.execution.sealed_plans import load_sealed_plan
+            sealed = load_sealed_plan(run.ref.directory, 'action-1')
+            physical = sealed['physical']
+            assert physical.bounds.max_row_bytes == 8192
+            assert physical.bounds.max_batch_bytes == 16384
+            assert physical.bounds.max_resident_bytes <= 64 * 2**20
+            stages = {stage.stage_id: stage for stage in physical.stages}
+            assert any(node.kernel.kind == 'join' for node in sealed['graph'].nodes)
+            for group in physical.residency.simultaneous_groups:
+                assert sum(stages[key].resident_bytes * len(stages[key].partitions) for key in group) + physical.residency.control_reserved_bytes <= 64 * 2**20
+            assert run.limits['batch_rows'] == 2
     finally:executor.close()
 
 
