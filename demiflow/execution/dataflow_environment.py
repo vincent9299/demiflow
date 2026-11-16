@@ -13,7 +13,7 @@ def native_environment_names(spec, *, depth=0):
     from ..data.plan import CallableSpec, OperatorLLMMapOp
     from ..operator_llm.model import PromptPack, PromptDefinition, PromptModel
     from ..embeddings.model import EmbeddingModel
-    from .dataflow_model_factory import PromptFactory, EmbeddingFactory, CacheFactory
+    from .dataflow_model_factory import PromptFactory, EmbeddingFactory, CacheFactory, RoutedPromptFactory
     if type(spec) is not CallableSpec:
         return ()
     if depth > 4:
@@ -21,7 +21,19 @@ def native_environment_names(spec, *, depth=0):
     args = spec.constructor_args
     if spec.target is CacheFactory:
         return native_environment_names(args[0], depth=depth + 1)
-    if spec.target is PromptFactory:
+    if spec.target is RoutedPromptFactory:
+        # Read only the exact passive declarations authenticated by the native
+        # program pin. Route actors/clients are never instantiated here, and
+        # values remain ephemeral allocation data rather than sealed identity.
+        children = args[0] if len(args) == 5 else None
+        if (type(children) is not dict or not 1 <= len(children) <= 32
+                or any(type(name) is not str or not name
+                       or type(child) is not CallableSpec or child.target is not PromptFactory
+                       for name, child in children.items())):
+            raise DataflowError('INVALID_CONTRACT', 'Native routed prompt environment requires original passive child declarations')
+        names = tuple(sorted({name for child in children.values()
+            for name in native_environment_names(child, depth=depth + 1)}))
+    elif spec.target is PromptFactory:
         operation = args[0]
         if type(operation) is not OperatorLLMMapOp or type(operation.config) is not PromptPack:
             raise DataflowError('INVALID_CONTRACT', 'Native prompt environment requires the original passive declaration')
