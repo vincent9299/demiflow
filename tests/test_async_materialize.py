@@ -99,7 +99,29 @@ def test_failed_materialize_cleans_only_its_spills(tmp_path):
     assert any(e['event'] == 'close' for e in events(event_path))
     failed = RunJournal(executor._run_ref.directory)
     assert failed.execution_status()['status'] == 'failed'
-    assert failed.execution_commits('action-1') == []
+    # Native checkpoints may ACK an empty/nonfinal recovery image before the
+    # callback fails; this must not expose a partial materialized result.
+    assert failed.execution_action('action-1')['result'] is None
+    for commit in failed.execution_commits('action-1'):
+        assert commit['status'] == 'acked'
+        prepared = commit['prepared']['sinks']['materialize']
+        assert prepared['rows'] == 0
+        assert prepared['manifest']['final'] is False
+        assert prepared['manifest']['partitions'] == []
+    assert failed.pending_dataflow_gc() == []
+    from demiflow.execution.dataflow_gc import gc_paths
+    with failed._connection() as db:
+        collected = [dict(zip(('gc_id', 'store_id', 'digest', 'status'), row))
+                     for row in db.execute('SELECT gc_id,store_id,digest,status FROM runtime_dataflow_gc')]
+        allocations = db.execute("SELECT COUNT(*) FROM resource_allocations WHERE cleanup!='CONFIRMED'").fetchone()[0]
+    assert allocations == 0
+    assert collected, "failed attempt did not collect any of its unreferenced objects"
+    for item in collected:
+        assert item['status'] == 'done'
+        target, quarantine = gc_paths(failed, item)
+        assert not target.exists() and not quarantine.exists()
+    assert failed.directory != handle._store.root.parent
+    assert not list((failed.directory / '.dataflow-store').rglob('*.tmp'))
     assert all(handle._store.inspect(ref) for ref in refs)
     assert previous.take_all() == [{'i': -1}]
     previous.release()

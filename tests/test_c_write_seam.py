@@ -6,8 +6,8 @@ tests prove, on the relational branch, that the gate fail-closes on structure
 drift (R1), code-pin drift (R2) and end-to-end before any publication (R3); that
 the three covered branches seal a plan the workbench reader can read back; and
 that the streamed branch really consumes the sealed checkpoint policy and stage
-limits. Deferred branches (pure Lance copy, arrow_batch_sink) honestly seal
-nothing. All scratch output lives under the pytest tmp_path (/tmp/demiflow-*).
+limits. Public writes now use the same v3 action; explicit historical v2 helpers
+remain separately tested without restoring their retired execution routes. All scratch output lives under the pytest tmp_path (/tmp/demiflow-*).
 """
 import hashlib
 import sys
@@ -55,28 +55,51 @@ def sealed_action_id(journal):
     with journal._connection() as db:
         actions = [r[0] for r in db.execute("SELECT action_id FROM runtime_actions")]
     sealed = [a for a in actions
-              if journal.source_binding(a + "-sealed-plan") is not None]
-    assert sealed, "no action carries a sealed-plan binding"
+              if journal.source_binding(a + "-dataflow-sealed") is not None]
+    assert len(sealed) == 1, "write must carry one original native sealed plan"
     return sealed[0]
 
 
 def assert_sealed_readable(run_dir, run, expected_kinds):
     action_id = sealed_action_id(run.journal)
     facts = read_sealed_plan(run_dir, action_id)
-    assert facts["available"] is True, facts
-    sealed = load_sealed_plan(run_dir, action_id)
-    nodes = sealed["logical_dag"]["nodes"]
-    assert [n["op_kind"] for n in nodes] == expected_kinds
-    assert sealed["logical_dag"]["action_id"] == action_id
-    # Four-way identity: F1 facts and the bindings bind the same run/action/dag/plan.
-    f1 = sealed["facts"]
+    assert facts["available"] is True and facts["version"] == "v3", facts
+    sealed = load_sealed_plan(run_dir, action_id, version="v3")
+    graph, physical, binding = sealed["graph"], sealed["physical"], sealed["facts"]
+    assert [node.kernel.kind for node in graph.nodes] == expected_kinds
+    assert graph.action_id == binding["action_id"] == action_id
+    assert binding["run_id"] == run.ref.run_id
+    assert graph.dag_id == physical.dag_id == binding["dag_id"] == facts["dag_id"]
+    assert physical.plan_id == binding["plan_id"] == facts["plan_id"]
+    view = facts["plan_view"]
+    assert [n["occurrence_id"] for n in view["logical_dag"]["nodes"]] == [n.occurrence_id for n in graph.nodes]
     bindings = load_execution_bindings(run_dir, action_id, sealed_plan=sealed)
-    doc = bindings["document"]
-    assert doc["run_id"] == f1["run_id"] == run.ref.run_id
-    assert doc["action_id"] == f1["action_id"] == action_id
-    assert doc["dag_id"] == f1["dag_id"]
-    assert doc["plan_id"] == f1["plan_id"]
+    assert bindings["version"] == "v3"
+    assert bindings["document"]["action_id"] == action_id
+    assert bindings["document"]["dag_id"] == graph.dag_id
+    assert run.journal.execution_commits(action_id)
+    assert all(c["status"] == "acked" for c in run.journal.execution_commits(action_id))
     return action_id
+
+
+def read_program_evidence(run_dir, action_id):
+    from demiflow.execution.sealed_plans import _v3_read_store
+    import json
+    bundle = load_sealed_plan(run_dir, action_id, version="v3")
+    sealed = bundle["sealed"]
+    store, bounds = _v3_read_store(run_dir, store_id=sealed.code_pin_ref.store_id)
+    pin_bytes = b"".join(store.read(sealed.code_pin_ref, max_bytes=bounds.max_control_bytes))
+    pin = json.loads(pin_bytes)
+    manifests = []
+    for node in bundle["graph"].nodes:
+        if node.program_ref is not None:
+            raw = b"".join(store.read(node.program_ref, max_bytes=bounds.max_control_bytes))
+            manifest = json.loads(raw)
+            assert manifest["occurrence_id"] == node.occurrence_id
+            assert manifest["code_identity"] == pin["programs"][node.occurrence_id]
+            manifests.append(manifest)
+    assert manifests and set(pin["programs"]) == {m["occurrence_id"] for m in manifests}
+    return bundle, store, pin_bytes, pin, manifests
 
 
 # --- Golden paths: the three covered branches seal the executed plan ----------
@@ -88,7 +111,7 @@ def test_relational_write_seals_executed_plan(tmp_path):
     with RunContext.start(tmp_path / "run") as run:
         ds.write_lance(str(target), mode="create", return_receipt=True)
         assert_sealed_readable(tmp_path / "run", run,
-                               ["KeyedSource", "map", "filter", "MaterializedSource", "MaterializedSource", "write_lance"])
+                               ["materialized", "materialized", "join", "BoundMapOp", "FilterOp", "write_lance"])
     rows = lance.dataset(str(target)).to_table().to_pylist()
     expected = [{"id": i, "a": i, "b": i * 10, "v": i * 2}
                 for i in range(8) if (i * 2) % 4 == 0]
@@ -104,7 +127,7 @@ def test_fallback_write_seals_executed_plan(tmp_path):
     with RunContext.start(tmp_path / "run") as run:
         ds.write_lance(str(target), mode="create", return_receipt=True)
         assert_sealed_readable(tmp_path / "run", run,
-                               ["MaterializedSource", "map", "filter", "write_lance"])
+                               ["materialized", "MapOp", "FilterOp", "write_lance"])
     rows = lance.dataset(str(target)).to_table().to_pylist()
     assert sorted(r["v"] for r in rows) == [0, 4, 8]
 
@@ -118,7 +141,7 @@ def test_streamed_write_seals_executed_plan(tmp_path):
     with RunContext.start(tmp_path / "run") as run:
         ds.write_lance(str(target), mode="create", return_receipt=True)
         assert_sealed_readable(tmp_path / "run", run,
-                               ["MaterializedSource", "async_map", "write_lance"])
+                               ["materialized", "AsyncMapOp", "write_lance"])
     rows = lance.dataset(str(target)).to_table().to_pylist()
     assert sorted(r["v"] for r in rows) == [0, 2, 4, 6, 8, 10]
 
@@ -155,66 +178,68 @@ def test_relational_code_pin_drift_fail_closed(tmp_path):
 
 
 def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
-    """R3: on the real relational write path, drift fail-closes before commit.
+    """A hash-valid program carrying changed code cannot publish a result.
 
-    The seal is perturbed to bind a different business UDF than the plan that
-    actually executes. The pre-publication gate must raise before the LanceSink
-    commits: no target dataset is created and no commit is acked.
+    The original declaration and seal retain enrich's pin. Only its staged
+    payload is replaced with enrich_drift before the real managed worker loads
+    it, so this exercises the actual loaded-code gate, not a retired caller.
     """
-    import demiflow.execution.chain as chain_mod
+    from dataclasses import asdict
+    import cloudpickle
+    import json
+    from demiflow.execution import dataflow_seal as sealing
+    from demiflow.execution.recovery_contract import document
+    original = sealing._stage_one_program
+    altered = []
 
-    from demiflow.execution import native_plan
-    real_seal = native_plan.bind_native_execution
+    def drift_payload(declaration, *, store, bounds, **options):
+        ref = original(declaration, store=store, bounds=bounds, **options)
+        if declaration.callable_spec is None or declaration.callable_spec.target is not enrich:
+            return ref
+        manifest = json.loads(b"".join(store.read(ref, max_bytes=bounds.max_control_bytes)))
+        payload = cloudpickle.dumps(drifted_relational_dataset()._plan.operations[0].callable)
+        payload_ref = store.put(iter((payload,)), max_bytes=bounds.max_state_bytes,
+                                media_type=sealing.PAYLOAD_MEDIA)
+        manifest["payload_ref"] = asdict(payload_ref)
+        altered.append(declaration.occurrence_id)
+        return store.put(iter((document(manifest, bounds.max_control_bytes),)),
+                         max_bytes=bounds.max_control_bytes, media_type=sealing.PROGRAM_MEDIA)
 
-    def drift_seal(action, source, plan, **options):
-        return real_seal(action, source, drifted_relational_dataset()._plan,
-                         **options)
-
-    monkeypatch.setattr(native_plan, "bind_native_execution", drift_seal)
-    ds = relational_dataset()
-    assert type(ds._source).__name__ == "KeyedSource"
-    target = tmp_path / "out.lance"
-    with pytest.raises(RecoveryContractError, match="code-pin differs"):
-        with RunContext.start(tmp_path / "run") as run:
-            ds.write_lance(str(target), mode="create", return_receipt=True)
+    monkeypatch.setattr(sealing, "_stage_one_program", drift_payload)
+    target, run_dir = tmp_path / "out.lance", tmp_path / "run"
+    with pytest.raises(Exception, match="Loaded program code differs from the sealed pin"):
+        with RunContext.start(run_dir):
+            relational_dataset().write_lance(str(target), mode="create", return_receipt=True)
+    assert len(altered) == 1
     assert not target.exists(), "publication happened despite a failed binding gate"
     from demiflow.execution.run_journal import RunJournal
-    journal = RunJournal(tmp_path / "run")
+    journal = RunJournal(run_dir)
     action_id = sealed_action_id(journal)
-    assert not journal.execution_commits(action_id), "a commit was acked before the gate"
+    assert not journal.execution_commits(action_id), "a commit was acked before the code gate"
 
 
 # --- Streamed layer-3: the sealed layout is really consumed -------------------
 
 def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypatch):
-    import demiflow.execution.chain as chain_mod
-    import demiflow.execution.stream_resources as stream_resources
-    import demiflow.execution.stream_materialize as stream_materialize
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_hosts import _EndpointBase
+    captured, assignments = [], []
+    original = DataflowExecution.start
+    original_prepare = _EndpointBase.prepare
 
-    captured = {"terminals": [], "queues": []}
-    from demiflow.execution import native_plan
-    real_seal = native_plan.bind_native_execution
+    def prepare(endpoint, assignment):
+        result = original_prepare(endpoint, assignment)
+        assignments.append(assignment)
+        return result
 
-    def capture_seal(action, source, plan, **options):
-        handle = real_seal(action, source, plan, **options)
-        captured["handle"] = handle
-        return handle
+    monkeypatch.setattr(_EndpointBase, "prepare", prepare)
 
-    real_init = stream_materialize.StreamMaterialization.__init__
+    def start(execution):
+        result = original(execution)
+        captured.append(execution)
+        return result
 
-    def spy_init(self, *args, **kwargs):
-        real_init(self, *args, **kwargs)
-        captured["terminals"].append(self)
-
-    real_queue = stream_resources.ObservedQueue
-
-    def spy_queue(*args, **kwargs):
-        captured["queues"].append(kwargs)
-        return real_queue(*args, **kwargs)
-
-    monkeypatch.setattr(native_plan, "bind_native_execution", capture_seal)
-    monkeypatch.setattr(stream_materialize.StreamMaterialization, "__init__", spy_init)
-    monkeypatch.setattr(stream_resources, "ObservedQueue", spy_queue)
+    monkeypatch.setattr(DataflowExecution, "start", start)
 
     async def double(row):
         return {**row, "v": row["i"] * 2}
@@ -227,25 +252,36 @@ def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypa
               "checkpoint_unconfirmed_bytes": 8 * 1024 ** 2}
     with RunContext.start(tmp_path / "run", limits=limits) as run:
         ds.write_lance(str(target), mode="create", return_receipt=True)
-        layout, placement = captured["handle"]
-        policy = layout.checkpoint
-        stage_limits = native_plan.root_stage_limits(placement)
-        # The layout reader round-trips the run.limits-derived sealed budgets.
-        assert policy.interval_ms == run.limits["checkpoint_interval_ms"]
-        assert policy.unconfirmed_rows == run.limits["checkpoint_unconfirmed_rows"]
-        assert policy.unconfirmed_bytes == run.limits["checkpoint_unconfirmed_bytes"]
-        output_bytes = run.limits["max_row_bytes"] + 256
-        inflight_bytes = max(output_bytes, run.limits["max_batch_bytes"])
-        assert stage_limits[0] == {"inflight_rows": run.limits["batch_rows"],
-                                   "inflight_bytes": inflight_bytes,
-                                   "output_bytes": output_bytes}
-        # checkpoint_policy really lands on the terminal progress object.
-        terminal = captured["terminals"][-1]
-        assert terminal.checkpoint_policy == policy
-        # The sealed stage budget really reaches a bounded queue constructor.
-        assert any(q.get("max_item_bytes") == output_bytes
-                   and q.get("max_bytes") == inflight_bytes
-                   for q in captured["queues"]), captured["queues"]
+        assert len(captured) == 1
+        execution = captured[0]
+        bundle = load_sealed_plan(run.directory, sealed_action_id(run.journal), version="v3")
+        physical = bundle["physical"]
+        assert execution._physical == physical
+        assert execution._policy == physical.policy
+        assert execution._bounds == physical.bounds
+        assert physical.policy.checkpoint_rows == limits["checkpoint_rows"]
+        assert physical.policy.checkpoint_interval_ms == limits["checkpoint_interval_ms"]
+        assert physical.bounds.max_row_bytes == limits["max_row_bytes"]
+        assert physical.bounds.max_batch_bytes == limits["max_batch_bytes"]
+        assert physical.stages and physical.exchanges
+        assert execution._observed_worker_count > 0
+        assert len(assignments) == execution._observed_worker_count
+        stage_map = {s.stage_id: s for s in physical.stages}
+        assert {s.stage_id for a in assignments for s in a.stages} == set(stage_map)
+        for assignment in assignments:
+            assert assignment.bounds == physical.bounds
+            assert assignment.sealed == bundle["sealed"]
+            assert assignment.plan_id == physical.plan_id
+            assert all(s == stage_map[s.stage_id] for s in assignment.stages)
+            assert all(e in physical.exchanges for e in (*assignment.inputs, *assignment.outputs))
+        # The native assignments are checked against the same sealed plan by
+        # each worker; observed allocator grants must cover its sealed stages.
+        with run.journal._connection() as db:
+            allocated = db.execute("SELECT COUNT(*) FROM resource_allocations").fetchone()[0]
+        assert allocated >= execution._observed_worker_count
+        assert all(e.credit_bytes <= physical.bounds.max_resident_bytes for e in physical.exchanges)
+        assert all(s.output_bytes <= physical.bounds.max_batch_bytes for s in physical.stages)
+        assert all(c["status"] == "acked" for c in run.journal.execution_commits(execution._action.action_id))
     rows = lance.dataset(str(target)).to_table().to_pylist()
     assert sorted(r["v"] for r in rows) == [0, 2, 4, 6, 8, 10]
 
@@ -308,106 +344,58 @@ def test_pure_copy_consumes_sealed_native_plan(tmp_path):
     target = tmp_path / "copy.lance"
     with RunContext.start(tmp_path / "run") as run:
         ds.write_lance(str(target), mode="create", return_receipt=True)
-        with run.journal._connection() as db:
-            actions = [r[0] for r in db.execute("SELECT action_id FROM runtime_actions")]
-        sealed = [a for a in actions
-                  if run.journal.source_binding(a + "-sealed-plan") is not None]
-        assert len(sealed) == 1
-        assert_sealed_readable(tmp_path / "run", run, ["LanceSource", "write_lance"])
-    assert lance.dataset(str(target)).count_rows() == 3
+        assert_sealed_readable(run.directory, run, ["lance", "write_lance"])
+    assert lance.dataset(str(target)).to_table().to_pylist() == [{"id": 1}, {"id": 2}, {"id": 3}]
 
 
 # --- Code-pin source archive durability: survives run-exit orphan cleanup ------
 
 def test_code_pin_source_archive_survives_run_exit(tmp_path, monkeypatch):
-    """The archived business source (manifest definition_ref.location) must survive.
-
-    snapshot_code_sources registered the archive as protected=0, so clean_orphans
-    unlinked it at run exit and the K1 manifest definition_ref.location dangled
-    (gap④ audit could not read the pinned source). It must be written unregistered.
-    """
-    import demiflow.execution.chain as chain_mod
-
-    captured = {}
-    from demiflow.execution import native_plan
-    real_seal = native_plan.bind_native_execution
-
-    def capture_seal(action, source, plan, **options):
-        handle = real_seal(action, source, plan, **options)
-        captured["plan_ref"] = next(p["plan_ref"] for p in handle[1].programs if not p["input_path"])
-        return handle
-
-    monkeypatch.setattr(native_plan, "bind_native_execution", capture_seal)
+    """Every pinned source remains readable after actual run-exit collection."""
+    from demiflow.execution.dataflow_seal import _artifact_from_json
     ds = relational_dataset()
-    target = tmp_path / "out.lance"
     run_dir = tmp_path / "run"
-    with RunContext.start(run_dir):
-        ds.write_lance(str(target), mode="create", return_receipt=True)
-        sources = captured["plan_ref"]["code_sources"]
+    with RunContext.start(run_dir) as run:
+        ds.write_lance(str(tmp_path / "out.lance"), mode="create", return_receipt=True)
+        action_id = sealed_action_id(run.journal)
+        _, store, _, _, manifests = read_program_evidence(run_dir, action_id)
+        sources = [(name, _artifact_from_json(ref), m["code_identity"]["imports"][name])
+                   for m in manifests for name, ref in m["business_sources"].items()]
         assert sources, "no business source was archived"
-        for ref in sources:
-            assert (run_dir / ref["path"]).exists()
-    # clean_orphans has run at exit; the audited source archive must still be present.
-    for ref in sources:
-        carrier = run_dir / ref["path"]
-        assert carrier.exists(), "clean_orphans pruned the code-pin source archive"
-        assert hashlib.sha256(carrier.read_bytes()).hexdigest() == ref["sha256"]
+        before = {(name, ref.digest): b"".join(store.read(ref, max_bytes=ref.size_bytes))
+                  for name, ref, _ in sources}
+    _, store, _, _, _ = read_program_evidence(run_dir, action_id)
+    for name, ref, fact in sources:
+        raw = b"".join(store.read(ref, max_bytes=ref.size_bytes))
+        assert raw == before[name, ref.digest]
+        assert hashlib.sha256(raw).hexdigest() == ref.digest == fact["sha256"]
+        assert len(raw) == ref.size_bytes == fact["bytes"]
 
 
 def test_write_seam_bundle_identity_is_code_pin_carrier_survives(tmp_path, monkeypatch):
-    """The in-process write seam seals its bundle identity as the code-pin, not a
-    live-actor pickle (Family 2). plan_ref.sha256 == identity(plan_code_pin(plan)),
-    the carrier is a real unregistered JSON file holding that code-pin document, it
-    survives run-exit orphan cleanup with matching sha256/bytes, and the K1 manifest
-    business.bundle_digest/module_key bind the same code-pin identity.
+    """The actual sealed pin carrier binds loaded-code identities independently
+    of pickle payload digests and survives run-exit orphan collection.
     """
-    import demiflow.execution.chain as chain_mod
     from demiflow.execution.recovery_contract import document, identity
-
-    captured = {}
-    from demiflow.execution import native_plan
-    real_seal = native_plan.bind_native_execution
-    real_manifest = chain_mod._build_sealed_manifest
-
-    def capture_seal(action, source, plan, **options):
-        handle = real_seal(action, source, plan, **options)
-        captured["plan_ref"] = next(p["plan_ref"] for p in handle[1].programs if not p["input_path"])
-        captured["code_pin"] = chain_mod.plan_code_pin(plan, source=source)
-        return handle
-
-    def capture_manifest(run, plan_ref, *, entrypoint="chain"):
-        manifest, mref = real_manifest(run, plan_ref, entrypoint=entrypoint)
-        captured["manifest"] = manifest
-        return manifest, mref
-
-    monkeypatch.setattr(native_plan, "bind_native_execution", capture_seal)
-    monkeypatch.setattr(chain_mod, "_build_sealed_manifest", capture_manifest)
-    ds = relational_dataset()
-    target = tmp_path / "out.lance"
     run_dir = tmp_path / "run"
-    with RunContext.start(run_dir):
-        ds.write_lance(str(target), mode="create", return_receipt=True)
-        plan_ref = captured["plan_ref"]
-        code_pin = captured["code_pin"]
-        pin_identity = identity(code_pin)
-        # Bundle identity is the code-pin, not a pickle digest; carrier holds the pin.
-        assert plan_ref["sha256"] == pin_identity
-        assert plan_ref["code_pin_digest"] == pin_identity
-        assert plan_ref["path"].endswith(".json")
-        carrier = run_dir / plan_ref["path"]
-        assert carrier.exists()
-        assert carrier.read_bytes() == document(code_pin, 4 * 1024 ** 2)
-        assert hashlib.sha256(carrier.read_bytes()).hexdigest() == plan_ref["sha256"]
-        assert carrier.stat().st_size == plan_ref["bytes"]
-        # K1 manifest binds the same code-pin identity (shape change, not silent).
-        business = captured["manifest"]["business"]
-        assert business["bundle_digest"] == "sha256:" + pin_identity
-        assert business["entrypoints"][0]["module_key"] == "p_" + pin_identity[:24]
-        assert business["entrypoints"][0]["definition_ref"]["sha256"] == pin_identity
-    # After clean_orphans at exit, the audited code-pin carrier must still survive.
-    assert carrier.exists(), "clean_orphans pruned the write-seam code-pin carrier"
-    assert hashlib.sha256(carrier.read_bytes()).hexdigest() == plan_ref["sha256"]
-    assert carrier.stat().st_size == plan_ref["bytes"]
+    with RunContext.start(run_dir) as run:
+        relational_dataset().write_lance(str(tmp_path / "out.lance"), mode="create", return_receipt=True)
+        action_id = sealed_action_id(run.journal)
+        bundle, store, raw, pin, manifests = read_program_evidence(run_dir, action_id)
+        ref = bundle["sealed"].code_pin_ref
+        assert pin["action_id"] == action_id
+        assert pin["platform_revision"] == run.journal.recovery_identity()["platform_revision"]
+        assert raw == document(pin, bundle["physical"].bounds.max_control_bytes)
+        assert ref.digest == hashlib.sha256(raw).hexdigest() == identity(pin)
+        assert ref.size_bytes == len(raw)
+        assert bundle["facts"]["code_pin_ref"]["digest"] == ref.digest
+        for manifest in manifests:
+            assert manifest["code_identity"] == pin["programs"][manifest["occurrence_id"]]
+            if "payload_ref" in manifest:
+                assert identity(manifest["code_identity"]) != manifest["payload_ref"]["digest"]
+        original = (raw, bundle["facts"])
+    after, _, after_raw, _, _ = read_program_evidence(run_dir, action_id)
+    assert (after_raw, after["facts"]) == original
 
 
 def test_write_seam_code_pin_resume_fail_closed(tmp_path):
@@ -494,7 +482,8 @@ def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch)
 
     sealed = facts.read_sealed_plan(target, action_id)
     assert sealed["available"] is True, sealed
-    assert sealed["logical_dag"]["nodes"], "sealed logical_dag has no nodes"
+    assert sealed["version"] == "v3"
+    assert sealed["plan_view"]["logical_dag"]["nodes"], "sealed graph has no nodes"
 
     bridge = facts.read_identity_bridge(target, action_id, dag_id=sealed["dag_id"],
                                         report_digest=inspection_digest)

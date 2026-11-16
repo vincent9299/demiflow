@@ -402,7 +402,8 @@ def test_l012(ex, engine):
     assert len(req.programs) == 1
     program = req.programs[0]
     assert isinstance(program, ActionProgram)
-    assert program.kind == 'aggregate' and program.name == 'total'
+    assert program.kind == 'aggregate' and program.name == 'aggregate-0'
+    assert req.arguments['names'] == [agg.name]
     assert program.value is agg, 'business aggregate must travel in programs, not arguments'
     _assert_retired_absent()
 
