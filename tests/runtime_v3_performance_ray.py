@@ -264,7 +264,8 @@ class RayObservations:
         import ray
         from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
         result = {'scope': 'original Ray allocations, actual node-local PID/birth trees; sampled RSS/FD',
-            'excluded': ['shared Ray daemons/object-store memory', 'monitor/probe actors'],
+            'excluded': ['shared Ray daemons/object-store memory', 'monitor/probe actors',
+                         'node-local worker artifact-cache disk outside the owned trial directory'],
             'preparation_s_outside_business_clock': self.preparation_s,
             'registration_s_inside_business_clock': self.registration_s,
             'errors': [], 'nodes': [], 'original_cleanup': [], 'monitor_exit': [],

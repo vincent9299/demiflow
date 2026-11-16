@@ -1,6 +1,6 @@
 # Ray 性能取证接线：已验证与未通过
 
-本轮仅改性能 harness、专用守卫测试与计划，不改生产。生产被测版本为本隔离树 merge `339f095`（包含 root `1120dcd`）；完整生产摘要、当时 dirty 状态及 harness/计划摘要均在各 trial.json 的 `source_before/source_after`，每次相等。后续基线策略元数据及守卫扩充发生在上述实际试跑之后；不把旧摘要冒称最终 harness 摘要。
+本轮仅改性能 harness、专用守卫测试与计划，不改生产。生产被测版本为本隔离树 merge `339f095`（root `1120dcd` 加此前授权的 `d68d959` capacity.py 历史归档修复，不能简写成逐字等于 1120）；完整生产摘要、当时 dirty 状态及 harness/计划摘要均在各 trial.json 的 `source_before/source_after`，每次相等。后续基线策略元数据及守卫扩充发生在上述实际试跑之后；不把旧摘要冒称最终 harness 摘要。
 
 同机真实 fast_cpu 原 20000→10000、4 workers、256MiB、120s 通过；receipt `/tmp/demiflow-perf-ray-observer-r2/fast_cpu/trial.json`，cluster `/tmp/demiflow-perf-ray-observer-r2/cluster.json`。49 个原 ACK（最后 final），first 8.4549s、完整 60.7926s、prepare/start 7.8876s。两名业务 actor 各自绑定原 allocation / spec / boot / GCS / PID / birth，1178 次节点采样，原清理 CONFIRMED + GCS DEAD + OS 同 birth 退出，测试监视器退出，private cluster children=[]。注册开销 0.0247s；节点监视线程累计采样 2.131s，预建 1.453s 在业务计时外。driver 与 worker 独立峰值之和 690892800B，不是同时 RSS 或 managed memory 硬上限。
 
@@ -23,4 +23,14 @@
 
 另补封闭反例：最终 `RayObservations` 对原 run journal 全部 allocation ID 作有限读取，要求与实际采样集合精确相同，不能仅证明自己登记到的子集。上述四份原业务 receipt（同机 fast、slow、finite 与两机 fast）已做只读补查，完整 ID 集均相等、所有 cleanup=CONFIRMED；报告 `/tmp/demiflow-perf-ray-allocation-completeness-20261116.json` 绑定各 receipt SHA，未回写旧 receipt。新的失败 receipt 另记录 `public_rows_observed`，只计实际从公开 iterator 取到的行，不把部分超时输出冒称完整结果。正式最终报告要求这两个新增字段，旧预热不冒充正式样本。
 
-守卫验收：`/tmp/demiflow-perf-ray-guard-r3.xml` 为 51 passed、1 deliberately deselected slow integration test；原合约、基线身份、空/漏采样、未释放、单机冒两机、额外未观测 allocation 均有拒绝反例。真实业务证据见上，不把 51 个守卫测试数当性能样本数。B1-Ray 隔离参考树 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_rayref_20261116` 固定 `2fbe839`，不在主仓运行。
+守卫验收：`/tmp/demiflow-perf-ray-guard-r4.xml` 为 51 passed、1 deliberately deselected slow integration test；原合约、基线身份、空/漏采样、未释放、单机冒两机、额外未观测 allocation 均有拒绝反例。真实业务证据见上，不把 51 个守卫测试数当性能样本数。B1-Ray 隔离参考树 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_rayref_20261116` 固定 `2fbe839`，不在主仓运行。
+
+## 固定 2f01747 的宽行诊断与基线准入
+
+同机 finite_sealed p2 receipt `/tmp/demiflow-pr-finite2-r1/finite_sealed/trial.json`：原 120s 失败，first 88.3980s，含清理 120.5373s，实际公开 22267/40002 行、120 非 final ACK；3 个全原 journal allocation=采样集合，全部 CONFIRMED/GCS DEAD/OS 退出，cluster children=[]。p1/p2 不能只算能力通过；原预算内完整结果未满足。
+
+总控要求的 p1 driver cProfile 在 `/tmp/demiflow-pr-finite1-profile-r1/finite_sealed/`，`driver.prof`、`profile-top.txt`、`profile-callers.json`、`profile-summary.json` 与原 `trial.json` 齐备。它是诊断、**不是正式计时**，没有增预算：120.5955s 耗尽，first 94.2382s，公开 15252/40002 行，111 非 final ACK。prepare/start 6.4258s。56351 次 `ray.get` 累计 58.77s；33307 次 `pull` 累计 41.32s；`pump` 的 14600 次 `sleep` 自身 30.036s；`read_admitted`→逐行 `_ack` 的 15252 次累计 12.704s；111 commit 累计 5.144s。调用含包含关系，不可把累计数相加，RPC wait 不等于 CPU 算力成本；该 profile 不能直接拆出 worker 内 DataFusion 计算时间。111 cut 有 86 个早于首公开行。所有观测/完整库存/清理通过，cluster children=[]。
+
+B0 与旧 B1 的真实 Ray 同预算准入探针分别位于 `/tmp/demiflow-pr-b0-unsupported/fast_cpu/trial.json`、`/tmp/demiflow-pr-b1-unsupported/fast_cpu/trial.json`。两者在公共 executor 缺 `workers` 处明确 `NotImplementedError` / `unsupported`，没有进入 Dataset 业务，没有旧 Ray Data 的性能数字；两个私有 cluster children=[]、源码前后相等。旧 receipt 的通用 `carrier` 默认值是 historical_local，在这里不能解释成执行过 Local；新 harness 将此未执行状态明确写为 not_executed，旧证据不回写。
+
+磁盘测量始终是原计划的 owned trial 目录。源码确认 Ray worker 的临时 artifact cache 可在节点本地 `/tmp`，该部分峰值未采样，现已明确放进 limitations；没有为采样把缓存迁到共享盘、改变原业务性能。复制计数也不包含 Ray Core 在被测 codec 之外的序列化，继续明确未观测边界。

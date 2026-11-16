@@ -327,7 +327,7 @@ class Observations:
         self.ray_observer = None
         self.copy = {'status': 'partial', 'driver_control_encode': {'calls': 0, 'bytes': 0},
                      'driver_control_decode': {'calls': 0, 'bytes': 0},
-                     'unobserved': 'worker/Arrow/DataFusion/CUDA internal copies; bytes below are serialized boundary bytes, not memory-copy counts'}
+                     'unobserved': 'worker/Arrow/DataFusion/CUDA internal copies and Ray Core serialization outside this codec; bytes below are serialized boundary bytes, not memory-copy counts'}
         self.patches = []
     def patch(self, owner, name, fn):
         old = getattr(owner, name); self.patches.append((owner, name, old)); setattr(owner, name, fn)
@@ -688,10 +688,12 @@ def run_child(config):
         facts['status'] = 'passed' if not failures else 'failed'
     elif variant['kind'] in ('historical', 'reference') and isinstance(error, NotImplementedError):
         facts['status'] = 'unsupported'
+        facts['carrier'] = 'not_executed'
     if provider != 'local':
         from runtime_v3_performance_ray import ray_receipt_errors
         remote_errors = ray_receipt_errors(facts['ray_resources'], require_two_hosts=provider == 'two_hosts')
-        facts['limitations'] = ['Shared Ray service/object-store RSS is unattributed; business RSS samples can count shared pages repeatedly']
+        facts['limitations'] = ['Shared Ray service/object-store RSS is unattributed; business RSS samples can count shared pages repeatedly',
+            'Disk samples cover the owned trial directory, excluding node-local worker artifact caches outside it']
         if remote_errors and facts['status'] == 'passed':
             failures.extend(remote_errors); facts['status'] = 'failed'
     facts['failures'] = failures
