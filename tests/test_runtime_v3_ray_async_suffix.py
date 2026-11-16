@@ -80,7 +80,7 @@ def test_ray_async_colocation_keeps_actual_host_and_explicit_profile_constraints
     original = stages[-1]
     profile = original.profile.to_dict()
     if constraint == 'limits':
-        profile['limits'] = {'memory_bytes': 2**28}
+        profile['limits'] = {'cpu_millis': 8000, 'memory_bytes': 2**28}
     elif constraint == 'isolation':
         profile['requirements'] = {'isolation': 'process'}
     else:
