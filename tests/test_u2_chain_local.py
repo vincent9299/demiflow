@@ -1,12 +1,7 @@
-"""U2 Local full-chain acceptance (S4, D3/D5).
+"""Historical Local chain guarantees on the single managed v3 execution path.
 
-The whole operator chain runs in one independent managed worker process; the
-driver owns only the control plane, the fixed source capture and the single
-result-commit authority. These tests drive the real ResourceManager +
-LocalResourceProvider + managed process unit + inherited socketpair, the frozen
-K3 lifecycle, the CommitCut/CommitReceipt handshake and the final drain. The
-platform-side selector seam (``unified_chain``) is opt-in; the default in-driver
-stream path must remain byte-for-byte unchanged (D5).
+Compatibility flags do not choose another engine. The original run owns the
+sealed graph, committed output and admitted managed workers in either mode.
 """
 import json
 import os
@@ -65,24 +60,29 @@ def test_local_chain_full_real_worker(tmp_path):
         with run.journal._connection() as db:
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert owner == (run.attempt, run.fence)
-        # The output child action completed through the single commit authority.
-        with run.journal._connection() as db:
-            child = db.execute("SELECT result FROM runtime_actions "
-                               "WHERE action_id LIKE '%-chain'").fetchone()
-        assert child is not None and child[0] is not None
-        result = json.loads(child[0])
-        assert result["rows"] == len(expected)
-        assert result["inputs"] == len(items)
+        # The original action itself owns the confirmed output, with no
+        # invented chain child action or inferred input count.
+        assert run.journal.execution_action('action-1')['result'] is not None
+        facts = run.journal.execution_commits('action-1')
+        assert facts and all(f['status'] == 'acked' for f in facts)
+        assert facts[-1]['receipts']['materialize']['data']['rows'] == len(expected)
+        from _native_receipt_fixtures import committed_rows
+        from demiflow.execution.state_artifacts import StateArtifacts
+        assert committed_rows(run, 'action-1', facts[-1]) == expected
+        image = StateArtifacts(run).read(facts[-1]['prepared']['state']['dataflow-cut-v3'])
+        assert image['cut']['final']
+        assert [c['next_sequence'] for c in image['dataflow.sources.v3']] == [len(items)]
     # A genuine independent worker process was supervised (birth identity recorded).
-    units = tmp_path / "run-resources" / "units"
+    units = tmp_path / "run-driver-resources" / "units"
     records = list(units.glob("*/*/process.json"))
     assert records, "managed worker process identity was not recorded"
     pid = json.loads(records[0].read_text())["identity"]["pid"]
     assert pid != os.getpid()
     # Capacity was released after confirmed exit evidence.
     from demiflow.resources.capacity import LocalCapacityPool
-    pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity",
-                             capacity={"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3})
+    from demiflow.execution.dataflow_capacity import local_capacity
+    root, capacity = local_capacity()
+    pool = LocalCapacityPool(root / 'capacity', capacity=capacity)
     assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
 
 
@@ -94,8 +94,12 @@ def test_default_in_driver_path_unchanged(tmp_path):
                           limits={"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
         rows = dataset.materialize().take_all()
     assert rows == expected
-    # The default seam never provisions a managed worker host.
-    assert not (tmp_path / "run-resources").exists()
+    # The old opt-in flag is inert: the default uses the same managed engine.
+    records = list((tmp_path / 'run-driver-resources' / 'units').glob('*/*/process.json'))
+    assert records and all(json.loads(p.read_text())['identity']['pid'] != os.getpid() for p in records)
+    from demiflow.execution.run_journal import RunJournal
+    journal = RunJournal(tmp_path / 'run')
+    assert journal.source_binding('action-1-dataflow-sealed') is not None
 
 
 def test_wide_row_admitted_with_raised_limit(tmp_path):
@@ -132,10 +136,11 @@ def test_wide_row_exceeding_limit_rejected(tmp_path):
     ))
     executor = LocalDatasetExecutor(workers=1, unified_chain=True)
     dataset = Dataset(ItemsSource(items), plan, executor)
-    from demiflow.execution.recovery_contract import RecoveryContractError
-    with pytest.raises(RecoveryContractError) as exc_info:
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with pytest.raises(DataflowError) as exc_info:
         with RunContext.start(tmp_path / "run",
                               limits={"max_row_bytes": 1 * 1024 ** 2,
                                       "checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
             dataset.materialize().take_all()
+    assert exc_info.value.code == "BUDGET_EXCEEDED"
     assert "byte budget" in str(exc_info.value).lower()

@@ -11,6 +11,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
+from _worker_event_fixtures import emit, events
 from demiflow.execution import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.stream import StreamStats, _arun, _materialize
@@ -45,9 +46,9 @@ def test_execution_layer_forwards_original_callback_exception(kind, hard_timeout
 @pytest.mark.parametrize('kind', ['row', 'batch'])
 @pytest.mark.parametrize('hard_timeout', [None, 30])
 @pytest.mark.parametrize('form', ['function', 'instance', 'class'])
-def test_callback_timeout_propagates_original_error(kind, hard_timeout, form):
+def test_callback_timeout_propagates_original_error(tmp_path, kind, hard_timeout, form):
     message = 'callback in asyncio.to_thread'
-    closed = []
+    closed = str(tmp_path / 'closed.jsonl')
 
     async def callback(value):
         def fail():
@@ -59,7 +60,7 @@ def test_callback_timeout_propagates_original_error(kind, hard_timeout, form):
             return await callback(value)
 
         async def aclose(self):
-            closed.append(True)
+            emit(closed, 'closed')
 
     fn = callback if form == 'function' else Actor() if form == 'instance' else Actor
     drained = []
@@ -72,7 +73,7 @@ def test_callback_timeout_propagates_original_error(kind, hard_timeout, form):
     assert drained[0].miss == {} and drained[0].dead_batches == []
     assert drained[0].emitted == 0
     assert drained[0].timing_summary()['probe']['count'] == 1
-    assert closed == ([] if form == 'function' else [True])
+    assert [e['event'] for e in events(closed)] == ([] if form == 'function' else ['closed'])
     assert not [t.name for t in threading.enumerate() if t.ident not in threads]
 
 
@@ -110,14 +111,14 @@ def test_explicit_catch_keeps_callback_timeout_policy(kind, hard_timeout, catch)
 @pytest.mark.parametrize('kind', ['row', 'batch'])
 @pytest.mark.parametrize('form', ['function', 'class'])
 @pytest.mark.parametrize('catch', [(), (TimeoutError,)])
-def test_real_deadline_keeps_miss_and_declared_catch_precedence(kind, form, catch):
-    cancelled = []
+def test_real_deadline_keeps_miss_and_declared_catch_precedence(tmp_path, kind, form, catch):
+    cancelled = str(tmp_path / "cancelled.jsonl")
 
     async def callback(value):
         try:
             await asyncio.Event().wait()
         finally:
-            cancelled.append(True)
+            emit(cancelled, 'cancelled')
 
     class Actor:
         async def __call__(self, value):
@@ -128,7 +129,7 @@ def test_real_deadline_keeps_miss_and_declared_catch_precedence(kind, form, catc
                    catch=catch, hard_timeout=.01).run_stream()
     calls = 2 if kind == 'batch' else 3
     reason = 'TimeoutError' if catch else 'hard_timeout'
-    assert stats.emitted == 0 and cancelled == [True] * calls
+    assert stats.emitted == 0 and [e['event'] for e in events(cancelled)] == ['cancelled'] * calls
     assert stats.miss == {'probe:' + reason: calls}
     if kind == 'batch':
         assert [b['reason'] for b in stats.dead_batches] == [reason] * calls
@@ -136,12 +137,14 @@ def test_real_deadline_keeps_miss_and_declared_catch_precedence(kind, form, catc
 
 
 @pytest.mark.parametrize('kind', ['row', 'batch'])
-def test_prior_deadline_does_not_reclassify_later_callback_error(kind):
+def test_prior_deadline_does_not_reclassify_later_callback_error(tmp_path, kind):
     calls = []
+    observed = str(tmp_path / "calls.jsonl")
     message = 'second callback failed'
 
     async def callback(value):
         calls.append(value)
+        emit(observed, 'call')
         if len(calls) == 1:
             await asyncio.Event().wait()
         raise TimeoutError(message)
@@ -150,7 +153,7 @@ def test_prior_deadline_does_not_reclassify_later_callback_error(kind):
     with pytest.raises(TimeoutError) as failure:
         mapped([{'id': i} for i in range(3)], kind, callback,
                hard_timeout=.01).run_stream(on_drain=drained.append)
-    assert str(failure.value) == message and len(calls) == 2
+    assert str(failure.value) == message and len(events(observed)) == 2
     assert drained[0].miss == {'probe:hard_timeout': 1}
     assert len(drained[0].dead_batches) == (1 if kind == 'batch' else 0)
 
@@ -232,7 +235,7 @@ def test_external_cancellation_drains_timed_call_and_has_no_pending_tasks(kind):
 @pytest.mark.parametrize('action', ['materialize', 'create', 'overwrite'])
 def test_native_failure_after_output_never_completes_action_or_publishes(tmp_path, kind, hard_timeout, action):
     message = 'synthetic second batch failure'
-    calls, closed = [], []
+    observed = str(tmp_path / "native-callbacks.jsonl")
     target = str(tmp_path / 'out.lance')
     schema = pa.schema([('id', pa.int64())])
     previous = pa.table({'id': [99]})
@@ -248,7 +251,8 @@ def test_native_failure_after_output_never_completes_action_or_publishes(tmp_pat
 
         async def __call__(self, value):
             rows = value if kind == 'batch' else [value]
-            calls.extend(r['id'] for r in rows)
+            for row in rows:
+                emit(observed, 'call', value=row['id'])
             if rows[0]['id'] >= 2:
                 def fail():
                     raise TimeoutError(message)
@@ -256,7 +260,7 @@ def test_native_failure_after_output_never_completes_action_or_publishes(tmp_pat
             return value
 
         async def aclose(self):
-            closed.append(True)
+            emit(observed, 'closed')
 
     before_threads = {t.ident for t in threading.enumerate()}
     with pytest.raises(TimeoutError) as failure:
@@ -268,8 +272,10 @@ def test_native_failure_after_output_never_completes_action_or_publishes(tmp_pat
                 ds.write_lance(target, mode=action, expected_version=1 if action == 'overwrite' else None,
                                schema=schema, return_receipt=True)
     assert str(failure.value) == message
+    actual = events(observed)
+    calls = [e['value'] for e in actual if e['event'] == 'call']
     assert calls[:2] == [0, 1] and len(calls) in (3, 4)
-    assert closed == [True]
+    assert [e['event'] for e in actual if e['event'] == 'closed'] == ['closed']
     journal = RunJournal(tmp_path / 'run')
     assert journal.execution_status()['status'] == 'failed'
     assert journal.execution_action('action-1')['result'] is None
@@ -294,7 +300,7 @@ def test_failed_row_materialization_keeps_confirmed_prefix(tmp_path):
         return row
 
     with pytest.raises(TimeoutError) as failure:
-        with RunContext.start(tmp_path / 'run'):
+        with RunContext.start(tmp_path / 'run') as run:
             mapped([{'id': i} for i in range(515)], 'row', callback, hard_timeout=30).materialize()
     assert str(failure.value) == message
     journal = RunJournal(tmp_path / 'run')
@@ -302,10 +308,14 @@ def test_failed_row_materialization_keeps_confirmed_prefix(tmp_path):
     assert journal.execution_action('action-1')['result'] is None
     facts = journal.execution_commits('action-1')
     assert len(facts) == 1 and facts[0]['status'] == 'acked'
-    assert facts[0]['intent']['position']['next_ordinal'] == 512
-    receipt = facts[0]['receipts']['output']['data']
+    from demiflow.execution.state_artifacts import StateArtifacts
+    from _native_receipt_fixtures import committed_rows
+    image = StateArtifacts(run).read(facts[0]['prepared']['state']['dataflow-cut-v3'])
+    assert image['cut']['final'] is False
+    assert [cursor['next_sequence'] for cursor in image['dataflow.sources.v3']] == [512]
+    receipt = facts[0]['receipts']['materialize']['data']
     assert receipt['rows'] == 512
-    assert all((tmp_path / 'run' / b['path']).is_file() for b in receipt['blocks'])
+    assert committed_rows(run, 'action-1', facts[0]) == [{'id': i} for i in range(512)]
 
 
 @pytest.mark.parametrize('kind', ['row', 'batch'])

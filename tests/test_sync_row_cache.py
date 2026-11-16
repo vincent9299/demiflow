@@ -1,5 +1,6 @@
 import pytest
 from demiflow import data
+from _worker_event_fixtures import emit, events
 
 
 def test_process_cache_reuses_exact_inputs_and_keeps_failed_input_retryable(tmp_path):
@@ -33,10 +34,10 @@ def test_sync_cache_rejects_async_callable(tmp_path):
 
 @pytest.mark.parametrize('synchronous', [False, True])
 def test_cache_predicate_keeps_unsubmitted_rows_retryable(tmp_path, synchronous):
-    calls = []
+    observed = str(tmp_path / 'cache-calls.jsonl')
     enabled = []
     def compute(row):
-        calls.append(row['id'])
+        emit(observed, 'call', value=row['id'])
         return {**row, 'status': 'done' if row['id'] == 1 or enabled else 'budget_exhausted'}
     async def async_compute(row): return compute(row)
     def plan():
@@ -48,6 +49,7 @@ def test_cache_predicate_keeps_unsubmitted_rows_retryable(tmp_path, synchronous)
     enabled.append(True)
     assert {r['status'] for r in plan()} == {'done'}
     plan()
+    calls = [e['value'] for e in events(observed)]
     assert calls.count(1) == 1 and calls.count(2) == 2
 
 

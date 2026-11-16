@@ -75,33 +75,21 @@ def _spec(n, cut_rows, special):
 
 
 def _committed_rows(run, action_id, rid, facts):
-    sink = BlockSink(RunAction(run, action_id + "-graph-" + rid, {"kind": "graph-node"}), rid)
-    rows = []
-    for fact in facts:
-        rows.extend(sink.iter_rows(fact["receipts"][rid]["data"]))
-    return rows
+    from _native_receipt_fixtures import committed_rows
+    assert facts and all(f['status'] == 'acked' for f in facts)
+    # The final original manifest contains the full confirmed prefix. Reading
+    # every cumulative cut would double count, unlike retired delta blocks.
+    rows = committed_rows(run, action_id, facts[-1])
+    return [entry['row'] for entry in rows if entry['reader_id'] == rid]
 
 
 def _release(root):
-    # Reclaim only this test's own graph workers; assert zero charged resources.
-    root = Path(root)
-    if not root.exists():
-        return
-    pool = LocalCapacityPool(root / "capacity",
-                             capacity={"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3})
-    unit = ManagedProcessUnit(root / "units")
-    for record in pool.snapshot()["active"]:
-        allocation_id = record["allocation_id"]
-        process_json = next((root / "units").glob("*/" + allocation_id + "/process.json"))
-        scope_id = process_json.parent.parent.name
-        evidence = unit.stop(scope_id, allocation_id, terminate_deadline_ms=2000)
-        assert evidence["confirmed"] is True
-        pool.release(allocation_id, evidence)
-        try:
-            os.waitpid(evidence["identity"]["pid"], os.WNOHANG)
-        except (ChildProcessError, OSError):
-            pass
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+    # The native driver must already have reclaimed its allocations; do not
+    # force-stop workers here and disguise a lifecycle leak as a passing test.
+    from demiflow.execution.dataflow_capacity import local_capacity
+    domain, capacity = local_capacity()
+    pool = LocalCapacityPool(domain / 'capacity', capacity=capacity)
+    assert pool.snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
 
 
 def _run_default_graph(tmp_path, special, n=8, cut_rows=4):
@@ -116,7 +104,7 @@ def _run_default_graph(tmp_path, special, n=8, cut_rows=4):
                 action_id = execution.action_id
                 result = run_local_graph(spec, control_timeout_s=15)
                 execution.complete(dict(kind="graph-materialized"))
-            facts = run.journal.execution_commits(action_id + "-graph-result")
+            facts = run.journal.execution_commits(action_id)
             rows = {rid: _committed_rows(run, action_id, rid, facts) for rid in readers}
         return rows, result["egress_rows"], readers
     finally:
