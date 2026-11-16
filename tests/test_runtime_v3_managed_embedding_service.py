@@ -156,7 +156,8 @@ def test_worker_sigkill_retains_unit_until_actual_service_tree_exits(tmp_path, m
     thread = threading.Thread(target=kill)
     thread.start()
     try:
-        with pytest.raises(Exception, match='UNKNOWN_EFFECT|worker connection closed|Connection reset by peer'):
+        # SIGKILL can sever either the read or write half of the real socket.
+        with pytest.raises(Exception, match='UNKNOWN_EFFECT|worker connection closed|Connection reset by peer|Broken pipe'):
             with RunContext.start(tmp_path / 'run', limits={'timeout_s': 25}):
                 dataset(fixture, tmp_path, cached=False).take_all()
     finally:
