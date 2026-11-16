@@ -206,7 +206,9 @@ def test_optional_hardware_and_postgres_require_explicit_scope(fixture, monkeypa
     assert 'DSN' in result['not_run']
 
 
-def test_real_reviewed_subprocess_runs_actual_unified_aggregate(tmp_path):
+def test_real_reviewed_subprocess_runs_actual_unified_aggregate(tmp_path, monkeypatch):
+    # Even an inherited shared location cache must be replaced before launch.
+    monkeypatch.setenv('DEMIFLOW_LOCATION_CACHE', '/not-owned/locations')
     node = 'tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum'
     entries = {node: {'state': 'reviewed', 'environment': 'local'}}
     result = gate.execute_batch({'nodeids': [node], 'environment': 'local', 'python': sys.executable},
@@ -219,9 +221,27 @@ def test_real_reviewed_subprocess_runs_actual_unified_aggregate(tmp_path):
     assert all(r['outcome'] == 'passed' for r in receipt['reports'])
     assert [i['nodeid'] for i in receipt['items']] == [node]
     assert not receipt['collection_problems'] and not receipt['deselected']
-    for key in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN', 'TMPDIR'):
+    for key in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN',
+                'DEMIFLOW_LOCATION_CACHE', 'TMPDIR'):
         assert Path(receipt['environment'][key]).is_relative_to(tmp_path / 'real-child')
     assert Path(receipt['environment']['TMPDIR']).is_dir()
+
+
+@pytest.mark.parametrize('name', ['DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME',
+                                'DEMIFLOW_FORGE_DOMAIN', 'DEMIFLOW_LOCATION_CACHE', 'TMPDIR'])
+@pytest.mark.parametrize('defect', ['missing', 'shared'])
+def test_inventory_refuses_missing_or_shared_write_domain(tmp_path, monkeypatch, name, defect):
+    from runtime_v3_regression_inventory import assert_private
+    for key in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN',
+                'DEMIFLOW_LOCATION_CACHE', 'TMPDIR'):
+        monkeypatch.setenv(key, str(tmp_path / key))
+    assert_private()
+    if defect == 'missing':
+        monkeypatch.delenv(name)
+    else:
+        monkeypatch.setenv(name, '/not-owned/' + name)
+    with pytest.raises((KeyError, AssertionError)):
+        assert_private()
 
 
 def test_missing_historical_file_is_not_silently_retired(fixture, tmp_path):

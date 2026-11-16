@@ -254,7 +254,7 @@ def evaluate(plan, collections, receipts, *, inputs):
 
 
 def execute_batch(batch, *, entries, destination, timeout=1800):
-    """Launch only a reviewed exact batch, sequentially, in three owned domains."""
+    """Launch only a reviewed exact batch, sequentially, in four owned domains."""
     destination = _private(destination)
     nodes = batch.get('nodeids', [])
     environment = batch.get('environment')
@@ -286,7 +286,7 @@ def execute_batch(batch, *, entries, destination, timeout=1800):
     env.update(PYTHONPATH=str(ROOT) + os.pathsep + str(ROOT / 'tests'),
                PYTHONDONTWRITEBYTECODE='1', TMPDIR=str(scratch), TEMP=str(scratch), TMP=str(scratch))
     for key, suffix in [('DEMIFLOW_RESOURCE_ROOT', 'resources'), ('DEMIFLOW_RESOURCE_HOME', 'home'),
-                        ('DEMIFLOW_FORGE_DOMAIN', 'forge')]:
+                        ('DEMIFLOW_FORGE_DOMAIN', 'forge'), ('DEMIFLOW_LOCATION_CACHE', 'locations')]:
         env[key] = str(destination / suffix)
     for key, suffix in [('FORGE_COMBINED_SCREENSHOTS', 'screenshots'), ('FORGE_WORKBENCH_EVIDENCE', 'workbench'),
                         ('FORGE_ACCEPTANCE_DIR', 'acceptance'), ('FORGE_OUTPUT_EVIDENCE', 'output')]:

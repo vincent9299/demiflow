@@ -1,6 +1,6 @@
 """Read-only full-suite inventory and explicit batch receipts; collection is never pass.
 
-Use only from a pinned isolated checkout with three private resource domains.
+Use only from a pinned isolated checkout with four private resource domains.
 The resulting nodeids are exact pytest selectors, not AST-guessed test names.
 """
 from __future__ import annotations
@@ -70,7 +70,8 @@ def snapshot():
 def assert_private():
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(ROOT)
-    for name in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN'):
+    for name in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN',
+                 'DEMIFLOW_LOCATION_CACHE', 'TMPDIR'):
         path = Path(os.environ[name]).resolve()
         assert path.is_relative_to('/tmp') and path.parts[2].startswith('demiflow-'), (name, str(path))
 
@@ -141,7 +142,7 @@ def run(destination, args):
     result = {'kind': 'collection_only' if '--collect-only' in args else 'execution',
               'python': sys.executable, 'args': args, 'returncode': int(code),
               'environment': {k: os.environ.get(k) for k in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME',
-                               'DEMIFLOW_FORGE_DOMAIN', 'PYTHONPATH', 'TMPDIR')},
+                               'DEMIFLOW_FORGE_DOMAIN', 'DEMIFLOW_LOCATION_CACHE', 'PYTHONPATH', 'TMPDIR')},
               'source_before': before, 'source_after': after, 'source_unchanged': before == after,
               'items': plugin.items, 'collection_problems': plugin.collection,
               'deselected': plugin.deselected, 'reports': plugin.reports}
