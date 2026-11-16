@@ -6,6 +6,7 @@
 
 当前生产已集成真实 peer 批读、Ray mailbox、持久展开窗口、受管对象 Embedding、工作台真实 GPU 和原 producer unit 恢复；Ray 异步后缀现与 Local 使用同一资源规则。各项保留实际验收版本。这不是“全部完成”的版本：旧私有模型缓存兼容、性能和部分正式验收门仍在收口，未推送或合入主仓。
 
+- **模型兼容集成**：原生路由 Prompt 已进入同一图、原 journal、run/node/route 原子额度与原 ACK 恢复；owner Local18项、真实Ray1项通过。显式 Embedding 私有缓存保持原 delivery-only，owner48项通过；总控独立核全部源摘要及附件。总控 `d85dca1` 的原 adaptive/有限准备/HTTP预取重叠与路由组合17项通过。原先遗漏的七个 Embedding 失败在旧267b914全部通过，已按真实行为逐项补修，托管服务与合作停止仍在收口。见 [模型兼容与边界](MODEL-COMPATIBILITY-CLOSURE.md)。
 - **工作台 GPU 与对象链组合**：owner `fae6a05` 的正式 V030 七个真实产品用例和 74 项合同/历史负例全部通过，已集成为 `fdea56c`；总控核两组各 2131 项源码摘要及 8 份证据附件，零不符。总控再于集成版本 `301b426` 跑 GPU/静态 tensor 负例/受管 image-document Embedding，55 passed / 299.81 秒，零跳过。资源声明、CPU0→CUDA1→CPU0、原 ACK/Lance/历史桥、取消释放与对象篡改零 HTTP 同版本通过。见 [NATIVE-GPU-CLOSURE.md](NATIVE-GPU-CLOSURE.md) 及 [总控复核](PRODUCT-GPU-RAY-ASYNC-PRIMARY-VERIFICATION.json)。只声明已验的封闭 Torch 子集与 Local/process 受管路径。
 - **真实队列业务与 Ray 差异**：原 producer unit 跨物理 cut 的恢复修复已集成 `a189328`，Local 五组业务含 19 次原执行、真实模型与队列/ACK/恢复已过。Ray 的 5 逻辑阶段/4 worker 误拒已修为原源与后缀两 owner，CPU/内存仍逐阶段求和；真实 Ray/旧默认合并 20 项过，编译与资源负例另 7 项过。4 CPU 仍在真实反例中明确拒绝。I09 fixture 按真实 6 CPU/4 worker 完整五组业务门通过，19 次原执行、112 次原分配全部 terminal/CONFIRMED；性能基准不增额。总控逐一核 1040 个源码摘要、8 个证据文件以及 112 条原 SQLite 分配的清理、birth/placement，零不符。见 [完整 Ray 业务](QUEUE-BUSINESS-RAY-CLOSURE-20261116.md)、[独立复核](QUEUE-BUSINESS-RAY-PRIMARY-VERIFICATION.json) 与 [RAY-ASYNC-SUFFIX-CLOSURE.md](RAY-ASYNC-SUFFIX-CLOSURE.md)。
 

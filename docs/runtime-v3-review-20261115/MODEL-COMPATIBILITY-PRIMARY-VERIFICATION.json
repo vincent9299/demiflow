@@ -1,0 +1,56 @@
+{
+  "private_cache": {
+    "head": "a61b82667979e547c6c57544983e2f746979c4c0",
+    "inputs": 2142,
+    "mismatches": [],
+    "receipt": "/tmp/demiflow-private-embedding-fixed-r3/verification.json",
+    "receipt_sha256": "dc7ae2730f772194462361486652dc4c254c83a3ec356270788dfeeed5d48f54",
+    "exit_code": 0,
+    "head_unchanged": true,
+    "clean_after": true
+  },
+  "routed_local": {
+    "head": "651a9bdd83e09b520a53672fc992bd608563e864",
+    "inputs": 2133,
+    "mismatches": [],
+    "receipt": "/tmp/demiflow-route-final2-local-evidence/verification.json",
+    "receipt_sha256": "1090a499e90b60ac5fb8cc4e9174df87556f02eda6706909f31991cd89e8eb15",
+    "exit_code": 0,
+    "head_unchanged": true,
+    "clean_after": true
+  },
+  "routed_ray": {
+    "head": "651a9bdd83e09b520a53672fc992bd608563e864",
+    "inputs": 2133,
+    "mismatches": [],
+    "receipt": "/tmp/demiflow-route-final2-ray-evidence/verification.json",
+    "receipt_sha256": "496c87ecdea6d523937b51d079b54980f25c62143fb42373c50f3b697258e71e",
+    "exit_code": 0,
+    "head_unchanged": true,
+    "clean_after": true
+  },
+  "integrated_observers_routes": {
+    "head": "d85dca11a9524ff7ace5d1d33b8c42c5c41b2ea5",
+    "inputs": 1834,
+    "mismatches": [],
+    "receipt": "/tmp/demiflow-embedding-observed-r2-evidence/verification.json",
+    "receipt_sha256": "156b70b712f03ed87662f0ca0abb897f788079aeb185443a3bc69681399e6f30",
+    "exit_code": 0,
+    "head_unchanged": true,
+    "clean_after": true
+  },
+  "native_quota_cancel": {
+    "head": "802577194bb2a8bda36a499968b73c84c8c8945e",
+    "inputs": 1829,
+    "mismatches": [],
+    "receipt": "/tmp/demiflow-native-embedding-budget-fixed-evidence/verification.json",
+    "receipt_sha256": "ce14caee0b53f3985252292fce93cef24fdbf8ba30f5d85f93c051f31cfabdfa",
+    "exit_code": 0,
+    "head_unchanged": true,
+    "clean_after": true
+  },
+  "routed_attachments": {
+    "verified": 9,
+    "mismatches": []
+  }
+}
