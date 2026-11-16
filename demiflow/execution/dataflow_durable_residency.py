@@ -11,6 +11,36 @@ from .dataflow_residency import finite_phases, participants_for
 from .recovery_contract import identity, document
 
 SCHEMA = 'demiflow.durable_residency.v1'
+PARTITION_SCHEMA = 'demiflow.durable_residency.v2'
+SCHEMAS = (SCHEMA, PARTITION_SCHEMA)
+
+
+def partition_phases(physical):
+    """Cycle isolated stage partitions; memory peers remain one live cohort."""
+    stages = {s.stage_id: s for s in physical.stages}
+    result = []
+    for group in finite_phases(physical, split_durable=True):
+        members = tuple(p for sid in group for p in stages[sid].partitions)
+        if len(group) == 1:
+            width = stages[group[0]].replica_target
+            result.extend((group, members[i:i + width]) for i in range(0, len(members), width))
+        else:
+            result.append((group, members))
+    return tuple(result)
+
+
+def member_partitions(physical, value, name):
+    if value.get('schema') == PARTITION_SCHEMA:
+        return set(value[name + '_partitions'])
+    return {p for stage in physical.stages if stage.stage_id in value[name + '_stages']
+            for p in stage.partitions}
+
+
+def participant_ids(physical, partitions):
+    from .contracts.dataflow_codec import compute_participant_id
+    return tuple(compute_participant_id(s.stage_id, p) for s in physical.stages
+                 for p in s.partitions if p in partitions)
+
 
 
 def frontier(contribution, partition, store, bounds):
@@ -32,27 +62,33 @@ class DurableResidency:
         self.active_index = 0
         self.acked_live = set()
         self.park_sent = False
-        self.groups = finite_phases(execution._physical, split_durable=True)
+        phases = partition_phases(execution._physical)
+        self.groups = tuple(group for group, _ in phases)
+        self.partition_groups = tuple(parts for _, parts in phases)
+        self.all_partitions = {p for s in execution._physical.stages for p in s.partitions}
+        self.schema = (PARTITION_SCHEMA if any(len(s.partitions) > s.replica_target
+                       for s in execution._physical.stages) else SCHEMA)
         prior = execution._checkpoint.residency
         if prior is not None:
-            if prior['schema'] != SCHEMA:
+            if prior['schema'] != self.schema:
                 raise DataflowError('INCOMPATIBLE_HISTORY', 'cannot reinterpret finite phase history as parked streaming')
             self.entries = copy.deepcopy(prior['deliveries'])
             self.edge_eoi = {tuple(x) for x in prior['edge_eoi']}
             self.satisfied_inputs = {tuple(x) for x in prior['satisfied_inputs']}
             for edge_id, consumer in self.satisfied_inputs:
                 execution._satisfied_consumers.setdefault(edge_id, set()).add(consumer)
-            self.visited = set(prior['visited_stages']) | set(prior['active_stages'])
-            self.completed = set(prior['completed_stages'])
+            active = member_partitions(execution._physical, prior, 'active')
+            self.visited = member_partitions(execution._physical, prior, 'visited') | active
+            self.completed = member_partitions(execution._physical, prior, 'completed')
             if prior['phase_complete']:
-                candidate = self.completed | set(prior['active_stages'])
-                if candidate == {s.stage_id for s in execution._physical.stages}:
+                candidate = self.completed | active
+                if candidate == self.all_partitions:
                     # A non-final cut may have observed completion while its
                     # participants were freezing. Reopen the last real owner to
                     # obtain final publication, without inventing a contribution.
                     self.epoch = execution._restore_image.cut.sequence
-                    self.active_index = next(i for i, g in enumerate(self.groups)
-                                             if set(g) == set(prior['active_stages']))
+                    self.active_index = next(i for i, g in enumerate(self.partition_groups)
+                                             if set(g) == active)
                     return
                 self.completed = candidate
             self.epoch = execution._restore_image.cut.sequence
@@ -60,24 +96,23 @@ class DurableResidency:
 
     def choose(self):
         ex = self.ex
-        owner = {p: s.stage_id for s in ex._physical.stages for p in s.partitions}
         # A ready consumer runs promptly, before admitting another source window.
         for index in reversed(range(len(self.groups))):
-            group = set(self.groups[index])
+            group = set(self.partition_groups[index])
             if group <= self.completed:
                 continue
             inputs = [edge for edge in ex._physical.exchanges
-                      if owner[edge.consumer_partitions[0]] in group and owner[edge.producer_partitions[0]] not in group]
+                      if set(edge.consumer_partitions) & group and not set(edge.producer_partitions) <= group]
             if any(edge.mode == 'finite_sealed' and edge.channel_id not in ex._finite_seals for edge in inputs):
                 continue
-            pending = any(not entry['consumed'] and owner[entry['payload']['target_partition']] in group
+            pending = any(not entry['consumed'] and entry['payload']['target_partition'] in group
                           for entry in self.entries.values())
             eof = bool(inputs) and all(edge.mode == 'finite_sealed' or
                     all((edge.edge_id, p) in self.edge_eoi for p in edge.producer_partitions) for edge in inputs)
             if pending or eof:
                 return index
         for index, group in enumerate(self.groups):
-            if set(group) <= self.completed:
+            if set(self.partition_groups[index]) <= self.completed:
                 continue
             if any(set(s.occurrences) & set(ex._graph.sources) for s in ex._physical.stages if s.stage_id in group):
                 return index
@@ -161,21 +196,26 @@ class DurableResidency:
         return all(key in self.entries for key in self.ex._deliveries)
 
     def final(self, phase_done):
-        return phase_done and set(s.stage_id for s in self.ex._physical.stages) <= (
-            self.completed | set(self.groups[self.active_index]))
+        return phase_done and self.all_partitions <= (
+            self.completed | set(self.partition_groups[self.active_index]))
 
     def metadata(self, phase_done):
         from .dataflow_checkpoint import _artifact_json
         ex = self.ex
-        value = {'schema': SCHEMA, 'epoch': self.epoch,
+        stages = ex._physical.stages
+        value = {'schema': self.schema, 'epoch': self.epoch,
                 'active_stages': list(self.groups[self.active_index]),
-                'visited_stages': sorted(self.visited), 'completed_stages': sorted(self.completed),
+                'visited_stages': sorted(s.stage_id for s in stages if set(s.partitions) & self.visited),
+                'completed_stages': sorted(s.stage_id for s in stages if set(s.partitions) <= self.completed),
                 'phase_complete': phase_done,
                 'finite_seals': {key: _artifact_json(ref) for key, ref in ex._finite_seals.items()},
                 'satisfied_source_splits': sorted(ex._checkpoint._operator_complete),
                 'deliveries': copy.deepcopy({key: value for key, value in self.entries.items() if key not in self.acked_live}),
                 'edge_eoi': [list(x) for x in sorted(self.edge_eoi)],
                 'satisfied_inputs': [list(x) for x in sorted(self.satisfied_inputs)]}
+        if self.schema == PARTITION_SCHEMA:
+            value.update(active_partitions=list(self.partition_groups[self.active_index]),
+                visited_partitions=sorted(self.visited), completed_partitions=sorted(self.completed))
         # producer/consumer cut proofs enlarge entries after begin; enforce the
         # same bound again before replacing the pending carrier.
         document(value, ex._bounds.max_state_bytes)
@@ -227,9 +267,9 @@ class DurableResidency:
         ex._checkpoint._pending[cut.cut_id].residency = self.metadata(set(ex._endpoints) <= ex._done)
 
     def committed(self, image, phase_done):
-        self.visited.update(self.groups[self.active_index])
+        self.visited.update(self.partition_groups[self.active_index])
         if phase_done:
-            self.completed.update(self.groups[self.active_index])
+            self.completed.update(self.partition_groups[self.active_index])
         for key in self.acked_live:
             self.entries.pop(key, None)
         self.acked_live.clear()
@@ -244,27 +284,46 @@ def validate_recovered(physical, cut, contributions, residency, *, facts, artifa
         raise DataflowError('CORRUPT_ARTIFACT', reason)
     keys = {'schema', 'epoch', 'active_stages', 'visited_stages', 'completed_stages',
             'phase_complete', 'finite_seals', 'satisfied_source_splits', 'deliveries', 'edge_eoi', 'satisfied_inputs'}
-    if type(residency) is not dict or set(residency) != keys or residency['schema'] != SCHEMA:
+    if type(residency) is not dict or residency.get('schema') not in SCHEMAS:
         reject('invalid durable residency schema')
+    partitioned = residency['schema'] == PARTITION_SCHEMA
+    if partitioned:
+        keys |= {'active_partitions', 'visited_partitions', 'completed_partitions'}
+    if set(residency) != keys:
+        reject('invalid durable residency fields')
     stages = {s.stage_id for s in physical.stages}
-    for name in ('active_stages', 'visited_stages', 'completed_stages'):
-        values = residency[name]
+    partitions = {p for s in physical.stages for p in s.partitions}
+    for name in ('active', 'visited', 'completed'):
+        values = residency[name + '_stages']
         if (type(values) is not list or any(type(x) is not str for x in values)
                 or len(values) != len(set(values)) or not set(values) <= stages):
             reject('invalid durable residency stage membership')
-    active, visited = set(residency['active_stages']), set(residency['visited_stages'])
-    completed = set(residency['completed_stages'])
+        if partitioned:
+            parts = residency[name + '_partitions']
+            if (type(parts) is not list or any(type(x) is not str for x in parts)
+                    or len(parts) != len(set(parts)) or not set(parts) <= partitions):
+                reject('invalid durable residency partition membership')
+            projected = {s.stage_id for s in physical.stages
+                         if (set(s.partitions) <= set(parts) if name == 'completed'
+                             else bool(set(s.partitions) & set(parts)))}
+            if set(values) != projected:
+                reject('partition residency disagrees with its stage projection')
+    active = member_partitions(physical, residency, 'active')
+    visited = member_partitions(physical, residency, 'visited')
+    completed = member_partitions(physical, residency, 'completed')
     if (not active or completed & active or not completed <= visited
             or type(residency['phase_complete']) is not bool
             or type(residency['epoch']) is not int or not 0 <= residency['epoch'] < cut.sequence):
         reject('invalid parked generation/completion frontier')
-    if set(cut.participants) != set(participants_for(physical, active)):
+    if partitioned and active not in [set(parts) for _, parts in partition_phases(physical)]:
+        reject('active partition wave differs from sealed replica concurrency')
+    if set(cut.participants) != set(participant_ids(physical, active)):
         reject('active parked cut participants differ')
-    expected = set(participants_for(physical, active | visited))
+    expected = set(participant_ids(physical, active | visited))
     if {c.participant_id for c in contributions} != expected or len(contributions) != len(expected):
         reject('parked recovery invented or omitted a visited worker')
-    if cut.final and (not residency['phase_complete'] or completed | active != stages):
-        reject('final parked cut precedes all stage completion')
+    if cut.final and (not residency['phase_complete'] or completed | active != partitions):
+        reject('final parked cut precedes all partition completion')
     origins = {}
     completed_proofs = set()
     for fact in facts:
@@ -280,9 +339,9 @@ def validate_recovered(physical, cut, contributions, residency, *, facts, artifa
                 origins[(value['cut_id'], value['participant_id'])] = value
         old = carrier.get('residency')
         if fact['commit_id'] != current_commit and old and old.get('phase_complete'):
-            completed_proofs.update(old['active_stages'])
+            completed_proofs.update(member_partitions(physical, old, 'active'))
     if not completed <= completed_proofs:
-        reject('completed parked stages lack their actual ACKed completion cut')
+        reject('completed parked partitions lack their actual ACKed completion cut')
     for contribution in contributions:
         if origins.get((contribution.cut_id, contribution.participant_id)) != _contribution_json(contribution):
             reject('parked state differs from its original ACKed contribution')

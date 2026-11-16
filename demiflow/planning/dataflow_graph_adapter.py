@@ -99,7 +99,10 @@ def translate_graph(graph_spec):
     keys = graph_spec.get('key_fields') or ()
     if route == 'hash' and (type(keys) not in (list, tuple) or not keys or any(type(key) is not str or not key for key in keys)):
         raise DataflowError('INVALID_CONTRACT', 'hash graph requires declared key fields')
-    declaration = {key: graph_spec[key] for key in ('source_id', 'credit_budget', 'prefetch_slots', 'cut_rows', 'queue_depth') if key in graph_spec}
+    declaration = {key: graph_spec[key] for key in ('source_id', 'credit_budget', 'prefetch_slots', 'cut_rows', 'queue_depth', 'storage_bytes') if key in graph_spec}
+    if 'storage_bytes' in declaration and (type(declaration['storage_bytes']) is not int
+                                          or declaration['storage_bytes'] <= 0):
+        raise DataflowError('INVALID_CONTRACT', 'graph storage_bytes must be a positive integer')
     declaration.update(routing=route, exchange_mode=mode, reader_ids=list(readers), key_fields=list(keys))
     prefix = tuple(ancestor.operations)
     if route == 'target':
@@ -220,8 +223,12 @@ def specialize_graph_stages(graph, stages, *, policy, bounds, hosts=None):
         readers = tuple(routers[names[0]]['reader_ids'])
         if len(readers) > min(bounds.max_partitions, policy.max_replicas):
             raise DataflowError('RESOURCE_INFEASIBLE', 'graph readers exceed admitted replica ceiling')
+        # Replica concurrency is distinct from immutable reader membership.
+        # A singleton resident stage may cycle these original partitions under
+        # its admitted worker ceiling; memory-connected groups remain strict.
+        concurrency = min(len(readers), policy.max_active_workers or len(readers))
         result.append(replace(stage, partitions=readers, replica_min=1,
-                              replica_target=len(readers), replica_max=len(readers)))
+                              replica_target=concurrency, replica_max=len(readers)))
     result = _colocate_literal_prefix(graph, tuple(result), policy=policy, bounds=bounds, hosts=hosts)
     return _colocate_private_tags(graph, result, policy=policy, bounds=bounds)
 
@@ -394,7 +401,8 @@ def specialize_graph_exchanges(graph, stages, exchanges, *, bounds):
         credit = graph_credit(declaration, bounds=bounds)
         mode = declaration['exchange_mode']
         updates = {'mode': mode, 'credit_rows': credit['rows'], 'credit_bytes': credit['bytes'],
-                   'storage_bytes': 0 if mode == 'memory_incremental' else bounds.max_spill_bytes,
+                   'storage_bytes': 0 if mode == 'memory_incremental' else min(
+                       declaration.get('storage_bytes', bounds.max_spill_bytes), bounds.max_spill_bytes),
                    'scope_id': 'scope-' + edge.edge_id if mode == 'finite_sealed' else None,
                    'reason': 'explicit graph adapter: original v3 routing and ACK'}
         if incoming is not None:

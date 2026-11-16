@@ -615,6 +615,12 @@ class DataflowExecution:
             if residency.get('phase_complete'):
                 retired.update(residency['active_stages'])
             retired_ids = set(participants_for(self._physical, retired))
+            if residency.get('schema') == 'demiflow.durable_residency.v2':
+                from .dataflow_durable_residency import member_partitions, participant_ids
+                parts = member_partitions(self._physical, residency, 'completed')
+                if residency['phase_complete']:
+                    parts |= member_partitions(self._physical, residency, 'active')
+                retired_ids = set(participant_ids(self._physical, parts))
             for contribution in self._restore_image.contributions:
                 if contribution.participant_id in retired_ids:
                     continue  # Its original ACKed output is restored, not its actor.
@@ -670,7 +676,9 @@ class DataflowExecution:
                 fits = False
         prior = self._checkpoint.residency
         durable = any(edge.mode == 'durable_incremental' for edge in self._physical.exchanges)
-        if durable and (not fits or prior is not None and prior.get('schema') == 'demiflow.durable_residency.v1'):
+        waves = any(len(s.partitions) > s.replica_target for s in stages)
+        if (durable or waves) and (not fits or waves or prior is not None and
+                prior.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2')):
             from .dataflow_durable_residency import DurableResidency
             if any(source.replay == 'attempt_only' for source in self._physical.sources):
                 raise DataflowError('UNSUPPORTED_CAPABILITY', 'attempt-only source cannot park and restore within an action')
@@ -689,12 +697,14 @@ class DataflowExecution:
         self._durable_peers_live = (durable and self._durable_residency is None
             and len(self._phases) == 1
             and set(self._phases[0]) == {s.stage_id for s in stages})
-        for phase in self._phases:
+        for index, phase in enumerate(self._phases):
             group = [s for s in stages if s.stage_id in phase]
-            resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in group)
+            members = (set(self._durable_residency.partition_groups[index])
+                       if self._durable_residency is not None else {p for s in group for p in s.partitions})
+            resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(set(s.partitions) & members) for s in group)
             if resident + self._publication_reservation.reserved(phase) > self._bounds.max_resident_bytes:
                 raise DataflowError('RESOURCE_INFEASIBLE', 'streaming-connected stage group exceeds resident capacity')
-            self._place_hosts([(s, self._initial_work(s, p)) for s in group for p in s.partitions])
+            self._place_hosts([(s, self._initial_work(s, p)) for s in group for p in s.partitions if p in members])
         if prior is not None and self._durable_residency is None:
             self._completed_stages = set(prior['completed_stages'])
             if prior['phase_complete']:
@@ -718,8 +728,10 @@ class DataflowExecution:
             and not self._lease_by_operation and self._checkpoint_progress() == 0)
         phase = self._phases[self._phase_index]
         stages = [s for s in self._stage_order() if s.stage_id in phase]
+        members = (set(self._durable_residency.partition_groups[self._phase_index])
+                   if self._durable_residency is not None else {p for s in stages for p in s.partitions})
         pending = [(stage, self._initial_work(stage, partition))
-                   for stage in stages for partition in stage.partitions]
+                   for stage in stages for partition in stage.partitions if partition in members]
         hosts = self._place_hosts(pending)
         ready = []
         from .dataflow_native_limits import admission_timeout_ms
@@ -1281,10 +1293,10 @@ class DataflowExecution:
             final = (phase_done and self._phase_index == len(self._phases) - 1
                      and self._checkpoint.inputs_complete())
             if durable is not None:
-                from .dataflow_residency import participants_for
+                from .dataflow_durable_residency import participant_ids
                 final = durable.final(phase_done) and self._checkpoint.inputs_complete()
                 self._cut = self._checkpoint.begin(final=final,
-                    participants=participants_for(self._physical, self._phases[self._phase_index]),
+                    participants=participant_ids(self._physical, durable.partition_groups[self._phase_index]),
                     residency=durable.metadata(phase_done))
             elif len(self._phases) > 1 or self._completed_stages:
                 from .dataflow_residency import SCHEMA, participants_for

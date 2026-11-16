@@ -479,11 +479,14 @@ def solve_residency(
 
     simultaneous = []
     for group in ordered_components:
-        if max_active_workers is not None and sum(len(s.partitions) for s in group) > max_active_workers:
+        # Only an isolated stage can cycle partitions. A memory-connected
+        # cohort still needs every live producer and consumer simultaneously.
+        count = lambda s: min(len(s.partitions), s.replica_target) if len(group) == 1 else len(s.partitions)
+        if max_active_workers is not None and sum(count(s) for s in group) > max_active_workers:
             raise _error("RESOURCE_INFEASIBLE", "memory-connected group exceeds active worker budget",
                          resource="max_active_workers", max_active_workers=max_active_workers)
         footprint = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
-                        * len(stage.partitions) for stage in group)
+                        * count(stage) for stage in group)
         group_available = (bounds.max_resident_bytes - publication_reservation.reserved(s.stage_id for s in group)
                            if publication_reservation is not None else available)
         if footprint > group_available:
@@ -515,9 +518,10 @@ def solve_residency(
     gpu_capacity = sum(host.logical_resources.get("gpu", 0.0) for host in hosts)
     isolation: set[str] = set()
     for group in ordered_components:
-        cpu_needed = sum(s.profile.requests["cpu_millis"] * s.replica_target for s in group)
-        memory_needed = sum(s.profile.requests["memory_bytes"] * s.replica_target for s in group)
-        gpu_needed = sum(_gpu_count(s.profile) * s.replica_target for s in group)
+        count = lambda s: min(len(s.partitions), s.replica_target) if len(group) == 1 else len(s.partitions)
+        cpu_needed = sum(s.profile.requests["cpu_millis"] * count(s) for s in group)
+        memory_needed = sum(s.profile.requests["memory_bytes"] * count(s) for s in group)
+        gpu_needed = sum(_gpu_count(s.profile) * count(s) for s in group)
         for stage in group:
             isolation.update(_isolation_tokens(stage.profile))
         if cpu_needed > cpu_capacity:

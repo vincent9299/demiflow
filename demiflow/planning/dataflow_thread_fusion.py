@@ -14,6 +14,10 @@ _TERMINALS = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_bat
 def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
     if not policy.fusion:
         return stages
+    if any('graph_route' in node.kernel.configuration for node in graph.nodes):
+        # Named graph readers are independent physical partitions. The graph
+        # adapter owns their explicit exchange boundaries and private tags.
+        return stages
     nodes = {n.occurrence_id: n for n in graph.nodes}
     incoming, outgoing = {}, {}
     for edge in graph.edges:

@@ -1,0 +1,102 @@
+"""Real named graph partitions retain one-worker admission and original ACKs."""
+from copy import deepcopy
+from pathlib import Path
+
+import pytest
+
+from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.dataflow_terminals import materialized_handle
+from demiflow.execution.executors.local import LocalDatasetExecutor
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.state_artifacts import StateArtifacts
+from test_runtime_v3_graph_adapter import _spec, graph_environment
+
+
+@pytest.mark.parametrize('mode', ['durable_incremental', 'memory_incremental', 'finite_sealed'])
+def test_single_worker_partition_wave_resume_keeps_original_membership(graph_environment, monkeypatch, mode):
+    class Interrupted(Exception): pass
+    root = graph_environment
+    spec = _spec(root)
+    spec.update(exchange_mode=mode, credit_budget={'rows': 8, 'bytes': 8*1024**2})
+    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    limits = {'checkpoint_rows': 8, 'checkpoint_unconfirmed_rows': 8,
+              'checkpoint_interval_ms': 60000, 'timeout_s': 120}
+    retire, finish = DataflowExecution._retire_phase, DataflowExecution.finish
+    stops, handles, outputs = [], [], []
+    def interrupt(execution, image):
+        active = image.cut.participants
+        router = next(s for s in execution._physical.stages if s.partitions == ('left', 'right'))
+        from demiflow.execution.contracts.dataflow_codec import compute_participant_id
+        if compute_participant_id(router.stage_id, 'right') in active:
+            assert len(active) == 1
+            stops.append(image)
+            raise Interrupted('after one original router partition ACK')
+        return retire(execution, image)
+    def observe(execution):
+        result = finish(execution)
+        stored = materialized_handle(result, execution=execution)
+        try:
+            outputs.extend(stored.rows())
+        finally:
+            stored.close()
+        handles.append(execution)
+        return result
+    with pytest.raises(Interrupted):
+        with RunContext.start(root/'run', limits=limits) as run:
+            reference = run.ref
+            with run.action({'kind': 'materialize', 'source': {'fixture': 'partition-waves'}}):
+                with monkeypatch.context() as patch:
+                    patch.setattr(DataflowExecution, '_retire_phase', interrupt)
+                    executor.materialize_graph(spec)
+    assert len(stops) == 1
+    with RunContext.resume(reference, limits=limits) as run:
+        before = run.journal.execution_commits('action-1')
+        assert before and all(f['status'] == 'acked' for f in before)
+        with run.action({'kind': 'materialize', 'source': {'fixture': 'partition-waves'}}) as action:
+            with monkeypatch.context() as patch:
+                patch.setattr(DataflowExecution, 'finish', observe)
+                result = executor.materialize_graph(spec)
+            assert result['egress_rows'] == 3
+            assert result['target_rows'] == {'left': 3, 'right': 3}
+            action.complete({'kind': 'graph-materialized'})
+        after = run.journal.execution_commits('action-1')
+        assert after[:len(before)] == before
+        states = [StateArtifacts(run).read(f['prepared']['state']['dataflow-cut-v3']) for f in after]
+        assert states[-1]['cut']['final']
+        assert all(s['residency']['schema'] == 'demiflow.durable_residency.v2' for s in states)
+        assert all(len(s['cut']['participants']) == 1 for s in states)
+        assert {p for s in states for p in s['residency']['active_partitions']} >= {'left', 'right'}
+        assert handles[0]._peak_active_workers == 1
+        assert sorted((r['reader_id'], r['row']['x']) for r in outputs) == [
+            ('left', 110), ('left', 111), ('left', 112),
+            ('right', 210), ('right', 211), ('right', 212)]
+        # Every inherited participant must retain an actual earlier ACKed fact;
+        # a forged "completed" partition may not be used to skip business work.
+        from demiflow.execution.dataflow_durable_residency import validate_recovered
+        from demiflow.execution.dataflow_checkpoint import _cut_from_json, _contribution_from_json
+        from demiflow.execution.contracts.dataflow_errors import DataflowError
+        value = states[-1]
+        kwargs = dict(facts=after, artifacts=StateArtifacts(run), current_commit=after[-1]['commit_id'],
+                      store=handles[0]._store)
+        contributions = tuple(_contribution_from_json(c) for c in value['contributions'])
+        validate_recovered(handles[0]._physical, _cut_from_json(value['cut']), contributions,
+                           value['residency'], **kwargs)
+        forged = deepcopy(value['residency'])
+        forged['visited_partitions'].remove('left')
+        with pytest.raises(DataflowError):
+            validate_recovered(handles[0]._physical, _cut_from_json(value['cut']), contributions, forged, **kwargs)
+        with pytest.raises(DataflowError, match='ACKed completion'):
+            validate_recovered(handles[0]._physical, _cut_from_json(value['cut']), contributions,
+                value['residency'], **{**kwargs, 'facts': [after[-1]]})
+
+
+def test_explicit_graph_storage_is_sealed_and_not_silently_enlarged(graph_environment):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    spec = _spec(graph_environment)
+    spec.update(exchange_mode='finite_sealed', storage_bytes=1)
+    with RunContext.start(graph_environment/'run') as run:
+        with pytest.raises(DataflowError, match='(?i)storage|spill'):
+            with run.action({'kind': 'materialize', 'source': {'fixture': 'one-byte-storage'}}):
+                LocalDatasetExecutor(workers=4, unified_graph=True).materialize_graph(spec)
+        assert not run.journal.execution_commits('action-1')
+    assert not (graph_environment/'ancestor.jsonl').exists()
