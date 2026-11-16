@@ -9,13 +9,19 @@ from test_runtime_v3_durable_residency import LIMITS
 
 
 def test_terminal_metadata_uses_only_room_after_control_and_payload(tmp_path):
+    class StopAfterResult(Exception):
+        pass
     with observe_execution(workers=4, memory_bytes=LIMITS['memory_bytes']) as observed:
-        with RunContext.start(tmp_path / 'run', limits=LIMITS) as run, data.local_execution(workers=4):
-            ref = run.ref
-            assert data.from_items([{'n': n} for n in range(8)]).take_all() == [
-                {'n': n} for n in range(8)]
-            commits = run.journal.execution_commits('action-1')
-            assert len(commits) > 2 and all(item['status'] == 'acked' for item in commits)
+        with pytest.raises(StopAfterResult):
+            with RunContext.start(tmp_path / 'run', limits=LIMITS) as run, data.local_execution(workers=4):
+                ref = run.ref
+                assert data.from_items([{'n': n} for n in range(8)]).take_all() == [
+                    {'n': n} for n in range(8)]
+                commits = run.journal.execution_commits('action-1')
+                assert len(commits) > 2 and all(item['status'] == 'acked' for item in commits)
+                # A run which fully succeeded cannot start another attempt.
+                # Interrupt after this action's result while the run is open.
+                raise StopAfterResult()
         sealed = observed['plans'][0]
         terminal = next(node for node in sealed['graph']['nodes'] if node['kind'] == 'terminal')
         window = terminal['kernel']['configuration']['terminal_memory']
@@ -37,8 +43,8 @@ def test_terminal_minimum_index_cannot_borrow_payload_or_control(tmp_path):
     # After the unchanged 3,840-byte control and 24-KiB payload windows,
     # only 2,304 bytes remain: less than the real first block+root charge.
     with observe_execution(workers=4, memory_bytes=limits['memory_bytes']) as observed:
-        with RunContext.start(tmp_path / 'run', limits=limits) as run, data.local_execution(workers=4):
-            with pytest.raises(DataflowError, match='terminal.*one block and root'):
+        with pytest.raises(DataflowError, match='terminal.*one block and root'):
+            with RunContext.start(tmp_path / 'run', limits=limits) as run, data.local_execution(workers=4):
                 data.from_items([{'n': 1}]).take_all()
-            assert run.journal.execution_commits('action-1') == []
+        assert run.journal.execution_commits('action-1') == []
         assert not observed['launches']
