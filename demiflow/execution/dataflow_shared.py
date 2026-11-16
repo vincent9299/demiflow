@@ -141,6 +141,9 @@ def _recipe_actor_relation(request, *, bounds):
         next_index += 1
         owner = actor_owner(spec.target) if isinstance(spec, CallableSpec) else None
         if owner is not None:
+            # Keep declaration owners alive while using object identity as the
+            # alias key; structural adapters may create temporary wrappers.
+            retained.append(owner)
             owners.setdefault(id(owner), []).append(occurrence)
         return occurrence
     def source_node(source, path):
