@@ -633,16 +633,15 @@ class WorkerGraphRunner:
                     source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
                     self._output(source, poll.record)
                     self._source_rows_since_cut += 1
+                    if reader._eoi and not reader._replay_pending:
+                        self._finish_source_split(split_id, source)
                     if not self._publication_overlap and self._source_rows_since_cut >= self._source_quantum:
                         self._paused = True
                         self._flush_metrics()
                     processed += 1
                 elif poll.status == 'eoi':
-                    self._finished_splits.add(split_id)
                     source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
-                    if all(s.split_id in self._finished_splits for s in self.e.assignment.source_splits
-                           if s.source_id == source):
-                        self._finish_node(source)
+                    self._finish_source_split(split_id, source)
                     processed += 1
                 break
             # A partition can own no splits, e.g. more partitions than source blocks.
@@ -690,6 +689,12 @@ class WorkerGraphRunner:
             self._send('cut', ref=ref)
             self._cut = None
         return WorkerStep(processed=processed, blocked=not bool(processed), end_of_input=done, events=())
+
+    def _finish_source_split(self, split_id, source):
+        self._finished_splits.add(split_id)
+        if all(s.split_id in self._finished_splits for s in self.e.assignment.source_splits
+               if s.source_id == source):
+            self._finish_node(source)
 
     def _metrics_payload(self, occ):
         from ..dataflow_usage import worker_prompt_usage

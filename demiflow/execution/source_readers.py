@@ -153,6 +153,12 @@ class _BaseReader:
             # precedes its downstream acknowledgement, not on every seek read.
             self._pending_record = record
         self._next_sequence += 1
+        # Some immutable sources prove exhaustion from the sealed split alone.
+        # Do not require a post-checkpoint pull merely to discover that the last
+        # published row was already the end. Keep its pending replay reference
+        # until the normal downstream acknowledgement, even with EOI known.
+        if self._at_known_end():
+            self._eoi = True
         return SourcePoll("record", record, 0)
 
     def acknowledge_output(self) -> None:
@@ -203,6 +209,11 @@ class _BaseReader:
     def _advance(self) -> tuple[Any, dict[str, Any]] | None:
         raise NotImplementedError
 
+    def _at_known_end(self) -> bool:
+        # File/materialized/task iterators may authenticate/flush on exhaustion;
+        # a claimed row count must never skip that actual final read.
+        return False
+
     def _teardown(self) -> None:
         return None
 
@@ -221,6 +232,7 @@ class ItemsReader(_BaseReader):
         self._start = int(split.locator.get("start", 0))
         self._index = int(self._offset.get("index", self._start))
         self._typed_rows = False
+        self._literal_items = isinstance(plan, ItemsSource)
         if isinstance(plan, ItemsSource):
             count = len(plan.items)
             rows = iter(plan.items)
@@ -258,6 +270,9 @@ class ItemsReader(_BaseReader):
         if close is not None:
             close()
 
+    def _at_known_end(self) -> bool:
+        return self._literal_items and self._index == self._end
+
 
 class RangeReader(_BaseReader):
     """Range shard determined by split start/end; no full expansion."""
@@ -281,6 +296,9 @@ class RangeReader(_BaseReader):
         self._value += 1
         self._offset = {"next": self._value}
         return row, position
+
+    def _at_known_end(self) -> bool:
+        return self._value == self._end
 
 
 class FileReader(_BaseReader):

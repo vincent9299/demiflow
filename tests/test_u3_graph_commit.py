@@ -121,8 +121,16 @@ def test_finite_sealed_mode_commits(tmp_path):
     assert set(run.directory.with_name('run-driver-resources').glob('units/*/*/process.json')) == records
 
 
-def test_durable_graph_reclaims_channel_segments(tmp_path):
+def test_durable_graph_reclaims_channel_segments(tmp_path, monkeypatch):
     from _native_receipt_fixtures import committed_rows
+    from demiflow.execution import dataflow_gc
+    observed = []
+    collect = dataflow_gc.collect_published_orphans
+    def collecting(action, **kwargs):
+        result = collect(action, **kwargs)
+        observed.append((action.action_id, result))
+        return result
+    monkeypatch.setattr(dataflow_gc, 'collect_published_orphans', collecting)
     spec, readers, n = _graph_spec(n=24, cut_rows=8, mode="durable_incremental", readers=("c0", "c1"))
     # This unregistered private byte must never be collected as an owned object.
     foreign = tmp_path / 'run' / '.dataflow-store' / 'foreign-protected.bin'
@@ -133,8 +141,11 @@ def test_durable_graph_reclaims_channel_segments(tmp_path):
     # GC operates on the original object settlements after confirmed owner exit.
     # ACKed channel snapshots remain roots for historical recovery, so expecting
     # every old transport payload to disappear would itself destroy recovery.
-    assert run._published_gc_result['blocked'] is None
-    assert run._published_gc_result['removed'] > 0
+    # This graph has no native prompt journal: its original execution close
+    # collects directly, rather than deferring collection to RunContext.close.
+    assert len(observed) == 1 and observed[0][0] == action_id
+    assert observed[0][1]['blocked'] is None
+    assert observed[0][1]['removed'] > 0
     with run.journal._connection() as db:
         collected = db.execute('SELECT store_id,digest,status FROM runtime_dataflow_gc').fetchall()
         assert collected and all(status == 'done' for _, _, status in collected)

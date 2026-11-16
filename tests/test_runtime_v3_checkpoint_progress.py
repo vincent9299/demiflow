@@ -162,7 +162,8 @@ def test_only_successful_commit_ack_advances_all_frontiers():
     assert (driver._last_checkpoint_rows, driver._last_checkpoint_outputs) == (8, {'join': 9})
     assert driver._checkpoint_deliveries == 0 and driver._checkpoint_progress() == 0
     assert driver.sent == [{'kind': 'receipt', 'cut_id': 'cut', 'commit_id': 'acked-commit'},
-                           {'kind': 'resume', 'publishing': False, 'source_credit': {'rows': 0, 'bytes': 0}}]
+                           {'kind': 'resume', 'publishing': False, 'observation_rows': 0,
+                            'source_credit': {'rows': 0, 'bytes': 0}}]
 
 
 def test_finite_join_after_source_eoi_naturally_checkpoints_and_resumes(tmp_path, monkeypatch):

@@ -28,6 +28,7 @@ def _finished_runner():
     runner._finished_splits = set()
     runner._consumed_deliveries = set()
     runner._source_rows_since_cut = 0
+    runner._cut_credit = {}
     runner._source_quantum = runner._source_park_quantum = 1
     runner._source_live_quantum = 8
     runner._park_mode = False
