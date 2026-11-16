@@ -8,7 +8,7 @@ import runtime_v3_support as support
 @pytest.mark.parametrize("scenario", [
     "fairness_deadlock",
     "queue_full_business", "memory_peak", "two_hosts",
-    "node_loss", "history_identity", "workbench_real_plan",
+    "history_identity", "workbench_real_plan",
     "product_regression", "all_regressions",
 ])
 def test_placeholder_scenarios_cannot_produce_passing_evidence(scenario):
@@ -28,6 +28,7 @@ def test_placeholder_scenarios_cannot_produce_passing_evidence(scenario):
     ('disk_gc', 'runtime_v3_gc_scenarios'),
     ('artifact_security', 'runtime_v3_artifact_security_scenarios'),
     ('cpu_gpu_isolation', 'runtime_v3_gpu_scenarios'),
+    ('node_loss', 'runtime_v3_node_loss_scenarios'),
 ])
 def test_implemented_gate_cannot_replace_missing_native_evidence_with_success(monkeypatch, scenario, module):
     import importlib

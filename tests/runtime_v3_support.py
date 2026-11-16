@@ -538,7 +538,9 @@ class RuntimeV3Fixture:
         # prerequisites. A local driver-restart proof needs no second host;
         # dedicated multi-host scenarios must still prove actual two hosts.
         optional = {"local", "ray", "all"}
-        if scenario not in {'two_hosts', 'node_loss'}:
+        # V027 explicitly permits loss of an actual producer actor owner.
+        # Physical two-host placement remains mandatory for its separate gate.
+        if scenario != 'two_hosts':
             optional.add('two_hosts')
         self.require_environment(*(e for e in envs if e not in optional))
         self.require_modules(scenario)
@@ -551,7 +553,7 @@ class RuntimeV3Fixture:
         from contextlib import nullcontext
         self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix',
             'multiworker_barrier', 'route_recovery', 'driver_restart', 'actor_state_lifecycle', 'performance',
-            'history_identity', 'workbench_real_plan', 'product_regression', 'cpu_gpu_isolation'}
+            'history_identity', 'workbench_real_plan', 'product_regression', 'cpu_gpu_isolation', 'node_loss'}
         scope = nullcontext() if self_managed else RunContext.start(self.journal_dir / scenario)
         try:
             with scope, _use_executor(executor):
@@ -1191,9 +1193,10 @@ def _s_two_hosts(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 
 def _s_node_loss(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must kill the actual producer host and recover its committed outputs'}
-    fx._record_not_run('node_loss', detail)
-    raise NotRunError('node_loss', detail)
+    from runtime_v3_node_loss_scenarios import node_loss, validate_evidence
+    evidence = node_loss(fx, fault)
+    validate_evidence(evidence)
+    return evidence
 
 
 def _s_driver_restart(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
