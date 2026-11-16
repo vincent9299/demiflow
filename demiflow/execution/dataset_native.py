@@ -596,17 +596,17 @@ def execute(executor, source, plan, *, arrow=False, sink_schema=None, execution=
         raise ValueError('Native delivery limit must be a nonnegative integer')
     if limit == 0:
         return
-    if arrow and limit is not None:
-        raise ValueError('Native delivery limit requires row output')
     original_plan = plan
-    kind = "iter_batches" if arrow else "take" if limit is not None else "iter_rows"
-    arguments = ({"batch_format": "pyarrow"} if arrow else
-                 {"limit": limit, DELIVERY_LIMIT: limit} if limit is not None else {})
+    kind = "take" if limit is not None else "iter_batches" if arrow else "iter_rows"
+    arguments = {"batch_format": "pyarrow"} if arrow else {}
+    if limit is not None:
+        arguments.update(limit=limit, **{DELIVERY_LIMIT: limit})
     ceilings = execution_ceilings(_sealed_ceilings(execution))
     if ceilings:
         arguments[EXECUTION_LIMITS] = ceilings
-    if arrow and ceilings.get('inflight_rows') is not None:
-        arguments['batch_size'] = ceilings['inflight_rows']
+    if arrow and (ceilings.get('inflight_rows') is not None or limit is not None):
+        arguments['batch_size'] = min(ceilings.get('inflight_rows', 256),
+                                      limit if limit is not None else 2**63-1)
     if sink_schema is not None:
         import pyarrow as pa
         from .contracts.dataflow_errors import DataflowError

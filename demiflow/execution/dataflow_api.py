@@ -300,10 +300,10 @@ def run_dataset_action(request: ActionRequest) -> object:
             record_execution_metadata(request, handle._execution)
     # Streaming adapters retain the action handle until exhaustion or close.
     from .dataflow_native_limits import DELIVERY_LIMIT
-    if request.kind == "iter_rows" or (
-            request.kind == "take" and DELIVERY_LIMIT in arguments):
+    native_delivery = request.kind == "take" and DELIVERY_LIMIT in arguments
+    if request.kind == "iter_rows" or (native_delivery and arguments.get('batch_format') != 'pyarrow'):
         return observed(iterate_rows(handle))
-    if request.kind == "iter_batches":
+    if request.kind == "iter_batches" or native_delivery:
         batch_size = arguments.get('batch_size')
         if arguments.get('native_execution_limits', {}).get('inflight_rows'):
             ceiling = (handle._execution._native_limits or {}).get('batch_rows', batch_size)

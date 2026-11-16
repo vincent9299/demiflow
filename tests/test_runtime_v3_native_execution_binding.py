@@ -265,7 +265,8 @@ def test_unrelated_active_action_cannot_borrow_native_execution(tmp_path, monkey
 
 
 @pytest.mark.parametrize('limit', [0, 1, 3])
-def test_native_take_uses_original_terminal_and_preserves_borrowed_action(tmp_path, monkeypatch, limit):
+@pytest.mark.parametrize('arrow', [False, True])
+def test_native_take_uses_original_terminal_and_preserves_borrowed_action(tmp_path, monkeypatch, limit, arrow):
     from demiflow.execution.checked import action
     seen = []
     prepare = DataflowExecution.prepare
@@ -278,12 +279,26 @@ def test_native_take_uses_original_terminal_and_preserves_borrowed_action(tmp_pa
     with RunContext.start(tmp_path/'run') as run, data.local_execution(worker_mode='thread') as session:
         ds = data.read_lance(uri, version=1).select_columns(['id'])
         with action('take', ds._source, ds._plan, arguments={'limit': limit}) as outer:
-            actual = list(execute(session._executor, ds._source, ds._plan, execution=placement(), limit=limit))
+            actual = list(execute(session._executor, ds._source, ds._plan, execution=placement(),
+                                  arrow=arrow, limit=limit,
+                                  sink_schema=pa.schema([('id', pa.int32())]) if arrow else None))
             assert outer.execution.record['result'] is None
             assert run.position == 1
+        if arrow:
+            assert all(isinstance(batch, pa.RecordBatch) and len(batch) <= 2
+                       and batch.schema.field('id').type == pa.int32() for batch in actual)
+            actual = pa.Table.from_batches(actual).to_pylist() if actual else []
         assert actual == [{'id':i} for i in range(limit)]
         assert run.journal.execution_action('action-2') is None
-    assert seen == ([] if limit == 0 else [('take', {
-        'limit': limit, 'native_delivery_limit': limit,
-        'native_execution_limits': {'cpu_millis':2000, 'memory_bytes':32*MiB,
-                                   'inflight_rows':2, 'inflight_bytes':MiB}})])
+    if limit == 0:
+        assert not seen
+    else:
+        assert len(seen) == 1 and seen[0][0] == 'take'
+        arguments = seen[0][1]
+        assert arguments['limit'] == arguments['native_delivery_limit'] == limit
+        assert arguments['native_execution_limits'] == {'cpu_millis':2000, 'memory_bytes':32*MiB,
+                                                       'inflight_rows':2, 'inflight_bytes':MiB}
+        if arrow:
+            assert arguments['batch_format'] == 'pyarrow'
+            assert arguments['batch_size'] == min(2, limit)
+            assert arguments['declared_arrow_schema']
