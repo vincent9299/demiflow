@@ -267,5 +267,17 @@
   },
   "changed_production_paths": [
     "demiflow/execution/kernels/operator.py"
-  ]
+  ],
+  "interpretation_correction_20261116": {
+    "baseline_root": "/tmp/demiflow-peer-frame-baseline-20261116",
+    "baseline_fs": "xfs",
+    "candidate_root": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+    "candidate_fs": "dpc",
+    "confound": "worker imports and code-pin reads occur inside the timed interval",
+    "observed_ratio_preserved": 0.920776,
+    "causal_code_improvement": "not identified by this comparison",
+    "withdrawn_claim": "the code change caused a 7.92% performance improvement",
+    "original_trial_receipts_unchanged": true,
+    "functional_and_profile_evidence_remain_valid": true
+  }
 }
