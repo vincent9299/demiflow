@@ -66,6 +66,7 @@ def ray_credit_case():
                         summary = _current_executor.get().materialize_graph(spec)
                         action.complete({'kind':'graph-materialized'})
                     commits = run.journal.execution_commits(action.action_id)
+                    checkpoint_rows = run.limits['checkpoint_rows']
                     bundle = load_sealed_plan(run.directory, action.action_id, version='v3')
                     raise InterruptedAfterResult()
             router = next(node.occurrence_id for node in bundle['graph'].nodes if 'graph_route' in node.kernel.configuration)
@@ -74,7 +75,8 @@ def ray_credit_case():
             assert len(channels)==3 and not blocker.attempts
             yield SimpleNamespace(fx=fx, spec=spec, declaration=declaration, reference=reference,
                 summary=summary, bundle=bundle, commits=commits, bounds=bounds,
-                channels=channels, results=results, executions=executions, blocker=blocker)
+                channels=channels, results=results, executions=executions, blocker=blocker,
+                checkpoint_rows=checkpoint_rows)
             assert not blocker.attempts
             fx._save_evidence('L018-real-ray-graph', {'dag_id':summary['dag_id'],
                 'plan_id':summary['plan_id'],'target_rows':summary['target_rows'],
@@ -117,6 +119,7 @@ def test_ray_wiring_consumes_both_resolved_fields(ray_credit_case):
     assert all(edge.credit_rows==1 and edge.credit_bytes==16384 for edge in case.channels)
     assert case.bundle['physical'].policy.provider=='ray_core'
     assert case.bundle['physical'].policy.max_active_workers==3
+    assert case.bundle['physical'].policy.checkpoint_rows==case.checkpoint_rows>1
     assert case.commits and all(commit['status']=='acked' for commit in case.commits)
     assert case.summary['target_rows']=={'left':3,'right':3}
 

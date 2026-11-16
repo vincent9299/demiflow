@@ -69,6 +69,7 @@ def test_native_channels_use_both_resolved_credit_dimensions(graph_environment):
             assert result['target_rows']=={'left':3,'right':3}
             action.complete({'kind':'graph-materialized'})
         bundle=load_sealed_plan(run.directory,action.action_id,version='v3')
+        assert bundle['physical'].policy.checkpoint_rows==run.limits['checkpoint_rows']>1
         router=next(node.occurrence_id for node in bundle['graph'].nodes if 'graph_route' in node.kernel.configuration)
         edges={edge.edge_id for edge in bundle['graph'].edges if router in (edge.producer,edge.consumer)}
         channels=[exchange for exchange in bundle['physical'].exchanges if exchange.edge_id in edges]

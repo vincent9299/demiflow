@@ -63,8 +63,6 @@ class WorkerGraphRunner:
         # Pause before reading a record that cannot be retained while the next
         # resident group is absent. Expansion inside one invocation is separately
         # rejected if it cannot fit the actual channel credit window.
-        windows = [min(spec.credit_rows, max(1, spec.credit_bytes // self.bounds.max_row_bytes))
-                   for spec in executor._output_specs if spec.mode == 'durable_incremental']
         self._credit_limit = min(self.bounds.max_pending_events, 64)
         from ..dataflow_native_limits import sealed_execution_ceilings
         self._credit_limit = min(self._credit_limit,
@@ -87,6 +85,7 @@ class WorkerGraphRunner:
         # records, before consuming a new source position or routing sequence.
         width = self._source_delivery_width()
         aggregate_window = max(1, self._credit_limit // width)
+        windows = self._source_durable_windows()
         self._source_quantum = (min([physical.policy.checkpoint_rows, aggregate_window, *windows])
                                 if windows else physical.policy.checkpoint_rows)
         host = '127.0.0.1'
@@ -141,6 +140,31 @@ class WorkerGraphRunner:
                                         if manifest.get('schema_ref') is not None else None)
             RecordSchemas(self.services).read(self._terminal_schema_ref)
             self._restored_terminal = True
+
+    def _source_durable_windows(self):
+        """Bound source admission by reachable original durable grants.
+
+        A source's immediate memory peer may share its resident group while
+        that peer's downstream durable consumer is parked. Traverse the sealed
+        DAG (once per node/edge), including those downstream boundaries, rather
+        than assuming a released memory credit replenished durable capacity.
+        This tightens the source admission quantum, not checkpoint policy.
+        """
+        pending = [occurrence for occurrence, node in self.e._node_specs.items()
+                   if node.kind == 'source']
+        visited, windows = set(), []
+        while pending:
+            occurrence = pending.pop()
+            if occurrence in visited:
+                continue
+            visited.add(occurrence)
+            for edge in self._outgoing.get(occurrence, ()):
+                spec = self._exchange[edge.edge_id]
+                if spec.mode == 'durable_incremental':
+                    windows.append(min(spec.credit_rows,
+                        max(1, spec.credit_bytes // self.bounds.max_row_bytes)))
+                pending.append(edge.consumer)
+        return windows
 
     def _source_delivery_width(self):
         """Static delivery multiplicity for one source record, without UDFs.
@@ -226,10 +250,11 @@ class WorkerGraphRunner:
                 channel_bytes += count * recipients * self.bounds.max_row_bytes
                 # Hash/target/rebalance may choose any declared reader; require
                 # enough room in every possible destination before advancing.
-                for reader in spec.consumer_partitions:
-                    credit = self.e._channels.reader_credit(spec.channel_id, reader)
-                    if credit['rows_left'] < count or credit['bytes_left'] < count * self.bounds.max_row_bytes:
-                        return False
+                if spec.mode != 'memory_incremental':
+                    for reader in spec.consumer_partitions:
+                        credit = self.e._channels.reader_credit(spec.channel_id, reader)
+                        if credit['rows_left'] < count or credit['bytes_left'] < count * self.bounds.max_row_bytes:
+                            return False
             if len(self._credits) + slots > self._credit_limit:
                 return False
             leases = self.e._channels.outstanding_leases()
@@ -537,8 +562,7 @@ class WorkerGraphRunner:
                     source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
                     self._output(source, poll.record)
                     self._source_rows_since_cut += 1
-                    quantum = (self.e._physical.policy.checkpoint_rows if self._park_mode else self._source_quantum)
-                    if self._source_rows_since_cut >= quantum:
+                    if self._source_rows_since_cut >= self._source_quantum:
                         self._paused = True
                         self._flush_metrics()
                     processed += 1

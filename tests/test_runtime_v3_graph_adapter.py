@@ -352,19 +352,34 @@ def test_reused_target_actor_is_independent_and_final_replay_starts_no_worker(gr
 
 
 @pytest.mark.parametrize('expand', [False, True])
-def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(graph_environment, expand):
+def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(graph_environment, monkeypatch, expand):
     from demiflow.data.plan import FlatMapOp
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    commits = []
+    commit = DataflowCheckpointCoordinator.commit
+    def observed(coordinator, *args, **kwargs):
+        image = commit(coordinator, *args, **kwargs)
+        commits.append(image)
+        return image
+    monkeypatch.setattr(DataflowCheckpointCoordinator, 'commit', observed)
     directory = graph_environment
     spec = _spec(directory)
-    spec['prefetch_slots'] = 1
+    if expand:
+        spec['prefetch_slots'] = 1
+    else:
+        # The source's one-row memory peer genuinely holds credit while this
+        # slow ancestor works. The absent graph egress retains its original
+        # larger durable grant, so this is legal backpressure, not expansion.
+        spec['ancestor']['plan'] = LogicalPlan((MapOp(CallableSpec.create(_slow),
+            stream_options=MapStreamOptions(concurrency=1)),))
     spec['targets'][0]['plan'] = LogicalPlan((FlatMapOp(CallableSpec.create(_expand_pair)),)) if expand else LogicalPlan((
         MapOp(CallableSpec.create(_slow), stream_options=MapStreamOptions(concurrency=1)),))
     def execute():
         with RunContext.start(directory/'run', limits={'memory_bytes':128*1024**2,
                 'max_row_bytes':4096,'max_batch_bytes':16384,'max_state_bytes':2*1024**2,
-                'timeout_s':60}) as run:
+                'timeout_s':60,'checkpoint_interval_ms':60000}) as run:
             with run.action({'kind':'materialize','source':{'fixture':'mixed-graph-residency'}}) as action:
                 result=LocalDatasetExecutor(workers=3).materialize_graph(spec)
                 action.complete({'kind':'graph-materialized'})
@@ -377,3 +392,5 @@ def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(gra
         assert result['target_rows']=={'left':3,'right':3}
         assert {edge.mode for edge in bundle['physical'].exchanges} >= {'memory_incremental','durable_incremental'}
         assert bundle['physical'].policy.max_active_workers==3
+        assert commits[0].source_vector[0].next_sequence==3
+        assert commits[0].source_vector[0].end_of_input
