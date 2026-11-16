@@ -15,8 +15,10 @@ def test_public_resume_rejects_changed_actor_relation_before_worker_start(tmp_pa
         second = first if shared else Counter(tmp_path/'events')
         return data.from_items([{'id': 1}]).map_async(first).map_async(second)
 
-    with RunContext.start(tmp_path/'run') as run:
-        assert pipeline(original_shared).materialize().take_all() == [{'id': 1}]
+    with pytest.raises(RuntimeError, match='after-original-action'):
+        with RunContext.start(tmp_path/'run') as run:
+            assert pipeline(original_shared).materialize().take_all() == [{'id': 1}]
+            raise RuntimeError('after-original-action')
     facts = run.journal.execution_commits('action-1')
     events = (tmp_path/'events').read_bytes()
     def no_start(*args, **kwargs):

@@ -35,9 +35,11 @@ def test_native_union_is_lazy_repeatable_and_keeps_context(tmp_path):
     with pytest.raises(RecoveryContractError, match='checkpoint'):
         ds.checkpoint(tmp_path/'union.jsonl',version='1')
     assert not (tmp_path/'union.jsonl').exists() and len(seen.read_text().splitlines())==2
-    with RunContext.start(tmp_path/'run') as run:
-        ref=run.ref
-        assert ds.materialize().take_all()==[{'id':1},{'id':2}]
+    with pytest.raises(RuntimeError, match='after-materialized-action'):
+        with RunContext.start(tmp_path/'run') as run:
+            ref=run.ref
+            assert ds.materialize().take_all()==[{'id':1},{'id':2}]
+            raise RuntimeError('after-materialized-action')
     with RunContext.resume(ref):
         assert ds.materialize().take_all()==[{'id':1},{'id':2}]
     assert len(seen.read_text().splitlines())==3
