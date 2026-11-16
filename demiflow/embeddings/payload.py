@@ -53,8 +53,12 @@ def image_content(value, options, *, transport='png', timings=None, image_metada
     for ref in refs:
         try:
             started = time.perf_counter()
-            with open_object(ref.get('uri')) as source:
-                raw = source.read(options['max_image_bytes'] + 1)
+            if 'object_read' in options:
+                from .object_input import read_bound_object
+                raw = read_bound_object(ref, binding=options['object_read'], max_bytes=options['max_image_bytes'])
+            else:
+                with open_object(ref.get('uri')) as source:
+                    raw = source.read(options['max_image_bytes'] + 1)
             if len(raw) > options['max_image_bytes']:
                 raise ValueError('Image exceeds max_image_bytes')
             if hashlib.sha256(raw).hexdigest() != ref['sha256']:

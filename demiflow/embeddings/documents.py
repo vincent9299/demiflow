@@ -37,7 +37,15 @@ class DocumentInputReader:
             if key in self.cache:
                 self.cache.move_to_end(key)
                 return self.cache[key][0]
-        document = read_document(ref, max_bytes=self.options['max_document_bytes'])
+        if 'object_read' in self.options:
+            from .object_input import read_bound_object
+            from demiflow.collect.documents import decode_document
+            payload = read_bound_object(ref, binding=self.options['object_read'],
+                                        max_bytes=self.options['max_document_bytes'])
+            document = decode_document(payload)
+            del payload
+        else:
+            document = read_document(ref, max_bytes=self.options['max_document_bytes'])
         if len(document['blocks']) > self.options['max_document_blocks']:
             raise ValueError('Document exceeds max_document_blocks')
         blocks = {block['block_id']: block['text'] for block in document['blocks']}

@@ -1429,6 +1429,7 @@ class Dataset:
 
     @_flow_api("embeddings", datasets=("self",), effects=("network",), execution="stream",
                normalize=_embedding_authoring.normalize_embedding,
+               resource_references=_embedding_authoring.embedding_resources,
                analyze=_embedding_authoring.analyze_embedding)
     def map_embeddings(
         self, *, model, inputs, output='embedding', batch_size=16,
@@ -1448,6 +1449,10 @@ class Dataset:
         queue_depth bounds upstream buffering. prefetch_batches adds bounded batch
         workers for CPU preparation while HTTP is occupied; it does not increase
         request concurrency. options.prepare_workers bounds image preparation;
+        options.object_read declares a local root, optional relocations and
+        layout for verified object inputs. Managed image/document flows require
+        this root to match a registered workspace location; no arbitrary URI
+        fallback occurs when it is declared.
         options.io_workers bounds journal work; options.response_workers separately
         bounds response parsing/validation. options.batch_request_bytes enables byte packing within each
         row batch; an oversized individual input still obeys max_request_bytes.

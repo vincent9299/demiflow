@@ -20,15 +20,23 @@ def embedding_options(options=None):
                     max_response_bytes=8 * 1024**2, timeout_s=300,
                     connect_timeout_s=10, read_timeout_s=120, write_timeout_s=120,
                     pool_timeout_s=10, trust_env=False, sqlite_journal=None)
-    if options is not None and (not isinstance(options, dict) or set(options) - defaults.keys()):
+    if options is not None and (not isinstance(options, dict) or set(options) - (defaults.keys() | {'object_read'})):
         raise ValueError('Unknown embedding runtime options')
     result = normalize_call_options({**defaults, **(options or {})})
+    # Add only when explicitly declared: old programs/default identities keep
+    # exactly their original option mapping and unrestricted native API path.
+    if 'object_read' in result:
+        from .object_input import object_read_binding
+        result['object_read'] = object_read_binding(result['object_read'])
     for key in ('max_image_bytes', 'max_decode_pixels', 'max_document_bytes',
                 'max_document_blocks', 'max_document_spans', 'max_document_text_bytes',
                 'document_cache_entries',
                 'max_request_bytes', 'max_response_bytes'):
         if type(result[key]) is not int or result[key] < 1:
             raise ValueError(key + ' must be a positive integer')
+    if 'object_read' in result and any(result[key] > 128 * 1024**2
+            for key in ('max_image_bytes', 'max_document_bytes')):
+        raise ValueError('Bound local embedding objects must fit the original 128 MiB read limit')
     if type(result['document_cache_bytes']) is not int or result['document_cache_bytes'] < 0:
         raise ValueError('document_cache_bytes must be a nonnegative integer')
     for key in ('timeout_s', 'connect_timeout_s', 'read_timeout_s', 'write_timeout_s', 'pool_timeout_s'):

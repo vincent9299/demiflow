@@ -65,14 +65,50 @@ def normalize_embedding(arguments):
     return values
 
 
+def embedding_resources(arguments):
+    binding = arguments['options'].get('object_read')
+    if binding is None:
+        return []
+    from ..collect.flow_contract import object_resources
+    return object_resources(binding)
+
+
+def _object_input_shape(actual, modality, *, nullable):
+    from ..data.flow_contract import compatible
+    ref = {**scalar('record'), 'fields': {key: field(scalar('str')) for key in ('uri', 'sha256')}}
+    if modality == 'image':
+        expected = ({**scalar('list'), 'item': ref} if actual['kind'] == 'list' else ref)
+    else:
+        span = {**scalar('record'), 'fields': {'block_id': field(scalar('str')),
+            'start': field(scalar('int')), 'end': field(scalar('int'))}}
+        expected = {**scalar('record'), 'fields': {'document_ref': field(ref),
+            'spans': field({**scalar('list'), 'item': span}),
+            'text_sha256': field(scalar('str')),
+            'prefix': field(scalar('str'), required=False),
+            'model_prefix': field(scalar('str'), required=False)}}
+    expected = {**expected, 'nullable': nullable}
+    if not compatible(actual, expected):
+        raise ValueError('Embedding ' + modality + ' requires declared verified object/span fields')
+
+
 def analyze_embedding(arguments, *, inputs, callables, resources):
     from .model import EmbeddingModel
     a=arguments; model=EmbeddingModel(**a['model']); schema=inputs[0]
     require_fields(schema,list(a['inputs'].values()))
     modality,column=next(iter(a['inputs'].items()))
+    object_resources = []
     if modality != 'text':
-        raise ValueError('Managed image/document embedding still requires an explicit object-read resource binding')
-    if schema[column]['type']['kind']!='str' or schema[column]['type'].get('nullable') and a['error_output'] is None:
+        binding = a['options'].get('object_read')
+        resolved = resources.get('objects')
+        if (binding is None or type(resolved) is not dict or resolved.get('kind') != 'objects'
+                or any(resolved.get(key) != value for key, value in binding.items())
+                or not resolved.get('location_id')):
+            raise ValueError('Managed image/document embedding requires an explicit registered object-read resource binding')
+        if modality == 'image' and model.input_format != 'chat':
+            raise ValueError('Embedding images require the original chat input protocol')
+        _object_input_shape(schema[column]['type'], modality, nullable=a['error_output'] is not None)
+        object_resources.append(resolved)
+    elif schema[column]['type']['kind']!='str' or schema[column]['type'].get('nullable') and a['error_output'] is None:
         raise ValueError('Embedding text requires a non-null string field or explicit error_output')
     result=copy.deepcopy(schema)
     result[a['output']]=field({**scalar('list',nullable=a['error_output'] is not None),
@@ -92,6 +128,14 @@ def analyze_embedding(arguments, *, inputs, callables, resources):
                 max_requests=a['max_requests'],concurrency=a['concurrency'],
                 endpoint=model.base_url,api_key_env=model.api_key_env,request_policy=a['request_policy'])
     workers=a['concurrency']+a['prefetch_batches']
+    reserved = workers*8*(a['options']['max_request_bytes']+a['options']['max_response_bytes'])
+    if modality == 'image':
+        reserved += workers*a['options']['prepare_workers']*(
+            4*a['options']['max_image_bytes']+16*a['options']['max_decode_pixels'])
+    elif modality == 'document':
+        reserved += workers*a['options']['prepare_workers']*(
+            32*a['options']['max_document_bytes']+4*a['options']['max_document_text_bytes'])
+        reserved += workers*a['options']['document_cache_bytes']
     return {'fields':result,'driver':'stream','input_driver':'either','kind':'batch_map',
         'cardinality':'one','order':'unspecified',
         'native':{'contract':'demiflow.embeddings.v2','arguments':native},
@@ -99,8 +143,8 @@ def analyze_embedding(arguments, *, inputs, callables, resources):
             queue_depth=a['queue_depth'] or workers,flush_interval=a['flush_interval'],
             catch=[],label=a['label'],hard_timeout=None),
         'resources':[{'kind':'network','endpoint':model.base_url},
-                     {'kind':'credential','name':model.api_key_env}],
+                     {'kind':'credential','name':model.api_key_env}, *object_resources],
         'request_budget':{'scope':'execution','maximum':a['max_requests']},
-        'reserved_bytes':workers*8*(a['options']['max_request_bytes']+a['options']['max_response_bytes']),
+        'reserved_bytes':reserved,
         'drain_timeout_s':a['options']['timeout_s']+1,
         'required_distributions':['httpx']}
