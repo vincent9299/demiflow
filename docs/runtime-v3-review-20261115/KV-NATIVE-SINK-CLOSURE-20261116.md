@@ -43,7 +43,7 @@ worker 不发布 SQLite，恢复入口不绕过历史保护，KV 不创建 RunJo
 
 增长变量包括输入行数、键/值编码字节、目标现有 SQLite/WAL/journal 大小、索引/回滚增长、收据个数。staging 是逐行有界序列；SQLite page cache 是连接级有限配置。每 namespace 的原生收据最多 65,536 个，达到上限明确拒绝新发布，绝不清除历史确认收据换取准入。
 
-SQLite 目标初始化和事务写入前，依据既有文件大小、实际 staged payload、行数和索引/收据余量，对 SQLite rollback / growth 进行保守预留。预留进入**原 run 总 scratch 账本**，与 v3 artifact staging 及其他 producer 累加；本任务预留在 finally 中释放。预留属于准入记录，不是新 allocator 或执行账本。已有数据库和其他任务的文件不会被当成本任务临时文件清理。
+SQLite 目标初始化和事务写入前，依据既有文件大小、实际 staged payload、行数和索引/收据余量，对 SQLite rollback / growth 进行保守预留。取得 `BEGIN IMMEDIATE` 写锁后，再读实际 `page_size/page_count`，在第一次写表前向同一原 reservation 补足 `2 × max(物理 DB/WAL/journal extent, page_size × page_count) + 4 × payload_bytes + (rows + 8) × 8 × page_size`。固定 32 KiB/行仅作锁前初始估计，不再是最终准入依据。新库安全创建明确采用 4 KiB 页；已有合法页大小（含 64 KiB）不改。原安全建库代码提取为 `_create_database`，竞争创建失败一方不会提前写赢家的 `kv_usage`。预留进入**原 run 总 scratch 账本**，与 v3 artifact staging 及其他 producer 累加；本任务预留在 finally 中释放。预留属于准入记录，不是新 allocator 或执行账本。已有数据库和其他任务的文件不会被当成本任务临时文件清理。
 
 这些边界不等价于 SQLite allocator 或进程 RSS 的精确硬上限，也不控制其他外部写者的物理磁盘增长。SQLite cache 上限、保守临时空间预留、原执行截止时间与平台已有资源保护承担各自的边界；不将小样例成功宣称为 SQLite RSS 硬隔离。
 
@@ -68,7 +68,11 @@ SQLite 目标初始化和事务写入前，依据既有文件大小、实际 sta
 
 第一次新增验收的六项通过覆盖真实进程在 prepare 未记录、prepared 已记录、目标发布但原运行收据未记录三个位置退出，以及目标 missing/replaced/receipt corruption 三种恢复拒绝。八项失败来自测试注入/断言本身：只在父进程 monkeypatch 生产方法被 worker code pin 正确拒绝；pytest assert rewrite 使 fixture 类在父/子进程代码不一致；把无副作用中间切片 ACK 误认为 KV 最终发布。修正采用同进程 thread 模式注入、普通可导入 fixture 模块及准确的 native-final ACK 判断；未修改 code-pin 守卫或生产协议。
 
-**最终同一 HEAD 汇总批次：待执行。** 性能 lane 的无竞争窗口结束后，执行原 KV 3 + 新增 KV 13 + 通用回调 3 + 原 entrypoint 7，共 26 项。新增空输入、Unicode、负零、重复键及跨 namespace 历史值场景目前尚未执行，不计入通过。
+**最终同一 HEAD：`95cc93d0078d6b2507d8381b289e66fa1358a775`，30 passed in 109.64s，零跳过/零 deselect。** 构成：原 KV 3 + 新增 KV 13 + 页几何/扩库 4 + 通用回调 3 + 原 entrypoint 7。共 90 个 setup/call/teardown report 全通过；源码及 HEAD 前后完全一致，工作树干净，无残留子进程。空输入、Unicode、负零、重复键、跨 namespace 历史值以及原三条回归均已真实执行通过。
+
+补充取证链：`84f29d8` 曾通过完整 26 项（100.97s）。总控随后指出页大小与锁前扩库窗口，`ae7fb14` 的四项定向检查全部失败；最明显场景旧预留 1,343,568 B，按锁内真实页几何及既定页余量政策需至少 10,878,976 B。这里证明的是准入政策未落实，**不是实测 SQLite 峰值达到该值**。`95cc93d` 修复后，原 26 + 新 4 项一起通过。新检查在真实独立 SQLite 事务扩库后、引擎取得写锁并即将首次写表前，读取原 journal reservation 对照真实页几何；没有提高原预算，也没有另造分配器。
+
+最终原始证据：`/tmp/demiflow-kv-final2-evidence/verification.json`、同目录 `result.xml`；完整日志 `/tmp/demiflow-kv-final2.log`。与本文同目录的 `KV-NATIVE-SINK-CLOSURE-20261116.json` 保存准确命令/资源域、所有 90 个执行报告、测试输入摘要、冻结件摘要、原始证据 SHA-256 和包含失败批次在内的完整证据索引。最后交付提交仅更新说明/证据，生产与测试字节保持此 tested HEAD。
 
 本次只声明 Local 线程和子进程路线及原生 driver sink 协议的证据。尚未单独做本 sink 的 Ray、多机或大库吞吐验收；不把父任务已有的其他 Ray 测试替代为本 sink 的证据。
 
