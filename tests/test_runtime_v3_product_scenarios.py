@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from test_forge_runs import base, root, custom, execute
+from test_forge_workspace import demo, isolated
+from test_forge_markdown_reading import browser
 from runtime_v3_product_scenarios import read_native_execution, validate_native_execution_evidence
 
 
@@ -77,3 +79,43 @@ def test_private_jupyter_sql_uses_original_compiler_broker_native_query_and_ingr
     assert evidence['rows'] == [{'bucket':'a','total':5}, {'bucket':'b','total':7}]
     assert evidence['kernel_status'] == 'succeeded'
     record_property('private_jupyter_sql', evidence)
+
+
+def test_real_sealed_physical_facts_are_visible_in_browser(isolated, browser, monkeypatch, tmp_path, record_property):
+    from playwright.sync_api import expect
+    from test_forge_public_api import service
+    from test_forge_workbench_browser import page_for
+    from test_workbench_execution_binding_browser import select_registered_flow
+    from demiflow.workbench.runs import manager as runs
+    from demiflow.workbench.graph import model
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path/'domain'))
+    with service(isolated,enable_runs=True) as app, page_for(browser,app) as (page,errors):
+        select_registered_flow(page)
+        page.get_by_role('button',name='运行',exact=True).click()
+        expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('成功')
+        run_id = page.evaluate('ForgeView.decodeView(location.hash)')['run_id']
+        result = runs.show(isolated, run_id)
+        graph = model.get(isolated,basis_kind='run',run_id=run_id,attempt=result['attempt'])
+        entry = next(e for e in graph['logical']['actions'] if e.get('binding_level')=='sealed')
+        physical = entry['physical']
+        page.get_by_role('button',name='运行封存计划（E2）',exact=True).click()
+        expect(page.locator('.wb-logical-bar')).to_contain_text('恢复级别 '+physical['recovery'])
+        expect(page.locator('.wb-logical-bar')).to_contain_text('交换通道 '+str(len(physical['exchanges'])))
+        expect(page.locator('.wb-logical-bar')).to_contain_text('恢复限制 '+str(len(physical['limitations']))+' 项')
+        for exchange in physical['exchanges']:
+            expect(page.locator('.wb-logical-bar')).to_contain_text(exchange['mode'])
+        page.locator('.wb-graph .wb-node').filter(has_text='normalize_question').click()
+        inspector = page.locator('.wb-inspector')
+        expect(inspector).to_contain_text('资源画像')
+        # Compare visible values to the original projected stage; never supply a
+        # fixture physical plan to the renderer or substitute computed labels.
+        bridge = entry['identity_bridge']['bridge']['entries']
+        report_id = next(n['id'] for n in graph['nodes'] if (n.get('operator') or {}).get('name')=='normalize_question')
+        occurrence = next(e['occurrence_id'] for e in bridge if e['report_node_id']==report_id)
+        stage = physical['stages'][occurrence]
+        for key,value in stage['profile']['requests'].items():
+            expect(inspector).to_contain_text(str(key)+'='+str(value))
+        assert not errors, errors
+        record_property('actual_sealed_physical_display',dict(run_id=run_id,attempt=result['attempt'],
+            plan_id=entry['plan_id'],dag_id=entry['dag']['dag_id'],stage=stage,
+            exchanges=physical['exchanges'],recovery=physical['recovery'],limitations=physical['limitations']))

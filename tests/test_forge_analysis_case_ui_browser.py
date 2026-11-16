@@ -142,22 +142,28 @@ def query_call(fixture):
 
 def test_real_full_query_nested_types_view_reload_and_narrow_layout(owned_case,tmp_path):
     f=owned_case;p=f['page']
-    p.get_by_text('配置选样条件',exact=True).click()
+    # Current Case layout keeps filters in the visible rail. Grouping lives in
+    # the settings panel and stable ordering has its own collapsed section.
     p.get_by_role('button',name='添加筛选条件',exact=True).click()
     p.get_by_label('筛选字段',exact=True).select_option('score');p.get_by_label('筛选关系',exact=True).select_option('range')
     p.get_by_label('筛选下限',exact=True).fill('0');p.get_by_label('筛选上限',exact=True).fill('0.000001')
     p.get_by_role('button',name='应用筛选与分组',exact=True).click();expect(p.locator('.analysis-case-coverage')).to_contain_text('范围内匹配 1 条')
     assert query_call(f)['query']['filters']['value']['upper']==1e-6
-    p.get_by_text('配置选样条件',exact=True).click()
     p.get_by_label('筛选下限',exact=True).fill('5');p.get_by_label('筛选上限',exact=True).fill('23')
     p.get_by_role('button',name='添加筛选条件',exact=True).click()
     p.get_by_label('筛选字段 2',exact=True).select_option('flag');p.get_by_label('筛选值 2',exact=True).select_option('true')
+    p.get_by_role('button',name='配置分组与筛选',exact=True).click()
     p.get_by_role('button',name='添加分组字段',exact=True).click();p.get_by_label('分组字段',exact=True).select_option('bucket')
-    p.get_by_role('button',name='添加排序字段',exact=True).click();p.get_by_label('排序字段',exact=True).select_option('score');p.get_by_label('排序方向',exact=True).select_option('desc')
+    p.get_by_role('button',name='字段与评测配置',exact=True).click()
+    p.get_by_text('排序与取样范围',exact=True).click()
+    p.get_by_role('button',name='添加排序字段',exact=True).click()
+    p.get_by_text('排序与取样范围',exact=True).click()
+    p.get_by_label('排序字段',exact=True).select_option('score');p.get_by_label('排序方向',exact=True).select_option('desc')
     p.get_by_role('button',name='应用筛选与分组',exact=True).click()
     expect(p.get_by_role('heading',name='Case 22',exact=True)).to_be_visible();expect(p.locator('.analysis-case-coverage')).to_contain_text('范围内匹配 9 条')
     payload=query_call(f);assert payload['query']['scope']=='full' and payload['query']['filters']['op']=='and'
     p.get_by_role('button',name='字段与评测配置',exact=True).click()
+    p.get_by_role('button',name='内容字段与格式',exact=True).click()
     p.get_by_label('字段标题 2',exact=True).fill('模型回答');p.get_by_label('预览格式 2',exact=True).select_option('md');p.get_by_label('Case 布局',exact=True).select_option('comparison')
     p.get_by_role('button',name='保存视图',exact=True).click();expect(p.locator('.analysis-case')).to_contain_text('视图已保存为 v1')
     f['boot']();expect(p.get_by_role('heading',name='Case 22',exact=True)).to_be_visible();expect(p.locator('.analysis-case-status')).to_contain_text('已存视图 v1')

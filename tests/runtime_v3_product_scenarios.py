@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -23,6 +24,7 @@ WORKBENCH_CASES = (
     "tests/test_workbench_execution_binding_browser.py::test_real_run_data_graph_source_and_params_still_load",
     "tests/test_forge_workbench_runtime_browser.py::test_native_multiple_runs_select_graph_logs_outputs_and_discard_late_delivery",
     "tests/test_forge_workbench_runtime_browser.py::test_native_stop_survives_current_code_removal_and_keeps_attempt_identity",
+    "tests/test_runtime_v3_product_scenarios.py::test_real_sealed_physical_facts_are_visible_in_browser",
 )
 PRODUCT_CASES = (
     "tests/test_runtime_v3_product_scenarios.py::test_managed_union_and_nested_materialize_bind_every_occurrence",
@@ -177,6 +179,10 @@ def _browser_gate(fx, scenario, nodeids):
             stderr=subprocess.STDOUT, timeout=900)
     assert output.is_file(), (process.returncode, root/'pytest.log')
     result = json.loads(output.read_text())
+    # Preserve failed as well as passing children before RuntimeV3Fixture.close
+    # removes its owned workspaces. Never reduce a failed report to a node count.
+    result['log'] = (root/'pytest.log').read_text()[-256*1024:]
+    fx._save_evidence(scenario+'-child', result)
     assert process.returncode == result['exit_code']
     assert not result['collection_errors'] and set(result['collected']) == set(nodeids)
     skipped = [r for r in result['reports'] if r['outcome'] == 'skipped']
@@ -204,7 +210,15 @@ def _browser_gate(fx, scenario, nodeids):
 
 
 def workbench_real_plan(fx, fault=None):
-    return _browser_gate(fx, 'workbench_real_plan', WORKBENCH_CASES)
+    from runtime_v3_support import NotRunError
+    result = _browser_gate(fx, 'workbench_real_plan', WORKBENCH_CASES)
+    # CPU/plan/bridge/attempt proofs do not stand in for the frozen positive GPU
+    # display requirement. The managed parent currently lacks a GPU grant.
+    detail = {'missing_semantic_harness': 'positive managed GPU grant and its original sealed profile displayed in the workbench',
+        'verified': 'native union/nested materialize, report bridges, CPU/exchange/recovery facts, run/attempt selection and stop/resume'}
+    fx._save_evidence('workbench_real_plan-partial', result)
+    fx._record_not_run('workbench_real_plan', detail)
+    raise NotRunError('workbench_real_plan', detail)
 
 
 def product_regression(fx, fault=None):
@@ -236,6 +250,8 @@ def _main():
                 if not parent.is_dir():
                     continue
                 for path in sorted(parent.iterdir()):
+                    if re.fullmatch(r'r[0-9a-f]{24}', path.name) is None:
+                        continue  # the original driver-resources directories are not runs
                     state = runs.show(workspace, path.name)
                     if state['status'] == 'succeeded':
                         proofs.append(read_native_execution(workspace, path.name,
@@ -243,7 +259,8 @@ def _main():
 
         def pytest_runtest_logreport(self, report):
             if report.when == 'call':
-                properties.append(dict(nodeid=report.nodeid, properties=report.user_properties))
+                properties.append(dict(nodeid=report.nodeid, properties=report.user_properties,
+                    failure=str(report.longrepr) if report.failed else None))
 
     report = ReportPlugin()
     assert_tree_binding()
