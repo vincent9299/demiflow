@@ -553,7 +553,7 @@ class RuntimeV3Fixture:
         from contextlib import nullcontext
         self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix',
             'multiworker_barrier', 'route_recovery', 'driver_restart', 'actor_state_lifecycle', 'performance',
-            'history_identity', 'workbench_real_plan', 'product_regression', 'cpu_gpu_isolation', 'node_loss'}
+            'history_identity', 'workbench_real_plan', 'product_regression', 'cpu_gpu_isolation', 'node_loss', 'two_hosts'}
         scope = nullcontext() if self_managed else RunContext.start(self.journal_dir / scenario)
         try:
             with scope, _use_executor(executor):
@@ -1187,9 +1187,10 @@ def _s_remote_journal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]
 
 
 def _s_two_hosts(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'host names in a JSON file do not prove actual Ray node placement or shared-store access'}
-    fx._record_not_run('two_hosts', detail)
-    raise NotRunError('two_hosts', detail)
+    from runtime_v3_two_hosts_scenarios import two_hosts, validate_evidence
+    evidence = two_hosts(fx, fault)
+    validate_evidence(evidence)
+    return evidence
 
 
 def _s_node_loss(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
