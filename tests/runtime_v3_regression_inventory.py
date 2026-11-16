@@ -41,7 +41,11 @@ class Inventory:
         self.items = [{'nodeid': item.nodeid, 'file': str(item.path.relative_to(ROOT)),
                        'line': item.location[1] + 1,
                        'fixtures': list(item.fixturenames),
-                       'markers': [{'name': m.name, 'args': repr(m.args), 'kwargs': repr(m.kwargs)}
+                       # Literal parametrize payloads can be many MiB. Exact
+                       # nodeids and source hashes identify them without copying
+                       # their bytes into every item in the evidence inventory.
+                       'markers': [{'name': m.name, 'argument_count': len(m.args),
+                                    'keyword_names': sorted(m.kwargs)}
                                    for m in item.iter_markers()]}
                       for item in session.items]
         assert len(self.items) <= 100000
