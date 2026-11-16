@@ -682,6 +682,8 @@ def test_real_ray_actor_death_terminal_and_resume_leaves_no_orphan(tmp_path, ray
             _materialize_chain(dataset)
     assert crash_marker.exists(), "the worker process never actually died"
     scopes, allocations = _assert_terminal_issued(run, "ABANDON")
+    original_commits = run.journal.execution_commits("action-1")
+    assert original_commits and all(item["status"] == "acked" for item in original_commits)
     first_scope = scopes[0]["scope_id"]
     _assert_no_residual_actor(ray_local, allocations)
 
@@ -689,6 +691,7 @@ def test_real_ray_actor_death_terminal_and_resume_leaves_no_orphan(tmp_path, ray
         assert _materialize_chain(dataset) == [{"x": i * 2} for i in range(6)]
         _converge_terminal(run2)
         scopes2, allocations2, outstanding2 = _ledger(run2)
+        assert run2.journal.execution_commits("action-1")[:len(original_commits)] == original_commits
     assert len(scopes2) == len(scopes) + 1, scopes2
     assert {a["allocation_id"] for a in allocations} < {a["allocation_id"] for a in allocations2}
     assert first_scope in [s["scope_id"] for s in scopes2]

@@ -27,14 +27,17 @@ def _entry(tmp_path):
 
 
 def _observe(monkeypatch):
-    from demiflow.execution import dataflow
-    original = dataflow.execute_action
+    from demiflow.execution import dataflow, dataflow_api
+    original = dataflow_api.execute_action
     observed = []
     def execute(request, *, policy, bounds):
         handle = original(request, policy=policy, bounds=bounds)
         observed.append((request, policy, bounds, handle))
         return handle
     monkeypatch.setattr(dataflow, 'execute_action', execute)
+    # The facade may already be imported by an earlier suite in the same pytest
+    # process. Observe its actual binding as well, not only a future import.
+    monkeypatch.setattr(dataflow_api, 'execute_action', execute)
     return observed
 
 
