@@ -310,6 +310,11 @@ def public_shared_models(fx):
         for row in seen:row['attempt']=owner_attempt[row['pid']]
         per_attempt=Counter((r['attempt'],r['i']) for r in seen)
         assert per_attempt and set(per_attempt.values())=={1},'shared upstream was repeated for a downstream branch'
+        source_cut=result['loss']['boundary']['sources']
+        assert len(source_cut)==1 and 0<source_cut[0]['offset']['index']<12
+        prefix=source_cut[0]['offset']['index'];all_calls=Counter(row['i'] for row in seen)
+        assert all(all_calls[i]==1 for i in range(prefix)), 'committed shared prefix was re-executed'
+        result['committed_shared_prefix_rows']=prefix
         assert len(result['physical']['sources'])==1
         outgoing=Counter(e['producer'] for e in result['physical']['edges'])
         assert any(n>=2 for n in outgoing.values())
