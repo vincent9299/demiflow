@@ -206,6 +206,8 @@ def test_duplicate_planned_batches_are_refused_before_launch(fixture):
     'tests/fixtures/example.json',
     'examples/forge_workspace/make_demo.py',
     'examples/forge_text_map/flows/config.json',
+    'tools/forge_analysis/build_image.py',
+    'tools/forge_analysis/build_helper.py',
     'docs/unified-runtime-v3-20261114/plan.json',
 ])
 def test_js_html_css_and_fixture_contract_changes_invalidate_old_receipt(tmp_path, monkeypatch, changed):
