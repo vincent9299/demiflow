@@ -5,10 +5,12 @@ This is physical admission for one machine domain, not the RunJournal
 cumulative cost ledger. Ray placement is charged by Ray Core, never here.
 """
 import fcntl
+import hashlib
 from contextvars import ContextVar
 from contextlib import contextmanager
 import json
 import os
+import stat
 from pathlib import Path
 import time
 
@@ -119,6 +121,7 @@ class LocalCapacityPool:
         self.root.mkdir(parents=True, exist_ok=True)
         self._records = self.root / "allocations"
         self._records.mkdir(exist_ok=True)
+        self._released = self.root / "released"
 
     def _lock(self):
         path = self.root / "capacity.lock"
@@ -130,32 +133,111 @@ class LocalCapacityPool:
             raise
         return fd
 
-    def _read(self, allocation_id):
-        path = self._records / (allocation_id + ".json")
+    def _released_path(self, allocation_id):
+        # Exact lookup, never a scan of unbounded historical allocations.
+        bucket = hashlib.sha256(allocation_id.encode("utf-8")).hexdigest()[:2]
+        return self._released / bucket / (allocation_id + ".json")
+
+    @staticmethod
+    def _read_file(path, allocation_id):
         try:
-            with open(path, "rb") as stream:
-                raw = stream.read(8193)
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         except FileNotFoundError:
             return None
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ResourceError("INVALID_SPEC", "capacity record is not a regular file")
+            try:
+                raw = stream.read(8193)
+            except OSError as exc:
+                raise ResourceError("INVALID_SPEC", "capacity record cannot be read") from exc
         if len(raw) > 8192:
             raise ResourceError("INVALID_SPEC", "capacity record exceeds byte budget")
         record = json.loads(raw)
         if type(record) is not dict or record.get("allocation_id") != allocation_id:
             raise ResourceError("INVALID_SPEC", "capacity record identity differs")
-        return record
+        return record, raw
+
+    def _read(self, allocation_id):
+        current = self._read_file(self._records / (allocation_id + ".json"), allocation_id)
+        archive_path = self._released_path(allocation_id)
+        if self._released.is_symlink() or archive_path.parent.is_symlink():
+            raise ResourceError("INVALID_SPEC", "capacity archive directory is a symlink")
+        archived = self._read_file(archive_path, allocation_id)
+        if archived is not None:
+            if archived[0].get("state") != "RELEASED":
+                raise ResourceError("INVALID_SPEC", "archived capacity record is not released")
+            if current is not None and current[1] != archived[1]:
+                raise ResourceError("INVALID_SPEC", "capacity history conflicts with active directory")
+        selected = current if current is not None else archived
+        return None if selected is None else selected[0]
+
+    @staticmethod
+    def _sync_directory(path):
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _archive_released(self, allocation_id):
+        """Same lock/record authority; interrupted moves remain retryable.
+
+        Link before unlink preserves the original inode and byte-for-byte exit
+        evidence. A crash can leave both names, but cannot lose the only durable
+        name. Differing duplicates fail closed instead of overwriting history.
+        """
+        source = self._records / (allocation_id + ".json")
+        current = self._read_file(source, allocation_id)
+        if current is None or current[0].get("state") != "RELEASED":
+            return
+        destination = self._released_path(allocation_id)
+        self._released.mkdir(exist_ok=True)
+        self._sync_directory(self.root)
+        self._sync_directory(self._released)
+        destination.parent.mkdir(exist_ok=True)
+        self._sync_directory(self._released)
+        self._sync_directory(destination.parent)
+        try:
+            os.link(source, destination, follow_symlinks=False)
+        except FileExistsError:
+            archived = self._read_file(destination, allocation_id)
+            if archived is None or current[1] != archived[1]:
+                raise ResourceError("INVALID_SPEC", "capacity archive conflicts with original record")
+        self._sync_directory(destination.parent)
+        source.unlink()
+        self._sync_directory(self._records)
 
     def _active(self):
-        records = []
-        with os.scandir(self._records) as entries:
-            for count, entry in enumerate(entries):
-                if count >= MAX_ACTIVE_RECORDS + 1:
-                    raise ResourceError("QUOTA_EXCEEDED", "capacity record count exceeds budget")
-                if not entry.name.endswith(".json") or entry.name.endswith(".tmp"):
-                    continue
-                record = self._read(entry.name[:-5])
-                if record is not None and record["state"] != "RELEASED":
-                    records.append(record)
-        return records
+        # At most two bounded pages per call, independent of total history.
+        # Never admit from an incomplete active scan. Large legacy directories
+        # make bounded progress and let the normal capacity retry try again.
+        for attempt in range(2):
+            records, released, overflow = [], [], False
+            with os.scandir(self._records) as entries:
+                for count, entry in enumerate(entries):
+                    if count >= MAX_ACTIVE_RECORDS:
+                        overflow = True
+                        break
+                    if not entry.name.endswith(".json"):
+                        continue
+                    allocation_id = entry.name[:-5]
+                    identifier(allocation_id)
+                    record = self._read(allocation_id)
+                    if record is None:
+                        continue
+                    if record["state"] == "RELEASED":
+                        released.append(allocation_id)
+                    else:
+                        records.append(record)
+            if not overflow:
+                return records
+            if not released:
+                raise ResourceError("QUOTA_EXCEEDED", "capacity record count exceeds active scan budget")
+            for allocation_id in released:
+                self._archive_released(allocation_id)
+        raise ResourceError("CAPACITY_PENDING", "capacity history compaction made progress; retry bounded scan",
+                            retriable=True, retry_after_ms=1)
 
     def _charged(self, records):
         charged = {
