@@ -173,17 +173,36 @@ def test_cache_observation_distinguishes_zero_missing_errors_and_window(tmp_path
     assert journal_observation(tmp_path/'missing.sqlite')['provider_cache_total']['token_hit_rate_on_reported_inputs'] is None
 
 
-def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeypatch):
+def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeypatch, record_property):
     from demiflow.data.api import DataAPI
     from demiflow.operator_llm import journal as module
+    from demiflow.operator_llm.client import AsyncOperatorLLMClient
+    from demiflow.execution import dataflow_api
+    from contextvars import ContextVar
     path = tmp_path / 'calls.sqlite'
     encoded = 'data:image/png;base64,' + 'YWJj' * 400000
     pack = PACK.replace('{{ payload | json }}', '{{ payload | image }}')
     original = module.canonical
-    hashes = []
+    hashes, driver_verifications = [], []
+    # Observe the original client hashing phase in a real thread worker. A
+    # driver-only patch cannot see a spawned worker, and the driver's separate
+    # authenticated request decoding is not the original preparation cache.
+    preparing = ContextVar('test_actual_client_preparation', default=False)
+    prepare = AsyncOperatorLLMClient.prepare
+    def observed_prepare(client, request):
+        token = preparing.set(True)
+        try:
+            return prepare(client, request)
+        finally:
+            preparing.reset(token)
+    resolve = dataflow_api.resolve_runtime_policy
+    def thread_policy(options, limits, **kwargs):
+        return resolve({**options, 'worker_mode': 'thread'}, limits, **kwargs)
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', thread_policy)
+    monkeypatch.setattr(AsyncOperatorLLMClient, 'prepare', observed_prepare)
     def counted(value):
         if isinstance(value, module.RequestRecord):
-            hashes.append(threading.get_ident())
+            (hashes if preparing.get() else driver_verifications).append(threading.get_ident())
         return original(value)
     monkeypatch.setattr(module, 'canonical', counted)
     for limit in (1, 0):
@@ -195,6 +214,11 @@ def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeyp
     assert len(server['requests']) == 1
     assert encoded in json.dumps(server['requests'][0]['body'])
     assert len(hashes) == 2  # one exact-request hash per attempt, including replay
+    assert all(worker != threading.get_ident() for worker in hashes)
+    assert driver_verifications  # Authentication remains real and separately observed.
+    record_property('actual_worker_mode', 'thread')
+    record_property('client_exact_request_hashes', len(hashes))
+    record_property('driver_request_authentication_hashes', len(driver_verifications))
     assert path.stat().st_size < 100000
     with sqlite3.connect(path) as db:
         saved = db.execute('SELECT request_json FROM calls').fetchone()[0]

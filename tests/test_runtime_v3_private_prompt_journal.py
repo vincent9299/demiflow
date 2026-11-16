@@ -141,6 +141,24 @@ def test_interrupted_private_materialization_never_becomes_a_resumable_result(tm
     assert len(native_server) == sent
 
 
+def test_private_prompt_ray_materializes_current_attempt_without_reissuing_http(tmp_path, native_server):
+    pytest.importorskip('ray')
+    from types import SimpleNamespace
+    from runtime_v3_residency_scenarios import _provider
+    with _provider(SimpleNamespace(root=tmp_path, provider='ray'), workers=3), RunContext.start(tmp_path/'run') as run:
+        saved = _pipeline(tmp_path/'private.sqlite').materialize()
+        try:
+            original = saved._source.handle._manifest_ref
+            first = saved.take_all()
+            assert saved.take_all() == first and [row['answer'] for row in first] == ['ok', 'ok']
+            assert len(native_server) == _charged(run) == 2
+            assert saved._source.handle._manifest_ref == original
+            assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+            assert run.journal.source_binding('action-1-state-recovery-restriction')['recovery'] == 'attempt_only'
+        finally:
+            saved.release()
+
+
 def test_private_prompt_read_only_miss_does_not_send_or_charge(tmp_path, native_server):
     from demiflow.operator_llm.errors import PromptReplayMissError
     path = tmp_path/'private.sqlite'
