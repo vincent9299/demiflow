@@ -20,7 +20,16 @@ def pipeline():
 
 @pytest.mark.parametrize('interrupt', [False, True])
 def test_two_outputs_park_and_resume_before_single_row_consumer(tmp_path, monkeypatch, interrupt):
+    from dataclasses import replace
+    from demiflow.execution import dataflow_api
     from demiflow.execution.dataflow import DataflowExecution
+    # This is the existing compiler's declared unfused mode, not a replacement
+    # kernel or scheduler. A fused pure pipeline would never cross this seam.
+    resolve = dataflow_api.resolve_action_runtime
+    def unfused(request):
+        policy, bounds = resolve(request)
+        return replace(policy, fusion=False), bounds
+    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', unfused)
     observed = []
     class Interrupted(Exception):
         pass
