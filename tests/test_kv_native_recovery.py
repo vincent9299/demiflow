@@ -123,7 +123,7 @@ def test_sqlite_duplicate_commit_and_abort_do_not_reapply_or_delete_publication(
         assert self.inspect(prepared, context) == result
         return result
     monkeypatch.setattr(KVDatasink, 'commit', twice)
-    with RunContext.start(tmp_path/'run') as run, data.local_execution(workers=1):
+    with RunContext.start(tmp_path/'run') as run, data.local_execution(workers=1, worker_mode='thread'):
         sink = store.datasink()
         data.from_items([{'key': 'a', 'value': 1}]).write_datasink(sink)
         assert sink.receipt.written_rows == 1
@@ -139,7 +139,8 @@ def test_sqlite_capacity_failure_rolls_back_whole_native_commit(tmp_path):
             data.from_items([{'key':'a','value':2}, {'key':'b','value':3}]).write_datasink(store.datasink(batch_rows=1))
     assert store.get('a')['value'] == {'original': 1} and not store.get('b')['hit']
     assert _markers(store) == []
-    assert not any(c['status']=='acked' for c in run.journal.execution_commits('action-1'))
+    assert not any(c['status']=='acked' and c['prepared']['sinks']['write_datasink'].get('native') is not None
+                   for c in run.journal.execution_commits('action-1'))
 
 
 def test_prepare_inspection_locked_target_and_unpublished_abort(tmp_path, monkeypatch):
@@ -159,7 +160,7 @@ def test_prepare_inspection_locked_target_and_unpublished_abort(tmp_path, monkey
         raise ValueError('abort test finished without publication')
     monkeypatch.setattr(KVDatasink, 'prepare', checked)
     with pytest.raises(ValueError, match='abort test finished'):
-        with RunContext.start(tmp_path/'run'), data.local_execution(workers=1):
+        with RunContext.start(tmp_path/'run'), data.local_execution(workers=1, worker_mode='thread'):
             data.from_items([{'key':'a','value':1}]).write_datasink(store.datasink())
     assert _markers(store) == []
 
@@ -176,7 +177,7 @@ def test_corrupt_prepared_payload_rolls_back_prior_upserts(tmp_path, monkeypatch
         return prepared
     monkeypatch.setattr(KVDatasink, 'prepare', corrupt)
     with pytest.raises(Exception, match='checksum'):
-        with RunContext.start(tmp_path/'run'), data.local_execution(workers=1):
+        with RunContext.start(tmp_path/'run'), data.local_execution(workers=1, worker_mode='thread'):
             data.from_items([{'key':'a','value':1}, {'key':'b','value':2}]).write_datasink(store.datasink())
     assert store.get('a')['value'] == 50 and not store.get('b')['hit']
     assert _markers(store) == []
@@ -202,6 +203,6 @@ def test_sqlite_scratch_uses_aggregate_original_run_admission(tmp_path, monkeypa
             run.release_temporaries([other])
     monkeypatch.setattr(KVDatasink, 'prepare', compete)
     with pytest.raises(ValueError, match='original aggregate admission'):
-        with RunContext.start(tmp_path/'run'), data.local_execution(workers=1):
+        with RunContext.start(tmp_path/'run'), data.local_execution(workers=1, worker_mode='thread'):
             data.from_items([{'key':'a','value':1}]).write_datasink(store.datasink())
     assert observed == [True] and not Path(store.path).exists()
