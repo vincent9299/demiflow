@@ -85,6 +85,25 @@ class SQLiteKV:
                                (self.namespace, key)).fetchone()[0]
         return {'hit': True, 'value': json.loads(value)}
 
+    def _create_database(self):
+        """Create only an absent database; never mutate a concurrent winner."""
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        if not Path(self.path).exists():
+            descriptor, temporary = tempfile.mkstemp(prefix='.kv-', dir=Path(self.path).parent)
+            os.close(descriptor)
+            try:
+                with closing(sqlite3.connect(temporary)) as initial:
+                    initial.execute('PRAGMA synchronous=FULL')
+                    initial.execute('PRAGMA page_size=4096')
+                    initial.execute('CREATE TABLE kv (namespace TEXT, key TEXT, value BLOB NOT NULL, PRIMARY KEY(namespace,key))')
+                    initial.execute('CREATE TABLE kv_usage (namespace TEXT PRIMARY KEY, entries INTEGER NOT NULL, bytes INTEGER NOT NULL)')
+                try:
+                    os.link(temporary, self.path)
+                except FileExistsError:
+                    pass
+            finally:
+                os.unlink(temporary)
+
     def put_many(self, items):
         # Caller batches both count and bytes before entering this transaction.
         encoded = []
@@ -95,21 +114,7 @@ class SQLiteKV:
             if len(encoded) >= 256 or total > 32 * 1024**2:
                 raise ValueError('KV write batch exceeds 256 rows or 32 MiB')
             encoded.append((self.namespace, self.key(key), payload))
-        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        if not Path(self.path).exists():
-            descriptor, temporary = tempfile.mkstemp(prefix='.kv-', dir=Path(self.path).parent)
-            os.close(descriptor)
-            try:
-                with closing(sqlite3.connect(temporary)) as initial:
-                    initial.execute('PRAGMA synchronous=FULL')
-                    initial.execute('CREATE TABLE kv (namespace TEXT, key TEXT, value BLOB NOT NULL, PRIMARY KEY(namespace,key))')
-                    initial.execute('CREATE TABLE kv_usage (namespace TEXT PRIMARY KEY, entries INTEGER NOT NULL, bytes INTEGER NOT NULL)')
-                try:
-                    os.link(temporary, self.path)
-                except FileExistsError:
-                    pass
-            finally:
-                os.unlink(temporary)
+        self._create_database()
         with closing(sqlite3.connect(self.path, timeout=self.timeout_s)) as db, db:
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')

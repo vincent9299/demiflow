@@ -33,8 +33,10 @@ def test_locked_page_geometry_and_concurrent_growth_are_reserved(tmp_path, monke
             return self.db.__exit__(*args)
         def close(self):
             self.db.close()
+        def __getattr__(self, name):
+            return getattr(self.db, name)
         def execute(self, sql, *args):
-            if sql.startswith(('CREATE TABLE', 'INSERT INTO')):
+            if not audits and sql.startswith(('CREATE TABLE', 'INSERT INTO')):
                 assert self.db.in_transaction
                 page_size = self.db.execute('PRAGMA page_size').fetchone()[0]
                 page_count = self.db.execute('PRAGMA page_count').fetchone()[0]

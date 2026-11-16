@@ -64,7 +64,9 @@ def _scratch(run, context, size):
     path = run.directory / 'scratch' / ('kv-' + context.commit_id + '.reservation')
     run.allocate_artifact(path, size=size, atomic=False)
     try:
-        yield
+        # Recheck against locked SQLite geometry without introducing another
+        # allocator or raising the original run's total admission ceiling.
+        yield lambda required: run.reserve_artifact_bytes(path, max(size, required))
     finally:
         run.release_temporaries([path])
 
@@ -93,6 +95,20 @@ def _target_bytes(path):
                for suffix in ('', '-wal', '-journal'))
 
 
+def _locked_extent(db, path, *, rows=0, payload_bytes=0):
+    if not db.in_transaction:
+        raise RecoveryContractError('SQLite scratch sizing requires the original write transaction')
+    page_size = db.execute('PRAGMA page_size').fetchone()[0]
+    page_count = db.execute('PRAGMA page_count').fetchone()[0]
+    if page_size not in (512, 1024, 2048, 4096, 8192, 16384, 32768, 65536) or page_count < 0:
+        raise RecoveryContractError('SQLite page geometry is invalid')
+    # BEGIN IMMEDIATE prevents another writer extending this snapshot between
+    # sizing and our writes. Account for logical WAL pages as well as extents;
+    # the structure allowance is pages, never an assumed 4096-byte page size.
+    existing = max(_target_bytes(path), page_size * page_count)
+    return 2 * existing + 4 * payload_bytes + (rows + 8) * 8 * page_size
+
+
 class DurableKVSink:
     def recovery_identity(self):
         return dict(kind='sqlite_kv', store=asdict(self.store), key=self.key,
@@ -104,13 +120,14 @@ class DurableKVSink:
     def _target(self, run, context):
         path = Path(self.store.path)
         extent = 2 * _target_bytes(path) + 128 * 1024
-        with _scratch(run, context, extent):
-            # Existing put_many already provides race-safe empty DB creation.
-            # No business KV values are written during preparation.
+        with _scratch(run, context, extent) as reserve:
+            # Race-safe creation only; a losing creator must not update the
+            # winner's kv_usage before taking and sizing its own write lock.
             if not path.exists():
-                self.store.put_many(())
+                self.store._create_database()
             with closing(_connection(self.store, run)) as db, db:
                 db.execute('BEGIN IMMEDIATE')
+                reserve(_locked_extent(db, path))
                 db.execute('CREATE TABLE IF NOT EXISTS kv_store_identity '
                            '(singleton INTEGER PRIMARY KEY CHECK(singleton=1), database_id TEXT NOT NULL)')
                 db.execute('INSERT OR IGNORE INTO kv_store_identity VALUES (1,?)', (uuid.uuid4().hex,))
@@ -275,11 +292,12 @@ class DurableKVSink:
         # Conservative rollback/growth admission includes existing database and
         # journal extents, new payload, key/index pages and fixed receipt pages.
         extent = 2 * _target_bytes(path) + 4 * prepared['bytes'] + (prepared['rows'] + 8) * 32768
-        with _scratch(run, context, extent), closing(self._open_verified(prepared, run, readonly=False)) as db, db:
+        with _scratch(run, context, extent) as reserve, closing(self._open_verified(prepared, run, readonly=False)) as db, db:
             db.execute('BEGIN IMMEDIATE')
             receipt = self._inspect_db(db, prepared, context, digest)
             if receipt is not None:
                 return receipt
+            reserve(_locked_extent(db, path, rows=prepared['rows'], payload_bytes=prepared['bytes']))
             if db.execute('SELECT COUNT(*) FROM kv_sink_commits WHERE namespace=?', (self.store.namespace,)).fetchone()[0] >= _MAX_RECEIPTS:
                 raise ValueError('KV sink receipt capacity exceeded')
             count, size = db.execute('SELECT entries,bytes FROM kv_usage WHERE namespace=?',
