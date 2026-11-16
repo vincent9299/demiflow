@@ -333,11 +333,15 @@ def plan_exchanges(
         else:
             mode = _MEMORY_MODE
         edge_credit_rows = credit_rows
-        if mode != 'finite_sealed' and producer_stage.stage_id != consumer_stage.stage_id:
+        if mode == _MEMORY_MODE and producer_stage.stage_id != consumer_stage.stage_id:
             # Plain tasks declare their input batch size. Bound live transport
             # prefetch by it so early-close need not drain a generic 64/256-row
             # window first. Finite scopes still spool their complete input;
             # task boundaries and historical sealed admission remain unchanged.
+            # A durable window owns disk-backed references, not the consumer's
+            # in-memory task queue. It must fit one bounded producer invocation
+            # while that consumer is absent; its bytes and pending deliveries
+            # remain charged by the original store/channel authorities.
             task_rows = [nodes[occ].kernel.configuration['task_batch_rows']
                          for occ in consumer_stage.occurrences
                          if nodes[occ].kernel.configuration.get('task_batch_rows')]
@@ -774,6 +778,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
             mode = "finite_sealed" if finite else "durable_incremental"
             upgraded.append(replace(exchange, mode=mode,
                 scope_id="scope-" + exchange.edge_id if finite else None,
+                credit_rows=min(256, bounds.max_pending_events),
                 storage_bytes=min(bounds.max_spill_bytes, exchange.credit_bytes * 8),
                 reason=f"{mode}:{reason}_requires_" +
                        ("finite_completion;" if finite else "checkpointed_parking;") + exchange.reason))
