@@ -68,6 +68,14 @@ def test_mixed_stateful_images_and_small_workspace_keep_original_path(tmp_path):
         assert all(ref.media_type == IMAGE_MEDIA_TYPE for ref in refs.values())
 
 
+def test_large_global_budget_does_not_borrow_a_small_assigned_input_window(tmp_path):
+    with store_fixture(tmp_path) as (_, store, port):
+        original = kernels(store, port._bounds)
+        small = replace(port._bounds, max_batch_bytes=16384)
+        refs = snapshot_kernel_images(original, store=store, bounds=small)
+        assert all(ref.media_type == IMAGE_MEDIA_TYPE for ref in refs.values())
+
+
 @pytest.mark.parametrize('occupied', [0, 4096])
 def test_header_overhead_cannot_expand_original_spill_quota(tmp_path, occupied):
     with store_fixture(tmp_path) as (_, store, port):

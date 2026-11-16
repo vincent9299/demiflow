@@ -22,7 +22,7 @@ _IMAGE_WORKSPACE = 256 * 1024
 
 def pack_limit(bounds):
     return min(bounds.max_state_bytes // 4, bounds.max_control_bytes // 4,
-               bounds.max_resident_bytes // 64, 65536)
+               bounds.max_resident_bytes // 64, bounds.max_batch_bytes // 4, 65536)
 
 
 def _header(occurrence, partition, raw):
@@ -40,8 +40,15 @@ def _pack(kernels, *, store, bounds):
     if (len(kernels) < 2 or limit < _HEADER_BYTES * len(kernels)
             or bounds.max_control_bytes < _MAX_MEMBERS * _HEADER_BYTES * 4
             or bounds.max_state_bytes < 4 * _IMAGE_WORKSPACE
+            or bounds.max_batch_bytes < _IMAGE_WORKSPACE
             or bounds.max_resident_bytes < 4 * _IMAGE_WORKSPACE):
         return None
+    # Placement already reserves one input window per fused pure occurrence.
+    # At this drained cut those windows contain no batch/ports. At least two
+    # original windows cover either one metadata encoding plus bounded headers,
+    # or the read/selected-member copies (at most 4 * 64 KiB). The stream is
+    # closed before decoding the selected image. These peaks do not overlap;
+    # no new grant, row/batch/state ceiling, or process-RSS promise is introduced.
     descriptors = []
     total = len(_MAGIC) + 2  # Member count is one decimal digit and a newline.
     for (occurrence, partition), kernel in kernels:
