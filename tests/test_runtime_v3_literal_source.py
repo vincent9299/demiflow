@@ -234,9 +234,13 @@ def test_real_dataset_literal_original_ack_gc_and_resume(tmp_path,monkeypatch):
     assert boundary and first['gc']['blocked'] is None and first['gc']['removed']>=1
     assert not first['execution']._store.inspect(first['orphan'])
     assert all(first['execution']._store.inspect(ref) for ref in first['refs'])
-    with RunContext.resume(reference) as run:
-        assert run.journal.execution_commit(boundary['commit_id'])==boundary['fact']
-        actual=data.from_items(rows).take_all()
+    with pytest.raises(InterruptedLiteral,match='after final ACK'):
+        with RunContext.resume(reference) as run:
+            assert run.journal.execution_commit(boundary['commit_id'])==boundary['fact']
+            actual=data.from_items(rows).take_all()
+            # Keep the run unfinished after the action's original final ACK.
+            # A successfully finished run correctly forbids another attempt.
+            raise InterruptedLiteral('after final ACK before run completion')
     assert actual==rows
     assert all(math.copysign(1,r['typed'][1][1])==-1 for r in actual)
     # The original final ACK is a read-only result on a subsequent resume.
@@ -277,3 +281,25 @@ def test_other_finished_split_pending_record_shares_original_worker_grant(tmp_pa
         finally:
             for reader in readers:reader.close()
         assert all(reader.retained_bytes==0 for reader in readers)
+
+
+def test_literal_pending_snapshot_replays_exact_original_record(tmp_path):
+    with store_fixture(tmp_path) as (_,store,_):
+        bounds=replace(store._bounds,max_state_bytes=4096,max_row_bytes=8192,max_batch_bytes=16384)
+        source=ItemsSource(example(40))
+        snapshot=snapshot_source(source,action=NS(action_id='literal-pending'),store=store,bounds=bounds)
+        services=services_for(store,bounds,snapshot,literal_reference(source,bounds))
+        split=plan_source_splits(snapshot,source,target_partitions=1,bounds=bounds)[0]
+        reader=open_source_reader(snapshot,split,cursor=None,services=services)
+        first=reader.next_record().record
+        cursor=reader.snapshot()  # No downstream acknowledgement happened.
+        assert len(cursor.pending_refs)==1
+        reader.close()
+        resumed=open_source_reader(snapshot,split,cursor=cursor,services=services)
+        try:
+            replay=resumed.next_record().record
+            assert replay.record_id==first.record_id and replay.sequence==first.sequence
+            assert thaw_record_value(replay.inline)==source.items[0]
+            assert read_all(resumed)==list(source.items[1:])
+        finally:resumed.close()
+        assert resumed.retained_bytes==0
