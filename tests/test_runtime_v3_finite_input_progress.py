@@ -15,7 +15,8 @@ def reader(services, spec):
     edge = NS(edge_id=spec.edge_id, consumer='terminal', input_port='input')
     runner = NS(services=services, bounds=services.bounds, partition='c0',
         _exchange={spec.edge_id: spec}, e=NS(_graph=NS(edges=(edge,)), _node_specs={'terminal': None}),
-        _finished_inputs=set(), _finished=set(), _closed_inputs=set(), _paused=False, _cut=None)
+        _finished_inputs=set(), _finished=set(), _closed_inputs=set(), _paused=False, _cut=None,
+        _park_requested=False, _park_mode=False, _park_finish_pending=False)
     runner._edge_eoi = lambda edge, producer: runner._finished_inputs.add((edge, producer))
     runner._frame_call = lambda fn, *a, _frame_retained=0, **kw: fn(
         *a, **kw, services=services, retained=_frame_retained)
@@ -82,3 +83,27 @@ def test_finite_reader_rejects_invalid_cursor_before_business(tmp_path, corrupti
         finally:
             drain.close()
             restored.close()
+
+
+def test_old_completed_frontier_survives_two_resume_generations(tmp_path):
+    with store_fixture(tmp_path) as (_, store, _):
+        services, spec = fixture(store)
+        seal, _, expected = make_seal(services, spec)
+        first, owner, rows = reader(services, spec)
+        second = None
+        try:
+            owner._finished_inputs.add((spec.edge_id, 'p0'))
+            first.restore({})  # Historical frontier did not contain this key.
+            first.adopt(spec.edge_id, seal)
+            saved = first.snapshot()
+            assert saved[spec.edge_id]['positions'] == {'p0': 4, 'p1': 0}
+            second, restored, suffix = reader(services, spec)
+            restored._finished_inputs = set(owner._finished_inputs)
+            second.restore(saved)
+            while second.step(max_records=1, deadline_ms=1000):
+                pass
+            assert rows == [] and suffix == expected[4:]
+        finally:
+            first.close()
+            if second is not None:
+                second.close()

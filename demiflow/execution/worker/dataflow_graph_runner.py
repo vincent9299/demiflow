@@ -659,8 +659,6 @@ class WorkerGraphRunner:
             for occ, node in self.e._node_specs.items():
                 if node.kind == 'source' and not any(s.source_id == occ for s in self.e.assignment.source_splits):
                     self._finish_node(occ)
-        if not self._paused and self._cut is None and processed < max_records:
-            processed += self._finite_input.step(max_records=max_records - processed, deadline_ms=deadline_ms)
         if not (self._paused and self._idle_sent):
             processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
@@ -1082,7 +1080,10 @@ class WorkerGraphRunner:
 
     def _advance_input_completions(self, *, max_records, deadline_ms):
         self._park_finish_pending = False
-        processed = self._advance_regions(max_records=max_records, deadline_ms=deadline_ms)
+        processed = self._finite_input.step(max_records=max_records, deadline_ms=deadline_ms)
+        if processed >= max_records:
+            return processed
+        processed += self._advance_regions(max_records=max_records - processed, deadline_ms=deadline_ms)
         if processed >= max_records:
             return processed
         outputs = processed
