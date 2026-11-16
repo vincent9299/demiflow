@@ -185,7 +185,7 @@ def test_original_journal_budget_identifiers_survive_both_rpc_hops(budget):
 
 @pytest.mark.parametrize('budget', ['../secret', 'x'*129, None])
 def test_malformed_local_budget_failure_still_produces_a_closed_control_reply(budget):
-    payload = failure_payload(ExecutionBudgetExceeded(budget))
+    payload = failure_payload(ExecutionBudgetExceeded(budget, message='invalid local budget'))
     assert payload['code'] == 'INVALID_CONTRACT' and 'budget' not in payload
     restored = restore_failure(json.loads(json.dumps(payload)))
     assert type(restored) is DataflowError and restored.code == 'INVALID_CONTRACT'
