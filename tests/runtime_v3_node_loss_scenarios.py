@@ -47,6 +47,54 @@ def _dead_actor(ray, actor, *, timeout=10):
     raise AssertionError('owned real worker actor did not die')
 
 
+def _kill_with_pending_identity(ray, actor, state):
+    """Freeze only this owned worker so a real RPC cannot win the kill race.
+
+    close() cancels HTTP and may finish immediately; it is not an in-flight
+    business call. A stopped real process gives us an observable fault boundary
+    without adding a fake actor method or changing the engine's lifecycle.
+    """
+    import psutil
+    import signal
+    pid = state['Pid']
+    assert state['Address']['NodeID'] == ray.get_runtime_context().get_node_id()
+    assert type(pid) is int and pid > 1 and pid != os.getpid()
+    process = psutil.Process(pid)
+    birth = process.create_time()
+    assert process.uids().real == os.getuid()
+    stopped = False
+    try:
+        process.send_signal(signal.SIGSTOP)
+        stopped = True
+        deadline = time.monotonic() + 5
+        while process.status() != psutil.STATUS_STOPPED:
+            assert time.monotonic() < deadline, 'owned actor did not stop at fault boundary'
+            time.sleep(.01)
+        pending = actor.identity.remote()
+        ready, _ = ray.wait([pending], timeout=.05)
+        assert not ready, 'stopped actor unexpectedly completed its original RPC'
+        proof = {'method': 'HostedDataflowWorker.identity', 'ref': pending.hex(),
+                 'completed_before_kill': False, 'pid': pid, 'process_birth': birth,
+                 'status_before_kill': process.status(), 'signal': 'SIGKILL'}
+        assert proof['status_before_kill'] == psutil.STATUS_STOPPED
+        # psutil checks the PID birth identity before signaling. This actor was
+        # launched by the real connector with max_restarts=0/max_task_retries=0.
+        process.kill()
+        stopped = False
+        proof['death'] = _dead_actor(ray, actor)
+        try:
+            ray.get(pending, timeout=10)
+        except ray.exceptions.RayActorError as error:
+            proof['error'] = {'type': type(error).__name__, 'message': str(error)}
+        else:
+            raise AssertionError('pending actor RPC survived loss of its actual worker')
+        return proof
+    finally:
+        if stopped and process.is_running():
+            process.send_signal(signal.SIGCONT)
+            ray.kill(actor, no_restart=True)
+
+
 def producer_loss(fx):
     import ray
     import ray.cloudpickle
@@ -218,23 +266,12 @@ def unknown_model_owner_loss(fx, kind):
         death = {'actor_id':actor._actor_id.hex(),'allocation_id':allocation,'native_at_accept':before,
                  'original_actor':actor, 'state_before':state['State']}
         deaths.append(death)
-        # Existing production lifecycle method, not an injected actor method.
-        # It must drain the accepted HTTP call whose external fixture has not
-        # returned any response, so this real actor task stays unconfirmed.
-        pending = actor.close.remote()
-        ready, _ = ray.wait([pending],timeout=.05)
-        assert not ready, 'original close RPC completed before the owned fault boundary'
-        death['pending_rpc'] = {'method':'HostedDataflowWorker.close', 'ref':pending.hex(),
-                                'completed_before_kill':False}
-        ray.kill(actor,no_restart=True)
-        death['confirmed_dead'] = _dead_actor(ray,actor)
+        # Keep the accepted native request unknown; do not cancel it with close.
+        # The real original identity RPC is separately kept pending by stopping
+        # the owned process, then must fail when that same process is killed.
+        death['pending_rpc'] = _kill_with_pending_identity(ray, actor, state)
+        death['confirmed_dead'] = death['pending_rpc']['death']
         assert death['confirmed_dead']['num_restarts']==0
-        try:
-            ray.get(pending,timeout=10)
-        except ray.exceptions.RayActorError as error:
-            death['pending_rpc']['error'] = {'type':type(error).__name__,'message':str(error)}
-        else:
-            raise AssertionError('pending actor RPC did not fail when its worker died')
     with _accepted_http(root,accepted) as (http,url,errors), \
             patch.dict(os.environ,{'DF_V3_NATIVE_TEST_URL':url+'/'+kind+'/v1','DF_V3_NATIVE_TEST_KEY':'owned-test-only'}), \
             _provider(fx,workers=3,fusion=False):
@@ -307,7 +344,10 @@ def validate_evidence(value):
         assert case['death']['confirmed_dead']['state']==case['death']['after_resume_dead']['state']=='DEAD'
         assert case['death']['confirmed_dead']['num_restarts']==case['death']['after_resume_dead']['num_restarts']==0
         rpc=case['death']['pending_rpc']
-        assert rpc['method']=='HostedDataflowWorker.close' and rpc['ref'] and rpc['completed_before_kill'] is False
+        assert rpc['method']=='HostedDataflowWorker.identity' and rpc['ref'] and rpc['completed_before_kill'] is False
+        assert rpc['status_before_kill']=='stopped' and rpc['signal']=='SIGKILL'
+        assert rpc['pid'] > 1 and rpc['process_birth'] > 0
+        assert rpc['death']==case['death']['confirmed_dead']
         assert rpc['error']['type'] in {'ActorDiedError','RayActorError'}
     assert value['fault_scope']=='actual actor owner loss; same-host Ray; no physical outage or network partition'
 
