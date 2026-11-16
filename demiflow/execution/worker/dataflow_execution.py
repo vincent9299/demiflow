@@ -450,8 +450,9 @@ class DataflowWorkerExecutor:
                     errors.append(exc)  # Continue physical cleanup; preserve the first error.
         for split_id, reader in list(self._readers.items()):
             try:
-                from ..dataflow_source_context import source_run_scope
-                with source_run_scope(self._source_run):
+                from ..dataflow_source_context import source_run_scope, source_run_view
+                view = getattr(self, '_source_run', None) or source_run_view(self._services)
+                with source_run_scope(view):
                     reader.close()
             except BaseException as exc:
                 errors.append(exc)

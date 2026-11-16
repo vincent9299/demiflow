@@ -294,6 +294,7 @@ class Dataset:
                 inputs.append(PlanInput(ds._source, ds._plan))
         return Dataset(UnionSource(tuple(inputs)), LogicalPlan(), self._executor)
 
+    @_flow_api("checkpoint", datasets=("self",), execution="action")
     def checkpoint(self, path, *, version):
         """Retired facade; execution-owned recovery uses the platform RunRef."""
         from ..execution.capabilities import require_action

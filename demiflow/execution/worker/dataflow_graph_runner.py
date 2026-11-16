@@ -119,6 +119,22 @@ class WorkerGraphRunner:
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
                        else None)
+        # A direct collection has no filtering/expansion or other consumer.
+        # Its source can prove overflow before filling the asynchronous channel
+        # with more input. Keep the driver's global check for multiple splits;
+        # never apply an output limit to inputs of a transforming graph.
+        self._direct_collection = None
+        graph = executor._graph
+        if len(graph.nodes) == 2 and len(graph.edges) == 1:
+            source = next((node for node in graph.nodes if node.kind == 'source'), None)
+            terminal = next((node for node in graph.nodes if node.kind == 'terminal'), None)
+            if (source is not None and terminal is not None
+                    and graph.edges[0].producer == source.occurrence_id
+                    and graph.edges[0].consumer == terminal.occurrence_id
+                    and terminal.kernel.kind == 'take_all'):
+                maximum = terminal.kernel.configuration.get('arguments', {}).get('limit')
+                if maximum is not None:
+                    self._direct_collection = (source.occurrence_id, maximum)
 
     def _restore_terminal(self):
         image = self.e._restore_image
@@ -652,6 +668,11 @@ class WorkerGraphRunner:
         self._metrics_at = time.monotonic()
 
     def _output(self, occurrence, record):
+        if (self._direct_collection is not None
+                and occurrence == self._direct_collection[0]
+                and record.sequence >= self._direct_collection[1]):
+            maximum = self._direct_collection[1]
+            raise ValueError(f'Dataset contains more than the take_all limit of {maximum} rows')
         if record.source_position.get('queue_delivery_kind') == 'producer':
             unit = record.source_position['producer_unit']
             old_unit, count, size = self._producer_expansion.get(occurrence, (unit, 0, 0))
