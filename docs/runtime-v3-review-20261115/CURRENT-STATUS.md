@@ -4,6 +4,9 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **最后私有模型准入与真实Ray组合**：`492c2b8` 让新Prompt row scope/Embedding batch＋part必须重新准入，原HTTP/cache键不变，同一RPC仍幂等；总控核owner9组源码与40附件零不符。固定`91c8658`真实Ray Core9 passed/0 skipped/121.65秒，含模型缓存、结果重读、回执后强杀、driver restart/FENCED。原模型全文件最终组合尚待补跑，不拼接不同版本冒称全门绿。
+- **新压力红保留**：仅余1CPU、64×4KiB共享双分支在120秒内未完成，记录79个ACK/80次worker启动；不是无消费者死锁，仍是不可接受的调度性能问题。没有缩样或扩时间，性能lane正在定位。Arrow与终端索引元数据必须一同做分配前准入，修复在途。
+
 - **Prompt＋真实托管服务完整链路**：`4cf3555` 同版本35 passed/0 skipped，包含原 HTTP owner、私有缓存、原物化结果重读、取消/退出、原生声明守卫与历史身份。真实 H100 服务 PID/NVML/原 device grant、原2 GiB内存预约、CUDA计算结果及最终释放均有证据。未另建服务调度/提交账本；服务完整环境只保留在执行程序，公开事实存摘要。见 [模型与服务总控复验](MODEL-SERVICE-CLOSURE.md) 和 [机器回执](MODEL-SERVICE-PRIMARY-VERIFICATION.json)。Local 数值GPU服务不代表 Ray/任意DeploymentService/路由服务的全量对称。
 - **输入、观测与退出增量**：旧 inference＋模型真实观测39 passed；cleanup OSError/原状态机18 passed；大图片 literal 有界身份＋原block21 passed/1 Ray skipped。默认身份及元数据1 MiB限制不改。显式私有 Prompt 普通当前attempt物化已集成；跨库失败不授予恢复。私有缓存 requeue 后新调用计费的最后同类修复仍在 owner 验证。
 - **及时交接与内存核心项**：两处 worker 丢唤醒已集成；原控制格式不变，无收益的wire格式实验未合入。实际Arrow反例确认worker/终端/写出存在分配后才检查的路径，正在前移原准入；性能及公平/峰值正式组合仍未通过，不能宣称全部完成。

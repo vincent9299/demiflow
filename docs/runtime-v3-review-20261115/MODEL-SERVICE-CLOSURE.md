@@ -22,6 +22,7 @@ GPU 服务使用已有 DevicePool 和 worker grant。固定 `4cf3555` 的真实 
 | `5d66d51` | 26 passed、1 failed | guardian/原资源释放通过；唯一旧 Prompt＋服务＋缓存入口失败，后续由本修复关闭 |
 | `428b67b` | 20 passed | 真实 Prompt 服务、私有缓存/原结果、取消、历史身份与普通 HTTP owner |
 | `4cf3555` | **35 passed、0 skipped，80.89 秒** | 上述服务、H100、历史身份与原生声明守卫的同版本组合 |
+| `91c8658` | **真实 Ray Core 9 passed、0 skipped，121.65 秒** | 私有模型 scope/part、原结果重读、bounded ACK RPC、receipt 后 ACK 前强杀、driver restart 与旧 worker FENCED |
 
 新服务第一轮有四个生产接线失败：冻结配置的容器未经过现有 strict-JSON 投影；已改用原 `_json_config`，没有放宽 DTO。下一轮只剩新取消测试把异常捕获放在 RunContext 内部，原 context 退出仍正确报告取消；测试已包住完整生命周期，并断言原 action result 为 None。所有红回执保留，未将其写成通过。
 
@@ -34,8 +35,8 @@ GPU 服务使用已有 DevicePool 和 worker grant。固定 `4cf3555` 的真实 
 - 普通私有 Prompt 可以提交当前 attempt 的结果，但私有 HTTP 库与 RunJournal 不是跨库原子事务；失败后禁止伪装成原生恢复。Embedding 的原 delivery-only 边界未放开。
 - 本服务接线不宣称所有 VLLM/DeploymentService、自定义 live 服务、routed service 多设备放置已完成。旧数值 GPU 下标的服务目前只支持已显式声明 inventory/PCI 顺序的 Local process；Ray 上的普通原生 GPU 算子有此前独立证据，不能混称全部服务对称。
 - GPU 整卡独占、进程树 RSS 抽样上限不等于分数 GPU/MIG/OS 硬内存沙箱。guardian 与丢弃 unit FD 的后代同时遭 SIGKILL 仍在已披露的合作进程单元边界之外。
-- 两处 worker 丢唤醒已集成为 `258a173`/`3656c73`，只修改同一 condition 的通知代际。owner 21 项及迁移后的四项有固定版本证据，旧三个失败在原 runner 上同样复现；真实 Ray 的最终组合仍待后续集成验收。
+- 两处 worker 丢唤醒已集成为 `258a173`/`3656c73`，只修改同一 condition 的通知代际。owner 21 项及迁移后的四项有固定版本证据，旧三个失败在原 runner 上同样复现；总控的真实 Ray 组合见上表。
 - 性能未达标。新 wire 批格式整链无实质收益，未合入；唤醒修复的 25.880 秒只是原 20k→10k 单次诊断，不能替代同预算五轮矩阵。
-- 私有模型缓存的显式 requeue 后新调用额度，以及 Arrow 分配前准入、公平与内存正式门仍在收口。产品既有完整演示/Notebook/Case 的证据按原版本保留，不用本组替代最终产品验收。
+- 私有模型缓存显式 requeue 后的新调用额度已修复并集成 `492c2b8`；总控独立核 owner 九组源码与40附件零不符，真实 Ray 组合也通过。Arrow 分配前准入、公平与内存正式门仍在收口；仅余1CPU的64行共享分支暴露80次worker启动/120秒超时，保留为实际核心性能失败。产品既有完整演示/Notebook/Case 的证据按原版本保留，不用本组替代最终产品验收。
 
 主仓 HEAD/原 dirty 文件和七冻结件保持；此前已披露的共享目录边界事故仍按原记录保留，不因本轮检查通过而撤销。

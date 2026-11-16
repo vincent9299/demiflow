@@ -457,5 +457,119 @@
     "bad": [],
     "frozen_bad": []
   },
-  "note": "Version-specific invocations with overlap; never sum into one full regression result. Final Prompt service group: 35 passed, zero skipped at 4cf3555."
+  "note": "Version-specific invocations with overlap; never sum into one full regression result. Final Prompt service group: 35 passed, zero skipped at 4cf3555.",
+  "private_models_owner_verification": {
+    "runs": [
+      {
+        "head": "8320f59c2a49d620ad3993b7a42d20bb5fea8cb9",
+        "inputs": 2144,
+        "counts": {
+          "passed": 74,
+          "failed": 4
+        },
+        "mismatches": [],
+        "exit": 1
+      },
+      {
+        "head": "8320f59c2a49d620ad3993b7a42d20bb5fea8cb9",
+        "inputs": 2144,
+        "counts": {
+          "passed": 2
+        },
+        "mismatches": [],
+        "exit": 0
+      },
+      {
+        "head": "06c6f4320f03ead0eadce92c204da366b2b2c360",
+        "inputs": 2145,
+        "counts": {
+          "passed": 27
+        },
+        "mismatches": [],
+        "exit": 0
+      },
+      {
+        "head": "27de6887a6709dad8450aa6e5094743f8aa356db",
+        "inputs": 2147,
+        "counts": {
+          "failed": 1,
+          "passed": 6
+        },
+        "mismatches": [],
+        "exit": 1
+      },
+      {
+        "head": "45a61b6227f327095a249117b917332ca4ca7c6e",
+        "inputs": 2147,
+        "counts": {
+          "passed": 31
+        },
+        "mismatches": [],
+        "exit": 0
+      },
+      {
+        "head": "45a61b6227f327095a249117b917332ca4ca7c6e",
+        "inputs": 2147,
+        "counts": {
+          "passed": 3
+        },
+        "mismatches": [],
+        "exit": 0
+      },
+      {
+        "head": "d0591cc01da188fcb88856d936e1b0a358ea97ca",
+        "inputs": 2147,
+        "counts": {
+          "passed": 1
+        },
+        "mismatches": [],
+        "exit": 0
+      },
+      {
+        "head": "aa3673b5873bfe2b22fb51d6ba4dfa74040feab9",
+        "inputs": 2147,
+        "counts": {
+          "passed": 32
+        },
+        "mismatches": [],
+        "exit": 0
+      },
+      {
+        "head": "aa3673b5873bfe2b22fb51d6ba4dfa74040feab9",
+        "inputs": 2147,
+        "counts": {
+          "passed": 2
+        },
+        "mismatches": [],
+        "exit": 0
+      }
+    ],
+    "attachments": 40,
+    "bad": []
+  },
+  "ray_integration": {
+    "head": "91c86582e65b556be2fc327162898eba8df1bbcc",
+    "inputs": 1856,
+    "exit": 0,
+    "counts": {
+      "passed": 9,
+      "skipped": 0
+    },
+    "seconds": 121.65,
+    "verification": "/tmp/demiflow-ray-model-wakeup-evidence/verification.json",
+    "verification_sha256": "bec0cec8dbd8bb3cead7d6c3fb32bc8d9d5cac85069ecb61fb672480eb918d2a",
+    "xml_sha256": "bfba83a2db1cf26b235a8cb2727c0dc2a524fead7b1a392856063f69d8eaef94",
+    "process_environment": {
+      "pid": 59215,
+      "environment": {
+        "DF_RECOVERY_TEST_PROVIDER": "ray_core",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115/tests",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-ray-model-wakeup-pool",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-ray-model-wakeup-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-ray-model-wakeup-domain"
+      },
+      "exe": "/yzp/zhaozy/yangzepeng/0905/env/bin/python3.11"
+    },
+    "note": "Actual Ray Core, all seven control/recovery cases and two private model cases; not multi-host."
+  }
 }
