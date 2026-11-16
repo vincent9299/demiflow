@@ -18,3 +18,5 @@
 仅本测试两棵带 owner 清单的共享目录已清理：`cpu-6d81795387bc3bdb`、`cpu-2816d1264820a95e`。原 journal 以 SQLite backup 归档、原 v1/v2 lock/header 和 commit 字节证据留在 `/tmp/demiflow-physical-hosts-20261116/cpu-journal-archive`，配套 JSON 逐文件 SHA/大小与删除后不存在事实齐全。
 
 此证明覆盖真实跨机 Dataset、路由、共享源分支、原提交和 owned actor 故障后的恢复。它没有覆盖两个 GPU 宿主的 GPU 执行、整机失效、网络分区或本批 driver 进程崩溃；GPU 绑定方案另行实现，不把 CPU 成功冒充 GPU 完成。
+
+总控独立复核：1786份输入与集成 `3f989a0` 全等；26份原journal/lock/commit归档SHA及大小全等。恢复记录确为同plan、attempt 1/2、两真实host、4/8/12/final12行ACK，最终ID 0…11各一次。root后续 `f9af1eb` 仅改等待身份错误文案/竞态夹具，不把旧硬件执行证据冒称该HEAD重新运行。

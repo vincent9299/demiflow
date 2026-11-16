@@ -8,9 +8,9 @@
 
 **平台 root**：正确、稳定、高性能、通用、架构干净的统一数据计算平台，完整支撑实际业务。Local/Ray Core 是承载方式，同一 Dataset、真实图、有限资源、原生提交与恢复必须一起成立。原文、来源会话及 I01–I14 见 [INTENT.md](../unified-runtime-v3-20261114/INTENT.md)。
 
-Dataset→真实 worker→数据交接→终端→原提交/ACK→恢复主链已经接通，但真实硬件和旧回归复验发现两项尚未闭环的问题，不能宣布完成。最新完整矩阵生产候选 **ab1b334** 的 Local/真实 Ray Core 各98 API、168例全通过；工作台实际执行图、取消/恢复、原宽数据5项通过。转换前共驻、恢复回读、提前关闭及旧终端断言迁移均已完成定向验收。随后 **5ff5da9** 仅修私有环境第三方依赖误分类，真实 Ray 转换13项与终端4项通过，未借用旧矩阵冒称新HEAD全量验证。
+Dataset→真实 worker→数据交接→终端→原提交/ACK→恢复主链已经接通，真实硬件复验发现的跨机租约缺陷现已闭环，旧回归暴露的函数状态缺陷仍在修复，不能宣布完成。最新完整矩阵生产候选 **ab1b334** 的 Local/真实 Ray Core 各98 API、168例全通过；工作台实际执行图、取消/恢复、原宽数据5项通过。转换前共驻、恢复回读、提前关闭及旧终端断言迁移均已完成定向验收。随后 **5ff5da9** 仅修私有环境第三方依赖误分类，真实 Ray 转换13项与终端4项通过，未借用旧矩阵冒称新HEAD全量验证。
 
-用户已授权本机4张H100及20机2张H100测试。真实本机 GPU 四项通过（使用一张卡）；两机 Ray Core 基础连通已证实，真正 Dataset 四例 **1过/3失败**，失败来自共享锁身份错误使用各宿主不同的本地设备号。另旧 code-pin 组合复验暴露 **workers=1持久停车丢失函数 closure/default 状态**，相同8行输出变成8个1，workers=4输出1…8。函数状态仍在原所有者隔离树修复；跨机租约已集成 `3f989a0` 并补 `f9af1eb` 原等待诊断。CPU/GPU跨宿主绑定仍需完成，不直接撤销现行保护。
+用户已授权本机4张H100及20机2张H100测试。真实本机 GPU 四项通过（使用一张卡）；两机真实 Dataset 原四例从 **1过/3失败** 修到 **4项全过**；正常写出、远程actor损失后的原ACK恢复、共享源union/repartition与非共享读取域拒绝均成立。旧失败来自共享锁身份错误使用各宿主不同的本地设备号。另旧 code-pin 组合复验暴露 **workers=1持久停车丢失函数 closure/default 状态**，相同8行输出变成8个1，workers=4输出1…8。函数状态仍在原所有者隔离树修复；跨机租约已集成 `3f989a0` 并补 `f9af1eb` 原等待诊断。CPU/GPU跨宿主绑定仍需完成，不直接撤销现行保护。
 
 ## 已验证的范围（每项保留自己的版本）
 
@@ -33,14 +33,14 @@ Dataset→真实 worker→数据交接→终端→原提交/ACK→恢复主链�
 | 数据保真与编码 | 原canonical字节保持，scalar/NumPy、负零、schema、block、引用、非canonical拒绝 | [CODEC-ENCODER-REUSE.md](CODEC-ENCODER-REUSE.md)，93项；没有payload缓存或跳过校验 |
 | 后续真实Ray转换及终端 | 13项转换、4项终端通过 | [RAY-TERMINAL-5FF5DA9-CLOSURE.md](RAY-TERMINAL-5FF5DA9-CLOSURE.md)；依赖分类上限64模块/8MiB不变，原失败证据保留 |
 | 真实物理GPU | 4 passed / 0 skipped，CPU→CUDA→CPU、final重放、取消/异常清理及中间ACK恢复 | [PHYSICAL-GPU-FINAL-5FF5DA9.md](PHYSICAL-GPU-FINAL-5FF5DA9.md)；1785输入独立字节比对全等，真实H100一张、5次原allocation全部RELEASED；不等于四卡或跨机GPU通过 |
-| 真实两宿主 | Ray双节点、共享域挑战、跨机锁互斥均成立；Dataset四例1过/3失败 | [PHYSICAL-HOSTS-LEASE-IDENTITY-RED.md](PHYSICAL-HOSTS-LEASE-IDENTITY-RED.md)；保持共享文件保护，正修跨机稳定租约身份 |
+| 真实两宿主 | 真实Dataset原四例4 passed；两host实际执行、远端actor损失后原ACK恢复、共享源union路由 | [PHYSICAL-HOSTS-CPU-CLOSURE.md](PHYSICAL-HOSTS-CPU-CLOSURE.md)；120.207秒，原红证据保留；1786输入及26份原journal归档总控独立核对，0不符 |
 
 Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼接，**实际为107次执行**。原始报告未篡改；测试记录器现按观察ID合并、保留两份原观察，独立业务调用即使参数相同也不折叠。本轮矩阵FD54→60通过原+8阈值，不能称零增长。
 
 ## 当前仍在处理的核心项
 
 1. **函数状态在资源停车后丢失：真实业务语义缺陷。** 同一8行输入与同一算子，workers=1得到8个1，workers=4得到1…8。修复归原编译/函数状态适配器，原journal持有快照；必须隔离函数实例、默认参数和cells，不污染封存程序，不复制显式共享活对象。首轮正例修正不代表验收完成；旧F7中断/代码漂移拒绝、F9真实工作台及生命周期组合仍需通过。
-2. **跨机共享工件租约身份：实际Dataset被错误拒绝。** 同一锁文件两机st_dev不同（196/170），inode和fsid相同，共享锁互斥实测有效。修复使用原journal版本化身份及原物理锁，保留本端fstat/lstat、替换/symlink防护；旧v1历史不静默升级。修复已集成，原v1保护及真实双机租约/GC通过；总控独立恢复与历史21项通过，旧竞态夹具按v2修正后4项通过。见 [CROSS-HOST-LEASE-CLOSURE.md](CROSS-HOST-LEASE-CLOSURE.md)。两机Dataset原四例在固定候选原样通过，详细原证据由owner归档中。
+2. **跨机共享工件租约身份：实际Dataset被错误拒绝。** 同一锁文件两机st_dev不同（196/170），inode和fsid相同，共享锁互斥实测有效。修复使用原journal版本化身份及原物理锁，保留本端fstat/lstat、替换/symlink防护；旧v1历史不静默升级。修复已集成，原v1保护及真实双机租约/GC通过；总控独立恢复与历史21项通过，旧竞态夹具按v2修正后4项通过。见 [CROSS-HOST-LEASE-CLOSURE.md](CROSS-HOST-LEASE-CLOSURE.md)。两机Dataset原四例在固定候选原样通过，总控已独立核对1786输入及26份原journal归档，见 [PHYSICAL-HOSTS-CPU-CLOSURE.md](PHYSICAL-HOSTS-CPU-CLOSURE.md)。
 3. **跨宿主GPU绑定仍未交付。** 单宿主真实CUDA四例已通过；当前Ray适配仍只允许一台GPU宿主。实际Ray设备与原DevicePool预约必须一一对应，按宿主准入，不能只删除守卫。仅在授权的空闲设备和私有集群测试。
 4. **已完成项不重复扩张。** 转换前共驻预算、实际恢复读取窗口、提前关闭、原GC与FD/历史保护均已交付定向证据。后续按上述修复影响补验，不以反复全量测试替代核心修复。
 5. **诚实保留其它范围。** 外部PostgreSQL未连库，完整性能矩阵/长内核与真实主机故障仍未证明；工作台image/document Embedding授权、全部Notebook/Case产品验收不因引擎用例通过自动完成。正式门中disk_gc已接，其余16门原NotRun不能计为通过。
@@ -55,7 +55,7 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 | I07/I10/I13 单一权威及历史 | 原RunJournal/CommitCoordinator/真实ACK与恢复，未知效果不重发，原封存/代码来源保护 | 不把局部历史兼容推定为任意旧版本兼容；完整GC需保历史根 |
 | I08 有限资源和性能 | 原预算反例保持，31行退步、GC/FD、driver累计返回已修且真验 | 40k通过但余量小；转换前共驻与恢复回读已修，完整性能/峰值矩阵未交付 |
 | I09 真实业务 | Local模型/队列/fetch/Save及恢复有实际链路；外部模型仅本地transport替身 | 外部PostgreSQL未连库，工作台image/document Embedding授权未开放 |
-| I11 多机 | 真实两宿主Core actor、可读域挑战及互斥锁通过 | 真实两宿主Dataset正在修共享租约；完整宿主失效矩阵未完成 |
+| I11 多机 | 真实两宿主Dataset、原生结果/ACK、共享源与actor恢复通过 | 真实两宿主Dataset及远端actor损失恢复通过；整机失效/网络分区未完成 |
 | I12 产品 | 工作台看原执行图/来源、真实运行/结果/恢复，Notebook/Case已有专项回归 | 既有产品专项并非最新同HEAD全产品验收；引擎不代表全部产品root |
 | I14 完整交付 | 逐公开入口及旧失败映射，显式保留未验项 | [旧17个正式门映射](FORMAL-GATE-EVIDENCE-MAP.md)中disk_gc现已接通；其余16门仍有NotRun，不返回常量伪造通过 |
 
