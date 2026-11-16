@@ -63,3 +63,43 @@ def test_original_optional_api_case_on_real_ray(ray_executor, tmp_path, case_nam
         assert outcome["execute_action_calls"]
         assert outcome["native_commits"]
         assert all(commit["status"] == "acked" for commit in outcome["native_commits"])
+
+
+def test_real_ray_source_identity_and_bounded_overflow(ray_executor, tmp_path):
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext, current_run
+    from demiflow.execution.run_journal import RunJournal
+
+    def identity_rows():
+        from demiflow.execution.run_context import current_run, current_action
+        run = current_run()
+        assert not hasattr(run, 'journal') and current_action() is None
+        yield {'directory': run.ref.directory, 'run_id': run.ref.run_id, 'pid': os.getpid()}
+
+    with RunContext.start(tmp_path / 'identity') as run:
+        result = data.from_iter(identity_rows).take_all()
+        assert len(result) == 1 and result[0]['directory'] == run.ref.directory
+        assert result[0]['run_id'] == run.ref.run_id and result[0]['pid'] != os.getpid()
+        assert current_run() is run
+    assert current_run() is None
+
+    evidence = tmp_path / 'source-reads.jsonl'
+    def rows():
+        try:
+            for index in range(5):
+                with evidence.open('a') as stream:
+                    stream.write(json.dumps({'index': index, 'pid': os.getpid()}) + '\n')
+                yield {'index': index}
+        finally:
+            evidence.with_suffix('.closed').write_text(current_run().ref.run_id)
+
+    with pytest.raises(ValueError, match='more than the take_all limit'):
+        with RunContext.start(tmp_path / 'overflow'):
+            data.from_iter(rows).take_all(limit=2)
+    observed = [json.loads(line) for line in evidence.read_text().splitlines()]
+    assert [item['index'] for item in observed] == [0, 1, 2]
+    assert all(item['pid'] != os.getpid() for item in observed)
+    journal = RunJournal(tmp_path / 'overflow')
+    assert evidence.with_suffix('.closed').read_text() == journal.recovery_identity()['run_id']
+    assert journal.execution_action('action-1')['result'] is None
+    assert current_run() is None
