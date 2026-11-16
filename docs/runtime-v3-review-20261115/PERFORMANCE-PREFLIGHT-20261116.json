@@ -1,0 +1,283 @@
+{
+  "status": "diagnostic_only_not_formal_five_rounds",
+  "trials": [
+    {
+      "status": "passed",
+      "elapsed_s": 2.535109529,
+      "first_result_s": 1.582668129,
+      "action_elapsed_s": 2.461462576,
+      "subprocess_elapsed_s": 3.806085020303726,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "source_unchanged": true,
+      "failures": [],
+      "name": "b0-profile",
+      "path": "/tmp/demiflow-perf-fastcpu-profile-r1/b0",
+      "head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+      "cuts": 0,
+      "receipt_sha256": "51f7c7eba4a52e09e8d0a08c4dc938c026b2b319137a9795baf36395c808022b"
+    },
+    {
+      "status": "passed",
+      "elapsed_s": 58.229938323,
+      "first_result_s": 8.619641814,
+      "action_elapsed_s": 58.15408497,
+      "subprocess_elapsed_s": 61.37116460502148,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "source_unchanged": true,
+      "failures": [],
+      "name": "b1-profile",
+      "path": "/tmp/demiflow-perf-fastcpu-profile-r1/b1",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "cuts": 49,
+      "receipt_sha256": "61f66900ca885b3a365910383679eb8656452464d27a588f0d85120585aa8a64"
+    },
+    {
+      "status": "passed",
+      "elapsed_s": 36.178178047,
+      "first_result_s": 6.254938983,
+      "action_elapsed_s": 36.144940374,
+      "subprocess_elapsed_s": 38.37998476624489,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "source_unchanged": true,
+      "failures": [],
+      "name": "b1-unprofiled",
+      "path": "/tmp/demiflow-perf-preflight-b1-r2/fast_cpu",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "cuts": 50,
+      "receipt_sha256": "4d37e55e709d753beb609fff0d8448590f2fddfff6f1dddc46570ac37e6df1bd"
+    }
+  ],
+  "workload_preflights": [
+    {
+      "path": "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/trial.json",
+      "sha256": "758ac5310a63c55e3c09b7b36efbf2828dec68f97f722ecbae136ed54b9f0b87",
+      "case": "fast_cpu",
+      "phase": "warmup",
+      "head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+      "status": "passed",
+      "elapsed_s": 1.872162861,
+      "first_result_s": 1.420893884,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": null
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b0-r3/hot_key/trial.json",
+      "sha256": "96095944e12f8dcd80c5ff8d05173e75690e2dc71ac4f0a4d118894ce72857bb",
+      "case": "hot_key",
+      "phase": "warmup",
+      "head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+      "status": "passed",
+      "elapsed_s": 9.415933044,
+      "first_result_s": 9.358181955,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": null
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b0-r3/large_graph/trial.json",
+      "sha256": "cc756c1ca19da3ce1891d43041773f6ffe3f8f37e57f08ac68fdf9786221929c",
+      "case": "large_graph",
+      "phase": "warmup",
+      "head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+      "status": "passed",
+      "elapsed_s": 12.833737343,
+      "first_result_s": 1.879292398,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": null
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b0-r3/slow_api/trial.json",
+      "sha256": "004ccba5e39a18202a5a0f74283c3e0728518878c7efb4824efc5473866eac9f",
+      "case": "slow_api",
+      "phase": "warmup",
+      "head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+      "status": "failed",
+      "elapsed_s": 31.53230888,
+      "first_result_s": null,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": "native first result failed to precede source EOI"
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b0-r3/uneven_model/trial.json",
+      "sha256": "c1680e3cc4aba3208a0ee4ade100c1b6cb979361238c4612a9e2457cac7cbd3a",
+      "case": "uneven_model",
+      "phase": "warmup",
+      "head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+      "status": "failed",
+      "elapsed_s": 31.032757501,
+      "first_result_s": null,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": "native first result failed to precede source EOI"
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b1-r2/fast_cpu/trial.json",
+      "sha256": "4d37e55e709d753beb609fff0d8448590f2fddfff6f1dddc46570ac37e6df1bd",
+      "case": "fast_cpu",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "passed",
+      "elapsed_s": 36.178178047,
+      "first_result_s": 6.254938983,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": null
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b1-r2/hot_key/trial.json",
+      "sha256": "6baa7fde3c47cab6392653881d52ecd824480cd079a7167e84486ae831428e60",
+      "case": "hot_key",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "failed",
+      "elapsed_s": 5.563482501,
+      "first_result_s": null,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": "BUDGET_EXCEEDED: finite producer exceeds reserved storage"
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b1-r2/large_graph/trial.json",
+      "sha256": "706bc3aa61208ca96d8a9a06347736435a8443c119afa92ac0c3e8f2debcd689",
+      "case": "large_graph",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "failed",
+      "elapsed_s": 5.433733677,
+      "first_result_s": null,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": "RESOURCE_INFEASIBLE: one operator invocation exceeds the parked durable credit window; co-resident execution required"
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b1-r2/slow_api/trial.json",
+      "sha256": "4c8d3a21eb21b42c7e645116b3af67e85e5bfc73992e5d6aa74d772c3f61fd74",
+      "case": "slow_api",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "passed",
+      "elapsed_s": 11.82738244,
+      "first_result_s": 5.520782432,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": null
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b1-r2/uneven_model/trial.json",
+      "sha256": "52af1667ae50e99d72bfc9deca4282e1f725101b55d1bbefd911625431ddecc5",
+      "case": "uneven_model",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "passed",
+      "elapsed_s": 11.295943559,
+      "first_result_s": 5.356754528,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": null
+    },
+    {
+      "path": "/tmp/demiflow-perf-preflight-b1-gpu-r1/cpu_gpu/trial.json",
+      "sha256": "24e48fde23654b183fc70fa7c5ffbddedf1d021b17288fc331e9546e6557a336",
+      "case": "cpu_gpu",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "passed",
+      "elapsed_s": 15.430228462,
+      "first_result_s": 14.740094043,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": null
+    },
+    {
+      "path": "/tmp/demiflow-perf-cancel-preflight-r1/cpu_gpu/trial.json",
+      "sha256": "daddb031d2b7892b1cc14ef603d5aac3835ca1dd0bdf6c74d327a7969a0ab845",
+      "case": "cpu_gpu",
+      "phase": "cancel",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "passed",
+      "elapsed_s": 13.927563993,
+      "first_result_s": null,
+      "cancel_latency_s": 0.327348121,
+      "source_unchanged": true,
+      "error": "Execution cancellation requested"
+    },
+    {
+      "path": "/tmp/demiflow-perf-cancel-preflight-r1/slow_api/trial.json",
+      "sha256": "5e395ec4da1811e52f71cfff55fd7002ea46f6495931a7f70fb31f5f055c70a5",
+      "case": "slow_api",
+      "phase": "cancel",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "passed",
+      "elapsed_s": 5.329111341,
+      "first_result_s": null,
+      "cancel_latency_s": 0.498149206,
+      "source_unchanged": true,
+      "error": "Execution cancellation requested"
+    },
+    {
+      "path": "/tmp/demiflow-perf-cancel-preflight-r1/small_data/trial.json",
+      "sha256": "df9ce9e7d86da4ed666c60c6ddff5520ddbd1bab47dea397a4f7deeb979926f5",
+      "case": "small_data",
+      "phase": "cancel",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "passed",
+      "elapsed_s": 3.422062968,
+      "first_result_s": null,
+      "cancel_latency_s": 0.090779761,
+      "source_unchanged": true,
+      "error": "Execution cancellation requested"
+    },
+    {
+      "path": "/tmp/demiflow-perf-wide-preflight-b1-r1/1/trial.json",
+      "sha256": "84d78126c46c396f4d4f56522faf5a362f31fd52e1ceab5fffe04eb18f42995a",
+      "case": "finite_sealed",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "failed",
+      "elapsed_s": 120.53998125,
+      "first_result_s": 73.02671861,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": "Execution time budget exhausted"
+    },
+    {
+      "path": "/tmp/demiflow-perf-wide-preflight-b1-r1/2/trial.json",
+      "sha256": "de015bb4a8b873ff623c0a89ec5f545d816706674ed1d94d4a26d2b15cb62885",
+      "case": "finite_sealed",
+      "phase": "warmup",
+      "head": "5ff5da9e9cad3d595d84212b44c1cbd787e08dc4",
+      "status": "failed",
+      "elapsed_s": 120.562237104,
+      "first_result_s": 70.543527777,
+      "cancel_latency_s": null,
+      "source_unchanged": true,
+      "error": "INVALID_CONTRACT: Execution time budget exhausted"
+    }
+  ],
+  "harness_tests": {
+    "command": "PYTHONPATH=\"$PWD:$PWD/tests\" PYTHONDONTWRITEBYTECODE=1 /yzp/zhaozy/yangzepeng/0905/env/bin/python -B -m pytest -q tests/test_runtime_v3_performance_harness.py --basetemp=/tmp/demiflow-perf-harness-test-r4 --junitxml=/tmp/demiflow-perf-harness-test-r4.xml",
+    "junit": "/tmp/demiflow-perf-harness-test-r4.xml",
+    "junit_sha256": "567b3895f3a6d5bdbbebca44c84ce6c4bf7092d1d1965d65e80035032c1f2641",
+    "passed": 28,
+    "scope": "27 guard/oracle unit checks and 1 actual child Dataset/ACK/cleanup test, not 28 performance workloads"
+  },
+  "delivered_harness_sha256": {
+    "tests/runtime_v3_performance_scenarios.py": "8214efb4e978e1932eeea9f9eac3bb45fd7aac38575aa9e0dc20343b541611c4",
+    "tests/test_runtime_v3_performance_harness.py": "e34de7144fcd0879f71fd9bc88fba79a27d1432f0a1c85eed2b49125633ce8a3"
+  }
+}
