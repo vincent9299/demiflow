@@ -482,6 +482,7 @@ class DataflowExecution:
             for node in graph.nodes)
         self._physical = physical
         self._policy = live_policy
+        self._services.journal_service.bind_recovery_policy(physical.policy)
         # Historical physical plans stay byte-identical. Current caller limits
         # may only tighten their live admission envelope, never enlarge it.
         limits = [v for v in (self._active_worker_limit, physical.policy.max_active_workers) if v is not None]

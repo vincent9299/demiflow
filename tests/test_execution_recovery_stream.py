@@ -135,7 +135,7 @@ def test_real_actor_state_outputs_and_occurrences_resume_together(tmp_path, monk
                    if json.loads(raw)["kind"] == "materialize"]
     assert len(actions) == 1
     facts = journal.execution_commits(actions[0])
-    assert [f['sequence'] for f in facts] == list(range(len(facts)))
+    assert [f['sequence'] for f in facts] == list(range(1, len(facts)+1))
     assert all(c['status'] == 'acked' for c in facts)
     by_id = {f['commit_id']: f for f in facts}
     for fact in before:
@@ -165,9 +165,83 @@ def test_actor_without_state_contract_fails_before_first_call(tmp_path, monkeypa
         return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
     monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
     with pytest.raises(RecoveryContractError, match="snapshot_state"):
-        with RunContext.start(tmp_path / "run"):
+        with RunContext.start(tmp_path / "run") as run:
             data.range(10).map_async(UnsafeCounter).materialize()
     assert not calls.exists()
+    assert not run.journal.execution_commits('action-1')
+    assert run.journal.source_binding('action-1-state-recovery-restriction') is None
+
+
+@pytest.mark.parametrize('resource', ['lock', 'task'])
+def test_checkpoint_factory_rejection_closes_started_resources_once(tmp_path, monkeypatch, resource):
+    from demiflow.execution import dataflow_api
+    events = tmp_path/'lifecycle'
+    class ResourceActor:
+        def __init__(self):
+            import threading
+            self.resource = threading.Lock() if resource == 'lock' else None
+            self.event('created')
+        def event(self, name):
+            with events.open('a') as stream:
+                stream.write(name+'\n')
+        async def astart(self):
+            import asyncio
+            self.event('started')
+            if resource == 'task':
+                self.resource = asyncio.create_task(asyncio.sleep(3600))
+        async def __call__(self, row):
+            self.event('call')
+            return row
+        async def astop(self):
+            import asyncio
+            self.event('stopped')
+            if resource == 'task':
+                self.resource.cancel()
+                try:
+                    await self.resource
+                except asyncio.CancelledError:
+                    pass
+                self.event('task-drained')
+        async def aclose(self):
+            if resource == 'task':
+                assert self.resource.done()
+            self.event('closed')
+    resolve = dataflow_api.resolve_runtime_policy
+    def checkpoint(options, limits, **kwargs):
+        return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
+    with pytest.raises(RecoveryContractError, match='required_recovery=checkpoint'):
+        with RunContext.start(tmp_path/'run') as run:
+            data.from_items([{'id': 1}]).map_async(ResourceActor).materialize()
+    assert events.read_text().splitlines() == ['created', 'started', 'stopped'] + (
+        ['task-drained'] if resource == 'task' else []) + ['closed']
+    assert not run.journal.execution_commits('action-1')
+
+
+@pytest.mark.parametrize('hooks', [False, True])
+def test_checkpoint_accepts_plain_state_and_explicit_hooks(tmp_path, monkeypatch, hooks):
+    from demiflow.execution import dataflow_api
+    class PlainCounter:
+        def __init__(self):
+            self.n = 0
+        async def __call__(self, row):
+            self.n += 1
+            return {**row, 'n': self.n}
+    class HookCounter(PlainCounter):
+        def snapshot_state(self):
+            return {'n': self.n}
+        def restore_state(self, state):
+            self.n = state['n']
+    resolve = dataflow_api.resolve_runtime_policy
+    def checkpoint(options, limits, **kwargs):
+        return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
+    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2}) as run:
+        rows = data.from_items([{'id': i} for i in range(4)]).map_async(
+            HookCounter if hooks else PlainCounter).materialize().take_all()
+        assert rows == [{'id': i, 'n': i+1} for i in range(4)]
+        assert run.journal.source_binding('action-1-state-recovery-restriction') is None
+        assert all(f['status'] == 'acked' for f in run.journal.execution_commits('action-1'))
 
 
 def test_opaque_actor_default_attempt_only_is_recorded_and_cannot_resume(tmp_path, monkeypatch):

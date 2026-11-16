@@ -245,6 +245,7 @@ class DriverJournalService:
         self._lock = threading.Lock()
         self._closed = False
         self._native = None
+        self._recovery_policy = None
         self._leases = {}
         self._worker_occurrences = {}
         self._native_action_id = None
@@ -307,6 +308,18 @@ class DriverJournalService:
         finally:
             if writer is not None:
                 writer.close()
+
+    def bind_recovery_policy(self, policy):
+        """Bind the authenticated physical policy before any worker can call."""
+        from .contracts.dataflow import RuntimePolicy
+        if not isinstance(policy, RuntimePolicy):
+            raise DataflowError('INVALID_CONTRACT', 'recovery admission requires the sealed runtime policy')
+        with self._lock:
+            if self._recovery_policy is not None and self._recovery_policy != policy:
+                raise DataflowError('FENCED', 'sealed recovery policy cannot be replaced')
+            if self._leases and self._recovery_policy is None:
+                raise DataflowError('FENCED', 'recovery policy must precede worker registration')
+            self._recovery_policy = policy
 
     def register_worker(self, lease, occurrences):
         if len(self._leases) >= self._bounds.max_partitions and lease.allocation_id not in self._leases:
@@ -719,6 +732,13 @@ class DriverJournalService:
 
     def _restrict_recovery(self, occurrence_id):
         identifier(occurrence_id)
+        policy = self._recovery_policy
+        if policy is None:
+            raise DataflowError('INVALID_CONTRACT', 'sealed recovery policy is not bound')
+        if policy.required_recovery != 'attempt_only':
+            from .recovery_contract import RecoveryContractError
+            raise RecoveryContractError('Actor needs snapshot_state/restore_state: '
+                'required_recovery=' + policy.required_recovery + ' forbids attempt_only state')
         # The worker can only tighten the bound action's recovery guarantee.
         # Persist before business calls, including crashes before the first cut.
         fact = {'schema': 'demiflow.state_recovery_restriction.v1',
