@@ -12,6 +12,7 @@ from ..lance.storage import inspect_lance, open_lance_dataset, schema_hash
 from .block_sink import storage_usage
 from .recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 from .state_artifacts import atomic_bytes
+from .run_journal import ExecutionBudgetExceeded
 
 
 class LanceSink(Datasink):
@@ -56,8 +57,10 @@ class LanceSink(Datasink):
                         raise RecoveryContractError("Lance staging requires native Arrow batches")
                     rows += block.num_rows
                     logical_bytes += block.nbytes
-                    if rows > self.run.limits["max_output_rows"] or logical_bytes > self.run.limits["max_output_bytes"]:
-                        raise RecoveryContractError("Lance output exceeds row/byte budget")
+                    if rows > self.run.limits["max_output_rows"]:
+                        raise ExecutionBudgetExceeded("max_output_rows", "Lance output exceeds row budget")
+                    if logical_bytes > self.run.limits["max_output_bytes"]:
+                        raise ExecutionBudgetExceeded("max_output_bytes", "Lance output exceeds byte budget")
                     # IPC framing/alignment plus retained buffers; native allocations
                     # remain covered by the driver isolation, not by this estimate.
                     self.run.reserve_artifact_bytes(path, stream.tell() + 2 * block.get_total_buffer_size() + 65536)

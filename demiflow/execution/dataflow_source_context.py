@@ -2,8 +2,8 @@
 
 The shared artifact root and assignment are already authenticated by runtime
 service assembly. This view opens no journal, claims no run and owns no action.
-It is scoped to reader open/pull/close, including native callback threads that
-use run_context.bind_iteration, rather than exposing the driver to a worker.
+Source and operator callbacks share this immutable view, including their
+construction, async/thread calls, snapshots and cleanup. No driver is exposed.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -23,10 +23,10 @@ class SourceRunView:
     check_stop: object
 
     def action(self, *args, **kwargs):
-        raise RecoveryContractError("Source callbacks cannot create driver actions")
+        raise RecoveryContractError("Worker callbacks cannot create driver actions")
 
 
-def source_run_view(services):
+def source_run_view(services, *, limits=None):
     """Derive immutable run facts from this worker's existing authenticated ports."""
     root = Path(services.store.root)
     if root.name != '.dataflow-store' or not root.is_absolute():
@@ -36,7 +36,9 @@ def source_run_view(services):
     # adapters still need the actual finite payload allowance when no optional
     # native policy was requested. Intersect both authenticated inputs; never
     # substitute a process-wide default or enlarge a declared ceiling.
-    limits = dict(services.constants.get('native_limits') or {})
+    limits = dict(limits or {})
+    for name, value in (services.constants.get('native_limits') or {}).items():
+        limits[name] = min(limits.get(name, value), value)
     for name, bound in (
         ('memory_bytes', services.bounds.max_resident_bytes),
         ('max_row_bytes', services.bounds.max_row_bytes),

@@ -214,19 +214,27 @@ def run(*, source, target):
         assert not (root / 'data/custom.lance').exists()
 
 
-_SCOPE_AUDIT = []
-
-async def record_scope(row):
-    _SCOPE_AUDIT.append(dict(current_run().limits))
+async def record_scope(row, audit):
+    import json, os
+    run = current_run()
+    raw = (json.dumps(dict(run.limits)) + '\n').encode()
+    fd = os.open(audit, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        assert os.write(fd, raw) == len(raw)
+    finally:
+        os.close(fd)
     return row
 
 
 def test_stream_effective_allocation_is_finite_scoped_and_identical_on_resume(tmp_path):
-    from demiflow.execution.capabilities import stream_residency
-    from demiflow.execution.plan_facts import operation_facts
-    _SCOPE_AUDIT.clear()
+    import json
+    audit = str(tmp_path / 'worker-limits.jsonl')
+    async def scoped(row):
+        return await record_scope(row, audit)
+    def observed():
+        return [json.loads(line) for line in Path(audit).read_text().splitlines()]
     def graph():
-        return data.range(3).map_async(record_scope, concurrency=8, queue_depth=16).materialize()
+        return data.range(3).map_async(scoped, concurrency=8, queue_depth=16).materialize()
     with pytest.raises(RuntimeError, match='after-materialized'):
         with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1024**3}) as run:
             reference = run.ref
@@ -234,16 +242,19 @@ def test_stream_effective_allocation_is_finite_scoped_and_identical_on_resume(tm
             assert graph().take_all() == [{'id': 0}, {'id': 1}, {'id': 2}]
             assert run.limits == ceiling
             raise RuntimeError('after-materialized')
-    assert len(_SCOPE_AUDIT) == 3 and all(limits == _SCOPE_AUDIT[0] for limits in _SCOPE_AUDIT)
-    admitted = _SCOPE_AUDIT[0]
+    scopes = observed()
+    assert len(scopes) == 3 and all(limits == scopes[0] for limits in scopes)
+    admitted = scopes[0]
     assert 0 < admitted['max_row_bytes'] < ceiling['max_row_bytes']
     assert admitted['max_batch_bytes'] <= ceiling['max_batch_bytes']
-    plan = data.range(3).map_async(record_scope, concurrency=8, queue_depth=16)._plan
-    reservation = stream_residency([operation_facts(op) for op in plan.operations], admitted)
-    assert reservation['reserved_bytes'] + admitted['max_row_bytes'] <= admitted['memory_bytes']
+    # The v3 physical grant, not retired stream_residency's independent
+    # queue estimate, is the finite worker allowance now exposed to callbacks.
+    assert 0 < admitted['memory_bytes'] <= ceiling['memory_bytes']
+    assert admitted['max_row_bytes'] + admitted['max_batch_bytes'] <= admitted['memory_bytes']
+    assert all(0 < value <= ceiling[name] for name, value in admitted.items())
     with RunContext.resume(reference):
         assert graph().take_all() == [{'id': 0}, {'id': 1}, {'id': 2}]
-    assert len(_SCOPE_AUDIT) == 3  # Prepared output is authoritative; no callback replay.
+    assert observed() == scopes  # Prepared output is authoritative; no callback replay.
 
 
 def test_resume_preserves_explicit_limit_semantics_even_when_numbers_match(tmp_path):

@@ -287,73 +287,77 @@ class DataflowWorkerExecutor:
                 raise _dataflow_error("FENCED", "business input requires activation",
                                       context={"state": self._state})
             self._check_grant()
-            assignment = self.assignment
-            from ..dataflow_shared import shared_actors
-            shared = shared_actors(self._kernel_specs, self._services.programs, assignment, graph=self._graph)
-            if self._restored_states:
-                for group in set(shared.values()):
-                    if not set(group.binding['members']) <= set(self._restored_states):
-                        raise _dataflow_error('INCOMPATIBLE_HISTORY', 'Shared actor recovery is missing a member image')
-            for occ, spec in self._kernel_specs.items():
-                if self._node_specs[occ].kind in ("source", "terminal"):
-                    continue
-                for partition in assignment.lease.partition_ids:
-                    kernel = make_kernel(spec, services=self._services, partition_id=partition)
-                    if occ in shared:
-                        kernel._shared_actor = shared[occ]
-                    self._kernels[(occ, partition)] = kernel
-                    kernel.start()
-                    state_ref = self._restored_states.get(occ)
-                    if state_ref is not None:
-                        kernel.restore(state_ref)
-                        instance = getattr(kernel, "instance", None)
-                        if instance is not None:
-                            restore_actor_state(instance, ref=state_ref, services=self._services)
-                    self._kernels[(occ, partition)] = kernel
-            # Only an explicitly versioned sealed stage may bind this finite
-            # compute optimization. Old stages never infer a new region.
-            from ...planning.dataflow_relational_regions import interpret_region
-            from ..kernels.relational_region import RelationalRegionRuntime
-            self._relational_regions = {}
-            for stage in assignment.stages:
-                region_plan = interpret_region(self._graph, stage)
-                if region_plan is None:
-                    continue
-                partition = assignment.lease.partition_ids[0]
-                members = {occ: self._kernels[(occ, partition)] for occ in region_plan.occurrences}
-                region = RelationalRegionRuntime(region_plan, kernels=members,
-                    services=self._services, edges=self._graph.edges)
-                for kernel in members.values():
-                    kernel._relational_region = region
-                self._relational_regions[region_plan.region_id] = region
-            if self._restored_states:
-                for group in set(shared.values()):
-                    if group.restored != set(group.binding['members']):
-                        raise _dataflow_error('INCOMPATIBLE_HISTORY', 'Shared actor state was not fully restored')
-            for source_id, splits in self._split_by_source.items():
-                if not hasattr(self, '_source_run'):
-                    self._source_run = source_run_view(self._services)
-                snapshot = self._snapshot_by_source.get(source_id)
-                if snapshot is None:
-                    raise _dataflow_error("SOURCE_CHANGED", "no snapshot for assigned source",
-                                          context={"source_id": source_id})
-                for split in splits:
-                    cursor = self._restored_cursors.get(split.split_id)
-                    with source_run_scope(self._source_run):
-                        reader = open_source_reader(snapshot, split, cursor=cursor,
-                                                    services=self._services)
-                    self._readers[split.split_id] = reader
-            if self._channels is None:
-                self._channels = open_channels(self._input_specs + self._output_specs,
-                                               services=self._services)
-            self._admit_open = True
-            self._state = "started"
-            from .dataflow_graph_runner import WorkerGraphRunner
-            self._runner = WorkerGraphRunner(self)
+            facts = self._services.journal.read_action(self.assignment.action_id)
+            self._source_run = source_run_view(self._services, limits=facts['limits'])
+            with source_run_scope(self._source_run):
+                assignment = self.assignment
+                from ..dataflow_shared import shared_actors
+                shared = shared_actors(self._kernel_specs, self._services.programs, assignment, graph=self._graph)
+                if self._restored_states:
+                    for group in set(shared.values()):
+                        if not set(group.binding['members']) <= set(self._restored_states):
+                            raise _dataflow_error('INCOMPATIBLE_HISTORY', 'Shared actor recovery is missing a member image')
+                for occ, spec in self._kernel_specs.items():
+                    if self._node_specs[occ].kind in ("source", "terminal"):
+                        continue
+                    for partition in assignment.lease.partition_ids:
+                        kernel = make_kernel(spec, services=self._services, partition_id=partition)
+                        if occ in shared:
+                            kernel._shared_actor = shared[occ]
+                        self._kernels[(occ, partition)] = kernel
+                        kernel.start()
+                        state_ref = self._restored_states.get(occ)
+                        if state_ref is not None:
+                            kernel.restore(state_ref)
+                            instance = getattr(kernel, "instance", None)
+                            if instance is not None:
+                                restore_actor_state(instance, ref=state_ref, services=self._services)
+                        self._kernels[(occ, partition)] = kernel
+                # Only an explicitly versioned sealed stage may bind this finite
+                # compute optimization. Old stages never infer a new region.
+                from ...planning.dataflow_relational_regions import interpret_region
+                from ..kernels.relational_region import RelationalRegionRuntime
+                self._relational_regions = {}
+                for stage in assignment.stages:
+                    region_plan = interpret_region(self._graph, stage)
+                    if region_plan is None:
+                        continue
+                    partition = assignment.lease.partition_ids[0]
+                    members = {occ: self._kernels[(occ, partition)] for occ in region_plan.occurrences}
+                    region = RelationalRegionRuntime(region_plan, kernels=members,
+                        services=self._services, edges=self._graph.edges)
+                    for kernel in members.values():
+                        kernel._relational_region = region
+                    self._relational_regions[region_plan.region_id] = region
+                if self._restored_states:
+                    for group in set(shared.values()):
+                        if group.restored != set(group.binding['members']):
+                            raise _dataflow_error('INCOMPATIBLE_HISTORY', 'Shared actor state was not fully restored')
+                for source_id, splits in self._split_by_source.items():
+                    snapshot = self._snapshot_by_source.get(source_id)
+                    if snapshot is None:
+                        raise _dataflow_error("SOURCE_CHANGED", "no snapshot for assigned source",
+                                              context={"source_id": source_id})
+                    for split in splits:
+                        cursor = self._restored_cursors.get(split.split_id)
+                        with source_run_scope(self._source_run):
+                            reader = open_source_reader(snapshot, split, cursor=cursor,
+                                                        services=self._services)
+                        self._readers[split.split_id] = reader
+                if self._channels is None:
+                    self._channels = open_channels(self._input_specs + self._output_specs,
+                                                   services=self._services)
+                self._admit_open = True
+                self._state = "started"
+                from .dataflow_graph_runner import WorkerGraphRunner
+                self._runner = WorkerGraphRunner(self)
 
     def run(self):
         """Begin business work only after the host accepts its K3 assignment."""
-        self._runner.start()
+        from ..dataflow_source_context import source_run_scope
+        with source_run_scope(self._source_run):
+            # The business thread and its async/thread calls copy this context.
+            self._runner.start()
 
     def receive(self, command):
         if command.get('kind') == 'renew_lease':
@@ -374,7 +378,9 @@ class DataflowWorkerExecutor:
                 from ..contracts.dataflow import WorkerStep
                 return WorkerStep(processed=0, blocked=False, end_of_input=True, events=())
             runner = self._runner
-        return runner.step(max_records=max_records, deadline_ms=deadline_ms)
+        from ..dataflow_source_context import source_run_scope
+        with source_run_scope(self._source_run):
+            return runner.step(max_records=max_records, deadline_ms=deadline_ms)
 
     # ---- B006 request_cut ----
     def request_cut(self, request):
@@ -386,7 +392,9 @@ class DataflowWorkerExecutor:
 
     # ---- B007 snapshot ----
     def snapshot(self, request):
-        return self._runner.snapshot(request)
+        from ..dataflow_source_context import source_run_scope
+        with source_run_scope(self._source_run):
+            return self._runner.snapshot(request)
 
     # ---- B008 accept_receipt ----
     def accept_receipt(self, commit_id: str, *, cut_id: str) -> None:
@@ -451,10 +459,12 @@ class DataflowWorkerExecutor:
         final_bytes = 2
         for key, kernel in list(self._kernels.items()):
             try:
-                kernel.close()
-                aclose = getattr(kernel, "aclose", None)
-                if aclose is not None:
-                    aclose()
+                from ..dataflow_source_context import source_run_scope
+                with source_run_scope(self._source_run):
+                    kernel.close()
+                    aclose = getattr(kernel, "aclose", None)
+                    if aclose is not None:
+                        aclose()
             except BaseException as exc:
                 errors.append(exc)
         # Shared owner close occurs at its last borrower; collect all final
