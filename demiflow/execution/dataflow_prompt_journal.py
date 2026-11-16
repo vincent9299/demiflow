@@ -147,7 +147,8 @@ def is_private_prompt_request(service, command, request):
 
 
 def _journal(service, node_id, route):
-    from ..operator_llm.sqlite_journal import SQLitePromptJournal, MAX_DISK_BYTES
+    from ..operator_llm.sqlite_journal import SQLitePromptJournal
+    from .dataflow_private_storage import private_storage
     with service._private_prompt_lock:
         if service._closed:
             raise DataflowError('FENCED', 'Private Prompt journal owner is closed')
@@ -158,10 +159,7 @@ def _journal(service, node_id, route):
             options = dict(config['private_journal'])
             maximum = options.pop('max_requests', config['max_requests'])
             options['timeout_s'] = min(options.get('timeout_s', 30), service._bounds.timeout_ms / 1000)
-            paths = {item['private_journal']['path'] for item in service._private_prompt_nodes.values()}
-            disk = min(service._bounds.max_spill_bytes // len(paths), MAX_DISK_BYTES)
-            if disk < 4 * 1024**2:
-                raise DataflowError('BUDGET_EXCEEDED', 'Private Prompt stores exceed bounded 4 MiB per-store minimum')
+            options['path'], disk = private_storage(service, options['path'])
             journal = SQLitePromptJournal(max_requests=maximum, max_disk_bytes=disk, **options)
             service._private_prompt_journals[key] = journal
         return journal

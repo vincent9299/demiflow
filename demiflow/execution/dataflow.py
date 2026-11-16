@@ -474,6 +474,8 @@ class DataflowExecution:
         bind_private_embedding_contracts(self._services.journal_service, graph)
         from .dataflow_prompt_journal import bind_private_prompt_contracts
         bind_private_prompt_contracts(self._services.journal_service, graph)
+        from .dataflow_private_storage import bind_private_storage
+        bind_private_storage(self._services.journal_service)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
             from .dataflow_stream_lance import NativeStreamLanceService

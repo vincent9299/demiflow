@@ -51,10 +51,12 @@ def test_async_owner_drains_only_fixed_service_reason(reason, settled):
 
 @pytest.mark.parametrize('private', [False, True])
 def test_stop_closes_fresh_driver_reserve_but_allows_original_receipt_and_response(tmp_path, private):
+    from demiflow.execution.dataflow_private_storage import bind_private_storage
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
         if private:
             authority._action.declaration['kind'] = 'take_all'
             bind_private_embedding_contracts(authority, private_graph(tmp_path/'calls.sqlite'))
+            bind_private_storage(authority)
         make = private_event if private else event
         request = make(run, store, 'a')
         original = authority.dispatch(request)

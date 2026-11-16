@@ -153,10 +153,12 @@ def private_event(run, store, seed='a'):
 
 def test_duplicate_reserve_rpc_one_original_admission_and_private_intent(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
+    from demiflow.execution.dataflow_private_storage import bind_private_storage
     path = tmp_path / 'private.sqlite'
     with interrupted_run(tmp_path / 'run') as run, service(run, pending=1) as (authority, store, lease):
         authority._action.declaration['kind'] = 'take_all'
         bind_private_embedding_contracts(authority, private_graph(path))
+        bind_private_storage(authority)
         request = private_event(run, store)
         with ThreadPoolExecutor(max_workers=2) as pool:
             first, second = list(pool.map(authority.dispatch, (request, request)))

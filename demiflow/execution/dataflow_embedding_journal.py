@@ -63,7 +63,8 @@ def bind_private_embedding_adapter(actor, *, services, node_id, configuration):
 
 
 def _journal(service, node_id):
-    from ..operator_llm.sqlite_journal import SQLitePromptJournal, MAX_DISK_BYTES
+    from ..operator_llm.sqlite_journal import SQLitePromptJournal
+    from .dataflow_private_storage import private_storage
     with service._private_embedding_lock:
         if service._closed:
             raise DataflowError('FENCED', 'Private embedding journal owner is closed')
@@ -72,9 +73,7 @@ def _journal(service, node_id):
             config = service._private_embedding_nodes[node_id]
             options = dict(config['private_journal'])
             options['timeout_s'] = min(options.get('timeout_s', 30), service._bounds.timeout_ms / 1000)
-            disk = min(service._bounds.max_spill_bytes, MAX_DISK_BYTES)
-            if disk < 4 * 1024**2:
-                raise DataflowError('BUDGET_EXCEEDED', 'Private SQLite needs its bounded 4 MiB storage minimum')
+            options['path'], disk = private_storage(service, options['path'])
             journal = SQLitePromptJournal(max_requests=config['max_requests'],
                                           max_disk_bytes=disk, **options)
             service._private_embedding_journals[node_id] = journal
