@@ -195,6 +195,8 @@ class _Admission:
                 self.check(self.builder + peak + blocks * 64)
             if allocated and used < span:
                 peak = max(peak, held + ((used + 63) // 64) * 64)
+                held += ((used + 63) // 64) * 64 - allocated
+            self.buffers += held
             self.builder += peak + blocks * 64
             self.check(self.builder)
             return

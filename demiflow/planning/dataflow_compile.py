@@ -1002,6 +1002,11 @@ class _Capture:
         profile = replace(profile, requests={**profile.requests, "memory_bytes": payload + metadata})
         configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
         native_publication = request.kind in {'write_lance', 'write_file', 'write_datasink'}
+        if request.kind == 'write_datasink':
+            from ..execution.queue_sinks import QueueResultSink
+            # Queue tasks were settled by their original authority already;
+            # this terminal only publishes the result manifest, without Arrow.
+            native_publication = not isinstance(request.sink, QueueResultSink)
         if native_publication:
             from ..execution.dataflow_publication_budget import FIELD, SCHEMA
             configuration[FIELD] = {'schema': SCHEMA, 'resident_bytes': _payload_workspace(self.bounds)}
