@@ -28,12 +28,37 @@ def _finished_runner():
     runner._finished_splits = set()
     runner._consumed_deliveries = set()
     runner._source_rows_since_cut = 0
+    runner._source_quantum = runner._source_park_quantum = 1
+    runner._source_live_quantum = 8
     runner._park_mode = False
     runner._cut = None
     runner._metrics_at = time.monotonic()
     runner._flush_metrics = lambda: None
     runner._advance_input_completions = lambda **kwargs: 0
     return runner
+
+
+def test_live_durable_peers_keep_original_checkpoint_policy_and_parking_cap():
+    runner = _finished_runner()
+    runner.e._physical = SimpleNamespace(policy=SimpleNamespace(checkpoint_rows=8))
+    runner.receive({'kind': 'resume', 'durable_peers_live': True})
+    assert runner._source_quantum == 8
+    assert runner._source_park_quantum == 1
+    runner.receive({'kind': 'park_policy'})
+    assert runner._source_quantum == 1
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with pytest.raises(DataflowError, match='durable peer residency'):
+        runner.receive({'kind': 'resume', 'durable_peers_live': True})
+    assert runner._source_quantum == 1
+
+
+@pytest.mark.parametrize('value', [1, None, 'true'])
+def test_live_durable_peers_require_an_actual_boolean(value):
+    runner = _finished_runner()
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    with pytest.raises(DataflowError, match='durable peer residency'):
+        runner.receive({'kind': 'resume', 'durable_peers_live': value})
+    assert runner._source_quantum == 1
 
 
 @pytest.mark.parametrize('command', [

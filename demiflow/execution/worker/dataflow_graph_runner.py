@@ -98,6 +98,9 @@ class WorkerGraphRunner:
         windows = self._source_durable_windows()
         self._source_quantum = (min([physical.policy.checkpoint_rows, aggregate_window, *windows])
                                 if windows else physical.policy.checkpoint_rows)
+        self._source_park_quantum = self._source_quantum
+        self._source_live_quantum = (min(physical.policy.checkpoint_rows, aggregate_window)
+                                    if windows else physical.policy.checkpoint_rows)
         host = '127.0.0.1'
         if executor._physical.policy.provider == 'ray_core':
             import ray
@@ -432,6 +435,7 @@ class WorkerGraphRunner:
                 self._credit_payloads.pop(command['delivery_id'], None)
             elif kind == 'park_policy':
                 self._park_mode = True
+                self._source_quantum = self._source_park_quantum
                 self._consumed_deliveries.intersection_update(command.get('retain_consumed', ()))
                 self._idle_sent = False
             elif kind in ('pause', 'park'):
@@ -439,6 +443,18 @@ class WorkerGraphRunner:
                 self._paused = True
                 self._idle_sent = False
             elif kind == 'resume':
+                if 'durable_peers_live' in command:
+                    live = command['durable_peers_live']
+                    if type(live) is not bool or live and self._park_mode:
+                        raise DataflowError('INVALID_CONTRACT', 'invalid durable peer residency')
+                    # The sole driver sends this only after activating every
+                    # stage in the one admitted cohort. Live peers replenish
+                    # the original channel/aggregate credits through real ACKs;
+                    # no worst-case parked byte window needs a forced cut.
+                    # Original credit checks and unconfirmed source bounds are
+                    # unchanged. Absent/parked peers keep the conservative cap.
+                    self._source_quantum = (self._source_live_quantum
+                        if live else self._source_park_quantum)
                 observation_rows = command.get('observation_rows', 0)
                 if type(observation_rows) is not int or observation_rows < 0:
                     raise DataflowError('INVALID_CONTRACT', 'invalid progress observation interval')

@@ -123,6 +123,7 @@ class DataflowExecution:
         self._phase_index = 0
         self._completed_stages = set()
         self._durable_residency = None
+        self._durable_peers_live = False
         self._satisfied_consumers = {}
         self._terminal_stop_sources = {}
         self._terminal_queue = deque()
@@ -676,6 +677,9 @@ class DataflowExecution:
             self._phases = ((tuple(s.stage_id for s in stages),) if fits and prior is None and not needs_prefix
                             else pack_finite_phases(self._physical, fits=phase_fits, prior=prior))
         # Preflight EVERY phase before business side effects.
+        self._durable_peers_live = (durable and self._durable_residency is None
+            and len(self._phases) == 1
+            and set(self._phases[0]) == {s.stage_id for s in stages})
         for phase in self._phases:
             group = [s for s in stages if s.stage_id in phase]
             resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in group)
@@ -1396,6 +1400,7 @@ class DataflowExecution:
         for key, endpoint in self._endpoints.items():
             endpoint.send_business({'kind': 'resume', 'publishing': publishing,
                 'observation_rows': getattr(self._action, '_observation_rows', 0),
+                **({'durable_peers_live': True} if getattr(self, '_durable_peers_live', False) else {}),
                 'source_credit': shares.get(key, {'rows': 0, 'bytes': 0})})
 
     def _start_publication(self):
