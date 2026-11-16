@@ -75,4 +75,25 @@ def test_native_concurrency_state_and_accelerator_minima_stay_additive():
     desired = _model_profile('gpu', bounds, 3, 'nonrecoverable')
     assert fixed.requests['memory_bytes'] == 3 * (4096 + 8192) + 16384
     assert desired.requests['memory_bytes'] >= fixed.requests['memory_bytes']
-    assert desired.requests['accelerators'] == ({'type': 'gpu', 'count': 1},)
+    assert desired.requests['accelerators'] == [{'type': 'gpu', 'count': 1}]
+
+
+def test_real_wide_materialized_model_reuses_its_original_ack(tmp_path, server):
+    payload = b'wide\x00original' * 750000
+    def execute():
+        return data.from_items([{'id': 1, 'payload': payload}]).map_prompt_async(
+            'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'id'}, output='answer',
+            concurrency=1, queue_depth=1, max_requests=1).materialize().take_all()
+    expected = [{'id': 1, 'payload': payload, 'answer': 'ok'}]
+    with RunContext.start(tmp_path / 'run') as run:
+        reference, limits = run.ref, dict(run.limits)
+        assert execute() == expected
+    assert len(server['requests']) == 1
+    journal = RunJournal(reference.directory)
+    before = journal.execution_commits('action-1')
+    assert any(c['status'] == 'acked' for c in before)
+    with RunContext.resume(reference) as resumed:
+        assert dict(resumed.limits) == limits
+        assert execute() == expected
+    assert journal.execution_commits('action-1') == before
+    assert len(server['requests']) == 1
