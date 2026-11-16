@@ -832,6 +832,8 @@ def compile_physical_dataflow(
         hosts = tuple(replace(host, logical_resources={**host.logical_resources,
             'cpu_millis': min(host.logical_resources.get('cpu_millis',
                 host.logical_resources.get('cpu', 0) * 1000), cpu_ceiling)}) for host in hosts)
+    from .dataflow_shared import colocate_shared_actors
+    stages = colocate_shared_actors(graph, stages, bounds=bounds, hosts=hosts)
     from .dataflow_fusion import fuse_single_worker_pipeline
     stages = fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     from .dataflow_thread_fusion import fuse_thread_suffix

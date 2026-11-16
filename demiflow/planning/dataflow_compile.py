@@ -923,6 +923,8 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
         for p, op, c, ip in capture.edges
     )
     declarations = tuple(decl for _, decl in capture.declarations)
+    from .dataflow_shared import bind_shared_actors
+    bound_nodes = bind_shared_actors(bound_nodes, edges, declarations)
     sources = tuple(node.occurrence_id for node in bound_nodes if node.kind == "source")
     terminals = (bound_nodes[terminal].occurrence_id,)
     graph = DataflowGraph(

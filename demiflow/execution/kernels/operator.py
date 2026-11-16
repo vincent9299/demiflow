@@ -81,8 +81,8 @@ def _resolve_instance(spec: KernelSpec, services: RuntimeServices, *, declaratio
             op = BoundMapOp(callable=declaration, inputs=dict(spec.configuration["inputs"]),
                             output=spec.configuration.get("output"),
                             outputs=spec.configuration.get("outputs"), stream_options=MapStreamOptions())
-            return _FieldCallable(op)
-        instance = declaration.instantiate()
+            return _FieldCallable(op, shared=bool(spec.configuration.get('shared_actor')))
+        instance = declaration.target if spec.configuration.get('shared_actor') else declaration.instantiate()
         if declaration.call_args or declaration.call_kwargs:
             return _BoundCallable(instance, declaration.call_args, dict(declaration.call_kwargs))
         return instance
@@ -93,6 +93,15 @@ from demiflow.data.plan import BoundCallable
 
 
 class _FieldCallable(BoundCallable):
+    def __init__(self, operation, *, shared=False):
+        if not shared:
+            super().__init__(operation)
+            return
+        from ...data.runtime_contract import validator
+        self._operation = operation
+        self._fn = operation.callable.target
+        self._validation = validator(self._fn, operation.callable.runtime_contract)
+
     def __getattr__(self, name):
         return getattr(self._fn, name)
 
@@ -311,6 +320,7 @@ class OperatorKernel:
         self._partition_id = partition_id
         self._occurrence = _occurrence(spec)
         self._instance: Any = None
+        self._shared_actor = None
         self._started = False
         self._closed = False
         self._restored = False
@@ -399,7 +409,7 @@ class OperatorKernel:
 
     def _create_instance(self, slot):
         declaration = None
-        if self._task_declaration is not None:
+        if self._task_declaration is not None and self._shared_actor is None:
             import cloudpickle
             raw = cloudpickle.dumps(self._task_declaration)
             if len(raw) > self._services.bounds.max_state_bytes:
@@ -452,10 +462,17 @@ class OperatorKernel:
         owner = self._state_owner(instance)
         lifecycle = (None if inspect.isroutine(owner) or inspect.isclass(owner)
                      else self.observations.lifecycle)
-        instance = AsyncInstance(instance, self._services,
-                                 owner=owner, lifecycle=lifecycle,
-                                 timeout=self._spec.configuration.get('hard_timeout'),
-                                 await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'})
+        if self._shared_actor is not None:
+            if owner is not self._shared_actor.owner:
+                raise _err('CORRUPT_ARTIFACT', 'Shared actor call resolved to a different owner')
+            instance = self._shared_actor.acquire(self._occurrence, instance, self._services,
+                lifecycle=lifecycle, timeout=self._spec.configuration.get('hard_timeout'),
+                await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'})
+        else:
+            instance = AsyncInstance(instance, self._services,
+                                     owner=owner, lifecycle=lifecycle,
+                                     timeout=self._spec.configuration.get('hard_timeout'),
+                                     await_calls=self._spec.kind not in {'MapOp', 'BoundMapOp'})
         instance.native_scope = (self._occurrence, self._partition_id) + ((slot,) if self._worker_scope else ())
         self._instances[slot] = instance
         if slot == 0:
@@ -674,7 +691,7 @@ class OperatorKernel:
                 raise _err('INVALID_CONTRACT', 'logical task provenance is absent or invalid')
         if self._task_ordinal is not None and ordinal < self._task_ordinal:
             raise _err('INVALID_CONTRACT', 'logical callback tasks arrived out of order')
-        if self._task_ordinal is not None and ordinal != self._task_ordinal:
+        if self._task_ordinal is not None and ordinal != self._task_ordinal and self._shared_actor is None:
             _close_instance(self._instance)
             self._instances[0] = self._instance = None
         self._task_ordinal = ordinal
@@ -951,7 +968,7 @@ class OperatorKernel:
         if not self.checkpoint_ready:
             raise _err('INVALID_CONTRACT', 'Checkpoint requires drained non-native invocations')
         worker_states = [self._snapshot_state(instance) if instance is not None else None for instance in self._instances] if self._worker_scope else None
-        completed_task = bool(self._task_rows and self._task_origin and self._task_frontier and self._task_frontier % self._task_rows == 0)
+        completed_task = bool(self._shared_actor is None and self._task_rows and self._task_origin and self._task_frontier and self._task_frontier % self._task_rows == 0)
         image = {
             "schema_version": IMAGE_VERSION,
             "kind": self._spec.kind,
@@ -1023,6 +1040,8 @@ class OperatorKernel:
         return self._state_owner(instance, retain_partial=True), (), {}
 
     def _snapshot_state(self, instance=None) -> Any:
+        if self._shared_actor is not None and self._occurrence != self._shared_actor.binding['state_owner']:
+            return {'mode': 'shared_owner', 'owner': self._shared_actor.binding['state_owner']}
         instance = instance if instance is not None else self._instance
         if instance is None or self._spec.state == "none":
             return None
@@ -1180,6 +1199,8 @@ class OperatorKernel:
             raise _err('INCOMPATIBLE_HISTORY', 'Pending calls have no invocation slots')
 
     def _restore_state(self, state: Any, instance=None) -> None:
+        if self._shared_actor is not None and not self._shared_actor.restoring(self._occurrence, state):
+            return
         if state is None:
             return
         mode = state["mode"]

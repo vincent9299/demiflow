@@ -167,7 +167,7 @@ def _code_identity_from_value(kind, value):
 
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
-                       live_binding=None, force_live=False) -> ArtifactRef:
+                       live_binding=None, force_live=False, shared_payload=None) -> ArtifactRef:
     import cloudpickle
     kind = _program_kind(declaration)
     value = _program_value(declaration)
@@ -175,14 +175,19 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     manifest = {"schema": PROGRAM_SCHEMA, "occurrence_id": declaration.occurrence_id,
                 "kind": kind, "code_identity": code_identity}
     try:
-        payload = None if force_live else cloudpickle.dumps(value)
+        payload = None if force_live or shared_payload is not None else cloudpickle.dumps(value)
     except Exception as exc:
         if live_binding is None:
             raise DataflowError("INVALID_CONTRACT",
                 "Program carries a live handle (connection/lock/FD); task/process scope requires a serializable declaration: "
                 + str(exc)) from exc
         payload = None
-    if payload is None:
+    if shared_payload is not None:
+        payload_ref, binding, sources, imports = shared_payload
+        manifest['payload_ref'] = _artifact_json(payload_ref)
+        manifest['shared_actor'] = binding
+        manifest['shared_sources'] = {'refs': sources, 'imports': imports}
+    elif payload is None:
         from .dataflow_thread_programs import marker
         manifest['thread_attempt'] = marker(declaration.occurrence_id, code_identity)
     else:
@@ -251,6 +256,39 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         if declaration.occurrence_id in declarations:
             raise DataflowError("INVALID_CONTRACT", "Duplicate program declaration occurrence")
         declarations[declaration.occurrence_id] = declaration
+    from .dataflow_shared import shared_binding
+    shared_payloads = {}
+    for node in graph.nodes:
+        binding = shared_binding(node.kernel.configuration, node.occurrence_id)
+        if binding is None or binding['owner'] in shared_payloads:
+            continue
+        import cloudpickle
+        import io
+        from .dataflow_code import business_sources, source_identity, stage_sources, MAX_SOURCES, MAX_SOURCE_BYTES
+        sources = {}
+        for occ in binding['members']:
+            member = declarations[occ]
+            for name, source in business_sources(_program_kind(member), _program_value(member)).items():
+                if name in sources and sources[name][1] != source[1]:
+                    raise DataflowError('CODE_MISMATCH', 'Shared actor bindings name different business source bytes')
+                sources[name] = source
+            if len(sources) > MAX_SOURCES or sum(len(raw) for _, raw in sources.values()) > MAX_SOURCE_BYTES:
+                raise DataflowError('BUDGET_EXCEEDED', 'Shared actor business imports exceed original source budget')
+        class BoundedPayload(io.BytesIO):
+            def write(self, chunk):
+                if self.tell() + len(chunk) > bounds.max_state_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'Shared actor program exceeds original byte budget')
+                return super().write(chunk)
+        stream = BoundedPayload()
+        try:
+            cloudpickle.dump(tuple(_program_value(declarations[o]) for o in binding['members']), stream)
+        except DataflowError:
+            raise
+        except Exception as exc:
+            raise DataflowError('INVALID_CONTRACT', 'Shared actor requires a serializable recoverable declaration') from exc
+        payload_ref = store.put(iter([stream.getvalue()]), max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
+        shared_payloads[binding['owner']] = (payload_ref, binding,
+            stage_sources(sources, store=store), source_identity(sources))
     nodes = []
     shared_stream = worker_mode == 'thread' and any(n.kernel.configuration.get('streaming_map')
         and n.kernel.configuration.get('execution') == 'thread' for n in graph.nodes)
@@ -288,7 +326,8 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             thread_stream or force_live or node.kernel.kind == 'AsyncMapOp')
         from .dataflow_thread_programs import owner
         ref = _stage_one_program(declaration, store=store, bounds=bounds,
-            live_binding=owner(action) if eligible else None, force_live=force_live)
+            live_binding=owner(action) if eligible else None, force_live=force_live,
+            shared_payload=shared_payloads.get(config.get("shared_actor", {}).get("owner")))
         manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
         if 'thread_attempt' in manifest:
             from ..planning.dataflow_compile import _plain
@@ -303,7 +342,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
 
 
 # -- D016 -----------------------------------------------------------------
-def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bounds, cache=None, live_binding=None) -> LoadedProgram:
+def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bounds, cache=None, live_binding=None, shared_cache=None) -> LoadedProgram:
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict or manifest.get("schema") != PROGRAM_SCHEMA:
         raise DataflowError("INVALID_CONTRACT", "Unsupported program artifact schema")
@@ -311,8 +350,13 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     code_identity = manifest["code_identity"]
     if identity(code_identity) != identity(expected_pin):
         raise DataflowError("INVALID_CONTRACT", "Program code pin differs from the sealed expectation")
+    shared_sources = manifest.get('shared_sources')
+    if 'shared_actor' in manifest and (type(shared_sources) is not dict or set(shared_sources) != {'refs', 'imports'}):
+        raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program has no complete source bundle')
     if cache is not None:
         from .dataflow_code import mount_sources
+        if shared_sources is not None:
+            mount_sources(shared_sources['refs'], shared_sources['imports'], store=store, cache=cache)
         mount_sources(manifest.get('business_sources', {}), code_identity.get('imports', {}),
                       store=store, cache=cache)
     if 'thread_attempt' in manifest:
@@ -323,10 +367,21 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
                        occurrence_id=manifest['occurrence_id'])
     else:
         payload_ref = _artifact_from_json(manifest["payload_ref"])
-        payload = _read_bytes(store, payload_ref, max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
+        from .dataflow_shared import shared_binding
+        binding = shared_binding(manifest, manifest['occurrence_id'])
+        cached = shared_cache.get(binding['owner']) if binding and shared_cache is not None else None
+        if cached is not None and (cached[0] != payload_ref or cached[1] != binding):
+            raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program bundle differs between members')
+        payload = None if cached is not None else _read_bytes(store, payload_ref, max_bytes=bounds.max_state_bytes, media_type=PAYLOAD_MEDIA)
         import cloudpickle
         try:
-            value = cloudpickle.loads(payload)
+            value = cached[2] if cached is not None else cloudpickle.loads(payload)
+            if binding:
+                if type(value) is not tuple or len(value) != len(binding['members']):
+                    raise DataflowError('CORRUPT_ARTIFACT', 'Invalid shared actor program membership')
+                if shared_cache is not None:
+                    shared_cache[binding['owner']] = (payload_ref, binding, value)
+                value = value[binding['members'].index(manifest['occurrence_id'])]
         except Exception as exc:
             raise DataflowError("CORRUPT_ARTIFACT", "Program payload failed to load: " + str(exc)) from exc
     recomputed = _code_identity_from_value(kind, value)

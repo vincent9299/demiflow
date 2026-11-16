@@ -99,14 +99,21 @@ class SharedCounter:
         self.count = value['count']
 
 
-def test_shared_actor_uses_one_snapshot_at_last_owner(tmp_path):
+def test_shared_actor_uses_one_snapshot_at_last_owner(tmp_path, monkeypatch):
+    from test_dataflow_shared_actor import capture_images
+    traces = capture_images(monkeypatch)
     actor = SharedCounter()
-    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 4, 'checkpoint_interval_ms': 60000}) as run:
+    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 4, 'checkpoint_interval_ms': 60000}):
         result = data.from_items([{'id': i} for i in range(12)]).map_async(actor, concurrency=3).map_async(
             identity, concurrency=2).map_async(actor, concurrency=2).materialize().take_all()
-        facts = run.journal.execution_commits('action-1')
-        assert [StateArtifacts(run).read(f['prepared']['state']['node-0'])['count'] for f in facts] == [
-            2 * f['intent']['position']['next_ordinal'] for f in facts]
+    assert len(traces) >= 2
+    for trace in traces:
+        hooks = [(o, state) for o, state in trace['states'] if state['mode'] == 'hooks']
+        aliases = [(o, state) for o, state in trace['states'] if state['mode'] == 'shared_owner']
+        assert len(hooks) == len(aliases) == 1
+        assert aliases[0][1]['owner'] == hooks[0][0]
+        assert hooks[0][1]['value']['count'] == sum(trace['outputs'][o] for o, _ in hooks + aliases)
+    assert next(s['value']['count'] for _, s in traces[-1]['states'] if s['mode'] == 'hooks') == 24
     assert sorted(result, key=lambda r: r['id']) == [{'id': i} for i in range(12)]
 
 

@@ -288,11 +288,20 @@ class DataflowWorkerExecutor:
                                       context={"state": self._state})
             self._check_grant()
             assignment = self.assignment
+            from ..dataflow_shared import shared_actors
+            shared = shared_actors(self._kernel_specs, self._services.programs, assignment)
+            if self._restored_states:
+                for group in set(shared.values()):
+                    if not set(group.binding['members']) <= set(self._restored_states):
+                        raise _dataflow_error('INCOMPATIBLE_HISTORY', 'Shared actor recovery is missing a member image')
             for occ, spec in self._kernel_specs.items():
                 if self._node_specs[occ].kind in ("source", "terminal"):
                     continue
                 for partition in assignment.lease.partition_ids:
                     kernel = make_kernel(spec, services=self._services, partition_id=partition)
+                    if occ in shared:
+                        kernel._shared_actor = shared[occ]
+                    self._kernels[(occ, partition)] = kernel
                     kernel.start()
                     state_ref = self._restored_states.get(occ)
                     if state_ref is not None:
@@ -301,6 +310,10 @@ class DataflowWorkerExecutor:
                         if instance is not None:
                             restore_actor_state(instance, ref=state_ref, services=self._services)
                     self._kernels[(occ, partition)] = kernel
+            if self._restored_states:
+                for group in set(shared.values()):
+                    if group.restored != set(group.binding['members']):
+                        raise _dataflow_error('INCOMPATIBLE_HISTORY', 'Shared actor state was not fully restored')
             for source_id, splits in self._split_by_source.items():
                 if not hasattr(self, '_source_run'):
                     self._source_run = source_run_view(self._services)
@@ -428,26 +441,28 @@ class DataflowWorkerExecutor:
                     aclose()
             except BaseException as exc:
                 errors.append(exc)
-            finally:
-                # The normal mailbox is closed during teardown. Carry only
-                # bounded, actual hook outcomes in the original Drain response.
-                try:
-                    runner = getattr(self, '_runner', None)
-                    if runner is not None and getattr(kernel, 'observations', None) is not None:
-                        payload = runner._metrics_payload(key[0])
-                        if payload.get('actor_lifecycle') is not None:
-                            from ..contracts.dataflow_codec import encode_wire
-                            import json
-                            raw = encode_wire(self._event('progress', payload=payload),
-                                type_name='WorkerEvent', bounds=self.assignment.bounds)
-                            # Wire envelopes overestimate each payload's bytes;
-                            # count once instead of reserializing the growing list.
-                            final_bytes += len(raw) + 1
-                            if final_bytes > self.assignment.bounds.max_control_bytes:
-                                raise _dataflow_error('BUDGET_EXCEEDED', 'final lifecycle observations exceed control budget')
-                            self._final_progress.append(json.loads(raw)['payload'])
-                except BaseException as exc:
-                    errors.append(exc)  # Continue physical cleanup; preserve the first error.
+        # Shared owner close occurs at its last borrower; collect all final
+        # observations only after every kernel has released its lifecycle.
+        for key, kernel in list(self._kernels.items()):
+            # The normal mailbox is closed during teardown. Carry only
+            # bounded, actual hook outcomes in the original Drain response.
+            try:
+                runner = getattr(self, '_runner', None)
+                if runner is not None and getattr(kernel, 'observations', None) is not None:
+                    payload = runner._metrics_payload(key[0])
+                    if payload.get('actor_lifecycle') is not None:
+                        from ..contracts.dataflow_codec import encode_wire
+                        import json
+                        raw = encode_wire(self._event('progress', payload=payload),
+                            type_name='WorkerEvent', bounds=self.assignment.bounds)
+                        # Wire envelopes overestimate each payload's bytes;
+                        # count once instead of reserializing the growing list.
+                        final_bytes += len(raw) + 1
+                        if final_bytes > self.assignment.bounds.max_control_bytes:
+                            raise _dataflow_error('BUDGET_EXCEEDED', 'final lifecycle observations exceed control budget')
+                        self._final_progress.append(json.loads(raw)['payload'])
+            except BaseException as exc:
+                errors.append(exc)  # Continue physical cleanup; preserve the first error.
         for split_id, reader in list(self._readers.items()):
             try:
                 from ..dataflow_source_context import source_run_scope, source_run_view

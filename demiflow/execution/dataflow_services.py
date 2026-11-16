@@ -183,13 +183,14 @@ def _load_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bou
         cache = None  # Never mutate sys.path/module namespaces in the hosting process.
     programs = _VerifiedPrograms()
     programs.native_limits = physical.policy.native_limits
+    shared_cache = {}
     owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
     for node in graph.nodes:
         if node.occurrence_id not in owned or node.program_ref is None:
             continue
         programs[node.occurrence_id] = verify_dataflow_program(
             node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
-            store=store, bounds=bounds, cache=cache,
+            store=store, bounds=bounds, cache=cache, shared_cache=shared_cache,
             live_binding={"run_id": assignment.run_id, "action_id": assignment.action_id,
                           "attempt": assignment.attempt, "fence": assignment.fence})
     return programs

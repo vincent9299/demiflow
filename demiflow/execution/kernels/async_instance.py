@@ -51,6 +51,7 @@ class _AsyncWorkPool(concurrent.futures.ThreadPoolExecutor):
 
 class AsyncInstance:
     def __init__(self, target, services, *, timeout=None, owner=None, await_calls=True, lifecycle=None):
+        self._shared = None
         self.target = target
         self.owner = target if owner is None else owner
         self.services = services
@@ -82,7 +83,9 @@ class AsyncInstance:
     def __getattr__(self, name):
         return getattr(self.target, name)
 
-    def resolve(self, value, *, closing=False):
+    def resolve(self, value, *, closing=False, timeout=None):
+        if self._shared is not None:
+            return self._shared.base.resolve(value, closing=closing, timeout=self.timeout)
         if not closing:
             try:
                 self.check_lifecycle()
@@ -121,7 +124,7 @@ class AsyncInstance:
             finally:
                 self._tasks.discard(task)
         future = asyncio.run_coroutine_threadsafe(wait(), self.loop)
-        deadline = time.monotonic() + self.timeout
+        deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         try:
             while True:
                 if not closing:
@@ -151,6 +154,8 @@ class AsyncInstance:
             raise
 
     def start(self):
+        if self._shared is not None:
+            return self._shared.base.start()
         if self._closed or self._stopping.is_set():
             raise DataflowError("INVALID_CONTRACT", "cannot start a closed operator")
         if self._started:
@@ -185,6 +190,8 @@ class AsyncInstance:
             self._observe_lifecycle('started', True)
 
     def check_lifecycle(self):
+        if self._shared is not None:
+            return self._shared.base.check_lifecycle()
         if self._lifecycle_failure is not None:
             raise self._lifecycle_failure
 
@@ -204,6 +211,8 @@ class AsyncInstance:
 
     def request_stop(self, reason=None):
         """Stop admission; only the fixed service-stop reason drains paid calls."""
+        if self._shared is not None:
+            return self._shared.base.request_stop(reason)
         from ..request_limits import COOPERATIVE_STOP_REASON
         if not self._stopping.is_set():
             self._stop_reason = reason if reason == COOPERATIVE_STOP_REASON else None
@@ -236,6 +245,11 @@ class AsyncInstance:
         self.resolve(cancel_pending(), closing=True)
 
     def close(self):
+        if self._shared is not None:
+            if not self._closed:
+                self._closed = True
+                self._shared.release(self._shared_occurrence)
+            return
         if self._closed:
             return
         self.request_stop()
