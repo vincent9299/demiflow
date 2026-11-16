@@ -63,7 +63,10 @@ def test_blob_constructor_is_not_called_when_input_and_storage_do_not_fit(tmp_pa
         calls.append(True)
         raise AssertionError('blob constructor before admission')
     monkeypatch.setattr(lance, 'blob_array', forbidden)
-    limits = {**LIMITS, 'max_batch_bytes':32768, 'max_row_bytes':32768}
+    # R/B describe one business payload, while Python+Arrow+writer copies
+    # occupy the separately sealed publication workspace within original M.
+    # Keep the original 14KB row and caps; make their actual coexistence fail.
+    limits = {**LIMITS, 'memory_bytes':384*1024, 'max_batch_bytes':32768, 'max_row_bytes':32768}
     target = tmp_path/'rejected.lance'
     with pytest.raises(DataflowError, match='batch conversion admission') as error:
         with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(batch_rows=1):
@@ -73,5 +76,19 @@ def test_blob_constructor_is_not_called_when_input_and_storage_do_not_fit(tmp_pa
     assert run.journal.execution_action('action-1')['result'] is None
     for fact in run.journal.execution_commits('action-1'):
         assert fact['status']=='pending' and fact['prepared'] is None and not fact['receipts']
+
+
+def test_same_blob_payload_fits_original_large_run_and_individual_batch_caps(tmp_path):
+    limits = {**LIMITS, 'max_batch_bytes':32768, 'max_row_bytes':32768}
+    target = tmp_path/'admitted.lance'
+    with RunContext.start(tmp_path/'run', limits=limits), data.local_execution(batch_rows=1):
+        data.from_items([{'id':0,'data':b'x'*14000}]).write_lance(str(target), mode='create', schema=_schema())
+    dataset = lance.dataset(str(target))
+    assert dataset.version == 1
+    value = dataset.take_blobs('data', indices=[0])[0]
+    try:
+        assert value.read() == b'x'*14000
+    finally:
+        value.close()
 
 
