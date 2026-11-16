@@ -38,7 +38,7 @@ def contract(tmp_path, definition, *, options=None):
     settings.update(options or {})
     body = "from demiflow import data\ndef run(*, target):\n    rows = data.from_items(" + repr([
         {'candidates': ITEMS, 'image': 'data:image/png;base64,aW1hZ2U='}]) + ")\n"
-    body += "    result = rows.map_prompt_async('match', config='flows/prompt.yaml', inputs={'candidates': 'candidates', 'image': 'image'}, output='answer', call_output='call', error_output='error', max_requests=2, token_budget={'unit': 'chars', 'max_input': 10000}, options=" + repr(settings) + ").materialize()\n"
+    body += "    result = rows.map_prompt_async('match', config='flows/prompt.yaml', inputs={'candidates': 'candidates', 'image': 'image'}, output='answer', call_output='call', error_output='error', concurrency=1, request_policy={'initial_concurrency': 1, 'max_concurrency': 1}, max_requests=2, token_budget={'unit': 'chars', 'max_input': 10000}, options=" + repr(settings) + ").materialize()\n"
     body += "    return result.select_columns(['answer']).write_lance(target, mode='create', return_receipt=True)\n"
     (tmp_path / 'flows/model.py').write_text(body)
     catalog = inspect_modules(['demiflow.data'], Path(data.__file__).resolve().parents[1], LIMITS)
@@ -89,6 +89,15 @@ def test_managed_questions_preserve_partial_answers_and_exact_replay(server, tmp
     assert final.to_table().to_pylist()[0]['answer'] == expected
     assert not (tmp_path/'evidence/calls.sqlite').exists()
     assert len(server['requests']) == 1
+
+
+def test_managed_explicit_sqlite_journal_cannot_create_second_request_ledger(server, tmp_path):
+    report, _ = contract(tmp_path, DEFINITION, options={
+        'sqlite_journal': {'path': 'evidence/calls.sqlite', 'timeout_s': 1,
+                           'max_requests': 2, 'max_disk_bytes': 4194304}})
+    assert report['status'] == 'invalid'
+    assert any('Prompt option has no bounded managed contract' in item['detail'] for item in report['diagnostics'])
+    assert not server['requests'] and not (tmp_path/'evidence/calls.sqlite').exists()
 
 
 @pytest.mark.parametrize('change', ['no_revision', 'no_limits', 'wrong_image_type'])
