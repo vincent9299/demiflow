@@ -1,0 +1,72 @@
+{
+  "candidate": "6d6411764627ac9288cb811a147de3b9a45bd154",
+  "source_inputs": 1052,
+  "source_mismatches": [],
+  "archives": {
+    "local/fairness_deadlock": {
+      "files": 54,
+      "mismatches": [],
+      "status": "passed"
+    },
+    "local/memory_peak": {
+      "files": 67,
+      "mismatches": [],
+      "status": "passed"
+    },
+    "ray_core/fairness_deadlock": {
+      "files": 27,
+      "mismatches": [],
+      "status": "failed"
+    },
+    "ray_core/memory_peak": {
+      "files": 40,
+      "mismatches": [],
+      "status": "passed"
+    }
+  },
+  "junit": {
+    "local": {
+      "path": "/tmp/demiflow-resource-final-r2-local.xml",
+      "matches": true,
+      "cases": [
+        {
+          "name": "test_fairness_deadlock",
+          "seconds": "86.104",
+          "status": "passed"
+        },
+        {
+          "name": "test_memory_peak",
+          "seconds": "48.990",
+          "status": "passed"
+        }
+      ]
+    },
+    "ray_core": {
+      "path": "/tmp/demiflow-resource-final-ray.xml",
+      "matches": true,
+      "cases": [
+        {
+          "name": "test_fairness_deadlock",
+          "seconds": "131.720",
+          "status": "failed"
+        },
+        {
+          "name": "test_memory_peak",
+          "seconds": "70.863",
+          "status": "passed"
+        }
+      ]
+    },
+    "export_fd": {
+      "path": "/tmp/demiflow-resource-export-fd.xml",
+      "matches": true,
+      "cases": [
+        {
+          "name": "test_resource_evidence_backup_closes_every_sqlite_handle",
+          "seconds": "0.029",
+          "status": "passed"
+        }
+      ]
+    }
+  }
+}
