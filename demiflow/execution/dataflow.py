@@ -1115,6 +1115,18 @@ class DataflowExecution:
             return
         all_workers = set(self._endpoints)
         durable = self._durable_residency
+        if (durable is not None and self._cut is None
+                and not self._checkpoint_requested and not self._stopping):
+            sources = {allocation_id for allocation_id, endpoint in self._endpoints.items()
+                       if endpoint._assignment.source_splits}
+            if (sources - self._done and sources <= self._idle | self._done
+                    and not all_workers <= self._idle):
+                # A source stopped on its original durable admission window.
+                # Its co-resident consumers must drain to the same real cut,
+                # even when the user checkpoint timer/row limit is not due.
+                # Existing pause stops new source reads; it still drains input,
+                # memory ACKs and pending native calls before reporting idle.
+                self.request_checkpoint()
         if self._checkpoint_deferred:
             sources = all_workers - self._checkpoint_deferred
             if sources <= self._idle | self._done:

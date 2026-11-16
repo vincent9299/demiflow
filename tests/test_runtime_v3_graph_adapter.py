@@ -394,3 +394,42 @@ def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(gra
         assert bundle['physical'].policy.max_active_workers==3
         assert commits[0].source_vector[0].next_sequence==3
         assert commits[0].source_vector[0].end_of_input
+
+
+def test_source_credit_pause_drains_pending_memory_before_original_cut(graph_environment, monkeypatch):
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    directory = graph_environment
+    spec = _spec(directory)
+    spec['prefetch_slots'] = 1
+    spec['ancestor']['plan'] = LogicalPlan(_plan(directory, 'first', 0).operations + (
+        MapOp(CallableSpec.create(_slow), stream_options=MapStreamOptions(concurrency=1)),))
+    observations = []
+    request = DataflowExecution.request_checkpoint
+    def observed(execution):
+        sources = {key for key, endpoint in execution._endpoints.items()
+                   if endpoint._assignment.source_splits}
+        durable = execution._durable_residency
+        if (durable is not None and sources - execution._done
+                and sources <= execution._idle | execution._done):
+            pending = [key for key, (producer, consumer) in execution._deliveries.items()
+                       if producer is not None and consumer is not None and key not in durable.entries]
+            if pending:
+                observations.append({'source_owners': sorted(sources), 'pending_memory': pending})
+        return request(execution)
+    monkeypatch.setattr(DataflowExecution, 'request_checkpoint', observed)
+    with RunContext.start(directory/'run', limits={'memory_bytes':128*1024**2,
+            'max_row_bytes':4096,'max_batch_bytes':16384,'max_state_bytes':2*1024**2,
+            'checkpoint_rows':64,'checkpoint_interval_ms':60000,'timeout_s':60}) as run:
+        with run.action({'kind':'materialize','source':{'fixture':'source-idle-pending-memory'}}) as action:
+            result=LocalDatasetExecutor(workers=3).materialize_graph(spec)
+            action.complete({'kind':'graph-materialized'})
+        bundle=load_sealed_plan(run.directory,action.action_id,version='v3')
+        commits=run.journal.execution_commits(action.action_id)
+    assert observations, 'must exercise real in-flight memory when the source admission window stops'
+    assert result['egress_rows']==3 and result['target_rows']=={'left':3,'right':3}
+    for name, expected in [('first',[0,1,2]),('left',[100,101,102]),('right',[200,201,202])]:
+        assert sorted(json.loads(line)['x'] for line in (directory/(name+'.jsonl')).read_text().splitlines())==expected
+    assert commits and all(commit['status']=='acked' for commit in commits)
+    assert bundle['physical'].policy.checkpoint_rows==64
+    assert bundle['physical'].policy.checkpoint_interval_ms==60000
