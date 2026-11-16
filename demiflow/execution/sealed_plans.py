@@ -147,20 +147,27 @@ def _load_sealed_v3(directory, action_id, marker):
             "physical": physical, "sealed": sealed}
 
 
-def load_sealed_plan(directory, action_id) -> dict:
+def load_sealed_plan(directory, action_id, *, version=None) -> dict:
     """Read the original F1 sealed plan; readable even without execution bindings.
 
     An explicit v3 branch delegates to ``load_dataflow`` when the action carries a
     v3 native seal marker; the v1/v2 F1 path below is preserved byte-for-byte (its
-    validation and original digests are never recomputed).
+    validation and original digests are never recomputed). ``version='v2'``
+    selects the original F1 v1/v2 family for a legacy reader; ``'v3'`` selects
+    the native v3 carrier. An explicit selection never falls back or rewrites
+    the other format, even when both carriers belong to the same action.
     """
     _check_action_id(action_id)
+    if version not in (None, 'v2', 'v3'):
+        raise PlanContractError('invalid_contract', 'Unknown sealed plan version')
     journal = RunJournal(directory)
     if not journal.path.is_file():
         raise PlanContractError("missing_plan", "run journal is absent")
     v3_marker = journal.source_binding(action_id + "-dataflow-sealed")
-    if v3_marker is not None:
+    if version != 'v2' and v3_marker is not None:
         return _load_sealed_v3(directory, action_id, v3_marker)
+    if version == 'v3':
+        raise PlanContractError('missing_plan', 'action has no v3 sealed plan')
     facts = journal.source_binding(action_id + _SEALED_PLAN_KEY)
     if facts is None:
         raise PlanContractError("missing_plan", "action has no sealed plan facts")

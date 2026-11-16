@@ -222,7 +222,7 @@ def load_native_execution(run, action_id, *, execution_id):
     No re-selection from current defaults/eligibility: the sealed layout is the
     authority and ``execution_id`` must match a single placement.
     """
-    sealed_plan = load_sealed_plan(run.directory, action_id)
+    sealed_plan = load_sealed_plan(run.directory, action_id, version='v2')
     bindings = load_execution_bindings(run.directory, action_id, sealed_plan=sealed_plan)
     layout = interpret_physical_plan(sealed_plan["logical_dag"], sealed_plan["physical_plan"],
                                      bindings=bindings,
@@ -241,7 +241,7 @@ def bind_native_execution(action, source, plan, *, decision, profile=None):
     layout, placement = load_native_execution(run, action.action_id, execution_id=execution_id)
     if placement.backend != decision.backend or placement.recovery != decision.recovery:
         raise PlanContractError('identity_mismatch', 'Decision differs from sealed execution')
-    sealed = load_sealed_plan(run.directory, action.action_id)
+    sealed = load_sealed_plan(run.directory, action.action_id, version='v2')
     actual, slices = compile_dataset_logical_dag(action_id=action.action_id, source=source, plan=plan,
         terminal_kind=decision.action_kind,
         sink_ids=('lance',) if decision.action_kind == 'write_lance' else ('output',))
