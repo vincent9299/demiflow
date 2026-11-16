@@ -159,7 +159,9 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
     class Interrupted(Exception):
         pass
     _require_separate_stages(monkeypatch)
-    pipeline = _three_stage_dataset()
+    # Construct inside each execution context so its actual public worker
+    # budget is bound to that attempt, including the tighter resume.
+    pipeline = _three_stage_dataset
     seen = []
     def stop(execution, image):
         assert not image.cut.final
@@ -170,7 +172,7 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
             ref = run.ref
             with monkeypatch.context() as patch:
                 patch.setattr(DataflowExecution, '_retire_phase', stop)
-                pipeline.take_all()
+                pipeline().take_all()
     frozen = seen[0]
     assert frozen.policy.max_active_workers == 2
     original_place = DataflowExecution._place_hosts
@@ -183,6 +185,6 @@ def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_
     with RunContext.resume(ref), data.local_execution(workers=1) as session:
         with monkeypatch.context() as patch:
             patch.setattr(DataflowExecution, '_place_hosts', place)
-            assert pipeline.take_all() == [{'n': n} for n in range(1, 9)]
+            assert pipeline().take_all() == [{'n': n} for n in range(1, 9)]
 
         assert session.stats['admitted_bounds']['max_active_workers'] == 1

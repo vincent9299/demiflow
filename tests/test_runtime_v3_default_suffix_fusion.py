@@ -103,7 +103,18 @@ def test_new_default_rule_does_not_absorb_shared_sources_or_gpu_stages():
         branch = branch.map(lambda row: row)
     graph, stages, policy, bounds = compiled(dataset=branch)
     assert len(stages) > policy.max_active_workers
-    assert fused(graph, stages, policy, bounds) == stages
+    result = fused(graph, stages, policy, bounds)
+    source = next(stage for stage in result if graph.sources[0] in stage.occurrences)
+    assert source.occurrences == graph.sources  # The shared source still has one independent owner.
+    suffix = next(stage for stage in result if graph.terminals[0] in stage.occurrences)
+    assert len(result) == 2
+    assert len(set(occ for stage in result for occ in stage.occurrences)) == len(graph.nodes)
+    assert sum(len(stage.occurrences) for stage in result) == len(graph.nodes)
+    members = [stage for stage in stages if stage is not source]
+    assert suffix.profile.requests['cpu_millis'] == max(stage.profile.requests['cpu_millis'] for stage in members)
+    assert suffix.profile.requests['memory_bytes'] == sum(
+        max(stage.resident_bytes, stage.profile.requests['memory_bytes']) for stage in members)
+    assert fused(graph, stages, replace(policy, fusion=False), bounds) == stages
     gpu = pipeline().map(lambda row: row, backend_options={'ray': {'worker_resources': {'gpu': 1}}})
     graph, stages, policy, bounds = compiled(dataset=gpu)
     original = next(stage for stage in stages if any(
