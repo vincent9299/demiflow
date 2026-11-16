@@ -355,42 +355,185 @@ def test_unified_checkpoint_deadline_includes_alignment_before_publication(tmp_p
 
 
 class NativeSlowFixture:
-    """Native-capability fixture: no shared semantic state or resource handles."""
+    """Bounded loopback model; only real PromptActor owns native capability."""
     def __init__(self):
-        self.release = None
+        self.first_cut = threading.Event()
+        self.seven = threading.Event()
+        self.slow_started = threading.Event()
+        self.zero_saved = threading.Event()
+        self.reply_release = threading.Event()
+        self.requests, self.errors = [], []
+        self.lock = threading.Lock()
 
-    def native_stream_recovery(self, action, node_id):
+    def __enter__(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        fixture = self
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.connection.settimeout(5)
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= 8192:
+                    self.send_error(413)
+                    return
+                request = json.loads(self.rfile.read(length))
+                item = int(request['messages'][-1]['content'])
+                with fixture.lock:
+                    fixture.requests.append(item)
+                if item == 0:
+                    fixture.slow_started.set()
+                    ready = fixture.seven.wait(20)
+                else:
+                    # The first real checkpoint must capture requests before
+                    # their outputs; release only after its actual native ACK.
+                    ready = fixture.first_cut.wait(20)
+                    if item == 7:
+                        fixture.seven.set()
+                if not ready:
+                    with fixture.lock:
+                        fixture.errors.append(('dependency timeout', item))
+                    self.send_error(504)
+                    return
+                body = json.dumps({'choices': [{'message': {'content': json.dumps({'answer': item})}}],
+                                   'usage': {'prompt_tokens': 1, 'completion_tokens': 1}}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            def log_message(self, *args):
+                pass
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=.02), daemon=True)
+        self.thread.start()
         return self
 
-    def snapshot_state(self):
-        return {}
+    def __exit__(self, *args):
+        self.first_cut.set(); self.seven.set(); self.reply_release.set()
+        self.server.shutdown(); self.server.server_close()
+        self.thread.join(timeout=3)
+        assert not self.thread.is_alive()
 
-    def restore_state(self, state):
-        assert state == {}
+    def config(self):
+        from demiflow.operator_llm import parse_prompt_pack
+        return parse_prompt_pack(json.dumps({'schema_version': 'demiflow_prompt_pack_v2',
+            'prompts': {'answer': {'version': 'native-slow-v1',
+                'model': {'name': 'loopback', 'transport': 'openai_compatible',
+                    'base_url': f'http://127.0.0.1:{self.server.server_port}/v1',
+                    'api_key_env': 'DEMIFLOW_NATIVE_SLOW_TEST_KEY'},
+                'schema_retries': 0, 'template': '{{ item }}',
+                'response_schema': {'type': 'object', 'additionalProperties': False,
+                    'required': ['answer'], 'properties': {'answer': {'type': 'integer'}}}}}}))
 
-    async def __call__(self, row):
-        if self.release is None:
-            self.release = asyncio.Event()
-        if row['id'] == 0:
-            await asyncio.wait_for(self.release.wait(), 5)
-        if row['id'] == 7:
-            self.release.set()
-        return row
 
+def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path, monkeypatch):
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
+    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
+    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    monkeypatch.setenv('DEMIFLOW_NATIVE_SLOW_TEST_KEY', 'fixture-only')
+    original_commit = DataflowCheckpointCoordinator.commit
+    original_pump, original_start = DataflowExecution.pump, DataflowExecution.start
+    original_response = RunPromptJournal.response
+    observed, interrupted, restored = [], [], []
+    class Interrupted(Exception):
+        pass
 
-def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path):
-    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}) as run:
-        result = data.from_items([{'id': i} for i in range(12)]).map_async(
-            NativeSlowFixture(), concurrency=3).materialize().take_all()
-        fact = run.journal.execution_commits('action-1')[0]
-        saved = StateArtifacts(run).read(fact['prepared']['state']['node-0-inflight'])
-        from demiflow.execution.block_sink import BlockSink
-        from demiflow.execution.run_context import RunAction
-        action = RunAction(run, 'action-1', run.journal.execution_action('action-1')['declaration'])
-        pending = list(BlockSink(action, 'node-0-inflight').iter_rows(saved['data']))
-        assert any(item['id'] == 0 for item in pending)
-        assert fact['receipts']['output']['data']['rows'] < 2
-    assert sorted(row['id'] for row in result) == list(range(12))
+    with NativeSlowFixture() as fixture:
+        config = fixture.config()
+        def pipeline():
+            return data.from_items([{'id': i} for i in range(12)]).map_prompt_async(
+                'answer', config=config, inputs={'item': 'id'}, output='answer',
+                concurrency=3, max_requests=12,
+                request_policy={'initial_concurrency': 3, 'max_concurrency': 3},
+                options={'trust_env': False, 'timeout_s': 25, 'max_request_bytes': 8192,
+                         'max_response_bytes': 8192, 'max_event_bytes': 8192})
+
+        def pending_ids(image, store, bounds):
+            ids = []
+            for contribution in image.contributions:
+                for ref in contribution.operator_states.values():
+                    if ref.media_type != IMAGE_MEDIA_TYPE:
+                        continue
+                    raw = b''.join(store.read(ref, max_bytes=bounds.max_state_bytes))
+                    state = state_codec.loads(raw, max_bytes=bounds.max_state_bytes)
+                    if state.get('kind') == 'prompt':
+                        ids.extend(call['input'].inline['id'] for call in state['inflight_calls'])
+            return ids
+
+        def committed(coordinator, *args, **kwargs):
+            image = original_commit(coordinator, *args, **kwargs)
+            if coordinator._action.action_id == 'action-1' and not observed:
+                assert not image.cut.final
+                pending = pending_ids(image, coordinator._store, coordinator._physical.bounds)
+                assert 0 in pending, 'first cut drained or lost the real slow invocation'
+                fact = coordinator._action.context.journal.execution_commit(image.commit_id)
+                assert fact['status'] == 'acked'
+                assert sum(value['data']['rows'] for value in fact['receipts'].values()) < 2
+                assert fixture.slow_started.wait(5), 'slow HTTP request was never dispatched'
+                assert not fixture.seven.is_set()
+                observed.append(image.commit_id)
+                fixture.first_cut.set()
+            return image
+
+        def persisted_response(journal, request, *args, **kwargs):
+            result = original_response(journal, request, *args, **kwargs)
+            if int(request['body']['messages'][-1]['content']) == 0 and not interrupted:
+                # Delay only delivery of a real, already durable journal reply.
+                # This exposes a pending invocation with a known response, the
+                # recoverable crash window; no result or receipt is invented.
+                fixture.zero_saved.set()
+                assert fixture.reply_release.wait(25), 'driver did not reach recovery boundary'
+            return result
+
+        def pump(execution, **kwargs):
+            result = original_pump(execution, **kwargs)
+            if (not interrupted and fixture.zero_saved.is_set()
+                    and execution._services.action.action_id == 'action-1'):
+                journal = execution._services.action.context.journal
+                with journal._connection() as db:
+                    complete = db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0]
+                image = execution._restore_image
+                if complete == 12 and image is not None and not image.cut.final:
+                    assert 0 in pending_ids(image, execution._store, execution._bounds)
+                    assert fixture.seven.is_set() and sorted(fixture.requests) == list(range(12))
+                    interrupted.append(image.commit_id)
+                    fixture.reply_release.set()
+                    raise Interrupted('after original pending cut and durable model responses')
+            return result
+
+        def start(execution):
+            result = original_start(execution)
+            if (execution._services.action.action_id == 'action-1'
+                    and execution._services.action.context.resuming):
+                restored.append(execution._restore_image.commit_id)
+            return result
+
+        monkeypatch.setattr(DataflowCheckpointCoordinator, 'commit', committed)
+        monkeypatch.setattr(RunPromptJournal, 'response', persisted_response)
+        monkeypatch.setattr(DataflowExecution, 'pump', pump)
+        monkeypatch.setattr(DataflowExecution, 'start', start)
+        try:
+            with pytest.raises(Interrupted, match='original pending cut'):
+                with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2,
+                        'checkpoint_interval_ms': 60000, 'max_requests': 12, 'timeout_s': 60}) as run, data.local_execution(workers=4, worker_mode='thread'):
+                    reference = run.ref
+                    pipeline().materialize().take_all()
+            assert observed and len(interrupted) == 1
+            before = run.journal.execution_commit(interrupted[0])
+            with RunContext.resume(reference) as resumed, data.local_execution(workers=4, worker_mode='thread'):
+                result = pipeline().materialize().take_all()
+                assert resumed.journal.execution_commit(interrupted[0]) == before
+                assert resumed.journal.budget_consumed('requests') == 12
+                with resumed.journal._connection() as db:
+                    assert db.execute('SELECT count(*) FROM calls').fetchone()[0] == 12
+                    assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 12
+            assert restored == interrupted
+            assert sorted(result, key=lambda row: row['id']) == [{'id': i, 'answer': i} for i in range(12)]
+            assert sorted(fixture.requests) == list(range(12)) and not fixture.errors
+        finally:
+            fixture.reply_release.set()
+
 
 
 def test_checkpoint_deadline_begins_before_blocked_insertion():
