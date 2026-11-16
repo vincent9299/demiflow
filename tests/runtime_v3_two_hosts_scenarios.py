@@ -8,7 +8,7 @@ import json
 import os
 
 
-def _remote_wrong_copy(path, *, remove=False):
+def _remote_wrong_copy(path, *, expected_bytes=None, remove=False):
     """A bounded wrong-byte fixture in this test's unshared /tmp namespace."""
     import ray
     path = Path(path)
@@ -16,9 +16,12 @@ def _remote_wrong_copy(path, *, remove=False):
     if remove:
         path.unlink()
     else:
+        assert type(expected_bytes) is int and 0 < expected_bytes <= 65536
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('xb') as stream:
-            stream.write(b'owned-wrong-domain-bytes')
+            # Match the declared length, so the real reader reaches the hash
+            # comparison rather than refusing an unrelated truncated object.
+            stream.write(b'!' * expected_bytes)
     return {'node_id': ray.get_runtime_context().get_node_id(), 'path': str(path)}
 
 
@@ -42,7 +45,7 @@ def _different_bytes(fx, nodes):
         assert path.is_file() and str(path).startswith(str(fx.root))
         task = ray.remote(num_cpus=0, max_retries=0)(_remote_wrong_copy).options(
             scheduling_strategy=NodeAffinitySchedulingStrategy(remote, soft=False))
-        proof = ray.get(task.remote(str(path)), timeout=20)
+        proof = ray.get(task.remote(str(path), expected_bytes=challenge.size_bytes), timeout=20)
         try:
             assert proof['node_id'] == remote and proof['path'] == str(path)
             original(host, store=store, challenge=challenge, bounds=bounds)
@@ -151,6 +154,8 @@ def two_hosts(fx, fault=None):
                         else:
                             function(physical, observed)
                         cases[name] = observed
+        fx._save_evidence('two_hosts-components', {'cases': cases,
+            'domain_proofs': domain_proofs, 'worker_code_caches': caches})
         different = _different_bytes(fx, nodes)
         value = {'hosts': sorted(n['NodeManagerHostname'] for n in nodes.values()),
             'nodes': sorted(nodes), 'cases': cases, 'domain_proofs': domain_proofs,
