@@ -1,0 +1,15 @@
+{
+  "production_commit": "ddc1e10",
+  "profile_production": "266aa54",
+  "profile_head": "e58139f",
+  "profile_concurrency": "parent Local 4-worker managed object embedding functional test; elapsed is not a paired performance result",
+  "evidence": {
+    "/tmp/demiflow-perf-ready-peer-profile-r1/fast_cpu/trial.json": "0bc44d2e19eaa5168e0fe5ff2133fb63a61fb7a92c2e07832b0f03196bd7f976",
+    "/tmp/demiflow-perf-ready-peer-profile-r1/fast_cpu/driver.prof": "d9ca784011170caae427dc00994be99cce35bfd38e2f38b5d51d7eec132354af",
+    "/tmp/demiflow-perf-ready-peer-profile-r1/fast_cpu/profile-top.txt": "49c77a3060570377e4047b9d22b4107fb586b2444c3d22609543a39d31de32a9",
+    "/tmp/demiflow-codec-field-width-micro-r1.json": "5b17d1ad621cddac799b6bf78ff93f4e741fe53b494ed149f0db75b34e5486b1",
+    "/tmp/demiflow-thaw-scalar-micro-r1.json": "63a1043aee990aa8c1c703587840d737e8eb1e0cb5a47f4a9bb4a96de16d8cca",
+    "/tmp/demiflow-thaw-scalars-r1-evidence/verification.json": "d3de260d478d30f6af9c4c91b4b8ea4b21a5570f6ce37d03312fc04dc2495499"
+  },
+  "dataset_performance_after_thaw": "not_run; await parent final integrated candidate"
+}
