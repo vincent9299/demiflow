@@ -1235,9 +1235,10 @@ def _s_bounded_terminal(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, An
 
 
 def _s_artifact_security(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must execute the code-pin/path/domain/grant counterexamples, not return their names'}
-    fx._record_not_run('artifact_security', detail)
-    raise NotRunError('artifact_security', detail)
+    from runtime_v3_artifact_security_scenarios import artifact_security, validate_evidence
+    evidence = artifact_security(fx, fault)
+    validate_evidence(evidence)
+    return evidence
 
 
 def _s_performance(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
