@@ -180,3 +180,27 @@ before its first committed cut does **not** acquire resume authority merely
 because paid HTTP responses exist. The existing RunContext guard refuses that
 resume before a second HTTP; confirmed responses and original admission remain
 in the journal. No-cut rejection was retained, not relaxed to satisfy the probe.
+
+The cross-model follow-up is `27702fe` plus test-fixture correction `6fa64d1`.
+It was verified with the already coordinator-owned Routed dependencies
+`b634ddb` / `651a9bd` (local cherry-picks `8709641` / `e25dd21`). The only cherry
+conflict kept this lane's existing stricter original native-budget message
+assertion; no business assertion was weakened. The coordinator need only take
+the observation and fixture commits, not duplicate its existing dependencies.
+
+Fixed `6fa64d13ccd54269e683c6b60a420adb667d7f27` passed **22/22 in 55.29 s**, no
+skips, with runner exit 0 and 2,147 tracked source/test digests unchanged:
+`/tmp/demiflow-model-observations-fixed-r2/verification.json` and `junit.xml`.
+Exact interpreter/argv/module/environment and source hashes are in that receipt.
+The suite includes the original Prompt/Embedding request-policy tests, real
+Prompt→Embedding composition, named Routed children, original routed provider
+isolation, original reserve retry/recovery, and the no-cut recovery guard.
+
+Its first fixed run is retained as `/tmp/demiflow-model-observations-fixed-r1`:
+20 passed, two new fixture assumptions failed. A route without request_policy
+correctly has no shared_admission object; the repaired fixture explicitly
+configures a gate for route A and locks absence for route B. A two-row stream
+could reach its final cut before the stop was observed; the no-cut fixture now
+uses ten inputs and a two-request limit and asserts zero original commits
+before attempting recovery. Production code was not changed for these fixture
+corrections, and the failed receipt is not counted as passing evidence.
