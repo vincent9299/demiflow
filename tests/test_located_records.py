@@ -23,7 +23,7 @@ def test_located_gzip_invalid_rows_and_json_container(tmp_path):
 
 def test_native_union_is_lazy_repeatable_and_keeps_context(tmp_path):
     from demiflow.execution.run_context import RunContext
-    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.recovery_contract import RecoveryContractError
     data=DataAPI();seen=tmp_path/'source-calls'
     def rows():
         with seen.open('a') as stream:stream.write('read\n')
@@ -32,7 +32,7 @@ def test_native_union_is_lazy_repeatable_and_keeps_context(tmp_path):
     assert not seen.exists() and ds._executor is left._executor
     assert ds.take_all()==[{'id':1},{'id':2}]
     assert ds.take_all()==[{'id':1},{'id':2}] and len(seen.read_text().splitlines())==2
-    with pytest.raises(DataflowError, match='checkpoint'):
+    with pytest.raises(RecoveryContractError, match='checkpoint'):
         ds.checkpoint(tmp_path/'union.jsonl',version='1')
     assert not (tmp_path/'union.jsonl').exists() and len(seen.read_text().splitlines())==2
     with RunContext.start(tmp_path/'run') as run:
