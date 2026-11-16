@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping as _RuntimeMapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import (
@@ -187,7 +188,7 @@ def _freeze_json(value, label: str, depth: int = 0, budget: list | None = None):
 
 
 def _json_map(value, label: str) -> Mapping[str, Json]:
-    if not isinstance(value, Mapping):
+    if not isinstance(value, _RuntimeMapping):
         raise _err(label + " must be a mapping")
     budget = [0, 0]
     frozen = {}
@@ -232,7 +233,7 @@ def _str_tuple(value, label: str) -> tuple:
 
 
 def _ref_map(value, label: str) -> Mapping[str, ArtifactRef]:
-    if not isinstance(value, Mapping):
+    if not isinstance(value, _RuntimeMapping):
         raise _err(label + " must be a mapping")
     frozen = {}
     for key, item in value.items():
@@ -242,7 +243,7 @@ def _ref_map(value, label: str) -> Mapping[str, ArtifactRef]:
 
 
 def _int_map(value, label: str) -> Mapping[str, int]:
-    if not isinstance(value, Mapping):
+    if not isinstance(value, _RuntimeMapping):
         raise _err(label + " must be a mapping")
     frozen = {}
     for key, item in value.items():
@@ -252,7 +253,7 @@ def _int_map(value, label: str) -> Mapping[str, int]:
 
 
 def _float_map(value, label: str) -> Mapping[str, float]:
-    if not isinstance(value, Mapping):
+    if not isinstance(value, _RuntimeMapping):
         raise _err(label + " must be a mapping")
     frozen = {}
     for key, item in value.items():
@@ -277,7 +278,7 @@ def thaw_record_value(value):
     if (value is None or kind is str or kind is int or kind is float
             or kind is bool or kind is bytes):
         return value
-    if isinstance(value, Mapping):
+    if isinstance(value, _RuntimeMapping):
         return {key: thaw_record_value(item) for key, item in value.items()}
     if isinstance(value, _FrozenRowList):
         return [thaw_record_value(item) for item in value]
@@ -298,7 +299,7 @@ def thaw_record_value(value):
 def _freeze_row_value(value, depth: int):
     if depth > _ROW_MAX_DEPTH:
         raise _budget_err("record row exceeds depth budget")
-    if isinstance(value, Mapping):
+    if isinstance(value, _RuntimeMapping):
         return MappingProxyType({k: _freeze_row_value(v, depth + 1) for k, v in value.items()})
     if type(value) is list or isinstance(value, _FrozenRowList):
         return _FrozenRowList(_freeze_row_value(v, depth + 1) for v in value)
@@ -318,7 +319,7 @@ def _freeze_row_value(value, depth: int):
 
 
 def _row(value, label: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
+    if not isinstance(value, _RuntimeMapping):
         raise _err(label + " must be a mapping row")
     frozen = {}
     for key, item in value.items():
@@ -704,7 +705,7 @@ def _native_limits(value):
     allowed = {'memory_bytes', 'max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes',
                'batch_rows', 'threads', 'partitions', 'timeout_s', 'admission_timeout_s',
                'cgroup_headroom_bytes'}
-    if not isinstance(value, Mapping) or set(value) - allowed:
+    if not isinstance(value, _RuntimeMapping) or set(value) - allowed:
         raise _err('unknown native resource limit')
     for key, amount in value.items():
         valid = (type(amount) in (int, float) and math.isfinite(amount) and amount > 0
@@ -994,7 +995,7 @@ class CutContribution:
         _ident(self.boot_id, "CutContribution.boot_id")
         object.__setattr__(self, "sources", _tuple(self.sources, "CutContribution.sources", lambda v, l: _is_cursor(v, l)))
         object.__setattr__(self, "operator_states", _ref_map(self.operator_states, "CutContribution.operator_states"))
-        if not isinstance(self.channels, Mapping):
+        if not isinstance(self.channels, _RuntimeMapping):
             raise _err("CutContribution.channels must be a mapping")
         channels = {}
         for key, value in self.channels.items():
@@ -1404,7 +1405,7 @@ class RuntimeServices:
         if not isinstance(self.assignment, WorkerAssignment):
             raise _err("RuntimeServices.assignment must be a WorkerAssignment")
         object.__setattr__(self, "constants", _json_map(self.constants, "RuntimeServices.constants"))
-        if not isinstance(self.programs, Mapping):
+        if not isinstance(self.programs, _RuntimeMapping):
             raise _err("RuntimeServices.programs must be a mapping")
         programs = {}
         for key, value in self.programs.items():
@@ -1559,7 +1560,7 @@ def _freeze_reservation(value):
         raise _err("NativeJournalCommand.reservation must be a (id, charges) pair")
     reservation_id, charges = value
     _ident(reservation_id, "NativeJournalCommand.reservation id")
-    if not isinstance(charges, Mapping):
+    if not isinstance(charges, _RuntimeMapping):
         raise _err("NativeJournalCommand.reservation charges must be a mapping")
     frozen = {}
     for key, amount in charges.items():
@@ -1605,7 +1606,7 @@ class NativeActionView:
         _ident(self.action_id, "NativeActionView.action_id")
         if not isinstance(self.context, NativeRunView):
             raise _err("NativeActionView.context must be a NativeRunView")
-        if not isinstance(self.object_sinks, Mapping):
+        if not isinstance(self.object_sinks, _RuntimeMapping):
             raise _err("NativeActionView.object_sinks must be a mapping")
         object.__setattr__(self, "object_sinks", MappingProxyType(dict(self.object_sinks)))
         _bool(self.native_image_effects, "NativeActionView.native_image_effects")
