@@ -175,6 +175,18 @@ class _Trace:
         estimate = 8 * len(raw)
         if estimate > maximum:
             raise UnprovenGC('JSON carrier exceeds collector decode workspace')
+        depth_limit = min(64, self.bounds.max_depth)
+        if type(raw) is bytes and len(raw) <= 65536:
+            # Counting punctuation inside strings only overestimates the old
+            # workspace/depth bounds. When that conservative bound fits, C
+            # byte counts prove admission before the same json.loads call.
+            # Ambiguous/large carriers retain the original streaming scan.
+            openings = raw.count(b'[') + raw.count(b'{')
+            punctuation = openings + raw.count(b',') + raw.count(b':')
+            if openings <= depth_limit and estimate + 256 * punctuation <= maximum:
+                if raw:
+                    self.check()  # Same scan step/deadline as a short carrier.
+                return json.loads(raw)
         quoted = escaped = False
         depth = 0
         for index, byte in enumerate(raw):
@@ -193,7 +205,7 @@ class _Trace:
                     depth += 1
             elif byte in (93,125):
                 depth -= 1
-            if estimate > maximum or depth > min(64,self.bounds.max_depth):
+            if estimate > maximum or depth > depth_limit:
                 raise UnprovenGC('JSON structure exceeds collector decode workspace')
             if index % 65536 == 0:
                 self.check()
