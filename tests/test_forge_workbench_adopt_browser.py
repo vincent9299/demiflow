@@ -1,7 +1,6 @@
 """Keep recovery facts independent of overlapping, real graph projections."""
 import hashlib
 import json
-from pathlib import Path
 
 from playwright.sync_api import expect
 
@@ -71,7 +70,8 @@ def test_adopted_file_intent_stays_cleared_when_a_newer_graph_read_is_pending(is
         expect(page.locator('.wb-notice')).to_contain_text('没有待保存的配置修改')
         assert len(writes)==1
         assert hashlib.sha256(file.read_bytes()).hexdigest()==expected_sha
-        out=Path('/yzp/zhaozy/yangzepeng/0905/_demiflow/forge_coordination_20261104/workflow_workbench_20261105/P1')
+        out=tmp_path/'evidence'
+        out.mkdir(exist_ok=True)
         (out/'CFG2-deterministic-final.json').write_text(json.dumps(dict(before_newer_graph=before,
             after_newer_graph_pending=0,observed_file_sha256=expected_sha,minimum=0.7,draft_dirty=False,
             write_requests=len(writes),pending_after_reload=0,attribution_or_fsync_proven=False),ensure_ascii=False,indent=2)+'\n')

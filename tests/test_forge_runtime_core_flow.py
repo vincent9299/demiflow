@@ -5,6 +5,7 @@ permissions, prepare or start a run on behalf of the browser.
 """
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,17 @@ def current_run(page):
     return page.evaluate('ForgeView.decodeView(location.hash).run_id')
 
 
+def assert_single_run(root, run_id):
+    # Driver resource accounting is a sibling directory, not another run.
+    # Check both the public history and the independently named run directories.
+    listed = runs.list_runs(root)
+    assert listed['total'] == 1
+    assert [row['run_id'] for row in listed['runs']] == [run_id]
+    native = [path.name for path in (root/'.forge/runs').iterdir()
+              if re.fullmatch(r'r[0-9a-f]{24}', path.name)]
+    assert native == [run_id]
+
+
 def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path, browser):
     registry = tmp_path / 'registry.json'
     registry.write_text(json.dumps(dict(format=console.FORMAT, projects={})))
@@ -157,8 +169,11 @@ def test_browser_onboard_submit_result_then_monitor_stop(unregistered, tmp_path,
         page.get_by_label('本次运行秒数上限', exact=True).fill('90')
         try:
             page.get_by_role('button', name='运行', exact=True).click()
-            page.locator('.wb-run-bar > strong').wait_for()
+            page.wait_for_function(
+                "prior => {const v=ForgeView.decodeView(location.hash);return v.run_id && v.run_id!==prior;}",
+                arg=first)
             active = current_run(page)
+            expect(page.get_by_role('combobox',name='运行记录',exact=True)).to_have_value(active)
             page.get_by_text('部分输出已提交', exact=False).first.wait_for()
             page.get_by_text('性能趋势 · 整次运行', exact=True).click()
             page.get_by_role('img', name='整次运行的 CPU 核数趋势').wait_for()
@@ -211,7 +226,7 @@ def test_lost_prepare_and_start_responses_keep_one_run(unregistered, browser, tm
         page.get_by_role('button', name='刷新状态',exact=True).click()
         finished(page)
         assert len(identities) == 2 and identities[0] == identities[1]
-        assert len(list((unregistered/'.forge/runs').iterdir())) == 1
+        assert_single_run(unregistered, current_run(page))
         run_id = page.evaluate('ForgeView.decodeView(location.hash).run_id')
         assert runs.show(unregistered, run_id)['status'] == 'succeeded'
 
@@ -238,7 +253,7 @@ def test_failed_prepare_can_be_read_closed_and_corrected(unregistered, browser, 
         finished(page)
         # The failed receipt is preserved, and only the corrected request executes.
         assert json.loads((unregistered/'.forge/requests'/(saved[0]['request_id']+'.json')).read_text()) == receipt
-        assert len(list((unregistered/'.forge/runs').iterdir())) == 1
+        assert_single_run(unregistered, current_run(page))
 
 
 def test_reload_during_start(unregistered, browser, tmp_path):
@@ -263,4 +278,4 @@ def test_reload_during_start(unregistered, browser, tmp_path):
         observed=page.evaluate('ForgeView.decodeView(location.hash)')
         assert observed.get('run_id') == run_id, observed
         finished(page)
-        assert len(list((unregistered/'.forge/runs').iterdir())) == 1
+        assert_single_run(unregistered, current_run(page))
