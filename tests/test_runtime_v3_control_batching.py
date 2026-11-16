@@ -294,8 +294,10 @@ def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, pr
 
 @pytest.mark.parametrize('fault', ['early_close', 'read_error'])
 def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path, monkeypatch, fault):
-    from demiflow import data
+    from demiflow.data.api import DataAPI
     from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.executors.local import LocalDatasetExecutor
+    from demiflow.execution.local_kernel import LocalKernelOptions
     from demiflow.execution.run_context import RunContext
     import demiflow.execution.exchange.dataflow_bridge as bridge
     original_start, original_decode = DataflowExecution.start, bridge._decode_record_document
@@ -314,20 +316,27 @@ def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path
     if fault == 'read_error':
         monkeypatch.setattr(bridge, '_decode_record_document', decode)
     def execute():
-        with RunContext.start(tmp_path/'run', limits={'timeout_s':30,
-                'checkpoint_interval_ms':60000}) as run, data.local_execution(workers=2):
-            rows = data.range(1000).map(lambda row: {'id': row['id'] * 2}).iter_rows()
-            if fault == 'early_close':
-                assert next(rows) == {'id':0}
-                rows.close()
-                facts = run.journal.execution_commits('action-1')
-                assert facts and facts[-1]['status'] == 'acked'
-                assert not executions[-1]._restore_image.cut.final
-            else:
-                try:
-                    list(rows)
-                finally:
+        # The module's real Ray fixture may still hold its public executor.
+        # Bind this test's Local API explicitly; do not replace that fixture.
+        executor = LocalDatasetExecutor(workers=2, local_kernel=LocalKernelOptions(workers=2))
+        api = DataAPI(executor=executor)
+        try:
+            with RunContext.start(tmp_path/'run', limits={'timeout_s':30,
+                    'checkpoint_interval_ms':60000}) as run:
+                rows = api.range(1000).map(lambda row: {'id': row['id'] * 2}).iter_rows()
+                if fault == 'early_close':
+                    assert next(rows) == {'id':0}
                     rows.close()
+                    facts = run.journal.execution_commits('action-1')
+                    assert facts and facts[-1]['status'] == 'acked'
+                    assert not executions[-1]._restore_image.cut.final
+                else:
+                    try:
+                        list(rows)
+                    finally:
+                        rows.close()
+        finally:
+            executor.close()
     if fault == 'read_error':
         with pytest.raises(ValueError, match='second real terminal read'):
             execute()
