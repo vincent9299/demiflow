@@ -245,6 +245,9 @@ class FakeConn:
     def pull(self, aid, limit):
         return tuple(self.pulled[:limit])
 
+    def _actor(self, aid):
+        return NS(pull_events=NS(remote=lambda limit: self.pull(aid, limit)))
+
 
 class FakeProvider:
     def __init__(self, cleanup='CONFIRMED'):
@@ -373,6 +376,10 @@ def doubled_endpoint(cls, services, phase='TERMINATED'):
     if not hasattr(services, 'resources'):
         services.resources = FakeManager(phase)
     HOSTS._EndpointBase.__init__(ep, mklease('local'), services=services)
+    if cls is HOSTS.RayHostEndpoint:
+        ep._pending_pull = None
+        ep._pull_limit = 0
+        ep._pull_started = 0.0
     ep._connector = FakeConn()
     ep._provider = FakeProvider()
     ep._state = FakeState()

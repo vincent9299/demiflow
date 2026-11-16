@@ -269,6 +269,7 @@ def build_fake_ray():
 
     ray.remote = remote
     ray.get = lambda ref, timeout=None: ref.value if isinstance(ref, _RemoteRef) else ref
+    ray.wait = lambda refs, timeout=None: (list(refs), [])
     ray.kill = lambda actor, no_restart=False: None
     ray.is_initialized = lambda: True
     ray.nodes = lambda: []

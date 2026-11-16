@@ -655,6 +655,45 @@ class RayHostEndpoint(_EndpointBase):
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
         super().__init__(lease, services=services)
         self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.dataflow_host")
+        self._pending_pull = None
+        self._pull_limit = 0
+        self._pull_started = 0.0
+
+    def _pull_ready(self, *, limit, wait_s=0.0, start=True):
+        """One bounded, non-retried mailbox read shared by pump and K3.
+
+        An empty/remote mailbox must not serialize every other worker behind
+        a round trip. The outstanding read owns the drained events until this
+        endpoint consumes them; it is never replaced by a second reader.
+        """
+        if self._pending_pull is None:
+            if not start:
+                return ()
+            self._pull_limit = min(limit, self._services.bounds.max_pending_events)
+            if self._pull_limit < 1:
+                raise DataflowError('BUDGET_EXCEEDED', 'Ray event read has no remaining credit')
+            self._pull_started = time.monotonic()
+            try:
+                self._pending_pull = self._connector._actor(self._allocation_id).pull_events.remote(self._pull_limit)
+            except (RayActorError, GetTimeoutError) as exc:
+                raise DataflowError('UNKNOWN_EFFECT', 'Ray worker became unreachable') from exc
+        timeout = self._services.policy.control_timeout_ms / 1000
+        remaining = timeout - (time.monotonic() - self._pull_started)
+        if remaining <= 0:
+            raise DataflowError('UNKNOWN_EFFECT', 'Ray worker event read exceeded its deadline')
+        try:
+            ready, _ = ray.wait([self._pending_pull], timeout=min(wait_s, remaining))
+            if not ready:
+                if time.monotonic() - self._pull_started >= timeout:
+                    raise DataflowError('UNKNOWN_EFFECT', 'Ray worker event read exceeded its deadline')
+                return ()
+            pending, self._pending_pull = self._pending_pull, None
+            events = ray.get(pending)
+        except (RayActorError, GetTimeoutError) as exc:
+            raise DataflowError('UNKNOWN_EFFECT', 'Ray worker became unreachable') from exc
+        if type(events) not in (tuple, list) or len(events) > self._pull_limit:
+            raise DataflowError('INVALID_CONTRACT', 'Ray mailbox exceeded its requested event credit')
+        return tuple(events)
 
     def prepare(self, assignment: "WorkerAssignment") -> None:
         if self._assignment is None:
@@ -694,10 +733,18 @@ class RayHostEndpoint(_EndpointBase):
             ready, _ = ray.wait([command], timeout=0.01)
             if ready:
                 result = ray.get(command)
+                # A previous nonblocking poll may already own the final events.
+                # Resolve it before declaring cleanup complete or dropping the
+                # endpoint. Do not issue another mailbox read on this path.
+                for event in self._pull_ready(limit=self._services.bounds.max_pending_events,
+                        wait_s=max(0.0, deadline - time.monotonic()), start=False):
+                    self._early_event(event)
+                if self._pending_pull is not None:
+                    raise DataflowError('UNKNOWN_EFFECT', 'Ray mailbox read did not settle before control completion')
                 break
             if time.monotonic() >= deadline:
                 raise DataflowError("DEADLINE_EXCEEDED", "Ray worker control command timed out")
-            for event in self._connector.pull(self._allocation_id, limit=self._services.bounds.max_pending_events):
+            for event in self._pull_ready(limit=self._services.bounds.max_pending_events - len(self._events)):
                 self._early_event(event)
         self._accept_final_observations(result)
         if "error" in result:
@@ -712,10 +759,12 @@ class RayHostEndpoint(_EndpointBase):
         while self._events and len(events) < max_events:
             events.append(self._events.popleft())
         if len(events) < max_events:
-            try:
-                events.extend(self._connector.pull(self._allocation_id, limit=max_events - len(events)))
-            except (RayActorError, GetTimeoutError) as exc:
-                raise DataflowError("UNKNOWN_EFFECT", "Ray worker became unreachable") from exc
+            room = max_events - len(events)
+            batch = self._pull_ready(limit=room)
+            events.extend(batch[:room])
+            # The caller can shrink its window while a read is in flight.
+            # Retain the bounded remainder in this same endpoint, in order.
+            self._events.extend(batch[room:])
         return tuple(events)
 
     def deliver_reply(self, reply: "ControlReply") -> None:
