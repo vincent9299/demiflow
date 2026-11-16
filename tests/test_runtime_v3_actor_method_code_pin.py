@@ -109,3 +109,25 @@ def test_actor_dependency_walk_never_invokes_instance_or_class_descriptors(tmp_p
     modules = _by_value_business_modules(Actor())
     assert name in {m.__name__ for m in modules}
     assert touched == []
+
+
+@pytest.mark.parametrize('declaration', ['dict', 'private'])
+def test_actual_actor_slots_pin_modules_without_getattribute(tmp_path, monkeypatch, declaration):
+    from demiflow.execution.chain import _by_value_business_modules
+    helper, _, name = _helper_graph(tmp_path, monkeypatch, 'passive_slots')
+    touched = []
+    if declaration == 'dict':
+        class Actor:
+            __slots__ = {'module': 'Original dependency slot'}
+    else:
+        class Actor:
+            __slots__ = ('__module_capture',)
+    actor = Actor()
+    slot = 'module' if declaration == 'dict' else '_Actor__module_capture'
+    object.__setattr__(actor, slot, helper)
+    def forbidden(self, key):
+        touched.append(key)
+        raise AssertionError('slot walk executed business lookup')
+    Actor.__getattribute__ = forbidden
+    assert name in {m.__name__ for m in _by_value_business_modules(actor)}
+    assert touched == []

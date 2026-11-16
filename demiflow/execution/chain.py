@@ -433,6 +433,7 @@ def _is_by_reference_udf(function):
     (source/bytecode/closure) and the cloudpickle payload.
     """
     import sys
+    import inspect
     module_name = getattr(function, "__module__", None)
     if not module_name or module_name == "__main__":
         return False
@@ -443,7 +444,7 @@ def _is_by_reference_udf(function):
     for part in getattr(function, "__qualname__", "").split("."):
         if part == "<locals>":
             return False
-        obj = getattr(obj, part, None)
+        obj = inspect.getattr_static(obj, part, None)
         if obj is None:
             return False
     if obj is not function:
@@ -459,17 +460,18 @@ def _is_by_reference_class(cls):
     (R4) — only its captured state is walked.
     """
     import sys
-    module_name = getattr(cls, "__module__", None)
+    import inspect
+    module_name = _class_namespace(cls).get("__module__")
     if not module_name or module_name == "__main__":
         return False
     module = sys.modules.get(module_name)
     if module is None:
         return False
     obj = module
-    for part in getattr(cls, "__qualname__", "").split("."):
+    for part in type.__dict__["__qualname__"].__get__(cls, type(cls)).split("."):
         if part == "<locals>":
             return False
-        obj = getattr(obj, part, None)
+        obj = inspect.getattr_static(obj, part, None)
         if obj is None:
             return False
     if obj is not cls:
@@ -548,19 +550,15 @@ def _instance_namespace(value):
 
 
 def _declared_slots(cls):
-    """Declared slot names without running a custom metaclass or descriptor."""
+    """Actual native slots, including private names and dict/iterator declarations."""
+    import types
     slots = []
     for base in _class_mro(cls):
-        declared = _class_namespace(base).get("__slots__", ())
-        if type(declared) is str:
-            declared = (declared,)
-        if type(declared) not in (tuple, list):
-            raise RecoveryContractError("Opaque class slots need an explicit code dependency adapter")
-        for slot in declared:
-            if type(slot) is not str:
-                raise RecoveryContractError("Class slot names must be strings")
-            if slot not in ("__dict__", "__weakref__"):
-                slots.append(slot)
+        namespace = _class_namespace(base)
+        if '__slots__' in namespace:
+            slots.extend(name for name, descriptor in namespace.items()
+                         if name not in ('__dict__', '__weakref__')
+                         and type(descriptor) is types.MemberDescriptorType)
     return slots
 
 
@@ -645,7 +643,7 @@ def _by_value_business_modules(function):
                 "Business dependency walk exceeds value budget; code-pin refuses (fail-closed)")
         kind = type(value)
         if issubclass(kind, types.ModuleType):
-            name = getattr(value, "__name__", "")
+            name = types.ModuleType.__dict__["__dict__"].__get__(value, kind).get("__name__", "")
             if name and name != "__main__":
                 modules.append(value)
             continue
@@ -672,7 +670,7 @@ def _by_value_business_modules(function):
             continue
         if issubclass(kind, type):
             if _is_by_reference_class(value):
-                module = sys.modules.get(value.__module__)
+                module = sys.modules.get(_class_namespace(value).get("__module__"))
                 if module is not None:
                     pending.append(module)
             else:
@@ -833,16 +831,17 @@ def _business_dependency_modules(plan, *, source=None):
             except (RuntimeError, ValueError, TypeError):
                 pass
             target = getattr(getattr(operation, "callable", None), "target", None)
-            function = target.__self__ if inspect.ismethod(target) else target
-            if inspect.isfunction(function) and _is_by_reference_udf(function):
+            function = target.__self__ if type(target) is types.MethodType else target
+            if type(function) is types.FunctionType and _is_by_reference_udf(function):
                 yield function
 
     def candidates(namespace):
         for value in list(namespace.values()):
-            if isinstance(value, types.ModuleType):
+            if issubclass(type(value), types.ModuleType):
                 yield value
-            elif inspect.isfunction(value) or inspect.isclass(value):
-                module = sys.modules.get(getattr(value, "__module__", None))
+            elif type(value) is types.FunctionType or issubclass(type(value), type):
+                module_name = value.__module__ if type(value) is types.FunctionType else _class_namespace(value).get("__module__")
+                module = sys.modules.get(module_name)
                 if module is not None:
                     yield module
 
@@ -854,10 +853,10 @@ def _business_dependency_modules(plan, *, source=None):
             except (RuntimeError, ValueError, TypeError):
                 pass
             target = getattr(getattr(operation, "callable", None), "target", None)
-            function = target.__self__ if inspect.ismethod(target) else target
-            if inspect.isfunction(function) and not _is_by_reference_udf(function):
+            function = target.__self__ if type(target) is types.MethodType else target
+            if type(function) is types.FunctionType and not _is_by_reference_udf(function):
                 yield function
-            elif function is not None and not inspect.isfunction(function):
+            elif function is not None and type(function) is not types.FunctionType:
                 # A callable class/instance/partial is serialized too. Its
                 # by-value class methods and capture slots use the same walk.
                 yield function
