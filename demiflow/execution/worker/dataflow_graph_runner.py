@@ -74,6 +74,7 @@ class WorkerGraphRunner:
         arrow_enabled = allows_batch_carrier(executor._graph, physical)
         for reader in executor._readers.values():
             reader._arrow_enabled = arrow_enabled
+            reader._shared_frame_call = self._frame_call
         self._park_mode = (any(e.mode == 'durable_incremental' for e in physical.exchanges)
             and sum(s.resident_bytes * s.replica_target for s in physical.stages)
                 + physical.residency.control_reserved_bytes > self.bounds.max_resident_bytes)
@@ -816,7 +817,8 @@ class WorkerGraphRunner:
                               delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]),
                               route_sequence=route_sequence, validated_raw=raw)
 
-    def _frame_call(self, function, *args, _frame_retained=0, _frame_reader_growth=False, **kwargs):
+    def _frame_call(self, function, *args, _frame_retained=0, _frame_reader_growth=False,
+                    _frame_source_reader_growth=None, **kwargs):
         """Original peer ACKs release codec room; never add another grant."""
         deadline = time.monotonic() + self.bounds.timeout_ms / 1000
         while True:
@@ -832,7 +834,11 @@ class WorkerGraphRunner:
                 # _ReplayLines' proposed peak already includes its old buffer,
                 # new storage, held chunk and extracted line. Count it once.
                 reader_bytes -= reader.buffered_bytes
-            retained = peer_bytes + kernel_bytes + reader_bytes + _frame_retained
+            source_bytes = sum(getattr(source, 'retained_bytes', 0)
+                               for source in getattr(self.e, '_readers', {}).values())
+            if _frame_source_reader_growth is not None:
+                source_bytes -= _frame_source_reader_growth.buffered_bytes
+            retained = peer_bytes + kernel_bytes + reader_bytes + source_bytes + _frame_retained
             try:
                 return function(*args, services=self.services, retained=retained, **kwargs)
             except DataflowError as exc:

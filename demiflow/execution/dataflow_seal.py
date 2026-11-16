@@ -171,6 +171,11 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     from .dataflow_program_pickle import dumps
     kind = _program_kind(declaration)
     value = _program_value(declaration)
+    if kind == 'source':
+        from .literal_source import literal_reference
+        literal = literal_reference(value, bounds)
+        if literal is not None:
+            value = literal
     code_identity = _code_identity_from_value(kind, value)
     manifest = {"schema": PROGRAM_SCHEMA, "occurrence_id": declaration.occurrence_id,
                 "kind": kind, "code_identity": code_identity}

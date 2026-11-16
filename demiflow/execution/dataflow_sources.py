@@ -91,8 +91,9 @@ def _factory_identity(factory: Any) -> dict[str, Any]:
 def _source_facts(source: SourcePlan) -> dict[str, Any]:
     """Canonical, Json-safe semantic facts used for identity and matching."""
     if isinstance(source, ItemsSource):
+        from .literal_source import items_fingerprint
         return {"kind": "ItemsSource", "count": len(source.items),
-                "items_digest": _content_digest(source.items)}
+                "items_digest": items_fingerprint(source.items)[0]}
     if isinstance(source, RangeSource):
         return {"kind": "RangeSource", "count": int(source.count)}
     if isinstance(source, FileSource):
@@ -199,6 +200,11 @@ def snapshot_source(
     if isinstance(source, ItemsSource):
         kind, replay, finite = "ItemsSource", "seek", True
         immutable = facts
+        from .literal_source import literal_reference, stage_literal
+        reference = literal_reference(source, bounds)
+        if reference is not None:
+            manifest_ref = stage_literal(source, reference, source_id=source_id,
+                                         store=store, bounds=bounds)
     elif isinstance(source, RangeSource):
         if isinstance(source.count, bool) or not isinstance(source.count, int) or source.count < 0:
             raise DataflowError("INVALID_CONTRACT", "range count must be a nonnegative integer")
@@ -396,6 +402,13 @@ def verify_source_snapshot(snapshot: SourceSnapshot, *, store: Any, bounds: Boun
                     "materialized", "iterable", "datasource", "queue_history", "queue"):
         raise DataflowError("INVALID_CONTRACT", f"unknown source kind: {kind}")
 
+    if kind == 'items' and snapshot.manifest_ref is not None:
+        # Literal data is authenticated lazily by the reader under the worker's
+        # shared codec grant, before any row or user effect is exposed.
+        from .literal_source import MEDIA
+        if snapshot.manifest_ref.media_type != MEDIA:
+            raise DataflowError('CORRUPT_ARTIFACT', 'literal source manifest media differs')
+        return
     if snapshot.manifest_ref is not None:
         if not store.inspect(snapshot.manifest_ref):
             raise DataflowError("SOURCE_CHANGED", "source manifest artifact is unavailable")

@@ -53,18 +53,22 @@ def _ref(entry):
     return ArtifactRef(**entry['ref'])
 
 
-def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_retained=None):
+def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_retained=None,
+              row_range=None, with_offsets=False):
     """Depth-first bounded traversal, authenticates metadata and rejects cycles."""
-    stack = [(root, None, frozenset())]
+    stack = [(root, None, frozenset(), 0)]
     visited = 0
     # There can be at most one nonempty segment per emitted row, plus empty
     # logical blocks; each binary tree has < 2N nodes. No unbounded visited set.
     ceiling = 4 * (bounds.max_output_rows + bounds.max_partitions + 1)
     while stack:
-        ref, expected, ancestors = stack.pop()
+        ref, expected, ancestors, offset = stack.pop()
+        if (row_range is not None and expected is not None
+                and (offset >= row_range[1] or offset + expected["rows"] <= row_range[0])):
+            continue
         if on_retained is not None:
             from .dataflow_record_frames import metadata_bytes
-            on_retained(metadata_bytes((stack, ref, expected, ancestors)))
+            on_retained(metadata_bytes((stack, ref, expected, ancestors, offset)))
         visited += 1
         key = (ref.store_id, ref.key)
         if visited > ceiling or len(ancestors) > bounds.max_depth or key in ancestors:
@@ -74,7 +78,9 @@ def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_ret
                 _fail('terminal tree leaf must be a record segment')
             if expected is not None and (expected['height'] != 0 or expected['bytes'] != ref.size_bytes):
                 _fail('terminal segment size/height disagrees with its parent')
-            yield ref
+            if with_offsets and expected is None:
+                _fail("range source requires an indexed row count")
+            yield (ref, offset, expected["rows"]) if with_offsets else ref
             continue
         node = _read(store, ref, bounds, frame_call=frame_call)
         if frame_call is not None:
@@ -93,8 +99,10 @@ def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_ret
             _fail('terminal child depth is not decreasing')
         if not leaves_only:
             yield ref
+        position = offset + node["rows"]
         for child in reversed(children):
-            stack.append((_ref(child), child, ancestors | {key}))
+            position -= child["rows"]
+            stack.append((_ref(child), child, ancestors | {key}, position))
         del node, children, child
 
 
@@ -102,6 +110,20 @@ def segment_refs(store, root, bounds, *, frame_call=None, on_retained=None):
     try:
         yield from tree_refs(store, root, bounds, leaves_only=True,
                             frame_call=frame_call, on_retained=on_retained)
+    finally:
+        if on_retained is not None:
+            on_retained(0)
+
+
+def range_segments(store, root, bounds, *, start, end, frame_call=None, on_retained=None):
+    """Seek a literal source by original row counts, skipping disjoint subtrees."""
+    if type(start) is not int or type(end) is not int or not 0 <= start <= end:
+        _fail('segment range must be nonnegative and ordered')
+    try:
+        if start != end:
+            yield from tree_refs(store, root, bounds, leaves_only=True,
+                frame_call=frame_call, on_retained=on_retained,
+                row_range=(start, end), with_offsets=True)
     finally:
         if on_retained is not None:
             on_retained(0)

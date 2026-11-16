@@ -145,7 +145,10 @@ class _BaseReader:
         if isinstance(row, ArrowPayload):
             record = Record(record_id, position, row.ref, None, row.encoded_bytes, sequence, self._schema_ref)
         else:
-            encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
+            encoded_bytes = getattr(self, '_decoded_row_bytes', None)
+            self._decoded_row_bytes = None
+            if encoded_bytes is None:
+                encoded_bytes = _encoded_size(row, max_bytes=self._services.bounds.max_row_bytes)
             record = Record(record_id, position, None, row, encoded_bytes, sequence, self._schema_ref)
         if self._snapshot.replay != "attempt_only":
             # Keep one bounded in-flight row. Persist it only if a snapshot
@@ -227,7 +230,24 @@ class ItemsReader(_BaseReader):
         self._start = int(split.locator.get("start", 0))
         self._index = int(self._offset.get("index", self._start))
         self._typed_rows = False
-        self._literal_items = isinstance(plan, ItemsSource)
+        self._literal_rows = None
+        from .literal_source import LiteralSourceReference, LiteralRows
+        self._literal_items = isinstance(plan, (ItemsSource, LiteralSourceReference))
+        if isinstance(plan, LiteralSourceReference) or self._snapshot.manifest_ref is not None and isinstance(plan, ItemsSource):
+            facts = self._snapshot.immutable_identity
+            reference = (plan if isinstance(plan, LiteralSourceReference) else
+                         LiteralSourceReference(len(plan.items), facts['items_digest']))
+            if (reference.schema != 'demiflow.literal-source.v1'
+                    or reference.count != facts.get('count')
+                    or reference.items_digest != facts.get('items_digest')):
+                raise DataflowError('SOURCE_CHANGED', 'literal source program differs from its snapshot')
+            self._end = int(split.locator.get('end', reference.count))
+            if not self._start <= self._index <= self._end <= reference.count:
+                raise DataflowError('INVALID_CONTRACT', 'items cursor outside split range')
+            self._literal_rows = LiteralRows(self._snapshot, reference, services=self._services,
+                start=self._index, end=self._end, frame_call=self._literal_frame_call)
+            self._rows = self._literal_rows
+            return
         if isinstance(plan, ItemsSource):
             count = len(plan.items)
             rows = iter(plan.items)
@@ -249,7 +269,10 @@ class ItemsReader(_BaseReader):
         if self._index >= self._end:
             return None
         try:
-            row = next(self._iterator)
+            row = (self._literal_rows.next_row() if self._literal_rows is not None
+                   else next(self._iterator))
+            if self._literal_rows is not None:
+                self._decoded_row_bytes = self._literal_rows.last_encoded_bytes
         except StopIteration as exc:
             raise DataflowError("SOURCE_CHANGED", "materialized input ended before its sealed row count") from exc
         if self._typed_rows:
@@ -259,6 +282,22 @@ class ItemsReader(_BaseReader):
         self._index += 1
         self._offset = {"index": self._index}
         return row, position
+
+    @property
+    def retained_bytes(self):
+        return self._literal_rows.retained_bytes if self._literal_rows is not None else 0
+
+    @property
+    def buffered_bytes(self):
+        return self._literal_rows.buffered_bytes if self._literal_rows is not None else 0
+
+    def _literal_frame_call(self, function, *args, source_growth=False, **kwargs):
+        shared = getattr(self, '_shared_frame_call', None)
+        if shared is not None:
+            return shared(function, *args,
+                _frame_source_reader_growth=self if source_growth else None, **kwargs)
+        retained = self.retained_bytes - (self.buffered_bytes if source_growth else 0)
+        return function(*args, services=self._services, retained=retained, **kwargs)
 
     def _teardown(self) -> None:
         close = getattr(self._rows, "close", None)
