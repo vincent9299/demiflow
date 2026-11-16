@@ -1165,9 +1165,8 @@ def _s_cache_materialize(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, A
 
 
 def _s_queue_full_business(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must use native acquisition/finalize/ACK and actual queue history, not a map fixture'}
-    fx._record_not_run('queue_full_business', detail)
-    raise NotRunError('queue_full_business', detail)
+    from runtime_v3_queue_business_scenarios import queue_full_business
+    return queue_full_business(fx, fault)
 
 
 def _s_memory_peak(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
