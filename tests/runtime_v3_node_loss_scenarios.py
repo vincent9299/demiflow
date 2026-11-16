@@ -95,15 +95,17 @@ def producer_loss(fx):
         ray.kill(actor,no_restart=True)
         lost['death'] = _dead_actor(ray, actor)
         assert lost['death']['num_restarts'] == 0
-        # GCS death and borrower ownership notifications are separate events.
-        # Wait for the real notification; never delete/free the Ray object.
-        time.sleep(.5)
+        # A completed put can remain readable from a borrower's cached copy.
+        # Neither outcome creates recovery authority. The separate real model
+        # case kills an actually pending original actor RPC and locks its loss.
         try:
-            ray.get(locator, timeout=10)
+            cached = ray.get(locator, timeout=10)
         except (ray.exceptions.OwnerDiedError, ray.exceptions.ObjectLostError) as error:
-            lost['object_ref_failure'] = {'type':type(error).__name__, 'message':str(error)}
+            lost['completed_cache'] = {'status':'lost','type':type(error).__name__, 'message':str(error)}
         else:
-            raise AssertionError('unconfirmed actor-owned ObjectRef remained usable after owner death')
+            assert cached['id']==int(files[0].name.split('-')[0]) and len(cached['unconfirmed'])==256*1024
+            lost['completed_cache'] = {'status':'readable','bytes':len(cached['unconfirmed']),
+                'payload_sha256':hashlib.sha256(cached['unconfirmed']).hexdigest()}
         return result  # original runtime must discover actor loss; no test exception
     def pipeline():
         return data.range(12).map(_ephemeral_producer, fn_kwargs={'directory':str(cache_refs)})
@@ -216,9 +218,23 @@ def unknown_model_owner_loss(fx, kind):
         death = {'actor_id':actor._actor_id.hex(),'allocation_id':allocation,'native_at_accept':before,
                  'original_actor':actor, 'state_before':state['State']}
         deaths.append(death)
+        # Existing production lifecycle method, not an injected actor method.
+        # It must drain the accepted HTTP call whose external fixture has not
+        # returned any response, so this real actor task stays unconfirmed.
+        pending = actor.close.remote()
+        ready, _ = ray.wait([pending],timeout=.05)
+        assert not ready, 'original close RPC completed before the owned fault boundary'
+        death['pending_rpc'] = {'method':'HostedDataflowWorker.close', 'ref':pending.hex(),
+                                'completed_before_kill':False}
         ray.kill(actor,no_restart=True)
         death['confirmed_dead'] = _dead_actor(ray,actor)
         assert death['confirmed_dead']['num_restarts']==0
+        try:
+            ray.get(pending,timeout=10)
+        except ray.exceptions.RayActorError as error:
+            death['pending_rpc']['error'] = {'type':type(error).__name__,'message':str(error)}
+        else:
+            raise AssertionError('pending actor RPC did not fail when its worker died')
     with _accepted_http(root,accepted) as (http,url,errors), \
             patch.dict(os.environ,{'DF_V3_NATIVE_TEST_URL':url+'/'+kind+'/v1','DF_V3_NATIVE_TEST_KEY':'owned-test-only'}), \
             _provider(fx,workers=3,fusion=False):
@@ -265,7 +281,10 @@ def validate_evidence(value):
     loss = producer['loss']
     assert loss['borrowed_before_kill'] and loss['borrowed_ref']
     assert loss['ack_before_kill']['status']=='acked' and loss['ack_before_kill']['final'] is False
-    assert loss['object_ref_failure']['type'] in {'OwnerDiedError','ObjectLostError'}
+    cache=loss['completed_cache']
+    assert cache['status'] in {'lost','readable'}
+    if cache['status']=='lost':assert cache['type'] in {'OwnerDiedError','ObjectLostError'}
+    else:assert cache['bytes']==256*1024 and cache['payload_sha256']
     assert loss['death']['state']==loss['after_resume_death']['state']=='DEAD'
     assert loss['death']['num_restarts']==loss['after_resume_death']['num_restarts']==0
     assert producer['initial_error']['code']=='UNKNOWN_EFFECT'
@@ -287,6 +306,9 @@ def validate_evidence(value):
         assert before['unresolved']==after['unresolved']==1 and before['confirmed']==after['confirmed']==0
         assert case['death']['confirmed_dead']['state']==case['death']['after_resume_dead']['state']=='DEAD'
         assert case['death']['confirmed_dead']['num_restarts']==case['death']['after_resume_dead']['num_restarts']==0
+        rpc=case['death']['pending_rpc']
+        assert rpc['method']=='HostedDataflowWorker.close' and rpc['ref'] and rpc['completed_before_kill'] is False
+        assert rpc['error']['type'] in {'ActorDiedError','RayActorError'}
     assert value['fault_scope']=='actual actor owner loss; same-host Ray; no physical outage or network partition'
 
 

@@ -11,7 +11,7 @@ def test_actual_producer_owner_loss_recovers_original_ack(runtime_v3_fixture):
     from runtime_v3_node_loss_scenarios import producer_loss
     evidence = producer_loss(runtime_v3_fixture)
     runtime_v3_fixture._save_evidence('producer-owner-loss',evidence)
-    assert evidence['loss']['object_ref_failure']['type'] in {'OwnerDiedError','ObjectLostError'}
+    assert evidence['loss']['completed_cache']['status'] in {'lost','readable'}
 
 
 @pytest.mark.parametrize('kind',['prompt','embedding','agent'])
@@ -30,7 +30,7 @@ def _guard_sample():
     dead={'state':'DEAD','num_restarts':0}
     native={'keys':['original-key'],'requests_consumed':1,'unresolved':1,'confirmed':0}
     producer={'loss':{'borrowed_before_kill':True,'borrowed_ref':'ref',
-        'ack_before_kill':{'status':'acked','final':False},'object_ref_failure':{'type':'OwnerDiedError'},
+        'ack_before_kill':{'status':'acked','final':False},'completed_cache':{'status':'lost','type':'OwnerDiedError'},
         'death':dict(dead),'after_resume_death':dict(dead),'dead_worker_cache_removed':True,
         'dead_worker_cache_entries':2,'plan_id':'plan','first_attempt':1},
         'initial_error':{'code':'UNKNOWN_EFFECT'},'original_durable_store_present':True,
@@ -40,20 +40,22 @@ def _guard_sample():
         'resume_error':{'type':'UncertainPromptCall','message':'automatic regeneration is forbidden'},
         'http':[{}],'commits':[],'attempt_before':1,'attempt_after':2,
         'fence_before':'old','fence_after':'new','before_resume':deepcopy(native),'after_resume':deepcopy(native),
-        'death':{'confirmed_dead':dict(dead),'after_resume_dead':dict(dead)}} for kind in ('prompt','embedding','agent')]
+        'death':{'confirmed_dead':dict(dead),'after_resume_dead':dict(dead),
+            'pending_rpc':{'method':'HostedDataflowWorker.close','ref':'real-ref','completed_before_kill':False,
+                'error':{'type':'ActorDiedError'}}}} for kind in ('prompt','embedding','agent')]
     return {'producer':producer,'models':models,
         'fault_scope':'actual actor owner loss; same-host Ray; no physical outage or network partition'}
 
 
 @pytest.mark.parametrize('defect',['empty','not_borrowed','no_owner_loss','no_original_ack','cache_unchanged',
     'wrong_output','plan_drift','restarted_actor','missing_model','http_repeated','new_request_key',
-    'budget_refund','fake_confirmed','same_fence','claimed_host_outage'])
+    'budget_refund','fake_confirmed','same_fence','claimed_host_outage','rpc_already_done','rpc_not_real_method'])
 def test_node_loss_guard_rejects_incomplete_proof(defect):
     from runtime_v3_node_loss_scenarios import validate_evidence
     v=_guard_sample();p=v['producer'];loss=p['loss'];m=v['models'][0]
     if defect=='empty':v={}
     elif defect=='not_borrowed':loss['borrowed_before_kill']=False
-    elif defect=='no_owner_loss':loss['object_ref_failure']['type']='InjectedTestError'
+    elif defect=='no_owner_loss':m['death']['pending_rpc']['error']['type']='InjectedTestError'
     elif defect=='no_original_ack':loss['ack_before_kill']['status']='prepared'
     elif defect=='cache_unchanged':loss['dead_worker_cache_removed']=False
     elif defect=='wrong_output':p['output'].pop()
@@ -66,6 +68,8 @@ def test_node_loss_guard_rejects_incomplete_proof(defect):
     elif defect=='fake_confirmed':m['after_resume']['confirmed']=1
     elif defect=='same_fence':m['fence_after']=m['fence_before']
     elif defect=='claimed_host_outage':v['fault_scope']='physical host outage'
+    elif defect=='rpc_already_done':m['death']['pending_rpc']['completed_before_kill']=True
+    elif defect=='rpc_not_real_method':m['death']['pending_rpc']['method']='test_double'
     with pytest.raises(AssertionError):validate_evidence(v)
 
 
