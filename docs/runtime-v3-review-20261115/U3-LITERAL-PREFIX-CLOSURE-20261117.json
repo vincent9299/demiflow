@@ -1,0 +1,208 @@
+{
+  "schema": "demiflow.u3_prefix_closure.v1",
+  "tested_head": "c378c5b51ee30b82f41a5117f51201ea62c94ba9",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_mainpath_20261116",
+  "branch": "engine/gpt-v3-u3-timing-20261117",
+  "production_commits": [
+    "0c8be49",
+    "c378c5b"
+  ],
+  "root_test_commits_reused": [
+    "67039c4",
+    "096187e"
+  ],
+  "source_scope": [
+    "demiflow/planning/dataflow_graph_adapter.py",
+    "demiflow/planning/dataflow_place.py"
+  ],
+  "new_test_file": "tests/test_u3_graph_prefix.py",
+  "formal": [
+    {
+      "name": "local35",
+      "receipt": "/tmp/demiflow-u3-prefix-final-r2/receipt.json",
+      "sha256": "6ede4c2c77dcd60f14cffb0ee3b6b998a7bfdfdb276de439dde2c082ca690403",
+      "head": "c378c5b51ee30b82f41a5117f51201ea62c94ba9",
+      "nodeids": [
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[items]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[range]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[two_maps]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[async]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[actor]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[concurrent]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[thread]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[native]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[opaque]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[source_native]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[resources]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[partitions]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[host_small]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[host_cpu]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[fusion_off]",
+        "tests/test_u3_graph_prefix.py::test_literal_prefix_only_colocates_proven_safe_source_and_callbacks[no_hosts]",
+        "tests/test_u3_graph_prefix.py::test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout",
+        "tests/test_u3_graph_prefix.py::test_range_prefix_uses_original_reader_and_exact_committed_rows",
+        "tests/test_u3_graph_local.py::test_local_graph_six_targets_shared_egress_once",
+        "tests/test_u3_graph_local.py::test_local_graph_slow_target_does_not_block_unrelated",
+        "tests/test_u3_graph_local.py::test_graph_seam_default_off",
+        "tests/test_u3_graph_commit.py::test_multi_cut_single_commit_full_k6",
+        "tests/test_u3_graph_commit.py::test_empty_source_sealed_cut",
+        "tests/test_u3_graph_commit.py::test_finite_sealed_mode_commits",
+        "tests/test_u3_graph_commit.py::test_durable_graph_reclaims_channel_segments",
+        "tests/test_u3_graph_commit.py::test_private_tag_colocation_keeps_reader_and_resource_boundaries[plain]",
+        "tests/test_u3_graph_commit.py::test_private_tag_colocation_keeps_reader_and_resource_boundaries[concurrent]",
+        "tests/test_u3_graph_commit.py::test_private_tag_colocation_keeps_reader_and_resource_boundaries[async]",
+        "tests/test_u3_graph_commit.py::test_private_tag_colocation_keeps_reader_and_resource_boundaries[actor]",
+        "tests/test_u3_graph_commit.py::test_private_tag_colocation_keeps_reader_and_resource_boundaries[resources]",
+        "tests/test_u3_graph_commit.py::test_private_tag_colocation_keeps_reader_and_resource_boundaries[fusion_off]",
+        "tests/test_runtime_v3_graph_adapter.py::test_actual_graph_routes_reach_distinct_programs[broadcast]",
+        "tests/test_runtime_v3_graph_adapter.py::test_actual_graph_routes_reach_distinct_programs[hash]",
+        "tests/test_runtime_v3_graph_adapter.py::test_actual_graph_routes_reach_distinct_programs[rebalance]",
+        "tests/test_runtime_v3_graph_adapter.py::test_actual_graph_routes_reach_distinct_programs[target]"
+      ],
+      "call_seconds": 124.2111821807921,
+      "source_inputs": 2950,
+      "isolation": "/tmp/demiflow-u3-prefix-final-r2/isolation.json"
+    },
+    {
+      "name": "slow_repeat1",
+      "receipt": "/tmp/demiflow-u3-prefix-slow-repeat-1/receipt.json",
+      "sha256": "234e76b03da7fa341770bff119ffed961674a2d4ac81cf3c7a1a4b0f8035e726",
+      "head": "c378c5b51ee30b82f41a5117f51201ea62c94ba9",
+      "nodeids": [
+        "tests/test_u3_graph_local.py::test_local_graph_slow_target_does_not_block_unrelated"
+      ],
+      "call_seconds": 12.545751560479403,
+      "source_inputs": 2950,
+      "isolation": "/tmp/demiflow-u3-prefix-slow-repeat-1/isolation.json"
+    },
+    {
+      "name": "slow_repeat2",
+      "receipt": "/tmp/demiflow-u3-prefix-slow-repeat-2/receipt.json",
+      "sha256": "7f0212a8a43579e416b1b5b151e424ba4ad82199e46c67393e1149ebd1d74dd1",
+      "head": "c378c5b51ee30b82f41a5117f51201ea62c94ba9",
+      "nodeids": [
+        "tests/test_u3_graph_local.py::test_local_graph_slow_target_does_not_block_unrelated"
+      ],
+      "call_seconds": 12.567489866167307,
+      "source_inputs": 2950,
+      "isolation": "/tmp/demiflow-u3-prefix-slow-repeat-2/isolation.json"
+    },
+    {
+      "name": "real_ray_two_original_route_recovery",
+      "receipt": "/tmp/demiflow-u3-prefix-ray-warm-final-r2-evidence/verification.json",
+      "sha256": "45a01e8dd42ed4d25087dd1126d6d8689a00dbb9702dc4d6448c81fde2029d2e",
+      "head": "c378c5b51ee30b82f41a5117f51201ea62c94ba9",
+      "nodeids": [
+        "tests/test_runtime_v3_graph_adapter.py::test_actual_graph_recovers_native_routes_and_target_identities[broadcast]",
+        "tests/test_runtime_v3_graph_adapter.py::test_actual_graph_recovers_native_routes_and_target_identities[target]"
+      ],
+      "call_seconds": 195.6225781440735,
+      "fixture_fd_checks": [
+        {
+          "baseline": 79,
+          "before_original_close": 81
+        },
+        {
+          "baseline": 81,
+          "before_original_close": 81
+        }
+      ],
+      "environment_cpu": 3,
+      "children_after": [],
+      "proof_files": {
+        "/tmp/demiflow-u3-prefix-ray-warm-final-r2-evidence/scenario-graph-adapter-broadcast.json": "81c079e53b13eecfac1057a62e12c857f007c05ffe588e23c6e2ad405df66cab",
+        "/tmp/demiflow-u3-prefix-ray-warm-final-r2-evidence/scenario-graph-adapter-target.json": "8a7d89197eff983082511506ca648943385c5278b853fec4674dc2c824fd343d"
+      }
+    }
+  ],
+  "retained_red": [
+    {
+      "receipt": "/tmp/demiflow-u3-prefix-bound-r1/receipt.json",
+      "sha256": "f7249c6a34bb706e4a8843158ff77bb7e081b48fd1e393daf698ff69460ebcdf",
+      "head": "79bc411c7723539bb09c4f39c291599be0043159",
+      "source_unchanged": true,
+      "failures": [
+        {
+          "nodeid": "tests/test_u3_graph_prefix.py::test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout",
+          "when": "call",
+          "outcome": "failed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 6.735436860471964,
+          "detail": "tests/test_u3_graph_prefix.py:154: in test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout\n    result = executor.materialize_graph(spec)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/executors/local.py:626: in materialize_graph\n    return run_local_graph(graph_spec, _executor=self)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/graph.py:557: in run_local_graph\n    return _run_graph(graph_spec, executor, control_timeout_s=control_timeout_s)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/graph.py:528: in _run_graph\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:400: in prepare\n    verify_dataflow_program(node.program_ref, expected_pin=pin[\"programs\"][node.occurrence_id],\ndemiflow/execution/dataflow_seal.py:390: in verify_dataflow_program\n    raise DataflowError(\"INVALID_CONTRACT\",\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)"
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/demiflow-u3-prefix-final-r1/receipt.json",
+      "sha256": "5a0ebe9ae4968e76c5ba72adba847342268dcb19a1619ca2374df67fd328e803",
+      "head": "8382d7d3f3e60857a764f8b8cd51391903b06074",
+      "source_unchanged": true,
+      "failures": [
+        {
+          "nodeid": "tests/test_u3_graph_prefix.py::test_range_prefix_uses_original_reader_and_exact_committed_rows",
+          "when": "call",
+          "outcome": "failed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 6.0937118753790855,
+          "detail": "tests/test_u3_graph_prefix.py:167: in test_range_prefix_uses_original_reader_and_exact_committed_rows\n    run, action, result, facts, carriers, physical = _execute(\ntests/test_u3_graph_commit.py:74: in _execute\n    facts, carriers, physical = assert_native_graph(run, action_id, result,\ntests/_native_graph_fixtures.py:65: in assert_native_graph\n    assert vector[0]['offset']['index'] == vector[0]['next_sequence']\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE   KeyError: 'index'"
+        },
+        {
+          "nodeid": "tests/test_u3_graph_local.py::test_local_graph_slow_target_does_not_block_unrelated",
+          "when": "call",
+          "outcome": "failed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 11.958981733769178,
+          "detail": "tests/test_u3_graph_local.py:103: in test_local_graph_slow_target_does_not_block_unrelated\n    assert arrival[\"c3\"] - latest_fast > 0.1, (arrival[\"c3\"], latest_fast)\nE   AssertionError: (20040888.318792075, 20040888.236844268)\nE   assert (20040888.318792075 - 20040888.236844268) > 0.1"
+        }
+      ]
+    },
+    {
+      "receipt": "/tmp/demiflow-u3-prefix-ray-final/receipt.json",
+      "sha256": "9428e77e27d3f3e3f2f64a19181261e20f13c270c313d66075c39bab38f9583c",
+      "head": "c378c5b51ee30b82f41a5117f51201ea62c94ba9",
+      "source_unchanged": true,
+      "failures": [
+        {
+          "nodeid": "tests/test_runtime_v3_graph_adapter.py::test_actual_graph_recovers_native_routes_and_target_identities[broadcast]",
+          "when": "teardown",
+          "outcome": "failed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.06350532174110413,
+          "detail": "tests/conftest.py:61: in runtime_v3_fixture\n    fixture.close()\ntests/runtime_v3_support.py:696: in close\n    raise RuntimeV3Error(\"INTERNAL_PROTOCOL\", \"fixture close left resources: \" + \"; \".join(problems))\nE   runtime_v3_support.RuntimeV3Error: [INTERNAL_PROTOCOL] fixture close left resources: FD leak: baseline=53 now=65"
+        }
+      ]
+    }
+  ],
+  "diagnostic": {
+    "path": "/tmp/demiflow-u3-timing-79bc411/diagnostic.json",
+    "sha256": "445c3d2979be28fe5531e9e23a1fe9cd61692923d1127d35a4594250443f0b79",
+    "instrumented": true,
+    "ancestor_span_seconds": 0.3883,
+    "meaning": "Original 60 rows supplied slower than slow callback total 0.3s. First/last callback file timestamps add observer cost; not a performance comparison."
+  },
+  "harness_setup_failure": {
+    "path": "/tmp/demiflow-u3-prefix-ray-warm-final.stderr",
+    "sha256": "89a4c1f70967108f81b431b038925226299e9e213bb1a4718cc763a2472e22a5",
+    "reason": "Private nested Ray UNIX socket path exceeded107bytes before pytest. Corrected temp cluster directory to direct /tmp/demiflow-u3-*; no test or production relaxation."
+  },
+  "frozen_reference": "49b666f",
+  "frozen": {
+    "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+    "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+    "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+    "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+    "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+    "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+    "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+  },
+  "not_claimed": [
+    "Formal I08 five-repetition matrix",
+    "whole repository or whole product complete",
+    "two-host U3 timing or arbitrary scheduler/load guarantee",
+    "arbitrary opaque readers, stateful/native/GPU/async callback co-location"
+  ]
+}
