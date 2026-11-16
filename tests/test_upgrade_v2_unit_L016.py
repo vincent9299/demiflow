@@ -1,39 +1,16 @@
-"""L016 · run_ray_chain — resource terminal on every exit.
+"""L016 obligations on the real unified Ray chain and original resource journal.
 
-2026-11-16: the marked Ray cases now exercise the actual v3 compatibility
-entry, with the same six input rows, two CPUs, original checkpoint policy,
-physical actor death, original journal and resume. The old unmarked fake
-layer below is retained pending migration and is NOT claimed as passing.
-Historical layer description follows; it is not current implementation evidence.
-
-Ruling (coordinator 61d0e9a3, 2026-11-14): verify_preserve → implement. The
-baseline closed the ResourceManager scope only on the success path, so a Ray
-failure/cancel before Drain left the journal scope OPEN with an unconfirmed
-allocation. ``manager.close`` + ``reconcile_once`` now run in the finally with
-DRAINED/ABANDON exactly as ``run_local_chain``, and connector.terminate/close
-stay after them.
-
-EVIDENCE, two layers, reported separately:
-* Default env (ray absent): the runtime cases inject a test-domain
-  provider/connector (authorized by the ruling) while keeping the REAL
-  ResourceManager, REAL RunResourceState and REAL run journal, so CLOSED /
-  CONFIRMED / orphan-scope assertions read the durable ledger rather than a fake.
-  The driver seam is the real one: LocalDatasetExecutor's unified_chain dispatch
-  is redirected to run_ray_chain, so source capture, plan sealing, layout
-  interpretation and the commit authority all run for real.
-* env-ray (ray 2.60.0, selected with -m ray): real single-host local Ray Core,
-  num_cpus=2, no cluster and no remote address. These exercise the real provider,
-  including its asynchronous-kill window: the single death probe right after
-  ray.kill can return UNCONFIRMED (ray-actor-alive:), which F6 correctly keeps
-  charged, and the standard protocol then converges to CLOSED + CONFIRMED once
-  the intent's claim lease expires. Neither layer is multi-host cluster evidence.
+All 28 original nodeids remain. Retired v2 AST checks now inspect actual sealed
+assignments and releases. The former fake driver fault cases now inject only a
+specific fault into the real Ray provider/endpoint, and inspect original ledger
+state before any test-owned repair. The five original real cases keep their
+six input rows, two CPUs, checkpoint policy, actual actor death and resume.
+A missing Ray environment is not a passing result. No Ray Data is permitted.
 """
 import ast
 import inspect
 import json
-import sys
 import time
-import types
 
 import pytest
 
@@ -41,10 +18,8 @@ from demiflow.data.dataset import Dataset
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution import chain
-from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.run_context import RunContext
-from demiflow.resources.contracts import spec_hash, validate_observation
 from demiflow.resources.manager import ResourceManager
 
 # These assertions still describe the retired v2 driver and are intentionally
@@ -243,149 +218,7 @@ def ray_chain_facts(ray_local, tmp_path_factory):
             source.close()
 
 
-# ---------------- runtime: real journal, injected provider/connector ----------------
-
-class _FakeRayConnector:
-    """Test-domain stand-in for the actor control transport (no Ray)."""
-    log = []
-    behaviour = {}
-    instances = []
-
-    def __init__(self, command_timeout_s=120):
-        self.command_timeout_s = command_timeout_s
-        self.staged = {}
-        _FakeRayConnector.instances.append(self)
-
-    def stage(self, allocation_id, launch_spec):
-        self.log.append(("connector.stage", allocation_id))
-        self.staged[allocation_id] = launch_spec
-
-    def handle(self, allocation_id, message):
-        self.log.append(("connector.handle", message["kind"]))
-        return {"receipt": {"operation_id": message["operation_id"], "kind": message["kind"]}}
-
-    def pull(self, allocation_id):
-        self.log.append(("connector.pull", allocation_id))
-        mode = self.behaviour.get("pull", "empty")
-        if mode == "raise":
-            raise RecoveryContractError("injected: ray actor unreachable")
-        if mode == "failure":
-            return [{"schema_version": chain.WORKER_FAILURE_SCHEMA,
-                     "error": {"type": "InjectedActorDeath", "message": "actor died"}}]
-        return []
-
-    def deliver_receipt(self, allocation_id, receipt):
-        self.log.append(("connector.deliver_receipt", allocation_id))
-
-    def terminate(self, allocation_id):
-        self.log.append(("connector.terminate", allocation_id))
-
-    def close(self, allocation_id):
-        self.log.append(("connector.close", allocation_id))
-
-
-class _FakeRayProvider:
-    """Test-domain stand-in for Ray Core placement; observations stay contract-valid."""
-    log = []
-    behaviour = {}
-    instances = []
-
-    def __init__(self, control, *, provision_timeout_s=30, device_pool=None):
-        self._control = control
-        self._alive = {}
-        _FakeRayProvider.instances.append(self)
-
-    def describe_and_normalize(self, binding, requirements, spec):
-        requests = spec["profile"]["requests"]
-        effective = {"cpu_millis": requests["cpu_millis"], "memory_bytes": requests["memory_bytes"]}
-        return {"effective": effective, "spec": spec, "spec_hash": spec_hash(spec)}
-
-    def _observation(self, scope_id, allocation_id, phase, *, boot_id=None,
-                     cleanup="NONE", effective=None, conditions=None, evidence_ref=None):
-        now = int(time.time() * 1000)
-        return validate_observation({
-            "allocation_id": allocation_id, "provider_uid": "fake-ray-" + allocation_id[:16],
-            "boot_id": boot_id, "phase": phase, "observation": "FRESH",
-            "observed_at_ms": now, "observation_revision": now, "cleanup": cleanup,
-            "effective_resources": effective, "conditions": conditions or [],
-            "evidence_ref": evidence_ref, "placement": None,
-            "ownership": {"scope_owned": [allocation_id], "shared": []},
-        })
-
-    def ensure_present(self, allocation_id, immutable_spec):
-        self.log.append(("provider.ensure_present", allocation_id))
-        scope_id = immutable_spec["scope_id"]
-        requests = immutable_spec["request"]["profile"]["requests"]
-        effective = {"cpu_millis": requests["cpu_millis"], "memory_bytes": requests["memory_bytes"]}
-        phase = self.behaviour.get("phase", "RUNNING")
-        if phase != "RUNNING":
-            return self._observation(scope_id, allocation_id, phase, effective=effective,
-                                     conditions=["LAUNCH_FAILED", "injected placement failure"])
-        boot_id = self._control.staged[allocation_id]["boot_id"]
-        self._alive[allocation_id] = boot_id
-        return self._observation(scope_id, allocation_id, "RUNNING", boot_id=boot_id,
-                                 effective=effective,
-                                 evidence_ref="fake-ray-actor:" + allocation_id)
-
-    def ensure_absent(self, exact_identity, terminate_deadline_ms):
-        allocation_id = exact_identity["allocation_id"]
-        self.log.append(("provider.ensure_absent", allocation_id))
-        now = int(time.time() * 1000)
-        mode = self.behaviour.get("cleanup", "confirmed")
-        if mode == "raise":
-            raise RuntimeError("injected: cleanup transport lost")
-        if mode == "unconfirmed":
-            return {"allocation_id": allocation_id, "cleanup": "UNCONFIRMED",
-                    "evidence_ref": "fake-ray-actor-alive:" + allocation_id, "observed_at_ms": now}
-        self._alive.pop(allocation_id, None)
-        return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
-                "evidence_ref": "fake-ray-actor-dead:" + allocation_id, "observed_at_ms": now}
-
-    def inspect(self, scope_id, page_token):
-        return {"allocations": [], "next_page_token": None,
-                "sampled_at_ms": int(time.time() * 1000)}
-
-
-def _install_fake_module(monkeypatch, name, **attrs):
-    module = types.ModuleType(name)
-    for key, value in attrs.items():
-        setattr(module, key, value)
-    monkeypatch.setitem(sys.modules, name, module)
-
-
-@pytest.fixture
-def ray_driver(monkeypatch):
-    """Redirect the real unified_chain driver seam to run_ray_chain with fakes."""
-    _FakeRayConnector.log = []
-    _FakeRayConnector.behaviour = {}
-    _FakeRayConnector.instances = []
-    _FakeRayProvider.log = []
-    _FakeRayProvider.behaviour = {}
-    _FakeRayProvider.instances = []
-    _install_fake_module(monkeypatch, "demiflow.resources.ray",
-                         RayResourceProvider=_FakeRayProvider)
-    _install_fake_module(monkeypatch, "demiflow.execution.worker.ray_host",
-                         RayControlConnector=_FakeRayConnector)
-    timeout = {"control_timeout_s": 5.0}
-
-    def seam(executor, dataset, *, source=None, plan=None, host_id="local"):
-        return chain.run_ray_chain(executor, dataset, source=source, plan=plan,
-                                   host_id=host_id, **timeout)
-
-    monkeypatch.setattr(chain, "run_local_chain", seam)
-    return types.SimpleNamespace(connector=_FakeRayConnector, provider=_FakeRayProvider,
-                                 timeout=timeout)
-
-
-def _dataset():
-    def double(row):
-        return {**row, "x": row["x"] * 2}
-
-    items = tuple({"x": i} for i in range(6))
-    plan = LogicalPlan((MapOp(CallableSpec.create(double),
-                              stream_options=MapStreamOptions(concurrency=1)),))
-    return Dataset(ItemsSource(items), plan, LocalDatasetExecutor(workers=1, unified_chain=True))
-
+# ---------------- real Ray faults, original resource/journal authority ----------------
 
 LIMITS = {"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}
 
@@ -404,138 +237,230 @@ def _ledger(run):
     return scopes, allocations, outstanding
 
 
-def _fail(tmp_path, name):
-    dataset = _dataset()
-    with pytest.raises(RecoveryContractError) as caught:
-        with RunContext.start(tmp_path / name, limits=LIMITS) as run:
-            reference = run.ref
-            dataset.materialize().take_all()
-    return run, reference, caught.value
+def _repair_owned_resource_terminal(execution):
+    """Test cleanup after an injected cleanup failure, under the original fence.
+
+    This never changes a verdict or writes ledger rows directly. Assertions use
+    the captured pre-repair observations; reconciliation is the native protocol.
+    """
+    scheduler = execution._scheduler
+    if scheduler is None or not execution._scope_open:
+        return
+    manager = execution._services.resources
+    state = manager.get(scheduler.scope_id)
+    if state['state'] == 'OPEN':
+        scheduler.close(deadline_ms=45000)
+        return
+    deadline = time.monotonic() + 45
+    while manager.get(scheduler.scope_id)['state'] != 'CLOSED':
+        assert time.monotonic() < deadline, 'owned failure fixture did not clean up'
+        manager.reconcile_once(execution._fence(), deadline, 16)
+        time.sleep(.02)
 
 
-def test_failure_before_running_closes_the_scope(tmp_path, ray_driver):
-    ray_driver.provider.behaviour["phase"] = "FAILED"
-    run, _, error = _fail(tmp_path, "before-running")
-    assert "did not reach RUNNING" in str(error)
-    scopes, allocations, outstanding = _ledger(run)
-    assert [s["state"] for s in scopes] == ["CLOSED"]
-    assert [a["cleanup"] for a in allocations] == ["CONFIRMED"]
-    assert all(a["terminal"] for a in allocations)
-    assert outstanding == 0
-    assert scopes[0]["close_document"]["mode"] == "ABANDON"
-    assert scopes[0]["close_document"]["engine_receipt_ref"].endswith("-abandoned")
+def _ray_failure(tmp_path, ray, *, mode, reference=None):
+    """Inject one transport/provision fault; execute the real Ray chain driver."""
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_hosts import RayHostEndpoint, DataflowRayConnector
+    from demiflow.execution.dataflow_scheduler import DataflowScheduler
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.resources.contracts import ResourceError
+    from demiflow.resources.ray import RayResourceProvider
+    original_init = DataflowExecution.__init__
+    original_activate = RayHostEndpoint.activate
+    original_command = RayHostEndpoint._send_k3
+    original_present = RayResourceProvider.ensure_present
+    original_absent = RayResourceProvider.ensure_absent
+    original_close = ResourceManager.close
+    original_scheduler_close = DataflowScheduler.close
+    original_kill = DataflowRayConnector.terminate
+    original_connector_close = DataflowRayConnector.close
+    executions, events = [], []
+    def created(execution, *args, **kwargs):
+        original_init(execution, *args, **kwargs)
+        executions.append(execution)
+    def present(provider, allocation_id, spec):
+        if mode == 'before':
+            raise ResourceError('LAUNCH_FAILED', 'injected placement failure')
+        result = original_present(provider, allocation_id, spec)
+        events.append(('present', allocation_id, result['phase']))
+        return result
+    def activate(endpoint, assignment):
+        original_activate(endpoint, assignment)
+        events.append(('activated', assignment.lease.allocation_id))
+        if mode in ('after', 'unconfirmed', 'terminal_failure'):
+            raise ConnectionError('injected: ray actor unreachable')
+    def command(endpoint, kind, payload):
+        if mode == 'timeout' and kind == 'VerifyArtifactAndCapabilities':
+            raise DataflowError('DEADLINE_EXCEEDED', 'injected Ray registration deadline')
+        return original_command(endpoint, kind, payload)
+    def absent(provider, identity, deadline_ms):
+        events.append(('absent', identity['allocation_id']))
+        result = original_absent(provider, identity, deadline_ms)
+        if mode == 'unconfirmed':
+            # Lose only the confirmation. Physical teardown still ran, but its
+            # unobserved success cannot release the original logical charge.
+            return dict(result, cleanup='UNCONFIRMED',
+                        evidence_ref='ray-actor-unconfirmed:' + identity['allocation_id'])
+        return result
+    def close(manager, context, spec):
+        if mode == 'terminal_failure':
+            raise RuntimeError('injected: resource terminal unavailable')
+        result = original_close(manager, context, spec)
+        events.append(('terminal', context.scope_id))
+        return result
+    def scheduler_close(scheduler, *, deadline_ms):
+        return original_scheduler_close(scheduler,
+            deadline_ms=min(deadline_ms, 200) if mode == 'unconfirmed' else deadline_ms)
+    def kill(connector, allocation_id):
+        events.append(('kill', allocation_id))
+        return original_kill(connector, allocation_id)
+    def connector_close(connector, allocation_id):
+        events.append(('connector_close', allocation_id))
+        return original_connector_close(connector, allocation_id)
+    items, plan = _boom_plan() if mode == 'frame' else _double_plan()[:2]
+    dataset = _ray_dataset(plan, items)
+    expected = (ValueError if mode == 'frame' else DataflowError
+                if mode in ('before', 'timeout') else ConnectionError)
+    context = RunContext.start(tmp_path / 'run', limits=LIMITS) if reference is None else RunContext.resume(reference)
+    with pytest.raises(expected) as caught:
+        with context as run:
+            with pytest.MonkeyPatch.context() as patch:
+                for owner, name, replacement in (
+                    (DataflowExecution, '__init__', created),
+                    (RayResourceProvider, 'ensure_present', present),
+                    (RayResourceProvider, 'ensure_absent', absent),
+                    (RayHostEndpoint, 'activate', activate),
+                    (RayHostEndpoint, '_send_k3', command),
+                    (ResourceManager, 'close', close),
+                    (DataflowScheduler, 'close', scheduler_close),
+                    (DataflowRayConnector, 'terminate', kill),
+                    (DataflowRayConnector, 'close', connector_close)):
+                    patch.setattr(owner, name, replacement)
+                try:
+                    _materialize_chain(dataset)
+                except expected:
+                    snapshot = _ledger(run)
+                    actors = tuple(ray.util.list_named_actors(all_namespaces=True))
+                    if executions:
+                        charged = executions[-1]._services.resources.get(
+                            executions[-1]._scheduler.scope_id)['charged_resources']
+                    else:
+                        charged = None
+                    raise
+                finally:
+                    patch.undo()
+                    for execution in executions:
+                        _repair_owned_resource_terminal(execution)
+    return dict(run=run, reference=run.ref, error=caught.value, snapshot=snapshot,
+                actors=actors, charged=charged, events=events, executions=executions)
 
 
-def test_actor_loss_after_running_closes_the_scope(tmp_path, ray_driver):
-    ray_driver.connector.behaviour["pull"] = "raise"
-    run, _, error = _fail(tmp_path, "actor-loss")
-    assert "unreachable" in str(error)
-    scopes, allocations, outstanding = _ledger(run)
-    assert [s["state"] for s in scopes] == ["CLOSED"]
-    assert [a["cleanup"] for a in allocations] == ["CONFIRMED"]
-    assert outstanding == 0
-    assert scopes[0]["close_document"]["mode"] == "ABANDON"
-    allocation_id = allocations[0]["allocation_id"]
-    # pull is only reached after the RUNNING check, so the scope really was live
-    assert ("connector.pull", allocation_id) in ray_driver.connector.log
-    assert ("provider.ensure_present", allocation_id) in ray_driver.provider.log
+def _assert_closed_failure(facts):
+    scopes, allocations, outstanding = facts['snapshot']
+    assert scopes and all(scope['state'] == 'CLOSED' for scope in scopes)
+    assert allocations and all(a['cleanup'] == 'CONFIRMED' and a['terminal'] for a in allocations)
+    assert outstanding == 0 and facts['actors'] == ()
+    assert all(scope['close_document']['mode'] == 'ABANDON' for scope in scopes)
 
 
-def test_worker_failure_frame_closes_the_scope(tmp_path, ray_driver):
-    ray_driver.connector.behaviour["pull"] = "failure"
-    run, _, error = _fail(tmp_path, "worker-failure")
-    assert "InjectedActorDeath" in str(error)
-    scopes, allocations, outstanding = _ledger(run)
-    assert [s["state"] for s in scopes] == ["CLOSED"]
-    assert [a["cleanup"] for a in allocations] == ["CONFIRMED"]
-    assert outstanding == 0
+@pytest.mark.ray
+def test_failure_before_running_closes_the_scope(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='before')
+    assert 'did not reach RUNNING' in str(facts['error'])
+    assert not any(event[0] == 'activated' for event in facts['events'])
+    _assert_closed_failure(facts)
+    assert facts['run'].journal.execution_commits('action-1') == []
 
 
-def test_control_timeout_closes_the_scope(tmp_path, ray_driver):
-    ray_driver.timeout["control_timeout_s"] = 0.05
-    run, _, error = _fail(tmp_path, "timeout")
-    assert "did not emit Register" in str(error)
-    scopes, allocations, outstanding = _ledger(run)
-    assert [s["state"] for s in scopes] == ["CLOSED"]
-    assert [a["cleanup"] for a in allocations] == ["CONFIRMED"]
-    assert outstanding == 0
+@pytest.mark.ray
+def test_actor_loss_after_running_closes_the_scope(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='after')
+    assert 'unreachable' in str(facts['error'])
+    assert any(event[0] == 'activated' for event in facts['events'])
+    _assert_closed_failure(facts)
 
 
-def test_actor_kill_runs_after_the_resource_terminal(tmp_path, ray_driver):
-    ray_driver.connector.behaviour["pull"] = "raise"
-    run, _, _ = _fail(tmp_path, "ordering")
-    allocation_id = _ledger(run)[1][0]["allocation_id"]
-    log = ray_driver.provider.log + ray_driver.connector.log
-    absent = log.index(("provider.ensure_absent", allocation_id))
-    terminate = log.index(("connector.terminate", allocation_id))
-    close = log.index(("connector.close", allocation_id))
-    assert absent < terminate < close
+@pytest.mark.ray
+def test_worker_failure_frame_closes_the_scope(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='frame')
+    assert 'injected business failure' in str(facts['error'])
+    _assert_closed_failure(facts)
 
 
-def test_unconfirmed_exit_keeps_its_charge(tmp_path, ray_driver):
-    ray_driver.connector.behaviour["pull"] = "raise"
-    ray_driver.provider.behaviour["cleanup"] = "unconfirmed"
-    run, _, _ = _fail(tmp_path, "unconfirmed")
-    scopes, allocations, _ = _ledger(run)
-    # F6: only a CONFIRMED exit releases capacity; the guard is not weakened
-    assert [a["cleanup"] for a in allocations] == ["UNCONFIRMED"]
-    assert [s["state"] for s in scopes] == ["CLOSING"]
-    log = ray_driver.connector.log
-    assert ("connector.terminate", allocations[0]["allocation_id"]) in log
-    assert ("connector.close", allocations[0]["allocation_id"]) in log
+@pytest.mark.ray
+def test_control_timeout_closes_the_scope(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='timeout')
+    assert facts['error'].code == 'DEADLINE_EXCEEDED'
+    assert 'registration deadline' in str(facts['error'])
+    _assert_closed_failure(facts)
+    assert facts['run'].journal.execution_commits('action-1') == []
 
 
-def test_terminal_failure_still_kills_the_actor_and_keeps_the_original_error(
-        tmp_path, ray_driver, monkeypatch, caplog):
-    ray_driver.connector.behaviour["pull"] = "raise"
-
-    def broken_close(self, context, close_spec):
-        raise RuntimeError("injected: resource terminal unavailable")
-
-    monkeypatch.setattr(ResourceManager, "close", broken_close)
-    with caplog.at_level("ERROR"):
-        run, _, error = _fail(tmp_path, "terminal-failure")
-    assert "unreachable" in str(error), "the cleanup failure must not mask the chain error"
-    assert "Ray chain resource terminal failed" in caplog.text
-    scopes, allocations, _ = _ledger(run)
-    assert [s["state"] for s in scopes] == ["OPEN"]
-    log = ray_driver.connector.log
-    assert ("connector.terminate", allocations[0]["allocation_id"]) in log
-    assert ("connector.close", allocations[0]["allocation_id"]) in log
+@pytest.mark.ray
+def test_actor_kill_runs_after_the_resource_terminal(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='after')
+    _assert_closed_failure(facts)
+    events = facts['events']
+    terminals = [i for i, event in enumerate(events) if event[0] == 'terminal']
+    kills = [(i, event[1]) for i, event in enumerate(events) if event[0] == 'kill']
+    assert terminals and kills
+    for index, allocation in kills:
+        assert min(terminals) < index
+        assert any(event == ('absent', allocation) for event in events[:index])
+        assert ('connector_close', allocation) in events[index + 1:]
 
 
-def test_resume_leaves_no_orphan_scope(tmp_path, ray_driver):
-    ray_driver.connector.behaviour["pull"] = "raise"
-    run, reference, _ = _fail(tmp_path, "resume")
-    first_scope = _ledger(run)[0][0]["scope_id"]
-    # The materialize action is still unconfirmed, so the resumed run refuses a
-    # clean exit. That is the history guard, not a resource leak: the ledger is
-    # read inside the block, before any new attempt work.
-    with pytest.raises(RecoveryContractError, match="unconfirmed actions"):
-        with RunContext.resume(reference) as run2:
-            scopes, allocations, outstanding = _ledger(run2)
-            assert first_scope in [s["scope_id"] for s in scopes]
-            assert all(s["state"] == "CLOSED" for s in scopes), scopes
-            assert all(a["cleanup"] == "CONFIRMED" for a in allocations), allocations
-            assert outstanding == 0
-            assert run2.attempt > run.attempt
+@pytest.mark.ray
+def test_unconfirmed_exit_keeps_its_charge(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='unconfirmed')
+    scopes, allocations, _ = facts['snapshot']
+    assert scopes and all(scope['state'] == 'CLOSING' for scope in scopes)
+    assert allocations and all(a['cleanup'] == 'UNCONFIRMED' for a in allocations)
+    assert facts['charged']['workers'] == len(allocations)
+    assert facts['charged']['cpu_millis'] > 0
+    assert facts['charged']['memory_bytes'] > 0
+    assert facts['actors'] == (), 'unknown receipt must retain charge even after real death'
+    assert any('worker exit remains unconfirmed' in note for note in facts['error'].__notes__)
+    assert all(scope['state'] == 'CLOSED' for scope in _ledger(facts['run'])[0])
 
 
-def test_second_failure_after_resume_opens_and_closes_its_own_scope(tmp_path, ray_driver):
-    ray_driver.connector.behaviour["pull"] = "raise"
-    run, reference, _ = _fail(tmp_path, "twice")
-    first_scope = _ledger(run)[0][0]["scope_id"]
-    dataset = _dataset()
-    with pytest.raises(RecoveryContractError):
-        with RunContext.resume(reference) as run2:
-            dataset.materialize().take_all()
-    scopes, allocations, outstanding = _ledger(run2)
-    assert len(scopes) == 2, scopes
-    assert all(s["state"] == "CLOSED" for s in scopes), scopes
-    assert all(a["cleanup"] == "CONFIRMED" for a in allocations), allocations
-    assert outstanding == 0
-    assert first_scope in [s["scope_id"] for s in scopes]
-    assert len({a["allocation_id"] for a in allocations}) == 2
+@pytest.mark.ray
+def test_terminal_failure_still_kills_the_actor_and_keeps_the_original_error(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='terminal_failure')
+    assert 'unreachable' in str(facts['error'])
+    assert any('resource terminal unavailable' in note for note in facts['error'].__notes__)
+    scopes, allocations, _ = facts['snapshot']
+    assert scopes and all(scope['state'] == 'OPEN' for scope in scopes)
+    assert facts['charged']['workers'] == len(allocations)
+    assert facts['actors'] == (), 'a failed ledger close must not leave its owned worker alive'
+    assert any(event[0] == 'kill' for event in facts['events'])
+
+
+@pytest.mark.ray
+def test_resume_leaves_no_orphan_scope(tmp_path, ray_local):
+    facts = _ray_failure(tmp_path, ray_local, mode='after')
+    first = {scope['scope_id'] for scope in facts['snapshot'][0]}
+    with pytest.raises(RecoveryContractError, match='unconfirmed actions'):
+        with RunContext.resume(facts['reference']) as resumed:
+            scopes, allocations, outstanding = _ledger(resumed)
+            assert first <= {scope['scope_id'] for scope in scopes}
+            assert all(scope['state'] == 'CLOSED' for scope in scopes)
+            assert all(a['cleanup'] == 'CONFIRMED' for a in allocations)
+            assert outstanding == 0 and resumed.attempt > facts['run'].attempt
+
+
+@pytest.mark.ray
+def test_second_failure_after_resume_opens_and_closes_its_own_scope(tmp_path, ray_local):
+    first = _ray_failure(tmp_path, ray_local, mode='after')
+    second = _ray_failure(tmp_path, ray_local, mode='after', reference=first['reference'])
+    _assert_closed_failure(second)
+    first_scopes, first_allocations, _ = first['snapshot']
+    scopes, allocations, _ = second['snapshot']
+    assert len(scopes) == len(first_scopes) + 1
+    assert {s['scope_id'] for s in first_scopes} < {s['scope_id'] for s in scopes}
+    assert {a['allocation_id'] for a in first_allocations} < {a['allocation_id'] for a in allocations}
+    assert second['run'].attempt > first['run'].attempt
 
 
 # ---------------- real single-host Ray Core (env-ray only, marked ray) ----------------
@@ -559,6 +484,7 @@ def ray_local(tmp_path_factory):
     # names, so use a short owned directory rather than the long pytest node path.
     with tempfile.TemporaryDirectory(prefix="demiflow-l16-") as ray_root:
         with pytest.MonkeyPatch.context() as patch:
+            patch.setenv('DEMIFLOW_V3_PROVIDER', 'ray_core')
             for key, suffix in (("DEMIFLOW_RESOURCE_ROOT", "pool"),
                                 ("DEMIFLOW_RESOURCE_HOME", "home"),
                                 ("DEMIFLOW_FORGE_DOMAIN", "forge")):
