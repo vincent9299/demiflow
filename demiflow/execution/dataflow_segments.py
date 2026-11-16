@@ -20,10 +20,16 @@ def _fail(message):
     raise DataflowError('CORRUPT_ARTIFACT', message)
 
 
-def _read(store, ref, bounds):
+def _read(store, ref, bounds, *, frame_call=None):
     if ref.media_type != SEGMENTS_MEDIA or ref.size_bytes > bounds.max_control_bytes:
         _fail('terminal segment index is invalid or exceeds its bound')
-    value = json.loads(b''.join(store.read(ref, max_bytes=bounds.max_control_bytes)))
+    if frame_call is None:
+        value = json.loads(b''.join(store.read(ref, max_bytes=bounds.max_control_bytes)))
+    else:
+        from .dataflow_record_frames import read_document, decode_metadata
+        raw = frame_call(read_document, ref, store, bounds, _maximum=bounds.max_control_bytes)
+        value = frame_call(decode_metadata, raw, bounds)
+        del raw
     if type(value) is not dict or set(value) != {'schema', 'height', 'rows', 'bytes', 'children'} or value['schema'] != SCHEMA:
         _fail('terminal segment index has an unknown shape')
     if any(type(value[k]) is not int or value[k] < 0 for k in ('height', 'rows', 'bytes')):
@@ -47,7 +53,7 @@ def _ref(entry):
     return ArtifactRef(**entry['ref'])
 
 
-def tree_refs(store, root, bounds, *, leaves_only=False):
+def tree_refs(store, root, bounds, *, leaves_only=False, frame_call=None, on_retained=None):
     """Depth-first bounded traversal, authenticates metadata and rejects cycles."""
     stack = [(root, None, frozenset())]
     visited = 0
@@ -56,6 +62,9 @@ def tree_refs(store, root, bounds, *, leaves_only=False):
     ceiling = 4 * (bounds.max_output_rows + bounds.max_partitions + 1)
     while stack:
         ref, expected, ancestors = stack.pop()
+        if on_retained is not None:
+            from .dataflow_record_frames import metadata_bytes
+            on_retained(metadata_bytes((stack, ref, expected, ancestors)))
         visited += 1
         key = (ref.store_id, ref.key)
         if visited > ceiling or len(ancestors) > bounds.max_depth or key in ancestors:
@@ -67,7 +76,10 @@ def tree_refs(store, root, bounds, *, leaves_only=False):
                 _fail('terminal segment size/height disagrees with its parent')
             yield ref
             continue
-        node = _read(store, ref, bounds)
+        node = _read(store, ref, bounds, frame_call=frame_call)
+        if frame_call is not None:
+            from .dataflow_record_frames import admit_workspace, metadata_bytes
+            frame_call(admit_workspace, 2 * metadata_bytes(node), bounds)
         if expected is not None and any(node[k] != expected[k] for k in ('rows', 'bytes', 'height')):
             _fail('terminal index counters disagree with its parent')
         children = node['children']
@@ -83,22 +95,50 @@ def tree_refs(store, root, bounds, *, leaves_only=False):
             yield ref
         for child in reversed(children):
             stack.append((_ref(child), child, ancestors | {key}))
+        del node, children, child
 
 
-def segment_refs(store, root, bounds):
-    yield from tree_refs(store, root, bounds, leaves_only=True)
+def segment_refs(store, root, bounds, *, frame_call=None, on_retained=None):
+    try:
+        yield from tree_refs(store, root, bounds, leaves_only=True,
+                            frame_call=frame_call, on_retained=on_retained)
+    finally:
+        if on_retained is not None:
+            on_retained(0)
 
 
-def block_chunks(store, root, bounds, *, chunk_bytes=None):
-    for ref in segment_refs(store, root, bounds):
-        options = {} if chunk_bytes is None else {'chunk_bytes': chunk_bytes}
-        yield from store.read(ref, max_bytes=max(1, ref.size_bytes), **options)
+def block_chunks(store, root, bounds, *, chunk_bytes=None, frame_call=None, on_retained=None):
+    refs = segment_refs(store, root, bounds, frame_call=frame_call, on_retained=on_retained)
+    try:
+        for ref in refs:
+            options = {} if chunk_bytes is None else {'chunk_bytes': chunk_bytes}
+            if frame_call is None:
+                yield from store.read(ref, max_bytes=max(1, ref.size_bytes), **options)
+                continue
+            from .dataflow_record_frames import admit_workspace
+            chunks = store.read(ref, max_bytes=max(1, ref.size_bytes), **options)
+            try:
+                while True:
+                    # Metadata traversal can grow the held index AFTER the
+                    # line reader's first growth check. Recheck before next()
+                    # allocates a physical chunk with that index now live.
+                    frame_call(admit_workspace, min(ref.size_bytes, chunk_bytes or bounds.max_row_bytes), bounds)
+                    try:
+                        chunk = next(chunks)
+                    except StopIteration:
+                        break
+                    yield chunk
+                    del chunk
+            finally:
+                chunks.close()
+    finally:
+        refs.close()
 
 
-def block_totals(store, root, bounds):
+def block_totals(store, root, bounds, *, frame_call=None):
     """Read bounded aggregate metadata; traversal still validates each leaf."""
     if root.media_type == SEGMENTS_MEDIA:
-        value = _read(store, root, bounds)
+        value = _read(store, root, bounds, frame_call=frame_call)
         return value['rows'], value['bytes']
     return None, root.size_bytes
 

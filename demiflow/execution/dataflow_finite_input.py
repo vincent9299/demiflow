@@ -11,7 +11,9 @@ from .contracts.dataflow_errors import DataflowError
 from .dataflow_handles import _ChunkStream
 from .dataflow_segments import block_chunks, block_totals
 from .exchange.dataflow_bridge import _validate_record, _decode_record_document
-from .dataflow_record_frames import decode_frame, decode_document, admit_document, document_limit, line_limit, frame_stream, read_chunk_bytes
+from .dataflow_record_frames import (decode_frame, decode_document, admit_document, document_limit,
+    line_limit, frame_stream, read_chunk_bytes, read_document, decode_metadata,
+    admit_workspace, metadata_bytes)
 
 _FIELDS = {'schema', 'seal_ref', 'manifest_ref', 'edge_id', 'producer', 'target',
            'rows', 'bytes', 'total_rows', 'total_bytes'}
@@ -60,11 +62,20 @@ def _json(raw):
         raise DataflowError('CORRUPT_ARTIFACT', 'invalid finite input JSON') from exc
 
 
-def _scope(services, ref, spec, target):
+def _scope(services, ref, spec, target, *, frame_call=None):
     if spec.mode != 'finite_sealed' or target not in spec.consumer_partitions:
         raise DataflowError('FENCED', 'finite input differs from assigned consumer')
-    raw = b''.join(services.store.read(ref, max_bytes=services.bounds.max_control_bytes))
-    seal = _json(raw)
+    if frame_call is None:
+        raw = b''.join(services.store.read(ref, max_bytes=services.bounds.max_control_bytes))
+        seal = _json(raw)
+    else:
+        raw = frame_call(read_document, ref, services.store, services.bounds,
+                         _maximum=services.bounds.max_control_bytes)
+        try:
+            seal = frame_call(decode_metadata, raw, services.bounds)
+        except (ValueError, UnicodeError) as exc:
+            raise DataflowError('CORRUPT_ARTIFACT', 'invalid finite input JSON') from exc
+    del raw
     if (type(seal) is not dict or set(seal) != {
             'schema', 'scope_id', 'generation', 'membership', 'producers', 'status'}
             or seal['schema'] != 'demiflow.seal.v3' or seal['scope_id'] != spec.scope_id
@@ -86,18 +97,34 @@ def _scope(services, ref, spec, target):
     return members
 
 
-def _records(services, ref, spec, *, target, total_rows, total_bytes, project=None):
+def _records(services, ref, spec, *, target, total_rows, total_bytes, project=None, frame_call=None):
     """Yield selected rows only; still validate every producer frame and route."""
-    declared, size = block_totals(services.store, ref, services.bounds)
+    declared, size = block_totals(services.store, ref, services.bounds, frame_call=frame_call)
     if size > spec.storage_bytes or size > services.bounds.max_spill_bytes:
         raise DataflowError('BUDGET_EXCEEDED', 'finite input exceeds original storage bound')
     if size != total_bytes or declared is not None and declared != total_rows:
         _fail('finite producer index counts differ from seal')
+    index_bytes = [0]
+    broadcast = None
+    stream = None
+    def call(function, *args, _frame_retained=0, **kwargs):
+        held = len(broadcast[2]) if broadcast is not None else 0
+        retained = _frame_retained + index_bytes[0] + held
+        if frame_call is not None:
+            return frame_call(function, *args, _frame_retained=retained, **kwargs)
+        return function(*args, services=services, retained=retained, **kwargs)
+    def index_call(function, *args, _frame_retained=0, **kwargs):
+        return call(function, *args, _frame_retained=(
+            _frame_retained + (stream.buffered_bytes if stream is not None else 0)), **kwargs)
     stream = frame_stream(block_chunks(services.store, ref, services.bounds,
-        chunk_bytes=read_chunk_bytes(services.bounds, services)), services.bounds, services=services)
+        chunk_bytes=read_chunk_bytes(services.bounds, services),
+        frame_call=index_call if frame_call is not None else None,
+        on_retained=(lambda size: index_bytes.__setitem__(0, size)) if frame_call is not None else None),
+        services.bounds, services=services,
+        check_workspace=(lambda size: call(admit_workspace, size, services.bounds))
+                        if frame_call is not None else None)
     consumers = spec.consumer_partitions
     count = byte_count = 0
-    broadcast = None
     try:
         while True:
             services.check_stop()
@@ -107,13 +134,12 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
             byte_count += len(line)
             if spec.routing == 'broadcast' and count % len(consumers) == 0:
                 broadcast = None
-            held = len(broadcast[2]) if broadcast is not None else 0
-            retained = stream.buffered_bytes + held
-            raw, item = decode_frame(line, services.bounds, services=services, finite=True, retained=retained)
+            retained = stream.buffered_bytes
+            raw, item = call(decode_frame, line, services.bounds, finite=True, _frame_retained=retained)
             del line
             if type(item['target']) is not str or item['target'] not in consumers:
                 _fail('finite record frame or target differs from channel')
-            admit_document(raw, services.bounds, services=services, retained=retained)
+            call(admit_document, raw, services.bounds, _frame_retained=retained)
             if project is None:
                 record = _decode_record_document(raw, record_id=item['record_id'], sequence=item['sequence'],
                     max_bytes=document_limit(services.bounds), payload_max_bytes=services.bounds.max_row_bytes,
@@ -128,7 +154,16 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
             if record.payload_ref is not None:
                 # Authenticate an existing external row too, without retaining
                 # another payload copy or taking over its original ownership.
-                for _ in services.store.read(record.payload_ref, max_bytes=services.bounds.max_row_bytes):
+                chunk_bytes = read_chunk_bytes(services.bounds, services)
+                # Authenticate external bytes in small pieces; grant their
+                # read buffers before advancing the original store iterator.
+                from .dataflow_record_frames import raw_workspace
+                if frame_call is not None:
+                    call(admit_workspace, raw_workspace(raw) + 2 * chunk_bytes,
+                         services.bounds, _frame_retained=retained)
+                options = {'chunk_bytes': chunk_bytes} if frame_call is not None else {}
+                for _ in services.store.read(record.payload_ref, max_bytes=services.bounds.max_row_bytes,
+                                              **options):
                     services.check_stop()
             if spec.routing == 'forward':
                 if len(consumers) != 1:
@@ -167,27 +202,40 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
         stream.close()
 
 
-def validate_finite_members(services, seal_ref, spec, *, target):
+def validate_finite_members(services, seal_ref, spec, *, target, frame_call=None):
     """Return bounded descriptors after every declared member was fully read."""
     entries = []
-    members = _scope(services, seal_ref, spec, target)
+    members = _scope(services, seal_ref, spec, target, frame_call=frame_call)
+    held_metadata = metadata_bytes((members, entries)) if frame_call is not None else 0
+    def call(function, *args, _frame_retained=0, **kwargs):
+        return frame_call(function, *args, _frame_retained=(
+            _frame_retained + held_metadata), **kwargs)
+    scoped_call = call if frame_call is not None else None
     if len(members) > services.bounds.max_partitions:
         raise DataflowError('BUDGET_EXCEEDED', 'finite producer membership exceeds max_partitions')
     for member in members:
         ref = ArtifactRef(**member['manifest_ref'])
         total_rows = member['last_sequence'] + 1
-        _, total_bytes = block_totals(services.store, ref, services.bounds)
+        _, total_bytes = block_totals(services.store, ref, services.bounds, frame_call=scoped_call)
         rows = size = 0
         for record in _records(services, ref, spec, target=target,
-                               total_rows=total_rows, total_bytes=total_bytes):
+                               total_rows=total_rows, total_bytes=total_bytes, frame_call=scoped_call):
             rows += 1
             size += record.encoded_bytes
+            del record  # Do not retain the previous decoded row into next().
         entry = {'schema':_SCHEMA, 'seal_ref':seal_ref, 'manifest_ref':ref,
             'edge_id':spec.edge_id,'producer':member['partition_id'],'target':target,
             'rows':rows,'bytes':size,'total_rows':total_rows,'total_bytes':total_bytes}
         entries.append(entry)
+        if frame_call is not None:
+            held_metadata = metadata_bytes((members, entries))
     # The original kernel image budget also bounds the proposed metadata.
     from .kernels import state_codec
+    if scoped_call is not None:
+        # This closed metadata tree adds list/dict/value tags, one pair list
+        # per field, and JSON text+bytes. Six times retained metadata plus 4KiB
+        # per entry bounds those wrappers before state_codec creates them.
+        scoped_call(admit_workspace, 6 * metadata_bytes(entries) + 4096 * len(entries), services.bounds)
     raw = state_codec.dumps(entries, max_bytes=services.bounds.max_state_bytes)
     # Proof/binding metadata is resident too. If it cannot coexist inside the
     # original state window, retain the original fully decoded Record path.

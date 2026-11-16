@@ -11,6 +11,7 @@ from ..contracts.dataflow_errors import DataflowError
 from ..dataflow_finite_input import validate_finite_members
 from ..dataflow_record_frames import (
     decode_document, decode_frame, frame_stream, line_limit, read_chunk_bytes,
+    admit_workspace, metadata_bytes,
 )
 from ..dataflow_segments import block_chunks
 from ..dataflow_sinks import _artifact_json
@@ -25,6 +26,19 @@ class FiniteInputDrain:
         self._active = None
         self._stream = None
         self._scanned = 0
+        self._index_bytes = 0
+
+    @property
+    def buffered_bytes(self):
+        return self._stream.buffered_bytes if self._stream is not None else 0
+
+    @property
+    def retained_bytes(self):
+        metadata = metadata_bytes((self._states, self._entries)) if self._states or self._entries else 0
+        return self.buffered_bytes + self._index_bytes + metadata
+
+    def _retain_index(self, size):
+        self._index_bytes = size
 
     def _edge(self, edge_id):
         runner = self.runner
@@ -46,7 +60,8 @@ class FiniteInputDrain:
             return
         # Authenticate every producer, route and record before ACK or invoking
         # business code. Reuse the existing bounded finite-reference validator.
-        entries = validate_finite_members(runner.services, seal_ref, spec, target=runner.partition)
+        entries = validate_finite_members(runner.services, seal_ref, spec, target=runner.partition,
+                                         frame_call=runner._frame_call)
         # Old frontiers have no partial read cursor: the old atomic consumer
         # either finished the entire producer or committed no consumption.
         positions = {entry['producer']: (entry['total_rows']
@@ -62,6 +77,10 @@ class FiniteInputDrain:
                         and positions[entry['producer']] != entry['total_rows']):
                     raise DataflowError('FENCED', 'completed finite input has an unfinished cursor')
         state = {'seal_ref': _artifact_json(seal_ref), 'positions': positions}
+        from ..dataflow_record_frames import _json_shape
+        size, workspace = _json_shape({**self._states, edge_id: state}, runner.bounds.max_state_bytes)
+        runner._frame_call(admit_workspace, workspace + 2 * size,
+                           runner.bounds, _frame_retained=metadata_bytes(entries))
         document({**self._states, edge_id: state}, runner.bounds.max_state_bytes)
         self._states[edge_id] = state
         self._entries[edge_id] = entries
@@ -119,8 +138,11 @@ class FiniteInputDrain:
                 self._active = key
                 self._stream = frame_stream(block_chunks(runner.services.store,
                     entry['manifest_ref'], runner.bounds,
-                    chunk_bytes=read_chunk_bytes(runner.bounds, runner.services)),
-                    runner.bounds, services=runner.services)
+                    chunk_bytes=read_chunk_bytes(runner.bounds, runner.services),
+                    frame_call=runner._frame_call, on_retained=self._retain_index),
+                    runner.bounds, services=runner.services,
+                    check_workspace=lambda size: runner._frame_call(admit_workspace, size,
+                        runner.bounds, _frame_reader_growth=True))
             line = self._stream.readline(line_limit(runner.bounds))
             if not line:
                 if self._scanned != entry['total_rows']:
@@ -129,8 +151,7 @@ class FiniteInputDrain:
                 runner._edge_eoi(*key)
                 processed += 1
                 continue
-            raw, item = runner._frame_call(decode_frame, line, runner.bounds, finite=True,
-                _frame_retained=self._stream.buffered_bytes)
+            raw, item = runner._frame_call(decode_frame, line, runner.bounds, finite=True)
             del line
             self._scanned += 1
             if self._scanned > entry['total_rows']:
@@ -138,15 +159,19 @@ class FiniteInputDrain:
             # Restart scans only the already committed prefix, without invoking
             # its consumer again. Even skipped/foreign-target frames consume a
             # step quantum; no replay scan blocks control for an entire input.
-            if self._scanned > position[entry['producer']]:
+            advancing = self._scanned > position[entry['producer']]
+            record = None
+            if advancing:
                 if item['target'] == runner.partition:
                     record = runner._frame_call(decode_document, raw,
-                        record_id=item['record_id'], sequence=item['sequence'], bounds=runner.bounds,
-                        _frame_retained=self._stream.buffered_bytes)
-                    runner._push(edge.consumer, edge.input_port, record)
-                    del record
-                position[entry['producer']] = self._scanned
+                        record_id=item['record_id'], sequence=item['sequence'], bounds=runner.bounds)
+            # No second serialized input copy survives into consumer encoding.
             del raw, item
+            if record is not None:
+                runner._push(edge.consumer, edge.input_port, record)
+                del record
+            if advancing:
+                position[entry['producer']] = self._scanned
             processed += 1
             if self._scanned == entry['total_rows']:
                 # Authenticate the original reader's EOF before recording EOI.
@@ -167,3 +192,4 @@ class FiniteInputDrain:
             self._stream.close()
         self._stream = self._active = None
         self._scanned = 0
+        self._index_bytes = 0

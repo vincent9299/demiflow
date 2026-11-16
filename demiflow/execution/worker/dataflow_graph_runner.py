@@ -779,7 +779,7 @@ class WorkerGraphRunner:
                               delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]),
                               route_sequence=route_sequence, validated_raw=raw)
 
-    def _frame_call(self, function, *args, _frame_retained=0, **kwargs):
+    def _frame_call(self, function, *args, _frame_retained=0, _frame_reader_growth=False, **kwargs):
         """Original peer ACKs release codec room; never add another grant."""
         deadline = time.monotonic() + self.bounds.timeout_ms / 1000
         while True:
@@ -789,7 +789,13 @@ class WorkerGraphRunner:
                 peer_bytes = self._peer._bytes
             kernel_bytes = sum(getattr(kernel, 'retained_resident_bytes', 0)
                                for kernel in self.e._kernels.values())
-            retained = peer_bytes + kernel_bytes + _frame_retained
+            reader = getattr(self, '_finite_input', None)
+            reader_bytes = reader.retained_bytes if reader is not None else 0
+            if _frame_reader_growth and reader is not None:
+                # _ReplayLines' proposed peak already includes its old buffer,
+                # new storage, held chunk and extracted line. Count it once.
+                reader_bytes -= reader.buffered_bytes
+            retained = peer_bytes + kernel_bytes + reader_bytes + _frame_retained
             try:
                 return function(*args, services=self.services, retained=retained, **kwargs)
             except DataflowError as exc:
@@ -1203,20 +1209,15 @@ class WorkerGraphRunner:
         return ArtifactRef(**part['data_ref']), part['rows']
 
     def _receive_finite(self, command):
-        from ..dataflow_handles import _ChunkStream
         spec = self._exchange[command['edge_id']]
         ref = ArtifactRef(**command['seal_ref'])
-        seal = json.loads(b''.join(self.services.store.read(ref, max_bytes=self.bounds.max_control_bytes)))
-        if (spec.mode != 'finite_sealed' or seal['scope_id'] != spec.scope_id
-                or set(seal['membership']) != set(spec.producer_partitions)
-                or seal['status'] != 'success' or seal['generation'] != spec.route_epoch):
-            raise DataflowError('FENCED', 'finite scope seal differs from physical membership')
         edge = next(e for e in self.e._graph.edges if e.edge_id == spec.edge_id)
         kernel = self.e._kernels.get((edge.consumer, self.partition))
         if kernel is not None and kernel.accepts_finite_reference(edge.input_port):
             from ..dataflow_finite_input import validate_finite_members
             # All members are authenticated before mutating the kernel port.
-            entries = validate_finite_members(self.services, ref, spec, target=self.partition)
+            entries = validate_finite_members(self.services, ref, spec, target=self.partition,
+                                             frame_call=self._frame_call)
             for entry in entries:
                 if (spec.edge_id, entry['producer']) in self._finished_inputs:
                     continue

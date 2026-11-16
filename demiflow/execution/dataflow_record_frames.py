@@ -156,6 +156,50 @@ def _admit(peak, maximum):
             context={'codec_workspace_bytes': peak, 'resident_limit_bytes': maximum})
 
 
+def admit_workspace(size, bounds, *, services=None, retained=0):
+    """Check a caller-owned reader/metadata peak against the original grant."""
+    _admit(size + retained, resident_limit(bounds, services))
+
+
+def metadata_bytes(value):
+    """Retained size of platform-owned finite/index metadata, without copying.
+
+    This deliberately does not measure business objects or invoke their hooks.
+    References alias immutable strings, so identity de-duplicates those leaves.
+    """
+    from .contracts.dataflow import ArtifactRef
+    seen = set()
+    def visit(item):
+        key = id(item)
+        if key in seen:
+            return 0
+        seen.add(key)
+        if len(seen) > 262144:
+            _fail('finite metadata exceeds its bounded node count')
+        if type(item) is ArtifactRef:
+            return sys.getsizeof(item) + visit(vars(item))
+        if isinstance(item, dict):
+            size = dict.__sizeof__(item) + 64
+            size += sum(visit(k) + visit(v) for k, v in item.items())
+            # A validation capability only adds its tuples. Referenced service,
+            # assignment and bounds are pre-existing owners, not copied state.
+            proof = getattr(item, '_proof', None)
+            if proof is not None:
+                size += tuple.__sizeof__(proof) + tuple.__sizeof__(proof[-1]) + 64
+            return size
+        if type(item) in (tuple, list, frozenset):
+            return sys.getsizeof(item) + sum(visit(child) for child in item)
+        if type(item) in (str, bytes, int, float, bool, type(None)):
+            return sys.getsizeof(item)
+        raise DataflowError('INVALID_CONTRACT', 'finite metadata must contain only closed platform data')
+    return visit(value)
+
+
+def decode_metadata(raw, bounds, *, services=None, retained=0):
+    _admit(retained + raw_workspace(raw, typed=False), resident_limit(bounds, services))
+    return json.loads(raw)
+
+
 def encode_document(record, bounds, *, services=None, payload_limit=None, retained=0):
     from .exchange.dataflow_bridge import _encode_record_document, _ref_document, _validate_record
     maximum = bounds.max_row_bytes if payload_limit is None else min(bounds.max_row_bytes, payload_limit)
@@ -331,10 +375,11 @@ def read_document(ref, store, bounds, *, services=None, retained=0, _maximum=Non
         if close is not None: close()
 
 
-def frame_stream(chunks, bounds, *, services=None):
+def frame_stream(chunks, bounds, *, services=None, check_workspace=None):
     from .dataflow_replay import _ReplayLines
     return _ReplayLines(chunks, chunk_bytes=read_chunk_bytes(bounds, services),
-        check=lambda size: _admit(size, resident_limit(bounds, services)))
+        check=(check_workspace if check_workspace is not None
+               else lambda size: _admit(size, resident_limit(bounds, services))))
 
 
 def admit_document(raw, bounds, *, services=None, retained=0):

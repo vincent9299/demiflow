@@ -1,11 +1,13 @@
 """Real finite artifacts advance cooperatively through the original frontier."""
 from copy import deepcopy
 from types import SimpleNamespace as NS
+import threading
 
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.worker.finite_input import FiniteInputDrain
+from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from test_runtime_v3_artifact_accounting import store_fixture
 from test_runtime_v3_finite_borrow import fixture, make_seal
 
@@ -14,14 +16,15 @@ def reader(services, spec):
     rows = []
     edge = NS(edge_id=spec.edge_id, consumer='terminal', input_port='input')
     runner = NS(services=services, bounds=services.bounds, partition='c0',
-        _exchange={spec.edge_id: spec}, e=NS(_graph=NS(edges=(edge,)), _node_specs={'terminal': None}),
+        _exchange={spec.edge_id: spec}, e=NS(_graph=NS(edges=(edge,)), _node_specs={'terminal': None}, _kernels={}),
         _finished_inputs=set(), _finished=set(), _closed_inputs=set(), _paused=False, _cut=None,
-        _park_requested=False, _park_mode=False, _park_finish_pending=False)
+        _park_requested=False, _park_mode=False, _park_finish_pending=False,
+        _condition=threading.Condition(), _wake_generation=0, _peer=NS(_bytes=0))
     runner._edge_eoi = lambda edge, producer: runner._finished_inputs.add((edge, producer))
-    runner._frame_call = lambda fn, *a, _frame_retained=0, **kw: fn(
-        *a, **kw, services=services, retained=_frame_retained)
+    runner._frame_call = WorkerGraphRunner._frame_call.__get__(runner)
     runner._push = lambda occurrence, port, record: rows.append(dict(record.inline))
-    return FiniteInputDrain(runner), runner, rows
+    runner._finite_input = FiniteInputDrain(runner)
+    return runner._finite_input, runner, rows
 
 
 @pytest.mark.parametrize('routing', ['forward', 'rebalance', 'broadcast', 'hash', 'target'])
