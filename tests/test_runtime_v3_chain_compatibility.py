@@ -38,6 +38,15 @@ def _observe(monkeypatch):
     return observed
 
 
+@contextmanager
+def _cleanup_under_owner(observed):
+    try:
+        yield
+    finally:
+        for _, _, _, handle in observed:
+            handle.close()
+
+
 def test_chain_returns_repeatable_materialization_and_closes_its_runtime(tmp_path, monkeypatch):
     observed = _observe(monkeypatch)
     result = None
@@ -45,7 +54,7 @@ def test_chain_returns_repeatable_materialization_and_closes_its_runtime(tmp_pat
         with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 32 * 2**20,
                 'max_row_bytes': 4096, 'max_batch_bytes': 16384}) as run, _entry(tmp_path) as (api, executor, entry):
             ds = api.from_items([{'id': 1}, {'id': 2}]).map(lambda row: {'id': row['id'] + 1})
-            with run.action(plan_identity('materialize', ds._source, ds._plan)) as action:
+            with run.action(plan_identity('materialize', ds._source, ds._plan)) as action, _cleanup_under_owner(observed):
                 result = entry(executor, ds)
                 assert isinstance(result, StoredMaterializedHandle)
                 assert result.row_count == 2
@@ -62,8 +71,6 @@ def test_chain_returns_repeatable_materialization_and_closes_its_runtime(tmp_pat
     finally:
         # Red-baseline cleanup is explicit; it cannot make the earlier lifecycle
         # assertion pass. Never leave an old leaking wrapper's worker behind.
-        for _, _, _, handle in observed:
-            handle.close()
         if isinstance(result, StoredMaterializedHandle):
             result.release()
 
@@ -77,12 +84,10 @@ def test_chain_keeps_the_original_row_ceiling(tmp_path, monkeypatch):
             with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 32 * 2**20,
                     'max_row_bytes': 128, 'max_batch_bytes': 2048}) as run, _entry(tmp_path) as (api, executor, entry):
                 ds = api.from_items([{'payload': 'x' * 4096}])
-                with run.action(plan_identity('materialize', ds._source, ds._plan)) as action:
+                with run.action(plan_identity('materialize', ds._source, ds._plan)) as action, _cleanup_under_owner(observed):
                     result = entry(executor, ds)
                     action.complete({'kind': 'unexpected-unbounded-success'})
         assert not run.journal.execution_commits('action-1')
     finally:
-        for _, _, _, handle in observed:
-            handle.close()
         if isinstance(result, StoredMaterializedHandle):
             result.release()
