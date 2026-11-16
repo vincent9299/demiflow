@@ -4,7 +4,13 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
-当前生产集成已到 `6e1020c`（Ray mailbox候选）；本页各项保留实际验收版本。这不是“全部完成”的版本：性能和部分正式验收门仍在收口，未推送或合入主仓。
+当前生产已集成真实 peer 批读、Ray mailbox、持久展开窗口及受管对象 Embedding，另集成 `76cf6ee` 的纯标量 thaw 优化；本页各项保留实际验收版本。这不是“全部完成”的版本：性能和部分正式验收门仍在收口，未推送或合入主仓。
+
+- **最新真实 Ray 组合**：固定 `d06e993`，7 passed / 85.01 秒，0 skipped。512 条终端 ACK 的原 RPC 批量、提前 close/最终结果重读/边界、receipt 后 ACK 前真实 SIGKILL、driver 重启与旧 worker FENCED 均通过；1821 项输入前后不变，私有集群退出。原证据 `/tmp/demiflow-ray-combined-peer-r1-evidence/verification.json`。此项关闭下文 mailbox/peer 的待真实 Ray 验收状态，不替代之后新代码的全部矩阵。
+- **持久展开窗口**：`763b973` 将已停车的持久交接容量与尚未运行的消费者内存队列分开。原 credit bytes/总 pending/磁盘/ACK 权威不增额；两源各展开两行→队列在 1 worker 下的正常和原 ACK 恢复及原持久断点 7 项通过。原超过全局窗口的 65 路扩增仍被拒绝，12 项 peer/终端预算组合通过。
+- **产品与历史正式门**：已集成 [NATIVE-PRODUCT-GATES.md](NATIVE-PRODUCT-GATES.md)。历史原身份/载体门和真实 Notebook/SQL/Case/开发会话产品门分别在其固定版本通过；总控逐组核2126项源码摘要与Git提交全等。工作台独立停止/恢复日志导航已修，GPU正向仍在接通，未把部分结果拼成全门绿。
+- **受管图片/文档 Embedding**：`94dac3e` 真正 prepare/start→对象校验→模型 HTTP→原 ACK/固定 Lance/执行计划桥 4 项通过，含封存后改对象失败且零 HTTP；原绑定、路径和旧默认身份 13 项通过，见 [MANAGED-EMBEDDING-OBJECTS.md](MANAGED-EMBEDDING-OBJECTS.md)。关闭下文“尚未开放”的旧状态，不能代替产品全域完成。
+- **性能最新事实**：原 40k×8KiB 每侧宽行 iter_rows 在同一 120 秒预算下完整通过 113.74 秒；窄链26.98秒，仍为旧1.872秒的14.4倍。均单次诊断，完整五轮矩阵未完成。后续严格内置标量 thaw 126项过，但微基准改善不冒称整链同比，见 [FAST-CPU-REMAINING-COST.md](FAST-CPU-REMAINING-COST.md)。
 
 - **Dataset → 原提交 → 恢复**：函数状态修复、borrowed thread 状态预算修复均已集成。原慢消费者不改预算通过；40 项状态/原回归通过，见 [BORROWED-THREAD-STATE-CLOSURE.md](BORROWED-THREAD-STATE-CLOSURE.md)。新增纯辅助函数的不可变默认参数不再把队列生产误标为 attempt-only；可变默认值/闭包仍拒绝假恢复。
 - **真实 Ray**：总控在 `fdffa2e` 跑真实 1/4 CPU 函数状态与原 ACK 恢复，以及 Ray 公开 workers/native_resources，**13 passed / 0 skipped / 209.17秒**。此前 `9d3481f` 的98 API/168例矩阵与原GPU绑定合组6 passed；最后无RayData单项因夹具没有集群而红，同HEAD独立私有集群补跑1 passed，红回执保留。

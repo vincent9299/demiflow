@@ -1,8 +1,9 @@
 # Native embedding nodes
 
-`Dataset.map_embeddings` turns text or verified image objects into vectors through
-an OpenAI-compatible `/v1/embeddings` endpoint. It uses the existing local stream
-workers, bounded queues, action lifecycle and SQLite HTTP request journal. Install
+`Dataset.map_embeddings` turns text, verified image objects or document spans into
+vectors through an OpenAI-compatible `/v1/embeddings` endpoint. The unified Dataset
+engine runs it on Local or Ray Core using the original bounded native model
+workers, action lifecycle and request journal. Install
 `demiflow[embeddings]`; model servers and their weights are separate dependencies.
 The platform contains no selected model, business paths or publication policy.
 
@@ -37,6 +38,41 @@ for the lifetime of that action, as required by the ObjectRef content contract.
 
 ## Declaration and execution
 
+For a managed workbench Flow, bind the `embeddings` platform extra and use the
+native run journal; a separate `sqlite_journal` or service object is not admitted.
+Image/document inputs additionally require an explicit `options.object_read`:
+
+```python
+options = {
+    'object_read': {'root': object_root, 'relocations': [], 'layout': 'path'},
+    'max_image_bytes': 4 * 1024**2,
+    'max_decode_pixels': 4_000_000,
+    'max_document_bytes': 4 * 1024**2,
+    'max_document_text_bytes': 256 * 1024,
+    'document_cache_bytes': 16 * 1024**2,
+}
+```
+
+`object_root` must be the exact absolute root of one registered workspace data
+location. A v2 `kind: location` parameter can supply it. Inspection seals the
+original location binding and checked execution compares the actual options.
+Object reads reuse the original local reader: regular files below the declared
+root, no symlinks, byte limits checked before allocation, and matching SHA256.
+Explicit nonoverlapping `relocations` map old URI prefixes into that root;
+`sha256_prefix2` is also supported. Remote URLs, undeclared roots and arbitrary
+fallback locations are rejected. Each alternate image reference obeys the same
+binding; document spans retain their original text hash and offset checks.
+
+The managed resource estimate includes preparation workers, image decoding or
+document parsing, cache and request/response copies. It is an admission estimate;
+the existing process RSS protection remains separate. Choose declared limits that
+fit the execution budget; neither the Flow nor this option grants more capacity.
+Image models require `input_format='chat'`. Missing bindings or required platform
+dependencies fail at preparation; changed object bytes fail before model HTTP or
+result publication. Omitting `object_read` preserves the existing native API and
+historical option identities, but does not authorize a managed image/document
+Flow to read arbitrary URIs.
+
 ```python
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
@@ -51,14 +87,14 @@ model = EmbeddingModel(
 encoded = (
     data.from_items([{'id': 'query-1', 'query': 'a wooden table near a window'}])
     .map_embeddings(model=model, inputs={'text': 'query'}, output='embedding',
-        batch_size=8, concurrency=4, queue_depth=8,
+        batch_size=8, concurrency=4, queue_depth=8, max_requests=100,
         call_output='embedding_call', error_output='embedding_error',
-        options={'io_workers': 2, 'sqlite_journal': {'path': 'calls.sqlite'}})
+        options={'io_workers': 2})
     .materialize()
 )
 ```
 
-`inputs` maps exactly one modality (`text` or `image`) to a column. Text must be
+`inputs` maps exactly one modality (`text`, `image` or `document`) to a column. Text must be
 a nonempty string. An image is an `ObjectRef` or `{uri, sha256}`; a list means
 alternate locations **for the same SHA**, tried in order. It does not mean a
 multi-image composition. Images are SHA-verified and fully decoded locally.

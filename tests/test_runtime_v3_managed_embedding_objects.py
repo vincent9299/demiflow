@@ -213,7 +213,7 @@ def test_workbench_prepare_start_uses_registered_objects_and_sealed_native_plan(
         assert not server['bodies'] and not Path(prepared['outputs'][0]['uri']).exists()
         from demiflow.execution.run_journal import RunJournal
         journal = RunJournal(runs.directory(root, result['run_id']))
-        assert not any(c['status'] == 'acked' for action in report['actions']
+        assert not any(c['status'] == 'acked' for action in prepared['report']['actions']
                        for c in journal.execution_commits(action))
     else:
         assert result['status'] == 'succeeded', (result, runs.logs(root, result['run_id']))
