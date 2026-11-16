@@ -225,14 +225,36 @@ class ActionObserver:
             return True
 
 
+@contextmanager
+def _closing_observed(iterator):
+    """Close the owned execution iterator before reporting action completion."""
+    failure = None
+    try:
+        yield iterator
+    except BaseException as exc:
+        failure = exc
+        raise
+    finally:
+        close = getattr(iterator, 'close', None)
+        if close is not None:
+            try:
+                close()
+            except BaseException as cleanup:
+                if failure is not None and not isinstance(failure, GeneratorExit):
+                    failure.add_note('Observed iterator cleanup also failed: ' + str(cleanup))
+                else:
+                    raise
+
+
 def observe_rows(action: str, rows: Iterable[Any], source: Any, plan: Any, executor: Any) -> Iterator[Any]:
     observer = ActionObserver(action, source, plan, executor)
     observer.start()
     token = _CURRENT_ACTION.set(observer)
     try:
-        for row in rows:
-            observer.progress(rows=1)
-            yield row
+        with _closing_observed(iter(rows)) as iterator:
+            for row in iterator:
+                observer.progress(rows=1)
+                yield row
     except GeneratorExit:
         observer.complete(early_stopped=True)
         raise
@@ -257,10 +279,11 @@ def observe_batches(action: str, batches: Iterable[Any], source: Any, plan: Any,
     observer.start()
     token = _CURRENT_ACTION.set(observer)
     try:
-        for batch in batches:
-            size = _batch_size(batch)
-            observer.progress(rows=size, batches=1)
-            yield batch
+        with _closing_observed(iter(batches)) as iterator:
+            for batch in iterator:
+                size = _batch_size(batch)
+                observer.progress(rows=size, batches=1)
+                yield batch
     except GeneratorExit:
         observer.complete(early_stopped=True)
         raise
