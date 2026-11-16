@@ -1,6 +1,6 @@
 # Ready peer data reads: bounded candidate, functional evidence
 
-Production commits `d9ad440` + `dce26e3`, isolated residency branch. Parent owns RayHostEndpoint asynchronous mailbox and terminal batch selection integration. This candidate does **not** claim performance or full real-host recovery completion; fixed real Local/Ray and same-budget fast/wide workloads remain required after integration.
+Production commits `d9ad440` + `dce26e3`, isolated residency branch. Parent owns RayHostEndpoint asynchronous mailbox and terminal batch selection integration. This candidate does **not** claim performance or full real-host recovery completion. Actual Local diagnostics are recorded in the follow-up below; integrated Ray/recovery and formal paired performance remain pending.
 
 ## Original execution and authority
 
@@ -24,4 +24,20 @@ Fixed d9ad440: **39 passed in 40.40 s**, original B20 plus new ready-peer14 and 
 
 New tests use real sockets, original RunArtifactStore file slots, and the original native compiler/store/channel/kernel/worker authorities (only their existing in-process network-boundary fixture). They establish four records over one connection with four original step calls and four ordered ACKs; second-frame digest/sequence/business failure preserves only the first success; cut boundary and a slow first callback stop without dequeueing the suffix; low FD and historical/invalid capability use single reads; one blocked 4 MiB sender does not block another reader; ACK cannot free its borrowed bytes; full connection-window shutdown releases the original grant and terminates all I/O threads.
 
-These are substantive component tests, not actual two-host or GPU claims. Real integrated Local/Ray, nonfinal cut/recovery and actual performance are pending. The preceding control-only two-host fast trial failed its original 120 s budget and remains red; this candidate must be judged using unchanged workloads, worker/memory limits and timeouts, not microbenchmarks. No main checkout or shared environment was changed.
+These are substantive component tests, not actual two-host or GPU claims. At this component-proof revision, real integrated Local/Ray, nonfinal cut/recovery and actual performance were pending; the subsequent Local diagnostics are recorded below. The preceding control-only two-host fast trial failed its original 120 s budget and remains red; this candidate must be judged using unchanged workloads, worker/memory limits and timeouts, not microbenchmarks. No main checkout or shared environment was changed.
+
+
+## Follow-up: exact raw lifetime and actual Local diagnostics
+
+`cf974fe` removes the yielded raw frame from the suspended generator entirely (`yield _read_peer_frame(...)`), retaining original per-frame length/SHA validation. Thus the previous raw cannot survive across the next native kernel poll. `fcde31d` validates the actual received object's unique consumer ownership (`sys.getrefcount == 2` including the counting call). First probe r6 was **18 passed / 1 failed** because enumerate caches its `(index, raw)` tuple and adds a consumer-side reference. The test now uses direct next and explicitly checks final StopIteration/socket closure; the ownership assertion is unchanged. Fixed r7: **19 passed in 17.58 s**, source-bound and clean. The failed evidence is retained. Earlier actual Local process early-close/second-read-error plus original terminal-close tests: **6 passed in 15.69 s**, source-bound a538eb3.
+
+Fixed combined candidate **266aa548db029d8a2af6b1017b4a38872a6b5545** adds parent's asynchronous Ray mailbox (`6e1020c`), terminal capability/authority checks (`dc3572c`), canonical document/ASCII improvements (`1e9fb87`, `218c3b5`), and native/Prompt lazy imports (`fdffa2e`, `92d9474`) to this peer candidate. Parent/regression/performance lanes released their heavy-test windows before these diagnostic runs; the shared machine and unrelated workloads were not controlled.
+
+| Original Local workload, four workers, 256 MiB, 120 s | Elapsed | First row | Output / original final ACK |
+|---|---:|---:|---|
+| fast_cpu, 20,000 inputs | 26.982835 s | 4.076723 s | 10,000 correct rows, 50 total ACKs including final |
+| finite_sealed p1, 40,000 regular 8 KiB rows each side plus original null/duplicate rows | 113.739444 s | 63.669495 s | 40,002 correct rows, 152 total ACKs including final |
+
+Both trials passed unchanged independent value/multiplicity digests, native resource inventory and physical cleanup checks: original pool `active=[]`, `charged={}`, observed descendants empty before/after driver exit, return code 0, no observation errors, source before/after equal and clean. Full exact configuration, original journals, snapshots and sampler output remain under `/tmp/demiflow-perf-ready-peer-local-r1`; trial hashes are in the companion JSON. The sampler observes the entire owned process tree, not a hard RSS guarantee. Measured peak RSS was 297,717,760 bytes (fast) and 264,966,144 bytes (wide); worker row/state budgets do not claim an equal whole-process-tree RSS cap.
+
+These are **one diagnostic per workload**, not the five paired formal repetitions. Narrow-chain time remains about 14.4 times the earlier historical 1.872 s reference. Wide completion has only about six seconds of timeout margin. No same-version Ray/two-host performance claim follows from these Local passes. The performance intent is still open. This lane released the timing window immediately afterward; parent owns integrated actual Ray/recovery acceptance before another performance decision.

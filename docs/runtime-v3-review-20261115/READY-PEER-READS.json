@@ -1,12 +1,52 @@
 {
   "production_commits": [
     "d9ad440",
-    "dce26e3"
+    "dce26e3",
+    "cf974fe"
   ],
   "evidence": {
     "/tmp/demiflow-ready-peer-bound-r3-evidence/verification.json": "e752eaeee6b8b0f1e10f446c8e1d2be0f63378dc168b143965b189db6cfe1ba3",
-    "/tmp/demiflow-ready-peer-hint-r4-evidence/verification.json": "18636b1e3dcaacfe300dc4d78f638a8393e210e72d9ea9ca60a81bc1efd1bca3"
+    "/tmp/demiflow-ready-peer-hint-r4-evidence/verification.json": "18636b1e3dcaacfe300dc4d78f638a8393e210e72d9ea9ca60a81bc1efd1bca3",
+    "/tmp/demiflow-ready-peer-local-r5-evidence/verification.json": "84d1246497ca34f00acd52a9afa5dcc7f583d474bcab996d5f429b534ff44138",
+    "/tmp/demiflow-ready-peer-lifetime-r6-evidence/verification.json": "dd1950870740562074872572d245a270f6770c6ee53e6ec0df097f3f0f58df92",
+    "/tmp/demiflow-ready-peer-lifetime-r7-evidence/verification.json": "73be9dfc074093b37c26bd5f3d167f144216f1a3bbd9e2752bcca7f32b2701cc"
   },
-  "actual_performance": "not_run_for_this_candidate",
-  "real_host_recovery": "pending_integrated_validation"
+  "actual_performance": "single original-budget Local diagnostics completed; no formal paired/multihost acceptance",
+  "real_host_recovery": "pending_integrated_validation",
+  "test_correction_commits": [
+    "fcde31d"
+  ],
+  "performance_head": "266aa548db029d8a2af6b1017b4a38872a6b5545",
+  "performance_trials": {
+    "fast_cpu": {
+      "path": "/tmp/demiflow-perf-ready-peer-local-r1/fast_cpu/trial.json",
+      "sha256": "bdcca5eea4a5b91711a75084319a681e5dbf88f7424b1ea2f48b9a6712ecfb87",
+      "status": "passed",
+      "elapsed_s": 26.982835172,
+      "first_result_s": 4.076722952,
+      "output": {
+        "rows": 10000,
+        "sum256": "4e99a2879fb5861c2810a125b1c4d4c6134685f6902befd87e4778caa6adb467",
+        "xor256": "c6d09889d3d7d400ccc1dc8fb610ef38289eab61e45f523bea8ca3666a91cded"
+      },
+      "failures": [],
+      "source_unchanged": true,
+      "remaining_observed_descendants_after_driver_exit": []
+    },
+    "finite_sealed": {
+      "path": "/tmp/demiflow-perf-ready-peer-local-r1/finite_sealed/trial.json",
+      "sha256": "10fd8e4b4d572c3949fc3743412bc1da0d91d57703a656f7eb674dbf7eb86e03",
+      "status": "passed",
+      "elapsed_s": 113.739444031,
+      "first_result_s": 63.669494728,
+      "output": {
+        "rows": 40002,
+        "sum256": "568977d91f8ddd54c5f4053d0cc2f1954a7490fc15f68fd4203c21e05175d614",
+        "xor256": "f5f9d43b6c36ab65b8f1aeca85b3ce3b5c099adde6b566f5cfe0b2d8fad3a394"
+      },
+      "failures": [],
+      "source_unchanged": true,
+      "remaining_observed_descendants_after_driver_exit": []
+    }
+  }
 }
