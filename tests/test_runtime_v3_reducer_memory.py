@@ -213,3 +213,58 @@ def test_numpy_view_charges_its_unique_owner_before_serialization(monkeypatch):
     from_buffer=np.frombuffer(buffer,dtype=np.uint8,count=1)
     retained=reducer_memory.measure_tree(from_buffer,max_bytes=128*1024,max_nodes=100).retained
     assert retained==sys.getsizeof(from_buffer)+sys.getsizeof(from_buffer.base)+sys.getsizeof(buffer)
+
+
+def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_seal(tmp_path,monkeypatch):
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.contracts.dataflow import LoadedProgram
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json
+    from demiflow.execution.kernels import relational
+    from demiflow.resources.contracts import ResourceProfile
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_c import bounds,make
+    from test_runtime_v3_finite_borrow import record
+    budget=bounds(max_row_bytes=4096,max_batch_bytes=4096,max_state_bytes=65536,max_resident_bytes=1024*1024)
+    initial={'pad':[0]*4096,'n':0}
+    for grant in (65536,512*1024):
+        calls=[];copies=[];encodes=[];reads=[]
+        def reducer(state,row):
+            calls.append(row['k'])
+            return {'k':row['k'],'n':state['n']+1}
+        spec=make('KernelSpec',kind='reduce',configuration={'on':['k'],'occurrence_id':'legacy-reduce',
+            'reducer_program':'reduce'})
+        stage=make('StageSpec',stage_id='original-legacy-stage',resident_bytes=grant,
+            profile=ResourceProfile(requests={'cpu_millis':1000,'memory_bytes':grant}))
+        original_config=json.dumps(_thaw_json(spec.configuration),sort_keys=True)
+        initial_program=CallableSpec.create(reducer,fn_args=(initial,))
+        with store_fixture(tmp_path/str(grant)) as (_,store,_):
+            svc=SimpleNamespace(bounds=budget,store=store,assignment=SimpleNamespace(stages=(stage,)),
+                programs={'reduce':LoadedProgram('callable',initial_program,'0'*64)},check_stop=lambda:None)
+            original_copy=relational.copy.deepcopy
+            original_pickle=reducer_memory.pickle.Pickler
+            def copy(*args,**kwargs):
+                copies.append(True)
+                return original_copy(*args,**kwargs)
+            def pickle(*args,**kwargs):
+                encodes.append(True)
+                return original_pickle(*args,**kwargs)
+            def records():
+                for i in range(2):
+                    reads.append(i)
+                    yield record({'k':1,'i':i},i)
+            with monkeypatch.context() as patch:
+                patch.setattr(relational.copy,'deepcopy',copy)
+                patch.setattr(reducer_memory.pickle,'Pickler',pickle)
+                if grant==65536:
+                    with pytest.raises(DataflowError,match='known copies exceed'):
+                        list(relational.reduce_partition(records(),spec=spec,services=svc))
+                    assert reads==copies==calls==encodes==[]
+                else:
+                    actual=list(relational.reduce_partition(records(),spec=spec,services=svc))
+                    assert [dict(r.inline) for r in actual]==[{'k':1,'n':2}]
+                    assert reads==[0,1] and calls==[1,1] and len(copies)==1 and len(encodes)==2
+            assert json.dumps(_thaw_json(spec.configuration),sort_keys=True)==original_config
+            assert reducer_memory.FIELD not in spec.configuration
+            assert svc.assignment.stages==(stage,) and stage.stage_id=='original-legacy-stage'
+            assert stage.resident_bytes==stage.profile.requests['memory_bytes']==grant
+    assert initial=={'pad':[0]*4096,'n':0}

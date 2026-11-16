@@ -101,6 +101,11 @@ def _describe(graph, members):
 def interpret_region(graph, stage):
     if not stage.stage_id.startswith(PREFIX):
         return None
+    from ..execution.kernels.reducer_memory import contract
+    if any(n.occurrence_id in stage.occurrences and n.kernel.kind == 'reduce'
+           and contract(n.kernel) is None for n in graph.nodes):
+        raise DataflowError('INCOMPATIBLE_HISTORY',
+            'sealed relational region predates its reducer resident declaration; cannot infer a new grant')
     plan = _describe(graph, stage.occurrences)
     if plan is None or plan.region_id != stage.stage_id or len(stage.partitions) != 1:
         raise DataflowError('INCOMPATIBLE_HISTORY', 'sealed relational region differs from original graph')

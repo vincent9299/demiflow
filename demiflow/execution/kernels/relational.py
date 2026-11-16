@@ -122,7 +122,7 @@ def _group_sort_spec(spec: KernelSpec, on: tuple[str, ...]) -> KernelSpec:
 
 
 def _ordered_group_rows(
-    records: Iterator[Record], on: tuple[str, ...], spec: KernelSpec, services: RuntimeServices
+    records: Iterator[Record], on: tuple[str, ...], spec: KernelSpec, services: RuntimeServices, *, memory=None
 ) -> Iterator[tuple[str, dict[str, Any], Record]]:
     sort_spec = _group_sort_spec(spec, on)
     def keyed_records():
@@ -130,7 +130,7 @@ def _ordered_group_rows(
             _group_key(_materialize_row(record, services), on)
             yield record
     from .reducer_memory import contract, sort_window
-    window = sort_window(services.bounds,key_only=False) if contract(spec) is not None else None
+    window = sort_window(services.bounds,key_only=False) if memory is not None or contract(spec) is not None else None
     runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services,window=window)
     for record in merge_sort_runs(runs, spec=sort_spec, services=services,window=window):
         row = _materialize_row(record, services)
@@ -150,17 +150,27 @@ def reduce_partition(
 ) -> Iterator[Record]:
     """K006: external grouping, provenance-order fold, no associativity assumed."""
     on = tuple(_cfg(spec, "on"))
-    yield from reduce_ordered_groups(_ordered_group_rows(records, on, spec, services),
+    memory = admit_reducer(spec,services)
+    yield from reduce_ordered_groups(_ordered_group_rows(records, on, spec, services,memory=memory),
                                      spec=spec, services=services, retain=retain)
 
 
 def admit_reducer(spec, services, *, join_depth=None):
-    from .reducer_memory import contract, check_initial, check_grant
+    from .reducer_memory import contract, declare, check_initial, check_grant
     from ...data.plan import CallableSpec
     memory = contract(spec)
-    if memory is not None:
+    if memory is not None or getattr(services.assignment,'stages',()):
         program = _program(services,_cfg(spec,'reducer_program'),'callable')
-        initial = program.call_args[0] if isinstance(program,CallableSpec) else spec.configuration.get('initial')
+        if isinstance(program,CallableSpec):
+            initial = program.call_args[0]
+        else:
+            ref=spec.configuration.get('initial_program')
+            initial=_program(services,ref,'callable') if ref is not None else spec.configuration.get('initial')
+        if memory is None:
+            # Legacy sealed plans keep their original identity and grant. The
+            # transient measurement can only prove that grant sufficient or
+            # reject before input/copy/callback/pickle; it never edits the seal.
+            memory=declare(initial,services.bounds)
         check_grant(memory,services.bounds,services.assignment,join_depth=join_depth)
         check_initial(initial,memory)
     return memory
