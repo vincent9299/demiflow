@@ -53,7 +53,7 @@
 - `tests/test_runtime_v3_producer_execution.py::test_same_run_producer_recovers_zero_and_many_outputs[postgresql-dataset_cut]`
 - `tests/test_runtime_v3_producer_execution.py::test_same_run_producer_recovers_zero_and_many_outputs[postgresql-native_unit]`
 
-前五条中四条仍写退休 `checkpoint/map_cached`，cleanup 仍观察旧 `local_relational.tempfile`。root 已指定下一隔离任务保留原 selector 和业务能力，将它们迁到真实 Dataset v3/原 RunContext/ACK；不能改成只验证“退休接口报错”。Document 及 unknown-paid embedding 由 root 最终组合复验；正式 V027 的真实场景可作后者历史语义证据，但不伪称这个独立 selector 已通过。两条 PostgreSQL 仍是环境缺口。
+前五条中四条仍使用退休 `checkpoint/checkpoint_async` 终端；`map_cached` 本身仍受支持，必须保留缓存能力，cleanup 仍观察旧 `local_relational.tempfile`。root 已指定下一隔离任务保留原 selector 和业务能力，将它们迁到真实 Dataset v3/原 RunContext/ACK；不能改成只验证“退休接口报错”。Document 及 unknown-paid embedding 由 root 最终组合复验；正式 V027 的真实场景可作后者历史语义证据，但不伪称这个独立 selector 已通过。两条 PostgreSQL 仍是环境缺口。
 
 初扫看起来有 18 个非绿节点。源码复核后，另外 9 个来自 F5/Arrow/legacy-stream/L017/A005 的旧参数展开；当前新 ID 已有记录，不列成新增缺陷。机器清单仍保留这些旧 ID 供最终 collection/等价映射复核，没有删除原红证据。
 
@@ -77,7 +77,7 @@ Chromium 的多个旧 fixture 有固定安装路径，其它依赖 `FORGE_CHROMI
 2. **只在冻结候选重新完整 collection。** 用原 inventory 脚本覆盖默认环境及真实 Ray 等必需补充环境；逐文件对齐 818 文件和原 577 文件基线，解析导入跳过、重复节点、382 个旧参数 ID。collection 不计通过。
 3. **先跑上述九项与实际受影响的 Dataset/模型/队列/提交恢复/Local-Ray/工作台组合。** 若出现生产失败，修复后重定冻结版本，避免先耗费外围批次。
 4. **在同一冻结输入字典上执行已审批次。** JSON 37 批只是目前真实漏证据的优先队列。原 V035 是全仓门，要真正绿色还必须覆盖全部最终 collected leaf；历史 6,000 余节点不能被转记为当前通过。已经在同一冻结字典取得的回执可直接归并，不重复执行。
-5. **正式 I08/真实硬件门保持原方法。** 性能独占窗口，原数据规模、预算、40 ACK、同文件系统五轮；不能用本次历史对账或单次宽行通过代替。无 PG/离线包/指定环境时明确环境未验，完整交付结论保留这一边界。
+5. **正式 I08/真实硬件门保持原方法。** 性能独占窗口，原数据规模、预算、checkpoint 策略与实际逐 cut 计数、同文件系统五轮（40 ACK 是旧 screen 的观测值，不是计划固定阈值）；不能用本次历史对账或单次宽行通过代替。无 PG/离线包/指定环境时明确环境未验，完整交付结论保留这一边界。
 6. **最后执行原 evaluate 与 V035 外层裁决。** 每个 leaf 恰有一次完整 setup/call/teardown，重复/重试/xfail/隐式 deselect/来源不符均不接受；V035 自身仅作 meta，不能递归运行自身。失败开发回执保留，但不得混入最终候选集合覆盖后来的结果。
 
 不改 gate、不改旧回执、不生成假参数节点、不用测试文件没变化推导生产依赖没变化。节约时间的正确方式是冻结后一次执行、充分复用同输入回执；本次历史归并帮助把优先级放在真实缺口上。
