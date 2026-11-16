@@ -12,13 +12,14 @@ import threading
 from contextvars import copy_context
 import time
 from collections import deque
+from itertools import islice
 from dataclasses import asdict
 
 from ..contracts.dataflow import ArtifactRef, CutContribution, WorkerStep
 from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_record_document, _decode_record_document
 from ..exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
-from ..exchange.dataflow_transport import PeerBuffers, read_peer
+from ..exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH
 from ..dataflow_sinks import _artifact_json, _encode_record, RECORDS_MEDIA, MANIFEST_MEDIA
 from ..recovery_contract import document
 
@@ -82,9 +83,12 @@ class WorkerGraphRunner:
         if executor._physical.policy.provider == 'ray_core':
             import ray
             host = ray.util.get_node_ip_address()
-        self._peer = PeerBuffers(bounds=self.bounds, host=host)
+        self._peer = PeerBuffers(bounds=self.bounds, host=host, store=self.services.store)
+        self._read_batch = None
         from ...resources.capacity import track_owned_thread
         track_owned_thread(self._peer._thread)
+        for thread in self._peer._threads:
+            track_owned_thread(thread)
         self._queue_finalizer = None
         self._terminal_rows = 0
         self._producer_expansion = {}
@@ -294,15 +298,16 @@ class WorkerGraphRunner:
         kind = command['kind']
         with self._condition:
             if kind == 'ack':
-                entry = self._credits.pop(command['delivery_id'], None)
+                entry = self._credits.get(command['delivery_id'])
                 if entry is None:
                     raise DataflowError('INVALID_CONTRACT', 'ack does not name an outstanding delivery')
-                self._credit_payloads.pop(command['delivery_id'], None)
                 lease, key = entry
+                if key is not None:
+                    self._peer.release(key)  # Sender references must die before credit release.
                 if lease is not None:
                     self.e._channels.release(lease)
-                if key is not None:
-                    self._peer.release(key)
+                self._credits.pop(command['delivery_id'])
+                self._credit_payloads.pop(command['delivery_id'], None)
             elif kind == 'park_policy':
                 self._park_mode = True
                 self._consumed_deliveries.intersection_update(command.get('retain_consumed', ()))
@@ -332,14 +337,68 @@ class WorkerGraphRunner:
             self._send('ready', {'worker_process_id': os.getpid(),
                                  'runner_thread_id': threading.get_native_id()})
             while not self.e._cancel_event.is_set():
-                step = self.step(max_records=1, deadline_ms=50)
-                if not step.processed:
+                processed = self._step_ready()
+                if not processed:
                     with self._condition:
                         self._condition.wait(.005)
         except BaseException as exc:
             if not self.e._cancel_event.is_set():
                 from ..dataflow_failures import failure_payload
                 self._send('failure', failure_payload(exc))
+
+    def _ready_peer_commands(self):
+        """Metadata-only selection; never dequeue or read future payloads."""
+        result, owner, size, limit = [], None, 0, MAX_PEER_BATCH
+        with self._condition:
+            for command in islice(self._queue, MAX_PEER_BATCH):
+                peer = command.get('peer')
+                if command.get('kind') != 'data' or type(peer) is not dict:
+                    break
+                declared = peer.get('max_batch_records', 1)
+                if type(declared) is not int or not 1 <= declared <= MAX_PEER_BATCH:
+                    break
+                limit = min(limit, declared)
+                if len(result) >= limit:
+                    break
+                spec = self._exchange.get(command.get('edge_id'))
+                if spec is None or spec.mode != 'memory_incremental':
+                    break
+                current = (command.get('edge_id'), command.get('producer_partition'),
+                    command.get('route_epoch'), peer.get('host'), peer.get('port'), peer.get('token'))
+                count = peer.get('bytes')
+                if type(count) is not int or count < 0 or count > self.bounds.max_row_bytes:
+                    break
+                if ((owner is not None and current != owner)
+                        or len(result) >= min(spec.credit_rows, self.bounds.max_pending_events)
+                        or size + count > min(spec.credit_bytes, self.bounds.max_resident_bytes)):
+                    break
+                owner = current
+                result.append(command)
+                size += count
+        return result
+
+    def _step_ready(self):
+        commands = self._ready_peer_commands()
+        if len(commands) < 2:
+            return self.step(max_records=1, deadline_ms=50).processed
+        frames = read_peer_many(tuple(command['peer'] for command in commands), bounds=self.bounds)
+        self._read_batch = [commands, frames, 0]
+        processed, deadline = 0, time.monotonic() + .05
+        try:
+            for command in commands:
+                if self.e._cancel_event.is_set() or time.monotonic() >= deadline:
+                    break
+                with self._condition:
+                    if not self._queue or self._queue[0] is not command:
+                        break  # A priority close/satisfy command must run first.
+                before = self._read_batch[2]
+                processed += self.step(max_records=1, deadline_ms=50).processed
+                if self._read_batch[2] == before:
+                    break  # Control arrived between the head check and dequeue.
+        finally:
+            self._read_batch = None
+            frames.close()
+        return processed
 
     def step(self, *, max_records, deadline_ms):
         if max_records <= 0 or deadline_ms <= 0:
@@ -590,7 +649,12 @@ class WorkerGraphRunner:
                 # peer buffer or executing the business callback a second time.
                 raise DataflowError('INVALID_CONTRACT', 'duplicate or reordered memory delivery')
         if 'peer' in command:
-            raw = read_peer(command['peer'], bounds=self.bounds)
+            batch = self._read_batch
+            if batch is not None and batch[2] < len(batch[0]) and batch[0][batch[2]] is command:
+                raw = next(batch[1])
+                batch[2] += 1
+            else:
+                raw = read_peer(command['peer'], bounds=self.bounds)
         else:
             ref = ArtifactRef(**command['ref'])
             raw = b''.join(self.services.store.read(ref, max_bytes=self.bounds.max_row_bytes))
