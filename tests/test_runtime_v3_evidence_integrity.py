@@ -6,7 +6,7 @@ import runtime_v3_support as support
 
 
 @pytest.mark.parametrize("scenario", [
-    "cpu_gpu_isolation", "fairness_deadlock",
+    "fairness_deadlock",
     "queue_full_business", "memory_peak", "two_hosts",
     "node_loss", "history_identity", "workbench_real_plan",
     "product_regression", "all_regressions",
@@ -27,6 +27,7 @@ def test_placeholder_scenarios_cannot_produce_passing_evidence(scenario):
     ('driver_restart', 'runtime_v3_recovery_scenarios'),
     ('disk_gc', 'runtime_v3_gc_scenarios'),
     ('artifact_security', 'runtime_v3_artifact_security_scenarios'),
+    ('cpu_gpu_isolation', 'runtime_v3_gpu_scenarios'),
 ])
 def test_implemented_gate_cannot_replace_missing_native_evidence_with_success(monkeypatch, scenario, module):
     import importlib

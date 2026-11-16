@@ -551,7 +551,7 @@ class RuntimeV3Fixture:
         from contextlib import nullcontext
         self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix',
             'multiworker_barrier', 'route_recovery', 'driver_restart', 'actor_state_lifecycle', 'performance',
-            'history_identity', 'workbench_real_plan', 'product_regression'}
+            'history_identity', 'workbench_real_plan', 'product_regression', 'cpu_gpu_isolation'}
         scope = nullcontext() if self_managed else RunContext.start(self.journal_dir / scenario)
         try:
             with scope, _use_executor(executor):
@@ -1062,9 +1062,10 @@ def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str
 
 
 def _s_cpu_gpu_isolation(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must launch a GPU stage and inspect actual placements, residency and prefetch'}
-    fx._record_not_run('cpu_gpu_isolation', detail)
-    raise NotRunError('cpu_gpu_isolation', detail)
+    from runtime_v3_gpu_scenarios import cpu_gpu_isolation, validate_evidence
+    evidence = cpu_gpu_isolation(fx, fault)
+    validate_evidence(evidence)
+    return evidence
 
 
 def _s_fairness_deadlock(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
