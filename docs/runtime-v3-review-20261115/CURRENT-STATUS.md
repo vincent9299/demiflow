@@ -4,6 +4,10 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **真实 actor 丢失组合复验**：`9272433` 的正式 V027＋V033＋证据守卫 23 passed，4 个重复组件节点未选（正式门已执行其全部场景）。根节点发现并修正旧故障夹具 `close` 会先取消 HTTP 的竞态，未修改生产实现。实际 SIGKILL、未知模型不重发/不退款、原 ACK 恢复及原工件安全均通过；2184 输入与固定提交相符。见 [根节点复验](ACTOR-OWNER-LOSS-ROOT-VERIFICATION.json)。
+- **纯同步线性管道优化**：已集成 `3f560d8`（owner `7159715`）。只在原 worker 上限会迫使合并时，将无状态、纯同步、单输入线性链置于一个原 worker；内存求和、单宿主准入、异步/定时/设备/显式隔离保护保持。owner 62 项功能验收通过，原 20k→10k/256MiB/120 秒单次为 Local 17.496 秒、真实 Ray 25.582 秒；完整五轮性能仍未达标，不称高性能完成。源码与 harness 摘要见 [独立复核](PURE-FUSION-PRIMARY-VERIFICATION.json)。
+- **公平调度尚有 Ray 真红**：后文 128 行/35 分配正例仅属 Local。最终 Ray 在只余 1 CPU、原 64×4KiB 双分支/16MiB/120 秒下仍超时（48 worker、terminal 0/128）；正修启动空档消耗 checkpoint 间隔造成的反复退租，不增预算或时限。V023 内存峰值 12 场景 Local/Ray 已由 owner 完整通过，最终测试/证据等待集成。
+
 - **资源、原模型完整文件及真实驻留 GPU**：原 Embedding/inference/SQLite 三个完整文件在 `0712606` 共100 passed；Arrow/terminal/工件/Prompt服务组合在 `ba4fd42` 18 passed。V011现为真实 CPU→CUDA Linear→IO：Local `2f5fa42`、Ray `abeaa7b` 均64行同一模型、不同CPU/GPU/IO进程；慢IO时仅2行GPU/3行CPU准备，原credit与ACK/释放均实测。停驻修复 `3ce2e06` 已合入，原1worker/16MiB/120s公平案例128行通过、35原分配全释放。证据及仍未关闭项见 [RESOURCE-AND-GPU-INTEGRATION-20261116.md](RESOURCE-AND-GPU-INTEGRATION-20261116.md)。下文“原模型完整文件待跑”已由本项取代，完整最终矩阵仍未宣称通过。
 - **最后私有模型准入与真实Ray组合**：`492c2b8` 让新Prompt row scope/Embedding batch＋part必须重新准入，原HTTP/cache键不变，同一RPC仍幂等；总控核owner9组源码与40附件零不符。固定`91c8658`真实Ray Core9 passed/0 skipped/121.65秒，含模型缓存、结果重读、回执后强杀、driver restart/FENCED。原模型全文件最终组合尚待补跑，不拼接不同版本冒称全门绿。
 - **新压力红保留**：仅余1CPU、64×4KiB共享双分支在120秒内未完成，记录79个ACK/80次worker启动；不是无消费者死锁，仍是不可接受的调度性能问题。没有缩样或扩时间，性能lane正在定位。Arrow与终端索引元数据必须一同做分配前准入，修复在途。

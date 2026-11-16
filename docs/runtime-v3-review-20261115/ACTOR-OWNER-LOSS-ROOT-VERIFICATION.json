@@ -1,0 +1,24 @@
+{
+  "head": "9272433133f70aa2ef8171f39bc78915c9459128",
+  "inputs": 2184,
+  "source_unchanged": true,
+  "exit_code": 0,
+  "passed": 23,
+  "scope": "actual Ray owner-loss and artifact-security integration; same host, not physical outage",
+  "proofs": {
+    "/tmp/demiflow-root-loss-fixed-evidence/started.json": "0c8520d695d13da83490e48d75fd06e109f59182bd4364678e877e6db4d8ed4f",
+    "/tmp/demiflow-root-loss-fixed-evidence/progress.json": "203c73725607b048bd5e46707c108bb05ba3bc098db514d2d164440aa8ac65eb",
+    "/tmp/demiflow-root-loss-fixed-evidence/scenario-node_loss.json": "e19b3e9f0045a07d3b46aa94527acb72c7daec25c33ca1d7ac1eef7dc0bcbe8d",
+    "/tmp/demiflow-root-loss-fixed-evidence/scenario-artifact_security.json": "0956d0a85068252e089ad45281ea2e117d5e4377118de2a6fec407d6771b0eb9",
+    "/tmp/demiflow-root-loss-fixed-evidence/result.xml": "7557338da089d7dcc53904303225c86fd21b7e7e9e9d5e4c80c9f1b2f8836ba7",
+    "/tmp/demiflow-root-loss-fixed-evidence/verification.json": "69776c8e3b1f42665196f73c49310fcb81fa0c0e8df5c70e10e9b4fae5c0e344",
+    "/tmp/demiflow-root-loss-fixed-evidence/owned-process-exit.json": "dcaef2c9485690da65a94d199df40999672a110f5407fa25823cbfea0bffb44c"
+  },
+  "red": {
+    "path": "/tmp/demiflow-root-loss-integrated-evidence/verification.json",
+    "head": "5ee2d49",
+    "failed": 2,
+    "passed": 22,
+    "cause": "new fixture close() cancelled the outstanding HTTP; pending RPC assertion raced with completion"
+  }
+}

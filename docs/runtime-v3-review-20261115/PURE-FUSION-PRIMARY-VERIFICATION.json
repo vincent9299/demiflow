@@ -1,0 +1,36 @@
+{
+  "candidate": "7159715c8cbf74858716585250f16403f1340696",
+  "checks": [
+    {
+      "evidence": "/tmp/demiflow-pure-fusion-fixed-r1/verification.json",
+      "sha256": "05f0117a69d000940a4032e42cd420c524e60a07ce25db3b36973a3b127c6a63",
+      "inputs": 1858,
+      "mismatches": {},
+      "exit": 0
+    },
+    {
+      "evidence": "/tmp/demiflow-perf-pure-linear-r2/fast_cpu/verification.json",
+      "sha256": "3d09084c50170344acf49970c6c63f9f36e15d715633319b76f498c2ea7f7f6d",
+      "inputs": 1050,
+      "mismatches": {},
+      "harness": {
+        "inputs": 2,
+        "mismatches": {}
+      },
+      "plan_sha256_matches": true,
+      "trial_status": "passed"
+    },
+    {
+      "evidence": "/tmp/demiflow-perf-pure-linear-ray-r1/fast_cpu/trial.json",
+      "sha256": "9a4bc7c4c234954db9993d66c5c856be01ef5ed6fb8a9132fa64d82382c2fb77",
+      "inputs": 1050,
+      "mismatches": {},
+      "harness": {
+        "inputs": 2,
+        "mismatches": {}
+      },
+      "plan_sha256_matches": true,
+      "trial_status": "passed"
+    }
+  ]
+}

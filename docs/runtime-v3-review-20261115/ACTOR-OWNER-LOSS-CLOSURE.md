@@ -1,5 +1,32 @@
 # V027 real actor-owner loss
 
+## Coordinator integration correction (2026-11-16)
+
+The original c761875 pass below is a historical result. Independent integration
+at `5ee2d49` found a fixture race: `HostedDataflowWorker.close` cancels its HTTP
+request and can finish before the asserted fault boundary (2 failed / 22 passed).
+The engine was not changed to accommodate that assumption.
+
+Test-only fix `9272433` first stops the exact owned actor process (PID and birth
+identity checked), proves it stopped, then submits the original `identity` RPC.
+It kills that process with SIGKILL while the genuine RPC is pending. Ray reports
+ActorDied and zero restarts. No lifecycle cancellation precedes the fault; the
+original accepted Prompt/Embedding/Agent intent stays unknown. Output, original
+ACK prefix, request keys, single charge, no retransmission and no fabricated
+commit assertions all remain. Two refusal checks now additionally reject an
+unstopped process and mismatched dead-owner evidence.
+
+At the fixed root revision, formal V027 + V033 + the guards passed **23 tests**
+with **4 standalone component nodes deselected** (their four scenarios run
+inside V027). All 2,184 source digests match that commit and stay unchanged;
+the original FD allowance is unchanged, the private Ray cluster shuts down,
+and the four killed workers are absent after exit. Exact commands, per-node
+results, retained red and proof digests are in
+[ACTOR-OWNER-LOSS-ROOT-VERIFICATION.json](ACTOR-OWNER-LOSS-ROOT-VERIFICATION.json).
+
+The sections below describe the earlier candidate. In particular, their
+`close`-as-pending-RPC assumption is superseded by the correction above.
+
 The formal `tests/test_runtime_v3_acceptance.py::test_node_loss` now executes
 actual Ray worker loss and recovery. Fixed candidate
 `c76187520131ff8fd36863d3999b906b30ba0534` passed **21 tests in 48.18 s**, with
