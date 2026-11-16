@@ -618,6 +618,22 @@ def _child(scenario, provider, directory):
     finally:
         if ray is not None:
             ray.shutdown()
+        import psutil
+        from itertools import islice
+        process = psutil.Process()
+        deadline = time.monotonic() + 15
+        children = process.children(recursive=True)
+        while children and time.monotonic() < deadline:
+            time.sleep(.05)
+            children = process.children(recursive=True)
+        allocation_paths = list(islice((Path(os.environ['DEMIFLOW_RESOURCE_ROOT']) / 'capacity' / 'allocations').glob('*.json'), 1025))
+        assert len(allocation_paths) <= 1024
+        allocations = [json.loads(p.read_text()) for p in allocation_paths]
+        active = [v['allocation_id'] for v in allocations if v['state'] != 'RELEASED']
+        result['cleanup'] = {'children':[{'pid':p.pid,'birth':p.create_time()} for p in children],
+                             'original_pool_records':len(allocations),'active_allocations':active}
+        if (children or active) and error is None:
+            error = {'type':'AssertionError','text':'original resource cleanup is not confirmed'}
         after=_snapshot()
         result.update(source_before=before,source_after=after,error=error,provider=provider,scenario=scenario)
         _write(root/'result.json',result)
