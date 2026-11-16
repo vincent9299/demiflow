@@ -278,14 +278,15 @@ def _payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
 
 
 def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none",
-                     codec_workspace=True) -> ResourceProfile:
+                     codec_workspace=True, concurrency=None) -> ResourceProfile:
     # The run memory budget covers admitted data, separately from process RSS.
     # Reserve the same working set used by physical residency, not a fixed
     # per-stage 64 MiB allowance multiplied by pipeline length.
     minimum = bounds.max_batch_bytes + bounds.max_row_bytes
     working_set = _payload_workspace(bounds) if codec_workspace else minimum
     options = getattr(operation, 'stream_options', None)
-    concurrency = getattr(options, 'concurrency', getattr(operation, 'concurrency', 1))
+    if concurrency is None:
+        concurrency = getattr(options, 'concurrency', getattr(operation, 'concurrency', 1))
     working_set *= concurrency
     minimum *= concurrency
     if state != "none":
@@ -352,7 +353,7 @@ def compile_kernel_spec(
         from ..execution.dataflow_routed_prompt import compile_routed_prompt
         return compile_routed_prompt(operation, native_declaration, program_ref=program_ref, bounds=bounds)
     if native_declaration is not None and native_declaration.target is PromptFactory:
-        from ..execution.dataflow_models import build_model_factory
+        from ..execution.dataflow_models import build_model_factory, _model_profile
         native_op, settings = native_declaration.constructor_args
         from ..data.plan import AgentMapOp
         model = build_model_factory(operation if isinstance(operation, AgentMapOp) else native_op,
@@ -361,8 +362,8 @@ def compile_kernel_spec(
         configuration.update(concurrency=settings.get('concurrency', 1),
                              catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
         model = replace(model, configuration=configuration,
-            profile=ResourceProfile(requests={**model.profile.requests, "memory_bytes":
-                configuration["concurrency"] * (bounds.max_batch_bytes + bounds.max_row_bytes)}))
+            profile=_model_profile(model.resource_role, bounds, configuration["concurrency"],
+                                   model.state, operation=operation))
         from ..execution.dataflow_prompt_service import service_kernel
         return service_kernel(model, settings)
     if definition.compiler_symbol == _MODEL_COMPILER:
@@ -644,11 +645,23 @@ class _Capture:
         kernel = self.nodes[index].kernel
         if kernel.kind in {'join', 'exclude_keys', 'reduce'}:
             return  # These kernels own explicit copy/reducer working sets.
-        expected = _default_profile(operation, bounds=self.bounds, state=kernel.state)
-        if kernel.profile != expected:
+        if kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
+            from ..execution.dataflow_models import _model_profile
+            concurrency = kernel.configuration.get('concurrency', 1)
+            expected = _model_profile(kernel.resource_role, self.bounds, concurrency,
+                                      kernel.state, operation=operation)
+            minimum = _model_profile(kernel.resource_role, self.bounds, concurrency,
+                kernel.state, operation=operation, codec_workspace=False).requests['memory_bytes']
+            # Managed-service declarations may refine the accelerator profile;
+            # this planner only redistributes proven default memory slack.
+            matches = kernel.profile.requests['memory_bytes'] == expected.requests['memory_bytes']
+        else:
+            expected = _default_profile(operation, bounds=self.bounds, state=kernel.state)
+            minimum = _default_profile(operation, bounds=self.bounds, state=kernel.state,
+                                       codec_workspace=False).requests['memory_bytes']
+            matches = kernel.profile == expected
+        if not matches:
             return  # Native models, reducers and other specialized grants retain their authority.
-        minimum = _default_profile(operation, bounds=self.bounds, state=kernel.state,
-                                   codec_workspace=False).requests['memory_bytes']
         target = kernel.profile.requests['memory_bytes']
         if target > minimum:
             self.codec_windows[index] = (minimum, target)
@@ -914,7 +927,7 @@ class _Capture:
                 if isinstance(callable_spec, CallableSpec) else {}
             )
             new_index = self._add_node("transform", kernel, semantic, {}, code_identity, None)
-            if native_declaration is None:
+            if native_declaration is None or kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
                 self._remember_codec_window(new_index, operation)
             options = getattr(operation, 'stream_options', None)
             base = (getattr(options, 'label', None) or getattr(operation, 'label', None)

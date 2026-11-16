@@ -81,13 +81,21 @@ def _input_ports(names):
                  for name in names)
 
 
-def _model_profile(resource_role, bounds, concurrency, state):
-    requests = {'cpu_millis': 100, 'memory_bytes':
-        concurrency * (bounds.max_batch_bytes + bounds.max_row_bytes) +
-        (bounds.max_state_bytes if state != "none" else 0)}
-    if resource_role == 'gpu':
+def _model_profile(resource_role, bounds, concurrency, state, *, operation=None,
+                   codec_workspace=True):
+    # Native actors carry the same typed records as ordinary kernels. Their
+    # codec copies must fit the original stage grant too; input+output alone
+    # is not that peak. Keep one planner and every explicit worker constraint.
+    from ..planning.dataflow_compile import _default_profile
+    profile = _default_profile(operation, bounds=bounds, state=state,
+        codec_workspace=codec_workspace, concurrency=concurrency)
+    requests = dict(profile.requests)
+    resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
+    if 'cpu' not in resources:
+        requests['cpu_millis'] = 100
+    if resource_role == 'gpu' and 'accelerators' not in requests:
         requests['accelerators'] = [{'type': 'gpu', 'count': 1}]
-    return ResourceProfile(requests=requests)
+    return ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
 
 
 def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None, bounds: Bounds) -> KernelSpec:
@@ -168,7 +176,7 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
 
     node_id = getattr(operation, 'node_id', None) or identity(['model-node', kind, config])
     config['node_id'] = node_id
-    profile = _model_profile(role, bounds, config.get('concurrency', 1), state)
+    profile = _model_profile(role, bounds, config.get('concurrency', 1), state, operation=operation)
     if kind == 'embedding' and config.get('managed_http_devices'):
         from dataclasses import replace
         profile = replace(profile, requests={**profile.requests, 'accelerators': [

@@ -63,8 +63,7 @@ def routed_declaration(actor, target):
 
 
 def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
-    from .dataflow_models import build_model_factory, _json_config
-    from ..resources.contracts import ResourceProfile
+    from .dataflow_models import build_model_factory, _json_config, _model_profile
     children, limits, route, isolate, max_requests = declaration.constructor_args
     if any(child.constructor_args[1].get('service') is not None for child in children.values()):
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Owned Prompt route services require independent service placement')
@@ -86,9 +85,8 @@ def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
             # state. Retain the runtime's existing attempt-only restriction.
             state = 'nonrecoverable'
     return replace(first, implementation_ref=program_ref, configuration=configuration, state=state,
-        profile=ResourceProfile(requests={'cpu_millis': 100, 'memory_bytes':
-            operation.concurrency * (bounds.max_batch_bytes + bounds.max_row_bytes)
-            + (bounds.max_state_bytes if state != 'none' else 0)}))
+        profile=_model_profile(first.resource_role, bounds, operation.concurrency, state,
+                               operation=operation))
 
 
 def bind_routed_prompt(actor, *, services, node_id, configuration):
