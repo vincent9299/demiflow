@@ -303,3 +303,59 @@ def test_literal_pending_snapshot_replays_exact_original_record(tmp_path):
             assert read_all(resumed)==list(source.items[1:])
         finally:resumed.close()
         assert resumed.retained_bytes==0
+
+
+def test_small_public_input_keeps_legacy_source_without_data_artifacts(tmp_path):
+    from demiflow import data
+    source=data.from_items([{'typed':(b'raw',-0.0)}])._source
+    with store_fixture(tmp_path) as (_,store,_):
+        before=set(store._objects.iterdir())
+        snapshot=snapshot_source(source,action=NS(action_id='literal-small-public'),store=store,bounds=store._bounds)
+        assert literal_reference(source,store._bounds) is None and snapshot.manifest_ref is None
+        assert set(store._objects.iterdir())==before
+
+
+def test_legacy_large_program_and_source_carriers_remain_readable(tmp_path,monkeypatch):
+    from demiflow import data
+    import demiflow.execution.literal_source as literal
+    source=data.from_items(list(example()))._source
+    with store_fixture(tmp_path) as (_,store,_):
+        bounds=replace(store._bounds,max_state_bytes=2*1024**2,max_row_bytes=8192,max_batch_bytes=16384)
+        pin=_code_identity_from_value('source',source)
+        # Produce the unchanged original program/snapshot carriers with the
+        # former selection rule, then restore the new rule before loading.
+        with monkeypatch.context() as patch:
+            patch.setattr(literal,'literal_reference',lambda *_a:None)
+            declaration=ProgramDeclaration('b'*64,None,source,None,pin)
+            ref=_stage_one_program(declaration,store=store,bounds=bounds)
+            snapshot=snapshot_source(source,action=NS(action_id='literal-legacy'),store=store,bounds=bounds)
+        assert snapshot.manifest_ref is None and literal_reference(source,bounds) is not None
+        loaded=verify_dataflow_program(ref,expected_pin=pin,store=store,bounds=bounds)
+        services=services_for(store,bounds,snapshot,loaded.value)
+        split=plan_source_splits(snapshot,source,target_partitions=1,bounds=bounds)[0]
+        reader=open_source_reader(snapshot,split,cursor=None,services=services)
+        try:
+            assert reader._literal_rows is None
+            assert read_all(reader)==list(example())
+        finally:reader.close()
+
+
+def test_literal_leaf_is_authenticated_before_first_row(tmp_path):
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    from demiflow.execution.dataflow_segments import segment_refs
+    with store_fixture(tmp_path) as (_,store,_):
+        bounds=replace(store._bounds,max_state_bytes=4096,max_row_bytes=8192,max_batch_bytes=16384)
+        source=ItemsSource(example(40))
+        snapshot=snapshot_source(source,action=NS(action_id='literal-corrupt'),store=store,bounds=bounds)
+        manifest=json.loads(b''.join(store.read(snapshot.manifest_ref,max_bytes=bounds.max_control_bytes)))
+        root=ArtifactRef(**manifest['data_ref'])
+        leaf=next(segment_refs(store,root,bounds))
+        path=store._objects/leaf.key
+        damaged=bytearray(path.read_bytes());damaged[-3]^=1;path.write_bytes(damaged)
+        services=services_for(store,bounds,snapshot,literal_reference(source,bounds))
+        split=plan_source_splits(snapshot,source,target_partitions=1,bounds=bounds)[0]
+        reader=open_source_reader(snapshot,split,cursor=None,services=services)
+        with pytest.raises(DataflowError,match='digest|integrity|corrupt'):
+            reader.next_record()
+        assert reader._next_sequence==0 and reader.retained_bytes==0
+        reader.close()
