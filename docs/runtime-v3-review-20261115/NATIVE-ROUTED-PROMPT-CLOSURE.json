@@ -1,0 +1,35 @@
+{
+  "candidate": "651a9bdd83e09b520a53672fc992bd608563e864",
+  "implementation_commits": [
+    "ba35b99",
+    "651a9bd"
+  ],
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_regression_20261115",
+  "branch": "engine/gpt-v3-regression-20261115",
+  "verified": {
+    "local": "18 passed, 1 deselected in 76.07s",
+    "same_host_ray_core": "1 passed in 27.65s",
+    "deselected": "Ray case run separately with real Ray Core",
+    "frozen_7": "byte-identical to 49b666f",
+    "source_files": 2133,
+    "source_changed": []
+  },
+  "not_claimed": [
+    "V017 physical target/broadcast complete worker recovery gate",
+    "managed Forge routed prompt admission",
+    "offline routes (follow-up in progress)",
+    "private SQLite delivery-only routes compatibility",
+    "multi-host route recovery"
+  ],
+  "artifacts": {
+    "/tmp/demiflow-route-final2-local-evidence/verification.json": "1090a499e90b60ac5fb8cc4e9174df87556f02eda6706909f31991cd89e8eb15",
+    "/tmp/demiflow-route-final2-local-evidence/result.xml": "f5996c274203a83d3245e029d7f38d89cc7bfb793aab674986d18fb12fe69c19",
+    "/tmp/demiflow-route-final2-local.log": "039cf1c7f78dbcd0b12e419b2eef8a43a9f9fea59e3e93d0169dcc9deffc53f3",
+    "/tmp/demiflow-route-final2-ray-evidence/verification.json": "496c87ecdea6d523937b51d079b54980f25c62143fb42373c50f3b697258e71e",
+    "/tmp/demiflow-route-final2-ray-evidence/result.xml": "21c9b3f5904204cae24a5b85f8b9117f95c16bb67733623af8bbcaf773731a9a",
+    "/tmp/demiflow-route-final2-ray.log": "49e13924e4348d2639ba0146bee2802305815cb21c3ccfecb8bc35d26067ce27",
+    "/tmp/demiflow-route-public-baseline.log": "718e21d5fff05651b745237a637dc0a6397af5ee764d1503bcd57d2fa7c08f5f",
+    "/tmp/demiflow-route-before-test.log": "37b793f239cd45df78568b6355dd466c2b4799c6f06447add7aa8181228c95b0",
+    "/tmp/demiflow-route-native-final.log": "bc17f5ef7c3ea8c4aa3ef166dff6318abdeccea560366d2825b033d369883ad9"
+  }
+}
