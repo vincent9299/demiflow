@@ -29,7 +29,8 @@ def service_kernel(model, settings):
         return model
     if model.kind != 'prompt':
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed HTTP service requires a native Prompt node')
-    configuration = dict(model.configuration, managed_http_declaration=declaration)
+    from .contracts.dataflow import thaw_record_value
+    configuration = dict(thaw_record_value(model.configuration), managed_http_declaration=declaration)
     parameters = declaration['parameters']
     requests = dict(model.profile.requests)
     role = model.resource_role
