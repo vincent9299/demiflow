@@ -26,9 +26,9 @@ def test_retained_python_rows_reject_before_the_next_decode_or_constructor(tmp_p
     monkeypatch.setattr(frames, 'decode_document', decode)
     monkeypatch.setattr(conversion, 'native_arrow_table', forbidden)
     target = tmp_path/'blocked.lance'
-    limits = dict(memory_bytes=4*1024**2, max_row_bytes=4096,
+    limits = dict(memory_bytes=4*1024**2, max_row_bytes=32768,
                   max_batch_bytes=131072, batch_rows=256)
-    rows = [{'i':i, 'values':[0]*80} for i in range(160)]
+    rows = [{'i':i, 'values':[{'n':j} for j in range(80)]} for i in range(160)]
     with pytest.raises(DataflowError, match='record frame codec workspace') as error:
         with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(batch_rows=256):
             data.from_items(rows).write_lance(str(target), mode='create')
