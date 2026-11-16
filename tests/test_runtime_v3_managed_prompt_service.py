@@ -86,7 +86,8 @@ def test_prompt_service_mutations_are_rejected_before_start(tmp_path, monkeypatc
 def test_prompt_cancel_reaps_original_service_and_leaves_no_success(tmp_path, monkeypatch, request):
     value = fixture(tmp_path, monkeypatch, request, mode='slow')
     seen, errors = threading.Event(), []
-    with RunContext.start(tmp_path/'run', limits={'timeout_s': 30}) as run, data.local_execution():
+    with pytest.raises(Exception, match='[Cc]ancel'), RunContext.start(
+            tmp_path/'run', limits={'timeout_s': 30}) as run, data.local_execution():
         def cancel():
             try:
                 deadline = time.monotonic()+20
@@ -99,10 +100,9 @@ def test_prompt_cancel_reaps_original_service_and_leaves_no_success(tmp_path, mo
                 errors.append(repr(exc))
         thread = threading.Thread(target=cancel); thread.start()
         try:
-            with pytest.raises(Exception, match='[Cc]ancel'):
-                dataset(value, tmp_path, cached=False).materialize()
+            dataset(value, tmp_path, cached=False).materialize()
         finally:
             thread.join(22)
-        assert not thread.is_alive() and seen.is_set() and not errors
-        assert not any(c['intent'].get('final') for c in run.journal.execution_commits('action-1'))
+    assert not thread.is_alive() and seen.is_set() and not errors
+    assert run.journal.execution_action('action-1')['result'] is None
     assert_reaped(value, requests=sum(r['event']=='request' for r in events(value)))

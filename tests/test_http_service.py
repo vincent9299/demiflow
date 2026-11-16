@@ -21,13 +21,28 @@ def test_generic_service_native_prompt_cache_and_cleanup(managed):
     spec=declaration(managed)
     _,_,processes,_,_,pack=managed
     assert not processes
+    # Process workers own the service now. Observe the actual service script,
+    # rather than counting unrelated parent-side source/worker Popen calls.
+    started = spec.root/'prompt-service-starts.jsonl'
+    script = spec.root/'server.py'
+    script.write_text('import os, psutil, json\nfrom pathlib import Path\n'
+        + f'with Path({str(started)!r}).open("a") as stream:\n'
+        + '    stream.write(json.dumps({"pid":os.getpid(),"birth":psutil.Process().create_time()})+"\\n")\n'
+        + script.read_text())
     options={'sqlite_journal':{'path':str(spec.root/'calls.sqlite')}}
     for _ in range(2):
         result=data.from_items([{'x':i} for i in range(8)]).map_prompt_async(
             'test',config=pack,inputs={'value':'x'},output='result',concurrency=4,
             service=spec,options=options).materialize().take_all()
         assert [row['result'] for row in result]==['ok']*8
-    assert len(processes)==1
+    starts = [json.loads(line) for line in started.read_text().splitlines()]
+    assert len(starts)==1
+    import psutil
+    for item in starts:
+        try:
+            assert psutil.Process(item['pid']).create_time()!=item['birth']
+        except psutil.NoSuchProcess:
+            pass
     assert_reaped(processes)
 
 
