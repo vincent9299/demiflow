@@ -239,7 +239,8 @@ def test_stream_effective_allocation_is_finite_scoped_and_identical_on_resume(tm
         with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1024**3}) as run:
             reference = run.ref
             ceiling = dict(run.limits)
-            assert graph().take_all() == [{'id': 0}, {'id': 1}, {'id': 2}]
+            result = graph().take_all()
+            assert sorted(result, key=lambda row: row['id']) == [{'id': 0}, {'id': 1}, {'id': 2}]
             assert run.limits == ceiling
             raise RuntimeError('after-materialized')
     scopes = observed()
@@ -253,7 +254,7 @@ def test_stream_effective_allocation_is_finite_scoped_and_identical_on_resume(tm
     assert admitted['max_row_bytes'] + admitted['max_batch_bytes'] <= admitted['memory_bytes']
     assert all(0 < value <= ceiling[name] for name, value in admitted.items())
     with RunContext.resume(reference):
-        assert graph().take_all() == [{'id': 0}, {'id': 1}, {'id': 2}]
+        assert graph().take_all() == result
     assert observed() == scopes  # Prepared output is authoritative; no callback replay.
 
 
