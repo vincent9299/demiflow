@@ -4,6 +4,10 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **2026-11-17 最新合流 `7c034a8`**：大 literal 输入改走原有类型化工件；worker/source/index 共用原 grant；严格 checkpoint 恢复要求绑定原封存 physical policy；actor/callback 只读 run 上下文、节点预算错误传输、有限前沿恢复及 cut/timer 顺序均已合。source 26 项、actor 12 项及历史策略保护 1 项各有固定提交证据；总控独立核验全部输入摘要与对应 Git 字节一致，不能把它们相加当最新 HEAD 全量通过。见[继续修复与验收 E](INTEGRATION-CONTINUATION-20261117-E.md)。
+- **当前核心未闭环**：大行模型的原生发布共驻预算候选尚未集成；两条原 64/128MiB 宽 join 已通过输入封存、但实际 planner 仍拒绝，不能算能力恢复；图像部分完成后协作取消仍有未封存响应，恢复被 unknown 保护阻止。三个图像最终写出故障窗口通过，损坏对象测试因同一前置 unknown 尚未走到校验点。旧 finite “唯一失败”表述只属于下方 6d 快照，现已由生产修复与真实验证替代。
+- **剩余终验**：最新合流的真实 Dataset/Local/Ray/工作台组合、原 U3 安静窗口、受影响 GPU、正式 I08 和 V035 历史总裁决。两机当前 SSH 授权入口仍待回复、PostgreSQL 无测试 DSN，保持未验。主仓原 HEAD/11 项 dirty/18 个文件摘要及七件冻结均复核未变。
+
 - **2026-11-17 最新固定候选 `6d0530d`**：payload/frame、实际tuple codec空间、reduce初值/新旧状态/序列化共驻及历史grant、工作台关闭等待已合。原完整4KiB/16KiB tuple反例、19项join-chain和原40KiB驻留均通过。Local/Ray各168 API场景、覆盖98入口；真实三模型×三恢复窗口、queue完整业务/unknown、工作台14项组合通过。根节点独立核验17份回执的2964输入摘要全部等于同一Git提交，119项中118通过/1失败，详见[最新组合证据与剩余修复](INTEGRATION-CONTINUATION-20261117-D.md)。
 - **当前正在修的唯一该组合失败**：默认预算使join/terminal合法分phase，旧测试只看join.finish_cursor；同时实测terminal非adopt有限输入不能中途checkpoint。新隔离叶树已有原100×10中途ACK/恢复1000正例，但仍在收口reader保留空间、park协作、旧frontier连续恢复，并补真实Ray/GC验证。未把测试观察点修改当生产修复，也未宣称叶树最终全绿。主root仍待合此修复。
 - **整体仍未完成**：上述finite修复的定向终验、原U3安静窗口、受影响GPU、正式I08五轮矩阵及V035历史总裁决。两机旧SSH入口当前认证拒绝，等待已提出的信息问题回复，不猜凭证；PostgreSQL仍无测试DSN。下方较早“frame/reducer正在修”等均是历史快照，不覆盖本节。

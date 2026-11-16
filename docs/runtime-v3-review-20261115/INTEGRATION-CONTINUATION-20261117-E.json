@@ -1,0 +1,122 @@
+{
+  "receipts": [
+    {
+      "receipt": "/tmp/demiflow-root-d729-core-r1-evidence/verification.json",
+      "sha256": "9adbd69f11b4fae5053116534dae847579a4f3d5b34a4408dde9b8379007ea0f",
+      "head": "d729ca3fc7057a991e3f1625ef78de29f318f7b8",
+      "inputs": 2973,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 163,
+        "call": 163,
+        "teardown": 163
+      },
+      "call_outcomes": {
+        "passed": 162,
+        "failed": 1
+      },
+      "children_after": [],
+      "returncode": 1
+    },
+    {
+      "receipt": "/tmp/demiflow-finite-cut-credit-r1-evidence/verification.json",
+      "sha256": "73d1d057b3d2695e0a0f309cc3846bf254340c44187c209d5573fe9c6827ff39",
+      "head": "d39f965e7996bc36f374e0340bf4a56936fb0c50",
+      "inputs": 2972,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 1,
+        "call": 1,
+        "teardown": 1
+      },
+      "call_outcomes": {
+        "passed": 1
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-literal-input-r8/receipt.json",
+      "sha256": "e614b2ba78f4106765ddfa5f494295b524ceb681bfcd1ac91d0dba302ae78dcd",
+      "head": "77cacbf2eff9e3b9fff608dc8c5c0ae1fc89da6e",
+      "inputs": 2973,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 26,
+        "call": 26,
+        "teardown": 26
+      },
+      "call_outcomes": {
+        "passed": 26
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-history-actor-native-r2/receipt.json",
+      "sha256": "8c410965abad6c2d6111cdb95a3222bd8269d131c284fe691996849a97d5fc1c",
+      "head": "19a4375f5d64488470c7e3b1d879c9e56e256a6a",
+      "inputs": 2972,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 12,
+        "call": 12,
+        "teardown": 12
+      },
+      "call_outcomes": {
+        "passed": 12
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-history-sealed-requirement-r1/receipt.json",
+      "sha256": "b9df50bd790d436dd756b2dc2eebb3b4c6f9c3bc7ae3a7ce27a5b7975bc25f6b",
+      "head": "61c755d77a6256f1b53263fdfa51f5c4f9bbd32f",
+      "inputs": 2972,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 1,
+        "call": 1,
+        "teardown": 1
+      },
+      "call_outcomes": {
+        "passed": 1
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-history-image-final-r1-evidence/verification.json",
+      "sha256": "92d2671bec252d64b209b184238fc72f6dd47631c0efe9ddb07ef76cfdccbacd",
+      "head": "9840bbd0f2b1082e60b13aba26fdd4bf2126954a",
+      "inputs": 2971,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 4,
+        "call": 4,
+        "teardown": 4
+      },
+      "call_outcomes": {
+        "passed": 3,
+        "failed": 1
+      },
+      "children_after": [],
+      "returncode": 1
+    }
+  ],
+  "boundaries": {
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "head_equal": true,
+    "status_equal": true,
+    "dirty_hashes_equal": true,
+    "frozen_equal": true
+  },
+  "not_same_head_suite": true
+}
