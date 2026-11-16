@@ -166,7 +166,7 @@ def test_region_small_budget_multirun_wide_key_nonassociative_fold(tmp_path):
     for row in oracle_join(oracle_join(left,right,how='left'),last,how='left'):
         expected.setdefault(row['k'],[]).append((row['v'],row.get('r'),row.get('z')))
     limits={'memory_bytes':1024*1024,'max_row_bytes':4096,'max_batch_bytes':8192,
-            'max_state_bytes':32768,'max_control_bytes':65536,'checkpoint_rows':64}
+            'max_state_bytes':32768,'checkpoint_rows':64}
     with RunContext.start(tmp_path/'run',limits=limits),data.local_execution(workers=2) as local:
         actual=data.from_items(left).join(data.from_items(right),on='k',how='left').join(
             data.from_items(last),on='k',how='left').reduce_by_key('k',lambda state,row:{
@@ -180,7 +180,7 @@ def test_region_small_budget_multirun_wide_key_nonassociative_fold(tmp_path):
         assert measured['sort_run_bytes']==2*4096
         assert 2*(3*measured['sort_frame_bytes']+measured['sort_read_chunk_bytes'])+2*measured['sort_frame_bytes']<=measured['sort_window_bytes']
         region=next(stage for stage in physical.stages if stage.stage_id.startswith('relational-v1-'))
-        assert measured['sort_window_bytes']+32768+8192+4*4096+4096==region.resident_bytes
+        assert measured['sort_window_bytes']+32768+8192+3*4096+65536==region.resident_bytes
         assert region.resident_bytes<physical.bounds.max_resident_bytes
         assert measured['partition_builds']==3 and measured['intermediate_key_rebuilds']==0
         assert measured['intermediate_payload_bytes']==0
@@ -198,7 +198,7 @@ def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypa
     with store_fixture(tmp_path) as (_,store,_):
         svc,_=fixture(store)
         svc.bounds=replace(svc.bounds,max_row_bytes=4096,max_resident_bytes=65536)
-        spec=make('KernelSpec',kind='sort',configuration={'keys':['k']})
+        spec=make('KernelSpec',kind='SortOp',configuration={'keys':['k']})
         window=SortWindow(32768,8192,4000,64,2,True)
         rows=[record({'k':str(i%5)*400,'unused':i},i) for i in range(30,-1,-1)]
         # Offsets and source provenance survive; only internal carrier payload

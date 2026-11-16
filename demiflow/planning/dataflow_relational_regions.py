@@ -104,14 +104,15 @@ def region_resident_bytes(plan, bounds):
     # Hydration has at most depth+1 input/result rows, two codec/copy rows and
     # one output handoff. Input preparation reuses that window sequentially.
     # One bounded index and traversal metadata use the remaining fixed window.
-    metadata = min(4 * 1024**2, max(4096, bounds.max_control_bytes // 16))
+    metadata = min(4 * 1024**2, max(4096,
+        min(bounds.max_control_bytes, bounds.max_resident_bytes) // 16))
     if plan.ordered_groups:
         # Reduce: 8R belongs exclusively to the actual external-sort window;
-        # depth+2 row windows plus the original batch window remain available
+        # depth+1 row windows plus the original batch window remain available
         # for arena hydration, key/codec/output temporaries. Reducer state and
         # metadata coexist. This is larger than join-only, never a max(profile)
         # substitution for simultaneously live resources.
-        return (bounds.max_batch_bytes + (plan.join_depth + 10) * bounds.max_row_bytes
+        return (bounds.max_batch_bytes + (plan.join_depth + 9) * bounds.max_row_bytes
                 + bounds.max_state_bytes + metadata)
     return bounds.max_batch_bytes + (plan.join_depth + 4) * bounds.max_row_bytes + metadata
 
