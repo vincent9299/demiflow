@@ -224,4 +224,4 @@ class RelationalRegionRuntime:
                 yield _group_key(row, keys), row, record
                 del row,record
         yield from reduce_ordered_groups(ordered(), spec=spec, services=self.services,
-                                         memory_join_depth=self.plan.join_depth)
+            memory_join_depth=self.plan.join_depth,retain=self.root._retain_reducer_peers)

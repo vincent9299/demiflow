@@ -138,3 +138,47 @@ def test_changed_initial_is_rejected_before_deepcopy(monkeypatch):
     with pytest.raises(DataflowError):
         list(relational.reduce_ordered_groups(iter([('key',row,record(row))]),spec=spec,services=svc))
     assert copies==[]
+
+
+def test_yielded_peers_are_alias_aware_and_release_on_finish_error_and_close():
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.contracts.dataflow import LoadedProgram
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from demiflow.execution.kernels.relational import reduce_ordered_groups
+    from demiflow.resources.contracts import ResourceProfile
+    from test_runtime_v3_c import bounds,make
+    from test_runtime_v3_finite_borrow import record
+    budget=bounds(max_row_bytes=4096,max_batch_bytes=4096,max_state_bytes=65536,max_resident_bytes=1024*1024)
+    initial={'shared':b'x'*1000}
+    memory=reducer_memory.declare(initial,budget)
+    out=record({'k':1})
+    peers=reducer_memory.yielded_peers(initial,initial,out,memory,budget)
+    assert peers==reducer_memory.measure_tree(initial,max_bytes=65536,max_nodes=100).retained
+    for mode in ('finish','error','close'):
+        def reducer(state,row):
+            if mode=='error' and row['k']==3:
+                raise ValueError('controlled third-group failure')
+            return {'k':row['k'],'shared':state['shared']}
+        spec=make('KernelSpec',kind='reduce',configuration={'on':['k'],'occurrence_id':'reduce-test',
+            'reducer_program':'reduce',reducer_memory.FIELD:memory})
+        grant=reducer_memory.resident_bytes(memory,budget)
+        stage=make('StageSpec',resident_bytes=grant,profile=ResourceProfile(requests={'cpu_millis':1000,'memory_bytes':grant}))
+        program=CallableSpec.create(reducer,fn_args=(initial,))
+        svc=SimpleNamespace(bounds=budget,assignment=SimpleNamespace(stages=(stage,)),
+            programs={'reduce':LoadedProgram('callable',program,'0'*64)},check_stop=lambda:None)
+        owner=OperatorKernel(spec,services=svc,partition_id='p0')
+        rows=[{'k':i} for i in (1,2,3)]
+        folded=reduce_ordered_groups(iter((str(row['k']),row,record(row)) for row in rows),
+            spec=spec,services=svc,retain=owner._retain_reducer_peers)
+        assert owner.retained_resident_bytes==0
+        first=next(folded)
+        assert dict(first.inline)=={'k':1,'shared':initial['shared']}
+        assert 7*4096<owner.retained_resident_bytes<grant
+        if mode=='close':
+            folded.close()
+        elif mode=='error':
+            with pytest.raises(ValueError,match='third-group'):
+                list(folded)
+        else:
+            assert [r.inline['k'] for r in folded]==[2,3]
+        assert owner.retained_resident_bytes==0

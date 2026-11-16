@@ -399,6 +399,7 @@ class OperatorKernel:
         self._recovery_rows = None
         self._recovery_buffering = False
         self._started = False
+        self._reducer_retained_bytes = 0
         self._closed = False
         self._restored = False
         self._image: dict[str, Any] | None = None
@@ -967,6 +968,19 @@ class OperatorKernel:
             instance = self._slot_instance(0)
             instance.finish(instance.native_call_ordinal)
 
+    @property
+    def retained_resident_bytes(self) -> int:
+        """Yield-suspended peers, excluding the current output Record itself.
+
+        Reducer initial/current state and live merge/next-group windows are
+        measured under the original grant. This is not a budget authority or
+        checkpoint field; the frame codec adds it to its own output allocation.
+        """
+        return self._reducer_retained_bytes
+
+    def _retain_reducer_peers(self, size: int) -> None:
+        self._reducer_retained_bytes = size
+
     def _finish_complete(self) -> Iterator[Record]:
         region = getattr(self, '_relational_region', None)
         if region is not None:
@@ -984,7 +998,8 @@ class OperatorKernel:
         elif kind == "reduce":
             from .relational import reduce_partition
 
-            yield from self._emit(reduce_partition(self._ports[self._port_order[0]].records(), spec=self._spec, services=self._services))
+            yield from self._emit(reduce_partition(self._ports[self._port_order[0]].records(), spec=self._spec,
+                services=self._services,retain=self._retain_reducer_peers))
         elif kind == "groups":
             from .relational import emit_groups
 
@@ -1359,6 +1374,7 @@ class OperatorKernel:
 
     # -- K022 close ---------------------------------------------------------
     def close(self) -> None:
+        self._reducer_retained_bytes = 0
         if self._closed:
             return
         for instance in self._instances:

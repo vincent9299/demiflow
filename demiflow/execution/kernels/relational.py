@@ -146,12 +146,12 @@ def _initial_state(spec: KernelSpec, services: RuntimeServices) -> Any:
 
 
 def reduce_partition(
-    records: Iterator[Record], *, spec: KernelSpec, services: RuntimeServices
+    records: Iterator[Record], *, spec: KernelSpec, services: RuntimeServices, retain=None
 ) -> Iterator[Record]:
     """K006: external grouping, provenance-order fold, no associativity assumed."""
     on = tuple(_cfg(spec, "on"))
     yield from reduce_ordered_groups(_ordered_group_rows(records, on, spec, services),
-                                     spec=spec, services=services)
+                                     spec=spec, services=services, retain=retain)
 
 
 def admit_reducer(spec, services, *, join_depth=None):
@@ -166,9 +166,9 @@ def admit_reducer(spec, services, *, join_depth=None):
     return memory
 
 
-def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices, memory_join_depth=None):
+def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices, memory_join_depth=None, retain=None):
     """One original sequential fold; caller proves complete ordered key groups."""
-    from .reducer_memory import check_initial,check_state
+    from .reducer_memory import check_initial,check_state,yielded_peers
     memory = admit_reducer(spec,services,join_depth=memory_join_depth)
     on = tuple(_cfg(spec, "on"))
     if not on:
@@ -218,7 +218,14 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
                 if current_key is not missing and state is not None:
                     out=output(state,current_key,sequence)
                     sequence+=1
-                    yield out
+                    if memory is not None and retain is not None:
+                        retain(yielded_peers(initial,state,out,memory,services.bounds,
+                                            pending=(row,current_key,key)))
+                    try:
+                        yield out
+                    finally:
+                        if retain is not None:
+                            retain(0)
                     del out
                 state=None  # previous group cannot coexist with the next deepcopy
                 current_key=key
@@ -236,8 +243,13 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
                 raise _err('BUDGET_EXCEEDED','reducer state exceeds max_state_bytes')
             del row,_record
         if current_key is not missing and state is not None:
-            yield output(state,current_key,sequence)
+            out=output(state,current_key,sequence)
+            if memory is not None and retain is not None:
+                retain(yielded_peers(initial,state,out,memory,services.bounds))
+            yield out
     finally:
+        if retain is not None:
+            retain(0)
         close=getattr(iterator,'close',None)
         if close is not None:
             close()

@@ -27,7 +27,8 @@ class TreeSize:
     nodes: int
 
 
-def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None):
+def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
+                 additional_roots=(), excluded_roots=()):
     """Inspect a bounded object graph without running user sizing methods.
 
     Aliases count once. Known builtin container copies include conservative
@@ -89,8 +90,29 @@ def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None):
         if retained > max_bytes or (max_copy_bytes is not None and copied > max_copy_bytes):
             raise _error('BUDGET_EXCEEDED', 'Reducer retained objects exceed the resident window')
 
+    # Output codecs account for the current Record. Seed its reachable objects
+    # before measuring peers so shared immutable payloads are not counted twice.
+    for excluded in excluded_roots:
+        visit(excluded, 0)
+    retained = copied = mutable = deepest = 0
     visit(value, 0)
+    for root in additional_roots:
+        visit(root, 0)
     return TreeSize(retained, copied, 512 * mutable + 256 * deepest, len(seen))
+
+
+def yielded_peers(initial, state, output, value, bounds, *, pending=()):
+    """Known peers at a suspended yield, excluding the codec-owned Record.
+
+    There is one shared traversal for initial/current/next row/group keys. The
+    explicit merge subwindow remains live only while a next group is pending.
+    This observes the original grant; it neither reserves nor persists bytes.
+    """
+    measured = measure_tree(initial,
+        max_bytes=value['initial_bytes'] + value['state_resident_bytes'] + 3 * bounds.max_row_bytes,
+        max_nodes=value['inspection_nodes'], additional_roots=(state, *pending),
+        excluded_roots=(output.inline, output.source_position))
+    return measured.retained + (7 * bounds.max_row_bytes if pending else 0)
 
 
 def declare(initial, bounds):
