@@ -317,7 +317,7 @@ def execute_native_plan(executor, source, plan, *, layout, execution_id,
     if placement.backend == "arrow_batch":
         from .arrow_batch_sink import execute as backend_execute
         iterator = backend_execute(executor, source, plan, sink_schema, execution=placement)
-    elif placement.backend == 'datafusion':
+    elif placement.backend in {'datafusion', 'local_pull'}:
         from .dataset_native import execute as backend_execute
         iterator = backend_execute(executor, source, plan, arrow=arrow,
                                    sink_schema=sink_schema, execution=placement)
@@ -326,17 +326,18 @@ def execute_native_plan(executor, source, plan, *, layout, execution_id,
         from .native_resources import _sealed_ceilings
         ceiling = _sealed_ceilings(placement)
         iterator = iter_lance_batches(source.query, batch_size=ceiling['inflight_rows'] or 256)
-    elif placement.backend == 'local_pull':
-        iterator = executor._apply_plan(source, plan, _native=False, execution=placement)
-        if arrow:
-            iterator = executor._rows_as_batches(iterator, batch_format='pyarrow',
-                schema=sink_schema, byte_limits=action.context.limits)
     elif placement.backend == 'local_stream':
         from .stream_delivery import iter_stream_rows
         arguments = action.declaration.get('arguments') or {}
         limit = (arguments.get('limit', arguments.get('batch_size'))
                  if action.declaration.get('kind') in {'take', 'take_batch'} else None)
-        iterator = iter_stream_rows(executor, source, plan, action=action, execution=placement, limit=limit)
+        if arrow:
+            from .dataset_native import execute as backend_execute
+            iterator = backend_execute(executor, source, plan, arrow=True,
+                sink_schema=sink_schema, execution=placement)
+        else:
+            iterator = iter_stream_rows(executor, source, plan, action=action,
+                execution=placement, limit=limit)
     else:
         raise PlanContractError('unsupported_layout', 'Unsupported native execution backend')
     try:
