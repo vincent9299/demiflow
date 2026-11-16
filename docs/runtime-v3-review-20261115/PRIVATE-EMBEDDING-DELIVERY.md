@@ -152,3 +152,31 @@ was terminated. The repaired group exited normally. The earlier lifecycle
 exploration had three workbench certification failures while files were still
 being edited; these remain unaccepted until the fixed-source rerun. None of
 these exploratory runs substitutes for the final source-bound receipt.
+
+The fixed follow-up `97734fddcea88f367ffc87743a4693439a97320f` passed all
+61 selected tests in 249.61 s. The runner exited 0; its 2,145 tracked source/test
+hashes and clean HEAD/status were identical before/after. Evidence:
+`/tmp/demiflow-model-stop-fixed-r1/verification.json` and `junit.xml`. This also
+reran the three earlier workbench certification failures successfully without
+changing their tests. Frozen seven files still match `362d8528` byte-for-byte.
+
+Coordinator review then extended the same observation channel to actual
+`PromptActor.call_metrics` and `_runtime.request_gate`. Prompt summaries keep
+their own closed schema, with no invented embedding phase fields. Routed nodes
+report each actual child under its sealed route name; every declared child is
+represented exactly once per observed actor instance. Route histograms stay
+separate. The original Prompt/Embedding declarative-admission positive tests both
+passed before the final routed extension.
+
+Private Prompt/Routed audit consumes the coordinator-owned sealed
+`_private_prompt_nodes[(occurrence, route)]` declaration and the shared
+`collect_journal_totals` flag. Normalized local paths are deduplicated across
+Embedding and Prompt routes; this remains read-only history, not current-run
+request accounting. A false flag preserves a named skip with no read for that
+route. Prompt binding and response journaling remain owned by the other lane.
+
+A new stop probe also locked an existing limit: native `run_stream` stopped
+before its first committed cut does **not** acquire resume authority merely
+because paid HTTP responses exist. The existing RunContext guard refuses that
+resume before a second HTTP; confirmed responses and original admission remain
+in the journal. No-cut rejection was retained, not relaxed to satisfy the probe.

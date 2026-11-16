@@ -138,3 +138,32 @@ def test_cooperative_drain_remains_bounded_by_original_instance_deadline():
         assert ended.wait(1)
         instance.close()
     assert not instance.thread.is_alive()
+
+
+def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.run_journal import RunJournal
+    stop = tmp_path/'STOP'
+    server['delay'] = .2
+    def on_request():
+        if len(server['bodies']) == 2:
+            stop.touch()
+    server['on_request'] = on_request
+    def flow():
+        return data.from_items([{'text': 'a'}, {'text': 'b'}]).map_embeddings(
+            model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=2)
+    with pytest.raises(ServiceStopped, match='operator_stop_file'):
+        with RunContext.start(tmp_path/'run', limits={'max_requests': 2}) as run:
+            reference = run.ref
+            flow().run_stream(stop_file=stop)
+    assert len(server['bodies']) == 2
+    stop.unlink()
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    with pytest.raises(RecoveryContractError, match='P3 native sink adapter'):
+        with RunContext.resume(reference):
+            flow().run_stream(stop_file=stop)
+    assert len(server['bodies']) == 2
+    with RunJournal(tmp_path/'run')._connection() as db:
+        assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 2
+        assert db.execute("SELECT consumed FROM runtime_budgets WHERE name='requests'").fetchone()[0] == 2
