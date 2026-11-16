@@ -66,6 +66,8 @@ def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
     from .dataflow_models import build_model_factory, _json_config
     from ..resources.contracts import ResourceProfile
     children, limits, route, isolate, max_requests = declaration.constructor_args
+    if any(child.constructor_args[1].get('service') is not None for child in children.values()):
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Owned Prompt route services require independent service placement')
     models = {name: build_model_factory(child.constructor_args[0], program_ref=None, bounds=bounds)
               for name, child in children.items()}
     first = next(iter(models.values()))

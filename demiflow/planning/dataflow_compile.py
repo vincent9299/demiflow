@@ -325,9 +325,11 @@ def compile_kernel_spec(
         configuration = _plain(model.configuration)
         configuration.update(concurrency=settings.get('concurrency', 1),
                              catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
-        return replace(model, configuration=configuration,
+        model = replace(model, configuration=configuration,
             profile=ResourceProfile(requests={**model.profile.requests, "memory_bytes":
                 configuration["concurrency"] * (bounds.max_batch_bytes + bounds.max_row_bytes)}))
+        from ..execution.dataflow_prompt_service import service_kernel
+        return service_kernel(model, settings)
     if definition.compiler_symbol == _MODEL_COMPILER:
         from ..execution.dataflow_models import build_model_factory
         return build_model_factory(operation, program_ref=program_ref, bounds=bounds)

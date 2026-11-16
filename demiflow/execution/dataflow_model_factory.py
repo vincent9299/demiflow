@@ -7,8 +7,16 @@ from ..data.plan import CallableSpec, OperatorLLMMapOp, EmbeddingMapOp
 class PromptFactory:
     def __new__(cls, operation, settings):
         from ..operator_llm.runtime import PromptActor, InProcessOperatorLLMCoordinator
+        service = None
+        if settings.get('service') is not None:
+            from .dataflow_managed_http import restore_worker_managed_http
+            service = restore_worker_managed_http(settings['service'])
         actor = PromptActor(operation, operation.config,
-                            InProcessOperatorLLMCoordinator(operation.max_requests), operation.options)
+                            InProcessOperatorLLMCoordinator(operation.max_requests), operation.options, service=service)
+        if service is not None:
+            import hashlib
+            from .recovery_contract import document
+            actor._sealed_service_declaration = hashlib.sha256(document(settings['service'], 65536)).hexdigest()
         for name in ('when', 'call_output', 'error_output', 'environment'):
             setattr(actor, name, settings.get(name))
         actor._runtime.concurrency = settings.get('concurrency', 1)
@@ -143,6 +151,10 @@ def native_model_declaration(operation):
         settings.update(concurrency=actor._runtime.concurrency,
                         token_budget=actor._runtime.token_budget,
                         request_policy=dict(actor._request_policy) if hasattr(actor, '_request_policy') else None)
+        from .dataflow_prompt_service import prompt_service_declaration
+        service = prompt_service_declaration(actor)
+        if service is not None:
+            settings['service'] = service
         return CallableSpec.create(PromptFactory, fn_constructor_args=(replace(actor._operation, node_id=None), settings))
     if isinstance(operation, EmbeddingMapOp):
         from ..embeddings.flow_contract import embedding_facts

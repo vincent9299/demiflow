@@ -1716,6 +1716,9 @@ class Dataset:
             token_budget.validate_model(operation.config.prompt_definitions[operation.prompt_name].model.name)
         actor = PromptActor(operation, operation.config,
             InProcessOperatorLLMCoordinator(operation.max_requests), operation.options, service=service)
+        if service is not None:
+            from ..execution.dataflow_managed_http import managed_http_digest
+            actor._sealed_service_declaration = managed_http_digest(service)
         if not any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
             from ..operator_llm.http_options import validate_http_options
             validate_http_options({**(options or {}),

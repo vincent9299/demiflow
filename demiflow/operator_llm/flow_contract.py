@@ -252,6 +252,8 @@ def analyze_prompt(arguments, *, inputs, callables, resources):
 def prompt_facts(actor):
     op, runtime = actor._operation, actor._runtime
     prompt = resolve_prompt(op.config, op.prompt_name)
+    from ..execution.dataflow_prompt_service import prompt_service_declaration
+    service = prompt_service_declaration(actor)
     from ..execution.adaptive_requests import AdaptiveRequestGate
     from ..inference import request_admission_config
     declaration = getattr(actor, '_request_policy', None)
@@ -264,12 +266,13 @@ def prompt_facts(actor):
         and gate.state_path is None and gate.failures == 5 and gate.interval_s == 0)
     if (_value(prompt) != _value(resolve_prompt(runtime.config, op.prompt_name)) or _value(prompt) != _value(actor._prompt)
             or op.options != runtime.options or runtime.coordinator.max_requests != op.max_requests
-            or actor.environment is not None or runtime._service is not None
+            or actor.environment is not None
             or not gate_matches
             or runtime._clients or runtime._service_owner is not None or runtime._service_owners):
         raise ValueError('Native prompt lowering/configuration copies differ')
-    return _native(prompt, op.inputs, op.output, op.outputs, runtime.options, op.max_requests,
+    facts = _native(prompt, op.inputs, op.output, op.outputs, runtime.options, op.max_requests,
                    actor.when is not None, actor.call_output, actor.error_output, runtime.token_budget, policy)
+    return facts if service is None else {**facts, 'managed_http_service': service}
 
 
 def agent_facts(actor, environment):

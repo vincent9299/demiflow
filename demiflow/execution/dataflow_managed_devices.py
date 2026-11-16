@@ -137,7 +137,7 @@ def sealed_service_placements(graph, physical, *, store):
     return placements
 
 
-def bind_worker_service(actor, spec, *, services, node_id):
+def bind_worker_service(actor, spec, *, services, node_id, service=None):
     if not spec.configuration.get(_KEY):
         return
     binding = _binding(services.constants, node_id)
@@ -155,7 +155,8 @@ def bind_worker_service(actor, spec, *, services, node_id):
         return binding
 
     check()
-    if tuple(actor.service.gpus) != tuple(binding['indices']):
+    service = actor.service if service is None else service
+    if tuple(service.gpus) != tuple(binding['indices']):
         raise _error('Managed service GPU declaration differs from its original device binding')
-    actor.service._worker_device_binding = binding
-    actor.service._worker_device_check = check
+    service._worker_device_binding = binding
+    service._worker_device_check = check

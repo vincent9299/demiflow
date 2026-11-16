@@ -349,6 +349,9 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
     node_id = spec.configuration.get('occurrence_id', spec.configuration.get('node_id'))
     kind = spec.kind
     if kind == 'prompt':
+        if 'routes' not in spec.configuration:
+            from .dataflow_prompt_service import bind_prompt_service
+            bind_prompt_service(instance, spec, services=services, node_id=node_id)
         if 'routes' in spec.configuration:
             from .dataflow_routed_prompt import bind_routed_prompt
             bind_routed_prompt(instance, services=services, node_id=node_id, configuration=spec.configuration)
