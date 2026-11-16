@@ -44,7 +44,7 @@ def test_finite_reader_prefix_original_ack_gc_and_exact_recovery(tmp_path, monke
         import ray
         assert not ray.is_initialized(), 'fixture must own its private Ray Core cluster'
         assert ray.ObjectRef is ray._raylet.ObjectRef
-    limits = {'memory_bytes': 256 * 1024**2, 'max_row_bytes': 16 * 1024**2,
+    limits = {'memory_bytes': 128 * 1024**2, 'max_row_bytes': 16 * 1024**2,
               'max_batch_bytes': 16 * 1024**2, 'checkpoint_rows': 64,
               'checkpoint_interval_ms': 60000, 'timeout_s': 120}
     prepare, close = DataflowExecution.prepare, DataflowExecution.close
@@ -66,7 +66,8 @@ def test_finite_reader_prefix_original_ack_gc_and_exact_recovery(tmp_path, monke
             incoming, = (e for e in graph.edges if e.consumer == terminal.occurrence_id)
             spec, = (e for e in physical.exchanges if e.edge_id == incoming.edge_id)
             # Explicit original R/B windows make simultaneous join+terminal
-            # residency infeasible under M=256MiB; do not force another planner.
+            # residency infeasible under M=128MiB, even after the compiler
+            # shares optional codec slack; do not force another planner.
             assert incoming.producer == join.occurrence_id
             assert spec.mode == 'finite_sealed' and spec.routing in {'forward', 'rebalance'}
             assert len(spec.consumer_partitions) == len(terminal_stage.partitions) == 1
