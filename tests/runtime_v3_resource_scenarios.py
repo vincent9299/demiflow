@@ -1,7 +1,7 @@
 """Real V012/V023 resource experiments; measurements never grant resources."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 import hashlib
 import json
 import os
@@ -698,7 +698,7 @@ def _child(scenario, provider, directory):
         assert len(databases) <= 32
         journal_allocations = {}; unconfirmed = []
         for path in databases:
-            with sqlite3.connect('file:' + str(path) + '?mode=ro', uri=True) as db:
+            with closing(sqlite3.connect('file:' + str(path) + '?mode=ro', uri=True)) as db:
                 exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='resource_allocations'").fetchone()
                 states = dict(db.execute('SELECT cleanup,count(*) FROM resource_allocations GROUP BY cleanup')) if exists else {}
             journal_allocations[str(path.relative_to(root))] = states
@@ -750,8 +750,8 @@ def _export_evidence(directory, *, provider, scenario):
     for source in databases:
         target = destination / source.relative_to(directory)
         target.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect('file:' + str(source) + '?mode=ro', uri=True) as original:
-            with sqlite3.connect(target) as snapshot:
+        with closing(sqlite3.connect('file:' + str(source) + '?mode=ro', uri=True)) as original:
+            with closing(sqlite3.connect(target)) as snapshot:
                 pages = original.execute('PRAGMA page_count').fetchone()[0]
                 page_size = original.execute('PRAGMA page_size').fetchone()[0]
                 assert pages * page_size <= 64*1024**2
