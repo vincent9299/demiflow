@@ -31,7 +31,7 @@ def committed_rows(run, action_id, fact, sink_id='materialize'):
         for partition in manifest['partitions']:
             for leaf in segment_refs(store, ArtifactRef(**partition['data_ref']), bounds):
                 assert leaf.media_type == 'application/x-demiflow-records-v3'
-                stream = _ChunkStream(store.read(leaf, max_bytes=leaf.size_bytes))
+                stream = _ChunkStream(store.read(leaf, max_bytes=max(1, leaf.size_bytes)))
                 while True:
                     line = stream.readline(bounds.max_row_bytes + 1)
                     if not line:

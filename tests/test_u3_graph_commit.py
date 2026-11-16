@@ -1,12 +1,9 @@
-"""U3 graph single-commit + full-coverage K6 acceptance (S4b, exit gates 2/3 Local).
+"""Historical graph guarantees read from the original native v3 commits.
 
-The driver schedules global cuts; every worker contributes its K6 fragment and the
-driver commits the whole group ONCE through a single CommitCoordinator on a graph
-result child action, then acks. These tests prove: one durable acked commit per cut
-(no worker owns commit authority), a full-coverage CheckpointManifest per cut
-(source/channel/operator/sink participants all covered), committed staging blocks
-read back verbatim with the shared expansion applied once, the final cut sealed,
-and the empty-source / finite_sealed edges.
+One driver commits each actual cut; final ACK contributions cover every sealed
+participant. Read exact cumulative values and source frontiers, preserve fixed
+history and restore, and collect only unrooted owned artifacts after owner exit.
+The retired K6/result-child implementation is not another runtime authority.
 """
 import sys
 
@@ -93,10 +90,25 @@ def test_empty_source_sealed_cut(tmp_path):
 
 def test_finite_sealed_mode_commits(tmp_path):
     spec, readers, n = _graph_spec(n=12, cut_rows=12, mode="finite_sealed", readers=("c0", "c1"))
-    _, _, _, _, carriers, physical = _execute(tmp_path, spec, readers, n, checkpoint_rows=64)
+    run, action_id, original, facts, carriers, physical = _execute(tmp_path, spec, readers, n, checkpoint_rows=64)
     assert any(e.mode == 'finite_sealed' for e in physical.exchanges)
     assert carriers[-1]['cut']['final'] is True
     assert carriers[-1]['dataflow.sources.v3'][0]['next_sequence'] == 12
+    # Recovery reads the original sealed plan and final ACK, starting no worker.
+    from _native_graph_fixtures import HISTORICAL_WORKERS, assert_native_graph
+    records = set(run.directory.with_name('run-driver-resources').glob('units/*/*/process.json'))
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    with RunContext.resume(run.ref) as resumed:
+        with resumed.action({"kind": "materialize", "source": {"fixture": "u3-graph-commit"}}) as execution:
+            recovered = executor.materialize_graph(spec)
+            execution.complete(dict(kind="graph-materialized", egress=recovered['egress_rows']))
+        assert execution.action_id == action_id
+        assert_native_graph(resumed, action_id, recovered, readers=readers, count=n)
+        assert resumed.journal.execution_commits(action_id) == facts
+        assert (recovered['dag_id'], recovered['plan_id'], recovered['result_ref']) == (
+            original['dag_id'], original['plan_id'], original['result_ref'])
+        assert recovered['workers'] == 0
+    assert set(run.directory.with_name('run-driver-resources').glob('units/*/*/process.json')) == records
 
 
 def test_durable_graph_reclaims_channel_segments(tmp_path):
@@ -125,3 +137,63 @@ def test_durable_graph_reclaims_channel_segments(tmp_path):
     rows = committed_rows(run, action_id, facts[-1])
     for reader in readers:
         assert [row['row'] for row in rows if row['reader_id'] == reader] == [{'x': i * 2} for i in range(n)]
+
+
+@pytest.mark.parametrize('variant', ['plain', 'concurrent', 'actor', 'resources', 'fusion_off'])
+def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, variant):
+    from dataclasses import replace
+    from _native_graph_fixtures import HISTORICAL_MEMORY, HISTORICAL_WORKERS
+    from demiflow.execution.graph import _graph_action_request
+    from demiflow.execution.dataflow_api import resolve_action_runtime
+    from demiflow.planning.dataflow_compile import lower_action
+    from demiflow.planning.dataflow_place import partition_stages
+    from demiflow.planning.dataflow_graph_adapter import specialize_graph_stages
+    from demiflow.resources.contracts import ResourceProfile
+
+    spec, readers, _ = _graph_spec(n=1)
+    if variant == 'concurrent':
+        spec['targets'][0]['plan'] = LogicalPlan((MapOp(CallableSpec.create(lambda row: row),
+            stream_options=MapStreamOptions(concurrency=2)),))
+    elif variant == 'actor':
+        class Actor:
+            def __call__(self, row):
+                raise AssertionError('compile must not execute or construct this actor')
+        spec['targets'][0]['plan'] = _stream_map(Actor)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS)
+    with RunContext.start(tmp_path/'compile', limits={'memory_bytes': HISTORICAL_MEMORY}) as run:
+        with run.action({'kind': 'materialize', 'fixture': variant}):
+            request = _graph_action_request(spec, executor)
+            policy, bounds = resolve_action_runtime(request)
+            graph = lower_action(request, bounds=bounds).graph
+            stages = partition_stages(graph, policy=policy, bounds=bounds)
+            tags = {n.occurrence_id: n.kernel.configuration['graph_private_tag'] for n in graph.nodes
+                    if 'graph_private_tag' in n.kernel.configuration}
+            target = next(v['producer'] for v in tags.values() if v['reader'] == 'c0')
+            if variant == 'resources':
+                stages = tuple(replace(stage, profile=ResourceProfile(
+                    requests={**stage.profile.requests, 'accelerator_gpu': 1}))
+                    if target in stage.occurrences else stage for stage in stages)
+            if variant == 'fusion_off':
+                policy = replace(policy, fusion=False)
+            original = {occ: stage for stage in stages for occ in stage.occurrences}
+            placed = specialize_graph_stages(graph, stages, policy=policy, bounds=bounds)
+            owners = {occ: stage for stage in placed for occ in stage.occurrences}
+            assert set(owners) == set(original)
+            router = next(n.occurrence_id for n in graph.nodes if 'graph_route' in n.kernel.configuration)
+            assert set(owners[router].partitions) == set(readers)
+            for tag, marker in tags.items():
+                target = marker['producer']
+                expected = variant != 'fusion_off' and (variant == 'plain' or marker['reader'] != 'c0')
+                assert (owners[tag] is owners[target]) is expected
+                if expected:
+                    before = (original[tag], original[target])
+                    merged = owners[tag]
+                    assert merged.occurrences == (target, tag)
+                    assert merged.resident_bytes >= sum(s.resident_bytes for s in before)
+                    assert merged.profile.requests['memory_bytes'] >= sum(s.profile.requests['memory_bytes'] for s in before)
+                    assert merged.output_bytes == sum(s.output_bytes for s in before)
+                    assert merged.state_bytes == sum(s.state_bytes for s in before)
+                else:
+                    assert owners[tag] == original[tag]
+                    assert owners[target] == original[target]
+            assert len({owners[v['producer']].stage_id for v in tags.values()}) == len(readers)

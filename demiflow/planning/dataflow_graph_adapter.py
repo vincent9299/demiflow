@@ -4,6 +4,7 @@ No scheduling, journal, source reader or commit implementation lives here. The
 compiler hooks specialize a normal captured UnionSource before its only seal.
 """
 from dataclasses import dataclass, replace
+import inspect
 import re
 import time
 
@@ -59,6 +60,21 @@ class _ClassTarget:
 def _map(target, **options):
     return MapOp(CallableSpec.create(target, **options),
                  stream_options=MapStreamOptions(concurrency=1))
+
+
+def _synchronous_target(operation):
+    """No user construction/call: admit only a plain synchronous map function."""
+    if type(operation) is not MapOp:
+        return False
+    spec = operation.callable
+    fn = spec.target
+    if (not inspect.isfunction(fn) or inspect.iscoroutinefunction(fn)
+            or inspect.isasyncgenfunction(fn) or inspect.isgeneratorfunction(fn)
+            or vars(fn) or spec.constructor_args or spec.constructor_kwargs):
+        return False
+    options = operation.stream_options
+    return options is None or (options.concurrency == 1 and options.execution == 'inline'
+                               and options.callable_scope == 'stage')
 
 
 def translate_graph(graph_spec):
@@ -136,12 +152,21 @@ def decorate_graph_capture(capture, request, *, terminal):
             semantic_id=identity(['graph-adapter-v3', node.semantic_id, marker]),
             kernel=replace(node.kernel, configuration=configuration, mergeable=False))
     mark(ancestor, {'graph_observe': True})
-    for reader, first, last in source.target_ends:
+    for (reader, first, last), branch in zip(source.target_ends, source.inputs):
         first_index, end_index = node_index(first), node_index(last)
         mark(first_index, {'graph_reader': reader})
         mark(end_index, {'graph_observe': True})
         targets[reader] = {'occurrence_id': capture.nodes[end_index].occurrence_id,
                            'partition_id': reader if last is source.router else None}
+        # This tag was created above by this adapter, not inferred from an
+        # arbitrary user map's field names. Retain its original occurrence and
+        # program; only the newly compiled physical owner may be co-located.
+        tag = branch.plan.operations[-1]
+        if type(tag) is not MapOp or tag.callable.target is not _tag:
+            raise DataflowError('INVALID_CONTRACT', 'graph branch lacks its platform tag')
+        mark(node_index(tag), {'graph_private_tag': {
+            'reader': reader, 'producer': capture.nodes[end_index].occurrence_id,
+            'synchronous_target': last is not source.router and _synchronous_target(last)}})
     mark(router, {'graph_route': source.declaration})
     terminal = next(i for i, node in enumerate(capture.nodes) if node.kind == 'terminal')
     mark(terminal, {'graph_result': {'ancestor': capture.nodes[ancestor].occurrence_id,
@@ -181,7 +206,65 @@ def specialize_graph_stages(graph, stages, *, policy, bounds):
             raise DataflowError('RESOURCE_INFEASIBLE', 'graph readers exceed admitted replica ceiling')
         result.append(replace(stage, partitions=readers, replica_min=1,
                               replica_target=len(readers), replica_max=len(readers)))
-    return tuple(result)
+    return _colocate_private_tags(graph, tuple(result), policy=policy, bounds=bounds)
+
+
+def _colocate_private_tags(graph, stages, *, policy, bounds):
+    """Run each private tag after its own plain target in the same worker.
+
+    This does not merge reader branches, router partitions, or explicit graph
+    exchanges. Both kernels and their full live memory/output/state windows
+    remain in the sealed stage. One CPU executes the two synchronous functions
+    sequentially; actor/async/concurrent or resource-constrained targets retain
+    their original independent owner.
+    """
+    if not policy.fusion:
+        return stages
+    nodes = {node.occurrence_id: node for node in graph.nodes}
+    owners = {occ: stage for stage in stages for occ in stage.occurrences}
+    incoming, outgoing = {}, {}
+    for edge in graph.edges:
+        incoming.setdefault(edge.consumer, []).append(edge)
+        outgoing.setdefault(edge.producer, []).append(edge)
+    merged, removed = {}, set()
+    for node in graph.nodes:
+        marker = node.kernel.configuration.get('graph_private_tag')
+        if marker is None or not marker['synchronous_target']:
+            continue
+        producer = marker['producer']
+        head, tail = owners[producer], owners[node.occurrence_id]
+        links = incoming.get(node.occurrence_id, ())
+        if (head.stage_id == tail.stage_id or head.stage_id in merged
+                or len(links) != 1 or links[0].producer != producer
+                or len(outgoing.get(producer, ())) != 1
+                or head.occurrences != (producer,) or tail.occurrences != (node.occurrence_id,)
+                or len(head.partitions) != 1 or len(tail.partitions) != 1):
+            continue
+        kernels = (nodes[producer].kernel, node.kernel)
+        if any(k.kind != 'MapOp' or k.state != 'none' or k.effect != 'pure'
+               or len(k.inputs) != 1 or k.inputs[0].requirement != 'incremental'
+               or k.configuration.get('concurrency', 1) != 1
+               or k.configuration.get('execution', 'inline') != 'inline'
+               or 'graph_route' in k.configuration for k in kernels):
+            continue
+        if any(s.profile.limits or s.profile.requirements
+               or set(s.profile.requests) != {'cpu_millis', 'memory_bytes'} for s in (head, tail)):
+            continue
+        resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in (head, tail))
+        control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+        if resident + control > bounds.max_resident_bytes:
+            continue
+        from ..resources.contracts import ResourceProfile
+        profile = ResourceProfile(requests={
+            'cpu_millis': max(s.profile.requests['cpu_millis'] for s in (head, tail)),
+            'memory_bytes': resident})
+        merged[head.stage_id] = replace(head,
+            occurrences=head.occurrences + tail.occurrences, profile=profile,
+            resident_bytes=resident, output_bytes=head.output_bytes + tail.output_bytes,
+            state_bytes=head.state_bytes + tail.state_bytes,
+            kernel_refs=tuple(dict.fromkeys(head.kernel_refs + tail.kernel_refs)))
+        removed.add(tail.stage_id)
+    return tuple(merged.get(stage.stage_id, stage) for stage in stages if stage.stage_id not in removed)
 
 
 def graph_credit(declaration, *, bounds):
