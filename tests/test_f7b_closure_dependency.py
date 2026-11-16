@@ -116,41 +116,93 @@ FACTORIES = {"module_cell": _make_module_cell,
 
 # --- G1: closure-captured helper edit -> SAME RunRef resume refused (three forms) ---
 
+def _checkpointable_capture(transform, trace):
+    # These three fixtures have declaration-only captures: a module, a Model.m
+    # module, or partial.args[0] module. Preserve that exact inner reference path;
+    # the explicit owner declares that none of them is mutable business state.
+    class CapturedTransform:
+        def __call__(self, row):
+            with trace.open("a") as stream:
+                stream.write(str(row["x"]) + "\n")
+            return transform(row)
+
+        def snapshot_state(self):
+            return {}
+
+        def restore_state(self, state):
+            assert state == {}
+
+    return CapturedTransform()
+
+
 @pytest.mark.parametrize("form", FORMS)
 def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
-                                        materialize_action_id, process_records)
+                                        materialize_action_id)
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg1_" + form)
     transform = FACTORIES[form](helper_mod)
-    hook, marker = _crash_hook(tmp_path)
+    captures = dict(zip(transform.__code__.co_freevars,
+                        (cell.cell_contents for cell in transform.__closure__)))
+    if form == "module_cell":
+        assert captures["helper"] is helper_mod
+    elif form == "instance_dict":
+        assert vars(captures["model"])["m"] is helper_mod
+    else:
+        assert isinstance(captures["part"], functools.partial)
+        assert captures["part"].args[0] is helper_mod
     rows_in = [{"x": i} for i in range(8)]
 
-    def pipeline():
-        return (data.from_items(rows_in).map_async(transform, concurrency=1)
-                .map_async(hook, concurrency=1))
+    def crashed_case(name):
+        case = tmp_path / name
+        case.mkdir()
+        hook, marker = _crash_hook(case)
+        trace = case / "business-calls"
+        owner = _checkpointable_capture(transform, trace)
+        root = case / "run"
+        def pipeline():
+            return (data.from_items(rows_in).map_async(owner, concurrency=1)
+                    .map_async(hook, concurrency=1))
+        with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
+            with RunContext.start(root, limits=LIMITS) as run:
+                reference = run.ref
+                with data.local_execution(workers=1, worker_mode="process", partitions=1,
+                                          unified_chain=True):
+                    pipeline().materialize().take_all()
+        assert_worker_killed(marker, root)
+        assert_released(root)
+        return root, reference, pipeline, trace
 
-    root = tmp_path / "run"
-    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
-        with RunContext.start(root, limits=LIMITS) as run:
-            reference = run.ref
-            with data.local_execution(workers=1, worker_mode="process", partitions=1,
-                                      unified_chain=True):
-                pipeline().materialize().take_all()
-    # Unedited code runs to the crash point: driver/worker manifests agree.
-    assert_worker_killed(marker, root)
-    assert_released(root)
-    # Edit ONLY the captured helper; the closure's own source + pickle bytes unchanged.
+    # Same original dependency shape is genuinely resumable before its code is
+    # edited. This rules out counting an unrelated attempt-only refusal as pinning.
+    control_root, control_ref, control_pipeline, _ = crashed_case("unchanged")
+    with RunContext.resume(control_ref) as run:
+        pre = [f for f in run.journal.execution_commits(materialize_action_id(run))
+               if f["status"] == "acked"]
+        assert pre
+        with data.local_execution(workers=1, worker_mode="process", partitions=1,
+                                  unified_chain=True):
+            rows = control_pipeline().materialize().take_all()
+        assert rows == [{"input": i, "value": i + 1} for i in range(8)]
+        after = {f["commit_id"]: f for f in run.journal.execution_commits(materialize_action_id(run))}
+        assert all(after[f["commit_id"]]["receipts"] == f["receipts"] for f in pre)
+    assert_released(control_root)
+
+    root, reference, pipeline, trace = crashed_case("edited")
+    before_calls = trace.read_bytes()
+    # Edit ONLY the captured helper; original callable and reference path survive.
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code") as excinfo:
+    with pytest.raises((RecoveryContractError, DataflowError), match="code") as excinfo:
         with RunContext.resume(reference):
             with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
-    assert not isinstance(excinfo.value, TimeoutError)
-    assert_released(tmp_path / "run")
-
+    if isinstance(excinfo.value, DataflowError):
+        assert excinfo.value.code == "INVALID_CONTRACT"
+        assert "Loaded program code differs from the sealed pin" in str(excinfo.value)
+    assert trace.read_bytes() == before_calls, "edited code ran before pin verification"
+    assert_released(root)
 
 
 # --- G3: closure-captured helper edit -> worker LOAD gate refuses (three forms) ---

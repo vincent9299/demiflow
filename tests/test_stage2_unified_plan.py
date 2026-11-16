@@ -749,11 +749,14 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
     assert_released(root)
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code") as excinfo:
+    with pytest.raises((RecoveryContractError, DataflowError), match="code") as excinfo:
         with RunContext.resume(reference):
             with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
+    if isinstance(excinfo.value, DataflowError):
+        assert excinfo.value.code == "INVALID_CONTRACT"
+        assert "Loaded program code differs from the sealed pin" in str(excinfo.value)
     assert not isinstance(excinfo.value, TimeoutError)
     assert_released(tmp_path / "run")
 
