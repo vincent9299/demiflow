@@ -589,12 +589,13 @@ def _is_walkable_value(value):
     import functools
     import inspect
     import types
-    if value is None or isinstance(value, (str, int, float, bool, bytes, bytearray)):
+    kind = type(value)
+    if value is None or issubclass(kind, (str, int, float, bool, bytes, bytearray)):
         return False
-    if isinstance(value, (types.ModuleType, functools.partial,
+    if issubclass(kind, (types.ModuleType, functools.partial,
                           list, tuple, set, frozenset, dict)):
         return True
-    if inspect.isfunction(value) or inspect.isclass(value) or inspect.ismethod(value):
+    if kind in (types.FunctionType, types.MethodType) or issubclass(kind, type):
         return True
     if type(value) in (staticmethod, classmethod, property) or _instance_namespace(value) is not None:
         return True
@@ -642,7 +643,8 @@ def _by_value_business_modules(function):
         if nodes > _DEP_MAX_NODES:
             raise RecoveryContractError(
                 "Business dependency walk exceeds value budget; code-pin refuses (fail-closed)")
-        if isinstance(value, types.ModuleType):
+        kind = type(value)
+        if issubclass(kind, types.ModuleType):
             name = getattr(value, "__name__", "")
             if name and name != "__main__":
                 modules.append(value)
@@ -653,10 +655,10 @@ def _by_value_business_modules(function):
         if type(value) is property:
             enqueue((value.fget, value.fset, value.fdel))
             continue
-        if inspect.ismethod(value):
+        if kind is types.MethodType:
             enqueue((value.__self__, value.__func__))
             continue
-        if inspect.isfunction(value):
+        if kind is types.FunctionType:
             functions += 1
             if functions > _DEP_MAX_FUNCTIONS:
                 raise RecoveryContractError(
@@ -668,7 +670,7 @@ def _by_value_business_modules(function):
             else:
                 enqueue(_by_value_reachable(value))
             continue
-        if inspect.isclass(value):
+        if issubclass(kind, type):
             if _is_by_reference_class(value):
                 module = sys.modules.get(value.__module__)
                 if module is not None:
@@ -678,16 +680,19 @@ def _by_value_business_modules(function):
                 enqueue(type.__dict__["__bases__"].__get__(value, type(value)))
                 enqueue((type(value),))
             continue
-        if isinstance(value, functools.partial):
-            enqueue((value.func,))
-            enqueue(value.args)
-            enqueue(value.keywords.values())
+        if issubclass(kind, functools.partial):
+            fields = functools.partial.__dict__
+            enqueue((fields['func'].__get__(value, kind),))
+            enqueue(fields['args'].__get__(value, kind))
+            enqueue(dict.values(fields['keywords'].__get__(value, kind)))
             continue
-        if isinstance(value, dict):
-            enqueue(value.values())
+        if issubclass(kind, dict):
+            enqueue(dict.values(value))
             continue
-        if isinstance(value, (list, tuple, set, frozenset)):
-            enqueue(value)
+        container = next((base for base in (list, tuple, set, frozenset)
+                          if issubclass(kind, base)), None)
+        if container is not None:
+            enqueue(container.__iter__(value))
             continue
         cls = type(value)
         # cloudpickle serializes a by-value instance's class as well as its data.
