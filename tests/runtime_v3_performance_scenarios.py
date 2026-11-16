@@ -521,13 +521,20 @@ def run_child(config):
     (root / 'temporary').mkdir(exist_ok=True)
     spec, variant, provider = config['spec'], config['variant'], config['provider']
     expected_root = Path(variant['root']).resolve()
-    assert os.environ['DEMIFLOW_RESOURCE_ROOT'] == str(root / 'capacity')
+    private_environment = {
+        'DEMIFLOW_RESOURCE_ROOT': str(root / 'capacity'),
+        'DEMIFLOW_RESOURCE_HOME': str(root / 'resource-home'),
+        'DEMIFLOW_FORGE_DOMAIN': str(root / 'forge-domain'),
+    }
+    for name, value in private_environment.items():
+        assert os.environ.get(name) == value, f'{name} must belong to this trial'
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(expected_root)
     from demiflow import data
     from demiflow.execution.run_context import RunContext
     cancellation = config['phase'] == 'cancel'
     facts = {'schema': 'demiflow.performance.trial.v1', **config,
+             'private_environment': private_environment,
              'input': input_digest(spec['id']), 'status': 'failed'}
     imports, observations = ImportObserver(), Observations()
     sys.meta_path.insert(0, imports)
@@ -553,7 +560,7 @@ def run_child(config):
                     raise RuntimeError('owned Ray address required; never connect to an implicit cluster')
                 ray.init(address=address, log_to_driver=False, runtime_env={'env_vars': {
                     'PYTHONPATH': str(expected_root) + ':' + str(OWN_TREE / 'tests'),
-                    'DEMIFLOW_RESOURCE_ROOT': str(root / 'capacity'),
+                    **private_environment,
                     'PYTHONDONTWRITEBYTECODE': '1'}})
                 outer.callback(ray.shutdown)
                 nodes = [n for n in ray.nodes() if n['Alive']]
@@ -715,7 +722,10 @@ def measure_trial(spec, variant, phase, repetition, provider, output_root, **set
     _write(output_root / 'config.json', config)
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1',
                PYTHONPATH=variant['root'] + ':' + str(OWN_TREE / 'tests'),
-               DEMIFLOW_RESOURCE_ROOT=str(output_root / 'capacity'), TMPDIR=str(output_root / 'tmp'))
+               DEMIFLOW_RESOURCE_ROOT=str(output_root / 'capacity'),
+               DEMIFLOW_RESOURCE_HOME=str(output_root / 'resource-home'),
+               DEMIFLOW_FORGE_DOMAIN=str(output_root / 'forge-domain'),
+               TMPDIR=str(output_root / 'tmp'))
     Path(env['TMPDIR']).mkdir()
     selected_gpu = None
     if spec['id'] == 'cpu_gpu':

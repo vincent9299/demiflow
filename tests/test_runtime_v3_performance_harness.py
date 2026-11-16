@@ -121,9 +121,12 @@ def test_empty_or_selected_subset_does_not_certify_whole_matrix():
 
 
 @pytest.mark.slow
-def test_actual_small_dataset_uses_original_route_ack_and_process_cleanup(tmp_path):
+def test_actual_small_dataset_uses_original_route_ack_and_process_cleanup(tmp_path, monkeypatch):
     # tmp_path is controlled by --basetemp=/tmp/demiflow-* in the exact command.
     spec = next(item for item in json.loads(PLAN_PATH.read_text())['cases'] if item['id'] == 'small_data')
+    inherited = tmp_path / 'must-not-use-parent-domain'
+    for name in ('DEMIFLOW_RESOURCE_ROOT', 'DEMIFLOW_RESOURCE_HOME', 'DEMIFLOW_FORGE_DOMAIN'):
+        monkeypatch.setenv(name, str(inherited / name))
     trial = measure_trial(spec, {'root': str(OWN_TREE), 'kind': 'candidate'},
                           'warmup', -1, 'local', tmp_path / 'actual')
     assert trial['status'] == 'passed', trial.get('error') or trial.get('failures')
@@ -132,6 +135,12 @@ def test_actual_small_dataset_uses_original_route_ack_and_process_cleanup(tmp_pa
     assert trial['cuts'][-1]['status'] == 'acked'
     assert trial['source_unchanged'] and trial['resources']['samples'] > 0
     assert trial['remaining_observed_descendants_after_driver_exit'] == []
+    assert not inherited.exists()
+    assert trial['private_environment'] == {
+        'DEMIFLOW_RESOURCE_ROOT': str(tmp_path / 'actual' / 'capacity'),
+        'DEMIFLOW_RESOURCE_HOME': str(tmp_path / 'actual' / 'resource-home'),
+        'DEMIFLOW_FORGE_DOMAIN': str(tmp_path / 'actual' / 'forge-domain'),
+    }
 
 
 def test_ordered_small_pipeline_cannot_pass_after_result_permutation():
