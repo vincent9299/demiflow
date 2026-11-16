@@ -4,7 +4,7 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
-当前隔离分支已集成至 `fd594c5`。这不是“全部完成”的版本：性能和部分正式验收门仍在收口，未推送或合入主仓。
+当前生产集成已到 `6e1020c`（Ray mailbox候选）；本页各项保留实际验收版本。这不是“全部完成”的版本：性能和部分正式验收门仍在收口，未推送或合入主仓。
 
 - **Dataset → 原提交 → 恢复**：函数状态修复、borrowed thread 状态预算修复均已集成。原慢消费者不改预算通过；40 项状态/原回归通过，见 [BORROWED-THREAD-STATE-CLOSURE.md](BORROWED-THREAD-STATE-CLOSURE.md)。新增纯辅助函数的不可变默认参数不再把队列生产误标为 attempt-only；可变默认值/闭包仍拒绝假恢复。
 - **真实 Ray**：总控在 `fdffa2e` 跑真实 1/4 CPU 函数状态与原 ACK 恢复，以及 Ray 公开 workers/native_resources，**13 passed / 0 skipped / 209.17秒**。此前 `9d3481f` 的98 API/168例矩阵与原GPU绑定合组6 passed；最后无RayData单项因夹具没有集群而红，同HEAD独立私有集群补跑1 passed，红回执保留。
@@ -15,6 +15,12 @@
 - **容量池历史积累**：只在原池归档已RELEASED记录，保留原字节、重复release与ID不可重用，bounded scan不足时不准入；50项私有池测试通过。新布局不可与旧flat-only客户端混用，未部署共享池。测试误触共享池及精确恢复单独披露于下方及 [CAPACITY-HISTORY-CLOSURE-20261116.md](CAPACITY-HISTORY-CLOSURE-20261116.md)。
 - **本轮新组合失败闭环**：初次35节点为26 passed/7 failed/2 PG skipped；真实producer默认参数误拒已修，结果读取夹具改为观察原read_admitted路径，quota仍锁定原PromptBudgetExceededError及一次计费，进程测试runner加main guard。固定 `fd594c5` 12 passed/2 PG skipped，覆盖7个原失败与5个可变helper反例。原断言的数据/额度/ACK语义保留，未把PG跳过算通过。
 
+
+- **原提交与物理驻留正式门已接线**：multiworker barrier、actor lifecycle、driver restart 在 owner `a19e78a` Local 4项、真实Ray 3项通过。总控独立逐组核2123条输入摘要及原附件，0不符；见 [NATIVE-RESIDENCY-PRIMARY-VERIFICATION.json](NATIVE-RESIDENCY-PRIMARY-VERIFICATION.json)。完整target/broadcast公开Dataset lowering仍未证明。
+- **批量控制通信**：原帧不变，只批已就绪消息，最多64条/1MiB；正常、原真实Ray终端、Local提前关闭/读失败和6个SIGKILL窗口，owner固定 `d8d241e` 27项通过。另512条原ACK只用28次成功Ray RPC。总控独立核两组各1806输入、XML及附件全等，见 [CONTROL-BATCHING.md](CONTROL-BATCHING.md) 和 [独立复核](CONTROL-BATCHING-PRIMARY-VERIFICATION.json)。双宿主20k→10k依然超原120秒，不能称性能闭环。
+- **元数据与Ray调度候选**：`1e9fb87` 在原结构遍历先证明编码上界后使用C JSON编码，原字节/身份不变，超保守界继续原增量编码；原历史/身份等115项通过。`6e1020c` 每worker仅一个有界在途Ray mailbox读取，保持原deadline/unknown/fence，86项控制单元通过，尚待合并数据批读后真实Ray复验。两项均不是正式五轮性能证据。
+- **完整业务/产品补验暴露真缺口**：search→enqueue跨物理阶段cut会提前结束native producer unit，正在修；工作台静态检查仍拒backend_options，固定thread且环境不传部署GPU配置，不能拿引擎CUDA成功冒充工作台GPU跑通。Notebook真实Jupyter→原SQL→DataFusion→Lance已正向通过；完整产品门仍待收口。
+
 最新原始总控回执：`/tmp/demiflow-ray-launch-fdffa2-evidence/verification.json`、`/tmp/demiflow-native-closure-fd594-evidence/verification.json`、`/tmp/demiflow-largegraph-b426/large_graph/trial.json`。完整同HEAD终验待批量传输候选合并后进行。
 
 ## 两条原始意图与目前判断
@@ -23,9 +29,9 @@
 
 **平台 root**：正确、稳定、高性能、通用、架构干净的统一数据计算平台，完整支撑实际业务。Local/Ray Core 是承载方式，同一 Dataset、真实图、有限资源、原生提交与恢复必须一起成立。原文、来源会话及 I01–I14 见 [INTENT.md](../unified-runtime-v3-20261114/INTENT.md)。
 
-Dataset→真实 worker→数据交接→终端→原提交/ACK→恢复主链已经接通，真实硬件复验发现的跨机租约缺陷现已闭环，旧回归暴露的函数状态缺陷仍在修复，不能宣布完成。最新完整矩阵生产候选 **ab1b334** 的 Local/真实 Ray Core 各98 API、168例全通过；工作台实际执行图、取消/恢复、原宽数据5项通过。转换前共驻、恢复回读、提前关闭及旧终端断言迁移均已完成定向验收。随后 **5ff5da9** 仅修私有环境第三方依赖误分类，真实 Ray 转换13项与终端4项通过，未借用旧矩阵冒称新HEAD全量验证。
+Dataset→真实 worker→数据交接→终端→原提交/ACK→恢复主链已经接通，真实硬件复验发现的跨机租约缺陷现已闭环，旧回归暴露的函数状态缺陷已修且真验；性能、完整业务和产品接线仍有缺口，不能宣布完成。最新完整矩阵生产候选 **ab1b334** 的 Local/真实 Ray Core 各98 API、168例全通过；工作台实际执行图、取消/恢复、原宽数据5项通过。转换前共驻、恢复回读、提前关闭及旧终端断言迁移均已完成定向验收。随后 **5ff5da9** 仅修私有环境第三方依赖误分类，真实 Ray 转换13项与终端4项通过，未借用旧矩阵冒称新HEAD全量验证。
 
-用户已授权本机4张H100及20机2张H100测试。真实本机 GPU 四项通过（使用一张卡）；两机真实 Dataset 原四例从 **1过/3失败** 修到 **4项全过**；正常写出、远程actor损失后的原ACK恢复、共享源union/repartition与非共享读取域拒绝均成立。旧失败来自共享锁身份错误使用各宿主不同的本地设备号。另旧 code-pin 组合复验暴露 **workers=1持久停车丢失函数 closure/default 状态**，相同8行输出变成8个1，workers=4输出1…8。函数状态仍在原所有者隔离树修复；跨机租约已集成 `3f989a0` 并补 `f9af1eb` 原等待诊断。CPU/GPU跨宿主绑定仍需完成，不直接撤销现行保护。
+用户已授权本机4张H100及20机2张H100。单卡、四卡、两宿主六卡及远端actor损失后的原ACK恢复均已实际验证；scope及复核见上方。CPU/GPU引擎验收不等于工作台GPU准入通过。旧workers=1函数状态丢失、双机锁身份误用宿主设备号已修复，不再列为当前缺陷。
 
 ## 已验证的范围（每项保留自己的版本）
 
@@ -55,7 +61,7 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 ## 当前仍在处理的核心项
 
 1. **性能及及时交接**：轻量CPU和跨机逐条RPC开销，40k宽行iter_rows原120秒仍未闭环。批量传输只合并已就绪的有界消息，不等待凑满，不减少fence/credit/ACK/行字节校验。九类Local及Ray/两机正式五轮矩阵未完成。
-2. **正式门接线与完整组合**：multiworker barrier、route recovery、driver restart、actor lifecycle正在复用真实链路接回原门。target/broadcast的C层能力不能冒充公开Dataset lowering；尚缺公开端到端触发证据。原其余NotRun按实际缺口保留，不能拿专项测试数顶替。
+2. **正式门接线与完整组合**：multiworker barrier、driver restart、actor lifecycle已接回原门并真验；route recovery保留已验证子集。target/broadcast的C层能力不能冒充公开Dataset lowering；尚缺公开端到端触发证据。原其余NotRun按实际缺口保留，不能拿专项测试数顶替。
 3. **产品与真实业务**：最终同HEAD工作台实际图/来源/运行/停止/恢复，以及Notebook/Case已承诺范围组合。image/document Embedding工作台的object-read授权仍未开放；不移除守卫冒充完成。外部PostgreSQL没有测试DSN，继续明确未验。
 4. **历史与权威**：原RunJournal/CommitCoordinator、code-pin、旧来源/提交/unknown效果边界不变。已验证多机actor损失不代替整机/网络故障，旧布局容量客户端不自动获得新布局兼容保证。
 
@@ -71,7 +77,7 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 | I09 真实业务 | Local模型/队列/fetch/Save及恢复有实际链路；外部模型仅本地transport替身 | 外部PostgreSQL未连库，工作台image/document Embedding授权未开放 |
 | I11 多机 | 真实两宿主Dataset、原生结果/ACK、共享源与actor恢复通过 | 真实两宿主Dataset及远端actor损失恢复通过；整机失效/网络分区未完成 |
 | I12 产品 | 工作台看原执行图/来源、真实运行/结果/恢复，Notebook/Case已有专项回归 | 既有产品专项并非最新同HEAD全产品验收；引擎不代表全部产品root |
-| I14 完整交付 | 逐公开入口及旧失败映射，显式保留未验项 | [旧17个正式门映射](FORMAL-GATE-EVIDENCE-MAP.md)中disk_gc现已接通；其余16门仍有NotRun，不返回常量伪造通过 |
+| I14 完整交付 | 逐公开入口及旧失败映射，显式保留未验项 | [旧17个正式门映射](FORMAL-GATE-EVIDENCE-MAP.md)中disk_gc现已接通；该表是早期快照，后续已接线门以上述带版本证据为准；剩余NotRun不返回常量伪造通过 |
 
 ## 历史与工作区纪律
 
