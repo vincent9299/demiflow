@@ -2407,5 +2407,6 @@
     "business-name to physical-reader lowering",
     "two-host routing loss or whole-host/network outage",
     "all performance gates or whole product completion"
-  ]
+  ],
+  "environment_scope_correction": "Dataset-only proofs isolated RESOURCE_ROOT and RESOURCE_HOME. Recorded RESOURCE_DOMAIN is unused by production; Forge uses FORGE_DOMAIN, not set by these runners. No product domain isolation claim; later runners must use FORGE_DOMAIN."
 }

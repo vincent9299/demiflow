@@ -35,7 +35,7 @@
 
 两组各有原 `scenario-route_recovery.json`、JUnit、完整命令、进程内导入路径与测试报告。每组 2188 个源码/测试/打包输入前后无变化，两个集合相同；另实际遍历 `git archive 17a93bc` 对比这 2188 项 SHA-256，零不符。七件冻结文件逐字等于 `362d8528c27ae60a0d6ae0ccc986a0ff93847de8`。
 
-所有命令显式绑定本树 `PYTHONPATH`，资源 ROOT/HOME/DOMAIN 都在本次 `/tmp/demiflow-*` 私有目录。Ray 为本次创建的 8 CPU / 0 GPU 私有集群，结束 `shutdown_completed=true`；两组 `children_after_environment_close=[]`。Local 原 fixture FD 为 53→53；Ray 为 38→41，在原容差内，**不称零增长**。两环境 Ray Data 导入探针均为零；两组都观察到 9 次真正的公共 `execute_action` 调用，底层首次封存调用不伪装成公共入口调用。
+所有命令显式绑定本树 `PYTHONPATH`，资源 `DEMIFLOW_RESOURCE_ROOT` / `DEMIFLOW_RESOURCE_HOME` 都在本次 `/tmp/demiflow-*` 私有目录。runner 另设的 `DEMIFLOW_RESOURCE_DOMAIN` 不是生产读取的键，不能算作产品域隔离；实际产品域键为 `DEMIFLOW_FORGE_DOMAIN`。本组仅执行 Dataset 引擎，未运行 Forge/workbench 产品路径，不能据此提供产品域隔离证明。后续通用 runner 必须使用正确键。Ray 为本次创建的 8 CPU / 0 GPU 私有集群，结束 `shutdown_completed=true`；两组 `children_after_environment_close=[]`。Local 原 fixture FD 为 53→53；Ray 为 38→41，在原容差内，**不称零增长**。两环境 Ray Data 导入探针均为零；两组都观察到 9 次真正的公共 `execute_action` 调用，底层首次封存调用不伪装成公共入口调用。
 
 配套 [机器回执](ROUTE-RECOVERY-CLOSURE-20261116.json) 保留所有证据文件 SHA-256、每条链路的实际死亡身份、计划/attempt/fence、提交前缀、正数 ordinal 与结果数。报告提交只新增文档，不改变已经测试的生产/测试字节。
 
