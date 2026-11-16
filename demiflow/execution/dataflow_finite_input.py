@@ -192,9 +192,13 @@ def _records(services, ref, spec, *, target, total_rows, total_bytes, project=No
             count += 1
             if count > total_rows or byte_count > total_bytes:
                 _fail('finite producer exceeds sealed row or byte counts')
+            # Routing has consumed this frame. A suspended downstream join
+            # need not retain its wide encoded copy as well as the Record.
+            # Broadcast's independent comparison tuple keeps its own raw ref.
+            del raw
             if item['target'] == target:
                 yield record
-            del record, raw, item
+            del record, item
         if (count != total_rows or byte_count != total_bytes
                 or spec.routing == 'broadcast' and count % len(consumers)):
             _fail('finite producer row/byte count differs from seal')

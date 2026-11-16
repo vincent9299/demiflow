@@ -45,6 +45,7 @@ class TerminalBlocks:
     def __init__(self, services, partition_id, *, declaration=None, partitioned=True, budget=None):
         self.services, self.bounds = services, services.bounds
         self.partition_id, self.partitioned = partition_id, partitioned
+        self._reference_only = False
         stages = getattr(getattr(services, 'assignment', None), 'stages', ())
         granted = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in stages) if stages else self.bounds.max_resident_bytes
         if budget is None:
@@ -52,13 +53,17 @@ class TerminalBlocks:
             # original window; a new compiler never rewrites their grants.
             self._metadata_limit = min(self.bounds.max_state_bytes, granted // 2)
         else:
-            if (not isinstance(budget, Mapping) or set(budget) != {'payload_bytes', 'metadata_bytes'}
-                    or any(type(v) is not int for v in budget.values())):
+            from ..dataflow_publication_budget import REF_CARRIER
+            self._reference_only = isinstance(budget, Mapping) and budget.get('carrier') == REF_CARRIER
+            fields = {'payload_bytes', 'metadata_bytes'} | ({'carrier'} if self._reference_only else set())
+            if (not isinstance(budget, Mapping) or set(budget) != fields
+                    or any(type(budget[k]) is not int for k in ('payload_bytes', 'metadata_bytes'))):
                 raise DataflowError('INVALID_CONTRACT', 'invalid sealed terminal memory windows')
             payload, metadata = budget['payload_bytes'], budget['metadata_bytes']
             # New plans may reserve a larger codec workspace within the same
             # grant; historical plans retain their original batch/row window.
-            if (payload < self.bounds.max_batch_bytes + self.bounds.max_row_bytes
+            minimum = 4096 if self._reference_only else self.bounds.max_batch_bytes + self.bounds.max_row_bytes
+            if (payload < minimum
                     or not 3072 <= metadata <= self.bounds.max_state_bytes
                     or payload + metadata > granted):
                 raise DataflowError('RESOURCE_INFEASIBLE', 'terminal payload and metadata exceed the original grant')
@@ -97,6 +102,12 @@ class TerminalBlocks:
         self.append_parts(record, iter((raw,)), size=len(raw))
 
     def append_parts(self, record, chunks, *, size):
+        if self._reference_only:
+            ref = record.payload_ref
+            if (record.inline is not None or ref is None or ref.media_type != 'application/octet-stream'
+                    or ref.size_bytes != record.encoded_bytes
+                    or not 0 <= record.encoded_bytes <= self.bounds.max_row_bytes):
+                raise DataflowError('INVALID_CONTRACT', 'compact terminal requires its sealed stored row carrier')
         tag = record.block_partition if self.partitioned else None
         # A concrete count also creates empty blocks. No fake business rows.
         if tag is not None and (tag.occurrence_id, tag.count) not in self._layouts:

@@ -162,6 +162,9 @@ def partition_stages(
         # Per-replica working set: one input batch, the declared output bound
         # and any state ceiling co-reside inside the provisioned worker.
         resident = bounds.max_batch_bytes + kernel.output_bound_bytes + state_bytes
+        from ..execution.dataflow_publication_budget import REF_CARRIER
+        if node.kind == 'terminal' and kernel.configuration.get('input_carrier') == REF_CARRIER:
+            resident = kernel.profile.requests['memory_bytes']
         if kernel.kind == 'reduce':
             from ..execution.kernels.reducer_memory import contract, resident_bytes
             reducer_memory = contract(kernel)
@@ -424,6 +427,7 @@ def solve_residency(
     max_active_workers: int | None = None,
     max_cpu_millis: int | None = None,
     publication_workspace_bytes: int = 0,
+    publication_reservation=None,
 ) -> ResidencyPlan:
     if not stages:
         raise _error("INVALID_CONTRACT", "physical plan has no stages")
@@ -433,6 +437,8 @@ def solve_residency(
     if type(publication_workspace_bytes) is not int or publication_workspace_bytes < 0:
         raise _error('INVALID_CONTRACT', 'publication workspace must be nonnegative')
     control_reserved += publication_workspace_bytes
+    if publication_reservation is not None:
+        control_reserved = publication_reservation.maximum
     available = bounds.max_resident_bytes - control_reserved
     if available <= 0:
         raise _error("RESOURCE_INFEASIBLE", "control reservation leaves no working memory")
@@ -478,7 +484,9 @@ def solve_residency(
                          resource="max_active_workers", max_active_workers=max_active_workers)
         footprint = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
                         * len(stage.partitions) for stage in group)
-        if footprint > available:
+        group_available = (bounds.max_resident_bytes - publication_reservation.reserved(s.stage_id for s in group)
+                           if publication_reservation is not None else available)
+        if footprint > group_available:
             raise _error(
                 "RESOURCE_INFEASIBLE",
                 "a memory-connected stage group exceeds the resident budget and cannot be staged",
@@ -489,7 +497,8 @@ def solve_residency(
     leaf_stages = consumer_ids - producer_ids
     consumer_slots = max(1, len(leaf_stages))
     smallest = min(stage.resident_bytes for stage in stages)
-    if smallest > available:
+    if smallest > (bounds.max_resident_bytes - publication_reservation.base
+                   if publication_reservation is not None else available):
         raise _error("RESOURCE_INFEASIBLE", "even the smallest stage cannot start within the resident budget")
 
     required_spill = sum(ex.storage_bytes for ex in exchanges if ex.mode in _DURABLE_MODES)
@@ -761,10 +770,13 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
     cpu_ceiling = ceilings.get('cpu_millis')
     from ..execution.dataflow_publication_budget import graph_workspace_bytes
     publication = graph_workspace_bytes(graph)
+    from ..execution.dataflow_publication_budget import PublicationReservation
+    reservation = PublicationReservation(graph, stages, bounds)
     try:
         return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
                                          max_active_workers=policy.max_active_workers,
-                                         max_cpu_millis=cpu_ceiling, publication_workspace_bytes=publication)
+                                         max_cpu_millis=cpu_ceiling, publication_workspace_bytes=publication,
+                                         publication_reservation=reservation)
     except DataflowError as original:
         if original.code != "RESOURCE_INFEASIBLE":
             raise
@@ -774,7 +786,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         try:
             solve_residency(stages, (), hosts=hosts, bounds=bounds,
                             max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
-                            publication_workspace_bytes=publication)
+                            publication_workspace_bytes=publication, publication_reservation=reservation)
         except DataflowError:
             raise
         eligible = (all(s.replay != "attempt_only" for s in snapshots)
@@ -814,7 +826,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         upgraded = _share_exchange_storage(upgraded, bounds)
         return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds,
                                         max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
-                                        publication_workspace_bytes=publication)
+                                        publication_workspace_bytes=publication, publication_reservation=reservation)
 
 
 def compile_physical_dataflow(

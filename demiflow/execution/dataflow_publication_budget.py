@@ -10,6 +10,8 @@ from .contracts.dataflow_errors import DataflowError
 
 FIELD = 'publication_workspace'
 SCHEMA = 'demiflow.native_publication_workspace.v1'
+PHASE_SCHEMA = 'demiflow.native_publication_workspace.v2'
+REF_CARRIER = 'stored_typed_row.v1'
 
 
 def workspace_bytes(configuration):
@@ -17,10 +19,43 @@ def workspace_bytes(configuration):
         return 0
     value = configuration[FIELD]
     if (not isinstance(value, Mapping) or set(value) != {'schema', 'resident_bytes'}
-            or value['schema'] != SCHEMA or type(value['resident_bytes']) is not int
+            or value['schema'] not in (SCHEMA, PHASE_SCHEMA) or type(value['resident_bytes']) is not int
             or value['resident_bytes'] <= 0):
         raise DataflowError('INVALID_CONTRACT', 'invalid native publication workspace')
     return value['resident_bytes']
+
+
+def phased(configuration):
+    workspace_bytes(configuration)
+    return configuration.get(FIELD, {}).get('schema') == PHASE_SCHEMA
+
+
+class PublicationReservation:
+    """Pure interpretation of one sealed reservation; owns no allocation.
+
+    v2 reserves native conversion beside every live terminal stage. Earlier
+    finite stages may use that space only while no terminal is resident. The
+    scheduler retains those stages until its original physical-exit proof.
+    """
+    def __init__(self, graph, stages, bounds, *, declared=None):
+        terminals = [n for n in graph.nodes if n.kind == 'terminal']
+        self.bytes = max((workspace_bytes(n.kernel.configuration) for n in terminals), default=0)
+        self.scoped = bool(self.bytes) and all(phased(n.kernel.configuration) for n in terminals)
+        occurrences = {n.occurrence_id for n in terminals}
+        self.stages = frozenset(s.stage_id for s in stages if occurrences.intersection(s.occurrences))
+        base = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+        self.maximum = base + self.bytes if declared is None else declared
+        if self.bytes and self.maximum < base + self.bytes:
+            raise DataflowError('INVALID_CONTRACT', 'publication workspace lacks its original reservation')
+        self.base = self.maximum - self.bytes
+
+    def reserved(self, active, *, publishing=False):
+        return self.base + (self.bytes if publishing or not self.scoped
+                            or self.stages.intersection(active) else 0)
+
+    def admit(self, active, resident, maximum, *, publishing=False):
+        if resident + self.reserved(active, publishing=publishing) > maximum:
+            raise DataflowError('BUDGET_EXCEEDED', 'publication and physically resident workers exceed the original memory budget')
 
 
 def graph_workspace_bytes(graph):

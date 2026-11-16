@@ -987,6 +987,23 @@ class WorkerGraphRunner:
                 # Authenticate and bind the shared payload before accepting its
                 # row bytes/schema into terminal state, even for co-location.
                 batch_cache(self.services.store, self.bounds, services=self.services).locate(record)
+            elif record.inline is None and self._terminal_spec.configuration.get('input_carrier') == 'stored_typed_row.v1':
+                # Only the sealed pure-join carrier may defer hydration to the
+                # native driver. Authenticate the complete original payload
+                # before this worker ACKs its compact Record metadata.
+                ref = record.payload_ref
+                if (ref.media_type != 'application/octet-stream'
+                        or ref.size_bytes != record.encoded_bytes
+                        or not 0 <= ref.size_bytes <= self.bounds.max_row_bytes):
+                    raise DataflowError('CORRUPT_ARTIFACT', 'stored terminal row differs from its sealed payload bound')
+                chunks = self.services.store.read(ref, max_bytes=self.bounds.max_row_bytes, chunk_bytes=4096)
+                chunk = None
+                try:
+                    for chunk in chunks:
+                        self.services.check_stop()
+                finally:
+                    chunks.close()
+                del chunk
             elif record.inline is None:
                 from ..dataflow_records import clone_record
                 from ..kernels.dataflow import _materialize_row, _row_bytes

@@ -364,13 +364,15 @@ class NativeTerminalSink(_DataflowArtifactSink):
     Staging streams bounded Arrow batches from worker-produced data. Native
     prepare/inspect/commit/abort retain all destination CAS and recovery rules.
     """
-    def __init__(self, *, native, batch_rows=256, native_limits=None, **kwargs):
+    def __init__(self, *, native, batch_rows=256, native_limits=None, admit_publication=None, **kwargs):
         super().__init__(**kwargs)
         self.native = native
         self._batch_rows = batch_rows
         self._native_limits = dict(native_limits or {})
-        from .dataflow_publication_budget import workspace_bytes
+        self._admit_publication = admit_publication
+        from .dataflow_publication_budget import workspace_bytes, phased
         self._publication_workspace = workspace_bytes(self._configuration)
+        self._publication_metadata = phased(self._configuration)
         if self._publication_workspace:
             from dataclasses import replace
             self._bounds = replace(self._bounds,
@@ -424,17 +426,23 @@ class NativeTerminalSink(_DataflowArtifactSink):
             index_bytes = value
 
         def table():
-            from .batch_conversion import admit_batch_conversion, native_arrow_table
-            reserved = (held() - batch_resident + stream.buffered_bytes + 65536
+            from .batch_conversion import admit_batch_conversion, native_arrow_table, native_writer_workspace
+            writer_window = []
+            reserved = (held() - batch_resident + stream.buffered_bytes + (0 if self._publication_metadata else 65536)
                         if self._publication_workspace else 0)
             admit_batch_conversion(batch, 'pyarrow', schema=schema, bounds=self._bounds,
                 reserved_bytes=reserved, resident_workspace=bool(self._publication_workspace),
-                writer_copies=2 if self._publication_workspace else 0)
+                writer_copies=2 if self._publication_workspace else 0,
+                writer_metadata=self._publication_metadata,
+                observe_writer_workspace=writer_window.append if self._publication_metadata else None)
             result = native_arrow_table(batch, schema)
             if self._publication_workspace:
                 if size > self._bounds.max_batch_bytes or result.nbytes > self._bounds.max_batch_bytes:
                     raise DataflowError('BUDGET_EXCEEDED', 'native sink payload exceeds max_batch_bytes')
-                call(admit_workspace, 3 * result.get_total_buffer_size() + 65536,
+                overhead = writer_window[0] if self._publication_metadata else 65536
+                if self._publication_metadata and native_writer_workspace(result.schema, self._bounds) > overhead:
+                    raise DataflowError('BUDGET_EXCEEDED', 'native writer schema exceeds its constructor admission')
+                call(admit_workspace, 3 * result.get_total_buffer_size() + overhead,
                      self._bounds, _frame_retained=stream.buffered_bytes)
             elif size + result.nbytes > self._bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')
@@ -444,7 +452,11 @@ class NativeTerminalSink(_DataflowArtifactSink):
             if self._publication_workspace:
                 # The cache already owns the retained parent. Writer copies
                 # and the caller's previous yielded batch share this grant.
-                call(admit_workspace, 2 * value.get_total_buffer_size() + 65536,
+                from .batch_conversion import native_writer_workspace
+                overhead = native_writer_workspace(value.schema, self._bounds) if self._publication_metadata else 65536
+                if self._publication_metadata:
+                    overhead += sum(64*len(chunk.buffers()) for column in value.columns for chunk in column.chunks)
+                call(admit_workspace, 2 * value.get_total_buffer_size() + overhead,
                      self._bounds, _frame_retained=stream.buffered_bytes)
                 if value.nbytes > self._bounds.max_batch_bytes:
                     raise DataflowError('BUDGET_EXCEEDED', 'native Arrow payload exceeds max_batch_bytes')
@@ -574,6 +586,8 @@ class NativeTerminalSink(_DataflowArtifactSink):
         # An intermediate cut commits the durable result prefix, while the
         # external destination publishes exactly once when all inputs finish.
         with self._native_scope():
+            if manifest.get('final', True) and self._admit_publication is not None:
+                self._admit_publication()
             result['native'] = (self.native.prepare(self._blocks(manifest), context)
                                 if manifest.get('final', True) else None)
         return result
@@ -608,7 +622,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
         super().abort(prepared, context)
 
 
-def make_native_terminal_sink(spec, *, request, services, publication_reserved_bytes=None):
+def make_native_terminal_sink(spec, *, request, services, publication_reserved_bytes=None, admit_publication=None):
     from .dataflow_publication_budget import workspace_bytes
     workspace = workspace_bytes(spec.configuration)
     if workspace:
@@ -686,6 +700,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
     batch_rows = min(256, (services.policy.native_limits or {}).get("batch_rows", 256),
                      services.action.context.limits['batch_rows'])
     return NativeTerminalSink(native=native, batch_rows=batch_rows, native_limits=services.policy.native_limits,
+        admit_publication=admit_publication,
         sink_id=request.kind, store=services.store,
         action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))
 

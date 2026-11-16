@@ -92,14 +92,18 @@ class _Chain:
 
 
 class _Spool:
-    def __init__(self, file, services):
+    def __init__(self, file, services, *, bounded=False, retained_key=None):
         self.file, self.services = file, services
         bounds = services.bounds
         self.document_limit = bounds.max_row_bytes + min(bounds.max_control_bytes, 65536)
         # Leave space for encoded/decoded inputs, two output rows, the codec,
         # hash dictionaries and the caller's transport batch at the same time.
         self.index_limit = max(1, _resident_limit(services) // 16)
-        self.row_window = max(1, _resident_limit(services) // 4)
+        self.bounded = bounded
+        self.live_bytes = 0
+        self.retained_key = retained_key
+        self.row_window = max(1, _resident_limit(services) - self.index_limit - 16384
+                              if bounded else _resident_limit(services) // 4)
 
     def append(self, record, fields):
         _check_stop(self.services)
@@ -108,9 +112,15 @@ class _Spool:
         # Validate the whole declared key even when one component is null.
         token = _group_key(row, fields).encode('utf-8')
         key = b'' if any(row[name] is None for name in fields) else token
+        del row
         if len(key) > self.row_window:
             raise _err('BUDGET_EXCEEDED', 'Join key exceeds its admitted resident window')
-        document = record.document if encoded else _encode_record_document(record, max_bytes=self.document_limit)
+        if self.bounded and not encoded:
+            from ..dataflow_record_frames import encode_document
+            document = encode_document(record, self.services.bounds, services=self.services,
+                                       retained=self.index_limit + len(key))
+        else:
+            document = record.document if encoded else _encode_record_document(record, max_bytes=self.document_limit)
         resident = record.resident_bytes if encoded else record.encoded_bytes
         if len(document) + len(key) + resident > self.row_window:
             raise _err('BUDGET_EXCEEDED', 'Join input and encoding exceed the admitted resident window')
@@ -158,8 +168,12 @@ class _Spool:
         else:
             record_id = self.file.read_at(start, _ID_BYTES).decode('ascii')
             raw = self.file.read_at(start + _ID_BYTES + header[2], header[3])
-        return _decode_record_document(raw, record_id=record_id, sequence=header[4],
-            max_bytes=self.document_limit)
+        if self.bounded:
+            from ..dataflow_record_frames import decode_document
+            return decode_document(raw, record_id=record_id, sequence=header[4],
+                bounds=self.services.bounds, services=self.services,
+                retained=self.index_limit + self.live_bytes)
+        return _decode_record_document(raw, record_id=record_id, sequence=header[4], max_bytes=self.document_limit)
 
     def partition(self, chain, shift):
         children = [_Chain() for _ in range(_FANOUT)]
@@ -208,6 +222,10 @@ def _pairs(spool, left, right, *, how, shift):
             return
     for loffset, lheader in spool.entries(left):
         key = spool.key(loffset, lheader)
+        if spool.bounded:
+            spool.live_bytes = len(key)
+            if spool.retained_key is not None:
+                spool.retained_key(len(key))
         if not key:
             matches = ()
         elif index is not None:
@@ -225,15 +243,19 @@ def _pairs(spool, left, right, *, how, shift):
                 break
             if lrecord is None:
                 lrecord = spool.record(loffset, lheader)
+                if spool.bounded:
+                    from ..dataflow_record_frames import _typed_shape
+                    spool.live_bytes += _typed_shape(lrecord.inline, spool.services.bounds.max_row_bytes)[1]
             if how == 'semi':
                 yield lrecord, None
                 break
             yield lrecord, spool.record(roffset, rheader)
+        spool.live_bytes = 0
         if not seen and how in ('left', 'anti'):
             yield spool.record(loffset, lheader), None
 
 
-def join_pairs(left, right, *, left_keys, right_keys, how, services):
+def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=False, retained_key=None):
     """Yield matching real Records; spill/FD/RAM limits precede growth."""
     bounds = services.bounds
     if bounds.max_open_files < 2:
@@ -246,7 +268,7 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services):
                                           maximum=bounds.max_open_files)
     with services.store.scratch(max_bytes=bounds.max_spill_bytes,
             max_io_bytes=max(1, _resident_limit(services) // 4)) as file:
-        spool = _Spool(file, services)
+        spool = _Spool(file, services, bounded=bounded, retained_key=retained_key)
         lparts, rparts = [_Chain() for _ in range(_FANOUT)], [_Chain() for _ in range(_FANOUT)]
         for records, keys, chains in ((left, left_keys, lparts), (right, right_keys, rparts)):
             for record in records:

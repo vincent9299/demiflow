@@ -6,6 +6,7 @@ original Bounds, schema, batch size and third-party conversion semantics.
 """
 from dataclasses import dataclass
 import sys
+import io
 
 from demiflow.data.runtime_contract import check_size
 from .contracts.dataflow_errors import DataflowError
@@ -87,6 +88,47 @@ def _binary_size(value):
     raise TypeError('Arrow string/binary conversion requires str or bytes')
 
 
+def _writer_metadata(value):
+    return sum(128 + 4 * (len(key) + len(item)) for key, item in (value or {}).items())
+
+
+def _writer_type(dtype, bounds, *, depth=0, count=None):
+    """Schema/IPC descriptors only; array buffers have their own accounting."""
+    count = [0] if count is None else count
+    count[0] += 1
+    if depth > min(16, bounds.max_depth) or count[0] > bounds.max_nodes:
+        raise _error('native writer schema exceeds structural budget')
+    import pyarrow as pa
+    # Includes FlatBuffer field/type, validity/data buffer descriptors, record
+    # message framing and alignment. Schema names/metadata are counted below.
+    size = 512
+    if isinstance(dtype, pa.BaseExtensionType):
+        storage = _builtin_storage(dtype)
+        if storage is None:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'unbounded writer extension metadata')
+        size += _writer_type(storage, bounds, depth=depth+1, count=count)
+    elif pa.types.is_dictionary(dtype):
+        size += _writer_type(dtype.index_type, bounds, depth=depth+1, count=count)
+        size += _writer_type(dtype.value_type, bounds, depth=depth+1, count=count)
+    else:
+        for index in range(dtype.num_fields):
+            field = dtype.field(index)
+            size += 4 * len(field.name) + _writer_metadata(field.metadata)
+            size += _writer_type(field.type, bounds, depth=depth+1, count=count)
+    return size
+
+
+def native_writer_workspace(schema, bounds):
+    """Bound the actual schema plus the original Python file write buffer.
+
+    This replaces a 64-KiB *estimate*, not an allocated writer buffer. Payload,
+    Arrow builder and two writer copies remain separately admitted as before.
+    """
+    return (io.DEFAULT_BUFFER_SIZE + 2048 + _writer_metadata(schema.metadata)
+        + sum(4*len(field.name) + _writer_metadata(field.metadata)
+              + _writer_type(field.type, bounds) for field in schema))
+
+
 @dataclass(frozen=True)
 class _Column:
     count: int
@@ -95,15 +137,19 @@ class _Column:
 
 
 class _Admission:
-    def __init__(self, rows, bounds, reserved_bytes=0, *, resident_workspace=False, writer_copies=0):
+    def __init__(self, rows, bounds, reserved_bytes=0, *, resident_workspace=False, writer_copies=0,
+                 writer_metadata=False):
         if type(reserved_bytes) is not int or reserved_bytes < 0:
             raise DataflowError('INVALID_CONTRACT', 'conversion reserve must be a nonnegative integer')
-        if type(resident_workspace) is not bool or type(writer_copies) is not int or writer_copies < 0:
+        if (type(resident_workspace) is not bool or type(writer_copies) is not int or writer_copies < 0
+                or type(writer_metadata) is not bool):
             raise DataflowError('INVALID_CONTRACT', 'invalid conversion workspace contract')
         self.maximum = bounds.max_resident_bytes - reserved_bytes
         if not resident_workspace:
             self.maximum = min(bounds.max_batch_bytes, self.maximum)
         self.writer_copies = writer_copies
+        self.writer_metadata = writer_metadata
+        self.writer_overhead = io.DEFAULT_BUFFER_SIZE + 2048 if writer_metadata else 0
         self.buffers = self.builder = 0
         self.depth = min(16, bounds.max_depth)
         self.max_types = bounds.max_nodes
@@ -115,7 +161,7 @@ class _Admission:
         self.check(0)
 
     def check(self, extra):
-        if self.retained + extra + self.writer_copies * self.buffers > self.maximum:
+        if self.retained + extra + self.writer_copies * self.buffers + self.writer_overhead > self.maximum:
             raise _error('input and conversion workspace exceed byte budget')
 
     def visit(self, depth):
@@ -169,6 +215,11 @@ class _Admission:
             self.arrow(column, dtype.value_type, depth + 1)
             return
         if pa.types.is_string_view(dtype) or pa.types.is_binary_view(dtype):
+            if self.writer_metadata:
+                # A view can own a distinct variadic data buffer per value;
+                # IPC includes each descriptor, even for nested view columns.
+                self.writer_overhead += 64 * n
+                self.check(self.builder)
             self.buffer((max(32, n) if n else 0) * 16)
             # StringHeapBuilder packs non-inline (>12-byte) values into 32KiB
             # blocks, or one larger block for an oversized value. Account for
@@ -430,7 +481,8 @@ class _Admission:
 
 
 def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes=0,
-                           resident_workspace=False, writer_copies=0):
+                           resident_workspace=False, writer_copies=0, writer_metadata=False,
+                           observe_writer_workspace=None):
     """Return the existing window after proving constructor workspace fits.
 
     Type inference (only when no schema was declared) creates type metadata from
@@ -438,7 +490,11 @@ def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes
     remain unchanged and are passed directly to the actual constructor.
     """
     admission = _Admission(rows, bounds, reserved_bytes,
-                           resident_workspace=resident_workspace, writer_copies=writer_copies)
+                           resident_workspace=resident_workspace, writer_copies=writer_copies,
+                           writer_metadata=writer_metadata)
+    if writer_metadata and schema is not None:
+        admission.writer_overhead += _writer_metadata(schema.metadata)
+        admission.check(0)
     n = len(rows)
     fmt = 'numpy' if batch_format == 'default' else batch_format
     if fmt == 'list':
@@ -479,6 +535,11 @@ def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes
                 admission.inference_guard(values, 64 + 8 * n)
                 dtype = pa.infer_type(values)
                 del values
+            if writer_metadata:
+                admission.writer_overhead += 4*len(name) + _writer_type(dtype,bounds)
+                if schema is not None:
+                    admission.writer_overhead += _writer_metadata(schema.field(index).metadata)
+                admission.check(admission.builder)
             admission.arrow(column, dtype)
     if fmt == 'pandas':
         # Object staging, inferred/native column arrays, block consolidation and
@@ -494,4 +555,6 @@ def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes
         admission.check(admission.builder + working)
     else:
         admission.check(admission.builder)
+    if observe_writer_workspace is not None:
+        observe_writer_workspace(admission.writer_overhead)
     return admission.retained, admission.maximum

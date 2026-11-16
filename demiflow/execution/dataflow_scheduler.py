@@ -41,7 +41,8 @@ def _grant_bytes(document_value: dict) -> bytes:
 
 
 class DataflowScheduler:
-    def __init__(self, physical: PhysicalDataflow, *, resources: ResourceManager, sealed=None, placements=None) -> None:
+    def __init__(self, physical: PhysicalDataflow, *, resources: ResourceManager, sealed=None, placements=None,
+                 publication_reservation=None) -> None:
         if not isinstance(physical, PhysicalDataflow):
             raise DataflowError("INVALID_CONTRACT", "scheduler requires a sealed PhysicalDataflow")
         if resources is None:
@@ -69,6 +70,7 @@ class DataflowScheduler:
             raise DataflowError("INVALID_CONTRACT", "fairness_quantum_bytes must be a positive int")
         self._resident_budget = self._bounds.max_resident_bytes
         self._control_reserved = self._residency.control_reserved_bytes
+        self._publication_reservation = publication_reservation
         self._consumer_slots = self._residency.consumer_reserved_slots
         self._ready_limit = self._bounds.max_pending_events
         self._lease_limit = self._bounds.max_partitions
@@ -149,8 +151,18 @@ class DataflowScheduler:
     def _feasible(self, work: ReadyWork) -> bool:
         if work.operation_id in self._allocation_by_operation:
             return True  # This pending allocation already holds its reservation.
-        available = self._resident_budget - self._control_reserved - self._resident_used
+        active = {self._lease_stage[allocation] for allocation in self._resident_by_allocation}
+        active.add(work.stage_id)
+        reserved = (self._publication_reservation.reserved(active)
+                    if self._publication_reservation is not None else self._control_reserved)
+        available = self._resident_budget - reserved - self._resident_used
         return work.resident_bytes <= available
+
+    def admit_publication(self):
+        if self._publication_reservation is not None:
+            active = {self._lease_stage[allocation] for allocation in self._resident_by_allocation}
+            self._publication_reservation.admit(active, self._resident_used,
+                self._resident_budget, publishing=True)
 
     def choose(self, *, now_ms: int) -> ScheduleChoice:
         if self._closed:

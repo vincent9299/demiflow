@@ -75,6 +75,7 @@ def join_partitions(
     *,
     spec: KernelSpec,
     services: RuntimeServices,
+    retain=None,
 ) -> Iterator[Record]:
     """K005: bounded key/reference hash join, no global business ordering."""
     if spec.kind == 'exclude_keys':
@@ -91,13 +92,17 @@ def join_partitions(
     if how not in ("inner", "left", "semi", "anti"):
         raise _err("INVALID_CONTRACT", "unsupported join type", how=how)
     occurrence, budget = _occurrence(spec), _OutputBudget(spec, services, streaming=True)
+    from ..dataflow_publication_budget import REF_CARRIER
+    stored = spec.configuration.get('output_carrier') == REF_CARRIER
     from .operator import _SpoolRecords
     if type(left) is _SpoolRecords:
         left = left.for_join(lk)
     if type(right) is _SpoolRecords:
         right = right.for_join(rk)
+    key_bytes = [0]
     pairs = join_pairs(iter(left), iter(right), left_keys=lk, right_keys=rk,
-                       how=how, services=services)
+                       how=how, services=services, bounded=stored,
+                       retained_key=lambda size: key_bytes.__setitem__(0, size))
     try:
         for sequence, (left_record, right_record) in enumerate(pairs):
             _check_stop(services)
@@ -105,12 +110,37 @@ def join_partitions(
             out_row = (left_row if right_record is None else _merge_row(left_row,
                 _materialize_row(right_record, services), lk, rk, suffix))
             record_id = _hash_id([RECORD_DOMAIN, occurrence, "join", sequence])
-            out = _output_record(record_id, {"join_index": sequence}, out_row, sequence,
-                services, schema_ref=left_record.schema_ref if how in ('semi', 'anti') else None)
+            if stored:
+                from ..dataflow_record_frames import _typed_shape, admit_workspace
+                from ..exchange.dataflow_bridge import _encode_payload
+                # One actual left/right pair, bounded key index, and encoded
+                # output coexist. No payload-sized transport batch is built.
+                native = sum(_typed_shape(r.inline, services.bounds.max_row_bytes)[1]
+                             for r in (left_record, right_record) if r is not None)
+                size, row_native, tree = _typed_shape(out_row, services.bounds.max_row_bytes)
+                from .join_spool import _resident_limit
+                held = native + row_native + key_bytes[0] + _resident_limit(services) // 16 + 16384
+                admit_workspace(tree + 2 * size, services.bounds, services=services, retained=held)
+                raw = _encode_payload(out_row, max_bytes=services.bounds.max_row_bytes)
+                ref = services.store.put(iter((raw,)), max_bytes=services.bounds.max_row_bytes,
+                                         media_type='application/octet-stream')
+                out = Record(record_id, {'join_index':sequence}, ref, None, len(raw), sequence,
+                    left_record.schema_ref if how in ('semi', 'anti') else None)
+                del raw
+                if retain is not None:
+                    retain(held)
+            else:
+                out = _output_record(record_id, {"join_index": sequence}, out_row, sequence,
+                    services, schema_ref=left_record.schema_ref if how in ('semi', 'anti') else None)
             budget.charge(out)
             yield out
+            del out, out_row, left_row, left_record, right_record
+            if retain is not None:
+                retain(0)
     finally:
         pairs.close()
+        if retain is not None:
+            retain(0)
 
 
 def _group_sort_spec(spec: KernelSpec, on: tuple[str, ...]) -> KernelSpec:

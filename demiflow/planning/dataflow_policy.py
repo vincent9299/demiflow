@@ -204,6 +204,11 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
         return bounds
     for _ in range(8):
         graph = lower_action(request, bounds=bounds).graph
+        from ..execution.dataflow_publication_budget import phased
+        if any(n.kind == 'terminal' and phased(n.kernel.configuration) for n in graph.nodes):
+            # These sealed finite phases already fit their own codec grants;
+            # a terminal-only driver reservation is not live upstream state.
+            return bounds
         if policy.max_active_workers != 1 and any(port.requirement == 'finite_complete' for node in graph.nodes for port in node.kernel.inputs):
             return bounds
         stages = partition_stages(graph, policy=policy, bounds=bounds)

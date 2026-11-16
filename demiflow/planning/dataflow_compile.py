@@ -691,13 +691,19 @@ class _Capture:
             groups.setdefault(owner(index), []).append(index)
         control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
         available = self.bounds.max_resident_bytes - control
+        phased_publication = False
         if self.publication_windows:
             from fractions import Fraction
             from ..execution.dataflow_publication_budget import FIELD
             publication_min = max(v[0] for v in self.publication_windows.values())
             publication_target = max(v[1] for v in self.publication_windows.values())
+            from ..execution.dataflow_publication_budget import phased
+            phased_publication = all(phased(self.nodes[i].kernel.configuration)
+                                     for i in self.publication_windows)
             factor = Fraction(1)
             for members in groups.values():
+                if phased_publication and not set(members).intersection(self.publication_windows):
+                    continue
                 targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
                 minima = {i: self.codec_windows.get(i, (target, target))[0]
                           for i, target in targets.items()}
@@ -710,16 +716,17 @@ class _Capture:
                 configuration = _plain(node.kernel.configuration)
                 configuration[FIELD]['resident_bytes'] = publication
                 self.nodes[index] = replace(node, kernel=replace(node.kernel, configuration=configuration))
-            available -= publication
         for members in groups.values():
+            group_available = available - (publication if self.publication_windows and
+                (not phased_publication or set(members).intersection(self.publication_windows)) else 0)
             targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
             adjustable = {i: self.codec_windows[i] for i in members if i in self.codec_windows
                           and self.codec_windows[i][1] == targets[i]}
             minima = {i: adjustable[i][0] if i in adjustable else targets[i] for i in members}
             floor, desired = sum(minima.values()), sum(targets.values())
-            if not adjustable or desired <= available or floor > available:
+            if not adjustable or desired <= group_available or floor > group_available:
                 continue
-            slack, demand = available - floor, desired - floor
+            slack, demand = group_available - floor, desired - floor
             for index, (minimum, target) in adjustable.items():
                 memory = minimum + (target - minimum) * slack // demand
                 node = self.nodes[index]
@@ -1013,9 +1020,48 @@ class _Capture:
             # batch when asking this generator to decode the next record.
             configuration[FIELD] = {'schema': SCHEMA,
                 'resident_bytes': _payload_workspace(self.bounds) + self.bounds.max_batch_bytes}
+        finite_producer = self.nodes[producer].kernel
+        phased_publication = (native_publication and finite_producer.effect == 'pure'
+            and bool(finite_producer.inputs)
+            and all(p.requirement == 'finite_complete' for p in finite_producer.inputs))
+        if phased_publication:
+            from ..execution.dataflow_publication_budget import PHASE_SCHEMA
+            configuration[FIELD]['schema'] = PHASE_SCHEMA
+        # A pure completed join can publish immutable typed row artifacts.
+        # Its terminal handles only the original bounded Record references;
+        # native hydration occurs later, under the single driver reservation.
+        # No user UDF/queue callback is placed across this carrier boundary.
+        compact = (request.kind == 'write_lance'
+            and self.nodes[producer].kernel.kind == 'join'
+            # A fused multi-join/reducer region owns a different output
+            # iterator. It retains its current carrier/profile until that
+            # producer explicitly implements this sealed representation.
+            and sum(n.kind == 'relational' for n in self.nodes) == 1
+            and self.nodes[producer].kernel.profile.requests['memory_bytes']
+                + self.bounds.max_batch_bytes + self.bounds.max_row_bytes + control
+                > self.bounds.max_resident_bytes
+            and all(n.kernel.kind in {'items', 'range', 'materialized'}
+                    for n in self.nodes if n.kind == 'source'))
+        if compact:
+            from ..execution.dataflow_publication_budget import PHASE_SCHEMA, REF_CARRIER
+            metadata = min(self.bounds.max_state_bytes, max(3072, self.bounds.max_resident_bytes // 128))
+            payload = min(128 * 1024, max(4096, self.bounds.max_resident_bytes // 64))
+            configuration['terminal_memory'] = {'payload_bytes': payload, 'metadata_bytes': metadata,
+                                                 'carrier': REF_CARRIER}
+            configuration['input_carrier'] = REF_CARRIER
+            configuration[FIELD]['schema'] = PHASE_SCHEMA
+            profile = replace(profile, requests={**profile.requests, 'memory_bytes': payload + metadata})
+            source_node = self.nodes[producer]
+            source_kernel = source_node.kernel
+            memory = min(source_kernel.profile.requests['memory_bytes'], self.bounds.max_resident_bytes - control)
+            self.nodes[producer] = replace(source_node, kernel=replace(source_kernel,
+                configuration={**_plain(source_kernel.configuration), 'output_carrier': REF_CARRIER},
+                profile=replace(source_kernel.profile, requests={**source_kernel.profile.requests,
+                    'memory_bytes': memory})))
         kernel = KernelSpec(
             kind=request.kind, implementation_ref=None, configuration=configuration,
-            inputs=(_input_port("main", request.kind),),
+            inputs=(replace(_input_port("main", request.kind), requirement='finite_complete')
+                    if phased_publication else _input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",
             profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
@@ -1024,7 +1070,7 @@ class _Capture:
         if native_publication:
             self.publication_windows[index] = (self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
                 _payload_workspace(self.bounds) + self.bounds.max_batch_bytes)
-        minimum = self.bounds.max_batch_bytes + self.bounds.max_row_bytes + metadata
+        minimum = (payload if compact else self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
         if payload + metadata > minimum:
             self.codec_windows[index] = (minimum, payload + metadata)
         if self.checked is not None:

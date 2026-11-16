@@ -994,7 +994,8 @@ class OperatorKernel:
 
             left = self._ports[self._port_order[0]].records()
             right = self._ports[self._port_order[1]].records()
-            yield from self._emit(preserve_block(join_partitions(left, right, spec=self._spec, services=self._services), None))
+            yield from self._emit(preserve_block(join_partitions(left, right, spec=self._spec,
+                services=self._services, retain=self._retain_reducer_peers), None))
         elif kind == "reduce":
             from .relational import reduce_partition
 

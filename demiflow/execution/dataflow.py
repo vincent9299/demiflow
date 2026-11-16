@@ -467,7 +467,8 @@ class DataflowExecution:
                     from .dataflow_sinks import make_native_terminal_sink
                     self._sinks[node.kernel.kind] = make_native_terminal_sink(node.kernel,
                         request=self._request, services=self._services,
-                        publication_reserved_bytes=physical.residency.control_reserved_bytes)
+                        publication_reserved_bytes=physical.residency.control_reserved_bytes,
+                        admit_publication=lambda: self._scheduler.admit_publication())
                 else:
                     self._sinks[node.kernel.kind] = make_sink_adapter(node.kernel, services=self._services)
         from .dataflow_images import bind_image_sinks
@@ -491,8 +492,11 @@ class DataflowExecution:
         self._sealed = sealed
         from .dataflow_managed_devices import sealed_service_placements
         placements = sealed_service_placements(graph, physical, store=self._store)
+        from .dataflow_publication_budget import PublicationReservation
+        self._publication_reservation = PublicationReservation(graph, physical.stages, physical.bounds,
+            declared=physical.residency.control_reserved_bytes)
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed,
-                                            placements=placements)
+                                            placements=placements, publication_reservation=self._publication_reservation)
         self._scheduler._policy = live_policy
         from .contracts.dataflow_codec import runtime_scope_id
         self._scheduler.scope_id = runtime_scope_id(physical.plan_id, self._attempt())
@@ -642,7 +646,7 @@ class DataflowExecution:
         def phase_fits(phase):
             group = [s for s in stages if s.stage_id in phase]
             memory = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in group)
-            if memory + self._physical.residency.control_reserved_bytes > self._bounds.max_resident_bytes:
+            if memory + self._publication_reservation.reserved(phase) > self._bounds.max_resident_bytes:
                 return False
             try:
                 self._place_hosts([(s, self._initial_work(s, p)) for s in group for p in s.partitions])
@@ -654,7 +658,7 @@ class DataflowExecution:
         pending = [(stage, self._initial_work(stage, partition))
                    for stage in stages for partition in stage.partitions]
         resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in stages)
-        fits = resident + self._physical.residency.control_reserved_bytes <= self._bounds.max_resident_bytes
+        fits = resident + self._publication_reservation.reserved(s.stage_id for s in stages) <= self._bounds.max_resident_bytes
         if fits:
             try:
                 self._place_hosts(pending)
@@ -686,7 +690,7 @@ class DataflowExecution:
         for phase in self._phases:
             group = [s for s in stages if s.stage_id in phase]
             resident = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * len(s.partitions) for s in group)
-            if resident + self._physical.residency.control_reserved_bytes > self._bounds.max_resident_bytes:
+            if resident + self._publication_reservation.reserved(phase) > self._bounds.max_resident_bytes:
                 raise DataflowError('RESOURCE_INFEASIBLE', 'streaming-connected stage group exceeds resident capacity')
             self._place_hosts([(s, self._initial_work(s, p)) for s in group for p in s.partitions])
         if prior is not None and self._durable_residency is None:
