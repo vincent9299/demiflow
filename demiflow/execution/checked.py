@@ -20,7 +20,7 @@ from ..data.sources import LanceSource, MaterializedSource
 from ..data.runtime_contract import RuntimeContractError
 from .local_kernel import KeyedSource, UnionSource
 from .plan_facts import operation_facts, source_facts
-from .capabilities import check_composition, stream_residency
+from .capabilities import check_composition
 
 _CURRENT = ContextVar('demiflow_checked_execution', default=None)
 
@@ -315,11 +315,10 @@ class CheckedExecution:
         capability = check_composition(actual)
         if not capability['supported']:
             raise RuntimeContractError(capability['reason'])
-        if capability['driver'] == 'stream':
-            try:
-                stream_residency(actual, self.limits)
-            except ValueError as exc:
-                raise RuntimeContractError(str(exc)) from exc
+        # Resource admission belongs to the actual unified physical plan.
+        # The historical "stream" report label does not describe its worker
+        # groups or windows; applying the old folded-stream estimate here can
+        # reject a legal graph before the sole allocator ever sees it.
         changed = []
         for op in reversed(plan.operations):
             node = self.nodes[identity]

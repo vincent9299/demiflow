@@ -22,7 +22,7 @@ def test_actual_native_plan_must_match_before_consuming_data(tmp_path, change):
              normalized_parameters=dict(uri=source, version=1, columns=[], projection={}, filter=None, limit=None,
                                         batch_size=None, batch_readahead=None, fragment_readahead=None)),
         dict(id='l', kind='limit', parameters={'limit': 1}, normalized_parameters={'limit': 1},
-             capability_fact={'kind': 'limit', 'driver': 'pull'}, analysis={}),
+             capability_fact={'kind': 'limit', 'driver': 'pull', 'native_options': False}, analysis={}),
         dict(id='w', kind='write_table', parameters=dict(uri=target, mode='create')),
     ]
     events = []
