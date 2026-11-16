@@ -84,6 +84,13 @@ def native_batch(tmp_path, monkeypatch):
         producer, consumer = env.make(), env.make('transform')
         producer.worker.start()
         consumer.worker.start()
+        # This fixture is the original driver boundary, with one source owner.
+        # Grant its original run allowance: a one-max-row helper window pauses
+        # after one small row because the next unknown row needs a full reserve.
+        limits = env.execution._action.context.limits
+        assert limits['checkpoint_unconfirmed_rows'] >= 4
+        producer.worker.receive({'kind': 'resume', 'source_credit': {
+            'rows': 4, 'bytes': limits['checkpoint_unconfirmed_bytes']}})
         for _ in range(4):
             producer.worker.step(max_records=1, deadline_ms=50)
         commands = [dict(thaw_record_value(e.payload), kind='data')
