@@ -421,6 +421,16 @@ def _module_registered_by_value(module_name):
         name = parent
 
 
+def _static_reference_member(owner, name):
+    import inspect
+    value = inspect.getattr_static(owner, name, None)
+    # Native staticmethod lookup returns the underlying function. Preserve
+    # cloudpickle's import-by-name classification without running descriptors.
+    if issubclass(type(owner), type) and type(value) is staticmethod:
+        return value.__func__
+    return value
+
+
 def _is_by_reference_udf(function):
     """True if cloudpickle carries this UDF by reference (importable module +
     qualname, not registered by value), so the worker re-imports the identical
@@ -444,7 +454,7 @@ def _is_by_reference_udf(function):
     for part in getattr(function, "__qualname__", "").split("."):
         if part == "<locals>":
             return False
-        obj = inspect.getattr_static(obj, part, None)
+        obj = _static_reference_member(obj, part)
         if obj is None:
             return False
     if obj is not function:
@@ -471,7 +481,7 @@ def _is_by_reference_class(cls):
     for part in type.__dict__["__qualname__"].__get__(cls, type(cls)).split("."):
         if part == "<locals>":
             return False
-        obj = inspect.getattr_static(obj, part, None)
+        obj = _static_reference_member(obj, part)
         if obj is None:
             return False
     if obj is not cls:

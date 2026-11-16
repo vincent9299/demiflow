@@ -136,3 +136,15 @@ def test_actual_actor_slots_pin_modules_without_getattribute(tmp_path, monkeypat
     Actor.__getattribute__ = forbidden
     assert name in {m.__name__ for m in _by_value_business_modules(actor)}
     assert touched == []
+
+
+def test_importable_static_method_retains_by_reference_source_pin(tmp_path, monkeypatch):
+    from demiflow.execution.chain import _is_by_reference_udf, _business_dependency_manifest
+    from test_stage2_unified_plan import _load_modules
+    name = 'static_reference_fixture'
+    source = "class Actor:\n    @staticmethod\n    def transform(row):\n        return {'x': row['x'] + 1}\n"
+    module, _ = _load_modules(tmp_path, monkeypatch, {name: source}, name)
+    function = module.Actor.transform
+    assert cloudpickle.loads(cloudpickle.dumps(function)) is function
+    assert _is_by_reference_udf(function)
+    assert name in _business_dependency_manifest(_map_plan(function))
