@@ -277,12 +277,13 @@ def _payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
     return max(payload, min(codec, available))
 
 
-def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none") -> ResourceProfile:
+def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none",
+                     codec_workspace=True) -> ResourceProfile:
     # The run memory budget covers admitted data, separately from process RSS.
     # Reserve the same working set used by physical residency, not a fixed
     # per-stage 64 MiB allowance multiplied by pipeline length.
     minimum = bounds.max_batch_bytes + bounds.max_row_bytes
-    working_set = _payload_workspace(bounds)
+    working_set = _payload_workspace(bounds) if codec_workspace else minimum
     options = getattr(operation, 'stream_options', None)
     concurrency = getattr(options, 'concurrency', getattr(operation, 'concurrency', 1))
     working_set *= concurrency
@@ -632,6 +633,71 @@ class _Capture:
         self.checked = current()
         self.report_bindings = []
         self.observation_labels = {}
+        # Optional codec targets are not independent hard per-node minima.
+        # Keep their provenance private until all simultaneous inputs are known.
+        self.codec_windows: dict[int, tuple[int, int]] = {}
+
+    def _remember_codec_window(self, index, operation=None):
+        resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
+        if 'memory_bytes' in resources:
+            return  # An explicit user grant is never redistributed.
+        kernel = self.nodes[index].kernel
+        if kernel.kind in {'join', 'exclude_keys', 'reduce'}:
+            return  # These kernels own explicit copy/reducer working sets.
+        expected = _default_profile(operation, bounds=self.bounds, state=kernel.state)
+        if kernel.profile != expected:
+            return  # Native models, reducers and other specialized grants retain their authority.
+        minimum = _default_profile(operation, bounds=self.bounds, state=kernel.state,
+                                   codec_workspace=False).requests['memory_bytes']
+        target = kernel.profile.requests['memory_bytes']
+        if target > minimum:
+            self.codec_windows[index] = (minimum, target)
+
+    def fit_codec_windows(self):
+        """Share only optional codec slack inside each incremental component.
+
+        Input/output/state and terminal index minima remain fully additive.
+        Finite-complete edges separate natural phases; no source is upgraded to
+        checkpointable and no existing sealed graph is passed through this code.
+        The physical solver still accounts for replicas, hosts and real grants;
+        actual typed codec allocations must still pass the runtime peak guard.
+        """
+        parents = list(range(len(self.nodes)))
+        def owner(index):
+            while parents[index] != index:
+                parents[index] = parents[parents[index]]
+                index = parents[index]
+            return index
+        for producer, _, consumer, port in self.edges:
+            spec = next(p for p in self.nodes[consumer].kernel.inputs if p.name == port)
+            if spec.requirement == 'incremental':
+                parents[owner(consumer)] = owner(producer)
+        groups = {}
+        for index in range(len(self.nodes)):
+            groups.setdefault(owner(index), []).append(index)
+        control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
+        available = self.bounds.max_resident_bytes - control
+        for members in groups.values():
+            targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
+            adjustable = {i: self.codec_windows[i] for i in members if i in self.codec_windows
+                          and self.codec_windows[i][1] == targets[i]}
+            minima = {i: adjustable[i][0] if i in adjustable else targets[i] for i in members}
+            floor, desired = sum(minima.values()), sum(targets.values())
+            if not adjustable or desired <= available or floor >= available:
+                continue
+            slack, demand = available - floor, desired - floor
+            for index, (minimum, target) in adjustable.items():
+                memory = minimum + (target - minimum) * slack // demand
+                node = self.nodes[index]
+                kernel = node.kernel
+                configuration = _plain(kernel.configuration)
+                if node.kind == 'terminal' and 'terminal_memory' in configuration:
+                    contract = configuration['terminal_memory']
+                    contract['payload_bytes'] = memory - contract['metadata_bytes']
+                self.nodes[index] = replace(node, kernel=replace(kernel,
+                    configuration=configuration,
+                    profile=replace(kernel.profile, requests={**kernel.profile.requests,
+                        'memory_bytes': memory})))
 
     def _bind_report(self, index, key):
         if key is None or self.checked is None:
@@ -712,6 +778,7 @@ class _Capture:
             mergeable=False,
         )
         index = self._add_node("source", kernel, semantic, {}, {"source_kind": kind}, None)
+        self._remember_codec_window(index)
         self.declarations.append((index, ProgramDeclaration(
             occurrence_id=self.nodes[index].occurrence_id, callable_spec=None, source_spec=source,
             action_program=None, code_identity={"source_kind": kind},
@@ -767,6 +834,7 @@ class _Capture:
                                  payload_columns=list(source.left.source.query.columns))
             kernel = replace(kernel, configuration=configuration)
         index = self._add_node("relational", kernel, semantic, {}, code_identity, None)
+        self._remember_codec_window(index)
         if reducer is not None:
             node = self.nodes[index]
             configuration = _plain(node.kernel.configuration)
@@ -846,6 +914,8 @@ class _Capture:
                 if isinstance(callable_spec, CallableSpec) else {}
             )
             new_index = self._add_node("transform", kernel, semantic, {}, code_identity, None)
+            if native_declaration is None:
+                self._remember_codec_window(new_index, operation)
             options = getattr(operation, 'stream_options', None)
             base = (getattr(options, 'label', None) or getattr(operation, 'label', None)
                     or getattr(callable_spec, 'name', None) or kernel.kind)
@@ -905,6 +975,9 @@ class _Capture:
             mergeable=False,
         )
         index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)
+        minimum = self.bounds.max_batch_bytes + self.bounds.max_row_bytes + metadata
+        if payload + metadata > minimum:
+            self.codec_windows[index] = (minimum, payload + metadata)
         if self.checked is not None:
             key = (request.action.action_id, request.action.action_id, 0)
             if key in self.checked.observations:
@@ -947,6 +1020,7 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
     terminal = capture.capture_terminal(producer)
     from .dataflow_graph_adapter import decorate_graph_capture
     terminal = decorate_graph_capture(capture, request, terminal=terminal)
+    capture.fit_codec_windows()
     # DTO constructors validate identities. Keep integer graph indices private;
     # never construct invalid public DTOs merely to replace their IDs later.
     bound_nodes = tuple(capture.nodes)

@@ -217,6 +217,12 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
         # large row must still fit its batch, and may correctly make it infeasible.
         changes = {name: max(1, getattr(bounds, name) * available * 9 // (resident * 10))
                    for name in adjustable}
+        if 'max_state_bytes' in changes:
+            # A terminal needs its first block/root even when no actor owns
+            # state. Shrinking an unused default state ceiling below that
+            # irreducible 3-KiB index cannot fix a payload/codec admission gap.
+            changes['max_state_bytes'] = min(bounds.max_state_bytes,
+                                             max(3072, changes['max_state_bytes']))
         changes['max_batch_bytes'] = max(changes.get('max_batch_bytes', bounds.max_batch_bytes),
                                         changes.get('max_row_bytes', bounds.max_row_bytes))
         if 'max_batch_bytes' not in adjustable:
