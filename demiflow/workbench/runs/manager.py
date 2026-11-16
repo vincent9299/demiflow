@@ -1093,8 +1093,22 @@ def register_results(root, run_id, *, recover=False, attempt=None):
             if not receipt or receipt['status'] != 'committed':
                 continue
             receipt = LanceWriteReceipt.from_dict(receipt)
-            intent = details['actions'][output['action_id']]['intent']
-            if receipt.uri != output['uri'] or receipt.request_hash != intent['request_hash']:
+            intent = details['actions'].get(output['action_id'], {}).get('intent')
+            native = run.execution_action(output['action_id'])
+            if native is not None:
+                from demiflow.execution.lance_sink import spec_from_identity
+                if native['declaration'].get('kind') != 'write_table':
+                    raise ForgeError('Output does not name an original native write action')
+                original = spec_from_identity(native['declaration']['sink'])
+                request_hash = original.content_hash
+                if intent is not None and intent.get('request_hash') != request_hash:
+                    raise ForgeError('Write observation differs from the original native declaration')
+            elif intent is not None:
+                # Old observed writes retain their original receipt contract.
+                request_hash = intent['request_hash']
+            else:
+                raise ForgeError('Write receipt has no original request identity')
+            if receipt.uri != output['uri'] or receipt.request_hash != request_hash:
                 raise ForgeError('Write receipt identity differs')
             actual = operation('metadata', output['uri'], version=receipt.committed_version)
             if actual['schema_hash'] != receipt.schema_hash or actual['row_count'] != receipt.written_rows:

@@ -39,6 +39,28 @@ def original_journal(root):
     return pointer, RunJournal(path)
 
 
+@pytest.mark.parametrize('root,relative', [
+    ('s3://bucket', 'rows.lance'), ('gs://bucket', 'rows.lance'),
+    ('file://foreign/tmp/data', 'rows.lance'),
+    (None, 's3://bucket/rows.lance'),
+])
+def test_remote_registration_paths_reject_before_source_or_local_files(tmp_path, monkeypatch, root, relative):
+    from demiflow.errors import InvalidLanceRequest
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(InvalidLanceRequest):
+        write_registered_table(root or tmp_path/'local', relative,
+            schema=SCHEMA, schema_name='ids', schema_version='1',
+            rows_factory=refusing_rows, fingerprint='remote-path', register=False)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_registered_file_uri_resolves_to_the_same_local_root(tmp_path):
+    root = tmp_path/'local'
+    ref, rows, replayed = registered(root.as_uri(), register=False)
+    assert rows == 2 and not replayed
+    assert ref.open(root).to_table().to_pylist() == [{'id': 1}, {'id': 2}]
+
+
 def test_catalog_failure_projects_original_ack_and_survives_move(tmp_path, monkeypatch):
     root = tmp_path / 'old'; root.mkdir()
     original = Catalog.register

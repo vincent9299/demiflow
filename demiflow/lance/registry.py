@@ -366,6 +366,21 @@ def write_registered_table(
 
         data_api = DataAPI()
 
+    # Validate URI spelling before Path can turn s3://bucket into a relative
+    # local s3:/bucket directory and cause an unintended source execution.
+    from urllib.parse import urlsplit
+    from ..errors import InvalidLanceRequest
+    from .storage import normalize_lance_uri
+    root_text = os.fspath(datasets_root)
+    if not isinstance(root_text, str) or not isinstance(relative_uri, str):
+        raise InvalidLanceRequest('Registered tables require local text paths')
+    root_uri = urlsplit(root_text)
+    if root_uri.scheme:
+        if root_uri.scheme != 'file':
+            raise InvalidLanceRequest('Registered tables require a local datasets root')
+        datasets_root = normalize_lance_uri(root_text)
+    if urlsplit(relative_uri).scheme:
+        raise InvalidLanceRequest('Registered relative_uri must be a local relative path')
     relative_path = Path(relative_uri)
     if relative_path.is_absolute() or ".." in relative_path.parts:
         raise ValueError("relative_uri must stay within the datasets root")
