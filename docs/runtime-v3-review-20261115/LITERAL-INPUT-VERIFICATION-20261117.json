@@ -1,0 +1,519 @@
+{
+  "candidate": "77cacbf2eff9e3b9fff608dc8c5c0ae1fc89da6e",
+  "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117",
+  "branch": "engine/gpt-literal-input-20261117",
+  "base": "dcd27b27fb605b3f2ba8a34ea05a5f1a3c3e89e0",
+  "scope": [
+    "demiflow/execution/dataflow_seal.py",
+    "demiflow/execution/dataflow_segments.py",
+    "demiflow/execution/dataflow_sources.py",
+    "demiflow/execution/literal_source.py",
+    "demiflow/execution/source_readers.py",
+    "demiflow/execution/worker/dataflow_graph_runner.py",
+    "tests/test_runtime_v3_literal_source.py"
+  ],
+  "source_acceptance_only": true,
+  "original_wide_join_acceptance": false,
+  "evidence": {
+    "r1": {
+      "receipt": "/tmp/demiflow-literal-input-r1/receipt.json",
+      "receipt_sha256": "e7aa278b057e1f420d74af5fed349ede05c369ba9dda8d8297a3b50d75727b97",
+      "head": "df3565efbacaa45c6b8019291f1535c82bff568f",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 27,
+      "outcome_counts": {
+        "passed": 7,
+        "failed_or_incomplete": 2
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_streamed_literal_fingerprint_preserves_original_pickle_aliases_and_bytes": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_small_literal_has_original_program_and_zero_data_artifacts": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_large_source_program_excludes_payload_without_changing_code_pin": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_split_seek_and_original_cursor_resume_keep_typed_values_and_signed_zero": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_source_data_quota_rejects_before_snapshot_or_program_can_publish_a_result": "passed",
+        "tests/test_runtime_v3_s.py::test_s006": "passed",
+        "tests/test_execution_payload_limits.py::test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate": "failed_or_incomplete",
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it": "failed_or_incomplete"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r1/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r1/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r1/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r1/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r1/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "literal",
+        "--candidate-head",
+        "df3565efbacaa45c6b8019291f1535c82bff568f",
+        "--output",
+        "/tmp/demiflow-literal-input-r1"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r1/launcher.json": "134946569d970cfe2604cb59aca91c3779a62b18b7fb775cf6f66684b8deab88",
+        "/tmp/demiflow-literal-input-r1/summary.json": "f5090dfce49bb553d030796442c43f1e37fb5032572f0f440faf7d5e91d45434",
+        "/tmp/demiflow-literal-input-r1/result.xml": "8b878dee9918b565bf0e9d1c204448322f7b11ddd0699f8df163b3f9f7b7917d"
+      },
+      "failures": {
+        "tests/test_execution_payload_limits.py::test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate": [
+          "tests/test_execution_payload_limits.py:290: in test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate\n    left.join(right, on='k', how='left').write_lance(str(target), mode='create', schema=pa.schema([\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:314: in _run_dataset_action\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:404: in prepare\n    graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,\ndemiflow/execution/dataflow_seal.py:334: in stage_dataflow_programs\n    ref = _stage_one_program(declaration, store=store, bounds=bounds,\ndemiflow/execution/dataflow_seal.py:200: in _stage_one_program\n    raise DataflowError(\"BUDGET_EXCEEDED\", \"Program payload exceeds byte budget\")\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: Program payload exceeds byte budget"
+        ],
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it": [
+          "tests/test_execution_payload_limits.py:320: in test_native_default_row_floor_remains_compatible_when_pool_supports_it\n    rows.write_lance(str(target), mode='create')\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:314: in _run_dataset_action\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:404: in prepare\n    graph = stage_dataflow_programs(compiled, action=self._action, store=self._store,\ndemiflow/execution/dataflow_seal.py:334: in stage_dataflow_programs\n    ref = _stage_one_program(declaration, store=store, bounds=bounds,\ndemiflow/execution/dataflow_seal.py:200: in _stage_one_program\n    raise DataflowError(\"BUDGET_EXCEEDED\", \"Program payload exceeds byte budget\")\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: Program payload exceeds byte budget"
+        ]
+      }
+    },
+    "r2": {
+      "receipt": "/tmp/demiflow-literal-input-r2/receipt.json",
+      "receipt_sha256": "dfedbd40f96897f8928642a8fda72431b2b9d4b4d7ad882ec50fe43c2210eeaa",
+      "head": "1960fa91b4dc2530c1d940ad1d382ca296d70d70",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 39,
+      "outcome_counts": {
+        "passed": 11,
+        "failed_or_incomplete": 2
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_streamed_literal_fingerprint_preserves_original_pickle_aliases_and_bytes": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_small_literal_has_original_program_and_zero_data_artifacts": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_large_source_program_excludes_payload_without_changing_code_pin": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_split_seek_and_original_cursor_resume_keep_typed_values_and_signed_zero": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_source_data_quota_rejects_before_snapshot_or_program_can_publish_a_result": "passed",
+        "tests/test_runtime_v3_s.py::test_s006": "passed",
+        "tests/test_execution_payload_limits.py::test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate": "failed_or_incomplete",
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it": "failed_or_incomplete",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[items]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[arrow]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[numpy]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[pandas]": "passed"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r2/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r2/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r2/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r2/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r2/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "literal",
+        "--candidate-head",
+        "1960fa91b4dc2530c1d940ad1d382ca296d70d70",
+        "--output",
+        "/tmp/demiflow-literal-input-r2"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r2/launcher.json": "307fd8ba7272d6f28c4f5db30faef6253dafc3644bed8343febf1b377f0cb7a8",
+        "/tmp/demiflow-literal-input-r2/summary.json": "d18c3d0b31c2898e6344d2f9fd7c9cc84ce8c891e83f073c2d81daa8ffc64578",
+        "/tmp/demiflow-literal-input-r2/result.xml": "373ec537669480e732f193f204ae578864e6d2779b77ee518a7fb1d7f13be49b"
+      },
+      "failures": {
+        "tests/test_execution_payload_limits.py::test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate": [
+          "tests/test_execution_payload_limits.py:290: in test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate\n    left.join(right, on='k', how='left').write_lance(str(target), mode='create', schema=pa.schema([\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:314: in _run_dataset_action\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:412: in prepare\n    snapshot = snapshot_source(declaration.source_spec, action=self._action,\ndemiflow/execution/dataflow_sources.py:248: in snapshot_source\n    manifest_ref = stage_literal(source, reference, source_id=source_id,\ndemiflow/execution/literal_source.py:103: in stage_literal\n    ref = store.put(chunks(), max_bytes=target, media_type=RECORDS_MEDIA)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_store.py:266: in put\n    return self._put(chunks, max_bytes=max_bytes, media_type=media_type)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_store.py:273: in _put\n    return self._put_owned(chunks,max_bytes=max_bytes,media_type=media_type)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_store.py:308: in _put_owned\n    for chunk in chunks:\ndemiflow/execution/literal_source.py:90: in chunks\n    total, parts = frame_parts(record, bounds,\ndemiflow/execution/dataflow_record_frames.py:402: in frame_parts\n    if raw is None: raw = encode_document(record, bounds, services=services, retained=retained)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_record_frames.py:221: in encode_document\n    _admit(retained + native + tree + meta_memory + 2 * doc_size + 512,\ndemiflow/execution/dataflow_record_frames.py:154: in _admit\n    raise DataflowError('BUDGET_EXCEEDED',\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: record frame codec workspace exceeds original resident budget (186720969 > 134217728)"
+        ],
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it": [
+          "tests/test_execution_payload_limits.py:320: in test_native_default_row_floor_remains_compatible_when_pool_supports_it\n    rows.write_lance(str(target), mode='create')\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:314: in _run_dataset_action\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:412: in prepare\n    snapshot = snapshot_source(declaration.source_spec, action=self._action,\ndemiflow/execution/dataflow_sources.py:248: in snapshot_source\n    manifest_ref = stage_literal(source, reference, source_id=source_id,\ndemiflow/execution/literal_source.py:103: in stage_literal\n    ref = store.put(chunks(), max_bytes=target, media_type=RECORDS_MEDIA)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_store.py:266: in put\n    return self._put(chunks, max_bytes=max_bytes, media_type=media_type)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_store.py:273: in _put\n    return self._put_owned(chunks,max_bytes=max_bytes,media_type=media_type)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_store.py:308: in _put_owned\n    for chunk in chunks:\ndemiflow/execution/literal_source.py:90: in chunks\n    total, parts = frame_parts(record, bounds,\ndemiflow/execution/dataflow_record_frames.py:402: in frame_parts\n    if raw is None: raw = encode_document(record, bounds, services=services, retained=retained)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_record_frames.py:221: in encode_document\n    _admit(retained + native + tree + meta_memory + 2 * doc_size + 512,\ndemiflow/execution/dataflow_record_frames.py:154: in _admit\n    raise DataflowError('BUDGET_EXCEEDED',\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: record frame codec workspace exceeds original resident budget (165720967 > 67108864)"
+        ]
+      }
+    },
+    "r3": {
+      "receipt": "/tmp/demiflow-literal-input-r3/receipt.json",
+      "receipt_sha256": "51047fd611fb679871347204f3900b310edd1d143ed76d24502d70e2dcb33160",
+      "head": "5edb4a31247598a0beac1e19801711ca72398ada",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 39,
+      "outcome_counts": {
+        "passed": 11,
+        "failed_or_incomplete": 2
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_streamed_literal_fingerprint_preserves_original_pickle_aliases_and_bytes": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_small_literal_has_original_program_and_zero_data_artifacts": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_large_source_program_excludes_payload_without_changing_code_pin": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_split_seek_and_original_cursor_resume_keep_typed_values_and_signed_zero": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_source_data_quota_rejects_before_snapshot_or_program_can_publish_a_result": "passed",
+        "tests/test_runtime_v3_s.py::test_s006": "passed",
+        "tests/test_execution_payload_limits.py::test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate": "failed_or_incomplete",
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it": "failed_or_incomplete",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[items]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[arrow]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[numpy]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[pandas]": "passed"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r3/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r3/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r3/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r3/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r3/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "literal",
+        "--candidate-head",
+        "5edb4a31247598a0beac1e19801711ca72398ada",
+        "--output",
+        "/tmp/demiflow-literal-input-r3"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r3/launcher.json": "56be4d1e89efeba9a4edefc83df23ad2e06185eccd8de612831eff9c991c4432",
+        "/tmp/demiflow-literal-input-r3/summary.json": "6f863491c28767591a5a0765f0a1e07646996ff50464f12754c0acc8883d16db",
+        "/tmp/demiflow-literal-input-r3/result.xml": "afb68247646cb20f261f8f92fafb32fd1de381069a797ac4f03e7d77a8fd0205"
+      },
+      "failures": {
+        "tests/test_execution_payload_limits.py::test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate": [
+          "demiflow/planning/dataflow_place.py:759: in _select_budgeted_residency\n    return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,\ndemiflow/planning/dataflow_place.py:473: in solve_residency\n    raise _error(\"RESOURCE_INFEASIBLE\", \"memory-connected group exceeds active worker budget\",\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: memory-connected group exceeds active worker budget\n\nDuring handling of the above exception, another exception occurred:\ntests/test_execution_payload_limits.py:290: in test_explicit_native_row_allowance_is_not_replaced_by_a_default_estimate\n    left.join(right, on='k', how='left').write_lance(str(target), mode='create', schema=pa.schema([\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:314: in _run_dataset_action\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:424: in prepare\n    physical = compile_physical_dataflow(\ndemiflow/planning/dataflow_place.py:860: in compile_physical_dataflow\n    exchanges, residency = _select_budgeted_residency(\ndemiflow/planning/dataflow_place.py:769: in _select_budgeted_residency\n    solve_residency(stages, (), hosts=hosts, bounds=bounds,\ndemiflow/planning/dataflow_place.py:478: in solve_residency\n    raise _error(\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: a memory-connected stage group exceeds the resident budget and cannot be staged"
+        ],
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it": [
+          "demiflow/planning/dataflow_place.py:759: in _select_budgeted_residency\n    return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,\ndemiflow/planning/dataflow_place.py:473: in solve_residency\n    raise _error(\"RESOURCE_INFEASIBLE\", \"memory-connected group exceeds active worker budget\",\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: memory-connected group exceeds active worker budget\n\nDuring handling of the above exception, another exception occurred:\ntests/test_execution_payload_limits.py:320: in test_native_default_row_floor_remains_compatible_when_pool_supports_it\n    rows.write_lance(str(target), mode='create')\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:314: in _run_dataset_action\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:424: in prepare\n    physical = compile_physical_dataflow(\ndemiflow/planning/dataflow_place.py:860: in compile_physical_dataflow\n    exchanges, residency = _select_budgeted_residency(\ndemiflow/planning/dataflow_place.py:769: in _select_budgeted_residency\n    solve_residency(stages, (), hosts=hosts, bounds=bounds,\ndemiflow/planning/dataflow_place.py:478: in solve_residency\n    raise _error(\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: a memory-connected stage group exceeds the resident budget and cannot be staged"
+        ]
+      }
+    },
+    "r4": {
+      "receipt": "/tmp/demiflow-literal-input-r4/receipt.json",
+      "receipt_sha256": "72bc4494a4b5e0da56e108b9b6614b563d10d74a3ea9e792b024aa0802b4452f",
+      "head": "ae468975edacd2621cde0789b1b1b7def79a15bc",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 33,
+      "outcome_counts": {
+        "failed_or_incomplete": 1,
+        "passed": 10
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_real_dataset_literal_original_ack_gc_and_resume": "failed_or_incomplete",
+        "tests/test_runtime_v3_literal_source.py::test_other_finished_split_pending_record_shares_original_worker_grant": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_suspended_finite_reader_is_charged_to_other_worker_codec_calls": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_initial_finite_authentication_cannot_borrow_live_kernel_window": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_reader_growth_rejects_before_fetching_a_new_chunk": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_existing_buffer_is_not_charged_twice_during_growth": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_segment_index_authentication_shares_the_same_live_grant": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_parked_reader_uses_original_output_credit_and_keeps_exact_position": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_cached_multi_producer_reader_keeps_order_and_original_recovery": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_index_growth_is_readmitted_before_extending_the_record_buffer": "passed"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r4/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r4/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r4/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r4/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r4/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "closure",
+        "--candidate-head",
+        "ae468975edacd2621cde0789b1b1b7def79a15bc",
+        "--output",
+        "/tmp/demiflow-literal-input-r4"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r4/launcher.json": "47d20e0498a6864c7b706b3305fcf1ba8393c8c1f3084c86ce331cfe96140816",
+        "/tmp/demiflow-literal-input-r4/summary.json": "89944d2d5f72a58dd5f04679057af9d5d3bacbeaf33db14ec15ca832f95ebbcf",
+        "/tmp/demiflow-literal-input-r4/result.xml": "7ba15795f4c8128426d27efb282b1cb441c340a2be62c6f378222dfbf4dfa69c"
+      },
+      "failures": {
+        "tests/test_runtime_v3_literal_source.py::test_real_dataset_literal_original_ack_gc_and_resume": [
+          "tests/test_runtime_v3_literal_source.py:246: in test_real_dataset_literal_original_ack_gc_and_resume\n    with RunContext.resume(reference):\ndemiflow/execution/run_context.py:184: in __enter__\n    raise RecoveryContractError(\"A completed run cannot create another attempt\")\nE   demiflow.execution.recovery_contract.RecoveryContractError: A completed run cannot create another attempt"
+        ]
+      }
+    },
+    "r5": {
+      "receipt": "/tmp/demiflow-literal-input-r5/receipt.json",
+      "receipt_sha256": "0586f2c68c511c941d624fb20d829430f3991456966de08a7ca6d7d39f85181e",
+      "head": "b52630aa3fce5f05d8fc9854cbbee990e3e61c8f",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 42,
+      "outcome_counts": {
+        "passed": 14
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_streamed_literal_fingerprint_preserves_original_pickle_aliases_and_bytes": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_small_literal_has_original_program_and_zero_data_artifacts": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_large_source_program_excludes_payload_without_changing_code_pin": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_split_seek_and_original_cursor_resume_keep_typed_values_and_signed_zero": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_source_data_quota_rejects_before_snapshot_or_program_can_publish_a_result": "passed",
+        "tests/test_runtime_v3_s.py::test_s006": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[items]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[arrow]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[numpy]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[pandas]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_real_dataset_literal_original_ack_gc_and_resume": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_other_finished_split_pending_record_shares_original_worker_grant": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_pending_snapshot_replays_exact_original_record": "passed"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r5/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r5/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r5/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r5/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r5/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "final_local",
+        "--candidate-head",
+        "b52630aa3fce5f05d8fc9854cbbee990e3e61c8f",
+        "--output",
+        "/tmp/demiflow-literal-input-r5"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r5/launcher.json": "9a2b99920056c3ef084e62ce0a0b7e05ee04b4a167a3a75b878464a6e315c79b",
+        "/tmp/demiflow-literal-input-r5/summary.json": "52dcf9b594526fa02a1529b007dd0f5f0ca6648ba6c7ac63b2366cb7a43e668e",
+        "/tmp/demiflow-literal-input-r5/result.xml": "a13b42f02cca203c9add118b57eb407ee1118b231bbfbae5c9f05bf9e60c4d89"
+      },
+      "failures": {}
+    },
+    "r6": {
+      "receipt": "/tmp/demiflow-literal-input-r6/receipt.json",
+      "receipt_sha256": "f3ed0f03e0f6e6369cdbada57361f63cee72dc2cd049080b19f67b116a520e5b",
+      "head": "c21afdceab43900d15482d95f094372b452af15e",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 9,
+      "outcome_counts": {
+        "passed": 2,
+        "failed_or_incomplete": 1
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_small_public_input_keeps_legacy_source_without_data_artifacts": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_legacy_large_program_and_source_carriers_remain_readable": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_leaf_is_authenticated_before_first_row": "failed_or_incomplete"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r6/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r6/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r6/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r6/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r6/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "compatibility",
+        "--candidate-head",
+        "c21afdceab43900d15482d95f094372b452af15e",
+        "--output",
+        "/tmp/demiflow-literal-input-r6"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r6/launcher.json": "fa6bb25c3069409a37d489b7699abdb4d701b7b0b231c6e3594ee38602eca7c7",
+        "/tmp/demiflow-literal-input-r6/summary.json": "cb2bbcf67f7d3e0c3d2bf1b2dd94d5f891427dd466e137f30cb2bce65aa7f02c",
+        "/tmp/demiflow-literal-input-r6/result.xml": "edc68af15372f1a2dd00295d78f2390d5cb30aab491b54b7c15726bf285035d3"
+      },
+      "failures": {
+        "tests/test_runtime_v3_literal_source.py::test_literal_leaf_is_authenticated_before_first_row": [
+          "tests/test_runtime_v3_literal_source.py:358: in test_literal_leaf_is_authenticated_before_first_row\n    with pytest.raises(DataflowError,match='digest|integrity|corrupt'):\nE   AssertionError: Regex pattern did not match.\nE     Expected regex: 'digest|integrity|corrupt'\nE     Actual message: 'INVALID_CONTRACT: artifact bytes do not match its reference'"
+        ]
+      }
+    },
+    "r7-red": {
+      "receipt": "/tmp/demiflow-literal-input-r7-red/receipt.json",
+      "receipt_sha256": "4d5eb48e9780c23f75b82b402ac6430fb4d529933178596c458aac18d00504bb",
+      "head": "fa5e0f0c5c780407fc02aba772f7d29d5963a1a3",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 3,
+      "outcome_counts": {
+        "failed_or_incomplete": 1
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_literal_root_authentication_failure_releases_manifest_workspace": "failed_or_incomplete"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r7-red/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r7-red/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r7-red/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r7-red/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r7-red/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "initial_failure",
+        "--candidate-head",
+        "fa5e0f0c5c780407fc02aba772f7d29d5963a1a3",
+        "--output",
+        "/tmp/demiflow-literal-input-r7-red"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r7-red/launcher.json": "e43fe89a127aa0bc9427c346db4e10ce061fc5ced10edf52de7611f30d8fa72c",
+        "/tmp/demiflow-literal-input-r7-red/summary.json": "dfdd8393fe50e0a597a1714838dfac5c93bfa7b66b22efb60dc5bbae64d3bb7c",
+        "/tmp/demiflow-literal-input-r7-red/result.xml": "c6586c0ae45aea543494d78250af5ebbf3311d39ab02042c41338d1e4c2f89a2"
+      },
+      "failures": {
+        "tests/test_runtime_v3_literal_source.py::test_literal_root_authentication_failure_releases_manifest_workspace": [
+          "tests/test_runtime_v3_literal_source.py:390: in test_literal_root_authentication_failure_releases_manifest_workspace\n    assert reader.retained_bytes==0\nE   assert 1103 == 0\nE    +  where 1103 = <demiflow.execution.source_readers.ItemsReader object at 0x7fc366577590>.retained_bytes"
+        ]
+      }
+    },
+    "r8": {
+      "receipt": "/tmp/demiflow-literal-input-r8/receipt.json",
+      "receipt_sha256": "e614b2ba78f4106765ddfa5f494295b524ceb681bfcd1ac91d0dba302ae78dcd",
+      "head": "77cacbf2eff9e3b9fff608dc8c5c0ae1fc89da6e",
+      "input_count": 2973,
+      "git_input_mismatches": [],
+      "source_unchanged": true,
+      "children_after": [],
+      "phases": 78,
+      "outcome_counts": {
+        "passed": 26
+      },
+      "node_outcomes": {
+        "tests/test_runtime_v3_literal_source.py::test_real_dataset_literal_original_ack_gc_and_resume": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_other_finished_split_pending_record_shares_original_worker_grant": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_reader_uses_real_worker_credit_and_releases_buffer_on_failure": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_suspended_finite_reader_is_charged_to_other_worker_codec_calls": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_initial_finite_authentication_cannot_borrow_live_kernel_window": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_reader_growth_rejects_before_fetching_a_new_chunk": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_existing_buffer_is_not_charged_twice_during_growth": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_segment_index_authentication_shares_the_same_live_grant": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_parked_reader_uses_original_output_credit_and_keeps_exact_position": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_cached_multi_producer_reader_keeps_order_and_original_recovery": "passed",
+        "tests/test_runtime_v3_finite_reader_credit.py::test_index_growth_is_readmitted_before_extending_the_record_buffer": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_streamed_literal_fingerprint_preserves_original_pickle_aliases_and_bytes": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_small_literal_has_original_program_and_zero_data_artifacts": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_large_source_program_excludes_payload_without_changing_code_pin": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_split_seek_and_original_cursor_resume_keep_typed_values_and_signed_zero": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_source_data_quota_rejects_before_snapshot_or_program_can_publish_a_result": "passed",
+        "tests/test_runtime_v3_s.py::test_s006": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[items]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[arrow]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[numpy]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_materialized_literal_uses_original_handle_digest_and_declared_schema[pandas]": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_pending_snapshot_replays_exact_original_record": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_small_public_input_keeps_legacy_source_without_data_artifacts": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_legacy_large_program_and_source_carriers_remain_readable": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_leaf_is_authenticated_before_first_row": "passed",
+        "tests/test_runtime_v3_literal_source.py::test_literal_root_authentication_failure_releases_manifest_workspace": "passed"
+      },
+      "actual_import": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/demiflow/__init__.py",
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-literal-input-r8/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-literal-input-r8/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-literal-input-r8/forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-literal-input-r8/locations",
+        "TMPDIR": "/tmp/demiflow-literal-input-r8/scratch",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_literal_input_20261117/tests",
+        "DF_API_TEST_PROVIDER": "local",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "FORGE_CHROMIUM": "/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+      },
+      "original_command": [
+        "/tmp/demiflow-literal-input-runner-20261117/run.py",
+        "--execute",
+        "--group",
+        "candidate",
+        "--candidate-head",
+        "77cacbf2eff9e3b9fff608dc8c5c0ae1fc89da6e",
+        "--output",
+        "/tmp/demiflow-literal-input-r8"
+      ],
+      "summary_hash_valid": true,
+      "attachments": {
+        "/tmp/demiflow-literal-input-r8/launcher.json": "efaff01c4bd97dfe1f41d2c6dd95f1e11c4e7332d989d159112f121105f91766",
+        "/tmp/demiflow-literal-input-r8/summary.json": "3f20f727370d7ac25ba8bbdd83257d157bd020091bdfee2d3f1fc2464272b74b",
+        "/tmp/demiflow-literal-input-r8/result.xml": "d13a9ce5f962859d5fd7fb50eb6b54921eaf42b1b1ddbefc6a4485b7f01e82c6"
+      },
+      "failures": {}
+    }
+  },
+  "boundaries": {
+    "main_head_equal": true,
+    "main_status_equal": true,
+    "main_dirty_count": 18,
+    "main_hash_mismatches": [],
+    "seven_frozen": {
+      "demiflow/execution/raw_fetch.py": true,
+      "demiflow/execution/queue_execution.py": true,
+      "demiflow/execution/queue_sinks.py": true,
+      "demiflow/execution/queue_source.py": true,
+      "demiflow/planning/dag.py": true,
+      "demiflow/execution/contracts/exchange.py": true,
+      "demiflow/resources/contracts.py": true
+    }
+  },
+  "limitations": [
+    "Original 6/10 MiB wide joins still fail original planner residency in R3; source/program sealing passes. Need combined planner candidate without changing tests.",
+    "Protocol-4 identity bytes unchanged; Pickler retains alias memo and NumPy/Arrow reducers can retain/allocate original native serialization intermediates. Not a constant-RSS identity promise.",
+    "Final Local source/GC/recovery evidence is not Ray/two-host/GPU or whole-project acceptance."
+  ]
+}
