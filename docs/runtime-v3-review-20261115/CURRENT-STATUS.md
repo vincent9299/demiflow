@@ -2,6 +2,16 @@
 
 本页替代初审 `REVIEW.md` 的“当前状态”，不替代原始证据，也不宣称全部意图完成。代码仍只在隔离分支 `engine/gpt-runtime-v3-review-20261115`，工作树 `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115`。
 
+## 最新集成与验收增量（本节优先于下文旧快照）
+
+- 函数状态修复 `f90b82b` 已集成；总控在 `18b6421` 独立跑真实 Ray 6 项全过，单/四 CPU 的 closure、显式参数与原 ACK 恢复保持一致。2104 个 owner 输入及1791个独立验收输入逐字节核对 0 不符，见 [FUNCTION-RAY-INDEPENDENT-18B6421.md](FUNCTION-RAY-INDEPENDENT-18B6421.md)。
+- Local/工作台/历史全组合固定版本 `f90b82b` 为 **109 passed / 1 failed**。唯一原慢消费者用例在原224MiB可驻留预算中被规划拒绝；原因是最终 thread_attempt 活引用程序仍按 owned 函数状态额外计快照。正在修，原测试/预算不动。此前106通过不能覆盖这项新回归。
+- 本机四张真实 GPU 的 normal/failure/cancel 已完成 **3 passed / 0 skipped**，12个原allocation全部释放，见 [PHYSICAL-FOUR-GPU-391AE6B.md](PHYSICAL-FOUR-GPU-391AE6B.md)。两机CPU四项此前已闭环。
+- 两宿主实际 GPU 绑定候选 `883cc5c` 已集成为 `e725af9`：Ray实际GPU grant先核宿主/UUID/内存，再在原DevicePool预约对应设备；资源层只接收注入的核验接口。CPU worker不见未授予CUDA，未知退出保留原计费，重建provider读取原journal核原actor。owner两宿主六张实际GPU normal/failure/cancel **3 passed / 168.92秒**；总控完整源审已完成，原始结果与journal尚待独立归档核验，不冒称最终验收。GPU远端actor-loss原ACK恢复正补验。
+- 原同预算性能工作负载计划已冻结，见 [PERFORMANCE-PLAN-20261116.md](PERFORMANCE-PLAN-20261116.md)。正在完成真实baseline预热和测量harness；正式五轮对比未执行，不以GPU能运行代替性能达标。
+
+下文保留前一阶段精确版本的事实；标为“在途”的旧状态以上述更新为准。最新组合仍未全绿，不宣布两大意图全部完成。
+
 ## 两条原始意图与目前判断
 
 **产品 root**：统一、真正可用的工作台，让用户看懂、配置、运行 pipeline，分析、比较、评测数据。Demo、开发对话、Notebook Python/SQL、Case/媒体、历史保护仍属于产品，不能被引擎测试数代替。

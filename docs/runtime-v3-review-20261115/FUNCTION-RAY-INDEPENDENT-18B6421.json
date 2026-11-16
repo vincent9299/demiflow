@@ -1,0 +1,72 @@
+{
+  "scope": "independent source proof and real Ray function-state tests",
+  "checks": [
+    {
+      "verification": "/tmp/demiflow-regression-function-final3-evidence/verification.json",
+      "verification_sha256": "0ec49997299417d32dd308acaf9c6975d70f1b910fc9d3d4f03915efc90b1afe",
+      "commit": "e007bfe9aae5235f70b9edeb766e2166fee07511",
+      "inputs": 2104,
+      "mismatches": []
+    },
+    {
+      "verification": "/tmp/demiflow-ray-function-state-18b6421-evidence/verification.json",
+      "verification_sha256": "94fba31b9913b52de904159f2f17d7cd1a7dcd0b9a8a175be84f78412774a5dd",
+      "commit": "18b6421a5bf087423f2f8c0d16a9dd53de96a8d3",
+      "inputs": 1791,
+      "mismatches": []
+    }
+  ],
+  "junit": "/tmp/demiflow-ray-function-state-18b6421.xml",
+  "junit_sha256": "aacf74dc41f6c924ab14f96fc2de533f873b689aa798b7176d2a4ee60cf8541c",
+  "result": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "6",
+    "time": "212.209",
+    "timestamp": "2026-11-16T09:09:44.306682+08:00",
+    "hostname": "job-09b54ebad3bd-20260629073159-5584d65864-wcm7n"
+  },
+  "tests": [
+    {
+      "classname": "tests.test_runtime_v3_ray_function_state",
+      "name": "test_real_ray_function_state_is_independent_of_host_capacity[1-cell]",
+      "time": "54.709"
+    },
+    {
+      "classname": "tests.test_runtime_v3_ray_function_state",
+      "name": "test_real_ray_function_state_is_independent_of_host_capacity[1-kwargs]",
+      "time": "50.851"
+    },
+    {
+      "classname": "tests.test_runtime_v3_ray_function_state",
+      "name": "test_real_ray_bound_state_resumes_the_original_ack[1]",
+      "time": "54.032"
+    },
+    {
+      "classname": "tests.test_runtime_v3_ray_function_state",
+      "name": "test_real_ray_function_state_is_independent_of_host_capacity[4-cell]",
+      "time": "14.884"
+    },
+    {
+      "classname": "tests.test_runtime_v3_ray_function_state",
+      "name": "test_real_ray_function_state_is_independent_of_host_capacity[4-kwargs]",
+      "time": "12.140"
+    },
+    {
+      "classname": "tests.test_runtime_v3_ray_function_state",
+      "name": "test_real_ray_bound_state_resumes_the_original_ack[4]",
+      "time": "25.289"
+    }
+  ],
+  "local_full_regression": {
+    "head": "59305b7",
+    "production_equivalent_to": "f90b82b",
+    "passed": 109,
+    "failed": 1,
+    "failure": "tests/test_stream_map.py::test_slow_consumer_bounds_wide_rows_and_inflight_calls",
+    "verification": "/tmp/demiflow-regression-final6-f90b82b-evidence/verification.json",
+    "resolved": false
+  }
+}
