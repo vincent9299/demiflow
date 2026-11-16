@@ -15,17 +15,26 @@ from .dataflow_model_journal import RemotePromptJournal
 
 class _RoutedPromptJournal(RemotePromptJournal):
     """Same RPC/SQLite transaction, adding the declared whole-node ceiling."""
-    def __init__(self, *, group_limit, **kwargs):
+    def __init__(self, *, group_limit, route, **kwargs):
         super().__init__(**kwargs)
         self._group_limit = group_limit
+        self._route = route
 
     def _command(self, operation, request, *, value_ref=None, reservation=None, options=None):
         if reservation is not None:
             key, charges = reservation
             reservation = (key, {**charges, 'requests-' + identity(self._node_id):
                                   (1, self._group_limit)})
-        return super()._command(operation, request, value_ref=value_ref,
-                                reservation=reservation, options=options)
+        command = super()._command(operation, request, value_ref=value_ref,
+                                    reservation=reservation, options=options)
+        if operation == 'offline_lookup':
+            if options:
+                raise DataflowError('INVALID_CONTRACT', 'Offline route cannot override its sealed declaration')
+            # Equal prompts in different explicitly declared stores can have
+            # equal source request digests. Keep their RPC waiters distinct.
+            command = replace(command, options={'route': self._route},
+                operation_id=identity(['routed-offline-input-v1', command.operation_id, self._route]))
+        return command
 
 
 def routed_declaration(actor, target):
@@ -86,7 +95,7 @@ def bind_routed_prompt(actor, *, services, node_id):
     action = make_native_action_view(services, node_id=node_id)
     for name, child in actor.actors.items():
         recovery = RemotePromptRecovery(child, action, node_id, services=services)
-        journal = _RoutedPromptJournal(port=services.journal, action=action, bounds=services.bounds,
+        journal = _RoutedPromptJournal(port=services.journal, action=action, bounds=services.bounds, route=name,
             group_limit=(action.context.limits['max_requests'] if actor.max_requests is None
                          else actor.max_requests))
         journal._bind(node_id, services.store)

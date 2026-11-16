@@ -40,12 +40,15 @@ class RemoteOfflinePromptClient:
         pass  # The run owns the port; no worker file/database was opened.
 
 
-def _sealed_declaration(service, node_id):
+def _sealed_declaration(service, node_id, *, route=None):
     """Read the original passive factory; never construct an actor on driver."""
     from .dataflow_seal import load_dataflow, load_sealed_dataflow, verify_dataflow_program
-    from .dataflow_model_factory import PromptFactory
+    from .dataflow_model_factory import PromptFactory, RoutedPromptFactory
     from ..data.plan import CallableSpec
-    cached = getattr(service, '_offline_declarations', {}).get(node_id)
+    if route is not None and (type(route) is not str or not route):
+        raise DataflowError('INVALID_CONTRACT', 'Offline route must name a sealed prompt declaration')
+    cache_key = node_id if route is None else (node_id, route)
+    cached = getattr(service, '_offline_declarations', {}).get(cache_key)
     if cached is not None:
         return cached
     action, bounds, store = service._action, service._bounds, service._store
@@ -58,6 +61,11 @@ def _sealed_declaration(service, node_id):
     program = verify_dataflow_program(node.program_ref,
         expected_pin=pin['programs'][node_id], store=store, bounds=bounds)
     spec = program.value
+    if route is not None:
+        if (not isinstance(spec, CallableSpec) or spec.target is not RoutedPromptFactory
+                or len(spec.constructor_args) != 5 or route not in spec.constructor_args[0]):
+            raise DataflowError('INVALID_CONTRACT', 'Offline route is absent from the sealed prompt factory')
+        spec = spec.constructor_args[0][route]
     if (not isinstance(spec, CallableSpec) or spec.target is not PromptFactory
             or len(spec.constructor_args) != 2):
         raise DataflowError('INVALID_CONTRACT', 'Offline lookup requires the original prompt factory')
@@ -69,20 +77,23 @@ def _sealed_declaration(service, node_id):
     with service._lock:
         if not hasattr(service, '_offline_declarations'):
             service._offline_declarations = {}
-        if len(service._offline_declarations) >= len(graph.nodes) and node_id not in service._offline_declarations:
+        maximum = sum(len(node.kernel.configuration.get('routes', {})) or 1 for node in graph.nodes)
+        if len(service._offline_declarations) >= maximum and cache_key not in service._offline_declarations:
             raise DataflowError('BUDGET_EXCEEDED', 'Offline declaration cache exceeds sealed graph')
-        service._offline_declarations[node_id] = declaration
+        service._offline_declarations[cache_key] = declaration
     return declaration
 
 
 def offline_lookup(service, command, record):
-    if command.reservation is not None or command.value_ref is not None or command.options:
+    if (command.reservation is not None or command.value_ref is not None
+            or set(command.options) not in (set(), {'route'})
+            or command.options and (type(command.options['route']) is not str or not command.options['route'])):
         raise DataflowError('INVALID_CONTRACT', 'Offline lookup cannot reserve or override its sealed store')
     original = dict(record)
     digest = original.pop('request_sha256', None)
     if digest != request_key(original):
         raise DataflowError('INVALID_CONTRACT', 'Offline request content digest differs')
-    options, model = _sealed_declaration(service, command.node_id)
+    options, model = _sealed_declaration(service, command.node_id, route=command.options.get('route'))
     if record.get('model') != model.name:
         raise DataflowError('INVALID_CONTRACT', 'Offline model differs from its sealed declaration')
     maximum = service._bounds.max_control_bytes

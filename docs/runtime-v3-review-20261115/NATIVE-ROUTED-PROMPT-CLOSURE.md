@@ -30,7 +30,8 @@
 
 唯一 deselected 为 Ray 参数，已用真实 Ray 环境单独跑绿。两组均锁同一提交的 2133 个
 源码/测试/pyproject 文件，before/after 无变化；七件冻结文件逐字匹配 `49b666f`。
-Ray 没有使用 Ray Data，测试使用独占私有容量目录和自己创建的私有 cluster。
+测试进入原 Ray Core executor，使用独占私有容量目录和自己创建的私有 cluster。
+本组没有额外的 Ray Data 导入探针，不把源码路径证据冒称逐进程导入计数。
 
 预算原测试失败独立复现于修改前 `f15016a`：原 RunPromptJournal 已把资源额度错误映射为
 `PromptBudgetExceededError`，测试仍期待 `RecoveryContractError`。仅修正内层领域错误断言；
