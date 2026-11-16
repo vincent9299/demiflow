@@ -1,0 +1,70 @@
+{
+  "schema": "demiflow.relational-history-migration-proof.v1",
+  "base": "907bd7e",
+  "head": "de70b34ca6acb20db51e7edf2ab25873670159a4",
+  "production_changed": false,
+  "changed_original_functions": [
+    "test_async_checkpoint_preserves_source_context_across_feed_chunks",
+    "test_checkpoint_async_in_running_loop_resume_and_version",
+    "test_checkpoint_cached_map_failure_resume",
+    "test_checkpoint_sync_and_mixed_prefix",
+    "test_sort_and_join_cleanup_on_consumer_error"
+  ],
+  "all_other_original_functions_ast_equal": true,
+  "source_inputs": 2958,
+  "git_byte_mismatches": [],
+  "source_unchanged": true,
+  "environment": {
+    "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-relational-history-r3/resources",
+    "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-relational-history-r3/home",
+    "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-relational-history-r3/forge",
+    "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-relational-history-r3/locations",
+    "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_mainpath_20261116:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_mainpath_20261116/tests",
+    "TMPDIR": "/tmp/demiflow-relational-history-r3/scratch"
+  },
+  "receipt": {
+    "path": "/tmp/demiflow-relational-history-r3/receipt.json",
+    "sha256": "9345d4b4c2b66e044d66047adec0765d0db1fd0a278a998eac0ee0dba48a27c5"
+  },
+  "summary": {
+    "fixed_head": "de70b34ca6acb20db51e7edf2ab25873670159a4",
+    "seconds": 39.52938938140869,
+    "source_unchanged": true,
+    "nodes": {
+      "tests/test_local_relational.py::test_checkpoint_cached_map_failure_resume": true,
+      "tests/test_local_relational.py::test_checkpoint_sync_and_mixed_prefix": true,
+      "tests/test_local_relational.py::test_async_checkpoint_preserves_source_context_across_feed_chunks": true,
+      "tests/test_local_relational.py::test_checkpoint_async_in_running_loop_resume_and_version": true,
+      "tests/test_local_relational.py::test_sort_and_join_cleanup_on_consumer_error": true
+    },
+    "counts": {
+      "true": 5
+    },
+    "receipt": "/tmp/demiflow-relational-history-r3/receipt.json",
+    "sha256": "9345d4b4c2b66e044d66047adec0765d0db1fd0a278a998eac0ee0dba48a27c5",
+    "argv": [
+      "/yzp/zhaozy/yangzepeng/0905/env/bin/python",
+      "-P",
+      "-B",
+      "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_v3_perf_mainpath_20261116/tests/runtime_v3_regression_inventory.py",
+      "/tmp/demiflow-relational-history-r3/request.json"
+    ],
+    "environment": "local"
+  },
+  "runner": {
+    "path": "/tmp/demiflow-relational-history-runner.py",
+    "sha256": "b13702cb78ed0bf01fd1318b6c4249ee57e07b864a8fc18a66fad8b08d6e8b89"
+  },
+  "red_receipts": [
+    {
+      "path": "/tmp/demiflow-relational-history-r1/receipt.json",
+      "sha256": "4e417a26b9bb95aa6bd19f21d03bfc6fa1b39c8248052f8151fc147531c7d712",
+      "classification": "test-observer-used-wrong-final-field"
+    },
+    {
+      "path": "/tmp/demiflow-relational-history-r2/receipt.json",
+      "sha256": "f9497e23214932a65dc2ca0753b7137115f34fc1f862a71ed4069e9306721eda",
+      "classification": "test-attempted-resume-of-completed-run"
+    }
+  ]
+}
