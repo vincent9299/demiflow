@@ -29,8 +29,8 @@ def service_kernel(model, settings):
         return model
     if model.kind != 'prompt':
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed HTTP service requires a native Prompt node')
-    from .contracts.dataflow import thaw_record_value
-    configuration = dict(thaw_record_value(model.configuration), managed_http_declaration=declaration)
+    from .dataflow_models import _json_config
+    configuration = dict(_json_config(model.configuration), managed_http_declaration=declaration)
     parameters = declaration['parameters']
     requests = dict(model.profile.requests)
     role = model.resource_role
@@ -50,10 +50,10 @@ def bind_prompt_service(actor, spec, *, services, node_id):
         raise DataflowError('INVALID_CONTRACT', 'Prompt worker service differs from the sealed plan')
     if declaration is None:
         return
-    from .contracts.dataflow import thaw_record_value
+    from .dataflow_models import _json_config
     from .recovery_contract import document
     import hashlib
-    digest = hashlib.sha256(document(thaw_record_value(declaration), 65536)).hexdigest()
+    digest = hashlib.sha256(document(_json_config(declaration), 65536)).hexdigest()
     if getattr(actor, '_sealed_service_declaration', None) != digest:
         raise DataflowError('INVALID_CONTRACT', 'Prompt worker service declaration does not match its program')
     from .dataflow_managed_devices import bind_worker_service
