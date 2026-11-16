@@ -251,6 +251,17 @@ def test_real_dataset_literal_original_ack_gc_and_resume(tmp_path,monkeypatch):
             assert data.from_items(rows).take_all()==rows
 
 
+def test_real_ray_literal_original_ack_gc_and_resume(tmp_path, monkeypatch):
+    ray = pytest.importorskip('ray')
+    from runtime_v3_residency_scenarios import _provider
+    from runtime_v3_support import _RayDataBlocker
+    assert not ray.is_initialized(), 'this test must own its Ray Core cluster'
+    with _provider(NS(root=tmp_path, provider='ray'), workers=3), _RayDataBlocker() as blocked:
+        test_real_dataset_literal_original_ack_gc_and_resume(tmp_path, monkeypatch)
+    assert not blocked.attempts
+    assert not ray.is_initialized()
+
+
 def test_other_finished_split_pending_record_shares_original_worker_grant(tmp_path):
     from demiflow.execution.dataflow_record_frames import admit_workspace
     from test_runtime_v3_finite_reader_credit import HeldState
