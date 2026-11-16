@@ -124,10 +124,17 @@ def test_resource_terminal_runs_in_the_finally(tmp_path, ray_local):
 def test_terminal_mode_follows_the_drain_flag(ray_chain_facts):
     facts = ray_chain_facts
     _assert_terminal_issued(facts['run'], 'DRAINED')
-    # Successful leases have a native DRAINED retirement before physical kill;
-    # whole-scope ABANDON only handles anything still remaining at close.
+    # Stage rotation uses DRAINED retirements. Final execution close may use the
+    # scope ABANDON terminal after the worker drained and its final cut ACKed.
+    # Check that actual ordering, rather than requiring the retired v2 mode.
     releases = [event for event in facts['terminal_events'] if event[0] == 'release']
-    assert releases and all(mode == 'DRAINED' for _, _, mode in releases)
+    assert all(mode == 'DRAINED' for _, _, mode in releases)
+    events = facts['terminal_events']
+    terminals = [(i, event) for i, event in enumerate(events) if event[0] == 'scope_close']
+    assert terminals and all(event[2] == 'ABANDON' for _, event in terminals)
+    for index, _ in terminals:
+        assert any(event[0] == 'acked' for event in events[:index])
+        assert any(event[0] == 'drained' for event in events[:index])
 
 
 @pytest.mark.ray
@@ -136,7 +143,9 @@ def test_actor_kill_stays_after_the_resource_terminal(ray_chain_facts):
     killed = [(i, value[1]) for i, value in enumerate(events) if value[0] == 'kill']
     assert killed
     for index, allocation in killed:
-        assert any(value[0] == 'release' and value[1] == allocation for value in events[:index])
+        assert ('drained', allocation) in events[:index]
+        assert any((value[0] == 'release' and value[1] == allocation)
+                   or value[0] == 'scope_close' for value in events[:index])
         assert any(value[0] == 'connector_close' and value[1] == allocation for value in events[index + 1:])
 
 
@@ -158,9 +167,12 @@ import test_upgrade_v2_unit_L015 as chain_contract
 def ray_chain_facts(ray_local, tmp_path_factory):
     import builtins
     from demiflow.resources.capacity import LocalCapacityPool
-    from demiflow.execution.dataflow_hosts import DataflowRayConnector
+    from demiflow.execution.dataflow_hosts import DataflowRayConnector, RayHostEndpoint
+    from demiflow.execution.commit import CommitCoordinator
     events, reservations, imports = [], [], []
     original_apply = ResourceManager.apply
+    original_terminal = ResourceManager.close
+    original_drain, original_commit = RayHostEndpoint.drain, CommitCoordinator.commit
     original_kill, original_close = ray_local.kill, DataflowRayConnector.close
     original_reserve, original_import = LocalCapacityPool.reserve, builtins.__import__
     def apply(manager, context, plan):
@@ -174,6 +186,19 @@ def ray_chain_facts(ray_local, tmp_path_factory):
     def close(connector, allocation_id):
         events.append(('connector_close', allocation_id))
         return original_close(connector, allocation_id)
+    def terminal(manager, context, spec):
+        result = original_terminal(manager, context, spec)
+        events.append(('scope_close', context.scope_id, spec['mode']))
+        return result
+    def drain(endpoint, *, deadline_ms):
+        result = original_drain(endpoint, deadline_ms=deadline_ms)
+        events.append(('drained', endpoint._allocation_id))
+        return result
+    def commit(owner, *args, **kwargs):
+        result = original_commit(owner, *args, **kwargs)
+        assert result['status'] == 'acked'
+        events.append(('acked', result['commit_id']))
+        return result
     def reserve(pool, *args, **kwargs):
         reservations.append(args)
         return original_reserve(pool, *args, **kwargs)
@@ -185,6 +210,9 @@ def ray_chain_facts(ray_local, tmp_path_factory):
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv('DEMIFLOW_V3_PROVIDER', 'ray_core')
         patch.setattr(ResourceManager, 'apply', apply)
+        patch.setattr(ResourceManager, 'close', terminal)
+        patch.setattr(RayHostEndpoint, 'drain', drain)
+        patch.setattr(CommitCoordinator, 'commit', commit)
         patch.setattr(ray_local, 'kill', terminate)
         patch.setattr(DataflowRayConnector, 'close', close)
         patch.setattr(LocalCapacityPool, 'reserve', reserve)
@@ -447,9 +475,15 @@ def test_resume_leaves_no_orphan_scope(tmp_path, ray_local):
 
 @pytest.mark.ray
 def test_second_failure_after_resume_opens_and_closes_its_own_scope(tmp_path, ray_local):
-    first = _ray_failure(tmp_path, ray_local, mode='after')
-    second = _ray_failure(tmp_path, ray_local, mode='after', reference=first['reference'])
+    # Resume needs an original committed cut. Both attempts really fail in the
+    # worker at row 3, after the first two rows ACK; launch failure alone is not
+    # recoverable history and must never be admitted from its sealed files.
+    first = _ray_failure(tmp_path, ray_local, mode='frame')
+    original_commits = first['run'].journal.execution_commits('action-1')
+    assert original_commits and all(item['status'] == 'acked' for item in original_commits)
+    second = _ray_failure(tmp_path, ray_local, mode='frame', reference=first['reference'])
     _assert_closed_failure(second)
+    assert second['run'].journal.execution_commits('action-1') == original_commits
     first_scopes, first_allocations, _ = first['snapshot']
     scopes, allocations, _ = second['snapshot']
     assert len(scopes) == len(first_scopes) + 1
