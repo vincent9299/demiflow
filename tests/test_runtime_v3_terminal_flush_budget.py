@@ -50,13 +50,12 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
                     chunks = observed_chunks()
                 return put(store, chunks, max_bytes=max_bytes, media_type=media_type)
             def read_tail(stream, count=-1):
-                raw = read(stream, count)
-                if active and id(stream) == active['tail_id'] and raw:
+                previous_id, previous = None, 0
+                observing = bool(active and id(stream) == active['tail_id'])
+                if observing:
                     # The original writer still holds its previous chunk/view
                     # while it asks the generator for the next scratch read.
                     frame = sys._getframe(1)
-                    live = {id(raw): len(raw)}
-                    previous = 0
                     for _ in range(12):
                         if frame is None:
                             break
@@ -64,11 +63,18 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
                             chunk = frame.f_locals.get('chunk')
                             if type(chunk) is bytes:
                                 previous = len(chunk)
-                                live[id(chunk)] = len(chunk)
+                                previous_id = id(chunk)
                             del chunk
                             break
                         frame = frame.f_back
                     del frame
+                # Inspect before reading so the observer never retains a stale
+                # frame-local snapshot across the next physical allocation.
+                raw = read(stream, count)
+                if observing and raw:
+                    live = {id(raw): len(raw)}
+                    if previous_id is not None:
+                        live[previous_id] = previous
                     with open(read_trace, 'a') as output:
                         output.write(json.dumps({**active, 'current_chunk_bytes': len(raw),
                             'previous_chunk_bytes': previous, 'live_tail_bytes': sum(live.values()),
@@ -128,10 +134,10 @@ def test_real_store_chunking_preserves_segment_hashes_and_restore(tmp_path, monk
     monkeypatch.setattr(ScratchStream, 'read', observe)
     with store_fixture(tmp_path) as (_, store, _):
         services = SimpleNamespace(store=store, bounds=limits)
-        state = TerminalBlocks(services, 'worker', declaration=('layout', 2))
+        state = TerminalBlocks(services, 'worker', declaration=(sha256(b'layout').hexdigest(), 2))
         rows = [(json.dumps({'n': i, 'payload': 'x'*900})+'\n').encode() for i in range(40)]
         for i, raw in enumerate(rows):
-            tag = BlockPartition('layout', i // 20, 2)
+            tag = BlockPartition(sha256(b'layout').hexdigest(), i // 20, 2)
             state.append(make('Record', block_partition=tag), raw)
         partitions = state.manifest_partitions()
         assert [p['rows'] for p in partitions] == [20, 20]
@@ -144,7 +150,7 @@ def test_real_store_chunking_preserves_segment_hashes_and_restore(tmp_path, monk
             assert leaves[0].size_bytes == len(expected)
             assert b''.join(block_chunks(store, root, limits)) == expected
         state.close()
-        restored = TerminalBlocks(services, 'worker', declaration=('layout', 2))
+        restored = TerminalBlocks(services, 'worker', declaration=(sha256(b'layout').hexdigest(), 2))
         manifest = {'rows': 40, 'bytes': sum(map(len, rows)), 'partitions': partitions}
         restored.restore(manifest)
         assert restored.manifest_partitions() == partitions
@@ -183,7 +189,8 @@ def test_exact_original_document_limit_plus_newline_remains_legal(tmp_path):
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     row = {'value': 'x'*32}
-    record = make('Record', inline=row, encoded_bytes=len(json.dumps(row, separators=(',', ':')).encode()))
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    record = make('Record', inline=row, encoded_bytes=len(_encode_payload(row, max_bytes=8192)))
     raw = _encode_record(record, bounds()) + b'\n'
     limits = bounds(max_row_bytes=len(raw)-1)
     # The original full encoder accepts exactly max_row bytes; the existing
