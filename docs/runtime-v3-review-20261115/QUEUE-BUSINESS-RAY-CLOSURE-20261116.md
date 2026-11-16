@@ -37,3 +37,5 @@ driver 与另一个实际 Ray worker 的八项依赖来源/版本一致。Ray 2.
 Local 五组完整门在 `ec6036f` 对应源内容通过，1 passed / 293.08s；Ray 五组在 `9414e04` 通过。两份输入集合只有两处不同：生产 `dataflow_thread_fusion.py` 的 Ray 启用条件，及 queue helper 的私有 Ray host 配置。Local 分支行为未因该生产条件变化而改变；本轮没有重复再跑一次 Local，也不宣称两者是在同一 HEAD 上运行。此前四个 producer 真实断点和七个原 search/helper 检查的版本与证据继续由原报告保留。
 
 本验收证明 Dataset 原生队列业务能从输入、执行、原结果/ACK、恢复、历史读取、模型工具到真实结果持久化串起来。它不单独证明工作台 UI、PostgreSQL、两机完整队列业务、业务 OS SIGKILL，也不替代正式五轮性能比较。产品侧和性能侧由总控的其他验收分别判断，不由这一个业务门推导整体 100%。
+
+总控独立读取提交归档、附件及原 SQLite 的复核记录：[QUEUE-BUSINESS-RAY-PRIMARY-VERIFICATION.json](QUEUE-BUSINESS-RAY-PRIMARY-VERIFICATION.json)。1040 个源码摘要、8 个证据附件和112条terminal/CONFIRMED分配的身份与原清理事实全部一致；未重复运行该完整业务门。

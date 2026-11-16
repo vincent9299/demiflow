@@ -174,16 +174,48 @@ def test_http_error_is_durable_and_requires_explicit_recovery(server, tmp_path):
     assert len(ds.take_all()) == 1 and len(server['bodies']) == 2
 
 
-def test_adaptive_gate_bounds_fresh_requests_and_excludes_replay(server, tmp_path):
+def test_adaptive_gate_bounds_fresh_requests_and_excludes_replay(server, tmp_path, monkeypatch):
+    from demiflow.embeddings.runtime import EmbeddingActor
+
     server['delay'] = .06
-    gate = AdaptiveRequestGate(dict(initial_concurrency=1, max_concurrency=3,
-        window_s=.001, min_samples=1, recovery_s=.001, increase_step=1))
+    policy = dict(initial_concurrency=1, max_concurrency=3,
+        window_s=.001, min_samples=1, recovery_s=.001, increase_step=1)
+    started_gates = []
+    original_start = EmbeddingActor.astart
+
+    async def observe_start(actor):
+        await original_start(actor)
+        started_gates.append(actor.request_gate)
+
+    monkeypatch.setattr(EmbeddingActor, 'astart', observe_start)
     ds = node(server, tmp_path, [{'text': str(i)} for i in range(9)],
-              batch_size=1, concurrency=3, queue_depth=1, request_gate=gate)
-    ds.take_all()
+              batch_size=1, concurrency=3, queue_depth=1, request_policy=policy)
+    # A worker owns its admission state. Observe the real worker gate through
+    # the supported thread provider; never pickle a caller-owned live gate.
+    with data.local_execution(worker_mode='thread'):
+        ds.take_all()
+    assert len(started_gates) == 1
+    gate = started_gates[0]
     assert 1 < server['peak'] <= 3 and gate.capacity == 3 and gate.admitted == 9
-    ds.take_all()
+    assert gate.fresh_responses == 9 and len(server['bodies']) == 9
+    with data.local_execution(worker_mode='thread'):
+        ds.take_all()
+    assert len(started_gates) == 2 and started_gates[1] is not gate
+    gate = started_gates[1]
     assert gate.admitted == 0 and gate.fresh_responses == 0
+    assert len(server['bodies']) == 9
+
+
+def test_caller_owned_adaptive_gate_is_not_silently_replaced(server, tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    gate = AdaptiveRequestGate(dict(initial_concurrency=1, max_concurrency=3))
+    ds = node(server, tmp_path, [{'text': 'never sent'}], concurrency=3,
+              request_gate=gate)
+    with pytest.raises(DataflowError, match='declared policy'):
+        ds.take_all()
+    assert server['bodies'] == [] and gate.admitted == 0
+    assert not (tmp_path / 'calls.sqlite').exists()
 
 
 def test_duplicate_concurrent_batches_singleflight(server, tmp_path):

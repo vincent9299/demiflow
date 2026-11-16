@@ -7,7 +7,7 @@
 当前生产已集成真实 peer 批读、Ray mailbox、持久展开窗口、受管对象 Embedding、工作台真实 GPU 和原 producer unit 恢复；Ray 异步后缀现与 Local 使用同一资源规则。各项保留实际验收版本。这不是“全部完成”的版本：旧私有模型缓存兼容、性能和部分正式验收门仍在收口，未推送或合入主仓。
 
 - **工作台 GPU 与对象链组合**：owner `fae6a05` 的正式 V030 七个真实产品用例和 74 项合同/历史负例全部通过，已集成为 `fdea56c`；总控核两组各 2131 项源码摘要及 8 份证据附件，零不符。总控再于集成版本 `301b426` 跑 GPU/静态 tensor 负例/受管 image-document Embedding，55 passed / 299.81 秒，零跳过。资源声明、CPU0→CUDA1→CPU0、原 ACK/Lance/历史桥、取消释放与对象篡改零 HTTP 同版本通过。见 [NATIVE-GPU-CLOSURE.md](NATIVE-GPU-CLOSURE.md) 及 [总控复核](PRODUCT-GPU-RAY-ASYNC-PRIMARY-VERIFICATION.json)。只声明已验的封闭 Torch 子集与 Local/process 受管路径。
-- **真实队列业务与 Ray 差异**：原 producer unit 跨物理 cut 的恢复修复已集成 `a189328`，Local 五组业务含 19 次原执行、真实模型与队列/ACK/恢复已过。Ray 的 5 逻辑阶段/4 worker 误拒已修为原源与后缀两 owner，CPU/内存仍逐阶段求和；真实 Ray/旧默认合并 20 项过，编译与资源负例另 7 项过。4 CPU 仍明确拒绝，I09 fixture 按真实 6 CPU/4 worker 继续验收；性能基准不增额。见 [QUEUE-BUSINESS-20261116.md](QUEUE-BUSINESS-20261116.md) 与 [RAY-ASYNC-SUFFIX-CLOSURE.md](RAY-ASYNC-SUFFIX-CLOSURE.md)。完整 Ray 业务门仍在运行。
+- **真实队列业务与 Ray 差异**：原 producer unit 跨物理 cut 的恢复修复已集成 `a189328`，Local 五组业务含 19 次原执行、真实模型与队列/ACK/恢复已过。Ray 的 5 逻辑阶段/4 worker 误拒已修为原源与后缀两 owner，CPU/内存仍逐阶段求和；真实 Ray/旧默认合并 20 项过，编译与资源负例另 7 项过。4 CPU 仍在真实反例中明确拒绝。I09 fixture 按真实 6 CPU/4 worker 完整五组业务门通过，19 次原执行、112 次原分配全部 terminal/CONFIRMED；性能基准不增额。总控逐一核 1040 个源码摘要、8 个证据文件以及 112 条原 SQLite 分配的清理、birth/placement，零不符。见 [完整 Ray 业务](QUEUE-BUSINESS-RAY-CLOSURE-20261116.md)、[独立复核](QUEUE-BUSINESS-RAY-PRIMARY-VERIFICATION.json) 与 [RAY-ASYNC-SUFFIX-CLOSURE.md](RAY-ASYNC-SUFFIX-CLOSURE.md)。
 
 - **最新真实 Ray 组合**：固定 `d06e993`，7 passed / 85.01 秒，0 skipped。512 条终端 ACK 的原 RPC 批量、提前 close/最终结果重读/边界、receipt 后 ACK 前真实 SIGKILL、driver 重启与旧 worker FENCED 均通过；1821 项输入前后不变，私有集群退出。原证据 `/tmp/demiflow-ray-combined-peer-r1-evidence/verification.json`。此项关闭下文 mailbox/peer 的待真实 Ray 验收状态，不替代之后新代码的全部矩阵。
 - **持久展开窗口**：`763b973` 将已停车的持久交接容量与尚未运行的消费者内存队列分开。原 credit bytes/总 pending/磁盘/ACK 权威不增额；两源各展开两行→队列在 1 worker 下的正常和原 ACK 恢复及原持久断点 7 项通过。原超过全局窗口的 65 路扩增仍被拒绝，12 项 peer/终端预算组合通过。
@@ -40,7 +40,7 @@
 
 Dataset→真实 worker→数据交接→终端→原提交/ACK→恢复主链已经接通，真实硬件复验发现的跨机租约缺陷现已闭环，旧回归暴露的函数状态缺陷已修且真验；性能、完整业务和产品接线仍有缺口，不能宣布完成。最新完整矩阵生产候选 **ab1b334** 的 Local/真实 Ray Core 各98 API、168例全通过；工作台实际执行图、取消/恢复、原宽数据5项通过。转换前共驻、恢复回读、提前关闭及旧终端断言迁移均已完成定向验收。随后 **5ff5da9** 仅修私有环境第三方依赖误分类，真实 Ray 转换13项与终端4项通过，未借用旧矩阵冒称新HEAD全量验证。
 
-用户已授权本机4张H100及20机2张H100。单卡、四卡、两宿主六卡及远端actor损失后的原ACK恢复均已实际验证；scope及复核见上方。CPU/GPU引擎验收不等于工作台GPU准入通过。旧workers=1函数状态丢失、双机锁身份误用宿主设备号已修复，不再列为当前缺陷。
+用户已授权本机4张H100及20机2张H100。单卡、四卡、两宿主六卡及远端actor损失后的原ACK恢复均已实际验证；scope及复核见上方。引擎硬件验收与工作台GPU准入分别取证；最新工作台GPU已按上方55项组合通过。旧workers=1函数状态丢失、双机锁身份误用宿主设备号已修复，不再列为当前缺陷。
 
 ## 已验证的范围（每项保留自己的版本）
 
@@ -83,7 +83,7 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 | I04 CPU/GPU独立 | 来源保持独立；纯CPU后缀可在真实容量允许时融合，GPU/显式隔离不被吸收 | 本机四卡及两宿主六卡实际CUDA/释放通过；不声称fractional/MIG或硬VRAM上限 |
 | I07/I10/I13 单一权威及历史 | 原RunJournal/CommitCoordinator/真实ACK与恢复，未知效果不重发，原封存/代码来源保护 | 不把局部历史兼容推定为任意旧版本兼容；完整GC需保历史根 |
 | I08 有限资源和性能 | 原预算反例保持，31行退步、GC/FD、driver累计返回已修且真验 | 原take_all压力通过不代替iter_rows压力；大图通过，轻量CPU/两机及完整性能矩阵未达标 |
-| I09 真实业务 | Local模型/队列/fetch/Save及恢复有实际链路；外部模型仅本地transport替身 | 外部PostgreSQL未连库，工作台image/document Embedding授权未开放 |
+| I09 真实业务 | Local模型/队列/fetch/Save及恢复有实际链路；外部模型仅本地transport替身 | 外部PostgreSQL未连库；旧显式模型缓存与托管服务兼容仍在收口 |
 | I11 多机 | 真实两宿主Dataset、原生结果/ACK、共享源与actor恢复通过 | 真实两宿主Dataset及远端actor损失恢复通过；整机失效/网络分区未完成 |
 | I12 产品 | 工作台看原执行图/来源、真实运行/结果/恢复，Notebook/Case已有专项回归 | 既有产品专项并非最新同HEAD全产品验收；引擎不代表全部产品root |
 | I14 完整交付 | 逐公开入口及旧失败映射，显式保留未验项 | [旧17个正式门映射](FORMAL-GATE-EVIDENCE-MAP.md)中disk_gc现已接通；该表是早期快照，后续已接线门以上述带版本证据为准；剩余NotRun不返回常量伪造通过 |
