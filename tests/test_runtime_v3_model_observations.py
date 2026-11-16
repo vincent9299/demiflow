@@ -133,6 +133,7 @@ def test_real_routed_prompts_keep_named_child_call_metrics(prompt_server):
     config = parse_prompt_pack(PACK)
     routes = {name: {'config': parse_prompt_pack(PACK.replace('mock-model', name)), 'concurrency': 1}
               for name in ('a', 'b')}
+    routes['a']['request_policy'] = {'initial_concurrency': 1, 'max_concurrency': 1}
     with data.local_execution(workers=4):
         stats = data.from_items([{'item': i, 'route': name} for i, name in enumerate(('a', 'a', 'b'))]).map_prompt_async(
             'enrich', config=config, inputs={'payload': 'item'}, output='answer',
@@ -140,6 +141,8 @@ def test_real_routed_prompts_keep_named_child_call_metrics(prompt_server):
     values = {value['route']: value for value in stats.metrics['models'].values()}
     assert set(values) == {'a', 'b'}
     assert values['a']['call_records'] == values['a']['shared_admission']['requests'] == 2
-    assert values['b']['call_records'] == values['b']['shared_admission']['requests'] == 1
-    assert all('phases' not in value and value['shared_admission']['peak'] <= 1 for value in values.values())
+    assert values['b']['call_records'] == 1 and 'shared_admission' not in values['b']
+    assert values['a']['shared_admission']['peak'] <= 1
+    assert values['a']['shared_admission']['adaptive']['fresh_responses'] == 2
+    assert all('phases' not in value for value in values.values())
     assert stats.emitted == len(prompt_server['requests']) == 3

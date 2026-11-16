@@ -151,13 +151,14 @@ def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
             stop.touch()
     server['on_request'] = on_request
     def flow():
-        return data.from_items([{'text': 'a'}, {'text': 'b'}]).map_embeddings(
+        return data.from_items([{'text': str(i)} for i in range(10)]).map_embeddings(
             model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=2)
     with pytest.raises(ServiceStopped, match='operator_stop_file'):
         with RunContext.start(tmp_path/'run', limits={'max_requests': 2}) as run:
             reference = run.ref
             flow().run_stream(stop_file=stop)
     assert len(server['bodies']) == 2
+    assert not RunJournal(tmp_path/'run').execution_commits('action-1')
     stop.unlink()
     from demiflow.execution.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError, match='P3 native sink adapter'):
