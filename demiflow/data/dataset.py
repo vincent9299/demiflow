@@ -2331,6 +2331,8 @@ class Dataset:
 
     def schema(self, fetch_if_missing: bool = True) -> Any:
         """Return the backend-native Dataset schema, fetching source metadata when requested."""
+        if not fetch_if_missing:
+            return self._executor.schema(self._source, self._plan, fetch_if_missing=False)
         from ..execution.checked import action
         from ..execution.dataflow_api import make_action_request, run_dataset_action
         with action("schema", self._source, self._plan,
@@ -2342,6 +2344,8 @@ class Dataset:
 
     def columns(self, fetch_if_missing: bool = True) -> list[str] | None:
         """Return known column names, fetching source metadata when requested."""
+        if not fetch_if_missing:
+            return self._executor.columns(self._source, self._plan, fetch_if_missing=False)
         from ..execution.checked import action
         from ..execution.dataflow_api import make_action_request, run_dataset_action
         with action("columns", self._source, self._plan,
