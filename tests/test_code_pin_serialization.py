@@ -131,13 +131,36 @@ def run(*, source, target):
     assert {r['case_id'] for r in out} == {'c01', 'c02', 'c03'}
     assert {r['normalized_question'] for r in out} == {
         '三角形的面积是多少？', '增长率是多少？', '这个结论一定成立吗？'}
-    # The unified chain sealed a code-pin binding -> the managed worker load gate
-    # actually ran (this is not the legacy in-driver fallback).
+    # The v3 worker loads the original code-pin/program bundle before emitting
+    # any cut. Read that bundle and its original ACK, not retired chain keys.
+    import json
+    from demiflow.execution.sealed_plans import load_sealed_plan, _v3_read_store
+    from demiflow.execution.dataflow_seal import _read_json, CODE_PIN_MEDIA, PROGRAM_MEDIA
     journal = runs.journal(root, result['run_id'])
     with journal._connection() as db:
-        keys = [r[0] for r in db.execute(
-            "SELECT action_id FROM runtime_sources WHERE action_id LIKE '%-code-pin-%'")]
-    assert keys, "no code-pin binding sealed; chain load gate was not exercised"
+        seals = [json.loads(row[0]) for row in db.execute(
+            "SELECT document FROM runtime_sources WHERE action_id LIKE '%-dataflow-sealed'")]
+    assert seals, "no unified execution seal; original worker gate was not exercised"
+    witnessed_map = False
+    for seal in seals:
+        directory = runs.directory(root, result['run_id'])
+        bundle = load_sealed_plan(directory, seal['action_id'])
+        store, bounds = _v3_read_store(directory, store_id=bundle['sealed'].code_pin_ref.store_id)
+        pin = _read_json(store,bundle['sealed'].code_pin_ref,max_bytes=bounds.max_control_bytes,
+                         media_type=CODE_PIN_MEDIA)
+        assert pin['action_id'] == seal['action_id']
+        for node in bundle['graph'].nodes:
+            if node.program_ref is None:
+                continue
+            manifest = _read_json(store,node.program_ref,max_bytes=bounds.max_control_bytes,
+                                  media_type=PROGRAM_MEDIA)
+            assert pin['programs'][node.occurrence_id] == manifest['code_identity']
+            witnessed_map |= node.kernel.kind == 'BoundMapOp'
+        commits = journal.execution_commits(seal['action_id'])
+        assert commits and commits[-1]['status'] == 'acked'
+        assert commits[-1]['prepared']['state']['dataflow-cut-v3']
+        assert journal.execution_action(seal['action_id'])['result'] is not None
+    assert witnessed_map
 
 
 # === F9 acceptance 4: by-value registration roundtrip, driver pin == worker pin ===
@@ -180,8 +203,8 @@ def test_f9_by_value_registration_roundtrip(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("form", FORMS)
 def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
-    from test_u2_chain_faults import _release_crash_orphans
-    from demiflow.execution import chain
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.run_journal import RunJournal
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7cg1_" + form)
     transform = FACTORIES[form](helper_mod)
     hook, marker = _crash_hook(tmp_path)
@@ -191,28 +214,35 @@ def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
         return (data.from_items(rows_in).map_async(transform, concurrency=1)
                 .map_async(hook, concurrency=1))
 
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError) as crashed:
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
+    # SIGKILL belongs to an actual managed child, never pytest's thread host.
+    assert crashed.value.code == 'UNKNOWN_EFFECT'
+    assert 'worker connection closed' in str(crashed.value)
     # Unedited code runs to the crash point: driver/worker manifests agree.
     assert marker.exists(), "first run must crash after acked cuts, not fail at load"
+    journal = RunJournal(reference.directory)
+    commits = journal.execution_commits('action-1')
+    assert commits and all(item['status'] == 'acked' for item in commits)
+    assert any(item['receipts']['materialize']['data']['rows'] > 0 for item in commits)
+    original_seal = journal.source_binding('action-1-dataflow-sealed')
     # Edit ONLY the default-arg-referenced helper; the closure's pickle bytes unchanged.
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
-    with pytest.raises(RecoveryContractError, match="code") as excinfo:
+    with pytest.raises(DataflowError, match="Loaded program code differs from the sealed pin") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
     assert not isinstance(excinfo.value, TimeoutError)
-    _release_crash_orphans(tmp_path / "run-resources")
+    assert excinfo.value.code == 'INVALID_CONTRACT'  # existing v3 code-pin rejection vocabulary
+    assert journal.execution_commits('action-1') == commits
+    assert journal.source_binding('action-1-dataflow-sealed') == original_seal
 
 
 # === F7c: default-arg helper edit -> worker LOAD gate refuses ===

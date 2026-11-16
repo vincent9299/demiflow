@@ -405,6 +405,23 @@ class OperatorKernel:
             if len(raw) > self._services.bounds.max_state_bytes:
                 raise _err('BUDGET_EXCEEDED', 'task declaration exceeds max_state_bytes')
             declaration = cloudpickle.loads(raw)
+        if self._spec.state == 'adapter':
+            # LoadedProgram is a frozen declaration, never the active function
+            # owner. Each occurrence/worker slot gets its own admitted data.
+            from ...data.plan import CallableSpec
+            from dataclasses import replace
+            from .task_scope import function_residency_kind, clone_resident_callable
+            key = self._spec.configuration.get('program')
+            if key is None and self._spec.implementation_ref is not None:
+                key = self._spec.implementation_ref.key
+            program = self._services.programs.get(key)
+            original = declaration if declaration is not None else program.value if program is not None else None
+            if isinstance(original, CallableSpec) and function_residency_kind(original.target,
+                    call_args=original.call_args, call_kwargs=original.call_kwargs) == 'adapter':
+                target, args, kwargs = clone_resident_callable(original.target,
+                    max_bytes=self._services.bounds.max_state_bytes,
+                    call_args=original.call_args, call_kwargs=original.call_kwargs)
+                declaration = replace(original, target=target, call_args=args, call_kwargs=kwargs)
         instance = _resolve_instance(self._spec, self._services, declaration=declaration)
         if self._spec.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
             from ..dataflow_models import bind_model_services
@@ -456,9 +473,8 @@ class OperatorKernel:
             from ..operator_policy import classify_operator_state
             owner = self._state_owner(instance)
             policy = classify_operator_state(owner, phase='instance')
-            if self._task_rows and policy.mode == 'function':
-                from .task_scope import snapshot_function
-                state = snapshot_function(owner, max_bytes=self._services.bounds.max_state_bytes)
+            if policy.mode == 'function':
+                state = self._snapshot_state(instance)
                 if state['mode'] == 'nonrecoverable':
                     self.recovery_restriction = state['reason']
                     self._services.journal.restrict_recovery(self._occurrence)
@@ -939,7 +955,7 @@ class OperatorKernel:
             raise _err("BUDGET_EXCEEDED", "kernel recovery image exceeds max_state_bytes")
         return self._services.store.put(iter([raw]), max_bytes=len(raw), media_type=IMAGE_MEDIA_TYPE)
 
-    def _state_owner(self, instance=None):
+    def _state_owner(self, instance=None, *, retain_partial=False):
         import functools
         import inspect
         instance = instance if instance is not None else self._instance
@@ -950,11 +966,23 @@ class OperatorKernel:
             elif isinstance(owner, _FieldCallable):
                 owner = owner._fn
             elif isinstance(owner, functools.partial):
+                if retain_partial:
+                    return owner
                 owner = owner.func
             elif inspect.ismethod(owner) or inspect.ismethodwrapper(owner):
                 owner = owner.__self__
             else:
                 return owner
+
+    def _function_slots(self, instance):
+        """Exact platform wrappers retain the explicit call binding state owner."""
+        target = instance.target if isinstance(instance, AsyncInstance) else instance
+        if isinstance(target, _BoundCallable):
+            return target._instance, target._args, target._kwargs
+        if isinstance(target, _FieldCallable):
+            declaration = target._operation.callable
+            return target._fn, declaration.call_args, declaration.call_kwargs
+        return self._state_owner(instance, retain_partial=True), (), {}
 
     def _snapshot_state(self, instance=None) -> Any:
         instance = instance if instance is not None else self._instance
@@ -967,13 +995,19 @@ class OperatorKernel:
         if snapshot is not None:
             return {"mode": "adapter", "value": instance.resolve(snapshot())}
         if policy.mode == "function":
-            if self._task_rows:
-                from .task_scope import snapshot_function
+            from .task_scope import function_residency_kind, snapshot_function, snapshot_resident_function
+            target, args, kwargs = self._function_slots(instance)
+            kind = function_residency_kind(target, call_args=args, call_kwargs=kwargs)
+            bound_state = any(type(value) in (list, dict) for value in (*args, *kwargs.values()))
+            if kind != 'nonrecoverable' and self._task_rows and target is owner and not bound_state:
                 state = snapshot_function(owner, max_bytes=self._services.bounds.max_state_bytes)
-                if state['mode'] == 'nonrecoverable':
-                    self._services.journal.restrict_recovery(self._occurrence)
-                return state
-            return None
+                if state['mode'] == 'task_function':
+                    return state  # Preserve every already-readable legacy task image.
+            state = snapshot_resident_function(target, call_args=args, call_kwargs=kwargs,
+                                               max_bytes=self._services.bounds.max_state_bytes)
+            if state['mode'] == 'nonrecoverable':
+                self._services.journal.restrict_recovery(self._occurrence)
+            return state
         if policy.mode == "hooks":
             return {"mode": "hooks", "value": instance.resolve(owner.snapshot_state())}
         if policy.mode == "auto_json":
@@ -1116,6 +1150,11 @@ class OperatorKernel:
         if mode == "plain_json":
             from ..operator_policy import restore_auto_state
             restore_auto_state(owner, state["value"], max_bytes=self._services.bounds.max_state_bytes)
+        elif mode == 'function_slots_v1':
+            from .task_scope import restore_resident_function
+            target, args, kwargs = self._function_slots(instance)
+            restore_resident_function(target, state, call_args=args, call_kwargs=kwargs,
+                                      max_bytes=self._services.bounds.max_state_bytes)
         elif mode == 'task_function' and self._task_rows:
             from .task_scope import restore_function
             restore_function(owner, state, max_bytes=self._services.bounds.max_state_bytes)

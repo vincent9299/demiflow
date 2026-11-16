@@ -209,11 +209,12 @@ def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_pa
     journal = RunJournal(ref.directory)
     commits_before = journal.execution_commits('action-1')
     started = time.monotonic()
-    with pytest.raises(DataflowError, match='active worker budget'):
+    with pytest.raises(DataflowError, match='ready cohort exceeds admitted host or resident capacity') as rejected:
         with RunContext.resume(ref), data.local_execution(workers=2, batch_rows=999):
             # This seal has a 3-worker memory cohort. A tighter live envelope
             # cannot silently replace its exchanges or start a partial cohort.
             build().take_all()
+    assert rejected.value.code == 'RESOURCE_INFEASIBLE'
     assert time.monotonic() - started < 30
     assert events(path) == before
     assert journal.execution_commits('action-1') == commits_before

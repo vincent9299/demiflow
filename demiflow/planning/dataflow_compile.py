@@ -335,13 +335,21 @@ def compile_kernel_spec(
     declaration = getattr(operation, "callable", None)
     if isinstance(declaration, CallableSpec):
         import functools
+        import types
         from ..execution.operator_policy import classify_operator_state
         target = declaration.target
+        if (type(target) is types.MethodWrapperType and target.__name__ == '__call__'
+                and type(target.__self__) is functools.partial):
+            target = target.__self__
         while isinstance(target, functools.partial):
             target = target.func
         policy = classify_operator_state(target, phase="declaration")
         state = {"function": "none", "factory": "auto_json", "auto_json": "auto_json",
                  "hooks": "adapter", "unsupported": "nonrecoverable"}[policy.mode]
+        if policy.mode == 'function':
+            from ..execution.kernels.task_scope import function_residency_kind
+            state = function_residency_kind(declaration.target, call_args=declaration.call_args,
+                                            call_kwargs=declaration.call_kwargs)
         if state != "none":
             mergeable = False
     # Semantic descriptions are for identity, not executable parameters. The
@@ -764,14 +772,12 @@ class _Capture:
                     runtime_contract=getattr(callable_spec, 'runtime_contract', None))
             if isinstance(operation, NativeOperation):
                 callable_spec = operation.factory
-            from ..execution.kernels.task_scope import TASK_KINDS, function_has_state
+            from ..execution.kernels.task_scope import TASK_KINDS
             if kernel.kind in TASK_KINDS and not kernel.configuration.get('streaming_map'):
                 executor = getattr(self.request.action, '_dataflow_executor', None)
                 local = getattr(executor, '_local_kernel', None)
                 task_rows = getattr(local, 'batch_rows', None) or 8192
                 state = kernel.state
-                if isinstance(callable_spec, CallableSpec) and function_has_state(callable_spec.target):
-                    state = 'adapter'
                 group = self.nodes[index].kernel.configuration.get('task_group')
                 origin = group is None
                 if origin:
