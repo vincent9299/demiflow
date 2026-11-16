@@ -175,3 +175,139 @@ def test_legacy_numeric_inventory_uses_default_ray_visibility(tmp_path,monkeypat
         records=[json.loads(p.read_text()) for p in (tmp_path/'capacity/devices/allocations').glob('*.json')]
         assert len(records)==1 and records[0]['devices'][0]['device_id']==rows[0]['gpu']['visible']
     finally:ray.shutdown()
+
+
+def _cuda_recovery(row, *, lane):
+    import json
+    from pathlib import Path
+    import time
+    import uuid
+    result = _cuda(row, lane=lane)
+    call = {'n': row['n'], 'lane': lane, 'gpu': result['gpu']}
+    (Path(row['calls']) / (uuid.uuid4().hex + '.json')).write_text(json.dumps(call))
+    time.sleep(.02)
+    return result
+
+
+def _recovery_pipeline(root):
+    source = data.from_items([{'n': n, 'calls': str(root/'calls')} for n in range(16)]).map(_before)
+    branches = [source.map(_cuda_recovery, fn_kwargs={'lane': lane},
+        backend_options={'ray': {'worker_resources': {'gpu': 1, 'memory_bytes': 2*1024**3}}})
+        for lane in range(6)]
+    return branches[0].union(*branches[1:]).map(_after)
+
+
+def test_multi_host_remote_gpu_actor_loss_resumes_original_ack(tmp_path, monkeypatch):
+    """A real remote CUDA actor dies; original ACKed rows are not recomputed."""
+    if os.environ.get('DEMIFLOW_PHYSICAL_TWO_HOST_GPU') != '1':
+        pytest.skip('requires explicitly owned two-physical-host six-GPU cluster')
+    import socket
+    from collections import Counter
+    import ray
+    from demiflow.data.api import _use_executor
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.executors.ray import RayDatasetExecutor
+    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.resources.device_pool import DevicePool
+    from runtime_v3_support import _RayDataBlocker
+    assert ray.is_initialized()
+    nodes = {n['NodeID']: n for n in ray.nodes() if n['Alive']}
+    assert len(nodes) == 2 and sorted(n['Resources'].get('GPU', 0) for n in nodes.values()) == [2, 4]
+    shared = Path(os.environ['DEMIFLOW_PHYSICAL_GPU_ROOT']).resolve()
+    owner = json.loads((shared/'owner.json').read_text())
+    assert owner['root'] == str(shared) and owner['purpose'] == 'demiflow-physical-host-gpu-validation'
+    root = shared/'recovery';root.mkdir();(root/'calls').mkdir()
+    monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
+    inventory = json.loads(Path(os.environ['DEMIFLOW_DEVICE_INVENTORY']).read_text())
+    pool = DevicePool(tmp_path/'capacity/devices', inventory={'devices': [d for h in inventory['hosts'] for d in h['devices']]})
+    advance, launch = DataflowExecution._advance_cut, DataflowExecution._launch_phase
+    cuts, phases, killed = [], [], []
+    def capture_launch(execution):
+        result = launch(execution)
+        phases.append({'attempt': execution._attempt(), 'plan_id': execution._physical.plan_id})
+        return result
+    monkeypatch.setattr(DataflowExecution, '_launch_phase', capture_launch)
+    class InjectedOwnedGpuLoss(Exception):
+        pass
+    def capture_cut(execution):
+        result = advance(execution)
+        image = execution._restore_image
+        if image is None or any(c['commit_id'] == image.commit_id for c in cuts):
+            return result
+        fact = execution._action.context.journal.execution_commit(image.commit_id)
+        assert fact['status'] == 'acked'
+        publication = execution._publication(image)
+        cuts.append({'commit_id': image.commit_id, 'final': image.cut.final,
+                     'rows': publication['manifest']['total_rows'], 'attempt': execution._attempt()})
+        if not image.cut.final and cuts[-1]['rows'] and not killed:
+            prefix = []
+            reader = execution._published_records(publication)
+            try:
+                while True:
+                    try:
+                        raw, ident, sequence, size = reader.pop()
+                    except StopIteration:
+                        break
+                    record = _decode_record_document(raw, record_id=ident, sequence=sequence,
+                                                     max_bytes=execution._bounds.max_row_bytes)
+                    prefix.append([record.payload['n'], record.payload['gpu']['lane']])
+                    assert len(prefix) <= 96
+            finally:
+                reader.close()
+            assert 0 < len(prefix) == cuts[-1]['rows'] < 96
+            remote = []
+            for allocation, endpoint in execution._endpoints.items():
+                lease = execution._scheduler.leases[allocation]
+                host = nodes[lease.host_id.removeprefix('ray-')]['NodeManagerHostname']
+                reservation = pool.reservation_view(allocation)
+                if host != socket.gethostname() and reservation is not None:
+                    remote.append((allocation, endpoint, host, reservation))
+            assert remote, 'a real remote GPU allocation must be alive at the original nonfinal ACK'
+            allocation, endpoint, host, reservation = remote[0]
+            actor = endpoint._connector._actor(allocation)
+            binding = ray.get(actor.identity.remote(), timeout=5)['accelerator_binding']
+            assert binding['devices'][0]['uuid'] == reservation['devices'][0]['device_id']
+            killed.append({'allocation_id': allocation, 'actor_id': actor._actor_id.hex(),
+                           'hostname': host, 'binding': binding, 'commit_id': image.commit_id,
+                           'plan_id': execution._physical.plan_id, 'prefix': prefix})
+            ray.kill(actor, no_restart=True)
+            raise InjectedOwnedGpuLoss('test-owned remote GPU actor killed after original ACK')
+        return result
+    executor = RayDatasetExecutor()
+    def calls():
+        return [json.loads(p.read_text()) for p in (root/'calls').glob('*.json')]
+    try:
+        with _RayDataBlocker() as blocker, _use_executor(executor):
+            with pytest.raises(InjectedOwnedGpuLoss):
+                with RunContext.start(root/'run', limits={'timeout_s': 180, 'memory_bytes': 16*1024**3,
+                        'max_row_bytes': 64*1024, 'max_batch_bytes': 256*1024,
+                        'checkpoint_rows': 12, 'checkpoint_interval_ms': 60000}) as run:
+                    ref = run.ref
+                    with monkeypatch.context() as patch:
+                        patch.setattr(DataflowExecution, '_advance_cut', capture_cut)
+                        _recovery_pipeline(root).take_all()
+            assert len(killed) == 1 and not pool.snapshot()['active']
+            before_calls = Counter((c['n'], c['lane']) for c in calls())
+            with RunContext.resume(ref) as run:
+                before = run.journal.execution_commits('action-1')
+                assert before and before[-1]['status'] == 'acked'
+                with monkeypatch.context() as patch:
+                    patch.setattr(DataflowExecution, '_advance_cut', capture_cut)
+                    rows = _recovery_pipeline(root).take_all()
+                after = run.journal.execution_commits('action-1')
+                assert after[:len(before)] == before and after[-1]['status'] == 'acked'
+            assert not blocker.attempts
+    finally:
+        executor.close()
+    assert Counter((r['n'], r['gpu']['lane']) for r in rows) == Counter((n, lane) for n in range(16) for lane in range(6))
+    assert len({r['gpu']['hostname'] for r in rows}) == 2
+    assert len({p['plan_id'] for p in phases}) == 1 and len({p['attempt'] for p in phases}) == 2
+    assert cuts[-1]['final'] and cuts[-1]['rows'] == 96
+    after_calls = Counter((c['n'], c['lane']) for c in calls())
+    assert all(after_calls[tuple(key)] == before_calls[tuple(key)] == 1 for key in killed[0]['prefix'])
+    assert not pool.snapshot()['active']
+    allocations = [json.loads(p.read_text()) for p in (tmp_path/'capacity/devices/allocations').glob('*.json')]
+    assert len(allocations) == 12 and all(a['state'] == 'RELEASED' and a['release_evidence'] for a in allocations)
+    evidence = {'killed': killed, 'phases': phases, 'cuts': cuts, 'before_commits': before,
+                'after_commits': after, 'released': allocations, 'calls': calls(), 'rows': rows}
+    (Path(os.environ['DEMIFLOW_PHYSICAL_HOSTS_EVIDENCE'])/'gpu-recovery.json').write_text(json.dumps(evidence, indent=2))
