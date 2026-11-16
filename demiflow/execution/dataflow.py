@@ -426,7 +426,7 @@ class DataflowExecution:
         limits = [v for v in (self._active_worker_limit, physical.policy.max_active_workers) if v is not None]
         self._active_worker_limit = min(limits) if limits else None
         self._sealed = sealed
-        self._scheduler = DataflowScheduler(physical, resources=self._services.resources)
+        self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed)
         self._scheduler._policy = live_policy
         from .contracts.dataflow_codec import runtime_scope_id
         self._scheduler.scope_id = runtime_scope_id(physical.plan_id, self._attempt())

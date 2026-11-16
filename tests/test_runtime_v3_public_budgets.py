@@ -59,9 +59,21 @@ def test_memory_option_tightens_defaults_without_erasing_explicit_limits():
     assert explicit.max_row_bytes == explicit.max_batch_bytes == 48 * 1024
 
 
+def _require_separate_stages(monkeypatch):
+    # These tests exercise parking/resuming an unchanged sealed plan. Optional
+    # pure-kernel fusion can remove the very phase boundary being tested.
+    from demiflow.execution import dataflow_api
+    original = dataflow_api.resolve_runtime_policy
+    def resolve(*args, **kwargs):
+        policy, bounds = original(*args, **kwargs)
+        return replace(policy, fusion=False), bounds
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', resolve)
+
+
 @pytest.mark.parametrize('workers', [1, 2])
 def test_public_worker_budget_uses_actual_phases_and_native_allocation(tmp_path, monkeypatch, workers):
     from demiflow.execution.resource_state import RunResourceState
+    _require_separate_stages(monkeypatch)
     physicals, charges = [], []
     original_prepare = DataflowExecution.prepare
     original_charge = RunResourceState._charged
@@ -146,10 +158,8 @@ def test_real_source_split_coverage_with_fewer_active_workers(tmp_path, monkeypa
 def test_resume_tightens_live_worker_envelope_without_rewriting_sealed_plan(tmp_path, monkeypatch):
     class Interrupted(Exception):
         pass
-    # A pure synchronous map may legitimately fuse with its terminal. Use a
-    # real finite boundary so the first ACK precedes an unstarted result phase;
-    # the test still proves 2 -> 1 workers without rewriting the sealed plan.
-    pipeline = _three_stage_dataset().sort('n')
+    _require_separate_stages(monkeypatch)
+    pipeline = _three_stage_dataset()
     seen = []
     def stop(execution, image):
         assert not image.cut.final

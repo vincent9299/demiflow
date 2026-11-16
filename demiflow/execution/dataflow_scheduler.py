@@ -41,11 +41,16 @@ def _grant_bytes(document_value: dict) -> bytes:
 
 
 class DataflowScheduler:
-    def __init__(self, physical: PhysicalDataflow, *, resources: ResourceManager) -> None:
+    def __init__(self, physical: PhysicalDataflow, *, resources: ResourceManager, sealed=None) -> None:
         if not isinstance(physical, PhysicalDataflow):
             raise DataflowError("INVALID_CONTRACT", "scheduler requires a sealed PhysicalDataflow")
         if resources is None:
             raise DataflowError("INVALID_CONTRACT", "scheduler requires the driver ResourceManager")
+        if sealed is not None:
+            from .contracts.dataflow import SealedExecution
+            if not isinstance(sealed, SealedExecution):
+                raise DataflowError('INVALID_CONTRACT', 'scheduler requires sealed launch artifacts')
+        self._sealed = sealed
         self._physical = physical
         self._resources = resources
         self._policy = physical.policy
@@ -171,8 +176,14 @@ class DataflowScheduler:
     # -- E012 place -------------------------------------------------------
     def _launch_spec(self, stage) -> WorkerLaunchSpec:
         artifact_refs = {}
-        for index, ref in enumerate(stage.kernel_refs):
-            artifact_refs["kernel-" + str(index)] = {
+        # The sealed physical artifact already names every stage/kernel ref.
+        # One authenticated root keeps WorkerLaunchSpec's original eight-ref
+        # bound even for a large fused stage. Workers still load and verify all
+        # assigned programs through load_sealed_dataflow before activation.
+        roots = ((('physical', self._sealed.physical_ref),) if self._sealed is not None
+                 else tuple(('kernel-' + str(i), ref) for i, ref in enumerate(stage.kernel_refs)))
+        for name, ref in roots:
+            artifact_refs[name] = {
                 "digest": ref.digest, "location": "store://" + ref.store_id + "/" + ref.key}
         artifact_refs["constants"] = {
             "digest": self._physical.constants_ref.digest,
