@@ -146,7 +146,7 @@ def test_catch_whitelist_miss_and_fatal_terminates(tmp_path):
         with RunContext.start(tmp_path / 'fatal-run'):
             ds2.run_stream()
     assert failure.value.code == 'INTERNAL_PROTOCOL'
-    assert 'Hard' in str(failure.value)
+    assert 'Hard' in '\n'.join(getattr(failure.value, '__notes__', ()))
     journal = RunJournal(tmp_path / 'fatal-run')
     assert journal.execution_action('action-1')['result'] is None
     assert not any(f['status'] == 'acked' for f in journal.execution_commits('action-1'))

@@ -275,8 +275,10 @@ def _business_miss(exc, cfg):
     # ordinary control/budget/unknown-effect failures can never become a miss.
     from . import async_instance
     callback_timeout = getattr(async_instance, 'CallbackDeadlineExceeded', None)
-    if callback_timeout is not None and isinstance(exc, callback_timeout):
-        return 'hard_timeout'
+    if (callback_timeout is not None and isinstance(exc, callback_timeout)
+            and cfg.get('hard_timeout') is not None):
+        names = {cls.__module__ + '.' + cls.__qualname__ for cls in TimeoutError.__mro__}
+        return 'TimeoutError' if set(cfg.get('catch', ())) & names else 'hard_timeout'
     if isinstance(exc, (RuntimeContractError, DataflowError,
                         RecoveryContractError, ServiceStopped, UncertainPromptCall)):
         return None
