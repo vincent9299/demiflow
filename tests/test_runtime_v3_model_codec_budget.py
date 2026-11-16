@@ -55,6 +55,24 @@ def test_native_codec_targets_fit_one_original_incremental_component():
                for n in graph.nodes)
 
 
+def test_native_publication_is_separate_from_workers_and_must_be_sealed():
+    from types import SimpleNamespace
+    from demiflow.execution.dataflow_publication_budget import graph_workspace_bytes, workspace_bytes
+    from demiflow.execution.dataflow_sinks import make_native_terminal_sink
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    action = replace(request(data.from_items([{'id': 1}])), kind='write_lance')
+    graph = lower_action(action, bounds=bounds).graph
+    publication = graph_workspace_bytes(graph)
+    control = min(bounds.max_control_bytes, bounds.max_resident_bytes // 8)
+    assert publication > 65_005_338
+    assert sum(n.kernel.profile.requests['memory_bytes'] for n in graph.nodes) + publication + control <= bounds.max_resident_bytes
+    assert workspace_bytes({}) == 0  # Historical absence is not a new default grant.
+    terminal = next(n.kernel for n in graph.nodes if n.kind == 'terminal')
+    with pytest.raises(DataflowError, match='lacks sealed residency reservation'):
+        make_native_terminal_sink(terminal, request=action, services=SimpleNamespace(bounds=bounds),
+                                  publication_reserved_bytes=control)
+
+
 def test_explicit_native_model_grant_is_not_enlarged_and_still_rejects_real_peak(tmp_path, server):
     dataset = data.from_items([{'id': 1, 'payload': b'wide\x00original' * 750000}]).map_prompt(
         'enrich', config=parse_prompt_pack(PACK), inputs={'payload': 'id'}, output='answer', max_requests=1,
