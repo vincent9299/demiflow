@@ -31,14 +31,14 @@ def _capture(monkeypatch):
     return plans, allocations
 
 
-def _check_profiles(graph, physical):
+def _check_profiles(graph, physical, *, shared_cpu=False):
     from demiflow.planning.dataflow_place import partition_stages
     originals = partition_stages(graph, policy=physical.policy, bounds=physical.bounds)
     by_node = {s.occurrences[0]: s for s in originals}
     for stage in physical.stages:
         if len(stage.occurrences) < 2:
             continue
-        assert stage.profile.requests['cpu_millis'] == sum(
+        assert stage.profile.requests['cpu_millis'] == (max if shared_cpu else sum)(
             by_node[o].profile.requests['cpu_millis'] for o in stage.occurrences)
         assert stage.profile.requests['memory_bytes'] == sum(
             max(by_node[o].resident_bytes, by_node[o].profile.requests['memory_bytes'])
@@ -171,12 +171,17 @@ def test_plain_iterator_map_early_close_keeps_source_independent(tmp_path, monke
         for n in range(10000):
             with reads.open('a') as stream: stream.write(str(n)+'\n')
             yield {'n':n}
-    with RunContext.start(tmp_path/'run'),data.local_execution(workers=2,worker_mode=mode,batch_rows=5):
+    with RunContext.start(tmp_path/'run') as run,data.local_execution(workers=2,worker_mode=mode,batch_rows=5):
         assert data.from_iter(source).map(lambda row:row).take(1) == [{'n':0}]
     assert 1 <= len(reads.read_text().splitlines()) <= 25
     graph, physical = plans[0]
     assert len(physical.stages) == len(allocations) == 2
-    _check_profiles(graph, physical)
+    # Pure synchronous kernels now share one business thread/grant; resident
+    # memory still sums, and the source remains an independent allocation.
+    _check_profiles(graph, physical, shared_cpu=True)
+    assert _actual_grants(run, allocations) == sorted(
+        (s.profile.requests['cpu_millis'], s.profile.requests['memory_bytes'])
+        for s in physical.stages)
 
 
 @pytest.mark.parametrize('change', ['effect','device','budget','fusion'])
@@ -216,3 +221,33 @@ def test_suffix_does_not_swallow_unknown_effect_device_or_exceed_grant(tmp_path,
         store_domains=(), logical_resources={'cpu_millis': 16000, 'memory_bytes': 2**30},
         isolation_capabilities=()),)
     assert fuse_thread_suffix(graph,stages,policy=policy,bounds=bounds,hosts=hosts)==stages
+
+
+def _actual_grants(run, allocations):
+    with run.journal._connection() as db:
+        rows = db.execute('SELECT allocation_id,effective FROM resource_allocations').fetchall()
+    assert {row[0] for row in rows} == set(allocations)
+    effective = [json.loads(row[1]) for row in rows]
+    return sorted((item['cpu_millis'], item['memory_bytes']) for item in effective)
+
+
+def test_unfused_independent_workers_keep_summed_grants(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from demiflow.execution import dataflow_api
+    from demiflow.planning.dataflow_place import partition_stages
+    resolve = dataflow_api.resolve_runtime_policy
+    def unfused(*args, **kwargs):
+        policy, bounds = resolve(*args, **kwargs)
+        return replace(policy, fusion=False), bounds
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', unfused)
+    plans, allocations = _capture(monkeypatch)
+    with RunContext.start(tmp_path/'run') as run, data.local_execution(workers=3):
+        assert data.from_items([{'n':0},{'n':1}]).map(lambda r: {'n':r['n']+1}).take_all() == [{'n':1},{'n':2}]
+    graph, physical = plans[0]
+    originals = partition_stages(graph, policy=physical.policy, bounds=physical.bounds)
+    assert len(originals) == len(physical.stages) == len(allocations) == 3
+    assert all(len(s.occurrences) == 1 for s in physical.stages)
+    grants = _actual_grants(run, allocations)
+    assert grants == sorted((s.profile.requests['cpu_millis'], s.profile.requests['memory_bytes'])
+                            for s in originals)
+    assert sum(cpu for cpu, _ in grants) == 3000

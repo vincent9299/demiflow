@@ -92,6 +92,14 @@ def test_finite_join_memory_transport_does_not_accumulate_per_row_history(tmp_pa
 
 
 def test_duplicate_memory_delivery_is_rejected_before_second_business_call(tmp_path, monkeypatch):
+    from demiflow.execution import dataflow_api
+    resolve = dataflow_api.resolve_runtime_policy
+    def unfused(*args, **kwargs):
+        policy, bounds = resolve(*args, **kwargs)
+        return replace(policy, fusion=False), bounds
+    # This counterexample requires an actual inter-worker memory delivery;
+    # legal synchronous fusion must not erase the injection point.
+    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', unfused)
     from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from _worker_event_fixtures import emit, events
