@@ -1252,9 +1252,8 @@ def _s_performance(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
 
 
 def _s_all_regressions(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must execute classified historical nodeids; collection is inventory, not a passing regression run'}
-    fx._record_not_run('all_regressions', detail)
-    raise NotRunError('all_regressions', detail)
+    from runtime_v3_regression_scenarios import all_regressions
+    return all_regressions(fx, fault)
 
 
 _SCENARIO_FUNCS: dict[str, Callable[[RuntimeV3Fixture, str | None], dict[str, Any]]] = {

@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def snapshot():
     files = sorted((ROOT / 'demiflow').rglob('*.py')) + sorted((ROOT / 'tests').rglob('*.py'))
+    files += [ROOT / name for name in ('pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini',
+        'docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json',
+        'docs/unified-runtime-v3-20261114/evidence/regression-files.json') if (ROOT / name).is_file()]
     assert len(files) <= 10000
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
             'inputs': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}}
@@ -61,6 +64,7 @@ class Inventory:
     def pytest_runtest_logreport(self, report):
         self.reports.append({'nodeid': report.nodeid, 'when': report.when, 'outcome': report.outcome,
                              'wasxfail': getattr(report, 'wasxfail', None),
+                             'rerun': getattr(report, 'rerun', 0),
                              'seconds': report.duration, 'detail': str(report.longrepr)[:32000] if report.failed else None})
 
 
@@ -85,3 +89,24 @@ def run(destination, args):
     assert before == after, 'source changed while collecting or executing'
     assert not plugin.deselected, 'implicit deselection is not accepted'
     return int(code)
+
+
+def main():
+    """Child entry: an owned JSON selector request, never a shell command."""
+    request = json.loads(Path(sys.argv[1]).read_text())
+    destination = Path(request['destination']).resolve()
+    selectors = request['selectors']
+    assert type(selectors) is list and 0 < len(selectors) <= 100000
+    assert all(type(n) is str and n.startswith('tests/') and '..' not in n.split('/')
+               and (('::' in n) or (request.get('collect_only') and n == 'tests/'))
+               for n in selectors)
+    args = ['-q', '--tb=short', '-p', 'no:cacheprovider',
+            '--basetemp=' + str(destination / 'tmp'),
+            '--junitxml=' + str(destination / 'result.xml')]
+    if request.get('collect_only'):
+        args.append('--collect-only')
+    return run(destination, args + selectors)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

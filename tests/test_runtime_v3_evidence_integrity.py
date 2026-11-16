@@ -5,22 +5,15 @@ import pytest
 import runtime_v3_support as support
 
 
-@pytest.mark.parametrize("scenario", [
-    "fairness_deadlock",
-    "queue_full_business", "memory_peak",
-    "history_identity", "workbench_real_plan",
-    "product_regression", "all_regressions",
-])
-def test_placeholder_scenarios_cannot_produce_passing_evidence(scenario):
-    recorded = []
-    fixture = SimpleNamespace(_record_not_run=lambda name, detail: recorded.append((name, detail)))
-    with pytest.raises(support.NotRunError):
-        support._SCENARIO_FUNCS[scenario](fixture, None)
-    assert recorded[0][0] == scenario
-    assert recorded[0][1]["missing_semantic_harness"]
-
-
 @pytest.mark.parametrize('scenario,module', [
+    ('two_hosts', 'runtime_v3_two_hosts_scenarios'),
+    ('all_regressions', 'runtime_v3_regression_scenarios'),
+    ('fairness_deadlock', 'runtime_v3_resource_scenarios'),
+    ('memory_peak', 'runtime_v3_resource_scenarios'),
+    ('queue_full_business', 'runtime_v3_queue_business_scenarios'),
+    ('history_identity', 'runtime_v3_product_scenarios'),
+    ('workbench_real_plan', 'runtime_v3_product_scenarios'),
+    ('product_regression', 'runtime_v3_product_scenarios'),
     ('multiworker_barrier', 'runtime_v3_residency_scenarios'),
     ('route_recovery', 'runtime_v3_residency_scenarios'),
     ('actor_state_lifecycle', 'runtime_v3_residency_scenarios'),
@@ -29,7 +22,6 @@ def test_placeholder_scenarios_cannot_produce_passing_evidence(scenario):
     ('artifact_security', 'runtime_v3_artifact_security_scenarios'),
     ('cpu_gpu_isolation', 'runtime_v3_gpu_scenarios'),
     ('node_loss', 'runtime_v3_node_loss_scenarios'),
-    ('two_hosts', 'runtime_v3_two_hosts_scenarios'),
 ])
 def test_implemented_gate_cannot_replace_missing_native_evidence_with_success(monkeypatch, scenario, module):
     import importlib
@@ -94,3 +86,13 @@ def test_stream_facade_alias_is_observed_even_when_imported_before_recorder(tmp_
                 data.from_items([{'i':attempt}]).batch_map(lambda rows:rows,max_batch=1).run_stream()
             assert len(recorder.calls)==1
             assert recorder.calls[0]['terminal_kind']=='run_stream'
+
+
+def test_all_regressions_requires_reviewed_candidate_plan(monkeypatch):
+    monkeypatch.delenv('DEMIFLOW_REGRESSION_EXECUTION_PLAN', raising=False)
+    recorded=[]
+    fixture=SimpleNamespace(_record_not_run=lambda name,detail:recorded.append((name,detail)))
+    with pytest.raises(support.NotRunError):
+        support._s_all_regressions(fixture,None)
+    assert recorded[0][0]=='all_regressions'
+    assert 'exact regression execution plan' in recorded[0][1]['missing_semantic_harness']

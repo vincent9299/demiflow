@@ -193,3 +193,7 @@ def test_all_regressions(runtime_v3_fixture):
     assert collection["exit_code"] == 0
     assert collection["nodeid_count"] >= collection["baseline_file_count"]
     assert len(evidence["dispositions"]) == 44
+    assert evidence["complete"] and evidence["historical_replacements_passed"]
+    assert not evidence["failed"] and not evidence["not_run"] and not evidence["collection_problems"]
+    assert all(case["passed"] for case in evidence["dispositions"])
+    assert len(evidence["executed"]) + len(evidence["meta_nodeids"]) == collection["nodeid_count"]
