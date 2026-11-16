@@ -160,6 +160,12 @@ def test_real_full_query_nested_types_view_reload_and_narrow_layout(owned_case,t
     p.get_by_text('排序与取样范围',exact=True).click()
     p.get_by_label('排序字段',exact=True).select_option('score');p.get_by_label('排序方向',exact=True).select_option('desc')
     p.get_by_role('button',name='应用筛选与分组',exact=True).click()
+    # Filtering keeps the current Case/draft (also locked by the representative
+    # demo test). Explicitly navigate to the first result of this sorted query.
+    expect(p.locator('.analysis-case-coverage')).to_contain_text('范围内匹配 9 条')
+    expect(p.locator('.analysis-case-list button').first).to_have_attribute('aria-label','Case 22')
+    expect(p.locator('.analysis-case-content')).to_contain_text('当前 Case 不在本次选样页')
+    p.get_by_role('button',name='Case 22',exact=True).click()
     expect(p.get_by_role('heading',name='Case 22',exact=True)).to_be_visible();expect(p.locator('.analysis-case-coverage')).to_contain_text('范围内匹配 9 条')
     payload=query_call(f);assert payload['query']['scope']=='full' and payload['query']['filters']['op']=='and'
     p.get_by_role('button',name='字段与评测配置',exact=True).click()
