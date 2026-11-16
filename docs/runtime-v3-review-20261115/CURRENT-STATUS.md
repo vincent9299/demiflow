@@ -4,6 +4,10 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
+- **2026-11-17 当前集成 `f48bfa3`**：原生大行发布预算已合；actor/class/partial 方法捕获代码固定及原 Ray 恢复观察点已合；Queue 从原 ACKed cut 恢复 bounded claim refs、原租约/已付费获取/原 final ACK 的完整链路已合。原两条 Queue SIGKILL 恢复通过，真实 thread/process 原生 ACK 丢回复恢复及结果类型改变拒绝通过；另一 agent 独立复审未发现新的 P0/P1 阻塞。总控核验 12 份回执输入摘要，均与各自 Git 字节一致；不是同 HEAD 全量通过。见[继续验收 F](INTEGRATION-CONTINUATION-20261117-F.md)。
+- **当前两个在途运行时收口**：图像取消的清理期 RPC 错误回复缺失已确证并修复，候选 37 控制项及原两个 130 行/130 请求/严格两 cut 恢复已过，真实 Ray 收尾后待合；原 64/128MiB 宽 join 与 80KiB sort 写出/恢复候选已过原断言，按物理 phase 预留发布空间及小 writer 开销最后验证后待合。旧候选间歇失败完整保留，未放宽 unknown、预算或测试数据。
+- **后续仍必须完成**：两候选合流后的真实 Dataset/Local/Ray/工作台组合、原 U3 核心历史节点、受影响 GPU 与正式 I08。V035 先按核心意图核安全余额，未找到回执不算通过；两机当前授权入口与 PostgreSQL DSN 仍缺，不冒充已验。主仓原 HEAD/11 项 dirty/18 文件摘要及七件冻结保持。以下较早“发布预算未合”“图像必然 unknown”等段落仅是当时快照。
+
 - **2026-11-17 最新合流 `7c034a8`**：大 literal 输入改走原有类型化工件；worker/source/index 共用原 grant；严格 checkpoint 恢复要求绑定原封存 physical policy；actor/callback 只读 run 上下文、节点预算错误传输、有限前沿恢复及 cut/timer 顺序均已合。source 26 项、actor 12 项及历史策略保护 1 项各有固定提交证据；总控独立核验全部输入摘要与对应 Git 字节一致，不能把它们相加当最新 HEAD 全量通过。见[继续修复与验收 E](INTEGRATION-CONTINUATION-20261117-E.md)。
 - **当前核心未闭环**：大行模型的原生发布共驻预算候选尚未集成；两条原 64/128MiB 宽 join 已通过输入封存、但实际 planner 仍拒绝，不能算能力恢复；图像部分完成后协作取消仍有未封存响应，恢复被 unknown 保护阻止。三个图像最终写出故障窗口通过，损坏对象测试因同一前置 unknown 尚未走到校验点。旧 finite “唯一失败”表述只属于下方 6d 快照，现已由生产修复与真实验证替代。
 - **剩余终验**：最新合流的真实 Dataset/Local/Ray/工作台组合、原 U3 安静窗口、受影响 GPU、正式 I08 和 V035 历史总裁决。两机当前 SSH 授权入口仍待回复、PostgreSQL 无测试 DSN，保持未验。主仓原 HEAD/11 项 dirty/18 个文件摘要及七件冻结均复核未变。
