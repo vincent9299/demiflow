@@ -32,6 +32,7 @@ class WorkerGraphRunner:
         self.partition = executor.assignment.lease.partition_ids[0]
         self._queue = deque()
         self._condition = threading.Condition()
+        self._wake_generation = 0
         self._thread = None
         self._paused = False
         self._idle_sent = False
@@ -289,6 +290,7 @@ class WorkerGraphRunner:
 
     def wake(self):
         with self._condition:
+            self._wake_generation += 1
             self._condition.notify_all()
 
     def _send(self, kind, payload=None, ref=None):
@@ -329,6 +331,7 @@ class WorkerGraphRunner:
                 else:
                     self._queue.append(command)
                 self._idle_sent = False
+            self._wake_generation += 1
             self._condition.notify_all()
 
     def _run(self):
@@ -337,10 +340,17 @@ class WorkerGraphRunner:
             self._send('ready', {'worker_process_id': os.getpid(),
                                  'runner_thread_id': threading.get_native_id()})
             while not self.e._cancel_event.is_set():
+                with self._condition:
+                    generation = self._wake_generation
                 processed = self._step_ready()
                 if not processed:
                     with self._condition:
-                        self._condition.wait(.005)
+                        # A command/credit/native completion can notify after
+                        # step saw no work but before this wait acquires the
+                        # lock. Remember that wake instead of sleeping over it.
+                        if (generation == self._wake_generation
+                                and not self.e._cancel_event.is_set()):
+                            self._condition.wait(.005)
         except BaseException as exc:
             if not self.e._cancel_event.is_set():
                 from ..dataflow_failures import failure_payload

@@ -18,6 +18,7 @@ def _finished_runner():
         accept_receipt=lambda *args, **kwargs: None)
     runner.bounds = SimpleNamespace(max_pending_events=8)
     runner._condition = threading.Condition()
+    runner._wake_generation = 0
     runner._queue = deque()
     runner._credits = {}
     runner._paused = True
