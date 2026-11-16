@@ -152,11 +152,11 @@ def partition_stages(
         stage_id = "stage-" + occ
         count = partitions
         # A sealed thread_attempt borrows the authenticated driver's live
-        # declaration. It cannot park or restore that state and owns no copied
-        # function-state image. Keep the original input/output/profile budget;
-        # do not add a second owned-state ceiling to the borrowed source/actor.
-        # The marker is set by program staging, never from execution='thread'
-        # alone (an explicitly process-hosted map still owns its state copy).
+        # declaration, not a second independent resident state owner. Keep the
+        # original profile (including its function image allowance), input,
+        # output and snapshot budgets; only the extra residency floor is zero.
+        # Staging sets the marker. execution='thread' alone cannot authorize
+        # this: an explicitly process-hosted map still owns its state copy.
         state_bytes = (bounds.max_state_bytes if kernel.state != "none"
                        and not kernel.configuration.get('thread_attempt') else 0)
         # Per-replica working set: one input batch, the declared output bound

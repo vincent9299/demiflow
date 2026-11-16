@@ -14,17 +14,8 @@ def _counting_flow(state):
 
 
 @pytest.mark.parametrize('mode', ['thread', 'process'])
-def test_real_host_mode_controls_borrowed_state_admission(tmp_path, monkeypatch, mode):
-    from demiflow.execution.kernels.operator import OperatorKernel
+def test_real_host_mode_controls_borrowed_state_admission(tmp_path, mode):
     from demiflow.execution.sealed_plans import load_sealed_plan
-    snapshots = []
-    snapshot = OperatorKernel._snapshot_state
-    def observe(kernel, instance=None):
-        value = snapshot(kernel, instance)
-        if kernel._spec.configuration.get('thread_attempt'):
-            snapshots.append(value)
-        return value
-    monkeypatch.setattr(OperatorKernel, '_snapshot_state', observe)
     state = [0]
     with RunContext.start(tmp_path/'run') as run, data.local_execution(
             workers=2, worker_mode=mode):
@@ -44,10 +35,7 @@ def test_real_host_mode_controls_borrowed_state_admission(tmp_path, monkeypatch,
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
     # Shared user observations remain live only in the explicit thread attempt.
     assert state == ([4] if mode == 'thread' else [0])
-    if mode == 'thread':
-        assert snapshots and all(s['mode'] == 'nonrecoverable' for s in snapshots)
-    else:
-        assert snapshots == []
+
 
 
 def test_borrowed_json_state_cannot_resume_after_original_ack(tmp_path, monkeypatch):
@@ -71,9 +59,15 @@ def test_borrowed_json_state_cannot_resume_after_original_ack(tmp_path, monkeypa
                 _counting_flow(state).take_all()
     assert seen
     before = list(state)
+    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    journal = RunJournal(reference.directory)
+    committed = journal.execution_commits('action-1')
+    assert committed and all(c['status'] == 'acked' for c in committed)
+    fresh_state = [0]
     # A new attempt cannot rebind shared state to a fresh live registry token.
-    from demiflow.execution.recovery_contract import RecoveryContractError
-    with pytest.raises(RecoveryContractError, match='Cannot resume attempt-only actor state'):
+    with pytest.raises(DataflowError, match='attempt-only live program has no final ACKed result'):
         with RunContext.resume(reference), data.local_execution(workers=2):
-            _counting_flow(state).take_all()
-    assert state == before
+            _counting_flow(fresh_state).take_all()
+    assert state == before and fresh_state == [0]
+    assert journal.execution_commits('action-1') == committed

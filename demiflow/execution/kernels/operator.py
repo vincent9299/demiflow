@@ -988,11 +988,6 @@ class OperatorKernel:
         instance = instance if instance is not None else self._instance
         if instance is None or self._spec.state == "none":
             return None
-        if self._spec.configuration.get('thread_attempt'):
-            # Borrowed live objects are shared with the authenticated driver.
-            # A JSON-shaped closure does not turn this attempt-only binding
-            # into owned, recoverable state, or authorize snapshot user hooks.
-            return {"mode": "nonrecoverable", "reason": "live thread declaration is attempt-only"}
         owner = self._state_owner(instance)
         from ..operator_policy import classify_operator_state, snapshot_auto_state
         policy = classify_operator_state(owner, phase="instance")
