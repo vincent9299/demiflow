@@ -76,63 +76,41 @@ def _graph_spec(n=60, slow_reader="c3"):
     return spec, readers, n
 
 
-def test_local_graph_six_targets_shared_egress_once(tmp_path):
-    spec, readers, n = _graph_spec()
-    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
-    with RunContext.start(tmp_path / "run",
-                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:
+def _execute(tmp_path, spec, readers, n):
+    from _native_graph_fixtures import (HISTORICAL_MEMORY, HISTORICAL_WORKERS,
+        assert_native_graph, assert_managed_graph)
+    executor = LocalDatasetExecutor(workers=HISTORICAL_WORKERS, unified_graph=True)
+    with RunContext.start(tmp_path / "run", limits={
+            "memory_bytes": HISTORICAL_MEMORY, "checkpoint_rows": 8,
+            "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "u3-graph"}}) as execution:
             result = executor.materialize_graph(spec)
             execution.complete(dict(kind="graph-materialized", workers=result["workers"],
                                     egress=result["egress_rows"]))
-        # Ownership never moved: every worker attached under the granted fence.
-        with run.journal._connection() as db:
-            owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
-        assert owner == (run.attempt, run.fence)
+        assert_native_graph(run, execution.action_id, result, readers=readers, count=n)
+        assert_managed_graph(executor, run.directory, result)
+    return result
 
-    # Seven independent worker hosts (one ancestor + six targets).
-    assert result["workers"] == 7
-    # The shared ancestor expanded each record ONCE: egress == n, never 6n.
-    assert result["egress_rows"] == n
-    # Every target received the full broadcast set and staged it timely.
-    assert set(result["target_rows"]) == set(readers)
-    for rid in readers:
-        assert result["target_rows"][rid] == n, (rid, result["target_rows"][rid])
-    # Each worker reached a final cut.
-    assert all(result["final_arrival"][rid] is not None for rid in ["ancestor", *readers])
 
-    # Genuine independent worker processes were supervised (birth identity recorded).
-    units = tmp_path / "run-resources" / "units"
-    records = list(units.glob("*/*/process.json"))
-    assert len(records) >= 7, "managed graph worker identities were not recorded"
-    import json
-    pids = {json.loads(path.read_text())["identity"]["pid"] for path in records}
-    assert os.getpid() not in pids
-    assert len(pids) >= 7
-    # Capacity was released after confirmed exit evidence.
-    from demiflow.resources.capacity import LocalCapacityPool
-    pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity",
-                             capacity={"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3})
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+def test_local_graph_six_targets_shared_egress_once(tmp_path):
+    spec, readers, n = _graph_spec()
+    result = _execute(tmp_path, spec, readers, n)
+    # Six reader identities and actual managed workers; 7 was the retired
+    # topology's process count, never the meaning of public workers=1.
+    assert result['egress_rows'] == n
+    assert result['target_rows'] == {reader: n for reader in readers}
+    assert all(result['final_arrival'][rid] is not None for rid in ['ancestor', *readers])
 
 
 def test_local_graph_slow_target_does_not_block_unrelated(tmp_path):
     spec, readers, n = _graph_spec(n=60, slow_reader="c3")
-    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
-    with RunContext.start(tmp_path / "run",
-                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:
-        with run.action({"kind": "materialize", "source": {"fixture": "u3-graph"}}) as execution:
-            result = executor.materialize_graph(spec)
-            execution.complete(dict(kind="graph-materialized", workers=result["workers"],
-                                    egress=result["egress_rows"]))
+    result = _execute(tmp_path, spec, readers, n)
     arrival = result["final_arrival"]
     fast = [rid for rid in readers if rid != "c3"]
-    # The ancestor and every fast target finalized well before the slow target.
     latest_fast = max(arrival[rid] for rid in fast)
     assert arrival["ancestor"] < arrival["c3"]
     assert latest_fast < arrival["c3"]
     assert arrival["c3"] - latest_fast > 0.1, (arrival["c3"], latest_fast)
-    # Isolation never lost records: the slow target still received the full set.
     assert result["target_rows"]["c3"] == n
     assert result["egress_rows"] == n
 
@@ -149,7 +127,7 @@ def test_graph_seam_default_off(tmp_path):
     from demiflow.data.dataset import Dataset
     dataset = Dataset(ItemsSource(items), _stream_map(double), executor)
     with RunContext.start(tmp_path / "run",
-                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
+                          limits={"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
         rows = dataset.materialize().take_all()
     assert rows == [{"x": i * 2} for i in range(10)]
     assert not (tmp_path / "run-resources").exists()
