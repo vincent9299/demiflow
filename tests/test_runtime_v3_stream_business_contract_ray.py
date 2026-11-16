@@ -69,3 +69,27 @@ def test_identically_named_exception_outside_whitelist_still_fails_on_ray(actual
 
 def test_stream_progress_comes_from_intermediate_business_frontiers_on_ray(actual_ray_binding):
     original_cases.test_stream_progress_comes_from_intermediate_business_frontiers()
+
+
+@pytest.mark.parametrize('kind', ['row', 'batch'])
+def test_plain_callback_failure_keeps_final_observations_on_ray(
+        actual_ray_binding, stream_owned_ray, monkeypatch, tmp_path, kind):
+    import test_stream_timeout_propagation as original_timeouts
+    monkeypatch.setattr(original_timeouts, 'data', stream_owned_ray)
+    original_timeouts.test_callback_timeout_propagates_original_error(
+        tmp_path, kind, None, 'function')
+
+
+@pytest.mark.parametrize('kind', ['row', 'batch'])
+def test_prior_deadline_keeps_miss_without_reclassifying_later_error_on_ray(
+        actual_ray_binding, stream_owned_ray, monkeypatch, tmp_path, kind):
+    import test_stream_timeout_propagation as original_timeouts
+    monkeypatch.setattr(original_timeouts, 'data', stream_owned_ray)
+    original_timeouts.test_prior_deadline_does_not_reclassify_later_callback_error(tmp_path, kind)
+
+
+def test_none_batch_preserves_actual_dropped_rows_on_ray(
+        actual_ray_binding, stream_owned_ray, monkeypatch):
+    import test_stream_timeout_propagation as original_timeouts
+    monkeypatch.setattr(original_timeouts, 'data', stream_owned_ray)
+    original_timeouts.test_unexpired_deadline_keeps_normal_none_and_empty_list('batch')
