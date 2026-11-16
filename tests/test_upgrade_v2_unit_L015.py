@@ -68,12 +68,15 @@ def actual_chain(tmp_path_factory):
                     with run.journal._connection() as db:
                         allocations = {key: json.loads(spec) for key, spec in
                             db.execute('SELECT allocation_id,spec FROM resource_allocations')}
-                    yield dict(run=run, action=action, execution=execution, graph=graph,
+                    facts = dict(run=run, action=action, execution=execution, graph=graph,
                         physical=physical, sealed=sealed, assignments=assignments,
                         allocations=allocations, commits=commits)
                     action.complete({'kind': 'materialized', 'rows': result.row_count})
                 finally:
                     result.release()
+        # The fact checks are read-only. Do not keep a live module-scoped run
+        # around tests that must create their own failure/recovery action.
+        yield facts
 
 
 def test_layout_is_interpreted_from_the_sealed_plan(actual_chain):
