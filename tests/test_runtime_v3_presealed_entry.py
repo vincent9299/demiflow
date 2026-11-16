@@ -12,7 +12,7 @@ def _plain(row):return {**row,'out':row['i']*2}
 
 
 @contextmanager
-def _prepared(tmp_path,*,thread=False):
+def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
     from demiflow.execution.dataflow import DataflowExecution
     from demiflow.execution.dataflow_api import make_action_request
     from demiflow.execution.dataflow_services import make_driver_services
@@ -38,6 +38,19 @@ def _prepared(tmp_path,*,thread=False):
             try:
                 compiled=lower_action(request,bounds=bounds)
                 graph=stage_dataflow_programs(compiled,action=request.action,store=services.store,bounds=bounds,worker_mode=mode)
+                if wrong_program_pin:
+                    # Fault input is immutable and checksum-correct. Its pin is
+                    # inconsistent with the actual serialized program, so only
+                    # the original loader's code recomputation can reject it.
+                    import json
+                    from dataclasses import replace
+                    from demiflow.execution.recovery_contract import document
+                    node=next(n for n in graph.nodes if n.kind=='transform')
+                    manifest=json.loads(b''.join(services.store.read(node.program_ref,max_bytes=bounds.max_control_bytes)))
+                    manifest['code_identity']={**manifest['code_identity'],'wrong_program_pin':True}
+                    raw=document(manifest,bounds.max_control_bytes)
+                    bad=services.store.put(iter([raw]),max_bytes=len(raw),media_type=node.program_ref.media_type)
+                    graph=replace(graph,nodes=tuple(replace(n,program_ref=bad) if n is node else n for n in graph.nodes))
                 snapshots=[];splits=[]
                 for declaration in compiled.declarations:
                     if declaration.source_spec is None:continue
@@ -120,3 +133,10 @@ def test_prepared_files_without_original_cut_still_cannot_resume(tmp_path):
     with pytest.raises(DataflowError,match='No committed cut with journal proof'):
         with RunContext.resume(reference),data.local_execution(worker_mode='process'):
             data.from_items([{'i':0},{'i':1}]).map(_plain).take_all()
+
+
+def test_first_sealed_checksum_correct_wrong_program_pin_fails_recomputation(tmp_path):
+    with _prepared(tmp_path,wrong_program_pin=True) as (run,ds,first,second,_):
+        with pytest.raises(DataflowError,match='Loaded program code differs from the sealed pin'):
+            second.prepare()
+        assert not second._started and not run.journal.execution_commits('action-1')
