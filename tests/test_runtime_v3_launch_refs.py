@@ -103,6 +103,19 @@ def test_original_inline_recovery_wire_remains_readable(tmp_path):
         store.close()
 
 
+def test_explicit_null_recovery_reference_cannot_become_fresh_execution(tmp_path):
+    with store_fixture(tmp_path) as (_, store, port):
+        runtime = object.__new__(WorkerRuntime)
+        runtime._v3 = True
+        runtime._v3_config = {'recovery_image_ref': None}
+        executor = NS(_services=NS(store=store, bounds=port._bounds),
+                      restore=lambda _: pytest.fail('invalid history became fresh execution'))
+        runtime._v3_ensure_executor = lambda: executor
+        with pytest.raises(DataflowError, match='invalid worker launch artifact reference'):
+            runtime._restore([])
+        store.close()
+
+
 def test_real_process_assignment_and_restore_launch_stay_below_original_64k(tmp_path, monkeypatch):
     from demiflow.execution.dataflow_hosts import _EndpointBase
     from demiflow.execution.worker.bootstrap import _MAX_LAUNCH_BYTES

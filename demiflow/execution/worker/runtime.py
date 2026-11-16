@@ -313,7 +313,7 @@ class WorkerRuntime:
                 raise DataflowError('INVALID_CONTRACT', 'worker recovery needs exactly one image carrier')
             executor = self._v3_ensure_executor()
             image = config.get("recovery_image")
-            if config.get("recovery_image_ref") is not None:
+            if "recovery_image_ref" in config:
                 image = _decode_v3_ref(config['recovery_image_ref'], type_name='RecoveryImage',
                     media_type='application/x-demiflow-recovery-image-v3',
                     store=executor._services.store, bounds=executor._services.bounds)
