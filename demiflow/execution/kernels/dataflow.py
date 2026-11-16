@@ -587,6 +587,8 @@ def invoke_batch(
                     return
                 if result is None:
                     miss = 'drop'
+                    if observe_dead is not None:
+                        observe_dead(rows, miss, max_bytes=min(16384, services.bounds.max_control_bytes // 16))
                     return
             finally:
                 if observe is not None:

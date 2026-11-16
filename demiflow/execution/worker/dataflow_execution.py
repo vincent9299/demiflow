@@ -445,12 +445,15 @@ class DataflowWorkerExecutor:
         # observations only after every kernel has released its lifecycle.
         for key, kernel in list(self._kernels.items()):
             # The normal mailbox is closed during teardown. Carry only
-            # bounded, actual hook outcomes in the original Drain response.
+            # bounded, actual callback/handoff/hook outcomes in the original
+            # Drain response. Plain functions have no actor lifecycle, but
+            # their final failed invocation and prior misses are still facts.
             try:
                 runner = getattr(self, '_runner', None)
                 if runner is not None and getattr(kernel, 'observations', None) is not None:
                     payload = runner._metrics_payload(key[0])
-                    if payload.get('actor_lifecycle') is not None:
+                    if any(payload.get(field) is not None for field in (
+                            'actor_lifecycle', 'callback_observations', 'output_handoff')):
                         from ..contracts.dataflow_codec import encode_wire
                         import json
                         raw = encode_wire(self._event('progress', payload=payload),
@@ -459,7 +462,7 @@ class DataflowWorkerExecutor:
                         # count once instead of reserializing the growing list.
                         final_bytes += len(raw) + 1
                         if final_bytes > self.assignment.bounds.max_control_bytes:
-                            raise _dataflow_error('BUDGET_EXCEEDED', 'final lifecycle observations exceed control budget')
+                            raise _dataflow_error('BUDGET_EXCEEDED', 'final worker observations exceed control budget')
                         self._final_progress.append(json.loads(raw)['payload'])
             except BaseException as exc:
                 errors.append(exc)  # Continue physical cleanup; preserve the first error.

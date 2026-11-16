@@ -300,7 +300,10 @@ def test_failed_row_materialization_keeps_confirmed_prefix(tmp_path):
         return row
 
     with pytest.raises(TimeoutError) as failure:
-        with RunContext.start(tmp_path / 'run') as run:
+        # Isolate the original 512-row frontier. The independent time trigger
+        # may legitimately seal an earlier prefix on a slower managed host.
+        with RunContext.start(tmp_path / 'run', limits={
+                'checkpoint_rows': 512, 'checkpoint_interval_ms': 60000}) as run:
             mapped([{'id': i} for i in range(515)], 'row', callback, hard_timeout=30).materialize()
     assert str(failure.value) == message
     journal = RunJournal(tmp_path / 'run')
