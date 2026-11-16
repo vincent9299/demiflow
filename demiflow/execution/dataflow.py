@@ -965,7 +965,6 @@ class DataflowExecution:
             self._scheduler.leases[allocation_id] = renewed
 
     def _handle_event(self, event):
-        from .contracts.dataflow import thaw_record_value
         # WorkerEvent carries finite Json, whose immutable arrays are tuples.
         # Business-record thawing intentionally preserves tuples and is wrong
         # here (e.g. bounded dead-batch diagnostics are Json arrays).

@@ -49,3 +49,23 @@ def test_real_async_business_miss_is_still_a_dropped_row(tmp_path):
     with RunContext.start(tmp_path/'run'):
         assert data.from_items([{'kind': 'business'}]).map_async(
             fail_control, catch=(ValueError,)).materialize().take_all() == []
+
+
+async def fail_batch_control(rows):
+    await fail_control(rows[0])
+
+
+@pytest.mark.parametrize('kind,expected', [
+    ('validation', 'RuntimeContractError'), ('protocol', 'DataflowError'),
+    ('recovery', 'RecoveryContractError'), ('budget', 'ExecutionBudgetExceeded'),
+    ('stop', 'ServiceStopped'), ('unknown', 'UncertainPromptCall'),
+])
+def test_real_batch_business_catch_cannot_ack_control_failure(tmp_path, kind, expected):
+    with pytest.raises(Exception) as failure:
+        with RunContext.start(tmp_path/'run'):
+            data.from_items([{'kind': kind}]).batch_map(
+                fail_batch_control, max_batch=1, catch=(Exception,)).materialize()
+    assert type(failure.value).__name__ == expected
+    journal = RunJournal(tmp_path/'run')
+    assert journal.execution_action('action-1')['result'] is None
+    assert not journal.execution_commits('action-1')
