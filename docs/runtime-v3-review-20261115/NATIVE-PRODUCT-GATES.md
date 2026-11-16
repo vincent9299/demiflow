@@ -1,5 +1,7 @@
 # 历史与产品正式验收接线
 
+本文件保留原阶段的固定提交结果。GPU 与 stop/resume 后续完整收口见 [NATIVE-GPU-CLOSURE.md](NATIVE-GPU-CLOSURE.md)；下文“未完成”描述为当时状态，不替代后续证据。
+
 本轮复用了真实服务、私有 Chromium/Jupyter、原 Dataset、原 RunJournal/ACK/固定 Lance 版本，没有以组件常量代替产品路径。固定版本与每项证据 SHA-256 见 `NATIVE-PRODUCT-GATES.json`。
 
 | 正式门 | 固定版本与结果 | 实际范围 |
