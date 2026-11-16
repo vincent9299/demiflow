@@ -32,7 +32,13 @@ class RayDatasetExecutor(DatasetExecutor):
         self, *, aggregate_state_max_bytes: int = 8 * 1024 * 1024,
         resource_root=None, planning_policy=None, candidate_execution=None,
         unified_chain: bool = False, unified_graph: bool = False,
+        workers: int | None = None, native_resources=None,
     ) -> None:
+        if workers is not None and (type(workers) is not int or workers < 1):
+            raise ValueError('workers must be a positive integer or None')
+        from ..native_resources import parse_native_resources
+        self._workers = workers
+        self._native_resources = parse_native_resources(native_resources)
         self._aggregate_state_max_bytes = max(1, int(aggregate_state_max_bytes))
         self.resource_root = Path(resource_root or ".").resolve()
         self._planning_policy = planning_policy or parse_platform_planning_policy(None)

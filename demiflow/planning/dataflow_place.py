@@ -353,7 +353,12 @@ def plan_exchanges(
         if routing == "forward" and producer_stage.partitions != consumer_stage.partitions:
             routing = "rebalance"
         scope_id = "scope-" + edge.edge_id if mode == "finite_sealed" else None
-        storage_bytes = 0 if mode == _MEMORY_MODE else min(bounds.max_spill_bytes, credit_bytes * 8)
+        # A finite input keeps its complete bounded spool, independently of
+        # the live transport window. The common splitter below assigns shares
+        # of the original run disk ceiling; the store still charges all actual
+        # staging/native/output bytes against that one authority.
+        storage_bytes = (0 if mode == _MEMORY_MODE else bounds.max_spill_bytes
+                         if mode == 'finite_sealed' else min(bounds.max_spill_bytes, credit_bytes * 8))
         exchanges.append(ExchangeSpec(
             channel_id="chan-" + edge.edge_id,
             edge_id=edge.edge_id,

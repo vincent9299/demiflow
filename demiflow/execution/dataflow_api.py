@@ -228,7 +228,7 @@ def resolve_action_runtime(request: ActionRequest):
     local = getattr(executor, '_local_kernel', None)
     options = {}
     workers = getattr(executor, '_workers', None)
-    if request.provider == 'local' and workers is not None:
+    if workers is not None:
         options['max_active_workers'] = workers
     if local is not None:
         options['memory_bytes'] = local.memory_bytes
@@ -239,7 +239,9 @@ def resolve_action_runtime(request: ActionRequest):
     run = request.action.context
     limits = dict(run.limits)
     explicit = set(run.explicit_limits)
-    declared = getattr(local, 'native_resources', None)
+    declared = getattr(executor, '_native_resources', None)
+    if declared is None:
+        declared = getattr(local, 'native_resources', None)
     native = None
     if declared is not None:
         from .dataflow_native_limits import effective_native_limits
