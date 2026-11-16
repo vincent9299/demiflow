@@ -466,7 +466,8 @@ class DataflowExecution:
                 if self._request.kind in ("write_lance", "write_datasink", "write_file"):
                     from .dataflow_sinks import make_native_terminal_sink
                     self._sinks[node.kernel.kind] = make_native_terminal_sink(node.kernel,
-                        request=self._request, services=self._services)
+                        request=self._request, services=self._services,
+                        publication_reserved_bytes=physical.residency.control_reserved_bytes)
                 else:
                     self._sinks[node.kernel.kind] = make_sink_adapter(node.kernel, services=self._services)
         from .dataflow_images import bind_image_sinks
