@@ -215,6 +215,25 @@ def test_numpy_view_charges_its_unique_owner_before_serialization(monkeypatch):
     assert retained==sys.getsizeof(from_buffer)+sys.getsizeof(from_buffer.base)+sys.getsizeof(buffer)
 
 
+def test_unknown_numpy_subclass_requires_adapter_before_state_encoding(monkeypatch):
+    import numpy as np
+    from test_runtime_v3_c import bounds
+    class NativeBufferView(np.ndarray):
+        pass
+    owner=np.arange(8192,dtype=np.int64)
+    view=owner.view(NativeBufferView)[::8192]
+    assert view.nbytes==8 and owner.nbytes==65536
+    memory=reducer_memory.declare(None,bounds(max_state_bytes=4096,max_resident_bytes=1024*1024))
+    calls=[]
+    def forbidden(*args,**kwargs):
+        calls.append(True)
+        raise AssertionError('unmeasured native buffer cannot reach platform pickle')
+    monkeypatch.setattr(reducer_memory.pickle,'Pickler',forbidden)
+    with pytest.raises(DataflowError,match='array subclass needs a bounded state adapter') as failure:
+        reducer_memory.check_state({'a':view},memory,serialized_limit=4096)
+    assert failure.value.code=='UNSUPPORTED_CAPABILITY' and calls==[]
+
+
 def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_seal(tmp_path,monkeypatch):
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.contracts.dataflow import LoadedProgram

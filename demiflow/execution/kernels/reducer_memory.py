@@ -40,6 +40,8 @@ def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
     immutable = (type(None), bool, int, float, complex, str, bytes)
     shared = (type, types.FunctionType, types.CodeType, types.ModuleType,
               types.BuiltinFunctionType)
+    numpy = sys.modules.get('numpy')
+    array_type = None if numpy is None else numpy.ndarray
 
     def visit(item, depth):
         nonlocal retained, copied, mutable, deepest
@@ -85,7 +87,7 @@ def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
             elif kind is not bytearray:
                 for child in item:
                     visit(child, depth + 1)
-        elif kind.__module__ == 'numpy' and kind.__name__ == 'ndarray':
+        elif array_type is not None and isinstance(item,array_type):
             import numpy as np
             if kind is not np.ndarray:
                 raise _error('UNSUPPORTED_CAPABILITY', 'Reducer array subclass needs a bounded state adapter')
