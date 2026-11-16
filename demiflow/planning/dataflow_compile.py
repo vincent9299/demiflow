@@ -258,24 +258,46 @@ def _source_kind(source: SourcePlan) -> str:
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
 
 
+def _payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
+    """Provision codec room in a new plan without enlarging the run budget.
+
+    The old batch + row window can be smaller than one near-limit row's
+    typed-document/JSONL decode. Six row windows plus fixed codec overhead
+    cover the usual scalar/bytes carriers; the runtime still measures actual
+    structure and rejects anything that cannot fit the sealed allocation.
+    Small runs retain their original batch/row minimum and may use a smaller
+    codec window, rather than losing all small-row execution capability.
+    """
+    payload = bounds.max_batch_bytes + bounds.max_row_bytes
+    control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+    available = max(0, bounds.max_resident_bytes - control - metadata_bytes)
+    return max(payload, min(6 * bounds.max_row_bytes + 4096, available))
+
+
 def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none") -> ResourceProfile:
     # The run memory budget covers admitted data, separately from process RSS.
     # Reserve the same working set used by physical residency, not a fixed
     # per-stage 64 MiB allowance multiplied by pipeline length.
-    working_set = bounds.max_batch_bytes + bounds.max_row_bytes
+    minimum = bounds.max_batch_bytes + bounds.max_row_bytes
+    working_set = _payload_workspace(bounds)
     options = getattr(operation, 'stream_options', None)
     concurrency = getattr(options, 'concurrency', getattr(operation, 'concurrency', 1))
     working_set *= concurrency
+    minimum *= concurrency
     if state != "none":
         owners = concurrency if getattr(options, "callable_scope", None) == "worker" else 1
         working_set += bounds.max_state_bytes * owners
+        minimum += bounds.max_state_bytes * owners
     requests = {"cpu_millis": 1000, "memory_bytes": working_set}
     native = getattr(operation, "native_options", None) if operation is not None else None
     resources = getattr(native, "worker_resources", None) or {}
     if isinstance(resources, Mapping):
         import math
         if "memory_bytes" in resources:
-            if resources["memory_bytes"] < working_set:
+            # An explicit worker limit remains authoritative. It must retain
+            # the original payload/state minimum; actual codec admission may
+            # reject a row that cannot fit it, without silently increasing it.
+            if resources["memory_bytes"] < minimum:
                 raise _error("RESOURCE_INFEASIBLE", "worker memory request is below the admitted working set")
             requests["memory_bytes"] = resources["memory_bytes"]
         if "cpu" in resources:
@@ -846,7 +868,7 @@ class _Capture:
         # The first terminal block and its first forest root occupy 3 KiB
         # while the input/output payload is still resident. Seal both windows
         # into the original profile; do not borrow half of that payload grant.
-        payload = self.bounds.max_batch_bytes + self.bounds.max_row_bytes
+        payload = _payload_workspace(self.bounds, metadata_bytes=3072)
         # A larger index is optional. Keep the exact control reservation used
         # by solve_residency and the whole live payload; cap only this new-plan
         # metadata window by the remaining single-worker space. The original
