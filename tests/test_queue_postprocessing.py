@@ -53,21 +53,24 @@ def receipt_status(result):
 
 @pytest.mark.parametrize('explicit',[False,True])
 def test_stateless_actor_field_binding_and_projection_settle(channel,tmp_path,monkeypatch,explicit):
-    from demiflow.execution.stream_map import _MapWorker
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore
-    events=[];original=_MapWorker._hook
-    async def hook(self,name):
-        if self.operation.callable.target is PureAnnotation:events.append(name)
-        return await original(self,name)
-    monkeypatch.setattr(_MapWorker,'_hook',hook)
+    from _worker_event_fixtures import emit, events
+    lifecycle = str(tmp_path/'lifecycle-events')
+    class ObservedAnnotation(PureAnnotation):
+        async def astart(self):
+            emit(lifecycle,'astart')
+        async def astop(self):
+            emit(lifecycle,'astop')
+        async def aclose(self):
+            emit(lifecycle,'aclose')
     with origin_server() as (url,calls):
         seed(channel,tmp_path,url)
         ds=data.read_queue(channel.config,pool='p',max_tasks=1,max_inflight=1,idle_timeout_s=.2,
                            settlement='explicit' if explicit else 'sink').fetch(
             store=LocalObjectStore(tmp_path/'objects'),concurrency=1,
             policy=FetchPolicy(max_object_bytes=131072,http=HttpSource(allow_private=True)))
-        ds=(ds.map(PureAnnotation).drop_columns(['request','temporary'])
+        ds=(ds.map(ObservedAnnotation).drop_columns(['request','temporary'])
             .rename_columns({'accepted':'business_accepted'})
             .select_columns(['result','business_accepted','_queue_delivery'])
             .map(receipt_status,inputs={'result':'result'},output='status')
@@ -78,7 +81,7 @@ def test_stateless_actor_field_binding_and_projection_settle(channel,tmp_path,mo
         assert row['business_accepted'] is False and row['label']=='downloaded'
         assert row['result']['status']=='ok' and row['verification']['status']=='verified'
         assert channel.state('p')['queue_drained'] and calls['/file']==1
-    assert events==['astart','astop','aclose']
+    assert [item['event'] for item in events(lifecycle)]==['astart','astop','aclose']
 
 
 @pytest.mark.parametrize('actor',[MutableActor,InitializingActor,EffectActor])

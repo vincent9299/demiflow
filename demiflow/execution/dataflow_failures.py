@@ -16,6 +16,7 @@ _BUILTINS = {name: getattr(builtins, name) for name in (
     'RuntimeError', 'AssertionError', 'OSError', 'FileNotFoundError', 'PermissionError',
     'NotImplementedError', 'ZeroDivisionError')}
 _KNOWN = {cls.__module__ + '.' + cls.__qualname__: cls for cls in _BUILTINS.values()}
+_OS_ERRORS = frozenset(cls for cls in _BUILTINS.values() if issubclass(cls, OSError))
 _KNOWN['sqlite3.OperationalError'] = sqlite3.OperationalError
 # Located JSON readers historically expose these parse errors to their callers.
 # Admit only the two fixed library classes, never import a remote type name.
@@ -53,6 +54,49 @@ _KNOWN[ServiceStopped.__module__ + '.' + ServiceStopped.__qualname__] = ServiceS
 _HTTP_TYPE = 'httpx.HTTPStatusError'
 
 
+def _os_error_fields(value, *, decode=False):
+    """Closed, bounded OS facts; never deserialize arbitrary exception args."""
+    if (not isinstance(value, Mapping) or not {'errno', 'strerror'} <= set(value)
+            or set(value) - {'errno', 'strerror', 'filename', 'filename2'}
+            or type(value['errno']) is not int or not -(1 << 31) <= value['errno'] < (1 << 31)
+            or value['strerror'] is not None and (
+                type(value['strerror']) is not str or len(value['strerror']) > 2048)):
+        raise DataflowError('INVALID_CONTRACT', 'Invalid bounded OS failure fields')
+    fields = dict(value)
+    for key in ('filename', 'filename2'):
+        if key not in fields:
+            continue
+        path = fields[key]
+        if path is None or type(path) is str and len(path) <= 4096:
+            continue
+        if (isinstance(path, Mapping) and set(path) == {'bytes_hex'}
+                and type(path['bytes_hex']) is str and len(path['bytes_hex']) <= 8192
+                and len(path['bytes_hex']) % 2 == 0
+                and re.fullmatch(r'[0-9a-f]*', path['bytes_hex'])):
+            if decode:
+                fields[key] = bytes.fromhex(path['bytes_hex'])
+            continue
+        raise DataflowError('INVALID_CONTRACT', 'Invalid bounded OS failure filename')
+    return fields
+
+
+def _os_error_payload(exc):
+    number = exc.errno
+    if type(number) is not int or not -(1 << 31) <= number < (1 << 31):
+        return None  # Preserve the legacy message-only OSError surface.
+    text = exc.strerror
+    fields = {'errno': number, 'strerror': text[:2048] if type(text) is str else None}
+    for key in ('filename', 'filename2'):
+        path = getattr(exc, key, None)
+        if type(path) is str and len(path) <= 4096:
+            fields[key] = path
+        elif type(path) is bytes and len(path) <= 4096:
+            fields[key] = {'bytes_hex': path.hex()}
+        # Oversized/non-data optional fields stay only in bounded diagnostics;
+        # they cannot turn exception transport into arbitrary object loading.
+    return fields
+
+
 def _http_status_fields(value, *, redact=False):
     from urllib.parse import urlsplit, urlunsplit
     if (not isinstance(value, Mapping) or set(value) != {'method', 'url', 'status'}
@@ -83,6 +127,10 @@ def failure_payload(exc, *, _depth=0, _budget=None):
     payload = {'code': getattr(exc, 'code', 'INTERNAL_PROTOCOL'),
             'error_type': name if name in _KNOWN or name in {_RECOVERY_TYPE, _UNRESOLVED_TYPE, _BUDGET_TYPE} else None,
             'message': message[:2048], 'traceback': traceback.format_exc()[-8000:]}
+    if type(exc) in _OS_ERRORS:
+        fields = _os_error_payload(exc)
+        if fields is not None:
+            payload['os_error'] = fields
     if name == _HTTP_TYPE:
         fields = _http_status_fields({'method': exc.request.method, 'url': str(exc.request.url),
                                      'status': exc.response.status_code}, redact=True)
@@ -169,6 +217,12 @@ def restore_failure(payload, *, _depth=0, _budget=None):
     elif cls is UnresolvedCommit:
         # Compatibility with an older host's fixed legacy exception tag.
         error = DataflowUnresolvedCommit(message)
+    elif cls in _OS_ERRORS and 'os_error' in payload:
+        fields = _os_error_fields(payload['os_error'], decode=True)
+        error = cls(fields['errno'], fields['strerror'])
+        for key in ('filename', 'filename2'):
+            if key in fields:
+                setattr(error, key, fields[key])
     elif cls is not None:
         error = cls(message)
     else:
