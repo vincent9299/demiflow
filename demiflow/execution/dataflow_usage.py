@@ -9,17 +9,20 @@ def empty_usage():
 
 def worker_prompt_usage(kernel):
     from ..operator_llm.runtime import PromptActor
+    from ..operator_llm.routed import RoutedPromptActor
     from ..data.result_cache import CacheCall
     totals, observed = empty_usage(), False
     for instance in getattr(kernel, '_instances', ()):
         owner = kernel._state_owner(instance)
         if isinstance(owner, CacheCall):
             owner = owner.fn
-        if not isinstance(owner, PromptActor):
-            continue
-        observed = True
-        for key, value in owner._runtime.coordinator.usage().to_dict().items():
-            totals[key] += value
+        owners = owner.actors.values() if isinstance(owner, RoutedPromptActor) else (owner,)
+        for child in owners:
+            if not isinstance(child, PromptActor):
+                continue
+            observed = True
+            for key, value in child._runtime.coordinator.usage().to_dict().items():
+                totals[key] += value
     return totals if observed else None
 
 

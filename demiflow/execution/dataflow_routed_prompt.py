@@ -66,9 +66,18 @@ def compile_routed_prompt(operation, declaration, *, program_ref, bounds):
         'max_requests': max_requests,
         'catch': [c.__module__ + '.' + c.__qualname__ for c in operation.catch]}
     configuration['node_id'] = identity(['routed-prompt', configuration])
-    return replace(first, implementation_ref=program_ref, configuration=configuration,
+    from .kernels.task_scope import function_residency_kind
+    state = 'none'
+    for child in children.values():
+        predicate = child.constructor_args[1].get('when')
+        if predicate is not None and function_residency_kind(predicate) != 'none':
+            # The native journal recovers HTTP effects, not arbitrary predicate
+            # state. Retain the runtime's existing attempt-only restriction.
+            state = 'nonrecoverable'
+    return replace(first, implementation_ref=program_ref, configuration=configuration, state=state,
         profile=ResourceProfile(requests={'cpu_millis': 100, 'memory_bytes':
-            operation.concurrency * (bounds.max_batch_bytes + bounds.max_row_bytes)}))
+            operation.concurrency * (bounds.max_batch_bytes + bounds.max_row_bytes)
+            + (bounds.max_state_bytes if state != 'none' else 0)}))
 
 
 def bind_routed_prompt(actor, *, services, node_id):

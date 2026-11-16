@@ -81,7 +81,8 @@ def test_routed_native_overlap_and_provider_isolation(tmp_path, routed_server):
     rows = [{'item': i, 'route': name} for i, name in enumerate(['slow', 'broken', 'fast', 'fast', 'fast'])]
     routes = {name: {'concurrency': 1, 'max_requests': 5} for name in ('slow', 'broken', 'fast')}
     with RunContext.start(tmp_path/'run') as run, data.local_execution():
-        saved = _pipeline(rows, total=5, routes=routes, concurrency=5).take_all()
+        pipeline = _pipeline(rows, total=5, routes=routes, concurrency=5)
+        saved = pipeline.take_all()
         assert len(saved) == len(routed_server.calls) == 5
         assert routed_server.finished.index('fast') < routed_server.finished.index('slow')
         assert all(n == 1 for n in routed_server.peaks.values())
@@ -92,6 +93,9 @@ def test_routed_native_overlap_and_provider_isolation(tmp_path, routed_server):
         assert len(calls) == 5 and budgets['requests'] == 5
         assert sorted(budgets.values()) == [1, 1, 3, 5, 5]  # child, whole node, run
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+        usage = pipeline._executor.operator_llm_usage()
+        assert usage['provider_requests_started'] == usage['provider_requests_reserved'] == 5
+        assert usage['provider_requests_completed'] == 4 and usage['provider_requests_failed'] == 1
     assert not any(routed_server.active.values())
 
 
@@ -171,11 +175,51 @@ def test_routed_native_unknown_request_stays_unknown(tmp_path, routed_server):
 
 
 def test_unknown_route_never_selects_another_model(tmp_path, routed_server):
-    from demiflow.execution.contracts.dataflow_errors import DataflowError
-    with pytest.raises(DataflowError), RunContext.start(tmp_path/'run') as run, data.local_execution():
+    with pytest.raises(KeyError, match='undeclared'), RunContext.start(tmp_path/'run') as run, data.local_execution():
         _pipeline([{'item': 'a', 'route': 'undeclared'}]).take_all()
     assert not routed_server.calls
     assert not run.journal.execution_commits('action-1')
+
+
+class _StatefulPredicate:
+    def __init__(self):
+        self.count = 0
+
+    def __call__(self, row):
+        self.count += 1
+        return True
+
+
+def test_routed_mutable_predicate_cannot_claim_http_only_recovery(tmp_path, routed_server, monkeypatch):
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    class Interrupted(Exception):
+        pass
+    def pipeline():
+        value = _pipeline([{'item': str(i), 'route': 'a'} for i in range(4)], concurrency=1)
+        actor = value._plan.operations[-1].callable.target.__self__
+        for child in actor.actors.values():
+            child.when = _StatefulPredicate()
+        return value
+    pump = DataflowExecution.pump
+    def interrupt(execution, **kwargs):
+        status = pump(execution, **kwargs)
+        if execution._restore_image is not None and not execution._restore_image.cut.final:
+            raise Interrupted()
+        return status
+    with pytest.raises(Interrupted), RunContext.start(tmp_path/'run', limits={
+            'checkpoint_rows': 1, 'max_state_bytes': 1024**2}) as run, data.local_execution():
+        ref = run.ref
+        with monkeypatch.context() as patch:
+            patch.setattr(DataflowExecution, 'pump', interrupt)
+            pipeline().take_all()
+    before = len(routed_server.calls)
+    assert 0 < before < 4
+    with pytest.raises((DataflowError, RecoveryContractError), match='attempt|recover|state'), \
+            RunContext.resume(ref), data.local_execution():
+        pipeline().take_all()
+    assert len(routed_server.calls) == before
 
 
 @pytest.mark.parametrize('change', ['capacity', 'gates', 'external_gate'])
