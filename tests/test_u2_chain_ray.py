@@ -54,11 +54,14 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def ray_cluster():
-    ray.init(num_cpus=2, include_dashboard=False, ignore_reinit_error=True)
-    try:
-        yield
-    finally:
-        ray.shutdown()
+    import tempfile
+    assert not ray.is_initialized(), 'test must own a new private Ray cluster'
+    with tempfile.TemporaryDirectory(prefix='demiflow-ray-u2-', dir='/tmp') as root:
+        try:
+            ray.init(address='local', num_cpus=2, include_dashboard=False, _temp_dir=root)
+            yield
+        finally:
+            ray.shutdown()
 
 
 @pytest.fixture(autouse=True)

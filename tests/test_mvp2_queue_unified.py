@@ -19,6 +19,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from runtime_v3_owned_crash import kill_owned_worker
 
 import demiflow.data as data
 from demiflow.collect import FetchPolicy, HttpSource
@@ -337,6 +338,9 @@ def test_unified_queue_carrier_matches_legacy_multi_task_settlement(tmp_path):
 
 
 def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     # R4: a genuine worker SIGKILL mid-transform, then resume the SAME run. The
     # byte-unchanged legacy queue lifecycle re-claims the interrupted task; the
     # acked RawFetch acquisition is reused (unknown paid effect never replayed);
@@ -345,12 +349,12 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
     n = 3
     cfg, clean_cfg = _config(tmp_path, 'r4'), _config(tmp_path, 'r4clean')
     root, clean_root = tmp_path / 'r4run', tmp_path / 'r4clean'
+    driver_pid = os.getpid()
     crash_marker, ref_file = tmp_path / 'crashed-once', tmp_path / 'run-ref.json'
 
     def fault_label(row):
         if row['_queue_delivery']['task_id'] == 't1' and not crash_marker.exists():
-            crash_marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(crash_marker, driver_pid)
         return {**row, 'label': 'downloaded' if row['status'] == 'ok' else 'failed'}
 
     build = _make_builder(n, label_fn=fault_label)
@@ -360,11 +364,14 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
         try:
             with RunContext.start(root, limits=LIMITS) as run:
                 ref_file.write_text(json.dumps(asdict(run.ref)))
-                with data.local_execution(workers=1, worker_mode="thread", partitions=1, unified_queue_chain=True):
+                with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
                     build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
-        except (RecoveryContractError, OSError):
+        except DataflowError as exc:
+            assert exc.code == "UNKNOWN_EFFECT"
             crashed = True
-        assert crashed and crash_marker.exists()
+        assert crashed
+        assert_worker_killed(crash_marker, root)
+        assert_released(root)
         # t0 settled; t1 acquired (acked) then interrupted in the worker; t2 pending.
         assert calls['/file'] == 2
         before = channel.state('p')
@@ -375,7 +382,7 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
         with channel.database.connection(write=True) as db:
             db.execute('UPDATE queue_tasks SET lease_until=0 WHERE generation=?', (p.generation,))
         with RunContext.resume(ref):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1, unified_queue_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
                 build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
         # Unknown paid effect never replayed: t1's acked acquisition reused, only
         # the never-acquired t2 fetched on resume (2 -> 3, not 2 -> 4).
@@ -399,6 +406,9 @@ def test_unified_queue_carrier_kill_recover_per_record_equivalence(tmp_path):
         consumed = db.execute('SELECT consumed FROM runtime_budgets WHERE name=?',
                               ('pool-' + p.generation + '-object_bytes',)).fetchone()[0]
     assert consumed == n * len(BODY)
+
+    assert_released(root)
+
 
 
 # --- Segment 2: finite-resource release (worker quota + claim/lease) ---------
@@ -496,14 +506,17 @@ def test_unified_queue_carrier_releases_worker_quota_on_success_and_cancel(tmp_p
 
 
 def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     n = 3
     cfg, root = _config(tmp_path, 'rq'), tmp_path / 'rqrun'
+    driver_pid = os.getpid()
     crash_marker, ref_file = tmp_path / 'rq-crashed', tmp_path / 'rq-ref.json'
 
     def fault_label(row):
         if row['_queue_delivery']['task_id'] == 't1' and not crash_marker.exists():
-            crash_marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(crash_marker, driver_pid)
         return {**row, 'label': 'downloaded' if row['status'] == 'ok' else 'failed'}
 
     build = _make_builder(n, label_fn=fault_label)
@@ -513,27 +526,27 @@ def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_pa
         try:
             with RunContext.start(root, limits=LIMITS) as run:
                 ref_file.write_text(json.dumps(asdict(run.ref)))
-                with data.local_execution(workers=1, worker_mode="thread", partitions=1, unified_queue_chain=True):
+                with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
                     build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
-        except (RecoveryContractError, OSError):
+        except DataflowError as exc:
+            assert exc.code == "UNKNOWN_EFFECT"
             crashed = True
-        assert crashed and crash_marker.exists()
-        res = _resources(root)
-        # SIGKILL ran no callback cleanup; the finally still left no live worker.
-        assert all(_pid_dead(pid) for pid in _managed_worker_pids(res))
-        charged_after_kill = _capacity(res).snapshot()["charged"]
+        assert crashed
+        assert_worker_killed(crash_marker, root)
+        assert_released(root)
+        before_processes = process_records(root)
+        charged_after_kill = assert_released(root)
         ref = RunRef(**json.loads(ref_file.read_text()))
         with channel.database.connection(write=True) as db:
             db.execute('UPDATE queue_tasks SET lease_until=0 WHERE generation=?', (p.generation,))
         with RunContext.resume(ref):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1, unified_queue_chain=True):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1, unified_queue_chain=True):
                 build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
-        # The resumed run released its OWN allocation on its success close: the
-        # only charged remainder is the pre-crash orphan, not a doubled charge.
-        assert _capacity(res).snapshot()["charged"] == charged_after_kill
-        assert all(_pid_dead(pid) for pid in _managed_worker_pids(res))
+        # Original allocator confirms both attempts released their own allocations.
+        assert before_processes.keys() < process_records(root).keys()
+        assert assert_released(root) == charged_after_kill
         assert channel.state('p')['queue_drained'] and calls['/file'] == n
-        assert _release_orphans(res) == {"cpu_millis": 0, "memory_bytes": 0}
+
 
 
 # --- Segment 3: S8.5 artifact immutability narrow gate ----------------------

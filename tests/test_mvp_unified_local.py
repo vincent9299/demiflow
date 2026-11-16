@@ -20,6 +20,7 @@ import signal
 import sys
 
 import pytest
+from runtime_v3_owned_crash import kill_owned_worker
 
 import demiflow.data as data
 from demiflow.execution.run_context import RunContext
@@ -146,6 +147,9 @@ def test_unified_readback_is_single_committed_handle_authority(tmp_path):
 
 
 def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     # R4 "recovery correct" + "known_completed reuse" + "state equality", bound onto
     # the actual workbench entry. Same genuine worker SIGKILL after an acked cut as
     # U2/F2, but selected through local_execution(unified_chain=True). The acked
@@ -155,29 +159,30 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
     # suffix is legitimately reprocessed after a worker crash). The "unknown never
     # auto-replayed" half is bound by the recovery-gate test below.
     from demiflow.execution.recovery_contract import RecoveryContractError
-    from test_u2_chain_faults import _chain_child_id, _release_crash_orphans
+    driver_pid = os.getpid()
     crash_marker = tmp_path / "crashed-once"
 
     def double(row):
         if row["x"] == 4 and not crash_marker.exists():
-            crash_marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(crash_marker, driver_pid)
         return {**row, "x": row["x"] * 2}
 
     expected = [{"x": i * 2} for i in range(10)]
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(tmp_path / "run", limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 data.from_items(_items(10)).map_async(double, concurrency=1).materialize().take_all()
-    assert crash_marker.exists()
+    assert_worker_killed(crash_marker, tmp_path / "run")
+    before_processes = process_records(tmp_path / "run")
+    assert_released(tmp_path / "run")
     with RunContext.resume(reference) as run2:
-        child = _chain_child_id(run2)
+        child = materialize_action_id(run2)
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+        with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                   unified_chain=True):
             rows = data.from_items(_items(10)).map_async(double, concurrency=1).materialize().take_all()
         assert sorted(rows, key=lambda r: r["x"]) == expected      # state equality: output
@@ -194,11 +199,14 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
         with run2.journal._connection() as db:
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert owner == (run2.attempt, run2.fence)                 # crash never moved ownership
-    records = list((tmp_path / "run-resources" / "units").glob("*/*/process.json"))
-    assert len(records) == 2, "a new worker allocation was not provisioned for recovery"
-    pids = {json.loads(path.read_text())["identity"]["pid"] for path in records}
-    assert len(pids) == 2 and os.getpid() not in pids
-    _release_crash_orphans(tmp_path / "run-resources")
+    after_processes = process_records(tmp_path / "run")
+    assert before_processes.keys() < after_processes.keys()
+    old_pids = {v["identity"]["pid"] for _, v in before_processes.values()}
+    new_pids = {v["identity"]["pid"] for key, (_, v) in after_processes.items()
+                if key not in before_processes}
+    assert new_pids and old_pids.isdisjoint(new_pids) and os.getpid() not in new_pids
+    assert_released(tmp_path / "run")
+
 
 
 def test_unified_chain_shares_legacy_recovery_gate_and_fail_closes_unknown(tmp_path):

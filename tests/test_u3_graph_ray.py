@@ -45,13 +45,16 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def ray_cluster():
-    # Logical scheduling tokens only (single-host semantic evidence); channel actors
-    # use num_cpus=0, each worker host reserves 1 CPU.
-    ray.init(num_cpus=8, include_dashboard=False, ignore_reinit_error=True, logging_level="ERROR")
-    try:
-        yield
-    finally:
-        ray.shutdown()
+    # Keep the original single-host scheduling tokens and all business oracles.
+    import tempfile
+    assert not ray.is_initialized(), 'test must own a new private Ray cluster'
+    with tempfile.TemporaryDirectory(prefix='demiflow-ray-u3-', dir='/tmp') as root:
+        try:
+            ray.init(address='local', num_cpus=8, include_dashboard=False,
+                     logging_level='ERROR', _temp_dir=root)
+            yield
+        finally:
+            ray.shutdown()
 
 
 def _stream_map(fn):

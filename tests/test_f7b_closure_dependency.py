@@ -118,8 +118,9 @@ FACTORIES = {"module_cell": _make_module_cell,
 
 @pytest.mark.parametrize("form", FORMS)
 def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
-    from test_u2_chain_faults import _release_crash_orphans
-    from demiflow.execution import chain
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg1_" + form)
     transform = FACTORIES[form](helper_mod)
     hook, marker = _crash_hook(tmp_path)
@@ -129,28 +130,27 @@ def test_g1_closure_helper_edit_same_run_resume_refuses(tmp_path, monkeypatch, f
         return (data.from_items(rows_in).map_async(transform, concurrency=1)
                 .map_async(hook, concurrency=1))
 
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
     # Unedited code runs to the crash point: driver/worker manifests agree.
-    assert marker.exists(), "first run must crash after acked cuts, not fail at load"
+    assert_worker_killed(marker, root)
+    assert_released(root)
     # Edit ONLY the captured helper; the closure's own source + pickle bytes unchanged.
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
     with pytest.raises(RecoveryContractError, match="code") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
     assert not isinstance(excinfo.value, TimeoutError)
-    _release_crash_orphans(tmp_path / "run-resources")
+    assert_released(tmp_path / "run")
+
 
 
 # --- G3: closure-captured helper edit -> worker LOAD gate refuses (three forms) ---

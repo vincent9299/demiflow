@@ -10,13 +10,12 @@ from test_u3_graph_ray import test_ray_graph_consumer_death_recovers_whole_graph
 @pytest.fixture(scope='module')
 def ray_cluster(tmp_path_factory):
     import tempfile
-    import shutil
-    root = tempfile.mkdtemp(prefix='demiflow-ray-')  # Unix socket path < 108 bytes.
-    ray.init(num_cpus=8, object_store_memory=128 * 1024**2, _memory=8 * 1024**3,
-             _temp_dir=root, include_dashboard=False,
-             logging_level='ERROR')
-    try:
-        yield
-    finally:
-        ray.shutdown()
-        shutil.rmtree(root)
+    assert not ray.is_initialized(), 'test must own a new private Ray cluster'
+    with tempfile.TemporaryDirectory(prefix='demiflow-ray-gpt-', dir='/tmp') as root:
+        try:
+            ray.init(address='local', num_cpus=8, object_store_memory=128 * 1024**2,
+                     _memory=8 * 1024**3, _temp_dir=root, include_dashboard=False,
+                     logging_level='ERROR')
+            yield
+        finally:
+            ray.shutdown()

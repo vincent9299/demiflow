@@ -65,6 +65,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from runtime_v3_owned_crash import kill_owned_worker
 
 import demiflow.data as data
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
@@ -299,6 +300,7 @@ def _code_pin_keys(run):
 
 
 def _crash_hook(tmp_path):
+    driver_pid = os.getpid()
     marker = tmp_path / "crashed-once"
     counter = [0]
 
@@ -307,8 +309,7 @@ def _crash_hook(tmp_path):
         # Crash the worker on the 5th row, after at least one durable acked cut
         # (checkpoint_rows=2 -> cuts after rows 2 and 4), mirroring the U2/MVP harness.
         if counter[0] == 5 and not marker.exists():
-            marker.touch()
-            os.kill(os.getpid(), signal.SIGKILL)
+            kill_owned_worker(marker, driver_pid)
         return row
 
     return hook, marker
@@ -350,7 +351,9 @@ def test_real_representative_chain_executes_with_pinned_business_code(tmp_path, 
 
 @requires_real_source
 def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
-    from test_u2_chain_faults import _chain_child_id, _release_crash_orphans
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     slice_rows = _real_slice(8)
     obj = _empty_store(tmp_path)
     monkeypatch.setenv("STAGE2_OBJECT_ROOT", str(obj))
@@ -358,19 +361,21 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
     expected = _expected(slice_rows, {})
     hook, marker = _crash_hook(tmp_path)
     root = tmp_path / "run"
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 _pipeline(biz, 8, hook).materialize().take_all()
-    assert marker.exists()
+    assert_worker_killed(marker, root)
+    assert_released(root)
+    before_processes = process_records(root)
     with RunContext.resume(reference) as run2:
-        child = _chain_child_id(run2)
+        child = materialize_action_id(run2)
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+        with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                   unified_chain=True):
             rows = _pipeline(biz, 8, hook).materialize().take_all()
         # Per-record equality: the recovered settlement equals the clean business output.
@@ -388,37 +393,38 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
         with run2.journal._connection() as db:
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert owner == (run2.attempt, run2.fence)              # crash never moved ownership
-    records = list((tmp_path / "run-resources" / "units").glob("*/*/process.json"))
-    assert len(records) == 2, "a new worker allocation was not provisioned for recovery"
-    pids = {json.loads(p.read_text())["identity"]["pid"] for p in records}
-    assert len(pids) == 2 and os.getpid() not in pids
+    assert before_processes.keys() < process_records(root).keys()
     # unknown-not-replayed: the chain worker shares the legacy recovery gate whose
     # production check_recovery fail-closes a persisted unknown paid effect (the
     # representative chain's fake model produces none, so the gate is bound structurally).
     from demiflow.execution.stream_materialize import StreamStageProgress
     from demiflow.execution.worker.progress import WorkerStreamProgress
     assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
-    _release_crash_orphans(tmp_path / "run-resources")
+    assert_released(tmp_path / "run")
+
 
 
 # --- Gate 2b: edit actual business code after seal -> resume fail-closed ---
 
 @requires_real_source
 def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, monkeypatch):
-    from test_u2_chain_faults import _release_crash_orphans
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     slice_rows = _real_slice(8)
     obj = _empty_store(tmp_path)
     monkeypatch.setenv("STAGE2_OBJECT_ROOT", str(obj))
     biz, path = _load_biz(tmp_path, monkeypatch, offset=1)
     hook, marker = _crash_hook(tmp_path)
     root = tmp_path / "run"
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 _pipeline(biz, 8, hook).materialize().take_all()
-    assert marker.exists()
+    assert_worker_killed(marker, root)
+    assert_released(root)
     # Edit the ACTUAL business function on disk (+1 -> +9999) and reload it, so the
     # driver's callable genuinely carries the edited code. The by-reference pickle
     # bytes are unchanged (module+qualname), so ONLY a code-sensitive identity can
@@ -433,14 +439,15 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     importlib.reload(biz)
     with pytest.raises(RecoveryContractError):
         with RunContext.resume(reference) as run2:
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 _pipeline(biz, 8, hook).materialize().take_all()
     # The unedited-recovery equality contrast is bound by
     # test_real_chain_kill_recovers_per_record_equality (same kill scenario, no edit
     # -> per-record equality + known_completed reuse), so the refusal above is caused
     # by the code edit, not a broken recovery path.
-    _release_crash_orphans(tmp_path / "run-resources")
+    assert_released(tmp_path / "run")
+
 
 
 # --- Gate 2a: worker load-time code-pin gate (unit, isolated from the driver) ---
@@ -719,8 +726,9 @@ def test_f7a_helper_only_edit_worker_load_gate_refuses(sealed, tmp_path, monkeyp
 
 # F7-b: helper-only edit -> SAME RunRef recovery explicitly refused (not mix/timeout).
 def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
-    from test_u2_chain_faults import _release_crash_orphans
-    from demiflow.execution import chain
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     biz, paths, helper = _direct_graph(tmp_path, monkeypatch, "f7b")
     hook, marker = _crash_hook(tmp_path)
     rows_in = [{"x": i} for i in range(8)]
@@ -729,27 +737,26 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
         return (data.from_items(rows_in).map_async(biz.transform, concurrency=1)
                 .map_async(hook, concurrency=1))
 
-    original_run = chain.run_local_chain
-    monkeypatch.setattr(chain, "run_local_chain",
-                        lambda *a, **k: original_run(*a, **k, control_timeout_s=5))
     root = tmp_path / "run"
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
     # Unedited code runs to the crash point: driver/worker manifests agree (F7-d).
-    assert marker.exists(), "first run must crash after acked cuts, not fail at load"
+    assert_worker_killed(marker, root)
+    assert_released(root)
     paths[helper].write_text("def delta():\n    return 9999\n")
     importlib.reload(sys.modules[helper])
     with pytest.raises(RecoveryContractError, match="code") as excinfo:
         with RunContext.resume(reference):
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 pipeline().materialize().take_all()
     assert not isinstance(excinfo.value, TimeoutError)
-    _release_crash_orphans(tmp_path / "run-resources")
+    assert_released(tmp_path / "run")
+
 
 
 # F7-transitive: edit ONLY the transitive leaf helper2 -> load + resume refuse.
@@ -969,7 +976,9 @@ def test_s4b_real_rows_unavailable_carry_real_sha(tmp_path, monkeypatch):
 # §4-c: two row types execute+recover per-record equality + known_completed reuse.
 @requires_real_source
 def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
-    from test_u2_chain_faults import _chain_child_id, _release_crash_orphans
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from runtime_v3_owned_crash import (assert_worker_killed, assert_released,
+                                        materialize_action_id, process_records)
     real_rows = _real_slice(4)
     obj, test_rows, present = _seed_test_content(tmp_path, 4)
     monkeypatch.setenv("STAGE2_OBJECT_ROOT", str(obj))
@@ -978,19 +987,20 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
     expected = _expected(mixed, present)
     hook, marker = _crash_hook(tmp_path)
     root = tmp_path / "run"
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+            with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                       unified_chain=True):
                 _pipeline_items(biz, mixed, hook).materialize().take_all()
-    assert marker.exists()
+    assert_worker_killed(marker, root)
+    assert_released(root)
     with RunContext.resume(reference) as run2:
-        child = _chain_child_id(run2)
+        child = materialize_action_id(run2)
         pre = [f for f in run2.journal.execution_commits(child) if f["status"] == "acked"]
         assert pre, "no acked prefix survived the worker crash"
         pre_by_id = {f["commit_id"]: f for f in pre}
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1,
+        with data.local_execution(workers=1, worker_mode="process", partitions=1,
                                   unified_chain=True):
             rows = _pipeline_items(biz, mixed, hook).materialize().take_all()
         assert {r["concept_id"]: r for r in rows} == expected
@@ -1007,4 +1017,4 @@ def test_s4c_two_row_types_execute_recover_equality(tmp_path, monkeypatch):
     from demiflow.execution.stream_materialize import StreamStageProgress
     from demiflow.execution.worker.progress import WorkerStreamProgress
     assert WorkerStreamProgress.bind_stages is StreamStageProgress.bind_stages
-    _release_crash_orphans(tmp_path / "run-resources")
+    assert_released(tmp_path / "run")
