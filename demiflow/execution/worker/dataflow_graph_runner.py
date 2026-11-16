@@ -35,7 +35,12 @@ class WorkerGraphRunner:
         self._wake_generation = 0
         self._activity_generation = 0
         self._thread = None
-        self._paused = False
+        self._paused = bool(executor.assignment.source_splits)
+        self._source_credit = None
+        self._unconfirmed_rows = 0
+        self._unconfirmed_bytes = 0
+        self._cut_credit = {}
+        self._publication_overlap = False
         self._park_requested = False
         self._park_finish_pending = False
         self._idle_sent = False
@@ -433,6 +438,13 @@ class WorkerGraphRunner:
                 self._paused = True
                 self._idle_sent = False
             elif kind == 'resume':
+                credit = command.get('source_credit')
+                if credit is not None:
+                    if (type(credit) is not dict or set(credit) != {'rows', 'bytes'}
+                            or any(type(v) is not int or v < 0 for v in credit.values())):
+                        raise DataflowError('INVALID_CONTRACT', 'invalid unconfirmed source credit')
+                    self._source_credit = credit
+                self._publication_overlap = command.get('publishing', False)
                 self._park_requested = False
                 self._source_rows_since_cut = 0
                 self._consumed_deliveries.clear()
@@ -565,6 +577,10 @@ class WorkerGraphRunner:
                 self._cut = command['request']
             elif command['kind'] == 'receipt':
                 self.e.accept_receipt(command['commit_id'], cut_id=command['cut_id'])
+                confirmed = self._cut_credit.pop(command['cut_id'], None)
+                if confirmed is not None:
+                    self._unconfirmed_rows -= confirmed[0]
+                    self._unconfirmed_bytes -= confirmed[1]
             else:
                 raise DataflowError('INVALID_CONTRACT', 'unknown business command')
             processed += 1
@@ -573,6 +589,14 @@ class WorkerGraphRunner:
                 if split_id in self._finished_splits:
                     continue
                 self.services.check_stop()
+                credit = self._source_credit
+                if credit is not None and (
+                        self._unconfirmed_rows >= credit['rows'] or not credit['bytes']
+                        or self._unconfirmed_bytes and
+                        self._unconfirmed_bytes + self.bounds.max_row_bytes > credit['bytes']):
+                    self._paused = True
+                    self._flush_metrics()
+                    break
                 source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
                 if self._park_mode and not self._park_can_output(source):
                     self._paused = True
@@ -581,10 +605,14 @@ class WorkerGraphRunner:
                 with source_run_scope(self.e._source_run):
                     poll = reader.next_record()
                 if poll.status == 'record':
+                    if credit is not None and self._unconfirmed_bytes + poll.record.encoded_bytes > credit['bytes']:
+                        raise DataflowError('BUDGET_EXCEEDED', 'source row exceeds checkpoint_unconfirmed_bytes')
+                    self._unconfirmed_rows += 1
+                    self._unconfirmed_bytes += poll.record.encoded_bytes
                     source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
                     self._output(source, poll.record)
                     self._source_rows_since_cut += 1
-                    if self._source_rows_since_cut >= self._source_quantum:
+                    if not self._publication_overlap and self._source_rows_since_cut >= self._source_quantum:
                         self._paused = True
                         self._flush_metrics()
                     processed += 1
@@ -631,7 +659,8 @@ class WorkerGraphRunner:
                     if s.split_id in self._finished_splits and not self.e._readers[s.split_id]._eoi]})
         if notify_idle:
             self._flush_metrics()
-            self._send('idle', {'done': done, 'activity_generation': idle_generation})
+            self._send('idle', {'done': done, 'activity_generation': idle_generation,
+                'source_done': set(self.e._readers) <= self._finished_splits})
         if self._cut is not None and quiet and (self._paused or done):
             from ..contracts.dataflow_codec import encode_wire
             contribution = self.snapshot(self._cut)
@@ -1139,6 +1168,7 @@ class WorkerGraphRunner:
             operator_states=states, channels={k: _artifact_json(v) for k, v in refs.items()},
             buffers=tuple(refs.values()), effects=tuple(self.e._effect_refs), sinks=sinks, final=request.final)
         self.e._snapshot_contributions[request.cut_id] = result
+        self._cut_credit[request.cut_id] = (self._unconfirmed_rows, self._unconfirmed_bytes)
         return result
 
     def close(self):

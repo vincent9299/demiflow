@@ -136,6 +136,16 @@ class DataflowExecution:
         self._checkpoint_requested = False
         self._checkpoint_deadline = None
         self._checkpoint_deferred = set()
+        # One driver-owned publication task uses the SAME coordinator/journal.
+        # No second cut can begin until its receipt or failure has drained.
+        self._publication_future = None
+        self._publication_thread = None
+        self._publication_resumed = False
+        self._publication_stopping = False
+        self._publication_frontiers = None
+        self._source_credit_rotation = 0
+        self._source_done = set()
+        self._source_credit_needs_rotation = False
         self._replay = None
         self._node_metrics = {}
         self._observed_workers = {}
@@ -148,6 +158,9 @@ class DataflowExecution:
         self._last_checkpoint_rows = 0
         self._last_checkpoint_outputs: dict[str, int] = {}
         self._checkpoint_deliveries = 0
+        self._delivery_edges = {}
+        self._edge_ack_frontiers = {}
+        self._last_edge_acks = {}
         self._checkpoint_at = time.monotonic()
 
     @property
@@ -190,7 +203,7 @@ class DataflowExecution:
 
     def _start_checkpoint_deadline(self):
         # One deadline starts at source-pause admission, including alignment.
-        # Publication remains synchronous: an already-started sink call drains
+        # An already-started publication task drains
         # before timeout is reported and its original receipt is never undone.
         if self._checkpoint_deadline is None:
             self._checkpoint_deadline = (time.monotonic() +
@@ -710,6 +723,7 @@ class DataflowExecution:
             self._checkpoint_at = time.monotonic()
         for lease, stage in ready:
             self._activate(lease, stage)
+        self._resume_workers()
         if self._durable_residency is not None:
             self._durable_residency.launched()
         for spec in self._physical.exchanges:
@@ -791,38 +805,30 @@ class DataflowExecution:
                                 context={"allocation_id": event.allocation_id})
 
     def pump(self, *, deadline_ms: int) -> ExecutionStatus:
+        try:
+            return self._pump_once(deadline_ms=deadline_ms)
+        except BaseException as failure:
+            self._failure = failure
+            if self._publication_future is not None:
+                try:
+                    self._drain_publication()
+                except BaseException as cleanup:
+                    failure.add_note('Checkpoint publication also failed: ' + str(cleanup))
+            raise
+
+    def _pump_once(self, *, deadline_ms: int) -> ExecutionStatus:
         if self._closed:
             raise DataflowError("CANCELLED", "execution is closed")
         if not self._started:
             raise DataflowError("INVALID_CONTRACT", "pump requires start")
         if type(deadline_ms) is not int or deadline_ms <= 0:
             raise DataflowError("INVALID_CONTRACT", "pump deadline_ms must be a positive int")
+        if self._cancelled:
+            return ExecutionStatus(state='cancelled', pending_events=0, confirmed_rows=self._confirmed_rows)
         self._check_stop()
         self._renew_workers()
         deadline = time.monotonic() + deadline_ms / 1000.0
-        max_events = self._bounds.max_pending_events
-        replies = self._services.journal_service.poll_replies(max_replies=max_events)
-        for completed in replies:
-            endpoint = self._endpoints.get(completed.allocation_id)
-            if endpoint is not None:
-                endpoint.deliver_reply(completed.reply)
-        events: list[WorkerEvent] = []
-        for allocation_id, endpoint in self._endpoints.items():
-            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-            batch = endpoint.poll(max_events=max_events, deadline_ms=remaining_ms)
-            events.extend(batch)
-            if time.monotonic() >= deadline:
-                break
-        self._pending_events = len(events)
-        from .dataflow_hosts import batch_business_commands
-        with batch_business_commands(self._endpoints.values()):
-            for event in events:
-                self._validate_event(event)
-                if event.kind in ("effect", "artifact", "reserve", "read_action", "read_configuration",
-                                  "check_grant", "restrict_recovery", "queue", "native_request"):
-                    self._services.journal_service.submit(event)
-                else:
-                    self._handle_event(event)
+        events, replies = self._poll_control(deadline)
         progress = self._checkpoint_progress()
         # A finite input may already be completely committed while its join or
         # sort still emits many rows. Actual output/ACK progress must also drive
@@ -853,6 +859,47 @@ class DataflowExecution:
         return ExecutionStatus(state=self._state, pending_events=self._pending_events,
                                confirmed_rows=self._confirmed_rows)
 
+    def _poll_control(self, deadline, *, draining=False):
+        max_events = self._bounds.max_pending_events
+        replies = self._services.journal_service.poll_replies(max_replies=max_events)
+        for completed in replies:
+            endpoint = self._endpoints.get(completed.allocation_id)
+            if endpoint is not None:
+                try:
+                    endpoint.deliver_reply(completed.reply)
+                except Exception:
+                    if not draining:
+                        raise
+        events: list[WorkerEvent] = []
+        for allocation_id, endpoint in self._endpoints.items():
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+            try:
+                batch = endpoint.poll(max_events=max_events, deadline_ms=remaining_ms)
+            except Exception:
+                if not draining:
+                    raise
+                continue
+            events.extend(batch)
+            if time.monotonic() >= deadline:
+                break
+        self._pending_events = len(events)
+        from .dataflow_hosts import batch_business_commands
+        from contextlib import nullcontext
+        commands = nullcontext() if draining else batch_business_commands(self._endpoints.values())
+        with commands:
+            for event in events:
+                try:
+                    self._validate_event(event)
+                    if event.kind in ("effect", "artifact", "reserve", "read_action", "read_configuration",
+                                      "check_grant", "restrict_recovery", "queue", "native_request"):
+                        self._services.journal_service.submit(event)
+                    else:
+                        self._handle_event(event)
+                except BaseException:
+                    if not draining:
+                        raise
+        return events, replies
+
     def _checkpoint_frontiers(self):
         """Aggregate partitions of each original logical occurrence, not depth."""
         sources = set(self._graph.sources)
@@ -870,7 +917,8 @@ class DataflowExecution:
     def _checkpoint_progress(self):
         source_rows, outputs = self._checkpoint_frontiers()
         progress = max(source_rows - self._last_checkpoint_rows,
-                       self._checkpoint_deliveries,
+                       max((count - self._last_edge_acks.get(edge, 0)
+                            for edge, count in self._edge_ack_frontiers.items()), default=0),
                        max((rows - self._last_checkpoint_outputs.get(occurrence, 0)
                             for occurrence, rows in outputs.items()), default=0))
         # A newly active stage must be compared with its own ACKed frontier:
@@ -980,6 +1028,7 @@ class DataflowExecution:
                 if (not self._terminal_subscription_closed
                         and len(self._terminal_queue) >= self._bounds.max_pending_events):
                     raise DataflowError("BUDGET_EXCEEDED", "terminal subscription credit exceeded")
+                self._delivery_edges[delivery] = 'terminal'
                 self._deliveries[delivery] = (endpoint, None)
                 if self._terminal_subscription_closed:
                     # The worker already spooled this real output. A consumer
@@ -996,6 +1045,7 @@ class DataflowExecution:
                 if (spec is None or payload["producer_partition"] not in spec.producer_partitions
                         or payload["target_partition"] not in spec.consumer_partitions):
                     raise DataflowError("FENCED", "delivery is outside physical channel membership")
+                self._delivery_edges[delivery] = spec.edge_id
                 target = self._by_partition.get(payload["target_partition"])
                 if self._durable_residency is not None and spec.mode == 'durable_incremental':
                     self._durable_residency.record(payload)
@@ -1092,6 +1142,15 @@ class DataflowExecution:
             # reaches the driver first; only the current quiet frontier cuts.
             if generation == expected:
                 self._idle.add(event.allocation_id)
+                if payload.get('source_done') is True and endpoint._assignment.source_splits:
+                    # Flow-credit availability only. Finality still requires the
+                    # original authenticated cursor in an actual contribution.
+                    self._source_done.add(event.allocation_id)
+                    shares = getattr(self, '_source_credit_shares', {})
+                    if shares.get(event.allocation_id, {}).get('rows', 0) and any(
+                            key not in self._source_done and not credit['rows']
+                            for key, credit in shares.items()):
+                        self._source_credit_needs_rotation = True
         elif event.kind == "cut":
             from .contracts.dataflow_codec import decode_wire
             raw = b"".join(self._store.read(event.payload_ref, max_bytes=self._bounds.max_control_bytes))
@@ -1100,6 +1159,10 @@ class DataflowExecution:
             expected = {compute_participant_id(lease.stage_id, p) for p in lease.partition_ids}
             if contribution.boot_id != lease.boot_id or contribution.participant_id not in expected:
                 raise DataflowError("FENCED", "cut contribution differs from worker assignment")
+            if self._publication_future is not None:
+                if self._contributions.get(contribution.participant_id) == contribution:
+                    return  # Idempotent replay must not wait on publisher I/O.
+                raise DataflowError('INVALID_CONTRACT', 'contribution changed during publication')
             self._checkpoint.contribute(contribution)
             self._contributions[contribution.participant_id] = contribution
 
@@ -1124,6 +1187,9 @@ class DataflowExecution:
     def _ack(self, delivery):
         producer, _ = self._deliveries.pop(delivery)
         self._checkpoint_deliveries += 1
+        edge = self._delivery_edges.pop(delivery, None)
+        if edge is not None:
+            self._edge_ack_frontiers[edge] = self._edge_ack_frontiers.get(edge, 0) + 1
         if self._durable_residency is not None and self._durable_residency.actual_ack(delivery):
             if producer is not None:
                 producer.send_business({"kind": "ack", "delivery_id": delivery})
@@ -1133,17 +1199,20 @@ class DataflowExecution:
             producer.send_business({"kind": "ack", "delivery_id": delivery})
 
     def _advance_cut(self):
+        if self._publication_future is not None:
+            self._poll_publication()
+            return
         self._check_checkpoint_deadline()
         if self._state in ("succeeded", "failed", "cancelled"):
             return
         all_workers = set(self._endpoints)
         durable = self._durable_residency
-        if (durable is not None and self._cut is None
+        if (self._cut is None
                 and not self._checkpoint_requested and not self._stopping):
             sources = {allocation_id for allocation_id, endpoint in self._endpoints.items()
                        if endpoint._assignment.source_splits}
             if (sources - self._done and sources <= self._idle | self._done
-                    and not all_workers <= self._idle):
+                    and (self._checkpoint_progress() > 0 or self._source_credit_needs_rotation)):
                 # A source stopped on its original durable admission window.
                 # Its co-resident consumers must drain to the same real cut,
                 # even when the user checkpoint timer/row limit is not due.
@@ -1201,56 +1270,181 @@ class DataflowExecution:
                     all(entry['consumed'] for entry in durable.entries.values()))
             if self._cut.final and self._acquisition is not None:
                 self._native_summary = self._acquisition.finish()
-            image = self._checkpoint.commit(self._cut.cut_id, sinks=self._sinks)
-            # ObjectSink.prepare already transfers exactly its generation.
-            # Calls finishing during publication append to the next generation.
-            self._restore_image = image
-            self._check_checkpoint_deadline()
-            self._checkpoint_deadline = None
-            self._last_checkpoint_rows, self._last_checkpoint_outputs = self._checkpoint_frontiers()
-            self._checkpoint_deliveries = 0
-            self._checkpoint_at = time.monotonic()
-            for endpoint in self._endpoints.values():
+            self._start_publication()
+
+    def _finish_publication(self, image):
+        all_workers = set(self._endpoints)
+        durable = self._durable_residency
+        # ObjectSink.prepare already transfers exactly its generation.
+        # Calls finishing during publication append to the next generation.
+        self._restore_image = image
+        self._checkpoint_deadline = None
+        self._last_checkpoint_rows, self._last_checkpoint_outputs, deliveries, self._last_edge_acks = self._publication_frontiers
+        self._checkpoint_deliveries -= deliveries
+        self._checkpoint_at = time.monotonic()
+        for endpoint in self._endpoints.values():
+            try:
                 endpoint.send_business({"kind": "receipt", "cut_id": self._cut.cut_id,
                                         "commit_id": image.commit_id})
-            if durable is not None:
-                if self._cut.final:
-                    self._set_result(image)
-                elif durable.final(all_workers <= self._done) and self._checkpoint.inputs_complete():
-                    # Completion may arrive after begin froze a non-final cut.
-                    # Obtain an actual final contribution from the still-live
-                    # owner; never relabel an already committed cut as final.
-                    self._cut = None
-                    self._contributions.clear()
-                    self._idle.clear()
-                    for endpoint in self._endpoints.values():
-                        endpoint.send_business({'kind': 'pause'})
-                elif self._stopping:
-                    self._set_result(image)
-                else:
-                    self._retire_phase(image)
-            elif all_workers <= self._done and self._phase_index < len(self._phases) - 1:
-                self._retire_phase(image)
-            elif (all_workers <= self._done and self._checkpoint.inputs_complete()
-                  and not image.cut.final):
-                # Native calls can finish after begin froze a non-final cut.
-                # Receipt that cut unchanged, then ask the same live owners for
-                # a real final contribution before declaring the action done.
+            except Exception:
+                if not self._publication_stopping:
+                    raise
+        if self._publication_stopping:
+            return
+        if self._stopping and self._publication_resumed and not image.cut.final:
+            # A user may have received a newer prefix while this older cut was
+            # publishing. Its ACK cannot complete that later demand. Align the
+            # still-live owners once more and commit the actual delivered cut.
+            self._cut = None
+            self._contributions.clear()
+            self._idle.clear()
+            self._checkpoint_requested = True
+            for endpoint in self._endpoints.values():
+                endpoint.send_business({'kind': 'pause'})
+            return
+        if durable is not None:
+            if self._cut.final:
+                self._set_result(image)
+            elif durable.final(all_workers <= self._done) and self._checkpoint.inputs_complete():
+                # Completion may arrive after begin froze a non-final cut.
+                # Obtain an actual final contribution from the still-live
+                # owner; never relabel an already committed cut as final.
                 self._cut = None
                 self._contributions.clear()
                 self._idle.clear()
                 for endpoint in self._endpoints.values():
                     endpoint.send_business({'kind': 'pause'})
-            elif self._stopping or all_workers <= self._done:
+            elif self._stopping:
                 self._set_result(image)
             else:
-                self._cut = None
-                self._contributions.clear()
-                self._idle.clear()
-                self._checkpoint_requested = False
-                self._checkpoint_deferred.clear()
-                for endpoint in self._endpoints.values():
-                    endpoint.send_business({"kind": "resume"})
+                self._retire_phase(image)
+        elif all_workers <= self._done and self._phase_index < len(self._phases) - 1:
+            self._retire_phase(image)
+        elif (all_workers <= self._done and self._checkpoint.inputs_complete()
+              and not image.cut.final):
+            # Native calls can finish after begin froze a non-final cut.
+            # Receipt that cut unchanged, then ask the same live owners for
+            # a real final contribution before declaring the action done.
+            self._cut = None
+            self._contributions.clear()
+            self._idle.clear()
+            for endpoint in self._endpoints.values():
+                endpoint.send_business({'kind': 'pause'})
+        elif self._stopping or all_workers <= self._done:
+            self._set_result(image)
+        else:
+            self._cut = None
+            self._contributions.clear()
+            self._idle.clear()
+            self._checkpoint_requested = False
+            self._checkpoint_deferred.clear()
+            self._resume_workers()
+
+    def _resume_workers(self, *, publishing=False):
+        # Shares sum to the original run ceilings, never one full allowance per
+        # worker. Extremely small windows rotate the admitted source owners at
+        # ACK boundaries; zero-share owners stay paused and still contribute.
+        sources = sorted(key for key, endpoint in self._endpoints.items()
+                         if endpoint._assignment.source_splits
+                         and (self._publication_resumed or key not in self._source_done))
+        limits = self._action.context.limits
+        rows, size = limits['checkpoint_unconfirmed_rows'], limits['checkpoint_unconfirmed_bytes']
+        shares = dict(getattr(self, '_source_credit_shares', {})) if publishing else {}
+        if sources and not publishing:
+            count = min(len(sources), rows, size)
+            offset = self._source_credit_rotation % len(sources)
+            owners = (sources[offset:] + sources[:offset])[:count]
+            for index, owner in enumerate(owners):
+                shares[owner] = {'rows': rows // count + (index < rows % count),
+                                 'bytes': size // count + (index < size % count)}
+            if not publishing and count < len(sources):
+                self._source_credit_rotation += count
+        for key in sources:
+            shares.setdefault(key, {'rows': 0, 'bytes': 0})
+        self._source_credit_shares = shares
+        self._idle.clear()
+        for key, endpoint in self._endpoints.items():
+            endpoint.send_business({'kind': 'resume', 'publishing': publishing,
+                'source_credit': shares.get(key, {'rows': 0, 'bytes': 0})})
+
+    def _start_publication(self):
+        from concurrent.futures import Future
+        from contextvars import copy_context
+        from threading import Thread
+        from ..resources.capacity import track_owned_thread
+        if self._publication_future is not None:
+            raise DataflowError('INVALID_CONTRACT', 'only one checkpoint publication may run')
+        self._publication_frontiers = (*self._checkpoint_frontiers(), self._checkpoint_deliveries, dict(self._edge_ack_frontiers))
+        future = self._publication_future = Future()
+        self._publication_resumed = False
+        self._source_credit_needs_rotation = False
+        cut_id, context = self._cut.cut_id, copy_context()
+
+        def publish():
+            try:
+                image = context.run(self._checkpoint.commit, cut_id, sinks=self._sinks)
+            except BaseException as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(image)
+
+        self._publication_thread = Thread(target=publish, name='demiflow-checkpoint-publication', daemon=True)
+        track_owned_thread(self._publication_thread)
+        self._publication_thread.start()
+
+    def _poll_publication(self):
+        future = self._publication_future
+        if future.done():
+            self._publication_thread.join()
+            self._publication_future = self._publication_thread = None
+            image = future.result()
+            # Preserve the real receipt BEFORE reporting an expired deadline.
+            expired = self._checkpoint_deadline is not None and time.monotonic() >= self._checkpoint_deadline
+            was_stopping = self._publication_stopping
+            if expired:
+                self._publication_stopping = True
+            self._finish_publication(image)
+            if expired and not was_stopping:
+                raise TimeoutError('Checkpoint coordination exceeded checkpoint_timeout_s')
+            return
+        if (self._publication_resumed or self._publication_stopping or self._cut.final
+                or self._stopping or self._durable_residency is not None
+                or len(self._phases) != 1):
+            return
+        sources = [endpoint for key, endpoint in self._endpoints.items()
+                   if endpoint._assignment.source_splits and key not in self._done]
+        limits = self._action.context.limits
+        if len(sources) > min(limits['checkpoint_unconfirmed_rows'], limits['checkpoint_unconfirmed_bytes']):
+            return  # A serial source grant rotates only at a real ACK boundary.
+        from .recovery_contract import identity
+        commit_id = identity([self._run_id(), self._action.action_id, self._cut.sequence])
+        fact = self._action.context.journal.execution_commit(commit_id)
+        if fact is not None and fact['prepared'] is not None:
+            # Preparation transferred every ObjectSink generation. Publication
+            # may now overlap the next bounded generation, never its snapshot.
+            self._publication_resumed = True
+            self._resume_workers(publishing=True)
+
+    def _drain_publication(self):
+        if self._publication_future is None:
+            return
+        self._publication_stopping = True
+        for endpoint in self._endpoints.values():
+            try:
+                endpoint.send_business({'kind': 'pause'})
+            except Exception:
+                pass
+        # A started native publisher cannot be killed safely. Keep the original
+        # control ports alive until it returns, then retain its actual receipt.
+        while self._publication_future is not None:
+            self._poll_control(time.monotonic() + .01, draining=True)
+            self._poll_publication()
+            if self._publication_future is not None:
+                try:
+                    self._renew_workers()
+                except Exception:
+                    pass
+                time.sleep(.001)
 
     def request_checkpoint(self):
         if self._cut is not None or self._checkpoint_requested or self._stopping:
@@ -1313,6 +1507,7 @@ class DataflowExecution:
         self._cancelled = True
         self._state = "cancelled"
         self._services.journal_service.stop_model_admission(reason)
+        self._drain_publication()
         if self._cut is not None and self._cut.cut_id in self._checkpoint._pending:
             self._checkpoint.abort(self._cut.cut_id, reason=reason)
         for endpoint in self._endpoints.values():
@@ -1331,9 +1526,13 @@ class DataflowExecution:
     def close(self) -> None:
         if self._closed:
             return
+        cleanup_error = None
+        try:
+            self._drain_publication()
+        except Exception as exc:
+            cleanup_error = exc
         self._closed = True
         deadline_ms = self._policy.control_timeout_ms
-        cleanup_error = None
         physical_closed = not self._scope_open
         # Finish actor aclose and reader teardown while the driver journal is
         # still reachable. Physical termination remains the final fallback.

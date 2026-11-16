@@ -34,30 +34,73 @@ class NestedCounter:
 
 
 def test_upstream_continues_before_commit_and_snapshot_is_detached(tmp_path, monkeypatch):
-    global _OVERLAP
-    _OVERLAP = threading.Event()
+    import time
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_sinks import _artifact_from_json
+    from demiflow.execution.kernels import state_codec
+
+    marker = tmp_path / 'upstream-8'
+
+    class ObservedCounter(NestedCounter):
+        async def __call__(self, row):
+            result = await super().__call__(row)
+            if row['id'] == 8:
+                marker.write_text('original worker reached input 8')
+            return result
+
     original = CommitCoordinator._finish
     recorded = []
+    executions = []
+    original_start = DataflowExecution._start_publication
+
+    def capture(execution):
+        executions[:] = [execution]
+        return original_start(execution)
 
     def slow_commit(coordinator, fact, sinks, acknowledge):
-        if fact['intent']['sinks'] == ['output'] and fact['sequence'] == 1:
-            assert _OVERLAP.wait(5), 'upstream remained blocked on global publication'
-            snapshot = {k: StateArtifacts(coordinator.run).read(v)
-                        for k, v in fact['prepared']['state'].items()}
-            assert snapshot['node-0'] == {'seen': [0, 1, 2, 3]}
-            rows = list(sinks['output'].iter_rows(fact['prepared']['sinks']['output']))
+        if fact['intent']['sinks'] == ['materialize'] and fact['sequence'] == 1:
+            deadline = time.monotonic() + 5
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(.005)
+            assert marker.exists(), 'upstream remained blocked on global publication'
+            cut = StateArtifacts(coordinator.run).read(fact['prepared']['state']['dataflow-cut-v3'])
+            execution = executions[0]
+            states = []
+            for contribution in cut['contributions']:
+                for ref in contribution['operator_states'].values():
+                    ref = _artifact_from_json(ref)
+                    if ref.media_type == 'application/x-demiflow-kernel-image-v3':
+                        state = state_codec.loads(b''.join(execution._store.read(ref,
+                            max_bytes=execution._bounds.max_state_bytes)),
+                            max_bytes=execution._bounds.max_state_bytes)
+                        if state.get('state') is not None:
+                            states.append(state['state'])
+            assert states == [{'mode': 'hooks', 'value': {'seen': [0, 1, 2, 3]}}]
+            from demiflow.execution.dataflow_replay import PublishedRecordReader
+            prepared = fact['prepared']['sinks']['materialize']
+            publication = json.loads(b''.join(execution._store.read(_artifact_from_json(prepared['ref']),
+                max_bytes=execution._bounds.max_control_bytes)))
+            reader = PublishedRecordReader(publication, store=execution._store, bounds=execution._bounds)
+            rows = []
+            from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+            try:
+                while True:
+                    raw, record_id, sequence, _ = reader.pop()
+                    rows.append(dict(_decode_record_document(raw, record_id=record_id, sequence=sequence, max_bytes=execution._bounds.max_row_bytes).inline))
+            except StopIteration:
+                pass
+            finally:
+                reader.close()
             assert rows == [{'id': i} for i in range(4)]
-            recorded.append(snapshot)
+            recorded.append(cut)
         return original(coordinator, fact, sinks, acknowledge)
 
+    monkeypatch.setattr(DataflowExecution, '_start_publication', capture)
     monkeypatch.setattr(CommitCoordinator, '_finish', slow_commit)
-    try:
-        with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 4, 'checkpoint_interval_ms': 60000}):
-            result = data.from_items([{'id': i} for i in range(12)]).map_async(NestedCounter()).materialize().take_all()
-        assert result == [{'id': i} for i in range(12)]
-        assert len(recorded) == 1
-    finally:
-        _OVERLAP = None
+    with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 4, 'checkpoint_interval_ms': 60000}):
+        result = data.from_items([{'id': i} for i in range(12)]).map_async(ObservedCounter()).materialize().take_all()
+    assert result == [{'id': i} for i in range(12)]
+    assert len(recorded) == 1
 
 
 async def identity(row):

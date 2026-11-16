@@ -98,6 +98,14 @@ def worker_env(tmp_path, *, rows=None):
                 item.worker.close()
 
 
+def _start_with_source_credit(worker):
+    # This harness is the driver boundary: activation alone cannot spend a
+    # per-worker copy of the whole run's unconfirmed source allowance.
+    worker.start()
+    worker.receive({'kind': 'resume', 'source_credit': {
+        'rows': 64, 'bytes': worker.assignment.bounds.max_batch_bytes}})
+
+
 def _cut(item, *, final=False, sequence=0):
     return CutRequest(identity(['B-cut', sequence]), sequence, item.assignment.plan_revision,
                       0, item.worker._participant_ids(), final)
@@ -175,7 +183,7 @@ def test_b002(tmp_path, monkeypatch):
 def test_b003(tmp_path):
     with worker_env(tmp_path) as env:
         old = env.make()
-        old.worker.start()
+        _start_with_source_credit(old.worker)
         cut = _cut(old)
         contribution = old.worker.snapshot(cut)
         image = RecoveryImage(identity('B-commit'), cut, (contribution,), {}, contribution.sources)
@@ -184,7 +192,7 @@ def test_b003(tmp_path):
         assert resumed.worker._state == 'restored'
         assert set(resumed.worker._restored_cursors) == {s.split_id for s in contribution.sources}
         assert resumed.worker._restored_states == dict(contribution.operator_states)
-        resumed.worker.start()
+        _start_with_source_credit(resumed.worker)
         resumed.worker.run()
         resumed.worker.cancel('restored', deadline_ms=100)
         with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
@@ -198,7 +206,7 @@ def test_b004(tmp_path, monkeypatch):
         item = env.make()
         with pytest.raises(DataflowError, match='FENCED'):
             item.worker.step(max_records=1, deadline_ms=100)
-        item.worker.start()
+        _start_with_source_credit(item.worker)
         reader = next(iter(item.worker._readers.values()))
         entered, release = threading.Event(), threading.Event()
         original = reader.next_record
@@ -234,8 +242,8 @@ def test_b005(tmp_path, monkeypatch):
     from demiflow.execution.exchange.dataflow_channels import reserve_credit
     with worker_env(tmp_path) as env:
         producer, consumer = env.make(), env.make('transform')
-        producer.worker.start()
-        consumer.worker.start()
+        _start_with_source_credit(producer.worker)
+        _start_with_source_credit(consumer.worker)
         spec = producer.assignment.outputs[0]
         grant = reserve_credit(spec.channel_id, spec.consumer_partitions[0], rows=spec.credit_rows,
             size_bytes=0, operation_id=identity('B-exhaust-credit'), state=producer.worker._channels)
@@ -280,7 +288,7 @@ def test_b005(tmp_path, monkeypatch):
 def test_b006(tmp_path):
     with worker_env(tmp_path, rows=[]) as env:
         item = env.make()
-        item.worker.start()
+        _start_with_source_credit(item.worker)
         item.worker.step(max_records=1, deadline_ms=100)
         assert not [e for e in _events(item) if e.kind == 'cut']
         cut = _cut(item, final=True)  # final is a driver request, not a worker decision.
@@ -298,7 +306,7 @@ def test_b006(tmp_path):
 def test_b007(tmp_path):
     with worker_env(tmp_path, rows=[]) as env:
         item = env.make()
-        item.worker.start()
+        _start_with_source_credit(item.worker)
         cut = _cut(item)
         contribution = item.worker.snapshot(cut)
         assert not contribution.final and contribution.participant_id in cut.participants
@@ -312,7 +320,7 @@ def test_b007(tmp_path):
 def test_b008(tmp_path):
     with worker_env(tmp_path) as env:
         item = env.make()
-        item.worker.start()
+        _start_with_source_credit(item.worker)
         cut = _cut(item)
         item.worker.snapshot(cut)
         item.worker.accept_receipt(identity('B-receipt'), cut_id=cut.cut_id)
@@ -327,7 +335,7 @@ def test_b008(tmp_path):
 def test_b009(tmp_path):
     with worker_env(tmp_path) as env:
         item = env.make()
-        item.worker.start()
+        _start_with_source_credit(item.worker)
         ref = env.driver.store.put(iter([b'unknown-effect']), max_bytes=14, media_type='application/octet-stream')
         item.worker._effect_refs.append(ref)
         before = {k: r.snapshot() for k, r in item.worker._readers.items()}
@@ -341,8 +349,8 @@ def test_b009(tmp_path):
 def test_b010(tmp_path, monkeypatch):
     with worker_env(tmp_path) as env:
         source, item = env.make(), env.make('transform')
-        source.worker.start()
-        item.worker.start()
+        _start_with_source_credit(source.worker)
+        _start_with_source_credit(item.worker)
         kernel = next(iter(item.worker._kernels.values()))
         # A real acquired reader is moved into this executor solely to exercise
         # close fan-out after another owned resource fails; no business execution.
@@ -581,3 +589,18 @@ def test_b020(tmp_path):
     assert not thread.is_alive()
     assert "error" not in result, result.get("error")
     assert result["runtime"].state == "RETIRED"
+
+def test_source_activation_does_not_pull_before_driver_credit(tmp_path):
+    with worker_env(tmp_path) as env:
+        item = env.make()
+        item.worker.start()
+        reader = next(iter(item.worker._readers.values()))
+        before = reader.snapshot()
+        item.worker.step(max_records=1, deadline_ms=100)
+        assert reader.snapshot() == before
+        assert not [event for event in _events(item) if event.kind == 'data']
+        item.worker.receive({'kind': 'resume', 'source_credit': {
+            'rows': 1, 'bytes': item.assignment.bounds.max_batch_bytes}})
+        item.worker.step(max_records=1, deadline_ms=100)
+        assert any(event.kind == 'data' for event in _events(item))
+        assert reader.snapshot().next_sequence == before.next_sequence + 1

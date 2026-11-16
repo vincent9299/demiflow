@@ -57,6 +57,9 @@ def test_acked_retired_handoff_starts_original_interval_before_first_activation(
     ex,clock=driver(monkeypatch)
     ex._launch_phase()
     assert ex.activations==[(102.4,102.4)]
+    assert ex.sent == [{'kind': 'resume', 'publishing': False,
+        'source_credit': {'rows': 4096, 'bytes': 64*1024**2}}]
+    ex.sent.clear()
     assert ex._last_checkpoint_rows==23 and ex._checkpoint_deliveries==0
     ex._node_metrics[('source','p0')]['rows_output']=24
     clock[0]=102.5;ex.pump(deadline_ms=1)

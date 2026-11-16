@@ -20,6 +20,18 @@ def execution(metrics, *, previous=None, source_rows=0, threshold=10):
     driver._last_checkpoint_rows = source_rows
     driver._last_checkpoint_outputs = dict(previous or {})
     driver._checkpoint_deliveries = 0
+    driver._delivery_edges = {}
+    driver._edge_ack_frontiers = {}
+    driver._last_edge_acks = {}
+    driver._publication_future = driver._publication_thread = None
+    driver._publication_resumed = driver._publication_stopping = False
+    driver._checkpoint_deadline = None
+    driver._source_credit_rotation = 0
+    driver._source_done = set()
+    driver._source_credit_needs_rotation = False
+    driver._cancelled = False
+    driver._action = NS(context=NS(limits={'checkpoint_timeout_s': 30,
+        'checkpoint_unconfirmed_rows': 4096, 'checkpoint_unconfirmed_bytes': 64*1024**2}))
     driver._checkpoint_at = time.monotonic()
     driver._policy = NS(checkpoint_rows=threshold, checkpoint_interval_ms=60000, provider='thread')
     driver._bounds = NS(max_pending_events=16)
@@ -89,6 +101,7 @@ def test_original_source_ack_and_timer_triggers_remain(trigger):
                                      ('source', 'p1'): {'rows_output': 6}})
     elif trigger == 'delivery_acks':
         driver._deliveries = {str(i): (None, ()) for i in range(10)}
+        driver._delivery_edges = {str(i): 'logical-edge' for i in range(10)}
         for delivery in tuple(driver._deliveries):
             driver._ack(delivery)
         assert driver._checkpoint_deliveries == 10 and not driver._deliveries
@@ -113,18 +126,22 @@ def test_only_successful_commit_ack_advances_all_frontiers():
         raise RuntimeError('no commit ACK')
 
     driver._checkpoint = NS(commit=fail)
+    DataflowExecution._advance_cut(driver)
+    driver._publication_thread.join(2)
     with pytest.raises(RuntimeError, match='no commit ACK'):
-        DataflowExecution._advance_cut(driver)
+        driver._poll_publication()
     assert (driver._last_checkpoint_rows, driver._last_checkpoint_outputs) == (3, {'join': 2})
     assert driver._checkpoint_deliveries == 4 and driver._checkpoint_at == old_time
     assert driver.sent == []
     image = NS(commit_id='acked-commit')
     driver._checkpoint.commit = lambda *args, **kwargs: image
     DataflowExecution._advance_cut(driver)
+    driver._publication_thread.join(2)
+    driver._poll_publication()
     assert (driver._last_checkpoint_rows, driver._last_checkpoint_outputs) == (8, {'join': 9})
     assert driver._checkpoint_deliveries == 0 and driver._checkpoint_progress() == 0
     assert driver.sent == [{'kind': 'receipt', 'cut_id': 'cut', 'commit_id': 'acked-commit'},
-                           {'kind': 'resume'}]
+                           {'kind': 'resume', 'publishing': False, 'source_credit': {'rows': 0, 'bytes': 0}}]
 
 
 def test_finite_join_after_source_eoi_naturally_checkpoints_and_resumes(tmp_path, monkeypatch):
