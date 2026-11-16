@@ -147,4 +147,4 @@ def analyze_embedding(arguments, *, inputs, callables, resources):
         'request_budget':{'scope':'execution','maximum':a['max_requests']},
         'reserved_bytes':reserved,
         'drain_timeout_s':a['options']['timeout_s']+1,
-        'required_distributions':['httpx']}
+        'required_distributions':['httpx', *(['pillow'] if modality == 'image' else [])]}

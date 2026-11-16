@@ -87,7 +87,7 @@ def _nonnullable(typ):
 
 
 def _fixture(root, catalog, endpoint, modality, *, registration=True, binding=True):
-    ws.init_workspace(root, modules=('demiflow.data', 'demiflow.embeddings'))
+    ws.init_workspace(root, modules=('demiflow.data', 'demiflow.embeddings'), extras=('embeddings',))
     objects = root / 'objects'; objects.mkdir()
     if registration:
         ws.add_location(root, 'objects', objects)
