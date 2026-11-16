@@ -590,7 +590,17 @@ class WorkerGraphRunner:
         # Once idle was reported, freeze the observed output frontier until
         # receipt/resume. Native futures may complete, but their input remains
         # in the cut and no unobserved output may cross it.
-        if self._sealed_cut is None and not (self._paused and self._idle_sent):
+        with self._condition:
+            # Cut/receipt invalidate the notification so the driver gets a
+            # fresh idle response, but are not permission to run business.
+            # Polling a timer here can emit to a peer that already sealed this
+            # cut, then wait forever for an ACK that requires resume. Earlier
+            # business stays ahead of an active cut in the original FIFO.
+            control_ready = bool(self._cut_controls or
+                self._queue and self._queue[0]['kind'] == 'cut')
+            poll_ready = (self._sealed_cut is None and not control_ready
+                          and not (self._paused and self._idle_sent))
+        if poll_ready:
             for (occurrence, _), kernel in self.e._kernels.items():
                 for record in kernel.poll():
                     self._output(occurrence, record)
@@ -676,7 +686,8 @@ class WorkerGraphRunner:
             for occ, node in self.e._node_specs.items():
                 if node.kind == 'source' and not any(s.source_id == occ for s in self.e.assignment.source_splits):
                     self._finish_node(occ)
-        if self._sealed_cut is None and not (self._paused and self._idle_sent):
+        if (self._sealed_cut is None and not (self._paused and self._idle_sent)
+                and (command is None or command['kind'] not in ('cut', 'receipt'))):
             processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
             self._flush_metrics()
