@@ -289,7 +289,7 @@ class DataflowWorkerExecutor:
             self._check_grant()
             assignment = self.assignment
             from ..dataflow_shared import shared_actors
-            shared = shared_actors(self._kernel_specs, self._services.programs, assignment)
+            shared = shared_actors(self._kernel_specs, self._services.programs, assignment, graph=self._graph)
             if self._restored_states:
                 for group in set(shared.values()):
                     if not set(group.binding['members']) <= set(self._restored_states):

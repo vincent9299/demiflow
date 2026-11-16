@@ -74,7 +74,7 @@ class SharedActor:
         return occurrence == self.binding['state_owner']
 
 
-def shared_actors(specs, programs, assignment):
+def shared_actors(specs, programs, assignment, *, graph=None):
     groups = {}
     for occ, spec in specs.items():
         binding = shared_binding(spec.configuration, occ)
@@ -86,6 +86,20 @@ def shared_actors(specs, programs, assignment):
         group = groups.setdefault(binding['owner'], SharedActor(binding, owner))
         if group.binding != binding or owner is None or group.owner is not owner:
             raise DataflowError('CORRUPT_ARTIFACT', 'Shared program lost its actual actor identity')
+    for group in groups.values():
+        selected = set(group.binding['members'])
+        if graph is not None:
+            forward, backward = set(selected), set(selected)
+            for seen, reverse in ((forward, False), (backward, True)):
+                changed = True
+                while changed:
+                    changed = False
+                    for edge in graph.edges:
+                        left, right = (edge.consumer, edge.producer) if reverse else (edge.producer, edge.consumer)
+                        if left in seen and right not in seen:
+                            seen.add(right); changed = True
+            selected = forward & backward
+        group.live_members = frozenset(selected)
     return {occ: group for group in groups.values() for occ in group.binding['members']}
 
 

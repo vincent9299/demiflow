@@ -986,6 +986,15 @@ class WorkerGraphRunner:
                                  if edge.edge_id in self._exchange else (self.partition,))
                     if not all((edge.edge_id, p) in self._finished_inputs for p in producers):
                         continue
+                    if kernel is not None and getattr(kernel, 'recovery_waits_for_live_drain', False):
+                        members = kernel._shared_actor.live_members
+                        if (self._queue or any(k.pending_calls for (o, _), k in self.e._kernels.items() if o in members)
+                                or any((incoming.edge_id, p) not in self._finished_inputs
+                                    for o in members for incoming in self._incoming.get(o, ())
+                                    if incoming.producer not in members
+                                    for p in (self._exchange[incoming.edge_id].producer_partitions
+                                        if incoming.edge_id in self._exchange else (self.partition,)))):
+                            continue
                     if kernel is not None and kernel.cooperative_finish:
                         if kernel.finish_replayable:
                             if self._paused and (not self._park_requested or self._cut is not None):

@@ -1,0 +1,27 @@
+{
+  "base": "92c99a2a46424c23295d7698e51b6193754884f9",
+  "evidence": [
+    {
+      "path": "/tmp/demiflow-recovery-rows-final/batch/receipt.json",
+      "sha256": "6b3d89ad2b74f07a8ada2ff495451a0c3bec23a6a99e92872fcdb4d7b3400142",
+      "passed": 11,
+      "source_unchanged": true
+    },
+    {
+      "path": "/tmp/demiflow-recovery-rows-ray/batch/receipt.json",
+      "sha256": "4c02f18e1fdf3e604bba628b856448bf2c5d54eeaaf20d4be86dae96c5ecdc8f",
+      "passed": 1,
+      "source_unchanged": true
+    }
+  ],
+  "inputs": {
+    "demiflow/execution/dataflow_shared.py": "84d2a41a5a997392f24fc344497477b8e3644c96ffa2f4dae5db6f676f8a2262",
+    "demiflow/execution/kernels/operator.py": "674b6b5333fb1c3e4674b7d748dc5b7523013527669149ba5bb085260ee95ea9",
+    "demiflow/execution/worker/dataflow_execution.py": "70eccfa996829abdaa3253cdea065fad4e1d55df95f0bb12f09dc9dd7c53046b",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "b0159f49febda7f93061b4fdbc18c8686b58afb085bcd4301a1351a7b1902520",
+    "demiflow/planning/dataflow_shared.py": "278ec7f64dcb6c1f514e09fb3a20c37832cbb6ceef011b23f93b474399c4c088",
+    "tests/test_native_barrier.py": "d5830901af1e7a8323d73532634f449f0f90991f0037d5aadd50b77863f923d9",
+    "demiflow/execution/kernels/recovery_rows.py": "977649b88ec148a5d59cb78b8d1ef8bcf9fd28387ecf431616ff26636ef39329",
+    "tests/test_dataflow_recovery_rows.py": "45b946d614b6efdf07020ecf04c38d0bf24049ca626fad8bc03d8d3d7ea05079"
+  }
+}

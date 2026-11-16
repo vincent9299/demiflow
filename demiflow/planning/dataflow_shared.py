@@ -7,12 +7,16 @@ from ..execution.dataflow_shared import actor_owner, shared_binding
 def bind_shared_actors(nodes, edges, declarations):
     from .dataflow_compile import _plain
     owners = {}
+    recovery_owners = set()
     by_occ = {n.occurrence_id: n for n in nodes}
     for declaration in declarations:
         spec = declaration.callable_spec
         owner = actor_owner(spec.target) if spec is not None else None
         if owner is not None:
             owners.setdefault(id(owner), []).append(declaration.occurrence_id)
+            import inspect
+            if inspect.getattr_static(owner, 'recovery_rows', None) is not None:
+                recovery_owners.add(id(owner))
     groups = [members for members in owners.values() if len(members) > 1]
     if not owners:
         return nodes
@@ -29,8 +33,10 @@ def bind_shared_actors(nodes, edges, declarations):
         binding = {'owner': members[0], 'members': members, 'state_owner': members[-1]}
         bindings.update((occ, binding) for occ in members)
     marked = {occ for members in owners.values() for occ in members}
+    recovery = {occ for key, members in owners.items() if key in recovery_owners for occ in members}
     return tuple(replace(n, kernel=replace(n.kernel, configuration={
         **_plain(n.kernel.configuration), 'actor_binding_version': 1,
+        **({'actor_recovery_rows': True} if n.occurrence_id in recovery else {}),
         **({'shared_actor': bindings[n.occurrence_id]} if n.occurrence_id in bindings else {})}))
         if n.occurrence_id in marked else n for n in nodes)
 
@@ -113,8 +119,12 @@ def colocate_shared_actors(graph, stages, *, bounds, hosts):
             break
         closures = [set().union(*(closures[i] for i in c)) for c in components]
     closures = [selected for selected in closures if len(selected) > 1]
+    by_occ = {n.occurrence_id: n for n in graph.nodes}
     replacements, consumed = {}, set()
     for selected in closures:
+        if (any(by_occ[o].kernel.configuration.get('actor_recovery_rows') for o in selected)
+                and any(port.requirement == 'finite_complete' for o in selected for port in by_occ[o].kernel.inputs)):
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Shared recovery_rows cannot cross a finite-input stage')
         members = [s for s in stages if selected.intersection(s.occurrences)]
         if any(s.replica_min != 1 or not set(s.occurrences) <= selected for s in members):
             raise DataflowError('UNSUPPORTED_CAPABILITY', 'Shared actor closure requires one partition per original stage')

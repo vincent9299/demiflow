@@ -664,19 +664,27 @@ class RecoveryEmitter:
 
 def test_recovery_rows_are_in_final_checkpoint_and_not_republished(tmp_path, monkeypatch):
     import demiflow.execution.commit as protocol
+    stopped = []
     def stop(name, commit_id):
         fact = RunJournal(tmp_path/'run').execution_commit(commit_id)
-        if name == 'after_acked' and fact['sequence'] == 2:
+        if name != 'after_acked' or fact['intent']['sinks'] != ['materialize']:
+            return
+        carrier = StateArtifacts(run).read(fact['prepared']['state']['dataflow-cut-v3'])
+        if carrier['cut']['final']:
+            stopped.append(commit_id)
             raise RuntimeError('stop after recovered outputs')
     monkeypatch.setattr(protocol, 'fault_point', stop)
     with pytest.raises(RuntimeError, match='stop after recovered outputs'):
         with RunContext.start(tmp_path/'run') as run:
             reference = run.ref
             data.from_items([]).map_async(RecoveryEmitter()).materialize()
+    assert len(stopped) == 1
+    before = RunJournal(tmp_path/'run').execution_commits('action-1')
     monkeypatch.setattr(protocol, 'fault_point', lambda *args: None)
     with RunContext.resume(reference):
         rows = data.from_items([]).map_async(RecoveryEmitter()).materialize().take_all()
     assert rows == [{'id': 101}, {'id': 102}]
+    assert RunJournal(tmp_path/'run').execution_commits('action-1') == before
 
 
 class WideState:

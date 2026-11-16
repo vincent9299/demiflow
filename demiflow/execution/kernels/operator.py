@@ -321,6 +321,8 @@ class OperatorKernel:
         self._occurrence = _occurrence(spec)
         self._instance: Any = None
         self._shared_actor = None
+        self._recovery_rows = None
+        self._recovery_buffering = False
         self._started = False
         self._closed = False
         self._restored = False
@@ -545,7 +547,14 @@ class OperatorKernel:
 
     @property
     def cooperative_finish(self):
-        return bool(self._ports) and self._spec.kind != 'StreamPrependOp'
+        from .recovery_rows import hook_owner
+        return (self._recovery_rows is not None or hook_owner(self) is not None
+                or bool(self._ports) and self._spec.kind != 'StreamPrependOp')
+
+    @property
+    def recovery_waits_for_live_drain(self):
+        from .recovery_rows import hook_owner
+        return self._shared_actor is not None and self._recovery_rows is None and hook_owner(self) is not None
 
     @property
     def finish_replayable(self):
@@ -556,6 +565,8 @@ class OperatorKernel:
 
     @property
     def checkpoint_ready(self):
+        if self._recovery_buffering or self._recovery_rows is not None and not self._recovery_rows.prepared:
+            return False
         if self._finish_cursor is not None and not self.finish_replayable:
             return False
         for instance in self._instances:
@@ -608,6 +619,11 @@ class OperatorKernel:
                 pass
         self._instances.clear()
         self._instance = None
+        if self._recovery_rows is not None:
+            try:
+                self._recovery_rows.close()
+            except BaseException:
+                pass
         for port in self._ports.values():
             try:
                 port.release()
@@ -813,6 +829,15 @@ class OperatorKernel:
 
     # -- K019 finish --------------------------------------------------------
     def finish(self, port: str, *, wait_for_calls: bool = True) -> Iterator[Record]:
+        from .recovery_rows import hook_owner, RecoveryRows
+        if self._recovery_rows is None and hook_owner(self) is not None:
+            self._recovery_rows = RecoveryRows(self)
+        if self._recovery_rows is not None:
+            yield from self._recovery_rows.finish(port)
+        else:
+            yield from self._finish_normal(port, wait_for_calls=wait_for_calls)
+
+    def _finish_normal(self, port: str, *, wait_for_calls: bool = True) -> Iterator[Record]:
         self._require_started()
         _check_stop(self._services)
         kind = self._spec.kind
@@ -919,6 +944,9 @@ class OperatorKernel:
             raise _err("INVALID_CONTRACT", "kind has no finite-complete finish", kind=kind)
 
     def _emit(self, records: Iterator[Record]) -> Iterator[Record]:
+        if self._recovery_buffering:
+            yield from records
+            return
         for record in records:
             if self._skip > 0:
                 self._skip -= 1
@@ -943,7 +971,7 @@ class OperatorKernel:
                 or self._spec.state != 'none' or self._spec.effect != 'pure'
                 or self._ports or self._batch or self._groups or self._group_base
                 or self._calls is not None or self._worker_scope or self._finish_cursor is not None
-                or self.aggregate_state is not None
+                or self.aggregate_state is not None or self._recovery_rows is not None
                 or isinstance(self._instance, AsyncInstance) and self._instance.loop is not None
                 or self._batch_deadline is not None or self._timer_deadline is not None):
             return False
@@ -992,6 +1020,8 @@ class OperatorKernel:
             "inflight_calls": self._calls.snapshot() if self._calls is not None else [],
             "aggregate_state": self.aggregate_state,
         }
+        if self._recovery_rows is not None:
+            image['recovery_rows'] = self._recovery_rows.snapshot()
         if self._finish_cursor is not None:
             image['finish_cursor'] = dict(self._finish_cursor)
         if self._spec.kind in _STREAM_GROUP_KINDS:
@@ -1101,6 +1131,10 @@ class OperatorKernel:
             self._apply_image(image)
 
     def _apply_image(self, image: Mapping[str, Any]) -> None:
+        if 'recovery_rows' in image:
+            from .recovery_rows import RecoveryRows
+            self._recovery_rows = RecoveryRows(self)
+            self._recovery_rows.restore(image['recovery_rows'])
         if 'callback_observations' in image:
             self.observations.restore(image['callback_observations'])
         if self._task_rows:
@@ -1259,6 +1293,11 @@ class OperatorKernel:
                 errors.append(exc)
         self._instances.clear()
         self._instance = None
+        if self._recovery_rows is not None:
+            try:
+                self._recovery_rows.close()
+            except BaseException as exc:
+                errors.append(exc)
         for port in self._ports.values():
             try:
                 port.release()
