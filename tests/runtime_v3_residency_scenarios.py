@@ -475,6 +475,9 @@ def _ray_child(fx,name,fault):
     result=_read(directory/'result.json')
     if child.returncode==3:
         from runtime_v3_support import NotRunError
+        verified=Path(result['missing']['verified_evidence'])
+        assert verified.resolve().is_relative_to(fx.root.resolve())
+        fx._save_evidence(name+'-partial',_read(verified))
         fx._record_not_run(name,result['missing'])
         raise NotRunError(name,result['missing'])
     result['ray_child']={'pid':child.pid,'returncode':child.returncode,'scope':'same-host private Ray Core'}
