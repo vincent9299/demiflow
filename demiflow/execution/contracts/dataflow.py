@@ -273,6 +273,10 @@ class _FrozenRowSet(frozenset):
 
 def thaw_record_value(value):
     """Return ordinary business containers without changing list/tuple identity."""
+    kind = type(value)
+    if (value is None or kind is str or kind is int or kind is float
+            or kind is bool or kind is bytes):
+        return value
     if isinstance(value, Mapping):
         return {key: thaw_record_value(item) for key, item in value.items()}
     if isinstance(value, _FrozenRowList):

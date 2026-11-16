@@ -182,3 +182,29 @@ def test_existing_primitive_payload_and_semantic_identity_bytes_stay_frozen():
     expected = '{"frozen":{"collection_type":"frozenset","items":2,"sha256":"4295f72eeb1e3507b8461e240e3b8d18c1e7bd2f1122b11fc9ec40a65894031a"},"raw":{"bytes":1,"bytes_sha256":"6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"},"set":{"collection_type":"set","items":2,"sha256":"e09614bbb9b54447d2a35b392abfac2983613186fcda65cdff52897548788c59"},"tuple":[1,null]}'
     assert document(describe({'set': {'b', 'a'}, 'frozen': frozenset({1, 2}),
         'tuple': (1, None), 'raw': b'\x00'})) == expected.encode()
+
+
+
+def test_thaw_preserves_strict_scalar_identity_subclasses_and_row_markers():
+    class BusinessInt(int):
+        pass
+    class BusinessText(str):
+        pass
+    values = [None, False, True, 2**100, -0.0, 0.0, float('nan'), float('inf'),
+              '\x00中文', b'\x00\xff', BusinessInt(7), BusinessText('x')]
+    for value in values:
+        assert thaw_record_value(value) is value
+    negative, positive = values[4:6]
+    record = Record('f' * 64, {}, None,
+        {'items': [negative, positive, b'\x00\xff'], 'pair': (1, None), 'set': {2}, 'frozen': frozenset({3})},
+        128, 0)
+    first = thaw_record_value(record.inline)
+    second = thaw_record_value(record.inline)
+    assert type(first['items']) is list and type(first['pair']) is tuple
+    assert type(first['set']) is set and type(first['frozen']) is frozenset
+    assert math.copysign(1, first['items'][0]) == -1
+    assert math.copysign(1, first['items'][1]) == 1
+    assert first['items'][2] == b'\x00\xff'
+    first['items'].append('consumer')
+    first['set'].add(4)
+    assert len(second['items']) == 3 and second['set'] == {2}
