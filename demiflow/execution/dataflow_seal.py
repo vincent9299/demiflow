@@ -237,11 +237,19 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         # and the planner keeps blocking next() in an independent worker.
         live_iterator = (shared_stream and node.kind == 'source'
                          and node.kernel.kind == 'iterable')
-        force_live = bool(worker_mode == 'thread' and (live_iterator or config.get('streaming_map')
-                          and config.get('execution') == 'thread' or shared_stream
+        # A worker-scoped class is a declaration, not a borrowed driver actor.
+        # Serialize that declaration and keep its per-owner checkpoint state.
+        # Unserializable constructors still use the existing attempt-only path;
+        # ordinary shared functions/instances must retain their live identity.
+        worker_factory = (config.get('callable_scope') == 'worker'
+                          and declaration.callable_spec is not None
+                          and declaration.callable_spec.is_class)
+        thread_stream = bool(config.get('streaming_map') and config.get('execution') == 'thread')
+        force_live = bool(worker_mode == 'thread' and (live_iterator
+                          or thread_stream and not worker_factory or shared_stream
                           and node.kernel.kind == 'AsyncMapOp' and not config.get('task_batch_rows')))
         eligible = worker_mode == 'thread' and not config.get('task_batch_rows') and (
-            force_live or node.kernel.kind == 'AsyncMapOp')
+            thread_stream or force_live or node.kernel.kind == 'AsyncMapOp')
         from .dataflow_thread_programs import owner
         ref = _stage_one_program(declaration, store=store, bounds=bounds,
             live_binding=owner(action) if eligible else None, force_live=force_live)
