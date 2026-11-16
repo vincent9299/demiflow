@@ -62,7 +62,11 @@ def fuse_thread_suffix(graph, stages, *, policy, bounds, hosts):
     prepend_tail = (policy.provider == 'local' and policy.max_active_workers is not None
         and sum(len(s.partitions) for s in stages) > policy.max_active_workers
         and any(n.kernel.kind == 'StreamPrependOp' for n in graph.nodes))
-    async_suffix = (policy.provider == 'local' and policy.max_active_workers is not None
+    # Both providers execute these kernels through the same GraphRunner. Keep
+    # the independent source and summed concurrent CPU/memory grant on Ray too;
+    # provider choice alone must not force an unparkable queue past its worker
+    # ceiling. The per-host and explicit-profile checks below still apply.
+    async_suffix = (policy.max_active_workers is not None
         and sum(len(s.partitions) for s in stages) > policy.max_active_workers
         and any(n.kernel.kind == 'AsyncMapOp' for n in graph.nodes))
     if policy.worker_mode != 'thread' and not bounded_suffix and not prepend_tail and not async_suffix:
