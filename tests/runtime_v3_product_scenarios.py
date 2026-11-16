@@ -25,6 +25,7 @@ WORKBENCH_CASES = (
     "tests/test_forge_workbench_runtime_browser.py::test_native_multiple_runs_select_graph_logs_outputs_and_discard_late_delivery",
     "tests/test_forge_workbench_runtime_browser.py::test_native_stop_survives_current_code_removal_and_keeps_attempt_identity",
     "tests/test_runtime_v3_product_scenarios.py::test_real_sealed_physical_facts_are_visible_in_browser",
+    "tests/test_workbench_native_gpu.py::test_real_managed_cuda_plan_bridge_and_browser",
 )
 PRODUCT_CASES = (
     "tests/test_runtime_v3_product_scenarios.py::test_managed_union_and_nested_materialize_bind_every_occurrence",
@@ -74,6 +75,9 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
     report = runs.verify_seal(target, manifest, environment=False)
     platform = manifest['platform']
     assert Path(platform['origin']).resolve() == WORKTREE / 'demiflow'
+    project_digest = _sha(WORKTREE/'pyproject.toml')
+    assert platform['declaration']['mode']=='source'
+    assert platform['declaration']['project_sha256']==project_digest
     source_digests = {}
     for item in platform['files']:
         path = Path(item['path'])
@@ -137,7 +141,7 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
     assert outputs, 'no original ACKed native output'
     return dict(schema=PROOF_SCHEMA, workspace=str(workspace), owned_root=str(Path(owned_root).resolve()),
         run_id=run_id, attempt=attempt, run_digest=manifest['digest'], report_digest=report['digest'],
-        candidate_sources=source_digests, plans=plans, outputs=outputs,
+        candidate_sources=source_digests, candidate_project_digest=project_digest, plans=plans, outputs=outputs,
         import_probe_scope='parent harness only; sealed managed worker has no import probe')
 
 
@@ -210,15 +214,10 @@ def _browser_gate(fx, scenario, nodeids):
 
 
 def workbench_real_plan(fx, fault=None):
-    from runtime_v3_support import NotRunError
-    result = _browser_gate(fx, 'workbench_real_plan', WORKBENCH_CASES)
-    # CPU/plan/bridge/attempt proofs do not stand in for the frozen positive GPU
-    # display requirement. The managed parent currently lacks a GPU grant.
-    detail = {'missing_semantic_harness': 'positive managed GPU grant and its original sealed profile displayed in the workbench',
-        'verified': 'native union/nested materialize, report bridges, CPU/exchange/recovery facts, run/attempt selection and stop/resume'}
-    fx._save_evidence('workbench_real_plan-partial', result)
-    fx._record_not_run('workbench_real_plan', detail)
-    raise NotRunError('workbench_real_plan', detail)
+    # Physical GPU is a required original-profile display witness. The child
+    # explicitly skips without authorised hardware; _browser_gate converts
+    # any required skip to NotRun, never a CPU-only successful V030 gate.
+    return _browser_gate(fx, 'workbench_real_plan', WORKBENCH_CASES)
 
 
 def product_regression(fx, fault=None):

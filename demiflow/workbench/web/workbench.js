@@ -365,7 +365,7 @@
         }
         if(stage){
           rows.push(['分区数',String(stage.partition_count)],['stage_id',String(stage.stage_id).slice(0,16)]);
-          if(v3)rows.push(['副本目标',String(stage.replica_target??'未提供')],['资源画像',stage.profile&&stage.profile.requests?Object.entries(stage.profile.requests).map(([k,v])=>k+'='+v).join(', '):'未提供']);
+          if(v3)rows.push(['副本目标',String(stage.replica_target??'未提供')],['资源画像',stage.profile&&stage.profile.requests?Object.entries(stage.profile.requests).map(([k,v])=>k+'='+(v&&typeof v==='object'?JSON.stringify(v):v)).join(', '):'未提供']);
           else rows.push(['worker 角色',stage.role||'未分配']);
         }
       }else rows.push(['声明节点',declared||'未映射']);

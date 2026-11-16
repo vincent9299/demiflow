@@ -70,7 +70,14 @@ def check_call(fact, *, backend="local", driver="pull"):
     elif native_kind not in registry:
         reason = 'Operation has no unified compiler capability contract'
     elif fact.get('native_options'):
-        reason = 'Managed backend_options require an explicit resource declaration'
+        from ..data.native_options import resource_only_options
+        declaration = fact.get('resource_declaration')
+        try:
+            if declaration is None or resource_only_options(
+                    {'ray': {'worker_resources': declaration}}) != declaration:
+                raise ValueError('resource declaration is missing or not canonical')
+        except (ValueError, TypeError):
+            reason = 'Managed backend_options require an explicit resource declaration'
     return {'version': VERSION, 'backend': backend, 'driver': driver,
             'supported': reason is None, 'reason': reason}
 

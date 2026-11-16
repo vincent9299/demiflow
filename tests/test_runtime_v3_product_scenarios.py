@@ -36,6 +36,7 @@ def run(*, source, target):
         lambda p: p.update(run_id='r'+'0'*24),
         lambda p: p.update(attempt=2),
         lambda p: p.update(report_digest='0'*64),
+        lambda p: p.update(candidate_project_digest='0'*64),
         lambda p: p['plans'][0].update(plan_id='0'*64),
         lambda p: p['outputs'][0]['receipt'].update(committed_version=99),
         lambda p: p['candidate_sources'].update({'execution/dataflow.py':'0'*64}),

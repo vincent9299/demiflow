@@ -669,14 +669,16 @@ class FlowChecker:
         if kind == 'prepend' and (len(inputs)!=2 or inputs[1].stream):
             self.fail('FL-08','Prepend prefix must be a finite synchronous Dataset without actors',node,module)
         stream = sem["execution"] == "stream" or any(ds.stream for ds in inputs)
+        resource_declaration = None
         if values.get("backend_options") is not None:
-            self.fail(
-                "FL-08",
-                "Backend option semantics are not covered in this inspection profile",
-                node,
-                module,
-                incomplete=True,
-            )
+            if sem['role'] != 'transform':
+                self.fail('FL-08', 'Managed native resources currently require an operator', node, module, incomplete=True)
+            try:
+                from ..data.native_options import resource_only_options
+                resource_declaration = resource_only_options(values['backend_options'],
+                    family='batch_transform' if kind in {'map_batches', 'batch_map'} else 'row_transform')
+            except (ValueError, TypeError) as exc:
+                self.fail('FL-08', str(exc), node, module, incomplete=True)
         schema = {}
         effects = list(sem["effects"])
         operator = None
@@ -958,6 +960,8 @@ class FlowChecker:
                     description,
                     constructor_args=construction.args if construction else values.get("fn_constructor_args") or (),
                     constructor_kwargs=construction.kwargs if construction else values.get("fn_constructor_kwargs"),
+                    native_resources=resource_declaration,
+                    concurrency=values.get('concurrency') or 1,
                 )
                 returns = description["returns"]
                 operator = {
@@ -1192,6 +1196,12 @@ class FlowChecker:
             raise
         except (ValueError, TypeError, KeyError) as exc:
             self.fail("FL-06", str(exc), node, module)
+        # Third-party computation uses the existing platform snapshot/extras
+        # authority. Even an unused torch import executes module initialization,
+        # so its dependency belongs to the original sealed environment closure.
+        if any(isinstance(value, Symbol) and value.name.split('.')[0] == 'torch'
+               for namespace in self.tree.modules.values() for value in namespace.values()):
+            analysis['required_distributions'] = sorted(set(analysis.get('required_distributions', ())) | {'torch'})
         stream = stream or analysis['driver']=='stream'
         from ..execution.capabilities import check_composition, check_call
 
@@ -1202,6 +1212,8 @@ class FlowChecker:
             "native_options": values.get("backend_options") is not None,
             "stream_options": kind == "map" and sem["execution"] != "stream" and analysis["driver"] == "stream",
         }
+        if resource_declaration is not None:
+            capability_fact['resource_declaration'] = resource_declaration
         driver = 'stream' if analysis['driver'] == 'stream' or any(ds.stream for ds in inputs) else 'pull'
         capability = check_composition([], driver=driver)
         if sem["role"] not in {"source"} and kind not in {"join", "union", "reduce"}:

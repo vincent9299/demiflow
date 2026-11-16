@@ -13,6 +13,35 @@ class NativeOptions:
     max_workers: int|None = None
     worker_resources: Mapping[str,Any] = None
 
+def resource_only_options(value, *, family="row_transform"):
+    """Canonical checked resource request; it grants no effects or file access.
+
+    Static declarations and actual NativeOptions pass the same parser and
+    unified policy validation. This deliberately excludes legacy Ray Data
+    compute/range controls, including otherwise empty declarations of them.
+    The compiler still owns working-set feasibility and original device grants.
+    """
+    if isinstance(value, NativeOptions):
+        validate_stream_native_options(value)
+        if value.backend != "ray":
+            raise ValueError("Unknown native resource backend spelling")
+        value = {"ray": {"worker_resources": value.worker_resources or {}}}
+    if (not isinstance(value, Mapping) or set(value) != {"ray"}
+            or not isinstance(value["ray"], Mapping)
+            or set(value["ray"]) - {"worker_resources"}):
+        raise ValueError("Managed backend_options accept worker_resources only; compute/worker ranges are unsupported")
+    parsed = parse_native_options(value, family=family)
+    resources = dict(parsed.worker_resources)
+    from ..planning.dataflow_policy import normalize_native_options
+    from ..execution.contracts.dataflow_errors import DataflowError
+    names = {"cpu": "num_cpus", "gpu": "num_gpus", "memory_bytes": "memory",
+             "custom_resources": "resources"}
+    try:
+        normalize_native_options({names[k]: v for k, v in resources.items()}, operation_kind=family)
+    except DataflowError as exc:
+        raise ValueError(str(exc)) from exc
+    return resources
+
 def validate_stream_native_options(value: NativeOptions | None) -> None:
     """Resource claims share the unified compiler; Ray Data pools do not.
 

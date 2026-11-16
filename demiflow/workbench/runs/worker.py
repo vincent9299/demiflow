@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from demiflow.workbench.process import process_identity
 
 
-def allocation_guard(limits):
+def allocation_guard(limits, *, native_execution=None):
     import resource
     # Import the trusted native libraries before establishing virtual headroom.
     import pyarrow as pa
@@ -20,6 +20,15 @@ def allocation_guard(limits):
     pa.set_io_thread_count(2)
     baseline = int(Path('/proc/self/statm').read_text().split()[0]) * os.sysconf('SC_PAGE_SIZE')
     ceiling = baseline + min(limits['max_rss_bytes'] // 2, 4 * limits['memory_bytes'])
+    if native_execution is not None:
+        from demiflow.workbench.runs.native_resources import validate
+        # CUDA reserves large virtual mappings even for a tiny tensor. This
+        # finite sealed ceiling does not alter real RSS/device/disk admission
+        # or the supervisor's whole-descendant-tree accounting and termination.
+        ceiling = validate(native_execution)['virtual_address_bytes']
+        _, inherited_hard = resource.getrlimit(resource.RLIMIT_AS)
+        if inherited_hard != resource.RLIM_INFINITY:
+            ceiling = min(ceiling, inherited_hard)
     if ceiling - baseline < 256 * 1024**2:
         raise MemoryError('Insufficient worker allocation headroom')
     resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
@@ -62,7 +71,7 @@ def execute(root, run_id, attempt=None):
 
     try:
         report = runs.verify_seal(target, manifest)
-        allocation_guard(manifest['limits'])
+        allocation_guard(manifest['limits'], native_execution=manifest.get('native_execution'))
         check_stop()
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
         source = target / 'source'
@@ -102,7 +111,8 @@ def execute(root, run_id, attempt=None):
             timeout_s=min(3600, limits['timeout_s']), admission_timeout_s=limits['admission_timeout_s'])
         # Use the unified bounded host default; the manifest still owns all resource ceilings.
         with RunContext.attach(run, entry_identity=manifest.get('source_digest'),
-                limits=manifest['limits'], check_stop=check_stop), local_execution(worker_mode='thread', partitions=1,
+                limits=manifest['limits'], check_stop=check_stop), local_execution(
+                worker_mode=(manifest.get('native_execution') or {}).get('worker_mode', 'thread'), partitions=1,
                 batch_rows=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
                 temp_directory=str(work), native_resources=native) as session:
             session._executor.resource_root = source
@@ -285,7 +295,8 @@ def supervise(root, run_id, lease, attempt=None):
             Path(output['uri']).parent.mkdir(parents=True, exist_ok=True)
         from demiflow.execution.output_watch import OutputWatch
         output_watch = OutputWatch([output['uri'] for output in manifest['outputs'].values()])
-        env = runs.worker_environment(target, limits, manifest.get('credential_names', []))
+        env = runs.worker_environment(target, limits, manifest.get('credential_names', []),
+                                      native_execution=manifest.get('native_execution'))
         env['DEMIFLOW_INSPECTION_PARENT'] = str(os.getpid())
         env['TMPDIR'] = str(work)
         unit_fds = inherited_unit()

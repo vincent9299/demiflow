@@ -395,7 +395,7 @@ class SourceTree:
                     "FL-02", "Wildcard/shadowing imports are forbidden", node, module
                 )
             root = target.split(".")[0]
-            if root in {"demiflow", "typing", "__future__", "json", "hashlib", "math", "re", "html"}:
+            if root in {"demiflow", "typing", "__future__", "json", "hashlib", "math", "re", "html", "torch"}:
                 if (self.root / (root + ".py")).exists() or (self.root / root).exists():
                     self.fail(
                         "FL-02",

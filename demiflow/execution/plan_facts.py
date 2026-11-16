@@ -110,9 +110,19 @@ def operation_capability(operation):
         kind = "unknown"
     native = getattr(operation, "native_options", None) if type(operation) in kinds else None
     stream = operation.stream_options if type(operation) in {ops.MapOp, ops.BoundMapOp} else None
-    return {"kind": kind, "driver": "stream" if kind in {"async_map", "batch_map"} or stream is not None else "pull",
+    fact = {"kind": kind, "driver": "stream" if kind in {"async_map", "batch_map"} or stream is not None else "pull",
             "native_options": native is not None, "stream_options": stream is not None,
             "bound": type(operation) is ops.BoundMapOp}
+    if native is not None:
+        from ..data.native_options import resource_only_options
+        try:
+            fact['resource_declaration'] = resource_only_options(native,
+                family='batch_transform' if kind in {'map_batches', 'batch_map'} else 'row_transform')
+        except (ValueError, TypeError):
+            # Retain the original unsupported-fact/error path for legacy
+            # compute/ranges and unknown options. No declaration means no grant.
+            pass
+    return fact
 
 
 def _catch_facts(catch):
@@ -158,7 +168,7 @@ def operation_facts(operation):
     # cannot be described here, and a kind it grants must be described here.
     if kind == "unknown":
         raise RuntimeContractError("Unknown actual operation contract: " + type(operation).__name__)
-    if fact["native_options"]:
+    if fact['native_options'] and 'resource_declaration' not in fact:
         raise RuntimeContractError("Backend option facts require a supported native contract")
     if kind == "map":
         arguments.update(inputs=None, output=None, outputs=None)

@@ -188,14 +188,18 @@ def worker_arguments(name, arguments):
     if type(arguments) is not dict:
         raise ForgeError('Worker run arguments must be an object', code='invalid_request')
     if name == 'run_prepare':
-        internal = {k: v for k, v in arguments.items() if k in {'reserved_run_id', 'prepare_request_id'}}
+        internal = {k: v for k, v in arguments.items() if k in {'reserved_run_id', 'prepare_request_id', 'native_deployment'}}
         public = {k: v for k, v in arguments.items() if k not in internal}
         # request_id belongs to the parent receipt wrapper, not _prepare.
         if 'request_id' in public:
             raise ForgeError('Preparation receipt is parent-owned', code='invalid_request')
         values = OPERATIONS['prepare'].validate(public)
         for key, value in internal.items():
-            Field('text', nullable=True).check(key, value)
+            if key == 'native_deployment':
+                from demiflow.workbench.runs.native_resources import validate
+                validate(value)
+            else:
+                Field('text', nullable=True).check(key, value)
         return {**values, **internal}
     if name == 'run_preflight':
         if set(arguments) != {'run_id', 'expected'}:

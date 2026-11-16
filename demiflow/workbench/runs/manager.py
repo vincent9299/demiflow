@@ -225,6 +225,10 @@ def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None,
     from demiflow.workbench.runs.domain import preparation_lock
     from functools import partial
     args = dict(params=params, outputs=outputs, new_outputs=new_outputs, limits=limits, inputs=inputs,telemetry=telemetry)
+    from demiflow.workbench.runs.native_resources import trusted_deployment
+    native_deployment = trusted_deployment(workspace=root)
+    if native_deployment is not None:
+        args['native_deployment'] = native_deployment
     with preparation_lock() as lease:
         perform=partial(operation,_pass_fds=(lease,), _authority=authority.bootstrap())
         if request_id is not None:
@@ -240,7 +244,7 @@ def _fact_actions(report, outputs):
 
 
 def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
-             reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None):
+             reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None):
     operation_budget.check()
     if type(telemetry) is not bool:
         raise ForgeError('telemetry must be boolean',code='invalid_request')
@@ -313,6 +317,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     report = ws._inspect_flow(root, entry, params=effective, save=True)
     if report.get('status') != 'checked':
         raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
+    from demiflow.workbench.runs import native_resources
+    native_execution = native_resources.select(report, native_deployment, workspace=root)
     if not 1 <= len(report['actions']) <= 32:
         raise ForgeError('Run action budget exceeded')
     from demiflow.execution.capabilities import VERSION as capability_version
@@ -450,6 +456,9 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 object_locations=object_locations(report=report),
                 platform=dict(digest=workspace['platform']['digest'], origin=str(platform_root),
                     declaration=declaration, environment=platform['environment'], files=platform['platform']['files'], limits=platform['limits']))
+            if native_execution is not None:
+                native_resources.seal(target, native_execution)
+                manifest['native_execution'] = native_execution
             manifest['digest'] = content_digest(manifest)
             operation_budget.check()
             # Expensive freshness checks precede the authorization commit guard.
@@ -611,6 +620,8 @@ def process_matches(identity):
 
 def verify_seal(target, manifest, *, environment=True):
     report = _report(target, manifest)
+    from demiflow.workbench.runs.native_resources import verify
+    verify(target, manifest.get('native_execution'))
     if manifest.get('format') not in {FORMAT, PREVIOUS_FORMAT, LEGACY_EXECUTABLE_FORMAT} or report.get('format') != 'demiflow_forge_flow_inspection_v3':
         raise ForgeError('Historical execution records are read-only; prepare a newly inspected run')
     if manifest['format'] in {FORMAT, PREVIOUS_FORMAT}:
@@ -732,7 +743,8 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                     command = [sys.executable, '-I', '-B', str(target / 'runtime/demiflow' / worker_path), 'supervise', str(root), run_id, str(lease)]
                     if attempt is not None:
                         command.append(str(attempt))
-                    env = worker_environment(target, value['manifest']['limits'], value['manifest'].get('credential_names', []))
+                    env = worker_environment(target, value['manifest']['limits'], value['manifest'].get('credential_names', []),
+                                             native_execution=value['manifest'].get('native_execution'))
                     env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(unit)
                     operation_budget.check()
                     spawn_attempted = True
@@ -919,7 +931,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
     return show(root, run_id)
 
 
-def worker_environment(target, limits=None, credential_names=()):
+def worker_environment(target, limits=None, credential_names=(), *, native_execution=None):
     limits = limits or DEFAULT_LIMITS
     result = dict(PATH=os.path.dirname(sys.executable) + ':/usr/bin:/bin', LANG='C.UTF-8',
         PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1',
@@ -931,6 +943,8 @@ def worker_environment(target, limits=None, credential_names=()):
         MALLOC_ARENA_MAX='2',
         TOKIO_WORKER_THREADS='2', LANCE_CPU_THREADS='2', CUDA_VISIBLE_DEVICES='',
         LANCE_MEM_POOL_SIZE=str(limits['memory_bytes']), LANCE_MAX_TEMP_DIRECTORY_SIZE=str(limits['max_scratch_bytes']))
+    from demiflow.workbench.runs.native_resources import environment
+    result.update(environment(target, native_execution))
     for name in credential_names:
         if not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,127}', name) or name in result or name in {'HOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH'} or name.startswith(('PYTHON', 'DEMIFLOW_', 'CUDA_')):
             raise ForgeError('Credential name conflicts with worker control environment')

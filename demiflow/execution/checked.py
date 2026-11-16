@@ -253,6 +253,9 @@ class CheckedExecution:
         identity = node['id']
         facts = operation_facts(op)
         _equal(facts['kind'], node['capability_fact']['kind'], identity + '.kind')
+        _equal(facts['native_options'], node['capability_fact']['native_options'], identity + '.native_options')
+        _equal(facts.get('resource_declaration'), node['capability_fact'].get('resource_declaration'),
+               identity + '.resource_declaration')
         native = facts.get('native')
         if type(op) is ops.StreamPrependOp:
             # The second actual Dataset was recursively checked in plan(); its

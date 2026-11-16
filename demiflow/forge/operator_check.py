@@ -40,6 +40,8 @@ class OperatorChecker:
         self.generators = []
         self.type_active = set()
         self.records = []
+        self.tensor_contexts = []
+        self.tensor_allocated = 0
 
     def fail(self, rule, detail, node, module, *, incomplete=False):
         self.tree.fail(rule, detail, node, module, incomplete=incomplete)
@@ -297,6 +299,8 @@ class OperatorChecker:
         constructor_kwargs=None,
         state=None,
         methods=None,
+        native_resources=None,
+        concurrency=1,
     ):
         definition, node = description["definition"], description["node"]
         module = definition.module
@@ -318,6 +322,13 @@ class OperatorChecker:
                 module,
                 incomplete=True,
             )
+        if not self.active:
+            self.tensor_allocated = 0
+        inherited = self.tensor_contexts[-1] if self.tensor_contexts else ({}, False, 1)
+        loop = inherited[1] or any(isinstance(n, (ast.For, ast.While, ast.ListComp, ast.SetComp,
+                  ast.DictComp, ast.GeneratorExp)) for n in ast.walk(node))
+        self.tensor_contexts.append((native_resources if native_resources is not None else inherited[0],
+                                     loop, max(concurrency, inherited[2])))
         self.active.append(identity)
         self.generators.append(description.get("generator", False))
         try:
@@ -446,6 +457,7 @@ class OperatorChecker:
         finally:
             self.active.pop()
             self.generators.pop()
+            self.tensor_contexts.pop()
 
     def _expr(self, node, env, module, state, methods):
         self.tree.guard()
@@ -645,6 +657,10 @@ class OperatorChecker:
                 )
             )
             values = [visit(n) for n in operands]
+            from .tensor_contract import binary
+            tensor = binary(self, values, node, module)
+            if tensor is not None:
+                return tensor
             if any(
                 not isinstance(v, Value)
                 or v.type["kind"]
@@ -843,6 +859,10 @@ class OperatorChecker:
                 )
             if isinstance(target, Symbol):
                 name = target.name
+                from .tensor_contract import construct
+                tensor = construct(self, name, args, kwargs, node, module)
+                if tensor is not None:
+                    return tensor
                 pure = self._pure_call(name, args, kwargs, node, module)
                 if pure is not None:
                     return pure
@@ -1056,6 +1076,10 @@ class OperatorChecker:
 
     def _method(self, parent, name, args, kwargs, node, module):
         kind = parent.type["kind"]
+        from .tensor_contract import method
+        tensor = method(self, parent, name, args, kwargs, node, module)
+        if tensor is not None:
+            return tensor
         if any(not isinstance(a, Value) for a in [*args, *kwargs.values()]):
             self.fail(
                 "OP-06",

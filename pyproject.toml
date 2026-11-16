@@ -17,6 +17,8 @@ demiflow-sandbox = "demiflow.workbench.analysis.provisioner:SandboxProvisioner"
 
 [project.optional-dependencies]
 local = ["cloudpickle>=2.2"]
+# Closed managed tensor value protocol; CUDA devices remain deployment-owned.
+gpu = ["torch>=2.13,<2.14"]
 fetch = ["httpx>=0.27,<0.29"]
 queue-postgresql = ["psycopg[binary]>=3.3,<4"]
 lance = ["pylance>=0.9"]
