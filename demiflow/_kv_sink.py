@@ -135,14 +135,15 @@ class DurableKVSink:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         try:
             with os.fdopen(fd, 'wb') as stream:
-                def write(raw):
+                def write(*chunks):
                     nonlocal size
-                    extent = size + len(raw)
+                    extent = size + sum(map(len, chunks))
                     if extent > run.limits['max_output_bytes']:
                         raise RecoveryContractError('KV staging exceeds output byte budget')
                     run.reserve_artifact_bytes(path, extent)
-                    stream.write(raw)
-                    digest.update(raw)
+                    for raw in chunks:
+                        stream.write(raw)
+                        digest.update(raw)
                     size = extent
                 write(_MAGIC)
                 for block in blocks:
@@ -159,9 +160,7 @@ class DurableKVSink:
                         if batch_count and (batch_count >= self.batch_rows or batch_size + len(value) > self.batch_bytes):
                             batches += 1
                             batch_count = batch_size = 0
-                        write(_HEADER.pack(len(key), len(value)))
-                        write(key)
-                        write(value)
+                        write(_HEADER.pack(len(key), len(value)), key, value)
                         rows += 1
                         batch_count += 1
                         batch_size += len(value)
