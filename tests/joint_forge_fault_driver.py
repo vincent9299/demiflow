@@ -92,7 +92,7 @@ elif mode == 'execute':
             final=window['window'].startswith('final_')
             point=window['window'].removeprefix('final_') if final else window['window']
             from demiflow.execution.state_artifacts import StateArtifacts
-            state = fact.get('prepared', {}).get('state', {}).get('dataflow-cut-v3')
+            state = (fact.get('prepared') or {}).get('state', {}).get('dataflow-cut-v3')
             cut = StateArtifacts(run).read(state) if state else None
             matches = bool(cut) and (
                 fact['intent']['sinks'] == ['write_lance'] and cut['cut']['final'] if final else
