@@ -110,7 +110,10 @@ def terminal_schema(graph, physical, *, terminal, bounds):
             parents = [known[parent] for parent in incoming[key]]
             base = parents[0] if len(parents) == 1 else None
             kind, cfg = node.kernel.kind, node.kernel.configuration
-            if node.kind == 'terminal' or kind in preserved:
+            if node.kind == 'terminal' and KEY in cfg.get('arguments', {}):
+                schema = decode(cfg['arguments'][KEY], bounds=bounds)
+                metadata_bytes += len(cfg['arguments'][KEY])
+            elif node.kind == 'terminal' or kind in preserved:
                 schema = base
             elif base is not None and kind == 'SaveLanceOp':
                 schema = stream_lance_output_schema(base, cfg.get('output_ref'))

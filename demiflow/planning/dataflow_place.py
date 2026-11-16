@@ -320,6 +320,10 @@ def plan_exchanges(
     owner = _stage_of_occurrence(stages)
     credit_rows = max(1, min(256, bounds.max_pending_events))
     credit_bytes = max(1, min(bounds.max_resident_bytes, bounds.max_batch_bytes * 4))
+    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    ceilings = sealed_execution_ceilings(graph)
+    credit_rows = min(credit_rows, ceilings.get('inflight_rows', credit_rows))
+    credit_bytes = min(credit_bytes, ceilings.get('inflight_bytes', credit_bytes))
     exchanges = []
     for edge in graph.edges:
         producer_stage = owner[edge.producer]
@@ -412,6 +416,7 @@ def solve_residency(
     hosts: tuple[HostDescriptor, ...],
     bounds: Bounds,
     max_active_workers: int | None = None,
+    max_cpu_millis: int | None = None,
 ) -> ResidencyPlan:
     if not stages:
         raise _error("INVALID_CONTRACT", "physical plan has no stages")
@@ -483,6 +488,10 @@ def solve_residency(
 
     cpu_capacity = sum(host.logical_resources.get(
         "cpu_millis", host.logical_resources.get("cpu", 0.0) * 1000) for host in hosts)
+    if max_cpu_millis is not None:
+        if type(max_cpu_millis) is not int or max_cpu_millis <= 0:
+            raise _error("INVALID_CONTRACT", "CPU ceiling must be a positive integer")
+        cpu_capacity = min(cpu_capacity, max_cpu_millis)
     memory_capacity = sum(host.logical_resources.get("memory_bytes", 0.0) for host in hosts)
     gpu_capacity = sum(host.logical_resources.get("gpu", 0.0) for host in hosts)
     isolation: set[str] = set()
@@ -737,9 +746,13 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
     If it cannot fit, checkpointable boundaries may park a bounded durable
     window. The fixed-plan solver remains strict about memory co-residency.
     """
+    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    ceilings = sealed_execution_ceilings(graph)
+    cpu_ceiling = ceilings.get('cpu_millis')
     try:
         return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
-                                         max_active_workers=policy.max_active_workers)
+                                         max_active_workers=policy.max_active_workers,
+                                         max_cpu_millis=cpu_ceiling)
     except DataflowError as original:
         if original.code != "RESOURCE_INFEASIBLE":
             raise
@@ -748,7 +761,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         # masking it with the disk cost of an irrelevant durable fallback.
         try:
             solve_residency(stages, (), hosts=hosts, bounds=bounds,
-                            max_active_workers=policy.max_active_workers)
+                            max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling)
         except DataflowError:
             raise
         eligible = (all(s.replay != "attempt_only" for s in snapshots)
@@ -780,14 +793,14 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
             mode = "finite_sealed" if finite else "durable_incremental"
             upgraded.append(replace(exchange, mode=mode,
                 scope_id="scope-" + exchange.edge_id if finite else None,
-                credit_rows=min(256, bounds.max_pending_events),
+                credit_rows=min(256, bounds.max_pending_events, ceilings.get('inflight_rows', 256)),
                 storage_bytes=min(bounds.max_spill_bytes, exchange.credit_bytes * 8),
                 reason=f"{mode}:{reason}_requires_" +
                        ("finite_completion;" if finite else "checkpointed_parking;") + exchange.reason))
         upgraded = tuple(upgraded)
         upgraded = _share_exchange_storage(upgraded, bounds)
         return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds,
-                                        max_active_workers=policy.max_active_workers)
+                                        max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling)
 
 
 def compile_physical_dataflow(
@@ -810,6 +823,15 @@ def compile_physical_dataflow(
 
     stages = partition_stages(graph, policy=policy, bounds=bounds)
     stages = _refine_source_partitions(graph, stages, splits, policy, bounds)
+    # Optional co-location must fit the same caller ceiling as the original
+    # allocation scope. Project capacity only for planning; real providers keep
+    # their original descriptors and admission authority.
+    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    cpu_ceiling = sealed_execution_ceilings(graph).get('cpu_millis')
+    if cpu_ceiling is not None:
+        hosts = tuple(replace(host, logical_resources={**host.logical_resources,
+            'cpu_millis': min(host.logical_resources.get('cpu_millis',
+                host.logical_resources.get('cpu', 0) * 1000), cpu_ceiling)}) for host in hosts)
     from .dataflow_fusion import fuse_single_worker_pipeline
     stages = fuse_single_worker_pipeline(graph, stages, policy=policy, bounds=bounds, hosts=hosts)
     from .dataflow_thread_fusion import fuse_thread_suffix

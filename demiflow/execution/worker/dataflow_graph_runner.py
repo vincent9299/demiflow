@@ -66,6 +66,9 @@ class WorkerGraphRunner:
         windows = [min(spec.credit_rows, max(1, spec.credit_bytes // self.bounds.max_row_bytes))
                    for spec in executor._output_specs if spec.mode == 'durable_incremental']
         self._credit_limit = min(self.bounds.max_pending_events, 64)
+        from ..dataflow_native_limits import sealed_execution_ceilings
+        self._credit_limit = min(self._credit_limit,
+            sealed_execution_ceilings(executor._graph).get('inflight_rows', self._credit_limit))
         self._terminals = {}
         self._finite = {}
         self._cut = None

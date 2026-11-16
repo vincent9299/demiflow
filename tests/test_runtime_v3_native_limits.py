@@ -119,7 +119,20 @@ def test_resume_retains_native_ceilings_and_original_plan_when_option_omitted(tm
     class Interrupted(Exception):
         pass
     sealed = []
+    # This fault targets a real durable phase boundary. Explicitly select the
+    # existing unfused policy so optional pure-pipeline co-location cannot
+    # remove the injection point and turn the test into a successful full run.
+    from demiflow.execution import dataflow_api
+    resolve = dataflow_api.resolve_action_runtime
+    def unfused(request):
+        policy, bounds = resolve(request)
+        return replace(policy, fusion=False), bounds
+    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', unfused)
     def stop(execution, image):
+        assert not image.cut.final
+        assert any(edge.mode == 'durable_incremental' for edge in execution._physical.exchanges)
+        assert any(c['commit_id'] == image.commit_id and c['status'] == 'acked'
+                   for c in execution._action.context.journal.execution_commits('action-1'))
         sealed.append(execution._physical)
         raise Interrupted()
     with pytest.raises(Interrupted):

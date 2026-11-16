@@ -239,13 +239,32 @@ def resolve_action_runtime(request: ActionRequest):
     run = request.action.context
     limits = dict(run.limits)
     explicit = set(run.explicit_limits)
+    from .dataflow_native_limits import EXECUTION_LIMITS, execution_ceilings, intersect_native_limits
+    ceilings = execution_ceilings(request.arguments.get(EXECUTION_LIMITS))
+    if ceilings:
+        for key, source_key in (('memory_bytes', 'memory_bytes'), ('max_scratch_bytes', 'scratch_bytes')):
+            if source_key in ceilings:
+                limits[key] = min(limits[key], ceilings[source_key])
+                explicit.add(key)
+        if 'memory_bytes' in ceilings:
+            options['memory_bytes'] = min(options.get('memory_bytes', limits['memory_bytes']), ceilings['memory_bytes'])
+        for key in ('inflight_bytes', 'output_bytes'):
+            if key in ceilings:
+                for name in ('max_row_bytes', 'max_batch_bytes'):
+                    limits[name] = min(limits[name], ceilings[key])
+                    explicit.add(name)
+        if 'cpu_millis' in ceilings:
+            count = ceilings['cpu_millis'] // 1000
+            options['max_active_workers'] = min(options.get('max_active_workers', count), count)
     declared = getattr(executor, '_native_resources', None)
     if declared is None:
         declared = getattr(local, 'native_resources', None)
-    native = None
+    native = ({'batch_rows': min(ceilings['inflight_rows'], limits['batch_rows'])}
+              if 'inflight_rows' in ceilings else None)
     if declared is not None:
         from .dataflow_native_limits import effective_native_limits
-        native = effective_native_limits(declared, limits)
+        native = intersect_native_limits(native, effective_native_limits(declared, limits))
+    if native is not None:
         for name in ('memory_bytes', 'max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes', 'batch_rows'):
             if name in native:
                 limits[name] = native[name]
@@ -280,10 +299,16 @@ def run_dataset_action(request: ActionRequest) -> object:
         finally:
             record_execution_metadata(request, handle._execution)
     # Streaming adapters retain the action handle until exhaustion or close.
-    if request.kind == "iter_rows":
+    from .dataflow_native_limits import DELIVERY_LIMIT
+    if request.kind == "iter_rows" or (
+            request.kind == "take" and DELIVERY_LIMIT in arguments):
         return observed(iterate_rows(handle))
     if request.kind == "iter_batches":
-        return observed(iterate_batches(handle, batch_size=arguments.get("batch_size"),
+        batch_size = arguments.get('batch_size')
+        if arguments.get('native_execution_limits', {}).get('inflight_rows'):
+            ceiling = (handle._execution._native_limits or {}).get('batch_rows', batch_size)
+            batch_size = min(batch_size, ceiling)
+        return observed(iterate_batches(handle, batch_size=batch_size,
                                batch_format=arguments.get("batch_format", "default"),
                                drop_last=arguments.get("drop_last", False)))
     try:

@@ -11,7 +11,7 @@ import json
 import pickle
 import tempfile
 import time
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -563,7 +563,24 @@ class Engine:
             yield from self.python_rows(executor, source, plan)
 
 
-def execute(executor, source, plan, *, arrow=False, sink_schema=None, execution=None):
+def _cast_sink_batch(batch, *, schema_bytes, max_bytes):
+    """An ordinary native worker operator; retain both arrays before casting."""
+    import base64
+    import pyarrow as pa
+    from .arrow_batch_sink import _cast_allocation
+    from .contracts.dataflow_errors import DataflowError
+    from ..resources.capacity import inherited_envelope
+    schema = pa.ipc.read_schema(pa.BufferReader(base64.b64decode(schema_bytes, validate=True)))
+    envelope = inherited_envelope()
+    if envelope is None:
+        raise DataflowError('INVALID_CONTRACT', 'native schema conversion requires an admitted worker')
+    maximum = min(max_bytes, envelope['memory_bytes'])
+    if batch.get_total_buffer_size() + _cast_allocation(batch, schema) > maximum:
+        raise DataflowError('BUDGET_EXCEEDED', 'native schema input and cast output exceed the byte ceiling')
+    return batch.cast(schema, safe=True)
+
+
+def execute(executor, source, plan, *, arrow=False, sink_schema=None, execution=None, limit=None):
     """Compat native relational entry adapted to the unified v3 request facade (E016).
 
     The legacy DataFusion ``Engine``/``Compiler`` instantiation and the Ray-only
@@ -572,9 +589,72 @@ def execute(executor, source, plan, *, arrow=False, sink_schema=None, execution=
     ``sink_schema`` is preserved through the terminal contract.
     """
     from .dataflow_api import make_action_request, run_dataset_action
+    from .dataflow_native_limits import EXECUTION_LIMITS, DELIVERY_LIMIT, execution_ceilings
+    from .native_resources import _sealed_ceilings
 
-    kind = "iter_batches" if arrow else "iter_rows"
-    arguments = {"batch_format": "pyarrow"} if arrow else {}
-    request = make_action_request(executor, source, plan, kind=kind, arguments=arguments)
-    result = run_dataset_action(request)
-    yield from result
+    if limit is not None and (type(limit) is not int or limit < 0):
+        raise ValueError('Native delivery limit must be a nonnegative integer')
+    if limit == 0:
+        return
+    if arrow and limit is not None:
+        raise ValueError('Native delivery limit requires row output')
+    original_plan = plan
+    kind = "iter_batches" if arrow else "take" if limit is not None else "iter_rows"
+    arguments = ({"batch_format": "pyarrow"} if arrow else
+                 {"limit": limit, DELIVERY_LIMIT: limit} if limit is not None else {})
+    ceilings = execution_ceilings(_sealed_ceilings(execution))
+    if ceilings:
+        arguments[EXECUTION_LIMITS] = ceilings
+    if arrow and ceilings.get('inflight_rows') is not None:
+        arguments['batch_size'] = ceilings['inflight_rows']
+    if sink_schema is not None:
+        import pyarrow as pa
+        from .contracts.dataflow_errors import DataflowError
+        from .dataflow_api import _PREFLIGHT_BOUNDS
+        from .dataflow_schema import KEY, encode
+        if not arrow or not isinstance(sink_schema, pa.Schema):
+            raise DataflowError('INVALID_CONTRACT', 'sink_schema requires Arrow output and a pyarrow.Schema')
+        encoded = encode(sink_schema, bounds=_PREFLIGHT_BOUNDS)
+        arguments[KEY] = encoded
+        # A real graph node performs and records the conversion before terminal
+        # publication. The driver's return adapter never relabels stored data.
+        maximum = min(ceilings.get('memory_bytes', 2**63-1),
+                      ceilings.get('inflight_bytes', 2**63-1),
+                      ceilings.get('output_bytes', 2**63-1))
+        plan = plan.append(ops.MapBatchesOp(ops.CallableSpec.create(_cast_sink_batch,
+            fn_kwargs={'schema_bytes': encoded, 'max_bytes': maximum}),
+            batch_size=min(256, ceilings.get('inflight_rows', 256)), batch_format='pyarrow'))
+    from .checked import action as checked_action
+    from .dataflow_api import declare_action_v3
+    from .run_context import current_action, current_run
+    from .contracts.dataflow_errors import DataflowError
+    active = current_action()
+    if active is not None:
+        if active.context is not current_run():
+            raise DataflowError('INVALID_CONTRACT', 'native execute action belongs to a different run context')
+        declaration = declare_action_v3(source, original_plan, kind=kind, arguments={},
+                                        sink_declaration=None)
+        if any(active.declaration.get(key) != declaration[key] for key in ('source', 'operations')):
+            raise DataflowError('INVALID_CONTRACT',
+                'native execute source/plan differ from the active action declaration')
+        # The source/plan still belong to the caller's action. New adapter facts
+        # are bound by that action's original graph seal, verified on every
+        # subsequent read by validate_execution_binding, never by another run.
+    scope = checked_action(kind, source, plan, arguments=arguments) if active is None else nullcontext()
+    with scope as checked:
+        if checked is not None:
+            source, plan = checked.source, checked.plan
+        request = make_action_request(executor, source, plan, kind=kind, arguments=arguments)
+        try:
+            with closing(run_dataset_action(request)) as result:
+                if arrow:
+                    for table in result:
+                        yield from table.to_batches()
+                else:
+                    yield from result
+        except GeneratorExit:
+            # A bounded take is still delivered lazily by this compatibility
+            # iterator. Only the owner it created may finalize early delivery.
+            if active is None and request.action.record['result'] is None:
+                request.action.complete({'kind': kind, 'delivery': 'closed'})
+            raise

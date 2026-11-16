@@ -340,6 +340,8 @@ class DataflowExecution:
                 self._action.action_id, store=self._store, bounds=self._bounds)
             from .dataflow_schema import validate_literal_schema_replay
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
+            from .dataflow_native_limits import validate_execution_binding
+            validate_execution_binding(self._request, graph)
             _, _, pin = load_sealed_dataflow(sealed, action_id=self._action.action_id,
                                              store=self._store, bounds=self._bounds)
             if pin.get("platform_revision") != platform_identity():
@@ -508,6 +510,13 @@ class DataflowExecution:
                                              for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
                   "max_workers": self._active_worker_limit or self._bounds.max_partitions}
+        from .dataflow_native_limits import sealed_execution_ceilings
+        ceilings = sealed_execution_ceilings(self._graph)
+        if 'cpu_millis' in ceilings:
+            budget['cpu_millis'] = min(budget['cpu_millis'], ceilings['cpu_millis'])
+            largest = max(stage.profile.requests['cpu_millis'] for stage in self._physical.stages)
+            if largest > budget['cpu_millis']:
+                raise DataflowError('RESOURCE_INFEASIBLE', 'native worker profile exceeds sealed CPU ceiling')
         gpu_budget = int(sum(host.logical_resources.get('gpu', 0) for host in self._services.hosts))
         if gpu_budget:
             budget['accelerator_gpu'] = gpu_budget

@@ -577,19 +577,27 @@ def test_f017(fake_action):
 # ---------------------------------------------------------------------------
 # F018-F019 dataset_native
 # ---------------------------------------------------------------------------
-def test_f018(fake_action):
+def test_f018(fake_action, monkeypatch):
     _binding_assertion()
     from demiflow.execution.dataset_native import execute
     from demiflow.data.plan import LogicalPlan
     from demiflow.data.sources import ItemsSource
-    STATE.run_result = iter([{"id": 1}, {"id": 2}])
-    out = list(execute(_FakeExecutor(), ItemsSource([{"id": 1}]), LogicalPlan()))
+    from demiflow.execution.dataflow_api import declare_action_v3
+    from demiflow.execution import run_context
+    source, plan = ItemsSource([{"id": 1}]), LogicalPlan()
+    fake_action.__class__.declaration = declare_action_v3(source, plan,
+        kind='iter_rows', arguments={}, sink_declaration=None)
+    monkeypatch.setattr(run_context, 'current_run', lambda: fake_action.context)
+    STATE.run_result = (row for row in [{"id": 1}, {"id": 2}])
+    out = list(execute(_FakeExecutor(), source, plan))
     assert out == [{"id": 1}, {"id": 2}]
     assert len(STATE.run_calls) == 1
     assert STATE.run_calls[0].kind == "iter_rows"
-    STATE.run_result = iter(["batch"])
-    out_arrow = list(execute(_FakeExecutor(), ItemsSource([{"id": 1}]), LogicalPlan(), arrow=True))
-    assert out_arrow == ["batch"]
+    import pyarrow as pa
+    table = pa.table({'id': [1, 2]})
+    STATE.run_result = (batch for batch in [table])
+    out_arrow = list(execute(_FakeExecutor(), source, plan, arrow=True))
+    assert out_arrow == table.to_batches()
     assert STATE.run_calls[1].kind == "iter_batches"
 
 
