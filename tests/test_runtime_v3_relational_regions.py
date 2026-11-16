@@ -170,8 +170,14 @@ def _small_budget_region(tmp_path, row_bytes, key_bytes):
     with RunContext.start(tmp_path/'run',limits=limits),data.local_execution(workers=2) as local:
         actual=data.from_items(left).join(data.from_items(right),on='k',how='left').join(
             data.from_items(last),on='k',how='left').reduce_by_key('k',lambda state,row:{
-                'k':row['k'],'values':(state or {}).get('values',[])+[(row['v'],row.get('r'),row.get('z'))]}).take_all()
-        assert actual==[{'k':key,'values':expected[key]} for key in [*sorted(k for k in expected if k is not None),None]]
+                'k':row['k'],'fold':((state or {}).get('fold',17)*131+row['v']*9+(row.get('r') or 0)*3+(row.get('z') or 0))%1000000007,
+                'n':(state or {}).get('n',0)+1}).take_all()
+        oracle=[]
+        for key in [*sorted(k for k in expected if k is not None),None]:
+            values=expected[key]; n=len(values); prime=1000000007
+            value=(17*pow(131,n,prime)+sum((v*9+(r or 0)*3+(z or 0))*pow(131,n-1-i,prime) for i,(v,r,z) in enumerate(values)))%prime
+            oracle.append({'k':key,'fold':value,'n':n})
+        assert actual==oracle
         graph,physical,counts=native_region_evidence(local)
         assert len(counts)==1
         measured=counts[0]
