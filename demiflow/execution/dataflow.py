@@ -629,6 +629,7 @@ class DataflowExecution:
         if self._acquisition is not None:
             self._acquisition._restore_image = self._restore_image
             self._acquisition._restore_residency = self._checkpoint.residency
+            self._acquisition._restore_queue_state = self._checkpoint.native_queue_state
             self._acquisition.start()
         self._launch_phase()
         self._started = True
@@ -1247,7 +1248,9 @@ class DataflowExecution:
                 and not self._checkpoint_requested and not self._stopping):
             sources = {allocation_id for allocation_id, endpoint in self._endpoints.items()
                        if endpoint._assignment.source_splits}
-            if (sources - self._done and sources <= self._idle | self._done
+            queue_full = (durable is not None and self._acquisition is not None
+                          and self._acquisition.claim_window_full())
+            if (sources - self._done and (sources <= self._idle | self._done or queue_full)
                     and (self._checkpoint_progress() > 0 or self._source_credit_needs_rotation)):
                 # A source stopped on its original durable admission window.
                 # Its co-resident consumers must drain to the same real cut,
@@ -1417,10 +1420,13 @@ class DataflowExecution:
         self._publication_resumed = False
         self._source_credit_needs_rotation = False
         cut_id, context = self._cut.cut_id, copy_context()
+        native_queue_state = (self._acquisition.checkpoint_state()
+            if self._acquisition is not None and hasattr(self._acquisition, 'checkpoint_state') else None)
 
         def publish():
             try:
-                image = context.run(self._checkpoint.commit, cut_id, sinks=self._sinks)
+                image = context.run(self._checkpoint.commit, cut_id, sinks=self._sinks,
+                                    native_queue_state=native_queue_state)
             except BaseException as exc:
                 future.set_exception(exc)
             else:

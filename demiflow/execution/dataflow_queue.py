@@ -66,7 +66,7 @@ class _Claim:
     __slots__ = (
         'delivery', 'occurrence', 'allocation_id', 'boot_id', 'delivery_ref',
         'row_ref', 'acquisition_fact', 'receipt_row', 'receipt_row_ref',
-        'final_fact', 'finalized',
+        'final_fact', 'finalized', 'descriptor',
     )
 
     def __init__(self, delivery, occurrence, lease, delivery_ref, row_ref):
@@ -81,6 +81,7 @@ class _Claim:
         self.receipt_row_ref = None
         self.final_fact = None
         self.finalized = False
+        self.descriptor = None
 
 
 from .dataflow_search import NativeSearchOperations
@@ -285,6 +286,8 @@ class NativeAcquisitionService(NativeSearchOperations):
         self._io_thread.start()
         try:
             self._run_io(self._astart(), timeout_s=self._services.bounds.timeout_ms / 1000)
+            from .dataflow_queue_recovery import restore_claims
+            restore_claims(self, getattr(self, '_restore_queue_state', None))
         except BaseException:
             self._close_owners()
             self._stop_loop()
@@ -345,6 +348,10 @@ class NativeAcquisitionService(NativeSearchOperations):
 
     def _poll_impl(self, command: QueueCommand, lease: WorkerLease) -> QueueReply:
         self._raise_failure()
+        with self._lock:
+            if (len(self._claims) >= self._max_inflight
+                    and not (self._drained.is_set() and self._handoff.empty())):
+                return QueueReply(command.operation_id, 'pending', None, None, None, 50)
         try:
             scoped = self._handoff.get_nowait()
         except _queue.Empty:
@@ -360,6 +367,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         row_ref = self._put_json(scoped.row, media_type=_ROW_MEDIA,
                                  max_bytes=self._services.bounds.max_row_bytes)
         claim = _Claim(delivery, occurrence, lease, delivery_ref, row_ref)
+        claim.descriptor = descriptor
         with self._lock:
             if len(self._claims) >= self._max_inflight:
                 raise DataflowError('BUDGET_EXCEEDED', 'native claim table is full')
@@ -405,13 +413,18 @@ class NativeAcquisitionService(NativeSearchOperations):
         row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         if type(row) is not dict:
             raise DataflowError('INVALID_CONTRACT', 'acquire requires exactly one request record')
+        from .dataflow_queue_recovery import current_delivery_row
+        native_row = current_delivery_row(row, claim)
         self._admit_io()
         try:
             receipt = self._run_io(
-                self._acquire_io(row, claim.delivery, claim.occurrence),
+                self._acquire_io(native_row, claim.delivery, claim.occurrence),
                 timeout_s=self._services.bounds.timeout_ms / 1000)
         finally:
             self._release_io()
+        # Flow provenance stays bound to the original sealed delivery ref;
+        # only native lease operations see a renewed attempt's reserved epoch.
+        receipt = {**receipt, '_queue_delivery': row['_queue_delivery']}
         fact = self._acquisition_fact(receipt)
         row_ref = self._put_json(receipt, media_type=_ROW_MEDIA,
                                  max_bytes=self._services.bounds.max_row_bytes)
@@ -446,15 +459,23 @@ class NativeAcquisitionService(NativeSearchOperations):
 
     def _finalize_impl(self, command: QueueCommand, lease: WorkerLease) -> QueueReply:
         claim = self._claim_for(command.delivery_ref, lease)
-        if claim.finalized:
-            return self._final_reply(command, claim)
         if claim.acquisition_fact is None:
             raise DataflowError('INVALID_CONTRACT', 'finalize requires a confirmed acquisition')
         row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         self._validate_final_row(row, claim)
+        if claim.finalized:
+            prepared = claim.final_fact['prepared']['sinks']['result']
+            if identity({k: v for k, v in row.items() if k != '_queue_delivery'}) != prepared['row_sha256']:
+                raise DataflowError('UNKNOWN_EFFECT', 'Restored final row differs from its original native commit')
+            reply = self._final_reply(command, claim)
+            with self._lock:
+                self._claims.pop(claim.delivery.task_id, None)
+            return reply
+        from .dataflow_queue_recovery import current_delivery_row
+        native_row = current_delivery_row(row, claim)
         self._admit_io()
         try:
-            fact = self._run_io(self._finalize_io(claim.delivery, row),
+            fact = self._run_io(self._finalize_io(claim.delivery, native_row),
                                 timeout_s=self._services.bounds.timeout_ms / 1000)
         except QueueIncomplete:
             # Exhausted retryable observation is persisted without ACK; never success.
@@ -622,11 +643,7 @@ class NativeAcquisitionService(NativeSearchOperations):
             claim = self._claims.get(task_id)
         if claim is None:
             raise DataflowError('FENCED', 'queue delivery is not owned by this service')
-        delivery = claim.delivery
-        if (descriptor.get('generation') != delivery.generation
-                or descriptor.get('fingerprint') != delivery.fingerprint
-                or descriptor.get('epoch') != delivery.epoch
-                or descriptor.get('worker_id') != delivery.worker_id):
+        if delivery_ref != claim.delivery_ref or descriptor != claim.descriptor:
             raise DataflowError('INVALID_CONTRACT', 'queue delivery descriptor changed its native identity')
         if not self._worker_occurrences and (lease.allocation_id != claim.allocation_id or lease.boot_id != claim.boot_id):
             raise DataflowError('FENCED', 'queue delivery owner changed')
@@ -635,8 +652,7 @@ class NativeAcquisitionService(NativeSearchOperations):
     def _validate_final_row(self, row, claim: _Claim) -> None:
         if type(row) is not dict:
             raise DataflowRecoveryError('INVALID_CONTRACT', 'finalize requires exactly one final record')
-        delivery = claim.delivery
-        display = dict(task_id=delivery.task_id, fingerprint=delivery.fingerprint, attempt=delivery.epoch)
+        display = dict(task_id=claim.descriptor['task_id'], fingerprint=claim.descriptor['fingerprint'], attempt=claim.descriptor['epoch'])
         if row.get('_queue_delivery') != display:
             raise DataflowRecoveryError('INVALID_CONTRACT', 'final row changed its native delivery display')
         result = row.get(self._fetch.output)
@@ -676,10 +692,27 @@ class NativeAcquisitionService(NativeSearchOperations):
             return QueueCommitStore._fact(db, commit_id)
 
     def _acquisition_reply(self, command: QueueCommand, claim: _Claim) -> QueueReply:
+        # Replaying a pre-acquisition cut may repeat pure maps before fetch.
+        # Preserve their current row while reusing only the original paid result.
+        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+        from .dataflow_queue_recovery import current_delivery_row
+        current_delivery_row(row, claim)
+        receipt = {**row, self._fetch.output: claim.receipt_row[self._fetch.output]}
+        row_ref = self._put_json(receipt, media_type=_ROW_MEDIA, max_bytes=self._services.bounds.max_row_bytes)
         fact_ref = self._put_json(claim.acquisition_fact, media_type=_FACT_MEDIA,
                                   max_bytes=self._services.bounds.max_control_bytes)
         return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
-                          claim.receipt_row_ref, fact_ref, 0)
+                          row_ref, fact_ref, 0)
+
+    def checkpoint_state(self):
+        from .dataflow_queue_recovery import snapshot_claims
+        return snapshot_claims(self)
+
+    def claim_window_full(self):
+        if self._source is None:
+            return False
+        with self._lock:
+            return len(self._claims) >= self._max_inflight
 
     def _final_reply(self, command: QueueCommand, claim: _Claim) -> QueueReply:
         fact_ref = self._put_json(claim.final_fact, media_type=_FACT_MEDIA,

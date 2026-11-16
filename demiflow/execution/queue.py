@@ -157,8 +157,9 @@ class QueueChannel:
                        (worker,row[0],document(domain,8192).decode(),contract,document(limits,16384).decode(),db.now()))
         return worker
 
-    def claim(self, worker_id, *, lease_s=60):
+    def claim(self, worker_id, *, lease_s=60, task_id=None):
         self._attach();identifier(worker_id)
+        if task_id is not None:identifier(task_id)
         if type(lease_s) not in (int,float) or not 30<=lease_s<=3600:
             raise ValueError('Lease must be 30..3600 seconds')
         with self.database.connection(write=True) as db:
@@ -171,8 +172,8 @@ class QueueChannel:
             active=db.execute("SELECT amount FROM queue_counts WHERE generation=? AND status='leased'",(worker[0],)).fetchone()[0]
             allow_pending=active<self.config.limits.max_active_tasks
             allow_fresh=worker[3]<json.loads(worker[2]).get('queue_max_tasks',10000)
-            row=db.execute(db.lock("SELECT task_id,fingerprint,payload,epoch,status,lease_until,worker_id FROM queue_tasks WHERE generation=? AND (status='pending' OR status='leased' AND lease_until<=?) AND (artifact_domain IS NULL OR artifact_domain=?) AND (worker_id=? OR ?=1) AND (status='leased' OR ?=1) ORDER BY ordinal LIMIT 1",skip=True),
-                           (worker[0],now,domain['domain_id'],worker_id,int(allow_fresh),int(allow_pending))).fetchone()
+            row=db.execute(db.lock("SELECT task_id,fingerprint,payload,epoch,status,lease_until,worker_id FROM queue_tasks WHERE generation=? AND (status='pending' OR status='leased' AND lease_until<=?) AND (artifact_domain IS NULL OR artifact_domain=?) AND (worker_id=? OR ?=1) AND (status='leased' OR ?=1)" + (" AND task_id=?" if task_id is not None else "") + " ORDER BY ordinal LIMIT 1",skip=True),
+                           (worker[0],now,domain['domain_id'],worker_id,int(allow_fresh),int(allow_pending)) + ((task_id,) if task_id is not None else ())).fetchone()
             if row is None:
                 return None
             # PostgreSQL clock_timestamp() is evaluated after the task lock.
@@ -211,6 +212,36 @@ class QueueChannel:
             db.execute("UPDATE queue_tasks SET status='leased',epoch=?,token=?,lease_until=?,worker_id=?,dispatch_domain=? WHERE generation=? AND task_id=?",
                        (epoch,token,until,worker_id,domain['domain_id'],worker[0],row[0]))
             return TaskDelivery(worker[0],row[0],row[1],json.loads(row[2]),epoch,token,worker_id,until,domain)
+
+    def restore_delivery(self, worker_id, *, generation, task_id, fingerprint, epoch, lease_s=60):
+        """Resume one authenticated original window entry, using native fencing.
+
+        The caller must own its RunJournal window. Tokens never leave this
+        driver authority. Expired leases go through the same claim admission;
+        an active lease owned by another window is never adopted.
+        """
+        self._attach()
+        for value in (worker_id,generation,task_id,fingerprint):identifier(value)
+        if type(epoch) is not int or epoch < 1:
+            raise RecoveryContractError('Invalid original queue delivery epoch')
+        if type(lease_s) not in (int,float) or not math.isfinite(lease_s) or not 30<=lease_s<=3600:
+            raise ValueError('Lease must be 30..3600 seconds')
+        with self.database.connection(write=True) as db:
+            worker=db.execute('SELECT generation,domain FROM queue_workers WHERE worker_id=?',(worker_id,)).fetchone()
+            row=db.execute(db.lock('SELECT fingerprint,payload,status,epoch,token,worker_id,lease_until FROM queue_tasks WHERE generation=? AND task_id=?'),(generation,task_id)).fetchone()
+            if (worker is None or worker[0]!=generation or row is None
+                    or row[0]!=fingerprint or row[2]!='leased'
+                    or row[3]<epoch or row[5]!=worker_id):
+                raise StaleQueueOwner('Original queue delivery no longer belongs to this worker window')
+            if row[6]>db.now():
+                delivery=TaskDelivery(generation,task_id,fingerprint,json.loads(row[1]),row[3],row[4],worker_id,row[6],json.loads(worker[1]))
+                self.lock_delivery(db,delivery)
+                db.execute('UPDATE queue_tasks SET lease_until=? WHERE generation=? AND task_id=?',(db.now()+lease_s,generation,task_id))
+                return delivery
+        delivery=self.claim(worker_id,lease_s=lease_s,task_id=task_id)
+        if delivery is None or delivery.generation!=generation or delivery.fingerprint!=fingerprint:
+            raise StaleQueueOwner('Original queue delivery cannot be reclaimed')
+        return delivery
 
     @staticmethod
     def transition(db,generation,old,new):

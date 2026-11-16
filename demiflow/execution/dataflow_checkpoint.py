@@ -168,7 +168,7 @@ class DataflowCheckpointCoordinator:
     __slots__ = ("_action", "_physical", "_store", "_commit", "_artifacts",
                  "_participants", "_route_epoch", "_lock", "_eoi_lock", "_sequence",
                  "_pending", "_last_acked_sequence", "_source_eoi", "_operator_complete", "_closed",
-                 "_fence", "_owner_key", "residency", "_last_image", "__weakref__")
+                 "_fence", "_owner_key", "residency", "native_queue_state", "_last_image", "__weakref__")
 
     def __init__(self, action: RunAction, physical: PhysicalDataflow, *, store) -> None:
         if not isinstance(action, RunAction):
@@ -214,6 +214,7 @@ class DataflowCheckpointCoordinator:
         self._closed = False
         self._fence = context.fence
         self.residency = None
+        self.native_queue_state = None
         self._last_image = None
 
     # -- internal helpers -------------------------------------------------
@@ -358,7 +359,7 @@ class DataflowCheckpointCoordinator:
                  self._physical.bounds.max_state_bytes)
 
     # -- D004 -------------------------------------------------------------
-    def commit(self, cut_id: str, *, sinks) -> RecoveryImage:
+    def commit(self, cut_id: str, *, sinks, native_queue_state=None) -> RecoveryImage:
         from .dataflow_sinks import ack_source_claims, combine_prepared_sinks
         with self._lock:
             self._check_open()
@@ -400,6 +401,8 @@ class DataflowCheckpointCoordinator:
             }}
             if pending.residency is not None:
                 states[_CUT_STATE_KEY]["residency"] = pending.residency
+            if native_queue_state is not None:
+                states[_CUT_STATE_KEY]["native_queue"] = native_queue_state
             outputs = {}
             for sink_id, sink in sinks.items():
                 sink_contributions = (contributions if pending.residency is not None and
@@ -436,6 +439,7 @@ class DataflowCheckpointCoordinator:
             del self._pending[cut_id]
             self._last_acked_sequence = request.sequence
             self.residency = pending.residency
+            self.native_queue_state = native_queue_state
             self._last_image = image
             return image
 
@@ -508,6 +512,7 @@ class DataflowCheckpointCoordinator:
             contributions = tuple(_contribution_from_json(c) for c in carrier["contributions"])
             vector = tuple(_cursor_from_json(c) for c in carrier[SOURCE_VECTOR_KEY])
             residency = carrier.get("residency")
+            self.native_queue_state = carrier.get("native_queue")
             if residency is None:
                 if set(c.participant_id for c in contributions) != set(self._participants):
                     raise DataflowError("CORRUPT_ARTIFACT", "Recovered cut participant set differs")
