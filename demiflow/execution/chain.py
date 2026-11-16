@@ -745,9 +745,12 @@ def source_callable_roots(source):
             import pyarrow.csv as pacsv
             options = value.options.get('parse_options')
             if type(options) is pacsv.ParseOptions:
-                root = pinnable(options.invalid_row_handler)
+                callback = options.invalid_row_handler
+                root = pinnable(callback)
                 if root is not None:
-                    roots.append(root)
+                    # A native CSV partial carries its argument modules too;
+                    # the existing bounded value walk owns those dependencies.
+                    roots.append(callback if type(callback) is functools.partial else root)
         pending.extend((child, lineage) for child in reversed(children))
     return tuple(roots)
 
@@ -920,6 +923,9 @@ def snapshot_code_sources(action, plan, *, source=None):
         if filename:
             archive(filename)
     for function in source_callable_roots(source) if source is not None else ():
+        import functools
+        while type(function) is functools.partial:
+            function = function.func
         filename = inspect.getsourcefile(function)
         if filename:
             archive(filename)

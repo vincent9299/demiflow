@@ -120,16 +120,22 @@ def test_native_wide_row_rejected_before_publication(tmp_path):
         reader.close()
 
 
-def test_csv_invalid_row_handler_runs_and_business_helper_drift_refuses_loaded_program(tmp_path, monkeypatch):
+@pytest.mark.parametrize('binding', ['global', 'partial'])
+def test_csv_invalid_row_handler_runs_and_business_helper_drift_refuses_loaded_program(tmp_path, monkeypatch, binding):
+    import functools
     import uuid
     helper_name = 'csv_helper_' + uuid.uuid4().hex
     handler_name = 'csv_handler_' + uuid.uuid4().hex
     helper = tmp_path / (helper_name + '.py')
     helper.write_text('def decision():\n    return "skip"\n')
-    (tmp_path / (handler_name + '.py')).write_text(
-        f'import {helper_name}\ndef handle(row):\n    return {helper_name}.decision()\n')
+    handler_path = tmp_path / (handler_name + '.py')
+    handler_path.write_text(
+        f'import {helper_name}\ndef handle(row):\n    return {helper_name}.decision()\n'
+        if binding == 'global' else 'def handle(row, *, helper):\n    return helper.decision()\n')
     monkeypatch.syspath_prepend(str(tmp_path))
     handler = importlib.import_module(handler_name).handle
+    if binding == 'partial':
+        handler = functools.partial(handler, helper=importlib.import_module(helper_name))
     path = tmp_path / 'invalid.csv'
     path.write_text('id,name\n1,ok\n2,bad,wide\n3,tail\n')
     options = {'parse_options': pacsv.ParseOptions(invalid_row_handler=handler),
@@ -147,7 +153,17 @@ def test_csv_invalid_row_handler_runs_and_business_helper_drift_refuses_loaded_p
     expected_pin = manifest['code_identity']
     verified = verify_dataflow_program(ref, expected_pin=expected_pin,
                                       store=services.store, bounds=services.bounds)
-    assert verified.value.options['parse_options'].invalid_row_handler is handler
+    restored = verified.value.options['parse_options'].invalid_row_handler
+    assert restored(None) == 'skip'
+    from types import SimpleNamespace
+    from demiflow.data.plan import LogicalPlan
+    from demiflow.execution.chain import snapshot_code_sources
+    from demiflow.execution.run_context import RunContext
+    with RunContext.start(tmp_path / 'archive-run') as run:
+        archives = snapshot_code_sources(SimpleNamespace(context=run), LogicalPlan(()), source=source)
+        assert {str(helper), str(handler_path)} <= {item['source'] for item in archives}
+        for item in archives:
+            assert (run.directory / item['path']).read_bytes() == open(item['source'], 'rb').read()
     helper.write_text('def decision():\n    return "error"\n')
     try:
         with pytest.raises(DataflowError, match='Loaded program code differs'):

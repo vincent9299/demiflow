@@ -69,7 +69,15 @@ def test_tsv_strict_width_and_literal_quotes(tmp_path):
             convert_options=pacsv.ConvertOptions(column_types={'id': pa.string(), 'name': pa.string()}))
         rows = data.read_lance(str(lp), version=1).join(right, on='id').take_all()
         assert_same_rows(rows, [{'id': 'a', 'name': '"quoted"'}, {'id': 'b', 'name': ''}])
-        with gzip.open(path, 'wt') as stream:
-            stream.write('id\tname\na\textra\tbroken\n')
-        with pytest.raises(Exception):
-            data.read_lance(str(lp), version=1).join(right, on='id').take_all()
+    with gzip.open(path, 'wt') as stream:
+        stream.write('id\tname\na\textra\tbroken\n')
+    # A failed action must also leave its run failed. Assert outside the scope
+    # so the context does not mistake a swallowed parser error for success.
+    with pytest.raises(Exception, match='Expected 2 columns'), \
+            RunContext.start(tmp_path / 'invalid-run') as failed_run, \
+            data.local_execution(workers=1, partitions=2, temp_directory=str(tmp_path)):
+        right = data.read_csv(str(path), parse_options=pacsv.ParseOptions(delimiter='\t', quote_char=False),
+            convert_options=pacsv.ConvertOptions(column_types={'id': pa.string(), 'name': pa.string()}))
+        data.read_lance(str(lp), version=1).join(right, on='id').take_all()
+    assert failed_run.journal.execution_action('action-1')['result'] is None
+    assert not any(c['cut'].get('final') for c in failed_run.journal.execution_commits('action-1'))
