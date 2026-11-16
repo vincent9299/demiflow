@@ -142,6 +142,71 @@
       "children_after": []
     },
     {
+      "receipt": "/tmp/demiflow-root-empty-aggregate-r1-evidence/verification.json",
+      "receipt_sha256": "ca2d26c5acd54d47db123b3e32c1ced7f76f33e6b631af0344629b7a0c13e687",
+      "head": "930fdee38c31a1e3707cd0f516b703ae56bf2b1b",
+      "source_inputs_verified": 2205,
+      "exit_code": 0,
+      "evidence_kind": "original three-phase reports",
+      "passed_nodeids": [
+        "tests/test_upgrade_v2_unit_A020.py::test_streaming_aggregate_preserves_real_sum",
+        "tests/test_upgrade_v2_unit_A020.py::test_ray_native_options_aggregate_rejected_before_read",
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_preserves_empty_sum",
+        "tests/test_upgrade_v2_unit_A020.py::test_public_aggregate_requires_an_aggregation_before_source_read",
+        "tests/test_upgrade_v2_unit_A020.py::test_plain_empty_source_aggregate_admits_and_returns_none",
+        "tests/test_upgrade_v2_unit_A020.py::test_nonempty_source_empty_aggregation_preserves_empty_dict"
+      ],
+      "failed_or_skipped_nodeids": [],
+      "junit_sha256": "a208e5e98bbeefae09c09c8cde97624ea143ef8355494abd3b6cdb647996c476",
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-aggregate-ray-red-r1-evidence/verification.json",
+      "receipt_sha256": "e857520b8ed8e9864e5d3e4f03c27dc66fea6d0d654304b865b5303bab8d1411",
+      "head": "e1b04c1743afd862fe77363111cfdeed525445fc",
+      "source_inputs_verified": 2206,
+      "exit_code": 1,
+      "evidence_kind": "original three-phase reports",
+      "passed_nodeids": [],
+      "failed_or_skipped_nodeids": [
+        "tests/test_runtime_v3_executor_aggregate.py::test_real_executor_aggregate_preserves_names_and_original_commit[items0-expected0]",
+        "tests/test_runtime_v3_executor_aggregate.py::test_real_executor_aggregate_preserves_names_and_original_commit[items1-expected1]"
+      ],
+      "junit_sha256": "2234643069ec345bbb6d3a3fd8c5e56507c9d838c71ca4628f38ceb586d1650d",
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-aggregate-ray-fixed-r1-evidence/verification.json",
+      "receipt_sha256": "db119b2cd543037336f5ce3e64a5da9a9a8f595ce71beda25e907683129694c7",
+      "head": "fffef127ceb5754096e39f959fec020860caae70",
+      "source_inputs_verified": 2206,
+      "exit_code": 0,
+      "evidence_kind": "original three-phase reports",
+      "passed_nodeids": [
+        "tests/test_runtime_v3_executor_aggregate.py::test_real_executor_aggregate_preserves_names_and_original_commit[items0-expected0]",
+        "tests/test_runtime_v3_executor_aggregate.py::test_real_executor_aggregate_preserves_names_and_original_commit[items1-expected1]"
+      ],
+      "failed_or_skipped_nodeids": [],
+      "junit_sha256": "062043ea03a99c5f8acca3589d8317e5282c5b3df922a516122aace99a4134ff",
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-root-aggregate-local-fixed-r1-evidence/verification.json",
+      "receipt_sha256": "590ce0a515234ebd7da79a51db7dd5c09160eb8424add2e50305364fb2e2db34",
+      "head": "fffef127ceb5754096e39f959fec020860caae70",
+      "source_inputs_verified": 1887,
+      "exit_code": 0,
+      "evidence_kind": "original JUnit cases; separate phase receipts not collected",
+      "passed_nodeids": [
+        "tests/test_runtime_v3_executor_aggregate.py::test_real_executor_aggregate_preserves_names_and_original_commit[items0-expected0]",
+        "tests/test_runtime_v3_executor_aggregate.py::test_real_executor_aggregate_preserves_names_and_original_commit[items1-expected1]",
+        "tests/test_runtime_v3_y.py::test_y012"
+      ],
+      "failed_or_skipped_nodeids": [],
+      "junit_sha256": "ea0a02b7ae8c0683badddeaef5bb22279a43b598b7e37df074ce5c14c31b222d",
+      "children_after": "not separately collected by this runner"
+    },
+    {
       "receipt": "/tmp/demiflow-root-compat-final-local-r1-evidence/verification.json",
       "receipt_sha256": "b29b6740e495b9b272a10e37ea9312d0e4e375cd0a7bc2fb0527f5f7316cc22d",
       "head": "f38acedd499fbe5c396724b50de7becb9e70a621",

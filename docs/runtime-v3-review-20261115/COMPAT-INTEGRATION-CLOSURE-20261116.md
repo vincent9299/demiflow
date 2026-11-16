@@ -19,6 +19,8 @@
 | `1065b94` | Local 61 passed、3 failed | 本轮 chain/native/F/原 L010/grant 组合；三个新准入反例的夹具错误保留，不称整组绿 |
 | `f38aced` | Local **101 passed / 173.44 秒** | 当前历史适配、原 native 选项、双载体、旧 Arrow 限额、Engine、六种真实 remainder 恢复，以及修正后的三个准入反例；无 skip |
 | `f38aced` | 真实 Ray **13 passed / 16.31 秒** | 同一 chain 正常/预算/身份拒绝及完整 L015 实际执行；三阶段记录全通过、私有集群关闭、子进程为空 |
+| `930fdee` | Local **6 passed / 14.54 秒** | A020 原低层空 tuple→None、非空源空 tuple→{}、真实 Sum 与公开零参数拒绝；原 action/ACK 保持，三阶段通过、子进程为空 |
+| `fffef12` | Local **3 passed / 5.10 秒**；真实 Ray **2 passed / 7.17 秒** | 同组真实 Sum/Count/自定义含空格括号名称、空输入/非空输入与原单 action/ACK，另含 Y012 接线守卫 |
 
 逐输入摘要已与各自 Git 提交字节核对，无漂移；[根节点机器回执](COMPAT-INTEGRATION-PRIMARY-VERIFICATION.json)保留精确 selector、原报告位置及通过/失败 nodeid。Local 原 runner 提供完整 JUnit，没有单独三阶段回执；Ray runner 提供三阶段。没有把两类证据混写。
 
@@ -30,7 +32,9 @@ chain 最初红基线真实复现错误返回和丢预算。其第一次新夹�
 
 新三个身份拒绝反例先查询尚未创建的 resource 表，又在作用域内吞掉预期失败，导致空 action 被误作正常结束。两次红回执保留；修正后先让真实异常退出 owner，再断言 execute_action 从未调用、原提交为空、资源 owner 表根本未建立。最终 Local/Ray 原三个反例都通过，生产准入逻辑未为此放宽。
 
-独立复审重开了 A020 的一个历史断言：旧 `ex.aggregate(..., ())` 空输入应返回 None，不能用 `aggregate(Sum(...))` 或公开无参数 aggregate 的拒绝代替。`13210ea` 已通过原 Count 程序在同一 aggregate action 计算空性，再仅转换低层返回；没有第二遍源读取、第二 action 或新公共协议。该修复和原 nodeid 已加入当前集成，根节点原用例复验另行记载。在这项复验完成前，历史 90 项的复核并集暂计 **82 已有合格证据、7 图入口待修、1 空聚合待复验**；owner 旧文档的 83 数字以此纠正为准。
+独立复审重开了 A020 的一个历史断言：旧 `ex.aggregate(..., ())` 空输入应返回 None，不能用 `aggregate(Sum(...))` 或公开无参数 aggregate 的拒绝代替。`13210ea` 通过原 Count 程序在同一 aggregate action 计算空性，再仅转换低层返回；没有第二遍源读取、第二 action 或新公共协议。根节点在 `930fdee` 对恢复后的原 nodeid 及其余五项真实用例复验通过，历史90项的证据并集恢复为 **83 已有合格证据、7 图入口待修**。早先独立审计 JSON 的82记录保留为当时重开状态，上表和新增原始回执记录此次实际关闭。
+
+Local/Ray 对称性审查随后发现 Ray 低层 aggregate 仍将 `sum(id)` 结果名称当作有界内部 program ID。固定 `e1b04c1` 的两个新真实用例均复现 INVALID_CONTRACT；`c2686e4` 与公开 Dataset/Local 一样使用 `aggregate-N` 内部标识，输出名称保持原值。原函数接线守卫新增 ID 断言，同一真实业务用例在 Local/Ray 均通过，不能只修 Local 后假定 Ray 自动相同。红/绿源字节和原报告均纳入根节点机器回执。
 
 ## 仍未完成
 
