@@ -1,5 +1,6 @@
 """Real bounded peer transport: every frame still owns its hash and credit."""
 from dataclasses import replace
+import sys
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
@@ -25,6 +26,9 @@ def test_short_lived_batch_preserves_order_bytes_and_per_record_release(monkeypa
         frames = read_peer_many(refs, bounds=bounds)
         for index, raw in enumerate(frames):
             assert raw == expected[index]
+            # Only the consumer owns this received copy, even while the read
+            # generator is suspended for a slow callback or native poll.
+            assert sys.getrefcount(raw) == 2
             assert peer._bytes == sum(map(len, expected[index:]))
             peer.release(refs[index]['key'])
         assert len(connections) == 1 and connections[0].fileno() == -1

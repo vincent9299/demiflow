@@ -240,11 +240,16 @@ def read_peer_many(locators, *, bounds):
     with socket.create_connection(endpoint[:2], timeout=bounds.timeout_ms / 1000) as sock:
         sock.sendall(struct.pack('!I', len(request)) + request)
         for locator in locators:
-            observed = struct.unpack('!Q', _read(sock, 8))[0]
-            if observed != locator['bytes']:
-                raise DataflowError('CORRUPT_ARTIFACT', 'peer frame size differs from locator')
-            data = _read(sock, observed)
-            if hashlib.sha256(data).hexdigest() != locator['sha256']:
-                raise DataflowError('CORRUPT_ARTIFACT', 'peer frame checksum differs from locator')
-            yield data
-            del data
+            # The suspended generator must not retain the yielded raw row
+            # across the consumer's next kernel poll or slow business callback.
+            yield _read_peer_frame(sock, locator)
+
+
+def _read_peer_frame(sock, locator):
+    observed = struct.unpack('!Q', _read(sock, 8))[0]
+    if observed != locator['bytes']:
+        raise DataflowError('CORRUPT_ARTIFACT', 'peer frame size differs from locator')
+    data = _read(sock, observed)
+    if hashlib.sha256(data).hexdigest() != locator['sha256']:
+        raise DataflowError('CORRUPT_ARTIFACT', 'peer frame checksum differs from locator')
+    return data
