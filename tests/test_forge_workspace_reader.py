@@ -174,7 +174,7 @@ def test_context_restores_and_inherited_output_fd_retires_reader_before_original
                 assert reader.process is None and process_identity(original['pid'])!=original
                 calls.append(kwargs['pass_fds'])
                 return original_capture(*args,**kwargs)
-            monkeypatch.setattr(platform_worker,'_capture',capture)
+            monkeypatch.setattr(platform_worker,'capture',capture)
             with (tmp_path/'owned-output').open('wb') as output:
                 assert operation('describe',table,version=1,_pass_fds=(output.fileno(),))['row_count']==4
             assert len(calls)==1

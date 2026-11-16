@@ -569,7 +569,44 @@ class _HistoryScan:
 
     @staticmethod
     def changed(before, after):
-        return (before.st_mtime_ns, before.st_ctime_ns) != (after.st_mtime_ns, after.st_ctime_ns)
+        # Some filesystems can expose equal timestamps for adjacent mutations.
+        # Retained directory size/link changes are still evidence of mutation.
+        return (before.st_mtime_ns, before.st_ctime_ns, before.st_size, before.st_nlink) != (
+            after.st_mtime_ns, after.st_ctime_ns, after.st_size, after.st_nlink)
+
+    @contextmanager
+    def run_set(self, parent):
+        """Bounded names/inodes only; timestamps need not resolve each mutation."""
+        identities = {}
+        reserved = 0
+        try:
+            self.buffer_reserve(1024)
+            reserved = 1024
+            with os.scandir(parent) as entries:
+                for count, entry in enumerate(entries):
+                    self.check()
+                    if count >= _HISTORY_RUNS or entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                        raise ForgeError("History traversal exceeds run budget or has invalid entry", code="resource_limit")
+                    # Prepay the key, identity tuple/integers and dict capacity.
+                    cost = sys.getsizeof(entry.name) + 512
+                    self.buffer_reserve(cost)
+                    reserved += cost
+                    identities[entry.name] = self.identity(entry.stat(follow_symlinks=False))
+            yield
+            count = 0
+            with os.scandir(parent) as entries:
+                for entry in entries:
+                    self.check()
+                    count += 1
+                    if (count > _HISTORY_RUNS or entry.is_symlink() or
+                            not entry.is_dir(follow_symlinks=False) or
+                            identities.get(entry.name) != self.identity(entry.stat(follow_symlinks=False))):
+                        raise ForgeError("Historical run set changed during admission", code="busy")
+            if count != len(identities):
+                raise ForgeError("Historical run set changed during admission", code="busy")
+        finally:
+            identities.clear()
+            self.buffer_release(reserved)
 
     def _absolute(self, path):
         path = Path(path).absolute()
@@ -827,7 +864,8 @@ def history_admission(root, *, reserve=MANAGEMENT_RESERVE, ceiling=None, admitti
                         with scan.directory("runs", parent=forge, missing=True) as parent:
                             if parent is not None:
                                 parent_before = os.fstat(parent)
-                                total = scan.total(parent, root, admitting, capacity)
+                                with scan.run_set(parent):
+                                    total = scan.total(parent, root, admitting, capacity)
                                 if scan.changed(parent_before, os.fstat(parent)):
                                     raise ForgeError("Historical run set changed during admission", code="busy")
             scan.check()

@@ -573,6 +573,40 @@ def test_run_set_mutation_refuses_even_when_new_entry_is_empty(tmp_path, monkeyp
         run_domain.history_admission(tmp_path, reserve=0)
 
 
+def test_run_set_check_does_not_depend_on_timestamp_resolution(tmp_path, monkeypatch):
+    target = tmp_path / '.forge/runs/owned'
+    target.mkdir(parents=True)
+    (target / 'payload').write_bytes(b'x')
+    original = run_domain._HistoryScan.bytes
+    changed = False
+    def walk(self, fd, **kwargs):
+        nonlocal changed
+        result = original(self, fd, **kwargs)
+        if not changed:
+            changed = True
+            (target.parent / 'new-empty').mkdir()
+        return result
+    monkeypatch.setattr(run_domain._HistoryScan, 'bytes', walk)
+    monkeypatch.setattr(run_domain._HistoryScan, 'changed', staticmethod(lambda before, after: False))
+    with pytest.raises(ForgeError, match='run set changed'):
+        run_domain.history_admission(tmp_path, reserve=0)
+
+
+def test_run_set_identity_buffer_is_bounded_and_released(tmp_path, monkeypatch):
+    for index in range(100):
+        (tmp_path / str(index)).mkdir()
+    monkeypatch.setattr(run_domain, '_HISTORY_BUFFER_BYTES', 4096)
+    scan = run_domain._HistoryScan()
+    fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(ForgeError, match='buffer exceeds management budget'):
+            with scan.run_set(fd):
+                pytest.fail('over-budget run set was admitted')
+        assert scan.buffer_bytes == 0
+    finally:
+        os.close(fd)
+
+
 def test_four_workers_have_one_cpu_bounded_jobs_and_restore_caller(tmp_path, monkeypatch):
     for number in range(4):
         target = tmp_path / '.forge/runs' / str(number)

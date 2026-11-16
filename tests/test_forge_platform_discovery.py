@@ -165,6 +165,21 @@ def test_worker_ignores_project_path_and_secrets(tmp_path, monkeypatch):
     assert result["secret"] is None
 
 
+def test_capture_does_not_import_the_workbench_layer(tmp_path):
+    script = '''import json, sys
+sys.path.insert(0, sys.argv[1])
+from demiflow.forge.platform import limits_with
+from demiflow.forge.platform_worker import capture
+assert not any(n == 'demiflow.workbench' or n.startswith('demiflow.workbench.') for n in sys.modules)
+code = 'import json;print(json.dumps({"format":"demiflow_forge_platform_catalog_v1"}))'
+assert capture([sys.executable, '-I', '-B', '-c', code], {}, limits_with())['format'] == 'demiflow_forge_platform_catalog_v1'
+assert not any(n == 'demiflow.workbench' or n.startswith('demiflow.workbench.') for n in sys.modules)
+'''
+    result = subprocess.run([sys.executable, '-I', '-B', '-c', script,
+        str(Path(__file__).resolve().parents[1])], cwd=tmp_path, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stderr.decode()
+
+
 def test_native_thread_allocations_do_not_reserve_an_arena_per_thread():
     # Reproduce native-thread allocator reservations without loading a large
     # table. The allocations total 8 MiB; default glibc arenas can reserve

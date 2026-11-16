@@ -106,14 +106,60 @@ def test_combined_domain_owner_scope_and_available_space_fail_closed(tmp_path, m
 
 
 def test_combined_read_worker_tree_uses_reserved_protection(tmp_path, monkeypatch):
+    import lance
+    import pyarrow as pa
+    from demiflow.forge import platform_worker
+    from demiflow.workbench.worker import operation
+    project=tmp_path/'native';project.mkdir()
+    combined_configuration(tmp_path,project,monkeypatch)
+    table = project / 'source.lance'
+    lance.write_dataset(pa.table({'value': [1]}), str(table))
+    assert operation('describe', table, version=1)['row_count'] == 1
+    actual = platform_worker.subprocess.Popen
+    children = []
+    def launch(*args, **kwargs):
+        child = actual(*args, **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(platform_worker.subprocess, 'Popen', launch)
+    monkeypatch.setattr(host_partition,'READONLY_RSS',1)
+    with pytest.raises(ForgeError,match='RSS reservation'):
+        operation('describe', table, version=1)
+    assert len(children) == 1 and children[0].poll() is not None
+
+
+@pytest.mark.parametrize('configured', [False, True])
+def test_read_worker_explicit_smaller_reservation_reaps_child(tmp_path, monkeypatch, configured):
+    import sys
+    from demiflow.forge import platform_worker
+    from demiflow.forge.platform import limits_with
+    if configured:
+        project = tmp_path / 'native'; project.mkdir()
+        combined_configuration(tmp_path, project, monkeypatch)
+    else:
+        monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'unconfigured'))
+    actual = platform_worker.subprocess.Popen
+    children = []
+    def launch(*args, **kwargs):
+        child = actual(*args, **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(platform_worker.subprocess, 'Popen', launch)
+    with pytest.raises(ForgeError, match='RSS reservation'):
+        platform_worker.capture([sys.executable, '-B', '-c', 'import time;time.sleep(30)'],
+            {}, limits_with({'timeout_seconds': 2}), tree_rss_limit=1)
+    assert len(children) == 1 and children[0].poll() is not None
+
+
+def test_standalone_forge_capture_does_not_read_workbench_deployment(tmp_path, monkeypatch):
     import sys
     from demiflow.forge.platform_worker import capture
     from demiflow.forge.platform import limits_with
-    project=tmp_path/'native';project.mkdir()
-    combined_configuration(tmp_path,project,monkeypatch)
-    monkeypatch.setattr(host_partition,'READONLY_RSS',1)
-    with pytest.raises(ForgeError,match='RSS reservation'):
-        capture([sys.executable,'-B','-c','import time;time.sleep(30)'],{},limits_with({'timeout_seconds':2}))
+    project = tmp_path / 'native'; project.mkdir()
+    combined_configuration(tmp_path, project, monkeypatch)
+    monkeypatch.setattr(host_partition, 'READONLY_RSS', 1)
+    code = 'import json; print(json.dumps({"format":"demiflow_forge_platform_catalog_v1"}))'
+    assert capture([sys.executable, '-B', '-c', code], {}, limits_with())['format'] == 'demiflow_forge_platform_catalog_v1'
 
 
 def test_combined_run_and_chat_keep_separate_stop_lanes_and_receipts(root, tmp_path, monkeypatch):
@@ -189,7 +235,7 @@ def test_combined_browser_keeps_development_and_runtime_views(root, tmp_path, mo
             page.get_by_role('button',name='运行记录',exact=True).click()
             assert page.evaluate('ForgeDevelopment.activeCount()') == 0
             page.locator('.wb-run-record[data-run=\"'+value['run_id']+'\"]').click()
-            page.locator('.wb-run-bar > strong').wait_for()
+            expect(page.locator('.wb-run-bar').get_by_label('运行记录')).to_have_value(value['run_id'])
             for width in (1440,390,320):
                 page.set_viewport_size(dict(width=width,height=1000))
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
