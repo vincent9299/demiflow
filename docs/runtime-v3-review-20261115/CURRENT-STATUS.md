@@ -4,11 +4,14 @@
 
 ## 最新集成与验收增量（本节优先于下文旧快照）
 
-当前生产已集成真实 peer 批读、Ray mailbox、持久展开窗口及受管对象 Embedding，另集成 `76cf6ee` 的纯标量 thaw 优化；本页各项保留实际验收版本。这不是“全部完成”的版本：性能和部分正式验收门仍在收口，未推送或合入主仓。
+当前生产已集成真实 peer 批读、Ray mailbox、持久展开窗口、受管对象 Embedding、工作台真实 GPU 和原 producer unit 恢复；Ray 异步后缀现与 Local 使用同一资源规则。各项保留实际验收版本。这不是“全部完成”的版本：旧私有模型缓存兼容、性能和部分正式验收门仍在收口，未推送或合入主仓。
+
+- **工作台 GPU 与对象链组合**：owner `fae6a05` 的正式 V030 七个真实产品用例和 74 项合同/历史负例全部通过，已集成为 `fdea56c`；总控核两组各 2131 项源码摘要及 8 份证据附件，零不符。总控再于集成版本 `301b426` 跑 GPU/静态 tensor 负例/受管 image-document Embedding，55 passed / 299.81 秒，零跳过。资源声明、CPU0→CUDA1→CPU0、原 ACK/Lance/历史桥、取消释放与对象篡改零 HTTP 同版本通过。见 [NATIVE-GPU-CLOSURE.md](NATIVE-GPU-CLOSURE.md) 及 [总控复核](PRODUCT-GPU-RAY-ASYNC-PRIMARY-VERIFICATION.json)。只声明已验的封闭 Torch 子集与 Local/process 受管路径。
+- **真实队列业务与 Ray 差异**：原 producer unit 跨物理 cut 的恢复修复已集成 `a189328`，Local 五组业务含 19 次原执行、真实模型与队列/ACK/恢复已过。Ray 的 5 逻辑阶段/4 worker 误拒已修为原源与后缀两 owner，CPU/内存仍逐阶段求和；真实 Ray/旧默认合并 20 项过，编译与资源负例另 7 项过。4 CPU 仍明确拒绝，I09 fixture 按真实 6 CPU/4 worker 继续验收；性能基准不增额。见 [QUEUE-BUSINESS-20261116.md](QUEUE-BUSINESS-20261116.md) 与 [RAY-ASYNC-SUFFIX-CLOSURE.md](RAY-ASYNC-SUFFIX-CLOSURE.md)。完整 Ray 业务门仍在运行。
 
 - **最新真实 Ray 组合**：固定 `d06e993`，7 passed / 85.01 秒，0 skipped。512 条终端 ACK 的原 RPC 批量、提前 close/最终结果重读/边界、receipt 后 ACK 前真实 SIGKILL、driver 重启与旧 worker FENCED 均通过；1821 项输入前后不变，私有集群退出。原证据 `/tmp/demiflow-ray-combined-peer-r1-evidence/verification.json`。此项关闭下文 mailbox/peer 的待真实 Ray 验收状态，不替代之后新代码的全部矩阵。
 - **持久展开窗口**：`763b973` 将已停车的持久交接容量与尚未运行的消费者内存队列分开。原 credit bytes/总 pending/磁盘/ACK 权威不增额；两源各展开两行→队列在 1 worker 下的正常和原 ACK 恢复及原持久断点 7 项通过。原超过全局窗口的 65 路扩增仍被拒绝，12 项 peer/终端预算组合通过。
-- **产品与历史正式门**：已集成 [NATIVE-PRODUCT-GATES.md](NATIVE-PRODUCT-GATES.md)。历史原身份/载体门和真实 Notebook/SQL/Case/开发会话产品门分别在其固定版本通过；总控逐组核2126项源码摘要与Git提交全等。工作台独立停止/恢复日志导航已修，GPU正向仍在接通，未把部分结果拼成全门绿。
+- **产品与历史正式门**：已集成 [NATIVE-PRODUCT-GATES.md](NATIVE-PRODUCT-GATES.md)。历史原身份/载体门和真实 Notebook/SQL/Case/开发会话产品门分别在其固定版本通过；总控逐组核2126项源码摘要与Git提交全等。工作台停止/恢复及 GPU 完整门已按上条通过，仍不把不同提交的各组结果拼成同 HEAD 全门绿。
 - **受管图片/文档 Embedding**：`94dac3e` 真正 prepare/start→对象校验→模型 HTTP→原 ACK/固定 Lance/执行计划桥 4 项通过，含封存后改对象失败且零 HTTP；原绑定、路径和旧默认身份 13 项通过，见 [MANAGED-EMBEDDING-OBJECTS.md](MANAGED-EMBEDDING-OBJECTS.md)。关闭下文“尚未开放”的旧状态，不能代替产品全域完成。
 - **性能最新事实**：原 40k×8KiB 每侧宽行 iter_rows 在同一 120 秒预算下完整通过 113.74 秒；窄链26.98秒，仍为旧1.872秒的14.4倍。均单次诊断，完整五轮矩阵未完成。后续严格内置标量 thaw 126项过，但微基准改善不冒称整链同比，见 [FAST-CPU-REMAINING-COST.md](FAST-CPU-REMAINING-COST.md)。
 
@@ -66,10 +69,9 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 
 ## 当前仍在处理的核心项
 
-1. **性能及及时交接**：轻量CPU和跨机逐条RPC开销，40k宽行iter_rows原120秒仍未闭环。批量传输只合并已就绪的有界消息，不等待凑满，不减少fence/credit/ACK/行字节校验。九类Local及Ray/两机正式五轮矩阵未完成。
-2. **正式门接线与完整组合**：multiworker barrier、driver restart、actor lifecycle已接回原门并真验；route recovery保留已验证子集。target/broadcast的C层能力不能冒充公开Dataset lowering；尚缺公开端到端触发证据。原其余NotRun按实际缺口保留，不能拿专项测试数顶替。
-3. **产品与真实业务**：最终同HEAD工作台实际图/来源/运行/停止/恢复，以及Notebook/Case已承诺范围组合。image/document Embedding工作台的object-read授权仍未开放；不移除守卫冒充完成。外部PostgreSQL没有测试DSN，继续明确未验。
-   上一句为较早快照，object-read已按本页顶部真实受管验收接通。最新补跑发现旧Embedding显式`sqlite_journal`缓存被统一V3路径拒绝（包括take_all）；`test_embeddings`与`test_document_embeddings`两原例红，单列兼容修复，不能据新功能通过声称旧API全部保持。保留原SQLite未知效果/缓存记录与原RunJournal提交权威，正在核对既定契约与可实施兼容方式。
+1. **性能及及时交接**：轻量 CPU 和跨机开销仍明显；40k 宽行 iter_rows 在原 120 秒预算内有一次 113.74 秒正例，完整五轮尚未通过。批量传输只合并已就绪有界消息，不等待凑满，不减少 fence/credit/ACK/行字节校验。九类 Local 及 Ray/两机正式矩阵未完成。
+2. **路由正式门与既有公开 API**：multiworker barrier、driver restart、actor lifecycle 已真验；route recovery 只覆盖已验证子集。正在核已有 `map_prompt_async(routes=..., route=...)` 与原 RoutedPromptActor 的真实接线，并分别补公开业务路由和 C05 物理合同恢复，不靠增加未要求的 DSL 凑门。其余 NotRun 保持原实际缺口。
+3. **完整业务兼容与最终组合**：工作台 object-read 和真实 GPU 已接通并组合验收；旧显式 `sqlite_journal` 的原合法 delivery-only 行为正在补兼容。driver 持原私有 HTTP/cache 账本、原 RunJournal 仍唯一提交及有限准入权威，未知效果不重发，不能把私有 journal 宣称为受管/物化原生恢复。普通 run_stream 与队列/producer 要按原支持边界分清。最终全矩阵仍需匹配最终代码；外部 PostgreSQL 没有测试 DSN，保持未验。
 4. **历史与权威**：原RunJournal/CommitCoordinator、code-pin、旧来源/提交/unknown效果边界不变。已验证多机actor损失不代替整机/网络故障，旧布局容量客户端不自动获得新布局兼容保证。
 
 ## 对齐意图，而不是用测试数量折算百分比
