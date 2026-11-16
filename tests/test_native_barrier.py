@@ -478,7 +478,7 @@ def test_native_inflight_cut_allows_free_slots_past_slow_call(tmp_path, monkeypa
 
         def persisted_response(journal, request, *args, **kwargs):
             result = original_response(journal, request, *args, **kwargs)
-            if int(request['body']['messages'][-1]['content']) == 0 and not interrupted:
+            if int(request['payload']['messages'][-1]['content']) == 0 and not interrupted:
                 # Delay only delivery of a real, already durable journal reply.
                 # This exposes a pending invocation with a known response, the
                 # recoverable crash window; no result or receipt is invented.
