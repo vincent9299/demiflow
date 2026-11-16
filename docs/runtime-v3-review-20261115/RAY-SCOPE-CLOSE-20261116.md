@@ -29,7 +29,7 @@ Ray在fixture内初始化并关闭；整进程FD为3→14，残留项包含Ray�
 L016全部28个原nodeid保持：布局/程序/资源/通道从真实封存和assignment读取；
 原9个fake故障现于真实provider/endpoint精确注入；5个原Ray案例保持六行、
 两CPU、checkpoint_rows=2、checkpoint_interval_ms=60000、真实SIGKILL和恢复。
-完整28项仍待组合复验；没有以删除失败或降低预算断言达成全绿。
+完整28项现已在固定 `6e1aab8` 组合复验通过，28 passed/119.40秒，全部三阶段通过、源码未变、0子进程；回执为 `/tmp/demiflow-root-l016-final-r2-evidence/verification.json`。没有以删除失败或降低预算断言达成全绿。r1的25通过/3失败保留：新观察器遗漏最终scope terminal，以及无提交启动失败不具备恢复依据，已改为同时核真实drain/ACK/close/kill与有原提交前缀的两次失败，详见[合流复核](GRAPH-FACTORY-INTEGRATION-20261116.md)。
 
 先前r1有两个红，须区分：一项真实worker残留；另一项新故障夹具直接在provider入口抛错，
 没有形成可验证创建/死亡身份，原协议正确保留UNKNOWN收费。现夹具改为真实provider

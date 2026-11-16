@@ -1,0 +1,54 @@
+[
+  {
+    "path": "/tmp/demiflow-graph-fixed-r4-evidence/verification.json",
+    "receipt_sha256": "c4fe22118419f980168bb9f649a87825f2a469db66d0a26b80018fefa06e0832",
+    "head": "8287f0fac12943ec0544a4a08b7f7ef477494043",
+    "inputs": 2197,
+    "input_mismatches": [],
+    "phases": {
+      "('setup', 'passed')": 46,
+      "('call', 'passed')": 46,
+      "('teardown', 'passed')": 46
+    },
+    "proof_files_checked": 4
+  },
+  {
+    "path": "/tmp/demiflow-graph-ray-fixed-r4-evidence/verification.json",
+    "receipt_sha256": "714ae568464f135de2a4b6e84531837f3172692284653177c80a37bc206679c7",
+    "head": "8287f0fac12943ec0544a4a08b7f7ef477494043",
+    "inputs": 2197,
+    "input_mismatches": [],
+    "phases": {
+      "('setup', 'passed')": 8,
+      "('call', 'passed')": 8,
+      "('teardown', 'passed')": 8
+    },
+    "proof_files_checked": 5
+  },
+  {
+    "path": "/tmp/demiflow-history-factory-close-r3/receipt.json",
+    "receipt_sha256": "b48d30f2fb76f7825964f9b97d663949afad3818765f263a4c26efd22599fedd",
+    "head": "077d940f7eba1fcbccaf2a9bac4be9c9e54c2a43",
+    "inputs": 2891,
+    "input_mismatches": [],
+    "phases": {
+      "('setup', 'passed')": 117,
+      "('call', 'passed')": 117,
+      "('teardown', 'passed')": 117
+    },
+    "proof_files_checked": 0
+  },
+  {
+    "path": "/tmp/demiflow-history-factory-new-r4/receipt.json",
+    "receipt_sha256": "bf72a11d7973b0991cd77f16958c4b015e62a62e90dee5be3ca6615dab36c66a",
+    "head": "ef26b98cfcb411a05d37263787f41effe170501e",
+    "inputs": 2898,
+    "input_mismatches": [],
+    "phases": {
+      "('setup', 'passed')": 14,
+      "('call', 'passed')": 14,
+      "('teardown', 'passed')": 14
+    },
+    "proof_files_checked": 0
+  }
+]
