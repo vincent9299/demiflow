@@ -60,7 +60,7 @@ class WorkerGraphRunner:
         # rejected if it cannot fit the actual channel credit window.
         windows = [min(spec.credit_rows, max(1, spec.credit_bytes // self.bounds.max_row_bytes))
                    for spec in executor._output_specs if spec.mode == 'durable_incremental']
-        self._source_quantum = min([physical.policy.checkpoint_rows, 64, *windows]) if windows else physical.policy.checkpoint_rows
+        self._credit_limit = min(self.bounds.max_pending_events, 64)
         self._terminals = {}
         self._finite = {}
         self._cut = None
@@ -70,6 +70,14 @@ class WorkerGraphRunner:
         for edge in executor._graph.edges:
             self._outgoing.setdefault(edge.producer, []).append(edge)
             self._incoming.setdefault(edge.consumer, []).append(edge)
+        # Every source row can occupy several delivery slots at once. Each
+        # channel fitting its own window does not prove the aggregate fits the
+        # same worker's bounded outstanding-delivery table. Stop between source
+        # records, before consuming a new source position or routing sequence.
+        width = self._source_delivery_width()
+        aggregate_window = max(1, self._credit_limit // width)
+        self._source_quantum = (min([physical.policy.checkpoint_rows, aggregate_window, *windows])
+                                if windows else physical.policy.checkpoint_rows)
         host = '127.0.0.1'
         if executor._physical.policy.provider == 'ray_core':
             import ray
@@ -118,6 +126,47 @@ class WorkerGraphRunner:
                                         if manifest.get('schema_ref') is not None else None)
             RecordSchemas(self.services).read(self._terminal_schema_ref)
             self._restored_terminal = True
+
+    def _source_delivery_width(self):
+        """Static delivery multiplicity for one source record, without UDFs.
+
+        Sum paths through co-resident incremental nodes (including a fork and
+        subsequent union), not all output specs of unrelated source owners.
+        A broadcast reserves one slot per actual reader; finite spools reserve
+        storage and no live delivery slots. Dynamic UDF expansion is still
+        checked by the original per-invocation publication gate.
+        """
+        owners = self.e._node_specs
+        memo = {}
+        sources = {split.source_id for split in self.e.assignment.source_splits}
+        for source in sources:
+            pending = [(source, False)]
+            while pending:
+                occurrence, expanded = pending.pop()
+                if occurrence in memo:
+                    continue
+                edges = self._outgoing.get(occurrence, ())
+                children = []
+                external = int(owners[occurrence].kind == 'terminal')
+                for edge in edges:
+                    if edge.consumer in owners:
+                        ports = owners[edge.consumer].kernel.inputs
+                        if any(p.name == edge.input_port and p.requirement == 'finite_complete' for p in ports):
+                            continue
+                        children.append(edge.consumer)
+                    else:
+                        spec = self._exchange[edge.edge_id]
+                        if spec.mode != 'finite_sealed':
+                            external += (len(spec.consumer_partitions) if spec.routing == 'broadcast' else 1)
+                if not expanded:
+                    pending.append((occurrence, True))
+                    pending.extend((child, False) for child in children if child not in memo)
+                    continue
+                memo[occurrence] = min(self._credit_limit + 1,
+                    external + sum(memo[child] for child in children))
+        # Different source splits are polled one record at a time against the
+        # same source-row counter, so the largest per-record width is enough.
+        return max([1, *(memo[source] for source in sources)])
 
     def start(self):
         if self._thread is not None:
@@ -486,7 +535,7 @@ class WorkerGraphRunner:
             if self.e._cancel_event.is_set():
                 raise DataflowError('CANCELLED', 'business execution cancelled')
             try:
-                if len(self._credits) >= min(self.bounds.max_pending_events, 64):
+                if len(self._credits) >= self._credit_limit:
                     raise DataflowError('CAPACITY_PENDING', 'data credit exhausted', retryable=True)
                 lease = (reserve_credit(spec.channel_id, target, rows=1, size_bytes=record.encoded_bytes,
                            operation_id=delivery, state=self.e._channels) if spec is not None else None)

@@ -37,6 +37,26 @@ def _is_dataflow_executor(executor):
     return executor is not None and executor.__class__.__name__ == "DataflowWorkerExecutor"
 
 
+def _decode_v3_ref(value, *, type_name, media_type, store, bounds):
+    """Consume a typed immutable launch carrier through the original store."""
+    from ..contracts.dataflow import ArtifactRef
+    from ..contracts.dataflow_codec import decode_wire
+    from ..contracts.dataflow_errors import DataflowError
+    if type(value) is not dict or set(value) != {'digest', 'size_bytes', 'store_id', 'key', 'media_type'}:
+        raise DataflowError('INVALID_CONTRACT', 'invalid worker launch artifact reference')
+    ref = ArtifactRef(**value)
+    if ref.media_type != media_type:
+        raise DataflowError('INVALID_CONTRACT', 'worker launch artifact type differs')
+    if ref.size_bytes > bounds.max_control_bytes:
+        raise DataflowError('BUDGET_EXCEEDED', 'worker launch artifact exceeds control budget')
+    if store is None:
+        raise DataflowError('INVALID_CONTRACT', 'worker launch reference requires its authenticated store')
+    # Exhaust the digest/size-checking read before decoding or constructing an
+    # executor. No path or replacement store is accepted from the reference.
+    raw = b''.join(store.read(ref, max_bytes=bounds.max_control_bytes))
+    return decode_wire(raw, type_name=type_name, bounds=bounds)
+
+
 def _decode_v3_assignment(config):
     from ..contracts.dataflow import Bounds, WorkerAssignment
     from ..contracts.dataflow_codec import decode_wire
@@ -46,6 +66,13 @@ def _decode_v3_assignment(config):
     bounds = config["bounds"]
     if isinstance(bounds, dict):
         bounds = Bounds(**bounds)
+    from ..contracts.dataflow_errors import DataflowError
+    if type(assignment) is not dict or set(assignment) not in ({'wire'}, {'ref'}):
+        raise DataflowError('INVALID_CONTRACT', 'worker assignment needs exactly one wire or ref')
+    if 'ref' in assignment:
+        return _decode_v3_ref(assignment['ref'], type_name='WorkerAssignment',
+            media_type='application/x-demiflow-worker-assignment-v3',
+            store=getattr(config.get('transport'), 'store', None), bounds=bounds)
     raw = assignment["wire"]
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
@@ -280,11 +307,19 @@ class WorkerRuntime:
 
     def _restore(self, state_refs):
         if self._v3:
+            config = self._v3_config or {}
+            from ..contracts.dataflow_errors import DataflowError
+            if len(set(config) & {'recovery_image', 'recovery_image_wire', 'recovery_image_ref'}) > 1:
+                raise DataflowError('INVALID_CONTRACT', 'worker recovery needs exactly one image carrier')
             executor = self._v3_ensure_executor()
-            image = (self._v3_config or {}).get("recovery_image")
-            if (self._v3_config or {}).get("recovery_image_wire") is not None:
+            image = config.get("recovery_image")
+            if config.get("recovery_image_ref") is not None:
+                image = _decode_v3_ref(config['recovery_image_ref'], type_name='RecoveryImage',
+                    media_type='application/x-demiflow-recovery-image-v3',
+                    store=executor._services.store, bounds=executor._services.bounds)
+            elif config.get("recovery_image_wire") is not None:
                 from ..contracts.dataflow_codec import decode_wire
-                image = decode_wire(self._v3_config["recovery_image_wire"].encode(),
+                image = decode_wire(config["recovery_image_wire"].encode(),
                     type_name="RecoveryImage", bounds=executor._services.bounds)
             executor.restore(image)
             return [ref["sha256"] for ref in state_refs]

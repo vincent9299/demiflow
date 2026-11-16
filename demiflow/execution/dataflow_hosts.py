@@ -275,6 +275,14 @@ class _EndpointBase:
                  "scope_id", "allocation_id", "boot_id", "controller_epoch", "expires_at_ms")}
         code_pin = assignment.sealed.code_pin_ref.digest
         manifest_ref = {"manifest_id": code_pin, "sha256": code_pin}
+        def wire_ref(value, type_name, media_type):
+            raw = encode_wire(value, type_name=type_name, bounds=assignment.bounds)
+            # The driver's existing writer lease protects these immutable
+            # carriers through worker startup. Historical state refs keep
+            # their original journal roots; launch carriers can be collected
+            # after physical worker cleanup like other unrooted metadata.
+            return asdict(self._services.store.put(iter([raw]),
+                max_bytes=assignment.bounds.max_control_bytes, media_type=media_type))
         launch_spec = {
             "directory": str(run.directory), "run_id": run.ref.run_id, "scope_id": scope_id,
             "allocation_id": lease.allocation_id, "boot_id": lease.boot_id,
@@ -285,12 +293,12 @@ class _EndpointBase:
                             "host_id": lease.host_id,
                             "cache": str(run.directory / "worker-cache"),
                             "store_root": str(self._services.store.root), "store_id": self._services.store.store_id,
-                            "assignment": {"wire": encode_wire(assignment, type_name="WorkerAssignment",
-                                                   bounds=assignment.bounds).decode("utf-8")}},
+                            "assignment": {"ref": wire_ref(assignment, "WorkerAssignment",
+                                "application/x-demiflow-worker-assignment-v3")}},
         }
         if getattr(self, "_recovery_image", None) is not None:
-            launch_spec["dataflow_v3"]["recovery_image_wire"] = encode_wire(self._recovery_image,
-                type_name="RecoveryImage", bounds=assignment.bounds).decode()
+            launch_spec["dataflow_v3"]["recovery_image_ref"] = wire_ref(self._recovery_image,
+                "RecoveryImage", "application/x-demiflow-recovery-image-v3")
         return launch_spec, grant, manifest_ref
 
     def prepare(self, assignment: "WorkerAssignment") -> None:

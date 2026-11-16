@@ -138,6 +138,7 @@ _REF_FIELDS = {'digest', 'size_bytes', 'store_id', 'key', 'media_type'}
 _LEAVES = {'application/octet-stream', 'application/vnd.demiflow.arrow-schema.v1',
     'application/x-demiflow-program-payload-v3', 'text/x-python', 'text/plain'}
 _STRUCTURED = {'application/json',
+    'application/x-demiflow-worker-assignment-v3', 'application/x-demiflow-recovery-image-v3',
     'application/x-demiflow-graph-v3', 'application/x-demiflow-physical-v3',
     'application/x-demiflow-program-v3', 'application/x-demiflow-code-pin-v3',
     'application/x-demiflow-bridge-v3', 'application/x-demiflow-constants-v3',
