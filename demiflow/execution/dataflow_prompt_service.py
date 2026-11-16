@@ -30,7 +30,12 @@ def service_kernel(model, settings):
     if model.kind != 'prompt':
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed HTTP service requires a native Prompt node')
     from .dataflow_models import _json_config
-    configuration = dict(_json_config(model.configuration), managed_http_declaration=declaration)
+    import hashlib
+    from .recovery_contract import document
+    # Execution programs retain the passive declaration. Public plan facts do
+    # not duplicate service environment values or arbitrary command arguments.
+    digest = hashlib.sha256(document(declaration, 65536)).hexdigest()
+    configuration = dict(_json_config(model.configuration), managed_http_service_digest=digest)
     parameters = declaration['parameters']
     requests = dict(model.profile.requests)
     role = model.resource_role
@@ -44,16 +49,12 @@ def service_kernel(model, settings):
 
 
 def bind_prompt_service(actor, spec, *, services, node_id):
-    declaration = spec.configuration.get('managed_http_declaration')
+    digest = spec.configuration.get('managed_http_service_digest')
     service = actor._runtime._service
-    if (declaration is None) != (service is None):
+    if (digest is None) != (service is None):
         raise DataflowError('INVALID_CONTRACT', 'Prompt worker service differs from the sealed plan')
-    if declaration is None:
+    if digest is None:
         return
-    from .dataflow_models import _json_config
-    from .recovery_contract import document
-    import hashlib
-    digest = hashlib.sha256(document(_json_config(declaration), 65536)).hexdigest()
     if getattr(actor, '_sealed_service_declaration', None) != digest:
         raise DataflowError('INVALID_CONTRACT', 'Prompt worker service declaration does not match its program')
     from .dataflow_managed_devices import bind_worker_service

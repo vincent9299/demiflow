@@ -72,6 +72,33 @@ def test_zero_prompt_budget_starts_no_service(tmp_path, monkeypatch, request):
     assert events(value) == []
 
 
+def test_service_facts_keep_native_identity_and_private_environment_in_program(tmp_path, monkeypatch, request):
+    from demiflow.operator_llm.flow_contract import prompt_facts
+    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.dataflow_prompt_service import service_kernel
+    from demiflow.execution.dataflow_models import build_model_factory
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+    from demiflow.execution.dataflow_api import resolve_runtime_policy
+    from demiflow.workbench.runs.limits import DEFAULT_LIMITS
+    value = fixture(tmp_path, monkeypatch, request)
+    value['service'].env['FIXTURE_PRIVATE_TOKEN'] = 'fixture-secret-only'
+    op = dataset(value, tmp_path)._plan.operations[-1]
+    actor = op.callable.target.__self__
+    facts = prompt_facts(actor)
+    from copy import copy
+    plain = copy(actor); plain._runtime = copy(actor._runtime)
+    plain._runtime._service = None
+    del plain._sealed_service_declaration
+    assert prompt_facts(plain) == facts
+    factory = native_model_declaration(op)
+    native_op, settings = factory.constructor_args
+    _, bounds = resolve_runtime_policy({}, DEFAULT_LIMITS, provider='local')
+    kernel = service_kernel(build_model_factory(native_op, program_ref=None, bounds=bounds), settings)
+    assert 'fixture-secret-only' not in json.dumps(thaw_record_value(kernel.configuration))
+    assert kernel.configuration['managed_http_service_digest'] == actor._sealed_service_declaration
+    assert settings['service']['parameters']['env']['FIXTURE_PRIVATE_TOKEN'] == 'fixture-secret-only'
+
+
 @pytest.mark.parametrize('mutation', ['environment', 'removed', 'owner', 'method'])
 def test_prompt_service_mutations_are_rejected_before_start(tmp_path, monkeypatch, request, mutation):
     from demiflow.execution.dataflow_model_factory import native_model_declaration
