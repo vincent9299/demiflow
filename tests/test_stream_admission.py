@@ -3,10 +3,9 @@ from demiflow import data
 
 
 def collect(rows, path, **options):
-    out = []
-    (data.from_items(rows).admit_rows(path=path, key='id', unique_on=['group', 'url'],
+    out = (data.from_items(rows).admit_rows(path=path, key='id', unique_on=['group', 'url'],
         quotas=[{'on': [], 'limit': 3}, {'on': ['group'], 'limit': 2}], **options)
-        .map(lambda row: out.append(row) or row).run_stream())
+        .take_all())
     return {r['id']: r['admission']['status'] for r in out}
 
 
@@ -28,16 +27,14 @@ def test_reservation_survives_downstream_failure(tmp_path):
     with pytest.raises(RuntimeError, match='sink failed'):
         (data.from_items([row]).admit_rows(path=path, key='id', quotas=[{'on': [], 'limit': 1}])
             .map(fail).run_stream())
-    out = []
-    (data.from_items([dict(id='new'), row]).admit_rows(path=path, key='id', quotas=[{'on': [], 'limit': 1}])
-        .map(lambda r: out.append(r) or r).run_stream())
+    out = (data.from_items([dict(id='new'), row]).admit_rows(path=path, key='id', quotas=[{'on': [], 'limit': 1}])
+        .take_all())
     assert [r['admission']['status'] for r in out] == ['limited', 'admitted']
 
 
 def test_same_identity_in_one_stream_emits_once(tmp_path):
-    out = []
-    (data.from_items([{'id': 'a'}, {'id': 'a'}]).admit_rows(path=tmp_path/'a', key='id')
-        .map(lambda r: out.append(r) or r).run_stream())
+    out = (data.from_items([{'id': 'a'}, {'id': 'a'}]).admit_rows(path=tmp_path/'a', key='id')
+        .take_all())
     assert [r['admission']['status'] for r in out] == ['admitted', 'duplicate']
 
 
@@ -57,9 +54,8 @@ def test_admission_bounds_and_skipped_rows(tmp_path):
     with pytest.raises(ValueError, match='max_key_bytes'):
         (data.from_items([{'id': '宽'*8}]).admit_rows(
             path=tmp_path/'b', key='id', max_key_bytes=8).run_stream())
-    out=[]
-    (data.from_items([{'skip': True}, {'id': 'a'}]).admit_rows(path=tmp_path/'c', key='id',
-            when=lambda r: not r.get('skip')).map(lambda r: out.append(r) or r).run_stream())
+    out = (data.from_items([{'skip': True}, {'id': 'a'}]).admit_rows(path=tmp_path/'c', key='id',
+            when=lambda r: not r.get('skip')).take_all())
     assert [r['admission']['status'] for r in out] == ['skipped', 'admitted']
 
 
@@ -96,10 +92,9 @@ def test_relax_limits_preserves_owners_counters_and_replay(tmp_path):
     from demiflow import AdmissionQuotaReader
     path = tmp_path/'relax.sqlite'
     def submit(items, limit, entries):
-        output = []
-        (data.from_items(items).admit_rows(path=path, key='id', unique_on=['url'],
+        output = (data.from_items(items).admit_rows(path=path, key='id', unique_on=['url'],
             quotas=[{'on': [], 'limit': limit}], max_entries=entries)
-            .map(lambda r: output.append(r) or r).run_stream())
+            .take_all())
         return [r['admission']['status'] for r in output]
     first = {'id': 'first', 'url': 'one'}
     second = {'id': 'second', 'url': 'two'}
@@ -121,10 +116,9 @@ def test_relax_limits_preserves_owners_counters_and_replay(tmp_path):
 def test_relax_one_quota_retains_other_group_limit(tmp_path):
     path = tmp_path/'mixed.sqlite'
     def submit(items, total):
-        output = []
-        (data.from_items(items).admit_rows(path=path, key='id',
+        output = (data.from_items(items).admit_rows(path=path, key='id',
             quotas=[{'on': [], 'limit': total}, {'on': ['group'], 'limit': 1}])
-            .map(lambda r: output.append(r) or r).run_stream())
+            .take_all())
         return [r['admission']['status'] for r in output]
     assert submit([{'id': 'a', 'group': 'x'}], 1) == ['admitted']
     assert submit([{'id': 'b', 'group': 'x'}, {'id': 'c', 'group': 'y'}], None) == ['limited', 'admitted']

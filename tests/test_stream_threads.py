@@ -33,7 +33,7 @@ def test_threads_overlap_and_preserve_context_without_blocking_async_stage():
               .map_async(prepare, execution='thread', concurrency=3, queue_depth=1)
               .map_async(consume, concurrency=1).materialize().take_all())
     assert len(result) == 6
-    assert len(names) == 3 and all(n.startswith('demiflow-stream-') for n in names)
+    assert len(names) == 3 and all(n.startswith('demiflow-kernel-call_') for n in names)
     assert not any(t.name in names for t in threading.enumerate())
 
 

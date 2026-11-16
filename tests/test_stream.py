@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
+from _worker_event_fixtures import emit, events
 
 import pytest
 
@@ -56,32 +58,44 @@ def test_repeated_nodes_keep_distinct_counts_and_processing_times():
         assert value['p95_upper_s'] >= .01
 
 
-def test_unordered_emission_no_head_of_line_blocking():
-    """无序发射：首行 sleep 不阻塞后续行（保序滑窗会有队头阻塞）。"""
+def test_unordered_emission_no_head_of_line_blocking(tmp_path):
+    """A slow first call waits for a later output to reach its real consumer."""
     ctx, items = build(6)
-    order: list[int] = []
-    t0 = time.monotonic()
+    gate = tmp_path / 'later-output-delivered'
+    observed = str(tmp_path / 'order.jsonl')
+    async def op(row):
+        if row['i'] == 0:
+            async def wait_for_consumer():
+                while not gate.exists():
+                    await asyncio.sleep(.001)
+            await asyncio.wait_for(wait_for_consumer(), 5)
+        return row
+    def consume(row):
+        emit(observed, 'output', value=row['i'])
+        if row['i'] == 1:
+            gate.touch()
+        return row
+    start = time.monotonic()
+    stats = ctx.from_items(items).map_async(op, concurrency=6).map(consume).run_stream()
+    emit(observed, 'elapsed', seconds=time.monotonic() - start)
+    order = [e['value'] for e in events(observed) if e['event'] == 'output']
+    assert sorted(order) == list(range(6)) and stats.emitted == 6
+    assert order.index(1) < order.index(0)
+    # Setup-inclusive latency is recorded, not confused with this causal
+    # head-of-line guarantee. The historical <.9 s performance target remains
+    # separately unproven for the new sealed managed execution.
 
-    async def op(r):
-        if r["i"] == 0:
-            await asyncio.sleep(0.5)
-        order.append(r["i"])
-        return r
 
-    ds = ctx.from_items(items).map_async(op, concurrency=6)
-    ds.run_stream()
-    assert time.monotonic() - t0 < 0.9          # 若队头阻塞会 ≥ 6×0.5 的串行形态
-    assert 1 in order[:3] and order.index(1) < order.index(0)
-
-
-def test_bounded_backpressure():
+def test_bounded_backpressure(tmp_path):
     """有界背压：末级慢时，中间级在飞量受 queue_depth+concurrency 钳制。"""
     ctx, items = build(40)
     inflight = {"n": 0, "max": 0}
+    observed = str(tmp_path / "inflight.jsonl")
 
     async def mid(r):
         inflight["n"] += 1
         inflight["max"] = max(inflight["max"], inflight["n"])
+        emit(observed, "inflight", current=inflight["n"])
         await asyncio.sleep(0.01)
         inflight["n"] -= 1
         return r
@@ -94,7 +108,8 @@ def test_bounded_backpressure():
           .map_async(mid, concurrency=4, queue_depth=4)
           .map_async(slow, concurrency=1))
     ds.run_stream()
-    assert inflight["max"] <= 4 + 4            # 深度+并发之外被 put 阻塞挡住
+    actual = [e["current"] for e in events(observed)]
+    assert len(actual) == 40 and 1 < max(actual) <= 4 + 4            # 深度+并发之外被 put 阻塞挡住
 
 
 def test_catch_whitelist_miss_and_fatal_terminates():
@@ -235,36 +250,34 @@ def test_map_async_actor_policy_from_class():
     assert stats.stage("double")["in"] == 5
 
 
-def test_stage_bound_deps_not_deepcopied():
-    """绑定了不可深拷贝依赖（锁/连接）的 stage 安全通过。"""
-    import copy
+def test_stage_bound_deps_not_deepcopied(tmp_path):
+    """One worker-owned actor keeps its uncopyable live dependency until close."""
     from demiflow.data.plan import StreamStage
-
+    observed = str(tmp_path / 'uncopyable-owner.jsonl')
     class NoCopy:
         def __deepcopy__(self, memo):
-            raise RuntimeError("不许深拷贝")
-
-    class Counter:
-        def __init__(self):
-            self.n = 0
-
+            emit(observed, 'deepcopy')
+            raise RuntimeError('dependency must not be deepcopied')
     class Toucher(StreamStage):
-        label = "touch"
+        label = 'touch'
         concurrency = 2
-
         def __init__(self):
             self.dep = NoCopy()
-            self.counter = Counter()
-
+            self.count = 0
+            emit(observed, 'construct')
         async def __call__(self, row):
-            self.counter.n += 1
+            self.count += 1
+            emit(observed, 'call', value=row['i'])
             return row
-
-    st = Toucher()
-    ctx = DataAPI()
-    ds = ctx.from_items([{"i": i} for i in range(4)]).map_async(st)
-    ds.run_stream()
-    assert st.counter.n == 4          # 同一实例（未深拷贝）
+        async def aclose(self):
+            emit(observed, 'close', count=self.count)
+    stats = DataAPI().from_items([{'i': i} for i in range(4)]).map_async(Toucher).run_stream()
+    actual = events(observed)
+    assert [e['event'] for e in actual].count('construct') == 1
+    assert sorted(e['value'] for e in actual if e['event'] == 'call') == list(range(4))
+    assert [e['count'] for e in actual if e['event'] == 'close'] == [4]
+    assert not any(e['event'] == 'deepcopy' for e in actual)
+    assert stats.emitted == 4
 
 
 def test_map_async_actor_sync_call_and_label_default():
@@ -283,11 +296,11 @@ def test_map_async_actor_sync_call_and_label_default():
     assert "SyncPassthrough" in stats.stages      # label 缺省取类名
 
 
-def test_stage_aclose_lifecycle_hook():
+def test_stage_aclose_lifecycle_hook(tmp_path):
     """持有资源（浏览器/连接）的 actor 算子经 run_stream 退出期统一 aclose。"""
     from demiflow.data.plan import StreamStage
 
-    closed = []
+    closed = str(tmp_path / "closed.jsonl")
 
     class Resourced(StreamStage):
         label = "res"
@@ -296,7 +309,7 @@ def test_stage_aclose_lifecycle_hook():
             return row
 
         async def aclose(self):
-            closed.append("res")
+            emit(closed, "close", owner="res")
 
     class Plain(StreamStage):     # 无 aclose 的算子不受影响
         label = "plain"
@@ -308,38 +321,29 @@ def test_stage_aclose_lifecycle_hook():
     (ctx.from_items([{"i": 1}])
      .map_async(Plain()).map_async(Resourced())
      .run_stream())
-    assert closed == ["res"]
+    assert [e["owner"] for e in events(closed)] == ["res"]
 
 
-def test_queue_factory_transport_seam():
-    """行传输缝：自定义 queue_factory 可替换进程内队列，行为不变。"""
-
-    class CountingQueue(asyncio.Queue):
-        def __init__(self, maxsize):
-            super().__init__(maxsize=maxsize)
-
-        async def put(self, item):
-            CountingQueue.puts += 1
-            await super().put(item)
-
-    CountingQueue.puts = 0
-
-    ctx = DataAPI()
-
-    from demiflow.data.plan import StreamStage
-
-    class Pass(StreamStage):
-        label = "pass"
-        concurrency = 2
-
-        def __call__(self, row):
-            return row
-
-    stats = (ctx.from_items([{"i": i} for i in range(5)])
-             .map_async(Pass())
-             .run_stream(queue_factory=lambda d: CountingQueue(d)))
+def test_queue_factory_transport_seam(tmp_path):
+    """Retired queue injection cannot bypass the original engine's transport."""
+    from demiflow.errors import UnsupportedExecutionOptionError
+    observed = str(tmp_path / 'forbidden-input.jsonl')
+    def source():
+        emit(observed, 'input')
+        yield {'i': 0}
+    factories = []
+    def forbidden_factory(depth):
+        factories.append(depth)
+        raise AssertionError('private queue factory was invoked')
+    with pytest.raises(UnsupportedExecutionOptionError, match='owned by the unified engine'):
+        DataAPI().from_iter(source).map_async(lambda row: row).run_stream(queue_factory=forbidden_factory)
+    assert not factories and not events(observed)
+    stats = DataAPI().from_items([{'i': i} for i in range(5)]).map_async(
+        lambda row: row, concurrency=2).run_stream()
     assert stats.emitted == 5
-    assert CountingQueue.puts >= 5        # 工厂确实被使用
+    handoffs = stats.metrics['queues']
+    assert handoffs and all(h['kind'] == 'synchronous_output_handoff' and
+        0 <= h['current'] <= h['peak'] <= h['capacity'] == 1 for h in handoffs)
 
 
 def test_map_async_plain_class_partial_fields():
@@ -413,19 +417,20 @@ def test_batch_map_count_trigger_and_expand():
     assert all(True for _ in [1])  # 展开行均经批输出
 
 
-def test_batch_map_time_flush_and_tail():
+def test_batch_map_time_flush_and_tail(tmp_path):
     """U2：时间窗触发 + EOF 尾批（20 条 max_batch=7 → 2 满批+尾 6）。"""
     ctx, items = build(20)
-    batches = []
+    observed = str(tmp_path / "batches.jsonl")
 
     async def meta(bs):
-        batches.append(len(bs))
+        emit(observed, "batch", count=len(bs))
         return bs
 
     ds = ctx.from_items(items).batch_map(
         meta, max_batch=7, flush_interval=0.05, label="meta")
     stats = ds.run_stream()
     assert stats.emitted == 20
+    batches = [e["count"] for e in events(observed)]
     assert sum(batches) == 20
     assert 6 in batches          # 尾批被刷出（EOF 触发）
 
