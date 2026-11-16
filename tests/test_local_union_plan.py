@@ -48,16 +48,42 @@ def test_union_preserves_child_order_with_keyed_and_lance_children(tmp_path, mod
 
 
 def test_union_rejects_unsupported_child_before_any_source_read(tmp_path):
-    called = []
+    from dataclasses import dataclass
+    from demiflow.data.dataset import Dataset
+    from demiflow.data.plan import LogicalOp, LogicalPlan
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    @dataclass(frozen=True)
+    class UndeclaredOp(LogicalOp):
+        pass
+
     def source():
-        called.append('scan')
+        (tmp_path/'source-opened').touch()
         yield {'key':'a'}
+    # Shuffle is now supported. An actually unregistered child must still
+    # reject the entire graph before either source factory executes.
+    with pytest.raises(DataflowError, match='UndeclaredOp') as failure:
+        with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)):
+            left = data.from_iter(source)
+            right = Dataset(left._source, LogicalPlan((UndeclaredOp(),)), left._executor)
+            left.union(right).take_all()
+    assert failure.value.code == 'UNSUPPORTED_CAPABILITY'
+    assert not (tmp_path/'source-opened').exists()
+
+
+def test_union_accepts_shuffle_and_keeps_each_independent_source(tmp_path):
+    def source():
+        with (tmp_path/'source-opened').open('a') as stream:
+            stream.write('opened\n')
+        yield from ({'key': i} for i in range(4))
     with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)):
         left = data.from_iter(source)
-        right = data.from_iter(source).random_shuffle()
-        with pytest.raises(NotImplementedError, match='RandomShuffleOp'):
-            left.union(right).take_all()
-    assert called == [] and not list(tmp_path.iterdir())
+        right = data.from_iter(source).random_shuffle(seed=7)
+        assert not (tmp_path/'source-opened').exists()
+        rows = left.union(right).take_all()
+    assert rows[:4] == [{'key': i} for i in range(4)]
+    assert sorted(rows[4:], key=lambda row: row['key']) == rows[:4]
+    assert (tmp_path/'source-opened').read_text().splitlines() == ['opened', 'opened']
 
 
 @pytest.mark.slow
