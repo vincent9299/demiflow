@@ -23,5 +23,11 @@
     "tests/test_native_barrier.py": "d5830901af1e7a8323d73532634f449f0f90991f0037d5aadd50b77863f923d9",
     "demiflow/execution/kernels/recovery_rows.py": "977649b88ec148a5d59cb78b8d1ef8bcf9fd28387ecf431616ff26636ef39329",
     "tests/test_dataflow_recovery_rows.py": "45b946d614b6efdf07020ecf04c38d0bf24049ca626fad8bc03d8d3d7ea05079"
+  },
+  "overlap_followup": {
+    "receipt": "/tmp/demiflow-recovery-overlap-r1/batch/receipt.json",
+    "sha256": "ac543984ad0edbdf396693ada797b680982c8cadf2812122d9886b4c05694f4c",
+    "passed": 1,
+    "test_sha256": "5717bfe1da7737185a16f8602d73892d227af218ad2e8a41ff50d62c5d25be30"
   }
 }

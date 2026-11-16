@@ -59,14 +59,27 @@ def test_recovery_output_prefix_resumes_without_reinvoking_actor(tmp_path, monke
     from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
     original = DataflowCheckpointCoordinator.commit
     stopped=[]
+    confirmed=[]
     def crash(coordinator, *args, **kwargs):
         image=original(coordinator, *args, **kwargs)
         fact=coordinator._action.context.journal.execution_commit(image.commit_id)
         receipt=fact['receipts'].get('materialize')
         rows=receipt['data']['rows'] if receipt else 0
         if not stopped and 0 < rows < 30 and not image.cut.final:
-            stopped.append(image.commit_id)
-            raise RuntimeError('recover-output-prefix-crash')
+            from demiflow.execution.kernels import state_codec
+            for contribution in image.contributions:
+                for ref in contribution.operator_states.values():
+                    if ref.media_type != 'application/x-demiflow-kernel-image-v3':
+                        continue
+                    raw=b''.join(coordinator._store.read(ref,max_bytes=coordinator._physical.bounds.max_state_bytes))
+                    value=state_codec.loads(raw,max_bytes=coordinator._physical.bounds.max_state_bytes)
+                    recovery=value.get('recovery_rows')
+                    if recovery and 0 < recovery['output_cursor'] < recovery['outputs']['count']:
+                        assert value['state']['value']['calls']==recovery['input_cursor']
+                        confirmed.append(recovery['input_cursor'])
+            if confirmed:
+                stopped.append(image.commit_id)
+                raise RuntimeError('recover-output-prefix-crash')
         return image
     monkeypatch.setattr(DataflowCheckpointCoordinator, 'commit', crash)
     limits={'checkpoint_interval_ms':1, 'checkpoint_rows':1,
@@ -80,8 +93,15 @@ def test_recovery_output_prefix_resumes_without_reinvoking_actor(tmp_path, monke
     assert rows==[{'id':i,'visits':0,'part':part} for i in range(101,111) for part in range(3)]
     events=[json.loads(v) for v in (tmp_path/'events').read_text().splitlines()]
     assert sum(v['event']=='recover' for v in events)==1
-    assert sorted(v['id'] for v in events if v['event']=='call')==list(range(101,111))
-    assert sum(v['event']=='restore' for v in events)==1
+    assert len(confirmed)==1 and 0 < confirmed[0] < 10
+    boundary=101+confirmed[0]
+    # Publication overlaps later pure work. Only this immutable ACK prefix
+    # (including the fully staged callback whose output is partially emitted)
+    # forbids reinvocation. Unconfirmed suffix work may replay on process loss.
+    assert sorted(v['id'] for v in events if v['event']=='call' and v['id']<boundary)==list(range(101,boundary))
+    restored=[i for i,v in enumerate(events) if v['event']=='restore']
+    assert len(restored)==1 and events[restored[0]]['calls']==confirmed[0]
+    assert sorted(v['id'] for v in events[restored[0]+1:] if v['event']=='call')==list(range(boundary,111))
 
 
 class TimedSharedRecovery(RecoveryActor):
