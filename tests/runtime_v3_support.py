@@ -1246,9 +1246,8 @@ def _s_artifact_security(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, A
 
 
 def _s_performance(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
-    detail = {"missing_semantic_harness": 'must measure all workload categories against a same-budget baseline with actual warmup and peaks'}
-    fx._record_not_run('performance', detail)
-    raise NotRunError('performance', detail)
+    from runtime_v3_performance_scenarios import performance
+    return performance(fx, fault)
 
 
 def _s_all_regressions(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:

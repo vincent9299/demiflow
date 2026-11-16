@@ -6,11 +6,10 @@ import runtime_v3_support as support
 
 
 @pytest.mark.parametrize("scenario", [
-    "cpu_gpu_isolation", "fairness_deadlock", "multiworker_barrier", "route_recovery",
-    "actor_state_lifecycle",
-    "queue_full_business", "memory_peak", "disk_gc", "two_hosts",
-    "node_loss", "driver_restart", "history_identity", "workbench_real_plan",
-    "product_regression", "artifact_security", "performance", "all_regressions",
+    "cpu_gpu_isolation", "fairness_deadlock",
+    "queue_full_business", "memory_peak", "two_hosts",
+    "node_loss", "history_identity", "workbench_real_plan",
+    "product_regression", "artifact_security", "all_regressions",
 ])
 def test_placeholder_scenarios_cannot_produce_passing_evidence(scenario):
     recorded = []
@@ -19,6 +18,31 @@ def test_placeholder_scenarios_cannot_produce_passing_evidence(scenario):
         support._SCENARIO_FUNCS[scenario](fixture, None)
     assert recorded[0][0] == scenario
     assert recorded[0][1]["missing_semantic_harness"]
+
+
+@pytest.mark.parametrize('scenario,module', [
+    ('multiworker_barrier', 'runtime_v3_residency_scenarios'),
+    ('route_recovery', 'runtime_v3_residency_scenarios'),
+    ('actor_state_lifecycle', 'runtime_v3_residency_scenarios'),
+    ('driver_restart', 'runtime_v3_recovery_scenarios'),
+    ('disk_gc', 'runtime_v3_gc_scenarios'),
+])
+def test_implemented_gate_cannot_replace_missing_native_evidence_with_success(monkeypatch, scenario, module):
+    import importlib
+    error = support.NotRunError(scenario, {'missing': 'native evidence unavailable'})
+    def missing(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(importlib.import_module(module), scenario, missing)
+    with pytest.raises(support.NotRunError) as observed:
+        support._SCENARIO_FUNCS[scenario](SimpleNamespace(), None)
+    assert observed.value is error
+
+
+def test_performance_requires_an_actual_complete_report(monkeypatch):
+    monkeypatch.delenv('DEMIFLOW_PERFORMANCE_REPORT', raising=False)
+    with pytest.raises(support.NotRunError) as observed:
+        support._s_performance(SimpleNamespace(), None)
+    assert observed.value.missing['missing'] == 'fixed candidate nine-class comparative report'
 
 
 def _api_report():
