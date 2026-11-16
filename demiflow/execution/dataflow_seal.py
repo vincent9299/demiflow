@@ -201,6 +201,43 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     return ref
 
 
+def _owned_factory_declaration(spec):
+    """A class blueprint is durable only when it borrows no mutable state.
+
+    Reuse the existing passive function-state policy for methods and constructor
+    arguments. A serializable external list is still shared caller state; pickle
+    success alone cannot justify replacing it with a disconnected copy.
+    """
+    import types
+    from .kernels.task_scope import function_residency_kind
+    if spec is None or not spec.is_class:
+        return False
+    immutable = (str, bytes, int, float, bool, type(None))
+    classes = type.__getattribute__(spec.target, '__mro__')
+    if len(classes) > 32:
+        return False
+    visited = 0
+    for cls in classes:
+        if cls is object:
+            continue
+        fields = type.__getattribute__(cls, '__dict__')
+        visited += len(fields)
+        if visited > 1024:
+            return False
+        for name, value in fields.items():
+            if name in {'__dict__', '__weakref__', '__module__', '__doc__', '__qualname__'}:
+                continue
+            if type(value) in (classmethod, staticmethod):
+                value = value.__func__
+            if type(value) is types.FunctionType:
+                args, kwargs = (spec.constructor_args, spec.constructor_kwargs) if name == '__init__' else (
+                    (spec.call_args, spec.call_kwargs) if name == '__call__' else ((), {}))
+                if function_residency_kind(value, call_args=args, call_kwargs=dict(kwargs)) != 'none':
+                    return False
+            elif type(value) not in immutable:
+                return False
+    return True
+
 # -- D015 -----------------------------------------------------------------
 def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                             store, bounds: Bounds, worker_mode=None) -> DataflowGraph:
@@ -237,16 +274,15 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         # and the planner keeps blocking next() in an independent worker.
         live_iterator = (shared_stream and node.kind == 'source'
                          and node.kernel.kind == 'iterable')
-        # A worker-scoped class is a declaration, not a borrowed driver actor.
+        # A class without shared captures is a declaration, not a borrowed actor.
         # Serialize that declaration and keep its per-owner checkpoint state.
         # Unserializable constructors still use the existing attempt-only path;
         # ordinary shared functions/instances must retain their live identity.
-        worker_factory = (config.get('callable_scope') == 'worker'
-                          and declaration.callable_spec is not None
-                          and declaration.callable_spec.is_class)
         thread_stream = bool(config.get('streaming_map') and config.get('execution') == 'thread')
+        owned_factory = (worker_mode == 'thread' and thread_stream
+                         and _owned_factory_declaration(declaration.callable_spec))
         force_live = bool(worker_mode == 'thread' and (live_iterator
-                          or thread_stream and not worker_factory or shared_stream
+                          or thread_stream and not owned_factory or shared_stream
                           and node.kernel.kind == 'AsyncMapOp' and not config.get('task_batch_rows')))
         eligible = worker_mode == 'thread' and not config.get('task_batch_rows') and (
             thread_stream or force_live or node.kernel.kind == 'AsyncMapOp')

@@ -51,6 +51,14 @@ def test_thread_calls_really_overlap(tmp_path):
 
 
 def test_worker_callable_slots_and_rotation_resume(tmp_path, monkeypatch):
+    _factory_slots_and_rotation_resume(tmp_path, monkeypatch, scope='worker', concurrency=3)
+
+
+def test_stage_factory_restores_its_owned_state(tmp_path, monkeypatch):
+    _factory_slots_and_rotation_resume(tmp_path, monkeypatch, scope='stage', concurrency=1)
+
+
+def _factory_slots_and_rotation_resume(tmp_path, monkeypatch, *, scope, concurrency):
     from demiflow.execution.dataflow import DataflowExecution
     class Counter:
         def __init__(self):
@@ -62,7 +70,7 @@ def test_worker_callable_slots_and_rotation_resume(tmp_path, monkeypatch):
             return {'n': row['n'], 'owner': self.owner, 'count': self.count}
     def pipeline():
         return data.from_items([{'n': i} for i in range(9)]).map(Counter,
-            concurrency=3, execution='thread', callable_scope='worker')
+            concurrency=concurrency, execution='thread', callable_scope=scope)
     class Interrupted(Exception):
         pass
     pump = DataflowExecution.pump
@@ -81,7 +89,7 @@ def test_worker_callable_slots_and_rotation_resume(tmp_path, monkeypatch):
         rows = pipeline().take_all()
         assert sorted(r['n'] for r in rows) == list(range(9))
         owners = {r['owner'] for r in rows}
-        assert len(owners) == 3
+        assert len(owners) == concurrency
         for owner in owners:
             counts = [r['count'] for r in rows if r['owner'] == owner]
             assert counts == list(range(1, len(counts) + 1))

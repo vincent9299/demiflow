@@ -47,15 +47,20 @@ def test_empty_and_filtered_class_never_constructs(tmp_path, rows, scope):
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
 
 
-def test_worker_factory_constructs_only_invoked_slot(tmp_path):
+@pytest.mark.parametrize('worker_mode', ['process', 'thread'])
+def test_worker_factory_constructs_only_invoked_slot(tmp_path, worker_mode):
     path = tmp_path / 'events'
-    with data.local_execution():
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution(worker_mode=worker_mode):
         actual = data.from_items([{'i': 1}]).map(ObservedSyncActor,
             fn_constructor_args=[str(path)], callable_scope='worker', execution='thread', concurrency=3).take_all()
     assert actual == [{'i': 1, 'count': 1}]
     observed = events(path)
     assert [item['event'] for item in observed] == ['construct', 'start', 'call', 'stop', 'close']
-    assert all(item['pid'] != os.getpid() for item in observed)
+    assert all((item['pid'] != os.getpid()) == (worker_mode == 'process') for item in observed)
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    sealed = load_sealed_plan(run.ref.directory, 'action-1')
+    assert sealed['physical'].policy.worker_mode == ('thread' if worker_mode == 'thread' else None)
+    assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
 
 
 def test_existing_instance_empty_action_still_starts_and_closes(tmp_path):
