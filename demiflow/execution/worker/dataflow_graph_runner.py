@@ -89,6 +89,11 @@ class WorkerGraphRunner:
                 self._outgoing.setdefault(edge.producer, []).append(edge)
             if (edge.consumer not in executor._node_specs or self.partition in spec.consumer_partitions):
                 self._incoming.setdefault(edge.consumer, []).append(edge)
+        self._relational_regions = getattr(executor, '_relational_regions', {})
+        self._region_members = {occ for region in self._relational_regions.values()
+                                for occ in region.plan.occurrences}
+        for region in self._relational_regions.values():
+            region.on_complete_member = self._region_member_completed
         # Every source row can occupy several delivery slots at once. Each
         # channel fitting its own window does not prove the aggregate fits the
         # same worker's bounded outstanding-delivery table. Stop between source
@@ -983,10 +988,67 @@ class WorkerGraphRunner:
         # EOI is an input fact, not permission to block this runner while a
         # callback waits for another co-resident node's timer or output.
 
+    def _region_member_completed(self, occurrence, outputs, inputs):
+        self._metrics[occurrence]['rows_input'] = inputs
+        self._metrics[occurrence]['rows_output'] = outputs
+        self._dirty_metrics.add(occurrence)
+        # A reference relation has actually been calculated, including its
+        # output-budget/collision validation, before this original EOI appears.
+        self._finish_node(occurrence)
+
+    def _advance_regions(self, *, max_records, deadline_ms):
+        processed = 0
+        deadline = time.monotonic() + deadline_ms / 1000
+        for region in self._relational_regions.values():
+            occurrence = region.plan.exit_occurrence
+            if occurrence in self._finished:
+                continue
+            if any(not all((entry.edge_id, p) in self._finished_inputs
+                           for p in self._exchange[entry.edge_id].producer_partitions)
+                   for entry in region.plan.inputs):
+                continue
+            kernel = region.root
+            if kernel.finish_replayable and self._paused and (not self._park_requested or self._cut is not None):
+                continue
+            if self._park_mode and self._park_requested and not self._park_can_output(occurrence):
+                self._paused = True
+                continue
+            key = region.plan.region_id
+            iterator = self._active_finishes.get(key)
+            if iterator is None:
+                # External ports own their original verified finite artifacts;
+                # internal ports carry no duplicate payload or invented seal.
+                for member in region.kernels.values():
+                    for port in member._ports.values():
+                        port.finish()
+                port = (kernel._finish_cursor['port'] if kernel._finish_cursor is not None
+                        else kernel._port_order[0])
+                iterator = iter(kernel.finish(port, wait_for_calls=False))
+                self._active_finishes[key] = iterator
+            while True:
+                try:
+                    record = next(iterator)
+                except StopIteration:
+                    self._active_finishes.pop(key)
+                    for member in region.plan.occurrences:
+                        for edge in self._incoming.get(member, ()):
+                            self._finished_ports.add(edge.edge_id)
+                        self._finish_node(member)
+                    break
+                self._output(occurrence, record)
+                processed += 1
+                if self._park_requested and kernel.finish_replayable:
+                    self._park_finish_pending = self._park_can_output(occurrence)
+                if processed >= max_records or time.monotonic() >= deadline:
+                    return processed
+        return processed
+
     def _advance_input_completions(self, *, max_records, deadline_ms):
         self._park_finish_pending = False
-        processed = 0
-        outputs = 0
+        processed = self._advance_regions(max_records=max_records, deadline_ms=deadline_ms)
+        if processed >= max_records:
+            return processed
+        outputs = processed
         deadline = time.monotonic() + deadline_ms / 1000
         # Graph membership bounds this state. A completed node may close its
         # local outgoing edges, so visit until no further synchronous EOI can
@@ -994,7 +1056,8 @@ class WorkerGraphRunner:
         while True:
             advanced = False
             for occurrence, edges in self._incoming.items():
-                if occurrence not in self.e._node_specs or occurrence in self._finished:
+                if (occurrence not in self.e._node_specs or occurrence in self._finished
+                        or occurrence in self._region_members):
                     continue
                 node = self.e._node_specs[occurrence]
                 kernel = self.e._kernels[(occurrence, self.partition)] if node.kind != 'terminal' else None

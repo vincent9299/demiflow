@@ -968,6 +968,12 @@ class OperatorKernel:
             instance.finish(instance.native_call_ordinal)
 
     def _finish_complete(self) -> Iterator[Record]:
+        region = getattr(self, '_relational_region', None)
+        if region is not None:
+            if self._occurrence != region.plan.exit_occurrence:
+                raise _err('INVALID_CONTRACT', 'internal region member cannot execute independently')
+            yield from self._emit(region.records())
+            return
         kind = self._spec.kind
         if kind in ("join", "exclude_keys"):
             from .relational import join_partitions
@@ -1099,6 +1105,9 @@ class OperatorKernel:
             "inflight_calls": self._calls.snapshot() if self._calls is not None else [],
             "aggregate_state": self.aggregate_state,
         }
+        region = getattr(self, '_relational_region', None)
+        if region is not None and self._occurrence == region.plan.exit_occurrence:
+            image['relational_region'] = region.snapshot()
         if self._recovery_rows is not None:
             image['recovery_rows'] = self._recovery_rows.snapshot()
         if self._finish_cursor is not None:

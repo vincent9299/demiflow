@@ -147,6 +147,13 @@ def reduce_partition(
 ) -> Iterator[Record]:
     """K006: external grouping, provenance-order fold, no associativity assumed."""
     on = tuple(_cfg(spec, "on"))
+    yield from reduce_ordered_groups(_ordered_group_rows(records, on, spec, services),
+                                     spec=spec, services=services)
+
+
+def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices):
+    """One original sequential fold; caller proves complete ordered key groups."""
+    on = tuple(_cfg(spec, "on"))
     if not on:
         raise _err("INVALID_CONTRACT", "empty group keys")
     program = _program(services, _cfg(spec, "reducer_program"), "callable")
@@ -171,7 +178,6 @@ def reduce_partition(
     max_state = services.bounds.max_state_bytes
     sequence = 0
 
-    ordered = _ordered_group_rows(records, on, spec, services)
     for key, items in itertools.groupby(ordered, key=lambda item: item[0]):
         _check_stop(services)
         state = copy.deepcopy(initial)

@@ -310,6 +310,22 @@ class DataflowWorkerExecutor:
                         if instance is not None:
                             restore_actor_state(instance, ref=state_ref, services=self._services)
                     self._kernels[(occ, partition)] = kernel
+            # Only an explicitly versioned sealed stage may bind this finite
+            # compute optimization. Old stages never infer a new region.
+            from ...planning.dataflow_relational_regions import interpret_region
+            from ..kernels.relational_region import RelationalRegionRuntime
+            self._relational_regions = {}
+            for stage in assignment.stages:
+                region_plan = interpret_region(self._graph, stage)
+                if region_plan is None:
+                    continue
+                partition = assignment.lease.partition_ids[0]
+                members = {occ: self._kernels[(occ, partition)] for occ in region_plan.occurrences}
+                region = RelationalRegionRuntime(region_plan, kernels=members,
+                    services=self._services, edges=self._graph.edges)
+                for kernel in members.values():
+                    kernel._relational_region = region
+                self._relational_regions[region_plan.region_id] = region
             if self._restored_states:
                 for group in set(shared.values()):
                     if group.restored != set(group.binding['members']):
