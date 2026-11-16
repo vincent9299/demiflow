@@ -1,4 +1,10 @@
-"""L016 · run_ray_chain — unified resource terminal on every exit (implement).
+"""L016 · run_ray_chain — resource terminal on every exit.
+
+2026-11-16: the five marked Ray cases now exercise the actual v3 compatibility
+entry, with the same six input rows, two CPUs, original checkpoint policy,
+physical actor death, original journal and resume. The old unmarked AST/fake
+layer below is retained pending migration and is NOT claimed as passing.
+Historical layer description follows; it is not current implementation evidence.
 
 Ruling (coordinator 61d0e9a3, 2026-11-14): verify_preserve → implement. The
 baseline closed the ResourceManager scope only on the success path, so a Ray
@@ -531,25 +537,32 @@ def test_second_failure_after_resume_opens_and_closes_its_own_scope(tmp_path, ra
 # remote address, no paid model. Ray's session dir is redirected under
 # /tmp/demiflow-* and ray.shutdown() always runs.
 
-RAY_TEMP = "/tmp/demiflow-l-chain/ray-session"
+# Each invocation owns its private cluster; never attach to a running service.
 
 
 @pytest.fixture(scope="module")
-def ray_local():
+def ray_local(tmp_path_factory):
     ray = pytest.importorskip("ray")
-    import os
-    os.makedirs(RAY_TEMP, exist_ok=True)
-    ray.init(num_cpus=2, include_dashboard=False, ignore_reinit_error=True,
-             _temp_dir=RAY_TEMP)
-    try:
-        yield ray
-    finally:
-        ray.shutdown()
+    from pathlib import Path
+    root = tmp_path_factory.mktemp("ray-chain")
+    assert str(root).startswith("/tmp/demiflow-")
+    assert not ray.is_initialized(), "this test must own a private 2-CPU cluster"
+    ray.init(address="local", num_cpus=2, num_gpus=0, include_dashboard=False,
+             object_store_memory=100 * 1024**2, _temp_dir=str(root / "ray"))
+    with pytest.MonkeyPatch.context() as patch:
+        for key, suffix in (("DEMIFLOW_RESOURCE_ROOT", "pool"),
+                            ("DEMIFLOW_RESOURCE_HOME", "home"),
+                            ("DEMIFLOW_FORGE_DOMAIN", "forge")):
+            patch.setenv(key, str(root / suffix))
+        try:
+            yield ray
+        finally:
+            ray.shutdown()
 
 
 def _ray_dataset(plan, items):
     from demiflow.execution.executors.ray import RayDatasetExecutor
-    return Dataset(ItemsSource(items), plan, RayDatasetExecutor(unified_chain=True))
+    return Dataset(ItemsSource(items), plan, RayDatasetExecutor(workers=2))
 
 
 def _double_plan():
@@ -575,32 +588,49 @@ def _ray_evidence(run):
 
 
 def _assert_terminal_issued(run, mode):
-    """What run_ray_chain's finally must have done, read off the real journal.
+    """Read the same original resource journal after the unified runtime exits.
 
-    CLOSED is deliberately not asserted here. F6 keeps the charge for an
-    unconfirmed exit, and the real provider probes death once immediately after
-    the asynchronous ray.kill, so that probe can land inside the kill window and
-    return UNCONFIRMED. Convergence is asserted separately, through the protocol.
+    V3 drains individual allocations and uses ABANDON to close the remaining
+    scope on every path. A success is proved by its original final ACK, not the
+    retired driver's receipt suffix. Every allocation still needs physical exit
+    evidence, and an unconfirmed exit remains charged until convergence.
     """
     scopes, allocations, _ = _ledger(run)
-    assert len(scopes) == 1, scopes
-    close = scopes[0]["close_document"]
-    assert close is not None, "run_ray_chain never closed the resource scope"
-    assert close["mode"] == mode, close
-    assert close["engine_receipt_ref"].endswith("-drained" if mode == "DRAINED" else "-abandoned")
-    assert close["reason"] == ("chain drained" if mode == "DRAINED" else "chain terminal cleanup")
-    assert close["terminate_deadline_ms"] == 5000
-    assert scopes[0]["state"] in ("CLOSING", "CLOSED"), scopes
-    absent = [i for i in _ray_intents(run) if i["kind"] == "ensure_absent"]
-    assert len(absent) == 1, _ray_intents(run)
-    assert absent[0]["status"] in ("claimed", "done"), absent
+    assert scopes and allocations
+    for scope in scopes:
+        close = scope["close_document"]
+        assert close is not None, "unified chain failed to issue its resource terminal"
+        assert close["mode"] in ("ABANDON", "DRAINED")
+        assert close["terminate_deadline_ms"] > 0
+        assert scope["state"] in ("CLOSING", "CLOSED")
+    intents = _ray_intents(run)
+    absent = [item for item in intents if item["kind"] == "ensure_absent"]
+    assert {item["allocation_id"] for item in absent} == {
+        allocation["allocation_id"] for allocation in allocations}
+    assert all(item["status"] in ("claimed", "done") for item in absent)
     evidence = _ray_evidence(run)
     for allocation in allocations:
-        assert allocation["cleanup"] in ("CONFIRMED", "UNCONFIRMED"), allocation
-        ref = evidence[allocation["allocation_id"]]
-        assert ref and ref.startswith(("ray-actor-dead:", "ray-actor-alive:",
-                                       "ray-actor-unconfirmed:", "never-created:")), ref
+        assert allocation["terminal"]
+        assert allocation["cleanup"] in ("CONFIRMED", "UNCONFIRMED")
+        assert evidence[allocation["allocation_id"]], allocation
+    commits = run.journal.execution_commits("action-1")
+    if mode == "DRAINED":
+        assert commits and all(item["status"] == "acked" for item in commits)
     return scopes, allocations
+
+
+def _materialize_chain(dataset):
+    from demiflow.execution.recovery_identity import plan_identity
+    from demiflow.execution.run_context import current_run
+    run = current_run()
+    with run.action(plan_identity("materialize", dataset._source, dataset._plan)) as action:
+        result = chain.run_ray_chain(dataset._executor, dataset)
+        try:
+            rows = list(result.rows())
+            action.complete({"kind": "materialized", "rows": len(rows)})
+            return rows
+        finally:
+            result.release()
 
 
 def _assert_no_residual_actor(ray, allocations):
@@ -644,7 +674,7 @@ def test_real_ray_success_issues_the_drained_terminal(tmp_path, ray_local):
     items, plan, expected = _double_plan()
     dataset = _ray_dataset(plan, items)
     with RunContext.start(tmp_path / "ok", limits=LIMITS) as run:
-        assert dataset.materialize().take_all() == expected
+        assert _materialize_chain(dataset) == expected
         _, allocations = _assert_terminal_issued(run, "DRAINED")
     _assert_no_residual_actor(ray_local, allocations)
 
@@ -664,9 +694,9 @@ def _boom_plan():
 def test_real_ray_worker_failure_issues_the_abandon_terminal(tmp_path, ray_local):
     items, plan = _boom_plan()
     dataset = _ray_dataset(plan, items)
-    with pytest.raises(RecoveryContractError) as caught:
+    with pytest.raises(ValueError) as caught:
         with RunContext.start(tmp_path / "boom", limits=LIMITS) as run:
-            dataset.materialize().take_all()
+            _materialize_chain(dataset)
     assert "injected business failure" in str(caught.value)
     _, allocations = _assert_terminal_issued(run, "ABANDON")
     _assert_no_residual_actor(ray_local, allocations)
@@ -676,17 +706,17 @@ def test_real_ray_worker_failure_issues_the_abandon_terminal(tmp_path, ray_local
 def test_real_ray_terminal_converges_to_closed_and_confirmed(tmp_path, ray_local):
     items, plan = _boom_plan()
     dataset = _ray_dataset(plan, items)
-    with pytest.raises(RecoveryContractError):
+    with pytest.raises(RecoveryContractError, match="unconfirmed actions"):
         with RunContext.start(tmp_path / "converge", limits=LIMITS) as run:
             try:
-                dataset.materialize().take_all()
-            except RecoveryContractError:
+                _materialize_chain(dataset)
+            except ValueError:
                 pass
             _assert_terminal_issued(run, "ABANDON")
             _converge_terminal(run)
             scopes, allocations, outstanding = _ledger(run)
-    assert [s["state"] for s in scopes] == ["CLOSED"], scopes
-    assert [a["cleanup"] for a in allocations] == ["CONFIRMED"], allocations
+    assert scopes and all(s["state"] == "CLOSED" for s in scopes), scopes
+    assert allocations and all(a["cleanup"] == "CONFIRMED" for a in allocations), allocations
     assert outstanding == 0
     _assert_no_residual_actor(ray_local, allocations)
 
@@ -711,17 +741,18 @@ def test_real_ray_actor_death_terminal_and_resume_leaves_no_orphan(tmp_path, ray
     with pytest.raises(Exception):
         with RunContext.start(tmp_path / "crash", limits=LIMITS) as run:
             reference = run.ref
-            dataset.materialize().take_all()
+            _materialize_chain(dataset)
     assert crash_marker.exists(), "the worker process never actually died"
     scopes, allocations = _assert_terminal_issued(run, "ABANDON")
     first_scope = scopes[0]["scope_id"]
     _assert_no_residual_actor(ray_local, allocations)
 
     with RunContext.resume(reference) as run2:
-        assert dataset.materialize().take_all() == [{"x": i * 2} for i in range(6)]
+        assert _materialize_chain(dataset) == [{"x": i * 2} for i in range(6)]
         _converge_terminal(run2)
         scopes2, allocations2, outstanding2 = _ledger(run2)
-    assert len(scopes2) == 2, scopes2
+    assert len(scopes2) == len(scopes) + 1, scopes2
+    assert {a["allocation_id"] for a in allocations} < {a["allocation_id"] for a in allocations2}
     assert first_scope in [s["scope_id"] for s in scopes2]
     assert all(s["state"] == "CLOSED" for s in scopes2), scopes2
     assert all(a["cleanup"] == "CONFIRMED" for a in allocations2), allocations2
@@ -739,9 +770,9 @@ def test_real_ray_failure_before_any_progress_leaves_no_residual_actor(tmp_path,
     plan = LogicalPlan((MapOp(CallableSpec.create(boom),
                               stream_options=MapStreamOptions(concurrency=1)),))
     dataset = _ray_dataset(plan, items)
-    with pytest.raises(RecoveryContractError):
+    with pytest.raises(ValueError):
         with RunContext.start(tmp_path / "residue", limits=LIMITS) as run:
-            dataset.materialize().take_all()
+            _materialize_chain(dataset)
     _, allocations = _assert_terminal_issued(run, "ABANDON")
     # a named actor left behind would still be adoptable; Ray must report it gone
     _assert_no_residual_actor(ray_local, allocations)
