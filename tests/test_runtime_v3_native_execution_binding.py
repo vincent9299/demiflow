@@ -175,11 +175,18 @@ def test_cast_admits_input_and_new_output_together_before_allocation(monkeypatch
     encoded = encode(schema, bounds=_PREFLIGHT_BOUNDS)
     total = table.get_total_buffer_size() + _cast_allocation(table, schema)
     assert table.get_total_buffer_size() < total-1
-    with allocation_envelope({'allocation_id': 'test-native', 'spec_hash': '0'*64,
-            'resource_directory': '/tmp/demiflow-native-unit-envelope',
-            'cpu_millis': 1000, 'memory_bytes': total-1}):
-        with pytest.raises(DataflowError, match='input and cast output'):
-            _cast_sink_batch(table, schema_bytes=encoded, max_bytes=total-1)
+    original_pool = pa.default_memory_pool()
+    observed_pool = pa.proxy_memory_pool(original_pool)
+    pa.set_memory_pool(observed_pool)
+    try:
+        with allocation_envelope({'allocation_id': 'test-native', 'spec_hash': '0'*64,
+                'resource_directory': '/tmp/demiflow-native-unit-envelope',
+                'cpu_millis': 1000, 'memory_bytes': total-1}):
+            with pytest.raises(DataflowError, match='input and cast output'):
+                _cast_sink_batch(table, schema_bytes=encoded, max_bytes=total-1)
+        assert observed_pool.max_memory() == 0
+    finally:
+        pa.set_memory_pool(original_pool)
     with allocation_envelope({'allocation_id': 'test-native', 'spec_hash': '0'*64,
             'resource_directory': '/tmp/demiflow-native-unit-envelope',
             'cpu_millis': 1000, 'memory_bytes': total}):
