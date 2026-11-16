@@ -154,8 +154,12 @@ def test_changed_protocol_during_wait_is_still_fenced(tmp_path, monkeypatch):
             assert entered.wait(2)
             waiting.start()
             assert attempted.wait(2)
-            device, inode = json.loads(original)
-            header.write_text(json.dumps([device, inode + 1]))
+            identity = json.loads(original)
+            # Tamper the original lock inode in either version, retaining the
+            # original wait, FENCED, and no-admission assertions below.
+            inode_index = 1 if len(identity) == 2 else 3
+            identity[inode_index] += 1
+            header.write_text(json.dumps(identity))
             release.set()
             gc.join(3)
             waiting.join(3)

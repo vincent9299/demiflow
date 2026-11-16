@@ -162,7 +162,9 @@ class ObjectLease:
             physical = protocol_identity(root)
             expected = validate_identity(expected) if expected is not None else physical
             if physical is not None and expected is not None and physical != expected:
-                raise DataflowError('FENCED', 'Published object protocol differs from original journal')
+                reason = ('Published object protocol changed while waiting' if self.waited
+                          else 'Published object protocol differs from original journal')
+                raise DataflowError('FENCED', reason)
             if create:
                 if physical is not None:
                     raise DataflowError('FENCED', 'Cannot recreate a registered published object lease')
