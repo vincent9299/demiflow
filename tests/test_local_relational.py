@@ -28,23 +28,53 @@ def test_group_spill_batches_and_composite_keys():
 
 
 def test_checkpoint_cached_map_failure_resume(tmp_path):
-    calls=[];failed=[False]
-    class Map:
-        concurrency=1
-        async def __call__(self,row):
-            calls.append(row['i'])
-            if row['i']==2 and not failed[0]:failed[0]=True;raise RuntimeError('interrupted')
-            return {**row,'square':row['i']**2}
-    def plan():return ds([{'i':i} for i in range(4)]).map_cached(Map(),cache_dir=tmp_path/'cache',version='v1')
-    with pytest.raises(RuntimeError):plan().checkpoint(tmp_path/'out.jsonl',version='v1')
-    before=calls.count(0)
-    result=plan().checkpoint(tmp_path/'out.jsonl',version='v1')
-    assert result.count()==4 and calls.count(0)==before
-    n=len(calls)
-    assert plan().checkpoint(tmp_path/'out.jsonl',version='v1').count()==4
-    assert len(calls)==n
-    assert list((tmp_path/'cache').rglob('*.error.json'))
-    with pytest.raises(ValueError):plan().checkpoint(tmp_path/'out.jsonl',version='v2')
+    from functools import partial
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    from _native_relational_history_fixtures import cached_transform
+    from _worker_event_fixtures import events
+    log, failure = tmp_path / 'calls.jsonl', tmp_path / 'failed-once'
+    def plan(version='v1'):
+        transform = partial(cached_transform, log=str(log), failure=str(failure),
+                            key='i', output='square', square=True)
+        return data.from_items([{'i': i} for i in range(4)]).map_cached(
+            transform, cache_dir=tmp_path / 'cache', version=version,
+            concurrency=1, queue_depth=1)
+    limits = {'checkpoint_rows': 1, 'checkpoint_unconfirmed_rows': 1,
+              'checkpoint_interval_ms': 60000}
+    with pytest.raises(RuntimeError, match='interrupted'):
+        with RunContext.start(tmp_path / 'run', limits=limits) as run, data.local_execution(worker_mode='thread'):
+            plan().materialize()
+    assert run.journal.execution_action('action-1')['result'] is None
+    assert any(c['status'] == 'acked' for c in run.journal.execution_commits('action-1'))
+    calls = [e['value'] for e in events(log) if e['event'] == 'call']
+    assert calls.count(0) == 1
+    errors = list((tmp_path / 'cache').glob('*.error.json'))
+    assert errors and any('interrupted' in path.read_text() for path in errors)
+    failed_facts, failed_calls = run.journal.execution_commits('action-1'), events(log)
+    with pytest.raises(RecoveryContractError, match='identity|differs'):
+        with RunContext.resume(run.ref), data.local_execution(worker_mode='thread'):
+            plan('v2').materialize()
+    assert events(log) == failed_calls and run.journal.execution_commits('action-1') == failed_facts
+    with RunContext.resume(run.ref), data.local_execution(worker_mode='thread'):
+        materialized = plan().materialize()
+        result = materialized.take_all()
+    assert result == [{'i': i, 'square': i * i} for i in range(4)]
+    assert [e['value'] for e in events(log)].count(0) == 1
+    facts = run.journal.execution_commits('action-1')
+    assert facts[-1]['status'] == 'acked' and facts[-1]['prepared']['sinks']['materialize']['manifest']['final']
+    calls = events(log)
+    # Completed runs are immutable; reuse the original public materialized
+    # result rather than inventing another attempt of a completed RunContext.
+    with data.local_execution(worker_mode='thread'):
+        assert materialized.take_all() == result
+    assert events(log) == calls and run.journal.execution_commits('action-1') == facts
+    # A new run really exercises the public result cache, independently of the
+    # completed original RunRef shortcut. Existing inputs must not call again.
+    with RunContext.start(tmp_path / 'new-run'), data.local_execution(worker_mode='thread'):
+        assert plan().materialize().take_all() == result
+    assert events(log) == calls
 
 
 def test_join_collision_rejected():
@@ -53,25 +83,52 @@ def test_join_collision_rejected():
 
 
 def test_checkpoint_sync_and_mixed_prefix(tmp_path):
-    class Double:
-        async def __call__(self,row):return {**row,'doubled':row['n']*2}
-    rows=ds([{'n':1},{'n':2}]).map(lambda r:{'n':r['n']+1}).filter(lambda r:r['n']>2)
-    assert rows.checkpoint(tmp_path/'sync.jsonl',version='v1').take_all()==[{'n':3}]
-    assert rows.map_cached(Double(),cache_dir=tmp_path/'cache',version='v1').checkpoint(tmp_path/'async.jsonl',version='v1').take_all()==[{'n':3,'doubled':6}]
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    from _native_relational_history_fixtures import double
+    def rows():
+        return (data.from_items([{'n': 1}, {'n': 2}])
+                .map(lambda row: {'n': row['n'] + 1}).filter(lambda row: row['n'] > 2))
+    with RunContext.start(tmp_path / 'sync'), data.local_execution(worker_mode='thread'):
+        assert rows().materialize().take_all() == [{'n': 3}]
+    with RunContext.start(tmp_path / 'mixed') as run, data.local_execution(worker_mode='thread'):
+        materialized = rows().map_cached(double, cache_dir=tmp_path / 'cache', version='v1').materialize()
+        result = materialized.take_all()
+    assert result == [{'n': 3, 'doubled': 6}]
+    facts = run.journal.execution_commits('action-1')
+    assert facts[-1]['status'] == 'acked' and facts[-1]['prepared']['sinks']['materialize']['manifest']['final']
+    with data.local_execution(worker_mode='thread'):
+        assert materialized.take_all() == result
+    assert run.journal.execution_commits('action-1') == facts
 
 
 def test_async_checkpoint_preserves_source_context_across_feed_chunks(tmp_path, monkeypatch):
-    import demiflow.execution.stream as stream
+    from functools import partial
+    from demiflow import data
     from demiflow.observability import _CURRENT_ACTION
-    monkeypatch.setattr(stream, '_FEED_CHUNK', 2)
-    class Echo:
-        async def __call__(self, row):return row
+    from demiflow.execution.run_context import RunContext, current_run, current_action
+    from _native_relational_history_fixtures import echo, source_with_context
+    from _worker_event_fixtures import events
     before = _CURRENT_ACTION.get()
-    result = (ds([{'n':i} for i in range(7)])
-              .map_cached(Echo(), cache_dir=tmp_path/'cache', version='v1')
-              .checkpoint(tmp_path/'out.jsonl', version='v1').take_all())
-    assert sorted(r['n'] for r in result) == list(range(7))
-    assert _CURRENT_ACTION.get() is before
+    log = tmp_path / 'source.jsonl'
+    # The retired stream._FEED_CHUNK hook is replaced by the actual native
+    # source/batch window. Seven rows span more than one two-row window.
+    with RunContext.start(tmp_path / 'run', limits={'batch_rows': 2, 'checkpoint_rows': 2,
+            'checkpoint_interval_ms': 60000}) as run, data.local_execution(worker_mode='thread', batch_rows=2):
+        result = (data.from_iter(partial(source_with_context, str(log)))
+                  .map_cached(echo, cache_dir=tmp_path / 'cache', version='v1')
+                  .materialize().take_all())
+        assert current_run() is run and current_action() is None
+        assert _CURRENT_ACTION.get() is before
+    assert sorted(row['n'] for row in result) == list(range(7))
+    observations = events(log)
+    assert [e['value'] for e in observations if e['event'] == 'pull'] == list(range(7))
+    assert [e['event'] for e in observations].count('source_close') == 1
+    assert all(e['run_id'] == run.ref.run_id for e in observations)
+    assert all(e['directory'] == str(run.directory) and e['attempt'] == 1
+               for e in observations if e['event'] == 'pull')
+    assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    assert current_run() is None and _CURRENT_ACTION.get() is before
 
 
 def test_consecutive_flat_maps_bind_separate_iterators():
@@ -84,34 +141,47 @@ def test_consecutive_flat_maps_bind_separate_iterators():
 
 def test_checkpoint_async_in_running_loop_resume_and_version(tmp_path):
     import asyncio
-    calls = []
-    fail = [True]
-    class Actor:
-        concurrency = 1
-        queue_depth = 1
-        async def __call__(self, row):
-            calls.append(row['n'])
-            await asyncio.sleep(0)
-            if row['n'] == 2 and fail[0]:
-                fail[0] = False
-                raise RuntimeError('failure to preserve')
-            return {**row, 'twice': row['n'] * 2}
-    def plan():
-        return ds([{'n':1}, {'n':2}]).map_cached(Actor(), cache_dir=tmp_path/'cache', version='v1')
+    from functools import partial
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext, current_run
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    from _native_relational_history_fixtures import cached_transform
+    from _worker_event_fixtures import events
+    log, failure = tmp_path / 'calls.jsonl', tmp_path / 'failed-once'
+    def plan(version='v1'):
+        return data.from_items([{'n': 1}, {'n': 2}]).map_cached(
+            partial(cached_transform, log=str(log), failure=str(failure), key='n', output='twice'),
+            cache_dir=tmp_path / 'cache', version=version, concurrency=1, queue_depth=1)
     async def notebook():
+        # Public materialize is synchronous. The same to_thread context bridge
+        # formerly used by checkpoint_async keeps a live notebook loop free.
+        loop = asyncio.get_running_loop()
         with pytest.raises(RuntimeError, match='failure to preserve'):
-            await plan().checkpoint_async(tmp_path/'out.jsonl', version='v1')
-        assert not (tmp_path/'out.jsonl').exists()
-        out = await plan().checkpoint_async(tmp_path/'out.jsonl', version='v1')
-        assert out.take_all() == [{'n':1,'twice':2}, {'n':2,'twice':4}]
-        assert calls.count(1) == 1
-        before = len(calls)
-        await plan().checkpoint_async(tmp_path/'out.jsonl', version='v1')
-        assert len(calls) == before
-        with pytest.raises(ValueError, match='version changed'):
-            await plan().checkpoint_async(tmp_path/'out.jsonl', version='v2')
-        sync = await ds([{'n':3}]).checkpoint_async(tmp_path/'sync.jsonl', version='v1')
-        assert sync.take_all() == [{'n':3}]
+            with RunContext.start(tmp_path / 'run', limits={'checkpoint_rows': 1,
+                    'checkpoint_unconfirmed_rows': 1, 'checkpoint_interval_ms': 60000}) as run, \
+                    data.local_execution(worker_mode='thread'):
+                await asyncio.to_thread(plan().materialize)
+        assert run.journal.execution_action('action-1')['result'] is None
+        assert current_run() is None and asyncio.get_running_loop() is loop
+        failed_facts, failed_calls = run.journal.execution_commits('action-1'), events(log)
+        with pytest.raises(RecoveryContractError, match='identity|differs'):
+            with RunContext.resume(run.ref), data.local_execution(worker_mode='thread'):
+                await asyncio.to_thread(plan('v2').materialize)
+        assert events(log) == failed_calls and run.journal.execution_commits('action-1') == failed_facts
+        with RunContext.resume(run.ref), data.local_execution(worker_mode='thread'):
+            out = await asyncio.to_thread(plan().materialize)
+            rows = await asyncio.to_thread(out.take_all)
+        assert rows == [{'n': 1, 'twice': 2}, {'n': 2, 'twice': 4}]
+        assert [e['value'] for e in events(log)].count(1) == 1
+        calls, facts = events(log), run.journal.execution_commits('action-1')
+        assert facts[-1]['status'] == 'acked' and facts[-1]['prepared']['sinks']['materialize']['manifest']['final']
+        with data.local_execution(worker_mode='thread'):
+            assert await asyncio.to_thread(out.take_all) == rows
+        assert events(log) == calls and run.journal.execution_commits('action-1') == facts
+        with RunContext.start(tmp_path / 'sync'), data.local_execution(worker_mode='thread'):
+            sync = await asyncio.to_thread(data.from_items([{'n': 3}]).materialize)
+            assert await asyncio.to_thread(sync.take_all) == [{'n': 3}]
+        assert current_run() is None and asyncio.get_running_loop() is loop
     asyncio.run(notebook())
 
 
@@ -237,21 +307,50 @@ def test_parallel_sort_matches_serial(tmp_path):
 
 
 def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
-    from demiflow.data import local_relational as rel
-    original = rel.tempfile.TemporaryDirectory
-    paths = []
-    def directory(*args, **kwargs):
-        kwargs.setdefault('dir', tmp_path)
-        result = original(*args, **kwargs)
-        paths.append(result.name)
-        return result
-    monkeypatch.setattr(rel.tempfile, 'TemporaryDirectory', directory)
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.resources.thread import ThreadResourceProvider
+    scratch, exits = [], []
+    original_scratch, original_absent = RunArtifactStore.scratch, ThreadResourceProvider.ensure_absent
+    def tracked_scratch(store, **options):
+        owned = original_scratch(store, **options)
+        scratch.append(owned)
+        return owned
+    def tracked_absent(provider, exact, deadline):
+        proof = original_absent(provider, exact, deadline)
+        exits.append((provider, dict(exact), dict(proof)))
+        return proof
+    monkeypatch.setattr(RunArtifactStore, 'scratch', tracked_scratch)
+    monkeypatch.setattr(ThreadResourceProvider, 'ensure_absent', tracked_absent)
     def fail(state, row):
         raise RuntimeError('consumer failed')
     with pytest.raises(RuntimeError, match='consumer failed'):
-        ds([{'k':1}]*50).join(ds([{'k':1}]*50), on='k', chunk_bytes=1).reduce_by_key('k', fail).take_all()
-    from pathlib import Path
-    assert paths and all(not Path(path).exists() for path in paths)
+        with RunContext.start(tmp_path / 'run') as run, data.local_execution(worker_mode='thread'):
+            (data.from_items([{'k': 1}] * 50).join(data.from_items([{'k': 1}] * 50), on='k', chunk_bytes=1)
+             .reduce_by_key('k', fail).take_all())
+    assert scratch, 'real native join/reducer must borrow original store scratch'
+    assert all(owned.fd is None and not owned.path.exists() and not owned.owner.exists() for owned in scratch)
+    with run.journal._connection() as connection:
+        for owned in scratch:
+            settlement = connection.execute('SELECT bytes,charged FROM runtime_dataflow_settlements WHERE reservation_id=?',
+                                             (owned.operation,)).fetchone()
+            assert settlement == (0, 0)
+            reservation = connection.execute("SELECT amount FROM runtime_reservations WHERE name='artifact_staging_bytes' AND reservation_id=?",
+                                             (owned.operation,)).fetchone()
+            assert reservation == (0,)
+        assert not connection.execute('SELECT 1 FROM runtime_dataflow_staging s LEFT JOIN runtime_dataflow_settlements d '
+                                      'ON s.reservation_id=d.reservation_id WHERE d.reservation_id IS NULL').fetchone()
+    assert run.journal.execution_action('action-1')['result'] is None
+    assert not any(sink.get('manifest', {}).get('final')
+                   for c in run.journal.execution_commits('action-1')
+                   for sink in (c.get('prepared') or {}).get('sinks', {}).values())
+    last = {exact['allocation_id']: (provider, exact, proof) for provider, exact, proof in exits}
+    assert last
+    for provider, exact, proof in last.values():
+        assert proof['cleanup'] == 'CONFIRMED'
+        assert provider.pool.reservation_view(exact['allocation_id'])['state'] == 'RELEASED'
+        assert provider.pool.snapshot()['charged']['cpu_millis'] == 0
 
 
 @pytest.mark.parametrize('how,expected_rows', [('inner', 2), ('semi', 2), ('left', 100), ('anti', 100)])
