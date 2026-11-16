@@ -1,0 +1,185 @@
+{
+  "schema": "demiflow.i08.terminal_ready_design.v1",
+  "status": "design_pending_parent_ruling",
+  "implemented": false,
+  "new_tests_run": false,
+  "production_base": "96f77e7b7d61ea6b7252b98573fcb1c19ed027d3",
+  "production_inputs": {
+    "demiflow/execution/dataflow_hosts.py": "2e13cbf9b2553ffcbfda15ab8e5c0417f4de39aaaa7c49acf6fc7d008976ec99",
+    "demiflow/execution/worker/bootstrap.py": "95c092a684ddd46c4156c20c67b123d535818dd49182d7effbfeae47c3b3fcbb",
+    "demiflow/execution/worker/dataflow_host.py": "d76c1ddbaa77df9481e8ebb7883c643dfa82bc22f77da423b3b0a693a3f6751f",
+    "demiflow/execution/dataflow.py": "fa659b0ea26e63a3936787ab8a8462826a6a92acc7032ff04a2033ccd41d683d",
+    "demiflow/execution/contracts/dataflow_codec.py": "05a855eb40ad31d4f84484179a270f6fa2803b94ebe802d2447ddb105a5a59ae",
+    "demiflow/execution/contracts/dataflow.py": "07845ab16876cace8b3497e85a196ba2f41128e0ce7d9a99a08cb3ed7d23e3e8",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "6a3f916f304c363729faec3e5b841847f132b923e4a32babe267e08743116db0"
+  },
+  "unadopted_candidates_in_base": false,
+  "historical_baseline": {
+    "commit": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+    "trial": "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/trial.json",
+    "phase": "warmup",
+    "elapsed_s": 1.872162861,
+    "first_result_s": 1.420893884,
+    "carrier": "historical_local",
+    "spec": {
+      "id": "fast_cpu",
+      "input_rows": 20000,
+      "row_shape": "id:int, v:int, text:32 UTF-8 bytes",
+      "program": "map arithmetic -> filter odd -> map projection -> iter_rows",
+      "expected_rows": 10000,
+      "workers": 4,
+      "limits": {
+        "memory_bytes": 268435456,
+        "max_row_bytes": 65536,
+        "max_batch_bytes": 262144,
+        "max_state_bytes": 2097152,
+        "max_scratch_bytes": 2147483648,
+        "max_output_rows": 1000000,
+        "timeout_s": 120
+      }
+    },
+    "run_limits": {
+      "timeout_s": 120,
+      "admission_timeout_s": 30,
+      "cancel_grace_s": 10,
+      "memory_bytes": 268435456,
+      "max_rss_bytes": 4294967296,
+      "max_scratch_bytes": 2147483648,
+      "max_output_bytes": 2147483648,
+      "max_evidence_bytes": 67108864,
+      "max_input_rows": 100000,
+      "max_output_rows": 1000000,
+      "batch_rows": 256,
+      "log_bytes": 16777216,
+      "max_row_bytes": 65536,
+      "max_batch_bytes": 262144,
+      "max_state_bytes": 2097152,
+      "max_control_bytes": 67108864,
+      "max_commits": 16384,
+      "max_requests": 100000,
+      "max_artifacts": 65536,
+      "checkpoint_rows": 512,
+      "checkpoint_interval_ms": 1000,
+      "checkpoint_timeout_s": 60,
+      "checkpoint_unconfirmed_rows": 4096,
+      "checkpoint_unconfirmed_bytes": 67108864
+    },
+    "local_stats": {
+      "worker_mode": "process",
+      "workers": 4,
+      "partitions": 16,
+      "peak_pending_tasks": 8,
+      "workers_used": [
+        [
+          20357,
+          139643751847744
+        ],
+        [
+          20354,
+          140530723067712
+        ],
+        [
+          20358,
+          139778921776960
+        ],
+        [
+          20359,
+          139732318832448
+        ]
+      ],
+      "stages": [
+        {
+          "name": "map",
+          "submitted": 79,
+          "completed": 79,
+          "worker_seconds": 0.21628453582525253,
+          "rows_input": 20000,
+          "rows_output": 10000,
+          "operators": [
+            "MapOp",
+            "FilterOp",
+            "MapOp"
+          ]
+        }
+      ],
+      "status": "complete",
+      "seconds": 1.164247628301382
+    },
+    "observed_tree_peak_rss_bytes": 375824384,
+    "read_only_sqlite": "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/run/run.sqlite",
+    "table_counts": {
+      "runtime_actions": 1,
+      "runtime_sources": 3,
+      "runtime_commits": 0,
+      "runtime_receipts": 0,
+      "runtime_artifacts": 0,
+      "action_events": 0
+    },
+    "actions": [
+      {
+        "action_id": "action-1",
+        "declaration_kind": "iter_rows",
+        "snapshot": null,
+        "result": {
+          "delivery": "completed",
+          "kind": "iter_rows"
+        }
+      }
+    ],
+    "bindings": [
+      {
+        "path": "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/run/scratch/chain-execution-bindings/2d414f0a45f22f6c5b5976ceae0625cfea5139f8545d3931a48975f4a1e4df5b.json",
+        "sha256": "2d414f0a45f22f6c5b5976ceae0625cfea5139f8545d3931a48975f4a1e4df5b",
+        "schema": "demiflow.execution_bindings.v2",
+        "checkpoint_rows": 512,
+        "executions": [
+          {
+            "backend": "local_pull",
+            "execution_id": "1c12ceaf3eb520df544ba22da5939e080f6124283a20f8a08bf4c816cd26bb65",
+            "placement": "driver",
+            "recovery": "attempt_only"
+          }
+        ],
+        "profiles": {
+          "3ac6b398e541879c3f1f4da2f583d5d90d092d85bf49ed887f7b91ba9f2117d9": {
+            "requests": {
+              "cpu_millis": 4000,
+              "memory_bytes": 2147483648,
+              "scratch_bytes": 2147483648
+            }
+          }
+        }
+      }
+    ],
+    "source_blob_sha256": {
+      "demiflow/execution/executors/local.py": "f9b74cdd7d20559a4e292519a45185dc4701b58e1a236a7dfc255220d1cb6bcb",
+      "demiflow/execution/native_plan.py": "85ec6efa6ccbcd130ac06340debf348e29c256394d1438489633c196ed5e5b3e"
+    },
+    "input_sha256_before": {
+      "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/trial.json": "758ac5310a63c55e3c09b7b36efbf2828dec68f97f722ecbae136ed54b9f0b87",
+      "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/run/run.sqlite": "cc4ea5c1930fb316fc3c9639a3ab613a8d4853e9d81a58d0c473b778fc0ff585",
+      "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/run/scratch/chain-execution-bindings/2d414f0a45f22f6c5b5976ceae0625cfea5139f8545d3931a48975f4a1e4df5b.json": "2d414f0a45f22f6c5b5976ceae0625cfea5139f8545d3931a48975f4a1e4df5b"
+    },
+    "input_sha256_after": {
+      "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/trial.json": "758ac5310a63c55e3c09b7b36efbf2828dec68f97f722ecbae136ed54b9f0b87",
+      "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/run/run.sqlite": "cc4ea5c1930fb316fc3c9639a3ab613a8d4853e9d81a58d0c473b778fc0ff585",
+      "/tmp/demiflow-perf-preflight-b0-r3/fast_cpu/run/scratch/chain-execution-bindings/2d414f0a45f22f6c5b5976ceae0625cfea5139f8545d3931a48975f4a1e4df5b.json": "2d414f0a45f22f6c5b5976ceae0625cfea5139f8545d3931a48975f4a1e4df5b"
+    },
+    "input_unchanged": true
+  },
+  "cost_evidence": {
+    "attribution": "/tmp/demiflow-historical-fastcpu-profile-20261117/attribution.json",
+    "sha256": "d33d41f7566e4867630887f993c93b67f7439bcc5433f1a03453a313c29791b4",
+    "driver_worker_event_decodes": 11099,
+    "driver_decode_cumulative_s": 2.690194988,
+    "warning": "Nested profiled costs are not additive and not a forecast; no bootstrap-thread CPU profile available."
+  },
+  "gate_changes": [],
+  "not_run": [
+    "implementation",
+    "new_protocol_tests",
+    "new_local_pipeline",
+    "new_ray_pipeline",
+    "new_performance_comparison"
+  ]
+}
