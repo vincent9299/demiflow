@@ -737,8 +737,8 @@ class LocalDatasetExecutor(DatasetExecutor):
         from ..dataflow_api import make_action_request, run_dataset_action
         from ..contracts.dataflow import ActionProgram
         programs = tuple(
-            ActionProgram(name=aggregate.name, kind='aggregate', value=aggregate)
-            for aggregate in aggregates
+            ActionProgram(name='aggregate-' + str(index), kind='aggregate', value=aggregate)
+            for index, aggregate in enumerate(aggregates)
         )
         request = make_action_request(self, source, plan, kind='aggregate',
             arguments={'names': [aggregate.name for aggregate in aggregates]},

@@ -9,6 +9,7 @@ import pytest
 
 from demiflow import data
 from demiflow.errors import UnsupportedExecutionOptionError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.executors.local import LocalDatasetExecutor
 
 
@@ -30,5 +31,5 @@ def test_streaming_write_lance_admits_then_requires_action_context():
     ds = _stream()
     # Admission routes streaming write_lance to stream_materialize (allowed);
     # without an outer action the durable-write gate fires, proving no early reject.
-    with pytest.raises(RuntimeError, match="execution action context"):
+    with pytest.raises(DataflowError, match="execution scope"):
         ex.write_lance(ds._source, ds._plan, SimpleNamespace(schema=None))

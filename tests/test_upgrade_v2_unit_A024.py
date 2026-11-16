@@ -7,6 +7,7 @@ import pytest
 
 from demiflow import data
 from demiflow.errors import UnsupportedExecutionOptionError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.executors.local import LocalDatasetExecutor
 
 
@@ -25,5 +26,5 @@ def test_ray_native_options_rejected_before_admission():
 def test_streaming_write_datasink_admits_then_requires_action_context():
     ex = LocalDatasetExecutor()
     ds = _stream()
-    with pytest.raises(RuntimeError, match="execution action context"):
+    with pytest.raises(DataflowError, match="execution scope"):
         ex.write_datasink(ds._source, ds._plan, object())

@@ -1,18 +1,13 @@
-"""A023 · LocalDatasetExecutor.materialize admits within the single action before reads.
-
-The public Dataset.materialize routes streaming plans to materialize_stream and
-plain plans here; admission must reject unsupported options/compositions before
-the source is read, while preserving the durable BlockSink/CommitCoordinator
-protocol and the single-action boundary. Heavy durable-commit recovery is
-exercised by the LAYOUT/RECOVERY gate suites.
-"""
+"""A023 · materialize uses one action, the actual dataflow, and pre-read admission."""
 import pytest
 
 from demiflow import data
 from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import CallableSpec, MapOp
 from demiflow.errors import UnsupportedExecutionOptionError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.executors.local import LocalDatasetExecutor
+from _runtime_v3_executor_scope import call, observed_source
 from demiflow.execution.run_context import RunContext
 
 
@@ -25,17 +20,6 @@ def _action_spy(monkeypatch):
         return orig(self, declaration, **kw)
 
     monkeypatch.setattr(RunContext, "action", counting)
-    return calls
-
-
-def _read_spy(monkeypatch):
-    calls = []
-
-    def spy(self, source, **kwargs):
-        calls.append(source)
-        raise AssertionError("source read attempted before admission")
-
-    monkeypatch.setattr(LocalDatasetExecutor, "_iter_source", spy)
     return calls
 
 
@@ -65,26 +49,24 @@ def test_empty_input_materialize_single_action(monkeypatch):
 def test_plain_materialize_requires_action_context():
     ex = LocalDatasetExecutor()
     ds = _plain()
-    with pytest.raises(RuntimeError, match="native action context"):
+    with pytest.raises(DataflowError, match="execution scope"):
         ex.materialize(ds._source, ds._plan)
 
 
 def test_streaming_materialize_admits_then_requires_action_context():
     ex = LocalDatasetExecutor()
     ds = _stream()
-    # materialize is a streaming terminal: admission must not misreject the
-    # streaming plan as a global map-option error; it passes, then the pull
-    # driver requires the native action context.
-    with pytest.raises(RuntimeError, match="native action context"):
+    # The thin host adapter requires the original execution scope for both kinds.
+    with pytest.raises(DataflowError, match="execution scope"):
         ex.materialize(ds._source, ds._plan)
 
 
-def test_ray_native_options_materialize_rejected_before_read(monkeypatch):
+def test_ray_native_options_materialize_rejected_before_read(tmp_path):
     ex = LocalDatasetExecutor()
     ds = _plain()
     plan = ds._plan.append(MapOp(CallableSpec.create(lambda r: r),
-                                 native_options=NativeOptions(backend="ray")))
-    calls = _read_spy(monkeypatch)
-    with pytest.raises(UnsupportedExecutionOptionError, match="backend_options"):
-        ex.materialize(ds._source, plan)
-    assert calls == []
+                                 native_options=NativeOptions(backend="ray", worker_resources={"cpu": 0})))
+    source, marker = observed_source(tmp_path)
+    with pytest.raises(DataflowError, match="positive CPU"):
+        call(ex, 'materialize', source, plan)
+    assert not marker.exists()

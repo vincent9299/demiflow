@@ -304,13 +304,17 @@ def compile_kernel_spec(
 ) -> KernelSpec:
     """Translate a real operation into a KernelSpec without instantiating it."""
     registry = operator_registry()
-    if isinstance(operation, NativeOperation):
+    if type(operation) is NativeOperation:
         kind = operation.kind
     else:
         kind = type(operation).__name__
     definition = registry.get(kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator kind is not registered: " + kind)
+    # Synchronous and streaming plans share one resource/host policy. Retired
+    # Ray Data pool controls must not be silently discarded by this compiler.
+    from ..data.native_options import validate_stream_native_options
+    validate_stream_native_options(getattr(operation, 'native_options', None))
     from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory, RoutedPromptFactory
     native_declaration = native_model_declaration(operation)
     if native_declaration is not None and native_declaration.target is RoutedPromptFactory:
@@ -873,8 +877,9 @@ class _Capture:
 
 
 def _lower_request(request: ActionRequest) -> ActionRequest:
-    """take(0) becomes an explicit literal_empty zero-read plan."""
-    if request.kind == "take" and request.arguments.get("limit") == 0:
+    """Zero-row take terminals become an explicit literal_empty zero-read plan."""
+    if (request.kind == "take" and request.arguments.get("limit") == 0
+            or request.kind == "take_batch" and request.arguments.get("batch_size") == 0):
         return ActionRequest(
             kind=request.kind, source=ItemsSource(()), plan=LogicalPlan(),
             arguments=request.arguments, sink=request.sink, programs=request.programs,

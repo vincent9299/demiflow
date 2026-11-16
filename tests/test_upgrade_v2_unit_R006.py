@@ -1,99 +1,62 @@
-"""R006/R007 · StreamStageProgress buffer wiring + crash recovery (C05/C13).
+"""R006/R007 · real v3 batch remainder recovery on the original commit protocol.
 
-End-to-end aligned-barrier counterexamples on the real run commit protocol:
-concurrent batch (c=2) and fixed batch survive a crash after an acked cut with
-a non-empty input remainder, restore exactly once, and reuse the acked prefix
-unchanged. The buffer is never the commit authority; the driver's journal is.
+The retired node-0-buffer layout is not fabricated. Read the real v3 operator
+image attached to the same original ACK; preserve batch membership, all rows,
+slot capacity and every original receipt across recovery.
 """
-import contextlib
-
 import pytest
 
 from demiflow import data
-from demiflow.execution import commit as protocol
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.sealed_plans import load_sealed_plan
+from _runtime_v3_buffer_recovery import images_at, crash_with_remainder, assert_prefix_unchanged
 
 
 async def batch_identity(rows):
     return [{**row, 'group': [r['id'] for r in rows]} for row in rows]
 
 
-@contextlib.contextmanager
-def _crash_first_output(monkeypatch, tmp_path):
-    def stop(name, commit_id):
-        fact = RunJournal(tmp_path / 'run').execution_commit(commit_id)
-        if name == 'after_acked' and fact['intent']['sinks'] == ['output']:
-            raise RuntimeError('crash after publication')
-    # Scope the fault to the crash phase: resume replays the acked cut through
-    # _finish, so the patch must be reverted before RunContext.resume runs.
-    with monkeypatch.context() as m:
-        m.setattr(protocol, 'fault_point', stop)
-        yield
-
-
-def _buffer_remainder(run, fact):
-    ref = fact['prepared']['state'].get('node-0-buffer')
-    if ref is None:
-        return 0
-    snapshot = StateArtifacts(run).read(ref)
-    total = 0
-    for slot in snapshot['slots'].values():
-        if 'data' in slot:
-            total += slot['data']['rows']
-        for group in slot.get('groups', []):
-            total += group['data']['rows']
-    return total
+def _recover(tmp_path, monkeypatch, *, concurrency, count):
+    limits = {'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}
+    items = [{'id': i} for i in range(count)]
+    holders = []
+    def execute():
+        return data.from_items(items).batch_map(batch_identity,
+            max_batch=3, concurrency=concurrency).materialize().take_all()
+    with crash_with_remainder(monkeypatch, holders, kind='BatchMapOp',
+            pending=lambda image: bool(image['batch'])) as fired:
+        with pytest.raises(RuntimeError, match='crash after publication'):
+            with RunContext.start(tmp_path / 'run', limits=limits) as run:
+                holders.append(run)
+                ref = run.ref
+                execute()
+    before = [f for f in RunJournal(tmp_path / 'run').execution_commits('action-1')
+              if f['status'] == 'acked']
+    with RunContext.resume(ref) as resumed:
+        cut, snapshots = images_at(resumed, fired[0], 'BatchMapOp')
+        assert not cut['cut']['final'] and any(snapshot['batch'] for snapshot in snapshots)
+        sealed = load_sealed_plan(resumed.directory, 'action-1', version='v3')
+        specs = [node.kernel for node in sealed['graph'].nodes if node.kernel.kind == 'BatchMapOp']
+        assert len(specs) == 1 and specs[0].configuration['concurrency'] == concurrency
+        for snapshot in snapshots:
+            assert len(snapshot['batch']) < 3
+            if snapshot['call_slots'] is not None:
+                occupied = [job['slot'] for job in snapshot['inflight_calls']]
+                assert sorted(snapshot['call_slots'] + occupied) == list(range(concurrency))
+        result = execute()
+        facts = resumed.journal.execution_commits('action-1')
+    assert_prefix_unchanged(before, facts)
+    return result
 
 
 def test_concurrent_batch_c2_crash_recovers_remainder_exactly_once(tmp_path, monkeypatch):
-    limits = {'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}
-    items = [{'id': i} for i in range(12)]
-    ref = None
-    with _crash_first_output(monkeypatch, tmp_path):
-        with pytest.raises(RuntimeError, match='crash after publication'):
-            with RunContext.start(tmp_path / 'run', limits=limits) as run:
-                ref = run.ref
-                data.from_items(items).batch_map(batch_identity, max_batch=3, concurrency=2).materialize().take_all()
-    pre = [f for f in RunJournal(tmp_path / 'run').execution_commits('action-1') if f['status'] == 'acked']
-    assert pre, 'no acked prefix survived the crash'
-    with RunContext.resume(ref) as run2:
-        # The crashed cut froze a real per-slot remainder (2 admitted rows, batch=3).
-        assert _buffer_remainder(run2, pre[0]) > 0
-        snapshot = StateArtifacts(run2).read(pre[0]['prepared']['state']['node-0-buffer'])
-        assert snapshot['kind'] == 'concurrent_batch' and snapshot['participants'] == 2
-        assert set(snapshot['slots']) == {'0', '1'}
-        result = data.from_items(items).batch_map(batch_identity, max_batch=3, concurrency=2).materialize().take_all()
-        facts = run2.journal.execution_commits('action-1')
-    assert sorted(r['id'] for r in result) == list(range(12))
-    assert len(result) == 12
+    result = _recover(tmp_path, monkeypatch, concurrency=2, count=12)
+    assert sorted(row['id'] for row in result) == list(range(12)) and len(result) == 12
     for row in result:
         assert row['id'] in row['group'] and len(row['group']) <= 3
-    # Acked prefix is reused unchanged; sequences stay contiguous and unique.
-    pre_by_id = {f['commit_id']: f for f in pre}
-    post_by_id = {f['commit_id']: f for f in facts if f['status'] == 'acked'}
-    assert pre_by_id.keys() <= post_by_id.keys()
-    for commit_id, before in pre_by_id.items():
-        assert post_by_id[commit_id]['receipts'] == before['receipts']
-    assert [f['sequence'] for f in facts] == list(range(1, len(facts) + 1))
 
 
-def test_fixed_batch_c1_crash_recovers_and_stays_legacy_compatible(tmp_path, monkeypatch):
-    limits = {'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000}
-    items = [{'id': i} for i in range(11)]
+def test_fixed_batch_c1_crash_preserves_exact_batch_membership(tmp_path, monkeypatch):
     expected = [{'id': i, 'group': list(range(i // 3 * 3, min(11, i // 3 * 3 + 3)))} for i in range(11)]
-    ref = None
-    with _crash_first_output(monkeypatch, tmp_path):
-        with pytest.raises(RuntimeError, match='crash after publication'):
-            with RunContext.start(tmp_path / 'run', limits=limits) as run:
-                ref = run.ref
-                data.from_items(items).batch_map(batch_identity, max_batch=3, concurrency=1).materialize().take_all()
-    with RunContext.resume(ref) as run2:
-        result = data.from_items(items).batch_map(batch_identity, max_batch=3, concurrency=1).materialize().take_all()
-        fact = run2.journal.execution_commits('action-1')[0]
-        snapshot = StateArtifacts(run2).read(fact['prepared']['state']['node-0-buffer'])
-    assert result == expected
-    # Single-worker fixed batch keeps the historical slot-0 lineage and identity.
-    assert snapshot['kind'] == 'fixed_batch' and snapshot['participants'] == 1
-    assert set(snapshot['slots']) == {'0'}
+    assert _recover(tmp_path, monkeypatch, concurrency=1, count=11) == expected

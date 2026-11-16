@@ -1,8 +1,9 @@
-"""A018 · count uses metadata for pinned materialized sources, admits otherwise."""
+"""A018 · count preserves actual published data without rerunning its upstream."""
 from demiflow import data
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.sources import MaterializedSource
-from demiflow.execution.executors.local import LocalDatasetExecutor, _LocalMaterializedHandle
+from demiflow.execution.executors.local import LocalDatasetExecutor
+from _runtime_v3_executor_scope import call
 
 
 def _plain():
@@ -14,25 +15,30 @@ def _stream():
         lambda r: r, execution="thread", concurrency=2)
 
 
-def test_materialized_empty_plan_uses_row_count_without_read(monkeypatch):
-    ex = LocalDatasetExecutor()
-    handle = _LocalMaterializedHandle(blocks=(), row_count=7)
-    source = MaterializedSource(handle, 7)
-
-    def spy(self, source, **kwargs):
-        raise AssertionError("metadata count must not read rows")
-
-    monkeypatch.setattr(LocalDatasetExecutor, "_iter_source", spy)
-    assert ex.count(source, LogicalPlan()) == 7
+def test_materialized_count_preserves_real_published_count_without_recomputing(tmp_path):
+    from pathlib import Path
+    marker = tmp_path / 'upstream'
+    def record(row):
+        with marker.open('a') as stream:
+            stream.write('read\n')
+        return row
+    with data.local_execution():
+        materialized = data.from_items([{'id': i} for i in range(7)]).map(record).materialize()
+        try:
+            assert materialized.count() == 7
+            assert materialized.count() == 7
+            assert marker.read_text().splitlines() == ['read'] * 7
+        finally:
+            materialized.release()
 
 
 def test_plain_count_counts_rows():
     ex = LocalDatasetExecutor()
     ds = _plain()
-    assert ex.count(ds._source, ds._plan) == 6
+    assert call(ex, 'count', ds._source, ds._plan) == 6
 
 
 def test_streaming_count_counts_rows():
     ex = LocalDatasetExecutor()
     ds = _stream()
-    assert ex.count(ds._source, ds._plan) == 6
+    assert call(ex, 'count', ds._source, ds._plan) == 6

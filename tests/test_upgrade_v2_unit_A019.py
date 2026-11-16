@@ -1,7 +1,7 @@
 """A019 · take_batch delegates to take (which admits) and shapes the batch."""
 from demiflow import data
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from _runtime_v3_executor_scope import call
+from _runtime_v3_executor_scope import call, observed_source
 
 
 def _plain():
@@ -27,8 +27,10 @@ def test_streaming_take_batch_returns_prefix():
     assert sorted(r["id"] for r in batch.to_pylist()) == [0, 1]
 
 
-def test_take_batch_zero_is_empty():
+def test_take_batch_zero_is_empty(tmp_path):
     ex = LocalDatasetExecutor()
     ds = _plain()
-    batch = call(ex, 'take_batch', ds._source, ds._plan, 0, batch_format="pyarrow")
+    source, marker = observed_source(tmp_path)
+    batch = call(ex, 'take_batch', source, ds._plan, 0, batch_format="pyarrow")
     assert batch.to_pylist() == []
+    assert not marker.exists()

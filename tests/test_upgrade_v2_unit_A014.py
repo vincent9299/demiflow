@@ -2,7 +2,8 @@
 import pytest
 
 from demiflow import data
-from demiflow.data.plan import CallableSpec, FilterOp
+from demiflow.data.plan import CallableSpec, FilterOp, MapOp, LogicalPlan
+from _runtime_v3_executor_scope import observed_source
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.recovery_identity import plan_identity
 from demiflow.execution.run_context import RunContext, current_action
@@ -24,8 +25,12 @@ def test_self_created_delivery_delivers_rows(tmp_path):
 
 def test_zero_limit_yields_nothing(tmp_path):
     ds = _stream_ds()
-    with RunContext.start(tmp_path / "run"):
-        assert list(iter_stream_rows(ds._executor, ds._source, ds._plan, limit=0)) == []
+    source, marker = observed_source(tmp_path)
+    with RunContext.start(tmp_path / "run") as run:
+        assert list(iter_stream_rows(ds._executor, source, ds._plan, limit=0)) == []
+        assert not marker.exists()
+        with run.journal._connection() as db:
+            assert db.execute('SELECT count(*) FROM runtime_actions').fetchone()[0] == 0
 
 
 def test_borrow_explicit_action_does_not_complete(tmp_path):
@@ -87,3 +92,13 @@ def test_invalid_limit_rejected(tmp_path):
     with RunContext.start(tmp_path / "run"):
         with pytest.raises(ValueError, match="nonnegative"):
             list(iter_stream_rows(ds._executor, ds._source, ds._plan, limit=-1))
+
+def test_borrow_rejects_same_length_different_operation_before_read(tmp_path):
+    ds = _stream_ds()
+    foreign = LogicalPlan((MapOp(CallableSpec.create(lambda row: {'different': True})),))
+    with RunContext.start(tmp_path / 'run') as run:
+        with run.action(plan_identity('take', ds._source, ds._plan)) as outer:
+            with pytest.raises(RecoveryContractError, match='plan differs'):
+                list(iter_stream_rows(ds._executor, ds._source, foreign, action=outer))
+            assert outer.record['result'] is None
+            outer.complete({'kind': 'take', 'delivery': 'not-executed'})

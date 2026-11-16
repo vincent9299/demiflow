@@ -1,37 +1,32 @@
-"""A016 · _apply_plan runs the unbound contract; a sealed execution binding is L-gated."""
+"""A016 · the retained adapter delegates to v3 and rejects invalid sealed bounds."""
 import pytest
 
 from demiflow import data
+from demiflow.execution.dataset_native import execute
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.plan_interpreter import PlanContractError
+from demiflow.execution.recovery_contract import RecoveryContractError
+from _runtime_v3_executor_scope import observed_source
 
 
 def _plain():
-    return data.from_items([{"id": i} for i in range(3)]).map(lambda r: r)
+    return data.from_items([{'id': i} for i in range(3)]).map(lambda row: row)
 
 
-def test_unbound_execution_runs_pull():
-    ex = LocalDatasetExecutor()
+def test_unbound_execution_uses_unified_rows():
     ds = _plain()
-    rows = list(ex._apply_plan(ds._source, ds._plan, action_kind="iter_rows"))
-    assert [r["id"] for r in rows] == [0, 1, 2]
+    assert list(execute(LocalDatasetExecutor(), ds._source, ds._plan)) == [
+        {'id': 0}, {'id': 1}, {'id': 2}]
 
 
-def test_bound_execution_rejected_with_plan_contract_error():
-    ex = LocalDatasetExecutor()
+def test_invalid_bound_execution_is_refused():
     ds = _plain()
-    with pytest.raises(PlanContractError, match="sealed execution binding") as exc:
-        list(ex._apply_plan(ds._source, ds._plan, execution=object()))
-    assert exc.value.reason == "invalid_contract"
+    with pytest.raises(RecoveryContractError, match='sealed resource profile'):
+        list(execute(LocalDatasetExecutor(), ds._source, ds._plan, execution=object()))
 
 
-def test_bound_execution_rejected_before_read(monkeypatch):
-    ex = LocalDatasetExecutor()
+def test_invalid_bound_execution_rejected_before_real_source_read(tmp_path):
     ds = _plain()
-
-    def spy(self, source, **kwargs):
-        raise AssertionError("source read attempted for a sealed binding")
-
-    monkeypatch.setattr(LocalDatasetExecutor, "_iter_source", spy)
-    with pytest.raises(PlanContractError):
-        list(ex._apply_plan(ds._source, ds._plan, execution=object()))
+    source, marker = observed_source(tmp_path)
+    with pytest.raises(RecoveryContractError, match='sealed resource profile'):
+        list(execute(LocalDatasetExecutor(), source, ds._plan, execution=object()))
+    assert not marker.exists()
