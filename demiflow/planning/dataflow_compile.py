@@ -842,7 +842,14 @@ class _Capture:
         # while the input/output payload is still resident. Seal both windows
         # into the original profile; do not borrow half of that payload grant.
         payload = self.bounds.max_batch_bytes + self.bounds.max_row_bytes
-        metadata = min(self.bounds.max_state_bytes, max(3072, payload // 2))
+        # A larger index is optional. Keep the exact control reservation used
+        # by solve_residency and the whole live payload; cap only this new-plan
+        # metadata window by the remaining single-worker space. The original
+        # solver/provider still admit the resulting profile and historical
+        # sealed profiles are never recalculated here.
+        control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
+        metadata = min(self.bounds.max_state_bytes, max(3072, payload // 2),
+                       self.bounds.max_resident_bytes - control - payload)
         if metadata < 3072:
             raise _error("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root")
         profile = _default_profile(None, bounds=self.bounds)
