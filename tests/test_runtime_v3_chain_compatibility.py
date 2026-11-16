@@ -91,3 +91,22 @@ def test_chain_keeps_the_original_row_ceiling(tmp_path, monkeypatch):
     finally:
         if isinstance(result, StoredMaterializedHandle):
             result.release()
+
+
+@pytest.mark.parametrize('mismatch', ['source', 'plan', 'provider'])
+def test_chain_rejects_a_foreign_binding_before_starting_workers(tmp_path, monkeypatch, mismatch):
+    from demiflow.execution import chain
+    observed = _observe(monkeypatch)
+    with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as (api, executor, entry):
+        declared = api.from_items([{'id': 1}])
+        candidate = (api.from_items([{'id': 2}]) if mismatch == 'source' else
+                     declared.map(lambda row: {'id': row['id'] + 1}) if mismatch == 'plan' else declared)
+        if mismatch == 'provider':
+            entry = chain.run_local_chain if entry is chain.run_ray_chain else chain.run_ray_chain
+        with run.action(plan_identity('materialize', declared._source, declared._plan)):
+            with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
+                entry(executor, candidate)
+            assert observed == []
+            assert not run.journal.execution_commits('action-1')
+            with run.journal._connection() as db:
+                assert db.execute('SELECT COUNT(*) FROM resource_allocations').fetchone() == (0,)
