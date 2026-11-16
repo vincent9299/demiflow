@@ -156,7 +156,10 @@ def _fields(value, spec):
 
 
 class WorkspaceServer(ThreadingHTTPServer):
-    daemon_threads = True
+    # The original HTTP/operation deadlines bound these request lifetimes.
+    # Track and join them: a request can still own an inspection subprocess
+    # after serve_forever stops accepting new connections.
+    daemon_threads = False
     allow_reuse_address = False
     request_queue_size = 8
 
@@ -226,6 +229,9 @@ class WorkspaceServer(ThreadingHTTPServer):
 
     def server_close(self):
         from contextlib import ExitStack
+        # Close admission and drain HTTP owners before retiring their shared
+        # reader/services. ThreadingMixIn joins only non-daemon request threads.
+        super().server_close()
         try:
             # Every independent owned resource is closed even if another
             # cleanup reports unknown/pending; no live helper is dropped.
@@ -236,7 +242,6 @@ class WorkspaceServer(ThreadingHTTPServer):
                 cleanup.callback(self.native_reader.close)
         finally:
             self.development=None;self.analysis=None
-            super().server_close()
 
     def serve_forever(self,poll_interval=.5):
         self.native_reader.begin_owner()

@@ -1,7 +1,6 @@
 """HTTP teardown waits for its real bounded inspection before reader cleanup."""
 import http.client
 import json
-import os
 from pathlib import Path
 import sys
 import threading
@@ -109,7 +108,10 @@ print(json.dumps({'format':'demiflow_forge_platform_catalog_v3','owned':True}))
             response = client.getresponse()
             assert response.status == (500 if outcome == 'inspection_error' else 200)
             body = json.loads(response.read())
-            assert body.get('owned') is True if outcome == 'success' else body['code'] == 'operation_failed'
+            if outcome == 'success':
+                assert body.get('owned') is True
+            else:
+                assert body['code'] == 'operation_failed'
         assert OPERATION_SECONDS == 60
         try:
             observed = psutil.Process(identity[0])
