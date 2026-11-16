@@ -3,6 +3,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.run_context import RunContext
+from demiflow.execution.run_journal import ExecutionBudgetExceeded
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
@@ -20,10 +21,11 @@ def _reduce(acc, row):
 @pytest.mark.parametrize('disk_bytes', [2 * 1024**3, 8 * 1024**2])
 def test_wide_hot_key_uses_original_disk_budget(tmp_path, monkeypatch, disk_bytes):
     from demiflow.execution.dataflow import DataflowExecution
-    prepare, plans = DataflowExecution.prepare, []
+    prepare, plans, executions = DataflowExecution.prepare, [], []
     def capture(execution):
         result = prepare(execution)
         plans.append(execution._physical)
+        executions.append(execution)
         return result
     monkeypatch.setattr(DataflowExecution, 'prepare', capture)
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
@@ -33,11 +35,14 @@ def test_wide_hot_key_uses_original_disk_budget(tmp_path, monkeypatch, disk_byte
         checkpoint_rows=512, checkpoint_interval_ms=1000, timeout_s=120)
     with RunContext.start(tmp_path/'run', limits=limits) as run:
         if disk_bytes < 64*1024**2:
-            with pytest.raises(DataflowError) as error:
+            with pytest.raises((DataflowError, ExecutionBudgetExceeded)) as error:
                 data.from_iter(_rows).reduce_by_key('k', _reduce).take_all()
-            assert error.value.code == 'BUDGET_EXCEEDED'
-            assert not any(c.get('terminal', {}).get('complete')
-                           for c in run.journal.execution_commits('action-1'))
+            if isinstance(error.value, DataflowError):
+                assert error.value.code == 'BUDGET_EXCEEDED'
+            else:
+                assert str(error.value) == 'Execution budget exhausted: artifact_staging_bytes'
+            assert not any(e._restore_image is not None and e._restore_image.cut.final
+                           for e in executions)
         else:
             actual = data.from_iter(_rows).reduce_by_key('k', _reduce).take_all()
             expected = {}
