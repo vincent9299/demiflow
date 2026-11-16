@@ -26,3 +26,10 @@ def test_real_actor_state_and_resource_lifecycle(residency_fx):
     result=actor_state_lifecycle(residency_fx)
     assert result['final_total']==10
     assert len(result['lifecycle_cases'])==4
+
+
+def test_original_channel_contracts_restore_four_route_suffixes(residency_fx):
+    from runtime_v3_residency_scenarios import _channel_recovery
+    result=_channel_recovery(residency_fx)
+    assert {case['routing'] for case in result}=={'hash','rebalance','target','broadcast'}
+    assert all(case['prefix']+case['suffix']==case['expected'] for case in result)
