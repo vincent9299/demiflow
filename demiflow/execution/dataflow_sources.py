@@ -65,6 +65,15 @@ def _json_digest(value: Any) -> str:
 
 
 def _options_digest(options: Mapping[str, Any]) -> str:
+    if any(type(value).__module__ == 'pyarrow._csv'
+           and type(value).__name__ in {'ReadOptions', 'ParseOptions', 'ConvertOptions'}
+           for value in options.values()):
+        # These native declarations were unsupported by the v3 compiler.
+        # Reuse their complete semantic projection; stdlib pickle cannot carry
+        # a local/partial callback's module captures. Old JSON/SQL option bytes
+        # continue through the original branch below without any migration.
+        from .recovery_identity import describe
+        return _json_digest(describe(dict(options)))
     return _content_digest(dict(options))
 
 

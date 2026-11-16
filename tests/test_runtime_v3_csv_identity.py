@@ -90,3 +90,16 @@ def test_csv_extension_does_not_rewrite_historical_primitive_or_long_list_bytes(
     class Choice(Enum):
         ONE = 'one'
     assert describe(Choice.ONE) == {'enum': Choice.__module__+'.'+Choice.__qualname__, 'value': 'one'}
+
+
+def test_source_snapshot_options_keep_old_digest_and_native_complete_semantics():
+    import pickle
+    from demiflow.execution.dataflow_sources import _options_digest
+    original = {'columns': ['id'], 'include_paths': True, 'format': 'jsonl'}
+    assert _options_digest(original) == hashlib.sha256(pickle.dumps(original, protocol=4)).hexdigest()
+    for options in ({'parse_options': pacsv.ParseOptions(delimiter=';')},
+                    {'read_options': pacsv.ReadOptions(block_size=4096)},
+                    {'convert_options': pacsv.ConvertOptions(column_types={'id': pa.int32()})}):
+        assert _options_digest(options) == _options_digest(cloudpickle.loads(cloudpickle.dumps(options)))
+    assert _options_digest({'parse_options': pacsv.ParseOptions(delimiter=';')}) != _options_digest(
+        {'parse_options': pacsv.ParseOptions(delimiter='\t')})
