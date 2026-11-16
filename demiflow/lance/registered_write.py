@@ -82,11 +82,14 @@ def _confirmed(journal, action_id, *, request):
     spec = spec_from_identity(action['declaration']['sink'])
     if spec.mode != 'create' or spec.content_hash != receipt.request_hash:
         raise RecoveryContractError('Registration receipt differs from the original create request')
-    return receipt
+    return receipt, fact['commit_id']
 
 
-def _verify_table(uri, receipt, options, expected_schema):
+def _verify_table(uri, receipt, options, expected_schema, commit_id):
     table = open_lance_dataset(uri, receipt.committed_version, options)
+    transaction = table.read_transaction(receipt.committed_version)
+    if (transaction.transaction_properties or {}).get('__lance_commit_message') != 'demiflow-lance:' + commit_id:
+        raise RecoveryContractError('Registered fixed-version publication identity differs from original ACK')
     if table.count_rows() != receipt.written_rows:
         raise RecoveryContractError('Registered fixed-version row count differs from native receipt')
     if schema_hash(table.schema) != schema_hash(expected_schema):
@@ -121,9 +124,10 @@ def write_registered_native(dataset, *, uri, relative_uri, schema, fingerprint,
         active = current_run()
         if original is not None:
             locator, journal = original
-            receipt = _confirmed(journal, locator['action_id'], request=request)
-            if receipt is not None:
-                _verify_table(uri, receipt, options, schema)
+            confirmed = _confirmed(journal, locator['action_id'], request=request)
+            if confirmed is not None:
+                receipt, commit_id = confirmed
+                _verify_table(uri, receipt, options, schema, commit_id)
                 # A caller resuming the owning run still consumes its original
                 # action position. A confirmed read never loads the new factory.
                 if active is not None and active.resuming and active.ref.run_id == locator['run_id']:
@@ -169,7 +173,7 @@ def write_registered_native(dataset, *, uri, relative_uri, schema, fingerprint,
                     storage_options=storage_options, return_receipt=True)
             located = _read_locator(locator_path)
             verified = _confirmed(located[1], located[0]['action_id'], request=request)
-            if verified is None or verified != receipt:
+            if verified is None or verified[0] != receipt:
                 raise RecoveryContractError('Registered write lacks its original final ACK/receipt')
-            _verify_table(uri, verified, options, schema)
-            return verified, False
+            _verify_table(uri, verified[0], options, schema, verified[1])
+            return verified[0], False

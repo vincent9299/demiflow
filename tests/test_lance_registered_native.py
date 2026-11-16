@@ -107,3 +107,24 @@ def test_unfinished_registration_uses_original_recovery_and_code_pin(tmp_path, m
         assert len(journal.execution_commits(pointer['action_id'])) == 1
         assert journal.latest_execution_commit(pointer['action_id'])['status'] == 'acked'
         assert lance.dataset(str(tmp_path / 'rows.lance')).to_table().to_pylist() == [{'id': 1}, {'id': 2}]
+
+
+def test_same_schema_count_version_foreign_table_cannot_replace_original_publication(tmp_path):
+    from demiflow.execution.recovery_contract import RecoveryContractError
+    ref, rows, replayed = registered(tmp_path)
+    pointer, journal = original_journal(tmp_path)
+    before = journal.execution_commits(pointer['action_id'])
+    original = tmp_path / 'original.lance'
+    (tmp_path / 'rows.lance').rename(original)
+    lance.write_dataset(pa.table({'id': [101, 102]}, schema=SCHEMA), str(tmp_path / 'rows.lance'))
+    foreign = lance.dataset(str(tmp_path / 'rows.lance'))
+    assert foreign.version == ref.lance_version and foreign.count_rows() == rows
+    with pytest.raises(RecoveryContractError, match='publication identity differs'):
+        registered(tmp_path, refusing_rows)
+    assert foreign.to_table().to_pylist() == [{'id': 101}, {'id': 102}]
+    assert journal.execution_commits(pointer['action_id']) == before
+    # Restore the original native version at another physical location. Its
+    # transaction marker, not the filesystem inode or absolute path, is proof.
+    (tmp_path / 'rows.lance').rename(tmp_path / 'foreign.lance')
+    original.rename(tmp_path / 'rows.lance')
+    assert registered(tmp_path, refusing_rows) == (ref, rows, True)

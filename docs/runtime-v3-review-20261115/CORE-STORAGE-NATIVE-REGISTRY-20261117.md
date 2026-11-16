@@ -122,3 +122,29 @@ only the original asserted runner.
 
 No main-repository edits/tests, pushes, environment installs, shared-cluster stops
 or protected-file edits were performed. The seven frozen files match `01413fc`.
+
+## Follow-up self-review: original transaction identity is mandatory
+
+Before parent integration, self-review found `ec1ee1f`'s confirmed-read check
+insufficient: schema/count/version alone could accept an unrelated replacement
+Lance table. The follow-up verifies the fixed version's existing native
+`__lance_commit_message` equals `demiflow-lance:<original journal commit_id>`.
+The commit_id is projected directly from the same final ACK; it is not copied
+into the locator. No inode or old absolute-URI check rejects legitimate moves.
+
+Real negative: save the original table, install a foreign same-schema/same-count/
+same-version table, then request the cached result with a refusing factory.
+Before the fix it incorrectly succeeds; after the fix it rejects. Restoring the
+original table succeeds, and the separate full-root-move case remains green.
+
+* Red original helper: `/tmp/demiflow-registry-native-identity-red/batch/receipt.json`,
+  one failure (`DID NOT RAISE`), SHA256
+  `33640b530d20e9c9d942716410ae075f1898dbc6e3d7cb888cf6aa6da795fd4a`.
+* Green follow-up: `/tmp/demiflow-registry-native-identity-r1/batch/receipt.json`,
+  five real registration/recovery cases passed, 25.37s, all 15 phases passed,
+  SHA256 `0a7622048af6b6b2f3f23e2d19bc5010b1aed8350036f38f05fbadb0c3990032`.
+
+These ran in the reused clean completed-performance tree on isolated branch
+`engine/gpt-v3-registry-identity-followup-20261117`, based on `e686bd8`.
+The simultaneously running original-history batch's source tree was untouched.
+`ec1ee1f` alone must not be called the final registry repair.
