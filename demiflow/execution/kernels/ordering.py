@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import struct
+from dataclasses import dataclass, replace
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -49,6 +50,37 @@ from .dataflow import (
 
 _MERGE_FAN_IN = 32
 _FRAME_OVERHEAD = 256
+
+
+@dataclass(frozen=True)
+class SortWindow:
+    """Private subwindow of an already admitted worker, never a new grant.
+
+    Each merge reader holds a frame, its decoded comparison key and a buffer;
+    two more frame windows cover heap/output/codec temporaries. Build reserves
+    four row windows for the current key/record/codec in addition to its run.
+    key_only is for internal key/offset carriers, never public business rows.
+    """
+    resident_bytes: int
+    run_bytes: int
+    frame_bytes: int
+    read_chunk_bytes: int
+    merge_fan_in: int = 2
+    key_only: bool = False
+
+    def validate(self, bounds):
+        values = (self.resident_bytes, self.run_bytes, self.frame_bytes,
+                  self.read_chunk_bytes, self.merge_fan_in)
+        if any(type(value) is not int or value < 1 for value in values) or type(self.key_only) is not bool:
+            raise _err('INVALID_CONTRACT', 'sort subwindow values must be positive integers')
+        if (self.resident_bytes > bounds.max_resident_bytes
+                or self.frame_bytes > self.run_bytes
+                or self.read_chunk_bytes > min(1 << 20, bounds.max_row_bytes)
+                or self.merge_fan_in > min(_MERGE_FAN_IN, bounds.max_open_files)
+                or self.run_bytes + 4 * bounds.max_row_bytes > self.resident_bytes
+                or self.merge_fan_in * (3 * self.frame_bytes + self.read_chunk_bytes)
+                   + 2 * self.frame_bytes > self.resident_bytes):
+            raise _err('RESOURCE_INFEASIBLE', 'sort subwindow exceeds its admitted live-object window')
 
 
 def shuffle_key(record_id: str, *, seed: int, occurrence_id: str) -> bytes:
@@ -229,14 +261,21 @@ class _FrameReader:
         return (key, prov, rec_bytes)
 
 
-def _run_frames(ref: ArtifactRef, services: RuntimeServices) -> Iterator[tuple]:
-    reader = _FrameReader(services.store.read(ref, max_bytes=ref.size_bytes),
-                          max_frame_bytes=services.bounds.max_resident_bytes)
-    while True:
-        frame = reader.next_frame()
-        if frame is None:
-            return
-        yield frame
+def _run_frames(ref: ArtifactRef, services: RuntimeServices, window=None) -> Iterator[tuple]:
+    kwargs = {} if window is None else {'chunk_bytes': window.read_chunk_bytes}
+    chunks = services.store.read(ref, max_bytes=ref.size_bytes, **kwargs)
+    reader = _FrameReader(chunks, max_frame_bytes=(services.bounds.max_resident_bytes
+                          if window is None else window.frame_bytes))
+    try:
+        while True:
+            frame = reader.next_frame()
+            if frame is None:
+                return
+            yield frame
+    finally:
+        close = getattr(chunks, 'close', None)
+        if close is not None:
+            close()
 
 
 def _write_run(
@@ -249,11 +288,14 @@ def _write_run(
 
 
 def build_sort_runs(
-    records: Iterator[Record], *, spec: KernelSpec, services: RuntimeServices
+    records: Iterator[Record], *, spec: KernelSpec, services: RuntimeServices,
+    window: SortWindow | None = None,
 ) -> tuple[ArtifactRef, ...]:
     """K009: bounded stable runs, disk reserved before write, single-row rejection."""
     bounds = services.bounds
-    run_budget = bounds.max_resident_bytes
+    if window is not None:
+        window.validate(bounds)
+    run_budget = bounds.max_resident_bytes if window is None else window.run_bytes
     if run_budget < 1:
         raise _err("RESOURCE_INFEASIBLE", "max_resident_bytes must be positive")
     refs: list[ArtifactRef] = []
@@ -283,9 +325,16 @@ def build_sort_runs(
             row = _materialize_row(record, services)
             key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
             prov = _provenance(record)
-            encoded = _encode_frame(key, prov, record, max_bytes=bounds.max_row_bytes)
+            saved_record = record
+            if window is not None and window.key_only:
+                # Only the region's key/offset carrier opts in. Offset,
+                # provenance and record identity survive; the key is already
+                # encoded in the comparator frame and need not be stored twice.
+                saved_record = replace(record, payload_ref=None, inline={},
+                    encoded_bytes=len(_encode_payload({}, max_bytes=bounds.max_row_bytes)), schema_ref=None)
+            encoded = _encode_frame(key, prov, saved_record, max_bytes=bounds.max_row_bytes)
             frame_bytes = len(encoded) + _FRAME_OVERHEAD
-            if frame_bytes > run_budget:
+            if frame_bytes > (run_budget if window is None else window.frame_bytes):
                 raise _err("BUDGET_EXCEEDED", "single sort frame exceeds the resident budget")
             if frames and used + frame_bytes > run_budget:
                 flush()
@@ -300,9 +349,9 @@ def build_sort_runs(
 
 
 def _merge_into(
-    sources: tuple[ArtifactRef, ...], services: RuntimeServices
+    sources: tuple[ArtifactRef, ...], services: RuntimeServices, window=None,
 ) -> Iterator[tuple]:
-    readers = [_run_frames(ref, services) for ref in sources]
+    readers = [_run_frames(ref, services, window) for ref in sources]
     try:
         for frame in heapq.merge(*readers, key=lambda item: (item[0], item[1])):
             yield frame
@@ -312,9 +361,12 @@ def _merge_into(
 
 
 def merge_sort_runs(
-    runs: tuple[ArtifactRef, ...], *, spec: KernelSpec, services: RuntimeServices
+    runs: tuple[ArtifactRef, ...], *, spec: KernelSpec, services: RuntimeServices,
+    window: SortWindow | None = None,
 ) -> Iterator[Record]:
     """K010: finite fan-in multi-pass merge; releases only owned intermediates."""
+    if window is not None:
+        window.validate(services.bounds)
     if not runs:
         return
     from ..dataflow_store import RunArtifactStore
@@ -328,6 +380,8 @@ def merge_sort_runs(
     else:
         # In-memory contract stores have no physical files or lease overhead.
         final_fan_in = fan_in = min(_MERGE_FAN_IN,services.bounds.max_open_files)
+    if window is not None:
+        final_fan_in = fan_in = min(fan_in, window.merge_fan_in)
     if final_fan_in < 1 or (len(runs)>1 and final_fan_in<2) or (len(runs)>final_fan_in and fan_in<2):
         raise _err("BUDGET_EXCEEDED", "sort merge requires at least two input file slots plus owned leases/output")
     max_spill = services.bounds.max_spill_bytes
@@ -345,7 +399,7 @@ def merge_sort_runs(
                     raise _err("BUDGET_EXCEEDED", "merge spill exceeds max_spill_bytes")
 
                 def frames() -> Iterator[bytes]:
-                    for key, prov, rec_bytes in _merge_into(group, services):
+                    for key, prov, rec_bytes in _merge_into(group, services, window):
                         yield _frame_bytes(key, prov, rec_bytes)
 
                 ref = services.store.put(frames(), max_bytes=remaining, media_type=RECORD_MEDIA_TYPE)
@@ -357,9 +411,10 @@ def merge_sort_runs(
                         services.store.release(source, owner="kernel-sort")
                         owned.remove(source)
             current = tuple(merged)
-        for key, prov, rec_bytes in _merge_into(current, services):
+        for key, prov, rec_bytes in _merge_into(current, services, window):
             _check_stop(services)
-            saved = _decode_payload(rec_bytes, max_bytes=services.bounds.max_resident_bytes)
+            saved = _decode_payload(rec_bytes, max_bytes=(services.bounds.max_resident_bytes
+                                   if window is None else window.frame_bytes))
             yield _decode_record_document(saved["document"], record_id=saved["record_id"],
                 sequence=saved["sequence"], max_bytes=services.bounds.max_row_bytes)
     finally:

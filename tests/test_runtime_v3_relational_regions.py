@@ -140,3 +140,90 @@ def test_region_pure_join_nonfinal_ack_restores_original_input_refs(tmp_path,mon
         after=run.journal.execution_commits('action-1')
         assert after[:len(before)]==before and all(x['status']=='acked' for x in after)
         assert local.stats['plan_id']==caught[0][1]
+
+
+def test_region_semi_anti_keeps_original_arrow_schema(tmp_path):
+    import pyarrow as pa
+    from _native_relational_fixtures import native_region_evidence
+    schema=pa.schema([pa.field('k',pa.int32(),nullable=False),
+                     pa.field('v',pa.large_string())],metadata={b'origin':b'region-source'})
+    table=pa.Table.from_pylist([{'k':1,'v':'one'},{'k':2,'v':None},{'k':3,'v':'three'}],schema=schema)
+    with RunContext.start(tmp_path/'run'),data.local_execution(workers=2) as local:
+        actual=data.from_arrow(table).join(data.from_items([{'k':1},{'k':2}]),on='k',how='semi').join(
+            data.from_items([{'k':2}]),on='k',how='anti').take_batch(10,batch_format='pyarrow')
+        assert actual.equals(table.slice(0,1),check_metadata=True)
+        _,_,counts=native_region_evidence(local)
+        assert len(counts)==1 and counts[0]['intermediate_payload_bytes']==0
+
+
+def test_region_small_budget_multirun_wide_key_nonassociative_fold(tmp_path):
+    from _native_relational_fixtures import native_region_evidence,oracle_join
+    keys=['a'*400,'b'*400,None]
+    left=[{'k':keys[i%3],'v':i} for i in range(24)]
+    right=[{'k':key,'r':j} for key in keys for j in range(2)]
+    last=[{'k':key,'z':j} for key in keys for j in range(2)]
+    expected={}
+    for row in oracle_join(oracle_join(left,right,how='left'),last,how='left'):
+        expected.setdefault(row['k'],[]).append((row['v'],row.get('r'),row.get('z')))
+    limits={'memory_bytes':1024*1024,'max_row_bytes':4096,'max_batch_bytes':8192,
+            'max_state_bytes':32768,'max_control_bytes':65536,'checkpoint_rows':64}
+    with RunContext.start(tmp_path/'run',limits=limits),data.local_execution(workers=2) as local:
+        actual=data.from_items(left).join(data.from_items(right),on='k',how='left').join(
+            data.from_items(last),on='k',how='left').reduce_by_key('k',lambda state,row:{
+                'k':row['k'],'values':(state or {}).get('values',[])+[(row['v'],row.get('r'),row.get('z'))]}).take_all()
+        assert actual==[{'k':key,'values':expected[key]} for key in [*sorted(k for k in expected if k is not None),None]]
+        graph,physical,counts=native_region_evidence(local)
+        assert len(counts)==1
+        measured=counts[0]
+        assert measured['sort_runs']>2 and measured['sort_fan_in_limit']==2
+        assert measured['sort_window_bytes']==8*4096
+        assert measured['sort_run_bytes']==2*4096
+        assert 2*(3*measured['sort_frame_bytes']+measured['sort_read_chunk_bytes'])+2*measured['sort_frame_bytes']<=measured['sort_window_bytes']
+        region=next(stage for stage in physical.stages if stage.stage_id.startswith('relational-v1-'))
+        assert measured['sort_window_bytes']+32768+8192+4*4096+4096==region.resident_bytes
+        assert region.resident_bytes<physical.bounds.max_resident_bytes
+        assert measured['partition_builds']==3 and measured['intermediate_key_rebuilds']==0
+        assert measured['intermediate_payload_bytes']==0
+
+
+def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    import pytest
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.kernels.ordering import SortWindow,build_sort_runs,merge_sort_runs
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_finite_borrow import fixture,record
+    from test_runtime_v3_c import make
+    with store_fixture(tmp_path) as (_,store,_):
+        svc,_=fixture(store)
+        svc.bounds=replace(svc.bounds,max_row_bytes=4096,max_resident_bytes=65536)
+        spec=make('KernelSpec',kind='sort',configuration={'keys':['k']})
+        window=SortWindow(32768,8192,4000,64,2,True)
+        rows=[record({'k':str(i%5)*400,'unused':i},i) for i in range(30,-1,-1)]
+        # Offsets and source provenance survive; only internal carrier payload
+        # is omitted. The original immutable runs remain caller-owned.
+        runs=build_sort_runs(iter(rows),spec=spec,services=svc,window=window)
+        assert len(runs)>2
+        real_read=store.read
+        activity={'active':0,'peak':0,'chunks':[]}
+        def observed(ref,**kwargs):
+            activity['chunks'].append(kwargs['chunk_bytes'])
+            activity['active']+=1
+            activity['peak']=max(activity['peak'],activity['active'])
+            try:yield from real_read(ref,**kwargs)
+            finally:activity['active']-=1
+        monkeypatch.setattr(store,'read',observed)
+        result=list(merge_sort_runs(runs,spec=spec,services=svc,window=window))
+        assert [item.sequence for item in result]==sorted(range(31),key=lambda i:(str(i%5)*400,i))
+        assert all(dict(item.inline)=={} for item in result)
+        assert activity['peak']==2 and activity['active']==0 and set(activity['chunks'])=={64}
+        assert all(store.inspect(run) for run in runs)
+        with pytest.raises(DataflowError,match='sort subwindow'):
+            build_sort_runs(iter(rows),spec=spec,services=svc,window=replace(window,resident_bytes=65537))
+        with pytest.raises(DataflowError,match='single sort frame'):
+            build_sort_runs(iter([record({'k':'x'*3000})]),spec=spec,services=svc,window=window)
+        closed=merge_sort_runs(runs,spec=spec,services=svc,window=window)
+        next(closed)
+        closed.close()
+        assert activity['active']==0

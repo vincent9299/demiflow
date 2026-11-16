@@ -31,27 +31,31 @@ class _RegionSpool(_Spool):
     def record(self, offset, header):
         return _RowReference(offset, header)
 
-    def hydrate(self, ref, depth=0):
+    def hydrate(self, ref):
+        return self.hydrate_with_schema(ref)[0]
+
+    def hydrate_with_schema(self, ref, depth=0):
         if depth > 2:
             raise _err('CORRUPT_ARTIFACT', 'region reference exceeds sealed join depth')
         start = ref.offset + _HEADER.size + _ID_BYTES + ref.header[2]
         tag = self.file.read_at(start, 1)
         if tag != b'@':
-            return _materialize_row(super().record(ref.offset, ref.header), self.services)
+            record = super().record(ref.offset, ref.header)
+            return _materialize_row(record, self.services), record.schema_ref
         if ref.header[3] != 1 + _REF.size:
             raise _err('CORRUPT_ARTIFACT', 'invalid region reference frame')
         left, right, index, size = _REF.unpack(self.file.read_at(start + 1, _REF.size))
         if not 0 <= left < ref.offset or right != _NONE and not 0 <= right < ref.offset or index >= len(self.specs):
             raise _err('CORRUPT_ARTIFACT', 'invalid region reference ancestry')
-        lrow = self.hydrate(_RowReference(left, self.header(left)), depth + 1)
-        if right == _NONE:
-            return lrow
-        rrow = self.hydrate(_RowReference(right, self.header(right)), depth + 1)
+        lrow, schema = self.hydrate_with_schema(_RowReference(left, self.header(left)), depth + 1)
         spec = self.specs[index]
+        if right == _NONE:
+            return lrow, schema if spec.configuration.get('how', 'inner') in ('semi', 'anti') else None
+        rrow, _ = self.hydrate_with_schema(_RowReference(right, self.header(right)), depth + 1)
         from .relational import _merge_row
         return _merge_row(lrow, rrow, tuple(spec.configuration['on']),
                           tuple(spec.configuration.get('right_on') or spec.configuration['on']),
-                          spec.configuration.get('suffix', '_right'))
+                          spec.configuration.get('suffix', '_right')), None
 
     def append_reference(self, left, right, *, index, sequence, budget):
         spec = self.specs[index]
@@ -96,7 +100,9 @@ class RelationalRegionRuntime:
         self.root = kernels[plan.exit_occurrence]
         self.counters = dict(leaf_key_rows=0, leaf_payload_bytes=0, intermediate_payload_bytes=0,
                              intermediate_reference_bytes=0, intermediate_validation_bytes=0,
-                             partition_builds=0, intermediate_key_rebuilds=0)
+                             partition_builds=0, intermediate_key_rebuilds=0,
+                             sort_runs=0, sort_window_bytes=0, sort_run_bytes=0,
+                             sort_frame_bytes=0, sort_read_chunk_bytes=0, sort_fan_in_limit=0)
         self.completed = None
         self.on_complete_member = None
         self.on_input_member = None
@@ -182,15 +188,16 @@ class RelationalRegionRuntime:
                         for chain in outputs:
                             for offset, header in arena.entries(chain):
                                 ref = _RowReference(offset, header)
-                                row = arena.hydrate(ref)
+                                row, schema = arena.hydrate_with_schema(ref)
                                 rid = _hash_id([RECORD_DOMAIN, occurrence, 'join', header[4]])
-                                yield _output_record(rid, {'join_index': header[4]}, row, header[4], self.services)
+                                yield _output_record(rid, {'join_index': header[4]}, row, header[4], self.services,
+                                                     schema_ref=schema)
             finally:
                 self.active = False
 
     def _reduce(self, arena, chains, spec):
         from .relational import _group_sort_spec, reduce_ordered_groups
-        from .ordering import build_sort_runs, merge_sort_runs
+        from .ordering import build_sort_runs, merge_sort_runs, SortWindow
         from .dataflow import _group_key
         keys = tuple(spec.configuration['on'])
         # Sort only a bounded key/offset record; wide payload remains in arena.
@@ -203,10 +210,17 @@ class RelationalRegionRuntime:
                     rid = _hash_id(['region-sort-v1', self.plan.region_id, offset])
                     yield _output_record(rid, {'join_index': header[4]}, keyrow, offset, self.services)
         sort_spec = _group_sort_spec(spec, keys)
-        runs = build_sort_runs(references(), spec=sort_spec, services=self.services)
+        row_bytes = self.services.bounds.max_row_bytes
+        chunk = min(65536, max(1, row_bytes // 64))
+        window = SortWindow(resident_bytes=8 * row_bytes, run_bytes=2 * row_bytes,
+            frame_bytes=max(1, (8 * row_bytes - 2 * chunk) // 8),
+            read_chunk_bytes=chunk, merge_fan_in=2, key_only=True)
+        runs = build_sort_runs(references(), spec=sort_spec, services=self.services, window=window)
+        self.counters.update(sort_runs=len(runs), sort_window_bytes=window.resident_bytes,
+            sort_run_bytes=window.run_bytes, sort_frame_bytes=window.frame_bytes,
+            sort_read_chunk_bytes=window.read_chunk_bytes, sort_fan_in_limit=window.merge_fan_in)
         def ordered():
-            for record in merge_sort_runs(runs, spec=sort_spec, services=self.services):
-                keyrow = _materialize_row(record, self.services)
+            for record in merge_sort_runs(runs, spec=sort_spec, services=self.services, window=window):
                 offset = record.sequence
                 row = arena.hydrate(_RowReference(offset, arena.header(offset)))
                 yield _group_key(row, keys), row, record
