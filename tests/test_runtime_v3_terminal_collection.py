@@ -86,6 +86,32 @@ def test_take_all_zero_limit_empty_input_succeeds(tmp_path):
     assert (tmp_path / 'source.closed').exists()
 
 
+@pytest.mark.parametrize('worker_mode', ['thread', 'process'])
+@pytest.mark.parametrize('limit', [0, 2, 65])
+def test_direct_collection_stops_input_at_first_overflow(tmp_path, worker_mode, limit):
+    from demiflow.execution.run_journal import RunJournal
+    with pytest.raises(ValueError, match='more than the take_all limit'):
+        with RunContext.start(tmp_path / 'run', limits={'timeout_s': 30,
+                'checkpoint_rows': 8}), data.local_execution(workers=2, worker_mode=worker_mode):
+            data.from_iter(_source(tmp_path, limit + 10, width=10)).take_all(limit=limit)
+    assert [event['i'] for event in _events(tmp_path)] == list(range(limit + 1))
+    assert (tmp_path / 'source.closed').exists()
+    journal = RunJournal(tmp_path / 'run')
+    assert journal.execution_action('action-1')['result'] is None
+    assert not any(c['prepared']['sinks']['take_all']['manifest']['final']
+                   for c in journal.execution_commits('action-1'))
+
+
+def test_collection_output_limit_does_not_limit_filtered_input(tmp_path):
+    with RunContext.start(tmp_path / 'run', limits={'timeout_s': 30}), data.local_execution(
+            workers=2, worker_mode='process'):
+        result = data.from_iter(_source(tmp_path, 6, width=10)).filter(
+            lambda row: row['i'] >= 4).take_all(limit=2)
+    assert [row['i'] for row in result] == [4, 5]
+    assert [event['i'] for event in _events(tmp_path)] == list(range(6))
+    assert (tmp_path / 'source.closed').exists()
+
+
 @pytest.mark.parametrize('limit,count', [(0, 1), (2, 3), (3, 4)])
 def test_take_all_limit_rejects_overflow_without_truncation(tmp_path, limit, count):
     with pytest.raises(ValueError, match='take_all limit'):
