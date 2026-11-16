@@ -68,9 +68,9 @@ def _committed_rows(run, action_id, rid, facts):
 
 def test_multi_cut_single_commit_full_k6(tmp_path):
     spec, readers, n = _graph_spec(n=24, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
     with RunContext.start(tmp_path / "run",
-                          limits={"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
+                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
                                   "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-commit"}}) as execution:
             result = executor.materialize_graph(spec)
@@ -114,9 +114,9 @@ def test_multi_cut_single_commit_full_k6(tmp_path):
 
 def test_empty_source_sealed_cut(tmp_path):
     spec, readers, n = _graph_spec(n=0, cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
     with RunContext.start(tmp_path / "run",
-                          limits={"checkpoint_unconfirmed_rows": 8,
+                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_unconfirmed_rows": 8,
                                   "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-empty"}}) as execution:
             result = executor.materialize_graph(spec)
@@ -139,9 +139,9 @@ def test_finite_sealed_mode_commits(tmp_path):
     spec, readers, n = _graph_spec(n=12, cut_rows=12, mode="finite_sealed", readers=("c0", "c1"))
     # finite_sealed needs a storage budget on each output channel spec; the channel
     # plan derives it from the credit budget bytes when the orchestrator builds it.
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
     with RunContext.start(tmp_path / "run",
-                          limits={"checkpoint_unconfirmed_rows": 64,
+                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_unconfirmed_rows": 64,
                                   "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-sealed"}}) as execution:
             result = executor.materialize_graph(spec)
@@ -160,9 +160,9 @@ def test_finite_sealed_mode_commits(tmp_path):
 def test_durable_graph_reclaims_channel_segments(tmp_path):
     import json
     spec, readers, n = _graph_spec(n=24, cut_rows=8, mode="durable_incremental", readers=("c0", "c1"))
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
     with RunContext.start(tmp_path / "run",
-                          limits={"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
+                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
                                   "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-gc"}}) as execution:
             result = executor.materialize_graph(spec)

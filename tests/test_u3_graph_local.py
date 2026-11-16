@@ -78,9 +78,9 @@ def _graph_spec(n=60, slow_reader="c3"):
 
 def test_local_graph_six_targets_shared_egress_once(tmp_path):
     spec, readers, n = _graph_spec()
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
     with RunContext.start(tmp_path / "run",
-                          limits={"checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:
+                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "u3-graph"}}) as execution:
             result = executor.materialize_graph(spec)
             execution.complete(dict(kind="graph-materialized", workers=result["workers"],
@@ -118,9 +118,9 @@ def test_local_graph_six_targets_shared_egress_once(tmp_path):
 
 def test_local_graph_slow_target_does_not_block_unrelated(tmp_path):
     spec, readers, n = _graph_spec(n=60, slow_reader="c3")
-    executor = LocalDatasetExecutor(workers=1, unified_graph=True)
+    executor = LocalDatasetExecutor(workers=16, unified_graph=True)
     with RunContext.start(tmp_path / "run",
-                          limits={"checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:
+                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 8, "checkpoint_interval_ms": 60000}) as run:
         with run.action({"kind": "materialize", "source": {"fixture": "u3-graph"}}) as execution:
             result = executor.materialize_graph(spec)
             execution.complete(dict(kind="graph-materialized", workers=result["workers"],
@@ -149,7 +149,7 @@ def test_graph_seam_default_off(tmp_path):
     from demiflow.data.dataset import Dataset
     dataset = Dataset(ItemsSource(items), _stream_map(double), executor)
     with RunContext.start(tmp_path / "run",
-                          limits={"checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
+                          limits={"memory_bytes": 16 * 1024 ** 3, "checkpoint_rows": 4, "checkpoint_interval_ms": 60000}):
         rows = dataset.materialize().take_all()
     assert rows == [{"x": i * 2} for i in range(10)]
     assert not (tmp_path / "run-resources").exists()
