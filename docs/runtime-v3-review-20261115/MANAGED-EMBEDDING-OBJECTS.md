@@ -10,9 +10,11 @@ prepare 需要绑定原 `embeddings` extra，图像还声明实际 `pillow` 依�
 
 - `3697e04`：13 passed / 35.84 秒。实际注册位置→CheckedExecution→原生 HTTP→RunJournal confirmed/requests_consumed→原 ACK→Lance 与身份桥；含 image/document 正例、未声明/未登记拒绝、外部路径/符号链接/网络/SHA/大小拒绝、明确 relocation 和旧 options SHA 黄金值。
 - `94dac3e`：4 passed / 127.94 秒。两模态均实际经过 manager.prepare/start、封存受管进程、原执行图/物理计划/桥、原 ACK、固定 DatasetRef 和 Lance 结果；另两例在 prepare 后改对象，均在 HTTP 和输出发布前失败。外部模型 HTTP 是确定性 transport fixture；静态检查、运行、读对象、提交、结果与工作台事实读取没有替身。
-- 后续加强腐败对象反例：从 prepare 的实际 report actions 核查无成功 ACK，避免引用较早静态报告的 action ID。该窄测试修正及最后组合证据另记，不能把旧回执重新绑定到较新 HEAD。
+- `41dcdf0` 加强腐败对象反例：从 prepare 的实际 report actions 核查无成功 ACK，避免引用较早静态报告的 action ID。两模态反例与旧默认 options 黄金值共3项通过；同组另外2项旧独立SQLite缓存API失败，总结果3 passed / 2 failed，69.13秒。两旧例在原native journal互斥守卫处拒绝，另列修复，未删除选项或改变原断言。此组不能称全绿。
 
 原回执：`/tmp/demiflow-managed-embedding-objects-r2-evidence/verification.json`、`/tmp/demiflow-managed-embedding-objects-r5-evidence/verification.json`；均保留实际代码/测试摘要、HEAD、环境、原 XML 摘要，前后源码未变。
+
+总控逐项与实际Git提交核对、源前后/HEAD一致及XML摘要复核见 [OBJECTS-RAY-PRIMARY-VERIFICATION.json](OBJECTS-RAY-PRIMARY-VERIFICATION.json)，包含上述部分失败组，未用owner结论替代取证。
 
 探索红回执全部保留：r1 的测试从错误 report 层读取 resources；r3 的新 workspace 测试夹具未建立 tables catalog；r4 未绑定 embeddings extra，被原环境准入正确拒绝。这些不是隐藏通过，也没有为消红移除运行守卫。r1 中其余原 Embedding 回归实际 22 passed；与后续集合重叠，不相加。
 

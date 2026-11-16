@@ -69,6 +69,7 @@ Local矩阵的旧汇总214是外层107条观察与案例层107条观察重复拼
 1. **性能及及时交接**：轻量CPU和跨机逐条RPC开销，40k宽行iter_rows原120秒仍未闭环。批量传输只合并已就绪的有界消息，不等待凑满，不减少fence/credit/ACK/行字节校验。九类Local及Ray/两机正式五轮矩阵未完成。
 2. **正式门接线与完整组合**：multiworker barrier、driver restart、actor lifecycle已接回原门并真验；route recovery保留已验证子集。target/broadcast的C层能力不能冒充公开Dataset lowering；尚缺公开端到端触发证据。原其余NotRun按实际缺口保留，不能拿专项测试数顶替。
 3. **产品与真实业务**：最终同HEAD工作台实际图/来源/运行/停止/恢复，以及Notebook/Case已承诺范围组合。image/document Embedding工作台的object-read授权仍未开放；不移除守卫冒充完成。外部PostgreSQL没有测试DSN，继续明确未验。
+   上一句为较早快照，object-read已按本页顶部真实受管验收接通。最新补跑发现旧Embedding显式`sqlite_journal`缓存被统一V3路径拒绝（包括take_all）；`test_embeddings`与`test_document_embeddings`两原例红，单列兼容修复，不能据新功能通过声称旧API全部保持。保留原SQLite未知效果/缓存记录与原RunJournal提交权威，正在核对既定契约与可实施兼容方式。
 4. **历史与权威**：原RunJournal/CommitCoordinator、code-pin、旧来源/提交/unknown效果边界不变。已验证多机actor损失不代替整机/网络故障，旧布局容量客户端不自动获得新布局兼容保证。
 
 ## 对齐意图，而不是用测试数量折算百分比
