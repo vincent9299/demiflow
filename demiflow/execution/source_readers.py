@@ -372,9 +372,14 @@ class FileReader(_BaseReader):
             yield {'bytes': data, **({'path': path} if include_paths else {})}
             return
         if fmt == "csv":
+            if any(options.get(key) is not None for key in
+                   ('read_options', 'parse_options', 'convert_options')):
+                yield from self._native_csv_rows(path)
+                return
             opener = gzip.open if path.endswith(".gz") else open
             with opener(path, "rt", newline="", encoding="utf-8") as stream:
-                yield from csv.DictReader(stream)
+                for row in csv.DictReader(stream):
+                    yield {**row, 'path': path} if options.get('include_paths') else row
             return
         if fmt == "parquet":
             import pyarrow.parquet as pq
@@ -393,6 +398,71 @@ class FileReader(_BaseReader):
             yield from self._image_rows(path)
             return
         raise DataflowError("UNSUPPORTED_CAPABILITY", f"unsupported file format: {fmt}")
+
+    def _native_csv_rows(self, path: str) -> Iterator[Any]:
+        """Preserve Arrow CSV semantics with one streamed batch and one row.
+
+        The native reader's block size controls type inference, so an explicit
+        value is never silently reduced. Admit room for its input blocks before
+        opening; check retained Arrow buffers before Python conversion. Arrow's
+        parser/decompressor internals are not a hard process-RSS allocator.
+        """
+        import pyarrow as pa
+        import pyarrow.csv as pacsv
+
+        options, bounds = self._options, self._services.bounds
+        read_options = options.get('read_options')
+        if read_options is None:
+            read_options = pacsv.ReadOptions()
+        if type(read_options) is not pacsv.ReadOptions:
+            raise DataflowError('INVALID_CONTRACT', 'CSV read_options must be Arrow ReadOptions')
+        block_bytes = read_options.block_size
+        # The source profile owns max_batch_bytes + max_row_bytes. Keep the
+        # input block and lookahead together with the converted batch within
+        # the first window; the yielded Python row uses the second window.
+        batch_window = min(bounds.max_batch_bytes,
+                           bounds.max_resident_bytes - bounds.max_row_bytes)
+        if 2 * block_bytes >= batch_window:
+            raise DataflowError('BUDGET_EXCEEDED',
+                                'CSV input blocks leave no decoded batch budget')
+        with pacsv.open_csv(path, read_options=read_options,
+                            parse_options=options.get('parse_options'),
+                            convert_options=options.get('convert_options')) as reader:
+            schema = reader.schema
+            if options.get('include_paths'):
+                index = schema.get_field_index('path')
+                field = pa.field('path', pa.string())
+                schema = schema.set(index, field) if index >= 0 else schema.append(field)
+            self._schema_ref = self._schemas.put(schema)
+            while True:
+                self._services.check_stop()
+                try:
+                    batch = reader.read_next_batch()
+                except StopIteration:
+                    return
+                try:
+                    # Total buffer size includes dictionary values and parent
+                    # buffers retained by slices; logical nbytes is insufficient.
+                    if batch.get_total_buffer_size() + 2 * block_bytes > batch_window:
+                        raise DataflowError('BUDGET_EXCEEDED',
+                                            'CSV decoded buffers and input blocks exceed batch budget')
+                    for index in range(batch.num_rows):
+                        self._services.check_stop()
+                        part = batch.slice(index, 1)
+                        try:
+                            if part.nbytes > bounds.max_row_bytes:
+                                raise DataflowError('BUDGET_EXCEEDED', 'CSV row exceeds max_row_bytes')
+                            row = part.to_pylist()[0]
+                        finally:
+                            del part
+                        if options.get('include_paths'):
+                            row['path'] = path
+                        yield row
+                        del row
+                finally:
+                    # Do not retain a previous batch while asking Arrow to
+                    # allocate and decode the next one.
+                    del batch
 
     def _image_rows(self, path: str) -> Iterator[Any]:
         from PIL import Image

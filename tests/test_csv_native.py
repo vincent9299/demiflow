@@ -8,6 +8,7 @@ import pyarrow.csv as pacsv
 import pytest
 from demiflow import data
 from tests.test_local_relational import _oracle_join, assert_same_rows
+from demiflow.execution.run_context import RunContext
 
 
 @pytest.mark.slow
@@ -24,17 +25,37 @@ def test_gzip_csv_join_keeps_original_strings_and_multiplicity(tmp_path, how):
         writer.writeheader(); writer.writerows(right)
     lp = tmp_path / 'left.lance'
     lance.write_dataset(pa.Table.from_pylist(left), str(lp))
-    with data.local_execution(workers=1, partitions=2, temp_directory=str(tmp_path)):
+    with RunContext.start(tmp_path / 'run') as run, \
+            data.local_execution(workers=1, partitions=2, temp_directory=str(tmp_path)):
         csv_rows = data.read_csv(str(path),
             parse_options=pacsv.ParseOptions(newlines_in_values=True),
             convert_options=pacsv.ConvertOptions(column_types={'id': pa.string(), 'description': pa.string()}))
         assert csv_rows.take_all() == right
         result = data.read_lance(str(lp), version=1).join(csv_rows, on='id', how=how)
         assert_same_rows(result.take_all(), _oracle_join(left, right, ['id'], ['id'], how))
-        stages = result.execution_metadata().diagnostics['stages']
-        assert not any(s['name'] == 'python_boundary' for s in stages)
-        plans = [(Path(s['query']) / 'plan.txt').read_text() for s in stages if s['name'] == 'datafusion']
-        assert any('file_type=csv' in p for p in plans)
+        # The unified engine reads native CSV in its sealed source worker;
+        # DataFusion no longer owns a second file-scan plan or query directory.
+        from demiflow.execution.dataflow_seal import load_dataflow
+        from demiflow.execution.dataflow_store import RunArtifactStore
+        from demiflow.planning.dataflow_policy import resolve_runtime_policy
+        metadata = result.execution_metadata().diagnostics
+        assert metadata['engine'] == 'dataflow_v3'
+        assert not any(s['name'] == 'python_boundary' for s in metadata['stages'])
+        action_id = metadata['action_id']
+        facts = run.journal.source_binding(action_id + '-dataflow-sealed')
+        _, bounds = resolve_runtime_policy({}, run.limits, provider='local')
+        store = RunArtifactStore(root=run.directory / '.dataflow-store', journal=None,
+            store_id=facts['logical_ref']['store_id'], bounds=bounds, readonly=True)
+        try:
+            graph, physical, _ = load_dataflow(run.directory, action_id, store=store, bounds=bounds)
+        finally:
+            store.close()
+        assert graph.dag_id == metadata['dag_id'] == physical.dag_id
+        assert physical.plan_id == metadata['plan_id']
+        assert any(n.kind == 'source' and n.kernel.kind == 'file'
+                   and n.kernel.configuration['format'] == 'csv' for n in graph.nodes)
+        assert any(n.kind == 'relational' and n.kernel.kind == 'join' for n in graph.nodes)
+        assert all(c['status'] == 'acked' for c in run.journal.execution_commits(action_id))
 
 
 def test_tsv_strict_width_and_literal_quotes(tmp_path):
