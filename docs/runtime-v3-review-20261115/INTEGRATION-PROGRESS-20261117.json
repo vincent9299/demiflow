@@ -1,0 +1,237 @@
+{
+  "head": "d87bddadb0db4127a9c575c651267de1beebcb29",
+  "branch": "engine/gpt-runtime-v3-review-20261115",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115",
+  "final_acceptance": false,
+  "proofs": [
+    {
+      "path": "/tmp/demiflow-root-product-reconcile-r2-evidence/verification.json",
+      "sha256": "8b91dc786ccb7e467d0d7937edee5ec0ed68186d9af7a49a6d4e57a2f72f88d4",
+      "head": "dfc3115780e0ff16014cf2532f977bfe9a4538a5",
+      "input_count": 2240,
+      "passed": [
+        "tests/test_forge_value_runs.py::test_sealed_checkpoint_partial_results_remain_readable[4]",
+        "tests/test_forge_runs.py::test_wrong_marker_never_promoted_and_registration_recovery",
+        "tests/test_forge_runs.py::test_create_reconciliation_uses_marker_and_preserves_fixed_version"
+      ],
+      "failures": [],
+      "unchanged_inputs": true,
+      "remaining_children": []
+    },
+    {
+      "path": "/tmp/demiflow-root-arrow-barrier-r1-evidence/verification.json",
+      "sha256": "45af45b78ed61bff250e1d99e4e0b1fdfd0aa76fcecbe543961bdef9c5958451",
+      "head": "68e9dd0fa6b734b994267da9858bf5b85d123004",
+      "input_count": 2240,
+      "passed": [
+        "tests/test_native_barrier.py::test_fixed_batch_spans_barriers_without_checkpoint_flush",
+        "tests/test_native_barrier.py::test_enospc_does_not_confirm_checkpoint_or_return_partial_result",
+        "tests/test_runtime_v3_arrow_payload.py::test_real_multiline_copy_keeps_schema_batch_and_ack[process]",
+        "tests/test_runtime_v3_arrow_payload.py::test_original_gc_keeps_shared_batch_reachable_from_real_materialized_result",
+        "tests/test_runtime_v3_arrow_payload.py::test_real_committed_cut_inside_arrow_batch_resumes_once",
+        "tests/test_runtime_v3_arrow_payload.py::test_real_store_sha_failure_precedes_native_publication",
+        "tests/test_lance_arrow_copy.py::test_arrow_copy_honors_projection_filter_version_and_empty_schema[False]",
+        "tests/test_lance_arrow_copy.py::test_arrow_copy_honors_projection_filter_version_and_empty_schema[True]"
+      ],
+      "failures": [
+        {
+          "nodeid": "tests/test_native_barrier.py::test_direct_lance_prepares_before_source_finishes_and_publishes_once",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 10.529999781399965,
+          "failure": "tests/test_native_barrier.py:245: in test_direct_lance_prepares_before_source_finishes_and_publishes_once\n    assert 2 <= len(facts) <= 17 and all(f['status'] == 'acked' for f in facts)\nE   AssertionError: assert (31 <= 17)\nE    +  where 31 = len([{'commit_id': 'd820fa8f52088dd7f6f84768812fa2d345b782e0497ee44d883024a597a2f502', 'action_id': 'action-1', 'sequence'...9e495b55051e7aa7e4700eeac07aaf7a6f9634056f56b16', 'action_id': 'action-1', 'sequence': 6, 'status': 'acked', ...}, ...])"
+        }
+      ],
+      "unchanged_inputs": true,
+      "remaining_children": []
+    },
+    {
+      "path": "/tmp/demiflow-root-source-control-r1-evidence/verification.json",
+      "sha256": "49b13a5d8306f0482baf2ed9725853da4c7ea44c86ba85df285955f63c8d5448",
+      "head": "3eb595a1395a8dc549568c35287e9443ef9964e0",
+      "input_count": 2241,
+      "passed": [
+        "tests/test_location_index.py::test_streaming_map_preserves_unicode_escaping_and_last_key_wins",
+        "tests/test_location_index.py::test_index_preserves_alias_priority_and_invalidates_same_mtime_size",
+        "tests/test_location_index.py::test_fresh_index_rejects_changed_bytes_with_identical_stat_ticks",
+        "tests/test_location_index.py::test_second_process_object_uses_index_without_reparsing",
+        "tests/test_location_index.py::test_bad_manifest_does_not_publish_a_partial_index[{\"files\":{\"a\":\"b\",},\"version\":1}]",
+        "tests/test_location_index.py::test_bad_manifest_does_not_publish_a_partial_index[{\"files\":{},\"version\":1,}]",
+        "tests/test_location_index.py::test_bad_manifest_does_not_publish_a_partial_index[{\"files\":{},\"version\":1} garbage]",
+        "tests/test_location_index.py::test_bad_manifest_does_not_publish_a_partial_index[{\"files\":{},\"version\":10}]",
+        "tests/test_location_index.py::test_bad_manifest_does_not_publish_a_partial_index[{\"files\":{},\"version\":1,\"files\":null}]",
+        "tests/test_location_index.py::test_bad_manifest_does_not_publish_a_partial_index[{\"files\":{\"a\":\"unterminated}]",
+        "tests/test_location_index.py::test_record_and_source_limits_fail_without_publishing",
+        "tests/test_location_index.py::test_row_budget_and_changed_source_leave_no_index",
+        "tests/test_location_index.py::test_cache_pruning_and_rebuild_never_delete_unowned_files",
+        "tests/test_location_index.py::test_lookup_closes_every_connection_including_missing_keys",
+        "tests/test_located_records.py::test_located_gzip_invalid_rows_and_json_container",
+        "tests/test_located_records.py::test_scan_report_records_limit_errors_and_missing",
+        "tests/test_located_records.py::test_reader_detects_changed_file_and_preserves_failed_scope",
+        "tests/test_located_records.py::test_interrupted_scan_can_resume_without_losing_report",
+        "tests/test_native_resources.py::test_real_dataset_uses_explicit_limits_and_preserves_join_multiplicity",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[validation-RuntimeContractError]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[protocol-DataflowError]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[recovery-RecoveryContractError]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[budget-ExecutionBudgetExceeded]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[stop-ServiceStopped]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[unknown-UncertainPromptCall]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_miss_is_still_a_dropped_row",
+        "tests/test_runtime_v3_native_limits.py::test_policy_and_assignment_preserve_old_wire_and_bind_new_ceilings",
+        "tests/test_runtime_v3_native_limits.py::test_native_guard_samples_actual_process_and_preserves_headroom_direction",
+        "tests/test_runtime_v3_native_limits.py::test_public_native_limits_constrain_real_lance_input_join_and_sink",
+        "tests/test_runtime_v3_native_limits.py::test_public_native_row_cap_rejects_before_lance_publication",
+        "tests/test_runtime_v3_native_limits.py::test_public_native_rss_cap_rejects_before_any_worker_launch",
+        "tests/test_runtime_v3_native_limits.py::test_resume_retains_native_ceilings_and_original_plan_when_option_omitted",
+        "tests/test_runtime_v3_native_limits.py::test_public_native_admission_deadline_bounds_real_scheduler_retry",
+        "tests/test_runtime_v3_native_limits.py::test_public_native_execution_deadline_does_not_publish_result",
+        "tests/test_runtime_v3_embedding_failures.py::test_http_status_keeps_type_status_method_and_only_public_url",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change0]",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change1]",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change2]",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change3]",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change4]",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change5]",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change6]",
+        "tests/test_runtime_v3_embedding_failures.py::test_malformed_http_payload_never_rebuilds_a_request[change7]",
+        "tests/test_runtime_v3_embedding_failures.py::test_uncertain_and_protocol_types_preserve_semantics_without_dynamic_import"
+      ],
+      "failures": [
+        {
+          "nodeid": "tests/test_located_records.py::test_native_union_is_lazy_repeatable_and_keeps_context",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 7.546114385128021,
+          "failure": "tests/test_located_records.py:36: in test_native_union_is_lazy_repeatable_and_keeps_context\n    ds.checkpoint(tmp_path/'union.jsonl',version='1')\ndemiflow/data/dataset.py:301: in checkpoint\n    require_action('checkpoint')\ndemiflow/execution/capabilities.py:42: in require_action\n    raise RecoveryContractError(capability['reason'])\nE   demiflow.execution.recovery_contract.RecoveryContractError: Explicit checkpoint orchestration is retired: checkpoint; native run recovery has one protocol; stage outputs require their P3 adapters"
+        }
+      ],
+      "unchanged_inputs": true,
+      "remaining_children": []
+    },
+    {
+      "path": "/tmp/demiflow-root-shared-overlap-r1-evidence/verification.json",
+      "sha256": "c439cc11ea00ca669e66d2a54cf8e1af59ff41e77bca022f3b8a500e76398662",
+      "head": "8174d6f8061c8968b3efdb57f999ab3e13ba184d",
+      "input_count": 2247,
+      "passed": [
+        "tests/test_dataflow_shared_actor.py::test_shared_actor_default_public_entry_fits_original_budget",
+        "tests/test_dataflow_shared_actor.py::test_shared_actor_resumes_original_cut_once[process]",
+        "tests/test_native_barrier.py::test_shared_actor_uses_one_snapshot_at_last_owner",
+        "tests/test_native_barrier.py::test_direct_lance_prepares_before_source_finishes_and_publishes_once",
+        "tests/test_operator_foundation_stream.py::test_async_actual_return_checked_after_await_and_outside_business_catch",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_slow_publication_stops_at_actual_unconfirmed_row_credit",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_small_source_credit_rotates_owners_without_losing_union_rows",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_failure_while_publishing_drains_original_ack_and_preserves_error",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_cancel_during_native_publication_drains_without_aborting_acked_cut",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_publication_obeys_encoded_byte_window_before_next_read",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_each_logical_edge_advances_checkpoint_trigger_without_depth_multiplication",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_native_lance_row_trigger_counts_business_frontier_once",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_failed_original_prepare_cleans_workers_without_false_receipt",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_take_during_old_publication_commits_the_new_delivered_prefix",
+        "tests/test_runtime_v3_checkpoint_overlap.py::test_receipt_releases_only_the_sealed_progress_frontier"
+      ],
+      "failures": [
+        {
+          "nodeid": "tests/test_runtime_v3_shared_actor_admission.py::test_public_resume_rejects_changed_actor_relation_before_worker_start[True]",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 6.81923196092248,
+          "failure": "tests/test_runtime_v3_shared_actor_admission.py:26: in test_public_resume_rejects_changed_actor_relation_before_worker_start\n    with RunContext.resume(run.ref):\ndemiflow/execution/run_context.py:184: in __enter__\n    raise RecoveryContractError(\"A completed run cannot create another attempt\")\nE   demiflow.execution.recovery_contract.RecoveryContractError: A completed run cannot create another attempt"
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_shared_actor_admission.py::test_public_resume_rejects_changed_actor_relation_before_worker_start[False]",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 6.376919664442539,
+          "failure": "tests/test_runtime_v3_shared_actor_admission.py:26: in test_public_resume_rejects_changed_actor_relation_before_worker_start\n    with RunContext.resume(run.ref):\ndemiflow/execution/run_context.py:184: in __enter__\n    raise RecoveryContractError(\"A completed run cannot create another attempt\")\nE   demiflow.execution.recovery_contract.RecoveryContractError: A completed run cannot create another attempt"
+        },
+        {
+          "nodeid": "tests/test_located_records.py::test_native_union_is_lazy_repeatable_and_keeps_context",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 12.972284849733114,
+          "failure": "tests/test_located_records.py:41: in test_native_union_is_lazy_repeatable_and_keeps_context\n    with RunContext.resume(ref):\ndemiflow/execution/run_context.py:184: in __enter__\n    raise RecoveryContractError(\"A completed run cannot create another attempt\")\nE   demiflow.execution.recovery_contract.RecoveryContractError: A completed run cannot create another attempt"
+        }
+      ],
+      "unchanged_inputs": true,
+      "remaining_children": []
+    },
+    {
+      "path": "/tmp/demiflow-root-stream-contract-r1-evidence/verification.json",
+      "sha256": "e00e32420b0b2c64610f3adf9628ebd2b7c3c230a63d75b32899de79e4eabaa6",
+      "head": "df5d2530c16be306502cb7eb0139a8f156556a2d",
+      "input_count": 2250,
+      "passed": [
+        "tests/test_runtime_v3_shared_actor_admission.py::test_public_resume_rejects_changed_actor_relation_before_worker_start[True]",
+        "tests/test_runtime_v3_shared_actor_admission.py::test_public_resume_rejects_changed_actor_relation_before_worker_start[False]",
+        "tests/test_located_records.py::test_native_union_is_lazy_repeatable_and_keeps_context",
+        "tests/test_runtime_v3_stream_business_contract.py::test_local_exception_whitelist_preserves_qualified_identity[False]",
+        "tests/test_runtime_v3_stream_business_contract.py::test_local_exception_whitelist_preserves_qualified_identity[True]",
+        "tests/test_runtime_v3_stream_business_contract.py::test_identically_named_exception_outside_whitelist_still_fails",
+        "tests/test_runtime_v3_stream_business_contract.py::test_stream_progress_comes_from_intermediate_business_frontiers",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[validation-RuntimeContractError]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[protocol-DataflowError]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[recovery-RecoveryContractError]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[budget-ExecutionBudgetExceeded]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[stop-ServiceStopped]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_catch_cannot_ack_control_failure[unknown-UncertainPromptCall]",
+        "tests/test_runtime_v3_callback_control_failures.py::test_real_async_business_miss_is_still_a_dropped_row",
+        "tests/test_stream.py::test_expand_none_and_set_equality",
+        "tests/test_stream.py::test_repeated_nodes_keep_distinct_counts_and_processing_times",
+        "tests/test_stream.py::test_progress_hook",
+        "tests/test_stream.py::test_multi_stage_sentinel_drain",
+        "tests/test_stream.py::test_batch_map_count_trigger_and_expand"
+      ],
+      "failures": [],
+      "unchanged_inputs": true,
+      "remaining_children": []
+    }
+  ],
+  "boundaries": {
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "main_status": " M \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\346\\226\\207\\346\\241\\243.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201Review-20261110.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\270\\211\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\272\\214\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261113.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2476\\346\\217\\220\\344\\272\\244\\345\\264\\251\\346\\272\\203\\347\\252\\227\\345\\217\\243\\351\\242\\235\\345\\272\\246-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2477\\345\\215\\225\\350\\241\\214\\344\\270\\212\\351\\231\\220-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\350\\201\\212\\345\\244\\251\\350\\256\\260\\345\\275\\225.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\351\\230\\266\\346\\256\\265\\350\\247\\204\\345\\210\\222-20261109.md\"\n?? docs/upgrade-implementation-20261113/\n",
+    "main_dirty_hashes": {
+      "docs/demiflow升级完整记忆文档.md": "502f40c4cbc9543145a8ab23df1190d5be9fdb3752da0410596a35fdc75d935f",
+      "docs/demiflow升级代码Review-20261110.md": "f4507d2dd8b5db7cd48fe8625103d761ceb409ebb12d8720fd7043d57fdd8c2a",
+      "docs/demiflow升级代码复审-20261112-第三轮.md": "ca4bce379310615025acfa3ab192826922af44c1836b8a78a1f498b96d802447",
+      "docs/demiflow升级代码复审-20261112-第二轮.md": "b4e4edc2ad1700833ca5de5b42f387c11c98626d94ae9c1031a374026747a934",
+      "docs/demiflow升级代码复审-20261112.md": "d266ba571633e0888b4c6e43590975bc4646db3b6bc392cf7feaae27d6ef00a6",
+      "docs/demiflow升级代码复审-20261113.md": "f4c96873a0812089c6d29ed17869b4959924258e5b6317f02c9ceb8e683e11c2",
+      "docs/demiflow升级复审-§6提交崩溃窗口额度-裁决-20261112.md": "1636877704b10c495a6639e4b2d8e9b866320eb5f1db6242dc6333b4d686c1f1",
+      "docs/demiflow升级复审-§7单行上限-裁决-20261112.md": "a5e3a5ede68af259b2fc5c3aec72dd006cfb6feda24065ace00e9f42382e6561",
+      "docs/demiflow升级完整记忆聊天记录.md": "0b76b8eff37e14c80948bb25e5cfe8916b622b97fdef35eca46c24cd30b08786",
+      "docs/demiflow升级阶段规划-20261109.md": "4468ead9e0a11f9ecc7a06c6a22269b9584eb574771a286412f00506c76d69f5",
+      "docs/upgrade-implementation-20261113/README.md": "2ab44324a01b430fe2b9ab95596aaf5cd08b79db6f10425b4ecf6d8dbd0e7ba0",
+      "docs/upgrade-implementation-20261113/agent-a-code-pin.md": "7aa38d2705216e52efc02357f098090dee10d9bffc39f306fbea48ecfed53c0b",
+      "docs/upgrade-implementation-20261113/agent-b-plan-contract.md": "eed89338757bcf9dc373bb63cde7b187c6ebe3b4b5645ff61d64d2adcbb28cae",
+      "docs/upgrade-implementation-20261113/agent-c-runtime-integration.md": "b533c05804122703a0188df809e365059d1009f4385a81acf56b13c191ff6605",
+      "docs/upgrade-implementation-20261113/agent-d-workbench.md": "0655e0e574aede390de6f303263826255f0e8b92bb6f94e9b6f71704cc055fad",
+      "docs/upgrade-implementation-20261113/agent-e-business-proof.md": "f1caa0ad22c293f4a4681b64df0078f083ef287b82ce764b5fb1895e680262bf",
+      "docs/upgrade-implementation-20261113/parallel-contracts-v1.md": "7d2207a17d9cba44de859a82741bd3566199e31bae414b09fa3a6f024246e6da",
+      "docs/upgrade-implementation-20261113/progress-review-20261113.md": "db0148eedb3a8ed29329f881127fa102386c64bec19cfc35eafc0df2b1e89919"
+    },
+    "frozen_against": "49b666f",
+    "frozen": {
+      "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+      "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+      "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+      "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+      "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+      "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+      "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+    }
+  },
+  "pending": [
+    "recovery_rows candidate and callback hard_timeout/batch observations integration",
+    "single-worker stateful graph placement",
+    "broader historical failures including 19 join_chain optimization regressions",
+    "full same-candidate Local/Ray/workbench final acceptance",
+    "formal I08 performance gate"
+  ],
+  "notes": [
+    "Proofs are per fixed revision; passing nodeids are not added into a claim of all-green at current HEAD.",
+    "Three failures at 8174d6f were invalid completed-run resume fixtures; corrected interrupted-run scenarios passed at df5d253.",
+    "Lance native encoding/publication remains final; early evidence establishes durable result prefix before source EOF, not early native Lance encoding.",
+    "Runtime failure messages stay data-only; arbitrary remote business exception classes are not imported or constructed."
+  ]
+}
