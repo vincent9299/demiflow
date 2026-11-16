@@ -32,9 +32,20 @@ def source_run_view(services):
     if root.name != '.dataflow-store' or not root.is_absolute():
         raise RecoveryContractError("Source context requires the original run artifact root")
     assignment = services.assignment
+    # Native ceilings are optional declarations, not the worker's grant. Read
+    # adapters still need the actual finite payload allowance when no optional
+    # native policy was requested. Intersect both authenticated inputs; never
+    # substitute a process-wide default or enlarge a declared ceiling.
+    limits = dict(services.constants.get('native_limits') or {})
+    for name, bound in (
+        ('memory_bytes', services.bounds.max_resident_bytes),
+        ('max_row_bytes', services.bounds.max_row_bytes),
+        ('max_batch_bytes', services.bounds.max_batch_bytes),
+    ):
+        limits[name] = min(limits.get(name, bound), bound)
     return SourceRunView(
         RunRef(str(root.parent), assignment.run_id), assignment.attempt,
-        assignment.fence, MappingProxyType(dict(services.constants.get('native_limits', {}))),
+        assignment.fence, MappingProxyType(limits),
         services.check_stop,
     )
 
