@@ -134,6 +134,7 @@ class DataflowExecution:
                        request.arguments.get("batch_size", 20) if request.kind == "take_batch" else None)
         self._failure = None
         self._checkpoint_requested = False
+        self._checkpoint_deadline = None
         self._checkpoint_deferred = set()
         self._replay = None
         self._node_metrics = {}
@@ -164,6 +165,7 @@ class DataflowExecution:
         if self._stopping or self._state == "succeeded":
             return
         self._stopping = True
+        self._start_checkpoint_deadline()
         self._checkpoint_deferred.clear()
         self._idle.clear()
         for allocation_id, endpoint in self._endpoints.items():
@@ -186,9 +188,22 @@ class DataflowExecution:
     def _run_id(self) -> str:
         return self._action.context.ref.run_id
 
+    def _start_checkpoint_deadline(self):
+        # One deadline starts at source-pause admission, including alignment.
+        # Publication remains synchronous: an already-started sink call drains
+        # before timeout is reported and its original receipt is never undone.
+        if self._checkpoint_deadline is None:
+            self._checkpoint_deadline = (time.monotonic() +
+                self._action.context.limits['checkpoint_timeout_s'])
+
+    def _check_checkpoint_deadline(self):
+        if self._checkpoint_deadline is not None and time.monotonic() >= self._checkpoint_deadline:
+            raise TimeoutError('Checkpoint coordination exceeded checkpoint_timeout_s')
+
     def _check_stop(self) -> None:
         self._action.context.check_stop()
         self._native_guard.check()
+        self._check_checkpoint_deadline()
         if time.monotonic() - self._began_at >= self._bounds.timeout_ms / 1000:
             raise DataflowError('DEADLINE_EXCEEDED', 'action exceeded its admitted execution timeout')
 
@@ -1116,6 +1131,7 @@ class DataflowExecution:
             producer.send_business({"kind": "ack", "delivery_id": delivery})
 
     def _advance_cut(self):
+        self._check_checkpoint_deadline()
         if self._state in ("succeeded", "failed", "cancelled"):
             return
         all_workers = set(self._endpoints)
@@ -1144,6 +1160,7 @@ class DataflowExecution:
                 self._checkpoint_deferred.clear()
         if (self._cut is None and all_workers and (not self._deliveries or durable is not None and durable.can_cut())
                 and all_workers <= self._idle and (durable is not None or self._stopping or self._checkpoint_requested or all_workers <= self._done)):
+            self._start_checkpoint_deadline()
             self._source_exhausted = self._checkpoint._sources_exhausted()
             phase_done = all_workers <= self._done
             final = (phase_done and self._phase_index == len(self._phases) - 1
@@ -1186,6 +1203,8 @@ class DataflowExecution:
             # ObjectSink.prepare already transfers exactly its generation.
             # Calls finishing during publication append to the next generation.
             self._restore_image = image
+            self._check_checkpoint_deadline()
+            self._checkpoint_deadline = None
             self._last_checkpoint_rows, self._last_checkpoint_outputs = self._checkpoint_frontiers()
             self._checkpoint_deliveries = 0
             self._checkpoint_at = time.monotonic()
@@ -1235,6 +1254,7 @@ class DataflowExecution:
         if self._cut is not None or self._checkpoint_requested or self._stopping:
             return
         self._checkpoint_requested = True
+        self._start_checkpoint_deadline()
         self._idle.clear()
         sources = {allocation_id for allocation_id, endpoint in self._endpoints.items()
                    if endpoint._assignment.source_splits}

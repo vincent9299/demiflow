@@ -59,8 +59,8 @@ def test_sealed_checkpoint_partial_results_remain_readable(root, minimum):
 def run(*, source, stage, target, minimum):
     schema = data.schema({'fields': [{'name': 'case_id', 'type': 'string'}]})
     rows = data.read_lance(source['uri'], version=source['version'], columns=['case_id'])
-    rows.write_lance(stage['uri'], mode='create', schema=schema, return_receipt=True)
-    result = data.read_lance(stage['uri'], version=1)
+    result = rows.materialize()
+    result.write_lance(stage['uri'], mode='create', schema=schema, return_receipt=True)
     data.require(result.count() >= minimum, 'not enough cases')
     return result.write_lance(target['uri'], mode='create', schema=schema, return_receipt=True)
 ''')

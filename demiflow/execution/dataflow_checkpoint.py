@@ -371,6 +371,13 @@ class DataflowCheckpointCoordinator:
                                     "cut is incomplete; missing participants: " + ",".join(sorted(missing)))
             fresh = tuple(pending.contributions[p] for p in request.participants)
             contributions = pending.inherited + fresh
+            # State images are external artifacts, but moving them out of the
+            # carrier must not multiply the original whole-cut state ceiling.
+            # Packed images and shared-owner aliases count their physical bytes
+            # once; inherited phase contributions remain part of this image.
+            refs = {ref for c in contributions for ref in c.operator_states.values()}
+            if sum(ref.size_bytes for ref in refs) > self._physical.bounds.max_state_bytes:
+                raise DataflowError('BUDGET_EXCEEDED', 'Aggregate checkpoint state exceeds max_state_bytes')
             if request.final and {c.participant_id for c in contributions} != set(self._participants):
                 raise DataflowError("INVALID_CONTRACT", "final cut lacks actual contributions from every stage")
             if request.final:

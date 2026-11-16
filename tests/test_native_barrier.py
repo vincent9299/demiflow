@@ -294,6 +294,24 @@ def test_publication_fence_does_not_hold_control_db_during_io(tmp_path):
         run.journal.claim_execution(configuration, run.fence)
 
 
+def test_unified_checkpoint_deadline_includes_alignment_before_publication(tmp_path, monkeypatch):
+    published = []
+    original = CommitCoordinator._finish
+    def finish(coordinator, *args, **kwargs):
+        published.append(True)
+        return original(coordinator, *args, **kwargs)
+    monkeypatch.setattr(CommitCoordinator, '_finish', finish)
+    async def slow(row):
+        await asyncio.sleep(1.6)
+        return row
+    with pytest.raises(TimeoutError, match='Checkpoint coordination'):
+        with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 1,
+                'checkpoint_timeout_s': 1, 'checkpoint_interval_ms': 60000}), data.local_execution(workers=2):
+            data.from_items([{'id': i} for i in range(3)]).map_async(slow, concurrency=1).materialize()
+    assert not published, 'timeout must include waiting for the first aligned cut'
+    assert RunJournal(tmp_path/'run').execution_action('action-1')['result'] is None
+
+
 class NativeSlowFixture:
     """Native-capability fixture: no shared semantic state or resource handles."""
     def __init__(self):
