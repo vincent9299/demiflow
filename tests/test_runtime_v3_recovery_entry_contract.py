@@ -167,3 +167,25 @@ def test_native_coordinator_budget_rejection_is_not_mislabeled_unknown(tmp_path,
             with RunContext.resume(reference),data.local_execution(workers=1):
                 data.range(1).take_all()
         assert RunJournal(reference.directory).execution_commits('action-1')==original
+
+
+@pytest.mark.parametrize('budget', ['image-requests-' + 'a'*64, 'requests-' + 'b'*64, '0-leading'])
+def test_original_journal_budget_identifiers_survive_both_rpc_hops(budget):
+    from demiflow.execution.recovery_contract import identifier
+    identifier(budget)
+    original = ExecutionBudgetExceeded(budget)
+    error = original
+    for _ in range(2):
+        payload = json.loads(json.dumps(failure_payload(error)))
+        assert payload['code'] == 'BUDGET_EXCEEDED'
+        error = restore_failure(payload)
+        assert type(error) is ExecutionBudgetExceeded and error.budget == budget
+        assert str(error) == str(original)
+
+
+@pytest.mark.parametrize('budget', ['../secret', 'x'*129, None])
+def test_malformed_local_budget_failure_still_produces_a_closed_control_reply(budget):
+    payload = failure_payload(ExecutionBudgetExceeded(budget))
+    assert payload['code'] == 'INVALID_CONTRACT' and 'budget' not in payload
+    restored = restore_failure(json.loads(json.dumps(payload)))
+    assert type(restored) is DataflowError and restored.code == 'INVALID_CONTRACT'

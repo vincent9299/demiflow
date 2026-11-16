@@ -143,7 +143,15 @@ def failure_payload(exc, *, _depth=0, _budget=None):
     if isinstance(exc, UnresolvedCommit):
         payload.update(code='UNKNOWN_EFFECT', error_type=_UNRESOLVED_TYPE)
     if type(exc) is ExecutionBudgetExceeded:
-        payload.update(code='BUDGET_EXCEEDED', budget=_budget_name(exc.budget))
+        try:
+            budget = _budget_name(exc.budget)
+        except DataflowError:
+            # Error reporting must still return a control reply. Invalid local
+            # exception fields do not become a definite budget rejection.
+            payload.update(code='INVALID_CONTRACT', error_type=None,
+                           message='Invalid execution budget failure', traceback='')
+        else:
+            payload.update(code='BUDGET_EXCEEDED', budget=budget)
     if _depth:
         payload['traceback'] = payload['traceback'][-2048:]
     if isinstance(exc, BaseExceptionGroup) and _depth < 4 and _budget[0] > 0:
@@ -170,8 +178,11 @@ def failure_payload(exc, *, _depth=0, _budget=None):
 
 
 def _budget_name(value):
-    if type(value) is not str or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,127}', value):
-        raise DataflowError('INVALID_CONTRACT', 'execution budget name must be a bounded identifier')
+    from .recovery_contract import identifier
+    try:
+        identifier(value)  # The original journal admits per-node names with '-'.
+    except RecoveryContractError as exc:
+        raise DataflowError('INVALID_CONTRACT', 'execution budget name must be a bounded identifier') from exc
     return value
 
 
