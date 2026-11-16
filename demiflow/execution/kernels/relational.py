@@ -129,10 +129,13 @@ def _ordered_group_rows(
         for record in records:
             _group_key(_materialize_row(record, services), on)
             yield record
-    runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services)
-    for record in merge_sort_runs(runs, spec=sort_spec, services=services):
+    from .reducer_memory import contract, sort_window
+    window = sort_window(services.bounds,key_only=False) if contract(spec) is not None else None
+    runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services,window=window)
+    for record in merge_sort_runs(runs, spec=sort_spec, services=services,window=window):
         row = _materialize_row(record, services)
         yield _group_key(row, on), row, record
+        del row, record
 
 
 def _initial_state(spec: KernelSpec, services: RuntimeServices) -> Any:
@@ -151,8 +154,22 @@ def reduce_partition(
                                      spec=spec, services=services)
 
 
-def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices):
+def admit_reducer(spec, services, *, join_depth=None):
+    from .reducer_memory import contract, check_initial, check_grant
+    from ...data.plan import CallableSpec
+    memory = contract(spec)
+    if memory is not None:
+        program = _program(services,_cfg(spec,'reducer_program'),'callable')
+        initial = program.call_args[0] if isinstance(program,CallableSpec) else spec.configuration.get('initial')
+        check_grant(memory,services.bounds,services.assignment,join_depth=join_depth)
+        check_initial(initial,memory)
+    return memory
+
+
+def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices, memory_join_depth=None):
     """One original sequential fold; caller proves complete ordered key groups."""
+    from .reducer_memory import check_initial,check_state
+    memory = admit_reducer(spec,services,join_depth=memory_join_depth)
     on = tuple(_cfg(spec, "on"))
     if not on:
         raise _err("INVALID_CONTRACT", "empty group keys")
@@ -168,7 +185,10 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
         validation = validator(reducer, program.runtime_contract) if program.runtime_contract is not None else None
     else:
         # Preserve the explicit low-level kernel fixture/legacy program form.
-        reducer, initial = program, _initial_state(spec, services)
+        initial_program = spec.configuration.get('initial_program')
+        reducer = program
+        initial = (_program(services,initial_program,'callable') if initial_program is not None
+                   else spec.configuration.get('initial'))
         fn_kwargs = dict(spec.configuration.get("reducer_kwargs") or {})
         validation = None
     if not callable(reducer):
@@ -178,26 +198,49 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
     max_state = services.bounds.max_state_bytes
     sequence = 0
 
-    for key, items in itertools.groupby(ordered, key=lambda item: item[0]):
-        _check_stop(services)
-        state = copy.deepcopy(initial)
-        for _, row, _record in items:
-            if validation is not None:
-                validation.inputs((state, row), fn_kwargs)
-            state = reducer(state, row, **fn_kwargs)
-            if validation is not None:
-                state = validation.output(state)
-            if max_state > 0 and len(pickle.dumps(state, protocol=pickle.HIGHEST_PROTOCOL)) > max_state:
-                raise _err("BUDGET_EXCEEDED", "reducer state exceeds max_state_bytes")
-        if state is None:
-            continue
+    def output(state,key,sequence):
         if not isinstance(state, Mapping):
             raise _err("INVALID_CONTRACT", "reducer must return a mapping row or None")
         record_id = _hash_id([RECORD_DOMAIN, occurrence, "reduce", key])
         out = _output_record(record_id, {"group_key": key}, state, sequence, services)
         budget.charge(out)
-        sequence += 1
-        yield out
+        return out
+
+    missing = object()
+    current_key, state = missing, None
+    iterator = iter(ordered)
+    try:
+        # Do not let itertools.groupby keep the previous row alive while the
+        # producer hydrates the next one. Only the group key and state survive.
+        for key,row,_record in iterator:
+            _check_stop(services)
+            if current_key is missing or key != current_key:
+                if current_key is not missing and state is not None:
+                    out=output(state,current_key,sequence)
+                    sequence+=1
+                    yield out
+                    del out
+                state=None  # previous group cannot coexist with the next deepcopy
+                current_key=key
+                if memory is not None:
+                    check_initial(initial,memory)
+                state=copy.deepcopy(initial)
+            if validation is not None:
+                validation.inputs((state,row),fn_kwargs)
+            state=reducer(state,row,**fn_kwargs)
+            if validation is not None:
+                state=validation.output(state)
+            if memory is not None:
+                check_state(state,memory,serialized_limit=max_state)
+            elif max_state>0 and len(pickle.dumps(state,protocol=pickle.HIGHEST_PROTOCOL))>max_state:
+                raise _err('BUDGET_EXCEEDED','reducer state exceeds max_state_bytes')
+            del row,_record
+        if current_key is not missing and state is not None:
+            yield output(state,current_key,sequence)
+    finally:
+        close=getattr(iterator,'close',None)
+        if close is not None:
+            close()
 
 
 def union_inputs(

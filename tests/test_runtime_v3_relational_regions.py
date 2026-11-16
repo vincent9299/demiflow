@@ -186,7 +186,12 @@ def _small_budget_region(tmp_path, row_bytes, key_bytes):
         assert measured['sort_run_bytes']==2*row_bytes
         assert 2*(3*measured['sort_frame_bytes']+measured['sort_read_chunk_bytes'])+2*measured['sort_frame_bytes']<=measured['sort_window_bytes']
         region=next(stage for stage in physical.stages if stage.stage_id.startswith('relational-v1-'))
-        assert measured['sort_window_bytes']+32768+2*row_bytes+3*row_bytes+16*row_bytes==region.resident_bytes
+        # State replacement/encoding coexists with the merge; unlike the old
+        # one-S formula, the small-row case reserves both actual state slots.
+        expected_peak=max(8*row_bytes+5*row_bytes,
+            7*row_bytes+max(6*row_bytes+32768,3*row_bytes+2*32768,
+                            6*row_bytes+32768))
+        assert expected_peak+16*row_bytes==region.resident_bytes
         assert region.resident_bytes<physical.bounds.max_resident_bytes
         assert measured['partition_builds']==3 and measured['intermediate_key_rebuilds']==0
         assert measured['intermediate_payload_bytes']==0

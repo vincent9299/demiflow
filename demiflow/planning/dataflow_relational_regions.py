@@ -31,6 +31,7 @@ class RelationalRegionPlan:
     internal_edges: tuple[str, ...]
     join_depth: int
     ordered_groups: bool
+    reducer_memory: tuple[tuple[str,int], ...] = ()
 
 
 def _fields(node, port):
@@ -85,9 +86,16 @@ def _describe(graph, members):
         return None
     payload = ['relational-region-v1', members, terminal,
                [(x.edge_id, x.consumer, x.port, x.fields) for x in external], inner, maximum]
+    from ..execution.kernels.reducer_memory import contract
+    memory = contract(nodes[terminal].kernel) if nodes[terminal].kernel.kind == 'reduce' else None
+    if nodes[terminal].kernel.kind == 'reduce' and memory is None:
+        return None
+    if memory is not None:
+        payload.append(['reducer-memory-v1',dict(memory)])
     return RelationalRegionPlan(PREFIX + identity(payload), tuple(members), terminal,
                                 tuple(external), tuple(inner), maximum,
-                                nodes[terminal].kernel.kind == 'reduce')
+                                nodes[terminal].kernel.kind == 'reduce',
+                                tuple(sorted(memory.items())) if memory is not None else ())
 
 
 def interpret_region(graph, stage):
@@ -107,18 +115,8 @@ def region_resident_bytes(plan, bounds):
     metadata = min(4 * 1024**2, max(4096,
         min(bounds.max_control_bytes, bounds.max_resident_bytes) // 16))
     if plan.ordered_groups:
-        # Reduce: 8R belongs exclusively to the actual external-sort window;
-        # depth+1 row windows plus the original batch window remain available
-        # for arena hydration, key/codec/output temporaries. A depth-d binary
-        # merge holds at most d+2 row-sized values: retained left siblings,
-        # current pair and its merged result. B >= R supplies the extra row.
-        # During sort build those hydrated parents are released before yielding
-        # the key carrier; sort's 2R retained run + 6R current codec window is
-        # separate and includes the decoded comparison tokens. Reducer state and
-        # metadata coexist. This is larger than join-only, never a max(profile)
-        # substitution for simultaneously live resources.
-        return (bounds.max_batch_bytes + (plan.join_depth + 9) * bounds.max_row_bytes
-                + bounds.max_state_bytes + metadata)
+        from ..execution.kernels.reducer_memory import resident_bytes
+        return resident_bytes(dict(plan.reducer_memory),bounds,join_depth=plan.join_depth)
     return bounds.max_batch_bytes + (plan.join_depth + 4) * bounds.max_row_bytes + metadata
 
 

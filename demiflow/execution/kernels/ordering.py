@@ -68,19 +68,23 @@ class SortWindow:
     read_chunk_bytes: int
     merge_fan_in: int = 2
     key_only: bool = False
+    merge_resident_bytes: int | None = None
 
     def validate(self, bounds):
         values = (self.resident_bytes, self.run_bytes, self.frame_bytes,
                   self.read_chunk_bytes, self.merge_fan_in)
         if any(type(value) is not int or value < 1 for value in values) or type(self.key_only) is not bool:
             raise _err('INVALID_CONTRACT', 'sort subwindow values must be positive integers')
+        merge_window = self.resident_bytes if self.merge_resident_bytes is None else self.merge_resident_bytes
+        if type(merge_window) is not int or not 1 <= merge_window <= self.resident_bytes:
+            raise _err('INVALID_CONTRACT', 'invalid sort merge subwindow')
         if (self.resident_bytes > bounds.max_resident_bytes
                 or self.frame_bytes > self.run_bytes
                 or self.read_chunk_bytes > min(1 << 20, bounds.max_row_bytes)
                 or self.merge_fan_in > min(_MERGE_FAN_IN, bounds.max_open_files)
                 or self.run_bytes + 6 * bounds.max_row_bytes > self.resident_bytes
                 or self.merge_fan_in * (3 * self.frame_bytes + self.read_chunk_bytes)
-                   + 2 * self.frame_bytes > self.resident_bytes):
+                   + 2 * self.frame_bytes > merge_window):
             raise _err('RESOURCE_INFEASIBLE', 'sort subwindow exceeds its admitted live-object window')
 
 

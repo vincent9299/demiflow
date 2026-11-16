@@ -162,6 +162,12 @@ def partition_stages(
         # Per-replica working set: one input batch, the declared output bound
         # and any state ceiling co-reside inside the provisioned worker.
         resident = bounds.max_batch_bytes + kernel.output_bound_bytes + state_bytes
+        if kernel.kind == 'reduce':
+            from ..execution.kernels.reducer_memory import contract, resident_bytes
+            reducer_memory = contract(kernel)
+            if reducer_memory is not None:
+                resident = resident_bytes(reducer_memory,bounds)
+                state_bytes = bounds.max_state_bytes
         replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
         from ..execution.dataflow_managed_devices import service_profile
         profile = service_profile(kernel, policy=policy, bounds=bounds)

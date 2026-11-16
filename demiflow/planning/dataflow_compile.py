@@ -743,12 +743,21 @@ class _Capture:
             requests = dict(profile.requests)
             requests['memory_bytes'] = self.bounds.max_batch_bytes + 6 * self.bounds.max_row_bytes
             profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
+        reducer_memory = None
+        if kind == 'reduce':
+            from ..execution.kernels.reducer_memory import declare, resident_bytes, FIELD
+            reducer_memory = declare(source.initial, self.bounds)
+            profile = ResourceProfile(requests={**profile.requests,
+                'memory_bytes':resident_bytes(reducer_memory,self.bounds)},
+                limits=profile.limits,requirements=profile.requirements)
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=inputs,
             state="none", effect="pure", resource_role="cpu",
             profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
+        if reducer_memory is not None:
+            kernel = replace(kernel,configuration={**dict(kernel.configuration),FIELD:reducer_memory})
         if isinstance(source, KeyedSource) and source.kind == "exclude_keys":
             configuration = _plain(kernel.configuration)
             configuration.update(lance_key_source=self.nodes[child_indices[0][0]].occurrence_id,

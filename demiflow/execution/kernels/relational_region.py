@@ -196,10 +196,12 @@ class RelationalRegionRuntime:
                 self.active = False
 
     def _reduce(self, arena, chains, spec):
-        from .relational import _group_sort_spec, reduce_ordered_groups
-        from .ordering import build_sort_runs, merge_sort_runs, SortWindow
+        from .relational import _group_sort_spec, reduce_ordered_groups, admit_reducer
+        from .ordering import build_sort_runs, merge_sort_runs
+        from .reducer_memory import sort_window
         from .dataflow import _group_key
         keys = tuple(spec.configuration['on'])
+        admit_reducer(spec,self.services,join_depth=self.plan.join_depth)
         # Sort only a bounded key/offset record; wide payload remains in arena.
         def references():
             for chain in chains:
@@ -210,11 +212,7 @@ class RelationalRegionRuntime:
                     rid = _hash_id(['region-sort-v1', self.plan.region_id, offset])
                     yield _output_record(rid, {'join_index': header[4]}, keyrow, offset, self.services)
         sort_spec = _group_sort_spec(spec, keys)
-        row_bytes = self.services.bounds.max_row_bytes
-        chunk = min(65536, max(1, row_bytes // 64))
-        window = SortWindow(resident_bytes=8 * row_bytes, run_bytes=2 * row_bytes,
-            frame_bytes=max(1, (8 * row_bytes - 2 * chunk) // 8),
-            read_chunk_bytes=chunk, merge_fan_in=2, key_only=True)
+        window = sort_window(self.services.bounds,key_only=True)
         runs = build_sort_runs(references(), spec=sort_spec, services=self.services, window=window)
         self.counters.update(sort_runs=len(runs), sort_window_bytes=window.resident_bytes,
             sort_run_bytes=window.run_bytes, sort_frame_bytes=window.frame_bytes,
@@ -224,4 +222,6 @@ class RelationalRegionRuntime:
                 offset = record.sequence
                 row = arena.hydrate(_RowReference(offset, arena.header(offset)))
                 yield _group_key(row, keys), row, record
-        yield from reduce_ordered_groups(ordered(), spec=spec, services=self.services)
+                del row,record
+        yield from reduce_ordered_groups(ordered(), spec=spec, services=self.services,
+                                         memory_join_depth=self.plan.join_depth)
