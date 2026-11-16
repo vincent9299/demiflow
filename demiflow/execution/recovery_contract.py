@@ -38,26 +38,49 @@ def document(value, maximum=MAX_DOCUMENT_BYTES):
     """Validate before encoding, including depth, node count and finite floats."""
     pending = [(value, 0)]
     nodes = 0
+    encoded_upper = 0
     while pending:
         item, depth = pending.pop()
+        kind = type(item)
         nodes += 1
         if nodes > 65536 or depth > 32:
             raise RecoveryContractError("Execution metadata exceeds structural budget")
-        if type(item) is dict:
-            if len(item) > 16384 or any(type(k) is not str for k in item):
+        if kind is dict:
+            if len(item) > 16384:
                 raise RecoveryContractError("Invalid execution metadata keys")
+            encoded_upper += 2 + 4 * len(item)
+            for key in item:
+                if type(key) is not str:
+                    raise RecoveryContractError("Invalid execution metadata keys")
+                encoded_upper += 6 * len(key)
             pending.extend((v, depth + 1) for v in item.values())
-        elif type(item) in (list, tuple):
+        elif kind in (list, tuple):
             if len(item) > 16384:
                 raise RecoveryContractError("Execution metadata collection exceeds budget")
+            encoded_upper += 2 + len(item)
             pending.extend((v, depth + 1) for v in item)
-        elif type(item) is float:
+        elif kind is float:
             if not math.isfinite(item):
                 raise RecoveryContractError("Nonfinite execution metadata")
-        elif type(item) not in (str, int, bool, type(None)):
+            encoded_upper += 32
+        elif kind not in (str, int, bool, type(None)):
             raise RecoveryContractError("Execution metadata must be strict JSON")
-        elif type(item) is str and len(item) > maximum:
-            raise RecoveryContractError("Execution metadata exceeds byte budget")
+        elif kind is str:
+            if len(item) > maximum:
+                raise RecoveryContractError("Execution metadata exceeds byte budget")
+            encoded_upper += 2 + 6 * len(item)
+        elif kind is int:
+            encoded_upper += item.bit_length() // 3 + 3
+        else:
+            encoded_upper += 5
+    if encoded_upper <= maximum:
+        # The same structural validation above has proved that the complete
+        # encoded object fits before allowing the C encoder to allocate it.
+        # Six bytes/codepoint bounds UTF-8 and every JSON escape; integer width
+        # uses log10(2) < 1/3. Ambiguous near-budget cases keep the old incremental
+        # path below, so this conservative estimate never rejects a valid input.
+        return json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False,
+                          separators=(",", ":")).encode("utf-8")
     chunks, size = [], 0
     for part in json.JSONEncoder(sort_keys=True, ensure_ascii=False, allow_nan=False,
                                  separators=(",", ":")).iterencode(value):
