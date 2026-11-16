@@ -47,7 +47,7 @@ def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, m
     from demiflow.execution.dataflow_checkpoint import DataflowCheckpointCoordinator
     from demiflow.execution.sealed_plans import load_sealed_plan
     from demiflow.execution.run_journal import RunJournal
-    reads, cuts = [], []
+    reads, cuts, source_frontiers = [], [], []
     next_record, commit = ItemsReader.next_record, DataflowCheckpointCoordinator.commit
     def observe(reader):
         poll = next_record(reader)
@@ -59,6 +59,8 @@ def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, m
     def interrupt(coordinator, *args, **kwargs):
         image = commit(coordinator,*args,**kwargs)
         cuts.append(image.commit_id)
+        assert len(image.source_vector) == 1
+        source_frontiers.append(image.source_vector[0].next_sequence)
         if resume and not image.cut.final and len(cuts)==1:
             raise Interrupted()
         return image
@@ -81,11 +83,21 @@ def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, m
         journal=RunJournal(reference.directory)
         before=journal.execution_commits('action-1')
         assert before and before[-1]['status']=='acked'
+        first_attempt_reads = len(reads)
+        assert reads == list(range(first_attempt_reads))
+        acked_source = source_frontiers[0]
+        assert acked_source <= first_attempt_reads <= 5
         with RunContext.resume(reference), data.local_execution(workers=4,worker_mode='thread'):
             rows=_flow().take_all()
         assert journal.execution_commits('action-1')[:len(before)]==before
     assert Counter((r['i'],r['branch']) for r in rows)==Counter((i,b) for i in range(5) for b in range(16))
-    assert reads==list(range(5))
+    if resume:
+        # Publication overlap may have read a pure suffix past the original
+        # ACK. Only that unconfirmed suffix may be reread; the shared source
+        # still reads once per attempt, never once per branch or per consumer.
+        assert reads[first_attempt_reads:] == list(range(acked_source, 5))
+    else:
+        assert reads==list(range(5))
     bundle=load_sealed_plan(reference.directory,'action-1')
     assert len(bundle['graph'].sources)==1 and len(bundle['graph'].nodes)==19
     assert cuts

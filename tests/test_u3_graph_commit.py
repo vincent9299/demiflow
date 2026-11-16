@@ -124,6 +124,7 @@ def test_finite_sealed_mode_commits(tmp_path):
 def test_durable_graph_reclaims_channel_segments(tmp_path, monkeypatch):
     from _native_receipt_fixtures import committed_rows
     from demiflow.execution import dataflow_gc
+    from demiflow.execution.dataflow import DataflowExecution
     observed = []
     collect = dataflow_gc.collect_published_orphans
     def collecting(action, **kwargs):
@@ -134,8 +135,16 @@ def test_durable_graph_reclaims_channel_segments(tmp_path, monkeypatch):
     spec, readers, n = _graph_spec(n=24, cut_rows=8, mode="durable_incremental", readers=("c0", "c1"))
     # This unregistered private byte must never be collected as an owned object.
     foreign = tmp_path / 'run' / '.dataflow-store' / 'foreign-protected.bin'
-    foreign.parent.mkdir(parents=True)
-    foreign.write_bytes(b'not-a-runtime-object')
+    prepare = DataflowExecution.prepare
+    def prepared(execution):
+        result = prepare(execution)
+        # Add the foreign file after the native store established its physical
+        # lease protocol. Precreating that namespace deliberately makes it a
+        # legacy store, where refusing all collection is the required guard.
+        assert execution._action.context.journal.dataflow_gc_protocol()[2]
+        foreign.write_bytes(b'not-a-runtime-object')
+        return result
+    monkeypatch.setattr(DataflowExecution, 'prepare', prepared)
     run, action_id, _, facts, carriers, physical = _execute(tmp_path, spec, readers, n, checkpoint_rows=8)
     assert any(e.mode == 'durable_incremental' for e in physical.exchanges)
     # GC operates on the original object settlements after confirmed owner exit.
