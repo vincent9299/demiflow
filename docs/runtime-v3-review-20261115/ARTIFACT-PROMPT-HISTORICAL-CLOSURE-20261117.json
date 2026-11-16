@@ -1,0 +1,378 @@
+{
+  "schema": "demiflow.native-prompt-historical-evidence.v1",
+  "base": "21f52b0",
+  "tested_head": "341699014e3c6465a9e677f620fcb8a014c8b1e0",
+  "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117",
+  "production_changes": [],
+  "only_changed_symbols": [
+    "NativeSlowFixture",
+    "test_native_inflight_cut_allows_free_slots_past_slow_call"
+  ],
+  "receipts": [
+    {
+      "round": 9,
+      "path": "/tmp/demiflow-kv-owned-history-r9/artifact_native-000/receipt.json",
+      "sha256": "784b82956eaafa41a9a71ac660cc696b6ceba20b9a0d78e4e92c159ec9d580d4",
+      "head": "21f52b0ef729a7899c208b59897cbb8bd6f43acd",
+      "inputs": 2929,
+      "source_unchanged": true,
+      "outcome": "passed",
+      "nodeids": [
+        "tests/test_lance_artifacts.py::test_fixed_bytes_survive_source_removal_and_new_blob_versions",
+        "tests/test_lance_artifacts.py::test_size_and_logical_names_are_validated",
+        "tests/test_lance_artifacts.py::test_streamed_blob_checkpoint_replays_without_reopening_source",
+        "tests/test_lance_artifacts.py::test_legacy_artifacts_allow_read_only_audit_but_no_new_reference"
+      ],
+      "reports": [
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_fixed_bytes_survive_source_removal_and_new_blob_versions",
+          "when": "setup",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0006611347198486328,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_fixed_bytes_survive_source_removal_and_new_blob_versions",
+          "when": "call",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 4.191221088171005,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_fixed_bytes_survive_source_removal_and_new_blob_versions",
+          "when": "teardown",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0001849159598350525,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_size_and_logical_names_are_validated",
+          "when": "setup",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0005803592503070831,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_size_and_logical_names_are_validated",
+          "when": "call",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 2.3430609926581383,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_size_and_logical_names_are_validated",
+          "when": "teardown",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0001822337508201599,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_streamed_blob_checkpoint_replays_without_reopening_source",
+          "when": "setup",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0005829483270645142,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_streamed_blob_checkpoint_replays_without_reopening_source",
+          "when": "call",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 3.8484181836247444,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_streamed_blob_checkpoint_replays_without_reopening_source",
+          "when": "teardown",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.00013545528054237366,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_legacy_artifacts_allow_read_only_audit_but_no_new_reference",
+          "when": "setup",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0004941299557685852,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_legacy_artifacts_allow_read_only_audit_but_no_new_reference",
+          "when": "call",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 2.483465526252985,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_lance_artifacts.py::test_legacy_artifacts_allow_read_only_audit_but_no_new_reference",
+          "when": "teardown",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.00029966607689857483,
+          "detail": null
+        }
+      ],
+      "argv": [
+        "-q",
+        "--tb=short",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp=/tmp/demiflow-kv-owned-history-r9/artifact_native-000/tmp",
+        "--junitxml=/tmp/demiflow-kv-owned-history-r9/artifact_native-000/result.xml",
+        "tests/test_lance_artifacts.py::test_fixed_bytes_survive_source_removal_and_new_blob_versions",
+        "tests/test_lance_artifacts.py::test_size_and_logical_names_are_validated",
+        "tests/test_lance_artifacts.py::test_streamed_blob_checkpoint_replays_without_reopening_source",
+        "tests/test_lance_artifacts.py::test_legacy_artifacts_allow_read_only_audit_but_no_new_reference"
+      ],
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-kv-owned-history-r9/artifact_native-000/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-kv-owned-history-r9/artifact_native-000/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-kv-owned-history-r9/artifact_native-000/forge",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/tests",
+        "TMPDIR": "/tmp/demiflow-kv-owned-history-r9/artifact_native-000/scratch"
+      }
+    },
+    {
+      "round": 10,
+      "path": "/tmp/demiflow-kv-owned-history-r10/native_slow_prompt-000/receipt.json",
+      "sha256": "e20cf5ce371ae92619bfbaeab91e63001e9ef4de0a674ce296682fe129ef792e",
+      "head": "cadfa892a60bba3b6cc2fec9172e3b66a349475e",
+      "inputs": 2929,
+      "source_unchanged": true,
+      "outcome": "failed: test observer used body instead of actual payload",
+      "nodeids": [
+        "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call"
+      ],
+      "reports": [
+        {
+          "nodeid": "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call",
+          "when": "setup",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0007575042545795441,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call",
+          "when": "call",
+          "outcome": "failed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 3.285172764211893,
+          "detail": "tests/test_native_barrier.py:479: in test_native_inflight_cut_allows_free_slots_past_slow_call\n    pipeline().materialize().take_all()\n    ^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/data/dataset.py:2043: in materialize\n    handle = run_dataset_action(request)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:375: in _run_dataset_action\n    handle.close()\ndemiflow/execution/dataflow_handles.py:364: in close\n    raise self._failure\ndemiflow/execution/dataflow_api.py:356: in _run_dataset_action\n    result = handle.result()\n             ^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_handles.py:327: in result\n    status = self._pump(min(_CONTROL_POLL_MS, remaining_ms))\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_handles.py:160: in _pump\n    return self._execution.pump(deadline_ms=deadline_ms)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_native_barrier.py:448: in pump\n    result = original_pump(execution, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:823: in pump\n    self._handle_event(event)\ndemiflow/execution/dataflow.py:942: in _handle_event\n    raise self._failure\nE   KeyError: '\"\\'body\\'\"'\nE   angzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/operator.py\", line 648, in push\nE       yield from self._emit(self._calls.submit(lambda slot: preserve_block(invoke_unary(self._spec, record,\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/operator.py\", line 905, in _emit\nE       for record in records:\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/concurrent_calls.py\", line 36, in submit\nE       yield from self.poll(wait_for=True, max_records=1)\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/concurrent_calls.py\", line 127, in poll\nE       raise value[1]\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/concurrent_calls.py\", line 56, in run\nE       for index, record in enumerate(iterator):\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/block_partition.py\", line 51, in preserve_block\nE       for record in records:\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/dataflow.py\", line 336, in invoke_unary\nE       result = _invoke_scoped(instance, row, (record,), spec)\nE                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/dataflow.py\", line 264, in _invoke_scoped\nE       return instance(value)\nE              ^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/async_instance.py\", line 202, in __call__\nE       result = self.resolve(result)\nE                ^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/async_instance.py\", line 135, in resolve\nE       result = future.result(timeout=min(.05, remaining))\nE                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/_base.py\", line 456, in result\nE       return self.__get_result()\nE              ^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/_base.py\", line 401, in __get_result\nE       raise self._exception\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/kernels/async_instance.py\", line 115, in wait\nE       return await value\nE              ^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/operator_llm/runtime.py\", line 575, in __call__\nE       result, trace = await self._runtime.call_with_trace(self._operation.prompt_name, self.values(row))\nE                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/operator_llm/runtime.py\", line 454, in call_with_trace\nE       request = exchange.throw(exc)  # a declared HTTP retry can continue this exchange\nE                 ^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/operator_llm/runtime.py\", line 218, in _exchange\nE       response = yield request\nE                  ^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/operator_llm/runtime.py\", line 439, in call_with_trace\nE       response = await execute(request)\nE                  ^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/operator_llm/stream_recovery.py\", line 260, in admitted\nE       return await execute(request)\nE              ^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/operator_llm/client.py\", line 537, in execute\nE       return await drain_on_service_stop(self._execute(request), enabled=bool(self.journal))\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/request_limits.py\", line 24, in drain_on_service_stop\nE       return await asyncio.shield(task)\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/operator_llm/client.py\", line 656, in _execute\nE       refs = await self._journal_pool.run(self.journal.response,source,record) if self.journal else None\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/blocking_io.py\", line 33, in run\nE       return await asyncio.shield(future)\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/env/lib/python3.11/concurrent/futures/thread.py\", line 58, in run\nE       result = self.fn(*self.args, **self.kwargs)\nE                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/blocking_io.py\", line 30, in <lambda>\nE       future = asyncio.get_running_loop().run_in_executor(self._executor, lambda: context.run(fn, *args, **kwargs))\nE                                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_model_journal.py\", line 182, in response\nE       return self._rpc(self._command('response', request, value_ref=value_ref))\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_model_journal.py\", line 127, in _rpc\nE       reply = self._port.native_request(command)\nE               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_authority.py\", line 982, in native_request\nE       value = self._request(\"native_request\", command.operation_id, payload)\nE               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_authority.py\", line 937, in _request\nE       raise restore_failure(reply.payload)\nE   KeyError: \"'body'\"\nE   Traceback (most recent call last):\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_authority.py\", line 461, in _serve\nE       reply = self.dispatch(event)\nE               ^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_authority.py\", line 516, in dispatch\nE       if command.operation == 'reserve' else self.native_request(command, lease=lease))\nE                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_authority.py\", line 680, in native_request\nE       return _NATIVE_HANDLERS[command.operation](self, journal, command, request)\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/demiflow/execution/dataflow_authority.py\", line 828, in _native_response\nE       references = journal.response(request, json.loads(raw))\nE                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/tests/test_native_barrier.py\", line 439, in persisted_response\nE       if int(request['body']['messages'][-1]['content']) == 0 and not interrupted:\nE              ~~~~~~~^^^^^^^^\nE   KeyError: 'body'"
+        },
+        {
+          "nodeid": "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call",
+          "when": "teardown",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0002644658088684082,
+          "detail": null
+        }
+      ],
+      "argv": [
+        "-q",
+        "--tb=short",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp=/tmp/demiflow-kv-owned-history-r10/native_slow_prompt-000/tmp",
+        "--junitxml=/tmp/demiflow-kv-owned-history-r10/native_slow_prompt-000/result.xml",
+        "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call"
+      ],
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-kv-owned-history-r10/native_slow_prompt-000/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-kv-owned-history-r10/native_slow_prompt-000/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-kv-owned-history-r10/native_slow_prompt-000/forge",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/tests",
+        "TMPDIR": "/tmp/demiflow-kv-owned-history-r10/native_slow_prompt-000/scratch"
+      }
+    },
+    {
+      "round": 11,
+      "path": "/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/receipt.json",
+      "sha256": "6507094f33fdc3aeb0c6138816f7b1b70476170b937ed4c30d410e42ab6b9247",
+      "head": "341699014e3c6465a9e677f620fcb8a014c8b1e0",
+      "inputs": 2929,
+      "source_unchanged": true,
+      "outcome": "passed",
+      "nodeids": [
+        "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call"
+      ],
+      "reports": [
+        {
+          "nodeid": "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call",
+          "when": "setup",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.0007425025105476379,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call",
+          "when": "call",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 10.071319922804832,
+          "detail": null
+        },
+        {
+          "nodeid": "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call",
+          "when": "teardown",
+          "outcome": "passed",
+          "wasxfail": null,
+          "rerun": 0,
+          "seconds": 0.00025540590286254883,
+          "detail": null
+        }
+      ],
+      "argv": [
+        "-q",
+        "--tb=short",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp=/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/tmp",
+        "--junitxml=/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/result.xml",
+        "tests/test_native_barrier.py::test_native_inflight_cut_allows_free_slots_past_slow_call"
+      ],
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/forge",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_native_prompt_20261117/tests",
+        "TMPDIR": "/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/scratch"
+      }
+    }
+  ],
+  "postrun_readonly_native_facts": {
+    "journal": "/tmp/demiflow-kv-owned-history-r11/native_slow_prompt-000/tmp/test_native_inflight_cut_allow0/run/run.sqlite",
+    "calls_and_complete": [
+      12,
+      12
+    ],
+    "request_budget": 12,
+    "commits": [
+      [
+        "79fdefad81b8384101c15e3922de134d7fcd79fae2a60b71871c8a22ef476338",
+        "action-1",
+        1,
+        "acked"
+      ],
+      [
+        "abc04537de9c23fa2a72e78e74991ad2e98bacde6aa634c8c22000aa8504dc4a",
+        "action-1",
+        2,
+        "acked"
+      ],
+      [
+        "5a092579cca419e9c1216bd2594ee82333671a24ed5479e2c3e47351dec5773c",
+        "action-1",
+        3,
+        "acked"
+      ],
+      [
+        "d27465fc8d2b8cc95ec1dc00a7fff9c8191e66bcd628481c02791bb34bc99b0d",
+        "action-1",
+        4,
+        "acked"
+      ],
+      [
+        "eab06a9ee2ab4745b83cc79ff76d88cc6e260da67a6cd7bae4fff9d1bdae5817",
+        "action-1",
+        5,
+        "acked"
+      ],
+      [
+        "1bae0204d1a0a80bcf7a8bc848189165d610e858a821c39984fc5e8ef3fec9ab",
+        "action-1",
+        6,
+        "acked"
+      ],
+      [
+        "aca71b86a6b2d4f7f4178adfa3e7ef8fa655e0a2e673a22c6d5675940a18af14",
+        "action-1",
+        7,
+        "acked"
+      ],
+      [
+        "0fd3a066c10e743c97103c0507fbd38c30963f65248ddaee63396ce5f045436e",
+        "action-1",
+        8,
+        "acked"
+      ],
+      [
+        "e4609e11b75253353aa0d3c00960d91fa88a488f7c25768a1e7f12c945bea785",
+        "action-1",
+        9,
+        "acked"
+      ],
+      [
+        "840f37dd0665b8da9a1280ad7e0cb0167bc575b187901606c9805e35acae5ab3",
+        "action-2",
+        1,
+        "acked"
+      ],
+      [
+        "b4ce645120eff0595446c8e457f21cc34c07c6bef3730bccbc4c95ef46d5e822",
+        "action-2",
+        2,
+        "acked"
+      ],
+      [
+        "5566178fe8f025282040d742d7c0d9c8e5587d2228a7814a2691e38a13778235",
+        "action-2",
+        3,
+        "acked"
+      ],
+      [
+        "3b6d247eedecbb24290a90bcf7795c8000cda1f6149e337ebcd32741a8c1e893",
+        "action-2",
+        4,
+        "acked"
+      ],
+      [
+        "9fc1da5e72e5f17877c49b9444013f27209f5c5595d1e1066a1e6c68b5eb0c20",
+        "action-2",
+        5,
+        "acked"
+      ],
+      [
+        "f04de9b9dc9048784092f3ea683a8e63bb0238cc8bad4b3d41b2904a2cddf76a",
+        "action-2",
+        6,
+        "acked"
+      ],
+      [
+        "b16f4e40196f531caf0313dd79255ebd2c7c9e90abc908fb05c6704c931ddc71",
+        "action-2",
+        7,
+        "acked"
+      ]
+    ]
+  },
+  "original_inventory_progress": "Previous lane receipts502 + original artifact4 + this original native barrier1 =507 of516 with source-bound passing receipts in this lane; root Prompt and other barrier work remain separately owned. Not a single-final-HEAD whole-suite pass claim."
+}
