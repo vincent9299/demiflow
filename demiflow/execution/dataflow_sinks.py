@@ -369,6 +369,12 @@ class NativeTerminalSink(_DataflowArtifactSink):
         self.native = native
         self._batch_rows = batch_rows
         self._native_limits = dict(native_limits or {})
+        from .dataflow_publication_budget import workspace_bytes
+        self._publication_workspace = workspace_bytes(self._configuration)
+        if self._publication_workspace:
+            from dataclasses import replace
+            self._bounds = replace(self._bounds,
+                max_resident_bytes=min(self._bounds.max_resident_bytes, self._publication_workspace))
 
     def _native_scope(self):
         from .payload_limits import payload_scope
@@ -390,13 +396,37 @@ class NativeTerminalSink(_DataflowArtifactSink):
         pending = None
         batch, size = [], 0
         schema_ref, schema = None, None
+        from ..data.runtime_contract import check_size
+        control_bytes = (check_size(manifest, self._bounds.max_control_bytes)
+                         if self._publication_workspace else 0)
+        held_record_bytes = 0
         def table():
             from .batch_conversion import admit_batch_conversion, native_arrow_table
-            admit_batch_conversion(batch, 'pyarrow', schema=schema, bounds=self._bounds)
+            reserved = (control_bytes + stream.buffered_bytes + held_record_bytes + 65536
+                        if self._publication_workspace else 0)
+            admit_batch_conversion(batch, 'pyarrow', schema=schema, bounds=self._bounds,
+                reserved_bytes=reserved, resident_workspace=bool(self._publication_workspace),
+                writer_copies=2 if self._publication_workspace else 0)
             result = native_arrow_table(batch, schema)
-            if size + result.nbytes > self._bounds.max_batch_bytes:
+            if self._publication_workspace:
+                if size > self._bounds.max_batch_bytes or result.nbytes > self._bounds.max_batch_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'native sink payload exceeds max_batch_bytes')
+                retained = check_size(batch, self._bounds.max_resident_bytes)
+                if reserved + retained + 3 * result.get_total_buffer_size() > self._bounds.max_resident_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion and writer exceed publication workspace')
+            elif size + result.nbytes > self._bounds.max_batch_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'native sink conversion coexistence exceeds max_batch_bytes')
             return result
+        def arrow_table(value):
+            if self._publication_workspace:
+                reserved = control_bytes + stream.buffered_bytes + held_record_bytes + 65536
+                # The Arrow carrier may be a tiny view of a large parent.
+                # Its parent and native writer copies share this same grant.
+                if reserved + 3 * value.get_total_buffer_size() > self._bounds.max_resident_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'native Arrow parent and writer exceed publication workspace')
+                if value.nbytes > self._bounds.max_batch_bytes:
+                    raise DataflowError('BUDGET_EXCEEDED', 'native Arrow payload exceeds max_batch_bytes')
+            return value
         try:
             for partition in manifest['partitions']:
                 ref = _artifact_from_json(partition['data_ref'])
@@ -408,11 +438,13 @@ class NativeTerminalSink(_DataflowArtifactSink):
                         line = stream.readline(line_limit(self._bounds))
                         if not line:
                             break
-                        raw, item = decode_frame(line, self._bounds, retained=stream.buffered_bytes + size)
+                        raw, item = decode_frame(line, self._bounds, retained=control_bytes + stream.buffered_bytes + size)
                         del line
                         record = decode_document(raw, record_id=item['record_id'],
-                            sequence=item['sequence'], bounds=self._bounds, retained=stream.buffered_bytes + size)
+                            sequence=item['sequence'], bounds=self._bounds,
+                            retained=control_bytes + stream.buffered_bytes + size)
                         del raw
+                        held_record_bytes = record.encoded_bytes
                         if is_arrow_record(record):
                             if batch:
                                 yield table()
@@ -421,7 +453,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
                                     or record.source_position['row_offset'] != pending[4]
                                     or pending[3] >= self._batch_rows
                                     or pending[5] + record.encoded_bytes > self._bounds.max_batch_bytes // 2):
-                                yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+                                yield arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
                                 pending = None
                             native_batch, index = arrow.locate(record)
                             if pending is None:
@@ -431,7 +463,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
                             pending[5] += record.encoded_bytes
                             continue
                         if pending is not None:
-                            yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+                            yield arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
                             pending = None
                             arrow.close()
                         if record.inline is None:
@@ -459,7 +491,7 @@ class NativeTerminalSink(_DataflowArtifactSink):
             if batch:
                 yield table()
             if pending is not None:
-                yield pa.Table.from_batches([pending[1].slice(pending[2], pending[3])])
+                yield arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
         finally:
             arrow.close()
 
@@ -502,7 +534,15 @@ class NativeTerminalSink(_DataflowArtifactSink):
         super().abort(prepared, context)
 
 
-def make_native_terminal_sink(spec, *, request, services):
+def make_native_terminal_sink(spec, *, request, services, publication_reserved_bytes=None):
+    from .dataflow_publication_budget import workspace_bytes
+    workspace = workspace_bytes(spec.configuration)
+    if workspace:
+        control = max(1, min(services.bounds.max_control_bytes, services.bounds.max_resident_bytes // 8))
+        if (type(publication_reserved_bytes) is not int
+                or workspace + control > publication_reserved_bytes
+                or publication_reserved_bytes > services.bounds.max_resident_bytes):
+            raise DataflowError('INVALID_CONTRACT', 'native publication workspace lacks sealed residency reservation')
     if request.kind == 'write_lance':
         from .lance_sink import LanceSink
         from ..lance.model import LanceWriteSpec
@@ -569,7 +609,8 @@ def make_native_terminal_sink(spec, *, request, services):
         _require_durable(native)
     else:
         raise DataflowError('INVALID_CONTRACT', 'unknown native terminal adapter')
-    batch_rows = min(256, (services.policy.native_limits or {}).get("batch_rows", 256))
+    batch_rows = min(256, (services.policy.native_limits or {}).get("batch_rows", 256),
+                     services.action.context.limits['batch_rows'])
     return NativeTerminalSink(native=native, batch_rows=batch_rows, native_limits=services.policy.native_limits,
         sink_id=request.kind, store=services.store,
         action=services.action, bounds=services.bounds, configuration=dict(spec.configuration))

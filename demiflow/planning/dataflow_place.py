@@ -423,12 +423,16 @@ def solve_residency(
     bounds: Bounds,
     max_active_workers: int | None = None,
     max_cpu_millis: int | None = None,
+    publication_workspace_bytes: int = 0,
 ) -> ResidencyPlan:
     if not stages:
         raise _error("INVALID_CONTRACT", "physical plan has no stages")
     if not hosts:
         raise _error("RESOURCE_INFEASIBLE", "no host can run the plan")
     control_reserved = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+    if type(publication_workspace_bytes) is not int or publication_workspace_bytes < 0:
+        raise _error('INVALID_CONTRACT', 'publication workspace must be nonnegative')
+    control_reserved += publication_workspace_bytes
     available = bounds.max_resident_bytes - control_reserved
     if available <= 0:
         raise _error("RESOURCE_INFEASIBLE", "control reservation leaves no working memory")
@@ -755,10 +759,12 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
     from ..execution.dataflow_native_limits import sealed_execution_ceilings
     ceilings = sealed_execution_ceilings(graph)
     cpu_ceiling = ceilings.get('cpu_millis')
+    from ..execution.dataflow_publication_budget import graph_workspace_bytes
+    publication = graph_workspace_bytes(graph)
     try:
         return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
                                          max_active_workers=policy.max_active_workers,
-                                         max_cpu_millis=cpu_ceiling)
+                                         max_cpu_millis=cpu_ceiling, publication_workspace_bytes=publication)
     except DataflowError as original:
         if original.code != "RESOURCE_INFEASIBLE":
             raise
@@ -767,7 +773,8 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         # masking it with the disk cost of an irrelevant durable fallback.
         try:
             solve_residency(stages, (), hosts=hosts, bounds=bounds,
-                            max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling)
+                            max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
+                            publication_workspace_bytes=publication)
         except DataflowError:
             raise
         eligible = (all(s.replay != "attempt_only" for s in snapshots)
@@ -806,7 +813,8 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         upgraded = tuple(upgraded)
         upgraded = _share_exchange_storage(upgraded, bounds)
         return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds,
-                                        max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling)
+                                        max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
+                                        publication_workspace_bytes=publication)
 
 
 def compile_physical_dataflow(

@@ -210,6 +210,8 @@ def fit_default_stream_windows(request, *, policy, bounds, explicit_limits=()):
         resident = sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
                        * len(stage.partitions) for stage in stages)
         control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
+        from ..execution.dataflow_publication_budget import graph_workspace_bytes
+        control += graph_workspace_bytes(graph)
         available = bounds.max_resident_bytes - control
         if resident <= available or available < 1:
             return bounds

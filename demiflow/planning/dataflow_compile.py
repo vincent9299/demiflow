@@ -637,6 +637,7 @@ class _Capture:
         # Optional codec targets are not independent hard per-node minima.
         # Keep their provenance private until all simultaneous inputs are known.
         self.codec_windows: dict[int, tuple[int, int]] = {}
+        self.publication_windows: dict[int, tuple[int, int]] = {}
 
     def _remember_codec_window(self, index, operation=None):
         resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
@@ -690,6 +691,26 @@ class _Capture:
             groups.setdefault(owner(index), []).append(index)
         control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
         available = self.bounds.max_resident_bytes - control
+        if self.publication_windows:
+            from fractions import Fraction
+            from ..execution.dataflow_publication_budget import FIELD
+            publication_min = max(v[0] for v in self.publication_windows.values())
+            publication_target = max(v[1] for v in self.publication_windows.values())
+            factor = Fraction(1)
+            for members in groups.values():
+                targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
+                minima = {i: self.codec_windows.get(i, (target, target))[0]
+                          for i, target in targets.items()}
+                demand = sum(targets.values()) - sum(minima.values()) + publication_target - publication_min
+                if demand:
+                    factor = min(factor, Fraction(max(0, available - sum(minima.values()) - publication_min), demand))
+            publication = publication_min + int((publication_target - publication_min) * factor)
+            for index in self.publication_windows:
+                node = self.nodes[index]
+                configuration = _plain(node.kernel.configuration)
+                configuration[FIELD]['resident_bytes'] = publication
+                self.nodes[index] = replace(node, kernel=replace(node.kernel, configuration=configuration))
+            available -= publication
         for members in groups.values():
             targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
             adjustable = {i: self.codec_windows[i] for i in members if i in self.codec_windows
@@ -980,6 +1001,10 @@ class _Capture:
         profile = _default_profile(None, bounds=self.bounds)
         profile = replace(profile, requests={**profile.requests, "memory_bytes": payload + metadata})
         configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
+        native_publication = request.kind in {'write_lance', 'write_file', 'write_datasink'}
+        if native_publication:
+            from ..execution.dataflow_publication_budget import FIELD, SCHEMA
+            configuration[FIELD] = {'schema': SCHEMA, 'resident_bytes': _payload_workspace(self.bounds)}
         kernel = KernelSpec(
             kind=request.kind, implementation_ref=None, configuration=configuration,
             inputs=(_input_port("main", request.kind),),
@@ -988,6 +1013,9 @@ class _Capture:
             mergeable=False,
         )
         index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)
+        if native_publication:
+            self.publication_windows[index] = (self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
+                                               _payload_workspace(self.bounds))
         minimum = self.bounds.max_batch_bytes + self.bounds.max_row_bytes + metadata
         if payload + metadata > minimum:
             self.codec_windows[index] = (minimum, payload + metadata)

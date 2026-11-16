@@ -95,10 +95,16 @@ class _Column:
 
 
 class _Admission:
-    def __init__(self, rows, bounds, reserved_bytes=0):
+    def __init__(self, rows, bounds, reserved_bytes=0, *, resident_workspace=False, writer_copies=0):
         if type(reserved_bytes) is not int or reserved_bytes < 0:
             raise DataflowError('INVALID_CONTRACT', 'conversion reserve must be a nonnegative integer')
-        self.maximum = min(bounds.max_batch_bytes, bounds.max_resident_bytes - reserved_bytes)
+        if type(resident_workspace) is not bool or type(writer_copies) is not int or writer_copies < 0:
+            raise DataflowError('INVALID_CONTRACT', 'invalid conversion workspace contract')
+        self.maximum = bounds.max_resident_bytes - reserved_bytes
+        if not resident_workspace:
+            self.maximum = min(bounds.max_batch_bytes, self.maximum)
+        self.writer_copies = writer_copies
+        self.buffers = self.builder = 0
         self.depth = min(16, bounds.max_depth)
         self.max_types = bounds.max_nodes
         self.types = self.visits = 0
@@ -107,10 +113,9 @@ class _Admission:
             self.retained += check_size(row, bounds.max_row_bytes)
             self.check(0)
         self.check(0)
-        self.buffers = self.builder = 0
 
     def check(self, extra):
-        if self.retained + extra > self.maximum:
+        if self.retained + extra + self.writer_copies * self.buffers > self.maximum:
             raise _error('input and conversion workspace exceed byte budget')
 
     def visit(self, depth):
@@ -422,14 +427,16 @@ class _Admission:
             visit(value)
 
 
-def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes=0):
+def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes=0,
+                           resident_workspace=False, writer_copies=0):
     """Return the existing window after proving constructor workspace fits.
 
     Type inference (only when no schema was declared) creates type metadata from
     an admitted pointer list, never an Arrow/NumPy payload array. Known schemas
     remain unchanged and are passed directly to the actual constructor.
     """
-    admission = _Admission(rows, bounds, reserved_bytes)
+    admission = _Admission(rows, bounds, reserved_bytes,
+                           resident_workspace=resident_workspace, writer_copies=writer_copies)
     n = len(rows)
     fmt = 'numpy' if batch_format == 'default' else batch_format
     if fmt == 'list':
