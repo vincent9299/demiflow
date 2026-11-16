@@ -36,6 +36,10 @@ class LanceSink(Datasink):
             raise LanceWriteConflict("Create target already exists")
         if self.spec.expected_version is not None and base != self.spec.expected_version:
             raise LanceWriteConflict("Lance CAS baseline changed")
+        append_schema = current.schema if self.spec.mode == 'append' and base is not None else None
+        if append_schema is not None and self.spec.schema is not None:
+            from ..lance.storage import require_compatible_schema
+            require_compatible_schema(self.spec.schema, append_schema)
         self.root.mkdir(parents=True, exist_ok=True)
         path = self.root / (uuid.uuid4().hex + ".arrow")
         self.run.allocate_artifact(path)
@@ -73,6 +77,9 @@ class LanceSink(Datasink):
                         block = block.cast(block_schema)
                         if retained + block.get_total_buffer_size() > self.run.limits['max_batch_bytes']:
                             raise RecoveryContractError('Lance cast coexistence exceeds batch budget')
+                    if append_schema is not None:
+                        from ..lance.storage import require_compatible_schema
+                        require_compatible_schema(block.schema, append_schema)
                     writer = pa.ipc.new_stream(stream, block_schema)
                     if isinstance(block, pa.RecordBatch):
                         writer.write_batch(block)

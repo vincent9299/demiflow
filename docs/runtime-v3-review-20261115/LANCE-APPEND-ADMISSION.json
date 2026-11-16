@@ -1,0 +1,12 @@
+{
+  "scope": "Lance append preparation before writer; explicit compatible cast retained",
+  "receipt": "/tmp/demiflow-lance-blob-append-r3/receipt.json",
+  "receipt_sha256": "26329e1bfd7a14837f3a2305aacf2b1b3ed84724c644bc7bc6a3e5ed8b6e067b",
+  "native_append_tests": 3,
+  "other_same_snapshot_tests": 4,
+  "uncommitted_arrow_candidate_present": true,
+  "files": {
+    "demiflow/execution/lance_sink.py": "6cff951e82a93aa44590ccb66ac972fab58b152131ad88509e5ee5fa42d3aaf8",
+    "tests/test_runtime_v3_lance_append_admission.py": "cfd163a25342a1481a16c3437303caeb3074265d52c33507ea81c5f7a414b7d3"
+  }
+}
