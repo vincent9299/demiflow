@@ -158,7 +158,19 @@ def test_durable_graph_reclaims_channel_segments(tmp_path, monkeypatch):
     with run.journal._connection() as db:
         collected = db.execute('SELECT store_id,digest,status FROM runtime_dataflow_gc').fetchall()
         assert collected and all(status == 'done' for _, _, status in collected)
-        assert not db.execute("SELECT 1 FROM runtime_reservations WHERE name='artifact_staging_bytes' AND amount>0").fetchone()
+        assert not db.execute('SELECT 1 FROM runtime_dataflow_staging s '
+            'LEFT JOIN runtime_dataflow_settlements settled ON s.reservation_id=settled.reservation_id '
+            'WHERE settled.reservation_id IS NULL').fetchone()
+        # Published history keeps its unique charge until physical deletion.
+        # Requiring this shared budget to be zero would refund live history.
+        retained = db.execute('SELECT COALESCE(SUM(bytes),0) FROM runtime_dataflow_objects').fetchone()[0]
+        charged = db.execute("SELECT COALESCE(SUM(amount),0) FROM runtime_reservations "
+            "WHERE name='artifact_staging_bytes'").fetchone()[0]
+        consumed = db.execute("SELECT consumed FROM runtime_budgets WHERE name='artifact_staging_bytes'").fetchone()[0]
+        assert retained == charged == consumed and retained > 0
+        assert not db.execute('SELECT 1 FROM runtime_dataflow_gc g JOIN runtime_reservations r '
+            "ON g.charge_id=r.reservation_id AND r.name='artifact_staging_bytes' "
+            "WHERE g.status='done' AND r.amount!=0").fetchone()
     for store_id, digest, _ in collected:
         assert not (run.directory / '.dataflow-store' / store_id / 'objects' / digest).exists()
     assert foreign.read_bytes() == b'not-a-runtime-object'
