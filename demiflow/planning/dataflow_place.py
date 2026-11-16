@@ -844,8 +844,12 @@ def compile_physical_dataflow(
     exchanges = plan_exchanges(graph, stages, policy=policy, bounds=bounds)
     exchanges = specialize_graph_exchanges(graph, stages, exchanges, bounds=bounds)
     exchanges = _share_exchange_storage(exchanges, bounds)
+    graph_requested_exchanges = exchanges
     exchanges, residency = _select_budgeted_residency(
         graph, snapshots, stages, exchanges, hosts=hosts, bounds=bounds, policy=policy)
+    from .dataflow_graph_adapter import pack_graph_residency
+    exchanges, residency = pack_graph_residency(graph, stages, exchanges, residency,
+        requested=graph_requested_exchanges, hosts=hosts, bounds=bounds, policy=policy)
     from .dataflow_graph_adapter import tighten_graph_credits
     exchanges = tighten_graph_credits(graph, exchanges, bounds=bounds)
     capability = infer_recovery(graph, snapshots, policy=policy)

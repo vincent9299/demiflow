@@ -347,3 +347,39 @@ def tighten_graph_credits(graph, exchanges, *, bounds):
         credit_rows=min(exchange.credit_rows, credit['rows']),
         credit_bytes=min(exchange.credit_bytes, credit['bytes']))
         if explicit or exchange.edge_id in routed else exchange for exchange in exchanges)
+
+
+def pack_graph_residency(graph, stages, exchanges, residency, *, requested, hosts, bounds, policy):
+    """Keep affordable original memory edges under the sole native solver.
+
+    The fallback first proves a legal durable plan. Deterministic, bounded
+    proposals can only restore automatic upgrades of original memory edges;
+    an infeasible proposal leaves that prior legal plan intact. No history is
+    replanned here: this hook runs only while compiling a newly sealed plan.
+    """
+    if not any('graph_route' in node.kernel.configuration for node in graph.nodes):
+        return exchanges, residency
+    from .dataflow_place import solve_residency
+    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    originals = {edge.edge_id: edge for edge in requested}
+    selected = exchanges
+    attempts = 0
+    for index, edge in enumerate(exchanges):
+        original = originals[edge.edge_id]
+        if (original.mode != 'memory_incremental' or edge.mode != 'durable_incremental'
+                or 'requires_checkpointed_parking' not in edge.reason):
+            continue
+        if attempts >= 64:
+            break
+        attempts += 1
+        proposed = tuple(original if i == index else value for i, value in enumerate(selected))
+        try:
+            candidate = solve_residency(stages, proposed, hosts=hosts, bounds=bounds,
+                max_active_workers=policy.max_active_workers,
+                max_cpu_millis=sealed_execution_ceilings(graph).get('cpu_millis'))
+        except DataflowError as error:
+            if error.code != 'RESOURCE_INFEASIBLE':
+                raise
+        else:
+            selected, residency = proposed, candidate
+    return selected, residency

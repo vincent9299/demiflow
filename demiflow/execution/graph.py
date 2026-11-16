@@ -536,11 +536,24 @@ def _run_graph(graph_spec, executor, *, control_timeout_s):
             handle.close()
 
 
+def _validate_graph_location(executor, *, host_id, resource_root):
+    """Legacy location keywords cannot create a second placement authority."""
+    from pathlib import Path
+    from .contracts.dataflow_errors import DataflowError
+    if host_id != 'local':
+        raise DataflowError('UNSUPPORTED_CAPABILITY',
+                            'graph host placement must use the current execution provider')
+    if resource_root is not None and Path(resource_root).resolve() != executor.resource_root:
+        raise DataflowError('INVALID_CONTRACT',
+                            'graph resource_root differs from the current executor domain')
+
+
 def run_local_graph(graph_spec, *, host_id='local', resource_root=None,
                     control_timeout_s=120, _executor=None):
     """Run the complete graph through the original Local v3 action authority."""
     from .executors.local import LocalDatasetExecutor
     executor = _executor if _executor is not None else LocalDatasetExecutor()
+    _validate_graph_location(executor, host_id=host_id, resource_root=resource_root)
     return _run_graph(graph_spec, executor, control_timeout_s=control_timeout_s)
 
 
@@ -549,4 +562,5 @@ def run_ray_graph(graph_spec, *, host_id='local', resource_root=None,
     """Run the same graph through Ray Core, retaining its caller's envelope."""
     from .executors.ray import RayDatasetExecutor
     executor = _executor if _executor is not None else RayDatasetExecutor()
+    _validate_graph_location(executor, host_id=host_id, resource_root=resource_root)
     return _run_graph(graph_spec, executor, control_timeout_s=control_timeout_s)

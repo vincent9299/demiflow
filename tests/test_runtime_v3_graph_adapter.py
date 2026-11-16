@@ -36,6 +36,21 @@ def _spec(directory):
             'routing': 'broadcast'}
 
 
+def test_graph_legacy_location_cannot_override_executor_domain(graph_environment, monkeypatch):
+    from demiflow.execution import graph
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    executor = LocalDatasetExecutor(resource_root=graph_environment)
+    called = []
+    monkeypatch.setattr(graph, '_run_graph', lambda spec, caller, **kwargs: called.append(caller))
+    with pytest.raises(DataflowError, match='host placement'):
+        graph.run_local_graph({}, host_id='other-host', _executor=executor)
+    with pytest.raises(DataflowError, match='resource_root differs'):
+        graph.run_local_graph({}, resource_root=graph_environment / 'other-domain', _executor=executor)
+    assert not called
+    graph.run_local_graph({}, resource_root=graph_environment, _executor=executor)
+    assert called == [executor]
+
+
 class _Counter:
     def __init__(self):
         self.count = 0
@@ -49,6 +64,16 @@ class _Counter:
 
     def restore_state(self, state):
         self.count = state['count']
+
+
+def _slow(row):
+    import time
+    time.sleep(.1)
+    return row
+
+
+def _expand_pair(row):
+    return [row, dict(row)]
 
 
 @pytest.fixture
@@ -324,3 +349,31 @@ def test_reused_target_actor_is_independent_and_final_replay_starts_no_worker(gr
     assert all(execution._peak_active_workers <= 3 for execution in executions)
     if not empty:
         assert len((directory / 'ancestor.jsonl').read_text().splitlines()) == 3
+
+
+@pytest.mark.parametrize('expand', [False, True])
+def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(graph_environment, expand):
+    from demiflow.data.plan import FlatMapOp
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    directory = graph_environment
+    spec = _spec(directory)
+    spec['prefetch_slots'] = 1
+    spec['targets'][0]['plan'] = LogicalPlan((FlatMapOp(CallableSpec.create(_expand_pair)),)) if expand else LogicalPlan((
+        MapOp(CallableSpec.create(_slow), stream_options=MapStreamOptions(concurrency=1)),))
+    def execute():
+        with RunContext.start(directory/'run', limits={'memory_bytes':128*1024**2,
+                'max_row_bytes':4096,'max_batch_bytes':16384,'max_state_bytes':2*1024**2,
+                'timeout_s':60}) as run:
+            with run.action({'kind':'materialize','source':{'fixture':'mixed-graph-residency'}}) as action:
+                result=LocalDatasetExecutor(workers=3).materialize_graph(spec)
+                action.complete({'kind':'graph-materialized'})
+            return result, load_sealed_plan(run.directory,action.action_id,version='v3')
+    if expand:
+        with pytest.raises(DataflowError, match='one operator invocation exceeds the parked durable credit window'):
+            execute()
+    else:
+        result, bundle = execute()
+        assert result['target_rows']=={'left':3,'right':3}
+        assert {edge.mode for edge in bundle['physical'].exchanges} >= {'memory_incremental','durable_incremental'}
+        assert bundle['physical'].policy.max_active_workers==3

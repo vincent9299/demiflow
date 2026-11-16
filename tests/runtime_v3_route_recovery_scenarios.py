@@ -105,7 +105,8 @@ def _kill_owned_worker(execution,fx):
         before=ray._private.state.actors(actor._actor_id.hex())
         assert before['State']=='ALIVE'
         ray.kill(actor,no_restart=True)
-        fact.update(kind='actual Ray HostedDataflowWorker loss',death=_dead_actor(ray,actor))
+        fact.update(kind='actual Ray HostedDataflowWorker loss',actor_id=actor._actor_id.hex(),
+                    death=_dead_actor(ray,actor))
     else:
         # Verify the exact worker owns this execution's control socket/launch.
         command=(Path('/proc')/str(pid)/'cmdline').read_bytes().decode(errors='replace')
@@ -222,8 +223,22 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
                     else:first_run(build(),run)
         except (DataflowError,BrokenPipeError,ConnectionResetError) as failure:
             error={'type':type(failure).__name__,'code':getattr(failure,'code',None),'message':str(failure)}
+        except Exception as failure:
+            # With concurrent journal replies, the very next RPC may observe
+            # the actual actor killed above before the poller translates loss.
+            # Only that already authenticated victim/death is admissible.
+            if not parked or fx.provider!='ray_core' or not loss:
+                raise
+            import ray
+            if (not isinstance(failure,ray.exceptions.ActorDiedError)
+                    or failure.actor_id!=loss['worker']['actor_id']):
+                raise
+            assert loss['worker']['death']['state']=='DEAD'
+            error={'type':type(failure).__name__,'code':getattr(failure,'code',None),'message':str(failure),
+                   'actor_id':failure.actor_id,'authenticated_ray_death':True}
         assert loss and error,(loss,error)
-        assert error['code']=='UNKNOWN_EFFECT' or error['type'] in ('BrokenPipeError','ConnectionResetError'),error
+        assert (error['code']=='UNKNOWN_EFFECT' or error['type'] in ('BrokenPipeError','ConnectionResetError')
+                or error.get('authenticated_ray_death') is True),error
         before=run.journal.execution_commits('action-1')
         assert before[-1]['status']=='acked' and not loss['boundary']['final']
         with RunContext.resume(ref) as resumed:
