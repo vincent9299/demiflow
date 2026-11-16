@@ -366,8 +366,10 @@ def route_recovery(fx,fault=None):
     # explicit. Component route tests do not turn those into public coverage.
     from demiflow import data
     def build():
-        return data.from_items([{'k':i%2,'i':i} for i in range(8)]).repartition(
-            2,keys=['k']).map_async(_identity,concurrency=1)
+        left=data.from_items([{'k':i%2,'i':i} for i in range(8)])
+        right=data.from_items([{'k':0},{'k':1}])
+        return left.join(right,on='k').repartition(2,shuffle=True).map_async(
+            _identity,concurrency=1)
     result = _resume_after_ack(fx,'route-recovery',build,fusion=False)
     assert sorted(result['rows'],key=lambda r:r['i']) == [{'k':i%2,'i':i} for i in range(8)]
     assert 'hash' in result['physical']['routes'] and 'rebalance' in result['physical']['routes']
