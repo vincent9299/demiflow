@@ -762,7 +762,20 @@ def test_h021(monkeypatch):
         with pytest.raises(DataflowError, match='staged'):
             ep.activate(assignment)
         ep.prepare(assignment)
+        observed = {'phase':'RUNNING', 'boot_id':ep._boot_id, 'allocation_id':ep._allocation_id,
+                    'effective_resources':{'cpu_millis':1000, 'memory_bytes':1048576}}
+        selected_binding = [None]
+        services.resources.state.read_allocation_identity = lambda scope_id, allocation_id: selected_binding[0]
+        for invalid in (None, {**observed, 'phase':'PENDING'}, {**observed, 'boot_id':'other'}):
+            selected_binding[0] = None if invalid is None else {'spec_hash':oid('resource-spec'), 'observation':invalid}
+            with pytest.raises(DataflowError, match='running allocation'):
+                ep.activate(assignment)
+            assert not ep._connector.handled
+        selected_binding[0] = {'spec_hash':oid('resource-spec'), 'observation':observed}
         ep.activate(assignment)
+        assert ep._allocation_envelope == {'allocation_id':ep._allocation_id,
+            'spec_hash':oid('resource-spec'), 'cpu_millis':1000, 'memory_bytes':1048576,
+            'resource_directory':str(e.ctx.directory/'worker-cache'/ep._allocation_id)}
         assert ep._activated
         assert ep._connector.handled == ['VerifyArtifactAndCapabilities', 'Restore', 'Activate', 'Assign']
         assert selected == [assignment]
