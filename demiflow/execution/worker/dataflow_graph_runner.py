@@ -33,6 +33,11 @@ class WorkerGraphRunner:
         self.bounds = self.services.bounds
         self.partition = executor.assignment.lease.partition_ids[0]
         self._queue = deque()
+        # At most the sole driver's receipt and next cut can be pending.
+        # Keep these bounded control messages reachable even when the next
+        # generation fills the business queue behind a sealed frontier.
+        self._cut_controls = deque()
+        self._sealed_cut = None
         self._condition = threading.Condition()
         self._wake_generation = 0
         self._activity_generation = 0
@@ -483,6 +488,12 @@ class WorkerGraphRunner:
                 self._paused = False
                 self._idle_sent = False
                 self._cut = None
+                self._sealed_cut = None
+            elif kind in ('receipt', 'cut'):
+                if len(self._cut_controls) >= 2:
+                    raise DataflowError('BUDGET_EXCEEDED', 'worker cut control queue exceeds its bound')
+                self._cut_controls.append(command)
+                self._idle_sent = False
             else:
                 if len(self._queue) >= self.bounds.max_pending_events:
                     raise DataflowError('BUDGET_EXCEEDED', 'worker input queue exceeds credit')
@@ -520,6 +531,8 @@ class WorkerGraphRunner:
         """Metadata-only selection; never dequeue or read future payloads."""
         result, owner, size, limit = [], None, 0, MAX_PEER_BATCH
         with self._condition:
+            if self._sealed_cut is not None or self._cut_controls:
+                return result
             for command in islice(self._queue, MAX_PEER_BATCH):
                 peer = command.get('peer')
                 if command.get('kind') != 'data' or type(peer) is not dict:
@@ -574,13 +587,14 @@ class WorkerGraphRunner:
         # Once idle was reported, freeze the observed output frontier until
         # receipt/resume. Native futures may complete, but their input remains
         # in the cut and no unobserved output may cross it.
-        if not (self._paused and self._idle_sent):
+        if self._sealed_cut is None and not (self._paused and self._idle_sent):
             for (occurrence, _), kernel in self.e._kernels.items():
                 for record in kernel.poll():
                     self._output(occurrence, record)
                     processed += 1
         with self._condition:
-            command = self._queue.popleft() if self._queue else None
+            command = (self._cut_controls.popleft() if self._cut_controls else
+                       self._queue.popleft() if self._sealed_cut is None and self._queue else None)
             if command is not None:
                 # receive() may enqueue while the previous step is publishing
                 # its idle notification. Consuming new work invalidates that
@@ -616,7 +630,7 @@ class WorkerGraphRunner:
             else:
                 raise DataflowError('INVALID_CONTRACT', 'unknown business command')
             processed += 1
-        if not self._paused and not self._cut:
+        if self._sealed_cut is None and not self._paused and not self._cut:
             for split_id, reader in self.e._readers.items():
                 if split_id in self._finished_splits:
                     continue
@@ -659,13 +673,17 @@ class WorkerGraphRunner:
             for occ, node in self.e._node_specs.items():
                 if node.kind == 'source' and not any(s.source_id == occ for s in self.e.assignment.source_splits):
                     self._finish_node(occ)
-        if not (self._paused and self._idle_sent):
+        if self._sealed_cut is None and not (self._paused and self._idle_sent):
             processed += self._advance_input_completions(max_records=max_records, deadline_ms=deadline_ms)
         if time.monotonic() - self._metrics_at >= .5:
             self._flush_metrics()
         done = set(self.e._node_specs).issubset(self._finished)
         with self._condition:
-            quiet = (not self._queue and (not self._credits or self._parkable_credits())
+            # Late business belongs to the next generation. It neither
+            # changes the sealed frontier nor blocks its receipt/final recut.
+            quiet = ((self._sealed_cut is not None or not self._queue)
+                     and not self._cut_controls
+                     and (not self._credits or self._parkable_credits())
                      and not (getattr(self, '_park_requested', False)
                               and getattr(self, '_park_finish_pending', False))
                      and all(k.checkpoint_ready for k in self.e._kernels.values())
@@ -682,6 +700,11 @@ class WorkerGraphRunner:
             if notify_idle:
                 self._idle_sent = True
             idle_generation = getattr(self, '_activity_generation', 0)
+            snapshot_request = self._cut if quiet and (self._paused or done) else None
+            if snapshot_request is not None:
+                # Freeze under the same lock that admits new input, BEFORE
+                # snapshot I/O or a mailbox send can release this thread.
+                self._sealed_cut = snapshot_request.cut_id
         if notify_done:
             from ..dataflow_checkpoint import _cursor_json
             self._send('eoi', {'scope': 'worker', 'cursors': [_cursor_json(r.snapshot())
@@ -692,9 +715,9 @@ class WorkerGraphRunner:
             self._flush_metrics()
             self._send('idle', {'done': done, 'activity_generation': idle_generation,
                 'source_done': set(self.e._readers) <= self._finished_splits})
-        if self._cut is not None and quiet and (self._paused or done):
+        if snapshot_request is not None and self._cut is snapshot_request:
             from ..contracts.dataflow_codec import encode_wire
-            contribution = self.snapshot(self._cut)
+            contribution = self.snapshot(snapshot_request)
             raw = encode_wire(contribution, type_name='CutContribution', bounds=self.bounds)
             ref = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
             self._send('cut', ref=ref)
@@ -1237,7 +1260,8 @@ class WorkerGraphRunner:
         return self._park_mode and set(self._credits) == set(self._credit_payloads)
 
     def snapshot(self, request):
-        if self._queue or (self._credits and not self._parkable_credits()):
+        if ((self._queue and self._sealed_cut != request.cut_id)
+                or (self._credits and not self._parkable_credits())):
             raise DataflowError('INVALID_CONTRACT', 'cut requires drained inputs and acknowledged deliveries')
         for reader in self.e._readers.values():
             reader.acknowledge_output()

@@ -20,6 +20,8 @@ def _finished_runner():
     runner._condition = threading.Condition()
     runner._wake_generation = 0
     runner._queue = deque()
+    runner._cut_controls = deque()
+    runner._sealed_cut = None
     runner._credits = {}
     runner._paused = True
     runner._idle_sent = False
