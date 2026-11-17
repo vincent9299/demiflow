@@ -3,7 +3,7 @@
   "branch": "engine/gpt-runtime-v3-review-20261115",
   "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115",
   "production_commit": "08335c8ea3bf4210763c07f8aee1266f1b41e72c",
-  "claim": "Core architecture/function fixes and affected composition accepted; not full original-intent100% or whole-suite green.",
+  "claim": "Engine core fixes and affected compositions accepted at recorded revisions; D1.9/2 plus latest engine integration remains uncompleted. Not full product/original-intent acceptance or whole-suite green.",
   "boundaries": {
     "root": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_runtime_v3_review_20261115",
     "root_head": "9e614afa6f25885e7d3a090f94213fc6cc26b2ef",
@@ -47,7 +47,8 @@
     "external paid transport invocation",
     "PostgreSQL and fixed Stage2 source validation",
     "offline package validation and complete V035",
-    "deployment or merge to main"
+    "deployment or merge to main",
+    "D1.9/2 frontend integrated and accepted with latest engine"
   ],
   "known_baseline_assertions": [
     "D009 budget1024 versus actual codec2777",
@@ -4735,5 +4736,17 @@
         "tests/test_runtime_v3_cache_frontier.py": "039226d02a53170ae0bf46e57af351af2c5243bf9c0f8f4f9bc8efc720626a84"
       }
     }
+  },
+  "product_integration_correction": {
+    "date": "2026-11-17",
+    "state": "open",
+    "engine_observed_head": "4dc50e7205aefe97593c87b8b009ea81ff764bf4",
+    "ui_observed_head": "3fe56f12be0cbd97c71c20c8322dd432845159cf",
+    "merge_base": "49b666fbff1257770b3ee3a3a61af4efc13146dc",
+    "original_product_evidence_scope": "18 scenarios used the older frontend on the engine branch, not D1.9/2 integrated with the latest engine.",
+    "source_report": "sgvps:/home/claude/work/reports/demiflow-intent-alignment-review-20261117.md",
+    "source_sha256": "69a8c781359a707e252f9be1ec09d2169b988311063b8da4cce67fcd31c072ee",
+    "new_integration_tests_run": false,
+    "reconciliation": "CLAUDE-REVIEW-RECONCILIATION-20261117.md"
   }
 }
