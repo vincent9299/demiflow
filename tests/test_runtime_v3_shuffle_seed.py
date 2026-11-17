@@ -59,7 +59,9 @@ def _spec(*, version=True, occurrence='shuffle-a'):
     config = {'seed': 7, 'occurrence_id': occurrence}
     if version:
         config['shuffle_order_version'] = 'typed-multiset-v1'
-    return make('KernelSpec', kind='RandomShuffleOp', configuration=config)
+    return make('KernelSpec', kind='RandomShuffleOp', configuration=config,
+        state='none', effect='pure', resource_role='cpu', mergeable=False,
+        output_bound_bytes=4096)
 
 
 def test_low_window_real_store_spills_twice_and_closes_every_reader(tmp_path, monkeypatch):
@@ -104,6 +106,132 @@ def test_low_window_real_store_spills_twice_and_closes_every_reader(tmp_path, mo
         assert active == [0]
         assert consumed(run) <= 16 << 20
         assert not list((store.root / store.store_id / 'staging').iterdir())
+
+
+def test_duplicate_record_identity_order_survives_reordered_delivery(tmp_path):
+    import random
+    from demiflow.execution.kernels.shuffle_order import seeded_shuffle
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from test_runtime_v3_artifact_accounting import store_fixture
+    records = [_record({'v': i % 3}, i) for i in range(90)]
+    # Distinct provenance also disambiguates a forwarded record-id collision.
+    records.append(replace(records[0], source_position={'source': 'a', 'ordinal': 900}, sequence=900))
+    reordered = list(records)
+    random.Random(19).shuffle(reordered)
+    with store_fixture(tmp_path) as (_, store, port):
+        services = _services(store, port)
+        def output(items):
+            return [(r.record_id, dict(r.source_position), _encode_payload(r.inline, max_bytes=4096))
+                for r in seeded_shuffle(iter(items), spec=_spec(), services=services)]
+        assert output(records) == output(reversed(records)) == output(reordered)
+
+
+def _operator_spec():
+    from test_runtime_v3_c import make
+    return replace(_spec(), inputs=(make('InputPort', name='main', requirement='finite_complete', ordering='global'),))
+
+
+def test_actual_operator_owned_spool_fills_old_segment_under_original_budget(tmp_path):
+    from demiflow.execution.kernels.operator import OperatorKernel, _SpoolPort
+    from demiflow.execution.kernels.shuffle_order import shuffle_windows
+    from test_runtime_v3_artifact_accounting import store_fixture
+    records = [_record({'v': i % 23, 'payload': 'x' * 350}, i) for i in range(1000)]
+    with store_fixture(tmp_path, ceiling=16 << 20) as (_, store, port):
+        services = _services(store, port)
+        services = replace(services, bounds=replace(services.bounds, max_batch_bytes=1 << 20))
+        windows = shuffle_windows(services)
+        legacy = _SpoolPort('legacy', services, 8192)
+        kernel = OperatorKernel(_operator_spec(), services=services, partition_id='p0')
+        try:
+            kernel.start()
+            for record in records:
+                legacy.push(record)
+                assert list(kernel.push('main', record)) == []
+            legacy.finish()
+            assert max(ref.size_bytes for ref in legacy._refs) > (windows.input_bytes - 4096) // 2
+            emitted = kernel.finish('main')
+            try:
+                first = next(emitted)
+                assert kernel.retained_resident_bytes > 0  # Exercise the actual getter/callback.
+                output = [first, *emitted]
+            finally:
+                emitted.close()
+            assert kernel.retained_resident_bytes == 0
+            assert Counter(r.record_id for r in output) == Counter(r.record_id for r in records)
+            assert len(kernel._ports['main']._refs) > len(legacy._refs)
+            assert services.bounds.max_resident_bytes == services.bounds.max_batch_bytes == 1 << 20
+        finally:
+            kernel.close()
+            legacy.release()
+
+
+@pytest.mark.parametrize('wide_control', ['seal', 'manifest'])
+def test_borrowed_metadata_is_admitted_while_first_sort_runs_exist(tmp_path, monkeypatch, wide_control):
+    import json
+    from dataclasses import asdict
+    from demiflow.execution.contracts.dataflow import ProducerCompletion
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.dataflow_finite_input import borrowed_records
+    from demiflow.execution.dataflow_segments import FINITE_RECORDS_MEDIA, SEGMENTS_MEDIA, SCHEMA
+    from demiflow.execution.exchange.dataflow_channels import seal_scope
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from test_runtime_v3_artifact_accounting import store_fixture
+    from test_runtime_v3_c import make
+    with store_fixture(tmp_path, ceiling=16 << 20) as (run, store, port):
+        services = _services(store, port)
+        services = replace(services, bounds=replace(services.bounds,
+            max_depth=512, max_batch_bytes=1 << 20, max_control_bytes=1 << 20))
+        empty = store.put(iter(()), max_bytes=1, media_type=FINITE_RECORDS_MEDIA)
+        manifest = empty
+        if wide_control == 'manifest':
+            child = {'ref': asdict(empty), 'rows': 0, 'bytes': 0, 'height': 0}
+            raw = json.dumps({'schema': SCHEMA, 'height': 1, 'rows': 0, 'bytes': 0,
+                'children': [child] * 512}, separators=(',', ':')).encode()
+            manifest = store.put(iter((raw,)), max_bytes=len(raw), media_type=SEGMENTS_MEDIA)
+        producers = tuple(f'p{i:04d}-' + 'x' * 120 for i in range(256 if wide_control == 'seal' else 1))
+        exchange = make('ExchangeSpec', channel_id='shuffle-input', edge_id='edge-shuffle',
+            producer_partitions=producers, consumer_partitions=('p0',), mode='finite_sealed',
+            routing='forward', scope_id='shuffle-scope', route_epoch=0, storage_bytes=16 << 20)
+        seal = seal_scope(exchange.scope_id, tuple(ProducerCompletion(p, 0, 'succeeded', -1, manifest)
+            for p in producers), store=store)
+        assignment = replace(services.assignment, inputs=(exchange,),
+            lease=replace(services.assignment.lease, partition_ids=('p0',)))
+        services = replace(services, assignment=assignment)
+        entry = {'schema': 'demiflow.borrowed-finite-input.v1', 'seal_ref': seal,
+            'manifest_ref': manifest, 'edge_id': exchange.edge_id, 'producer': producers[0],
+            'target': 'p0', 'rows': 0, 'bytes': 0, 'total_rows': 0, 'total_bytes': 0}
+        # The original manifest/seal is valid; the new failure must be budget
+        # admission with sort runs live, not malformed synthetic metadata.
+        assert list(borrowed_records(services, entry)) == []
+        kernel = OperatorKernel(_operator_spec(), services=services, partition_id='p0')
+        written, released = [], []
+        original_put, original_release = store.put, store.release
+        def put(*args, **kwargs):
+            ref = original_put(*args, **kwargs)
+            written.append(ref)
+            return ref
+        def release(ref, **kwargs):
+            if kwargs['owner'] == 'kernel-sort':
+                released.append(ref)
+            return original_release(ref, **kwargs)
+        try:
+            kernel.start()
+            for i in range(400):
+                list(kernel.push('main', _record({'v': i, 'payload': 'x' * 256}, i)))
+            kernel._ports['main'].adopt(entry)
+            kernel._ports['main'].finish()
+            monkeypatch.setattr(store, 'put', put)
+            monkeypatch.setattr(store, 'release', release)
+            with pytest.raises(DataflowError, match='workspace|subwindow') as caught:
+                list(kernel.finish('main'))
+            assert caught.value.code == 'BUDGET_EXCEEDED'
+            assert written and set(written) <= set(released)
+            assert seal not in released and manifest not in released
+            assert store.inspect(seal) and store.inspect(manifest)
+            assert not run.journal.execution_commits('action-1')
+            assert not list((store.root / store.store_id / 'staging').iterdir())
+        finally:
+            kernel.close()
 
 
 @pytest.mark.parametrize('boundary', ['first_build', 'second_build', 'output_close', 'disk_failure'])

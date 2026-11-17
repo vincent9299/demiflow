@@ -13,8 +13,8 @@ import json
 import sys
 
 from .dataflow import _err, _seed, _materialize_row, _input_row_bytes
-from .ordering import SortWindow, _build_sort_runs, merge_sort_runs, _release_runs
-from ..dataflow_record_frames import resident_limit, raw_workspace, read_document, _typed_shape, _json_shape, _record_metadata
+from .ordering import SortWindow, _build_sort_runs, merge_sort_runs, _release_runs, _provenance
+from ..dataflow_record_frames import resident_limit, raw_workspace, read_document, metadata_bytes, _typed_shape, _json_shape, _record_metadata
 from ..exchange.dataflow_bridge import _encode_payload, _decode_payload
 
 FIELD = 'shuffle_order_version'
@@ -28,10 +28,11 @@ class ShuffleWindows:
     input_bytes: int
     metadata_bytes: int
     sort: SortWindow
+    input_metadata_bytes: int = 0
 
     @property
     def output_retained_bytes(self):
-        return self.sort.merge_resident_bytes + self.metadata_bytes
+        return self.sort.merge_resident_bytes + self.metadata_bytes + self.input_metadata_bytes
 
 
 def shuffle_windows(services):
@@ -39,9 +40,12 @@ def shuffle_windows(services):
 
     First build: input 3G/8 + run G/4 + codec G/4 + metadata G/16.
     Second build: first merge 3G/8 + run G/4 + codec G/4 + metadata G/16.
-    Each is <= 15G/16. The merge 3G/8 includes G/8 of record decode room;
+    The input's original descriptors may remain after its iterator closes;
+    they are capped at G/16, making the second build total at most G.
+    The merge 3G/8 includes G/8 of record decode room;
     the remaining G/4 covers two reader frames, heap and writer temporaries.
-    Final output retains merge + metadata; downstream codecs see that charge.
+    Final output retains merge + sort/input metadata (at most G/2);
+    downstream codecs see that charge.
     """
     grant = resident_limit(services.bounds, services)
     metadata = grant // 16
@@ -65,8 +69,31 @@ def input_records(port, services, windows):
     scoped = copy(port)
     scoped._services = replace(services, bounds=replace(services.bounds,
         max_resident_bytes=windows.input_bytes))
-    scoped._shuffle_input_window = windows.input_bytes
-    return scoped.records()
+    held = metadata_bytes((port._refs, port._borrowed, port._pending, port._borrowed_proofs))
+    if held > windows.metadata_bytes:
+        raise _err('BUDGET_EXCEEDED', 'shuffle retained input descriptors exceed their reserved window')
+    scoped._shuffle_input_window = windows.input_bytes - held
+    if scoped._shuffle_input_window < 1:
+        raise _err('BUDGET_EXCEEDED', 'shuffle input descriptors exceed their reader subwindow')
+    def call(function, *args, _frame_retained=0, **kwargs):
+        return function(*args, services=scoped._services,
+            retained=held + _frame_retained, **kwargs)
+    scoped._shuffle_frame_call = call
+    return scoped.records(), replace(windows, input_metadata_bytes=held)
+
+
+def spool_fragment_workspace(raw, maximum):
+    """Decode projection for one unchanged state-codec record fragment."""
+    outer = 2 * raw_workspace(raw, typed=False)
+    if outer > maximum:
+        raise _err('BUDGET_EXCEEDED', 'shuffle input record exceeds its reader subwindow')
+    item = json.loads(raw)
+    if item[0] != 'record':
+        raise _err('CORRUPT_ARTIFACT', 'shuffle input fragment is not a record')
+    size = outer + raw_workspace(item[3].encode('utf-8')) + 256
+    if size + 4096 > maximum:
+        raise _err('BUDGET_EXCEEDED', 'decoded shuffle input record exceeds its reader subwindow')
+    return size
 
 
 def admit_spool_image(raw, maximum):
@@ -124,7 +151,11 @@ class _TypedKeys:
             raise _err('BUDGET_EXCEEDED', 'shuffle row exceeds its merge frame subwindow')
         raw = _encode_payload(row, max_bytes=services.bounds.max_row_bytes)
         if self.seed is None:
-            return (raw,)
+            # Value equality alone does not identify a duplicate occurrence.
+            # Replays of the same original Records must assign each identity
+            # the same ordinal even when producer delivery order changes.
+            # Across actions these hidden ties can change only equal values.
+            return (raw, record.record_id, _provenance(record))
         self.duplicate = self.duplicate + 1 if raw == self.previous else 0
         self.previous = raw
         digest = hashlib.sha256(raw).digest()
