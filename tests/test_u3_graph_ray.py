@@ -383,7 +383,7 @@ def test_ray_graph_sealed_storage_exhaustion_fails_early_without_publication(tmp
     spec["storage_bytes"] = 1
     limits = {"checkpoint_unconfirmed_rows": 64, "checkpoint_interval_ms": 60000}
     start = time.monotonic()
-    with pytest.raises(DataflowError, match='^graph storage budget cannot admit every declared channel$') as failure:
+    with pytest.raises(DataflowError, match='^BUDGET_EXCEEDED: graph storage budget cannot admit every declared channel$') as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-sealed-exhaust"}}):
                 run_ray_graph(spec, control_timeout_s=10)

@@ -197,7 +197,7 @@ def test_sealed_storage_exhaustion_fails_early_without_publication(tmp_path):
                              mode="finite_sealed", storage_bytes=1, ancestor_fn=double)
     limits = {"checkpoint_unconfirmed_rows": 64, "checkpoint_interval_ms": 60000}
     start = time.monotonic()
-    with pytest.raises(DataflowError, match='^graph storage budget cannot admit every declared channel$') as failure:
+    with pytest.raises(DataflowError, match='^BUDGET_EXCEEDED: graph storage budget cannot admit every declared channel$') as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-sealed-exhaust"}}) as execution:
                 run_local_graph(spec, control_timeout_s=8)
