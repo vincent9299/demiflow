@@ -486,6 +486,64 @@ def decode_frame(line, bounds, *, services=None, retained=0, finite=False, newli
 _OUTER_SPECIAL = re.compile(rb'["\\]')
 
 
+def _decode_native_outer(line, bounds, *, services, retained, finite):
+    """Use the native string decoder only when its copies fit the same grant.
+
+    The delimiter is a candidate, never proof of a JSON boundary. Loading the
+    whole quoted slice must confirm exactly one string; unsupported spellings
+    and insufficient conservative room keep the existing precise reader.
+    """
+    prefix = b'{"document":"'
+    if not line.startswith(prefix):
+        return None
+    end = line.find(b'","record_id":', len(prefix))
+    if end < 0:
+        return None
+    quoted_size = end - len(prefix) + 2  # Includes both JSON quotes.
+    tail_size = len(line) - end - 1  # The original suffix plus its opening '{'.
+    if tail_size > bounds.max_control_bytes + 1:
+        return None
+    maximum = resident_limit(bounds, services)
+    # json.loads(bytes) can retain quoted bytes Q, a 4Q Unicode input and a
+    # 4Q decoded Unicode string together. Ten Q plus fixed slack covers that
+    # peak, then the smaller string->UTF-8 peak. The original line stays live.
+    # Four T only admits constructing the tail, not parsing its object tree.
+    base = retained + len(line) + 10 * quoted_size + 4096
+    if base + 4 * tail_size > maximum:
+        return None
+    tail = b'{' + line[end + 2:]
+    workspace = raw_workspace(tail, typed=False)
+    if base + workspace > maximum:
+        return None
+    _admit(base + workspace, maximum)
+    quoted = line[len(prefix) - 1:end + 1]
+    try:
+        decoded = json.loads(quoted)
+    except (ValueError, UnicodeError):
+        return None
+    del quoted
+    if type(decoded) is not str:
+        return None
+    try:
+        raw = decoded.encode('utf-8')
+    except UnicodeError:
+        return None
+    del decoded
+    if len(raw) > document_limit(bounds):
+        _fail('record document exceeds its frame bound')
+    # The admitted tail workspace includes its input, text and object tree;
+    # the original line and decoded business document remain resident too.
+    try:
+        item = json.loads(tail)
+    except (ValueError, UnicodeError) as exc:
+        raise DataflowError('CORRUPT_ARTIFACT', 'invalid record frame metadata') from exc
+    expected = {'record_id', 'sequence'} | ({'target'} if finite else set())
+    if type(item) is not dict or set(item) != expected:
+        raise DataflowError('CORRUPT_ARTIFACT', 'invalid record frame fields')
+    _json_shape(item, bounds.max_control_bytes)
+    return raw, item
+
+
 def _decode_canonical_outer(line, bounds, *, services, retained, finite):
     """Unescape the old canonical document string without a full text copy.
 
@@ -493,6 +551,9 @@ def _decode_canonical_outer(line, bounds, *, services, retained, finite):
     This fast path only accepts the exact writer prefix and its two escapes;
     the inner typed codec still performs all original canonical validation.
     """
+    native = _decode_native_outer(line, bounds, services=services, retained=retained, finite=finite)
+    if native is not None:
+        return native
     prefix = b'{"document":"'
     if not line.startswith(prefix): return None
     start = cursor = len(prefix)
