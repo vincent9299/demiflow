@@ -583,7 +583,7 @@ class StoredMaterializedHandle:
         self._check_open()
         return len(self._blocks)
 
-    def rows(self) -> Iterator["Row"]:
+    def rows(self) -> Iterator[object]:
         self._check_open()
         return self._iter_rows()
 
@@ -591,7 +591,7 @@ class StoredMaterializedHandle:
         self._check_open()
         return self._iter_rows(with_schema=True)
 
-    def _iter_rows(self, *, with_schema=False) -> Iterator["Row"]:
+    def _iter_rows(self, *, with_schema=False) -> Iterator[object]:
         from .record_schema import RecordSchemas
         schemas = RecordSchemas(store=self._store, bounds=self._bounds) if with_schema else None
         count = 0

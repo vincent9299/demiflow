@@ -4,6 +4,8 @@
 
 ## C01 数据表示、版本与错误
 
+2026-11-17 兼容修订：`Record.inline`、普通回调参数和物化值迭代允许原 typed codec 的非 `None` 业务值，恢复既有 reducer 的 list/scalar 输出能力；`Row` 仍限定按列访问的 Mapping。详见 [Reducer 业务值契约勘误](REDUCER_VALUE_COMPATIBILITY.md)。`object` 类型标注不授予任意 Python 对象或 pickle 传输能力，原封闭类型、预算和历史字节校验保持。
+
 所有 DTO frozen 且内层深冻结，脱离调用者可变对象。wire 只接受显式字段，不透传未知字段；schema 必填，v3 不自动读取为 v1/v2。Json 有限深度、有限 UTF-8 字节、禁止 NaN/Infinity；业务 Record 编码可保留 IEEE 浮点特殊值、负零、tuple/bytes、Arrow/numpy 值，这些不能直接作为 Json 身份输入。`inline` 与 `payload_ref` 恰有一个；空行是合法 payload，不等于 EOI。
 
 ID 使用 lowercase sha256 hex；人类 source/port 名称不是 hash。ArtifactRef.key 是 store 内相对不可变 key，不含绝对路径、`..`、URL query 或凭证。原有 DataRef/Artifact 格式由桥接函数调用原校验器，不能把 ArtifactRef 直接交给 K4 的 v1 validator。代码 pickle 和业务数据编码有不同 media_type，数据读取不得当程序执行。

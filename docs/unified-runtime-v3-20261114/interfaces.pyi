@@ -133,7 +133,9 @@ class Record:
     record_id: str
     source_position: Mapping[str, Json]
     payload_ref: ArtifactRef | None
-    inline: Row | None
+    # 2026-11-17 compatibility amendment: closed typed business values;
+    # Row remains the mapping contract for named-column operations.
+    inline: object | None
     encoded_bytes: int
     sequence: int
 
@@ -531,7 +533,7 @@ class ActionHandle(Protocol):
     def close(self) -> None: ...
 
 class CallableInstance(Protocol):
-    def __call__(self, row: Row) -> object: ...
+    def __call__(self, row: object) -> object: ...
 
 class NativeEffectTransport(Protocol):
     def lookup(self, command: EffectCommand) -> EffectReply: ...
@@ -539,7 +541,7 @@ class NativeEffectTransport(Protocol):
 
 class MaterializedHandle(Protocol):
     def num_blocks(self) -> int: ...
-    def rows(self) -> Iterator[Row]: ...
+    def rows(self) -> Iterator[object]: ...
     def release(self) -> None: ...
 
 class ChannelSet(Protocol):

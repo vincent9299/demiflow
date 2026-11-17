@@ -113,7 +113,7 @@ class RayDatasetExecutor(DatasetExecutor):
         self._last_metadata = ExecutionMetadata(source_name=type(source).__name__)
         return result
 
-    def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[dict[str, Any]]:
+    def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[object]:
         from ..dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind="iter_rows", arguments={})
         return run_dataset_action(request)

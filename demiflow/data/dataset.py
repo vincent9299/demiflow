@@ -156,6 +156,9 @@ class Dataset:
         engine, while arbitrary reducers retain Python semantics and are not
         rewritten as parallel partial aggregates.
         ``fn_kwargs`` binds explicit fixed parameters to the same row reducer.
+        Each non-None final accumulator is emitted unchanged within the typed
+        data codec's supported values; later column operations still require
+        mapping rows. False, zero and empty containers are valid outputs.
         """
         from ..execution.local_kernel import keyed_dataset
         return keyed_dataset(self, 'reduce', on, reducer=reducer, initial=initial, chunk_bytes=chunk_bytes, reducer_kwargs=fn_kwargs)
@@ -2055,7 +2058,7 @@ class Dataset:
             LogicalPlan(), self._executor,
         )
 
-    def take(self, limit: int = 20) -> list[dict[str, Any]]:
+    def take(self, limit: int = 20) -> list[object]:
         """Execute and return at most ``limit`` rows to the Driver.
 
         Use for bounded sampling or inspection. Fewer rows may be returned, and
@@ -2075,7 +2078,7 @@ class Dataset:
             observer.complete(limit=maximum, early_stopped=len(rows) == maximum)
         return rows
 
-    def take_all(self, limit: Optional[int] = None) -> list[dict[str, Any]]:
+    def take_all(self, limit: Optional[int] = None) -> list[object]:
         """Execute and collect accepted rows in Driver memory.
 
         Without ``limit`` every row is collected. With ``limit``, Demiflow
@@ -2281,7 +2284,7 @@ class Dataset:
             Std, on, ddof=ddof, ignore_nulls=ignore_nulls,
         )
 
-    def iter_rows(self) -> Iterable[dict[str, Any]]:
+    def iter_rows(self) -> Iterable[object]:
         """Execute and consume rows incrementally without building a driver list."""
         from ..execution.checked import action
         from ..execution.dataflow_api import make_action_request, run_dataset_action

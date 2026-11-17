@@ -539,7 +539,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         for output_rows in self._map_stage(batches(), apply, width):
             yield from output_rows
 
-    def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[dict[str, Any]]:
+    def iter_rows(self, source: SourcePlan, plan: LogicalPlan) -> Iterable[object]:
         from ..dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind='iter_rows', arguments={})
         return run_dataset_action(request)
