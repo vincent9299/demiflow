@@ -14,8 +14,8 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
     original_class, original_join = join_spool._Spool, join_spool.join_pairs
     reports = []
     class ObservedSpool(original_class):
-        def __init__(self, file, services):
-            super().__init__(file, services)
+        def __init__(self, file, services, *, bounded=False, retained_key=None):
+            super().__init__(file, services, bounded=bounded, retained_key=retained_key)
             self.proof = dict(input_rows=0, hydrated_rows=0, max_document_bytes=0,
                 max_payload_bytes=0, max_index_bytes=0, max_index_entries=0,
                 index_limit=self.index_limit, row_window=self.row_window,
