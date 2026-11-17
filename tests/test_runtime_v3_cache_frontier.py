@@ -90,20 +90,24 @@ def test_old_stateful_image_rejected_and_old_stateless_result_readable(tmp_path)
     assert 'origin' not in plain.store.get(plain.prepare({'value': 0})[1])
 
 
-def test_origin_and_value_share_capacity_transaction_and_plain_writes_clear_origin(tmp_path):
+def test_origin_and_value_share_capacity_transaction_and_plain_writes_keep_origin(tmp_path):
     store = SQLiteKV(tmp_path / 'cache.sqlite', 'n', max_value_bytes=128, max_entries=1, max_bytes=128)
-    store.put_many([('a', 1)], _origin='first')
+    first = json.dumps({'owner': 'first', 'generation': 1})
+    replayed = json.dumps({'owner': 'first', 'generation': 2})
+    store.put_many([('a', 1)], _origin=first)
     with pytest.raises(ValueError, match='capacity'):
         store.put_many([('b', 2)], _origin='rejected')
     assert store.get('b', _with_origin=True) == {'hit': False, 'value': None}
-    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': 'first'}
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': first}
     with pytest.raises(ValueError, match='changed'):
-        store.put_many([('a', 2)], _origin='wrong', _origin_only=True)
-    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': 'first'}
-    store.put_many([('a', 1)], _origin='replayed', _origin_only=True)
-    assert store.get('a', _with_origin=True)['origin'] == 'replayed'
-    store.put_many([('a', 3)])
-    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 3, 'origin': None}
+        store.put_many([('a', 2)], _origin=replayed, _origin_only=True)
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': first}
+    store.put_many([('a', 1)], _origin=replayed, _origin_only=True)
+    assert store.get('a', _with_origin=True)['origin'] == replayed
+    with pytest.raises(ValueError, match='provenance'):
+        store.put_many([('a', 3)])
+    store.put_many([('a', 1)])
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': replayed}
 
 
 def test_stateful_rejected_cache_input_cannot_be_silently_skipped_on_replay(tmp_path):
@@ -137,22 +141,51 @@ def test_cache_creator_metadata_obeys_original_byte_capacity(tmp_path):
     store.put_many([('a', 1)], _origin='x' * 127)
     with pytest.raises(ValueError, match='capacity'):
         store.put_many([('b', 2)])
-    store.put_many([('a', 3)])  # replacing provenance releases its exact bytes
-    store.put_many([('b', 2)])
-    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 3, 'origin': None}
+    store.put_many([('a', 1)])  # an identical write cannot discard provenance/its charge
+    with pytest.raises(ValueError, match='capacity'):
+        store.put_many([('b', 2)])
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': 'x' * 127}
+    plain = SQLiteKV(tmp_path / 'plain.sqlite', 'n', max_value_bytes=128, max_bytes=128)
+    plain.put_many([('a', 1)])
+    plain.put_many([('a', 3), ('b', 2)])
+    assert plain.get('a') == {'hit': True, 'value': 3}
 
 
-def test_native_kv_sink_replaces_creator_metadata_in_same_commit(tmp_path):
+def test_native_kv_sink_keeps_creator_metadata_and_refuses_replacement(tmp_path):
     import sqlite3
     from demiflow import data
     from demiflow.execution.run_context import RunContext
     store = SQLiteKV(tmp_path / 'index.sqlite', 'n', max_value_bytes=128, max_bytes=128)
-    store.put_many([('a', 1)], _origin='x' * 127)
+    store.put_many([('a', 1)], _origin='x' * 126)
     with RunContext.start(tmp_path / 'run'), data.local_execution():
-        data.from_items([{'key': 'a', 'value': 22}, {'key': 'b', 'value': 3}]).write_datasink(store.datasink())
-    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 22, 'origin': None}
+        data.from_items([{'key': 'a', 'value': 1}, {'key': 'b', 'value': 3}]).write_datasink(store.datasink())
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': 'x' * 126}
     with sqlite3.connect(store.path) as db:
-        assert db.execute('SELECT entries,bytes FROM kv_usage WHERE namespace=?', ('n',)).fetchone() == (2, 3)
+        assert db.execute('SELECT entries,bytes FROM kv_usage WHERE namespace=?', ('n',)).fetchone() == (2, 128)
+    with pytest.raises(ValueError, match='provenance'):
+        with RunContext.start(tmp_path / 'rejected'), data.local_execution():
+            data.from_items([{'key': 'a', 'value': 22}]).write_datasink(store.datasink())
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 1, 'origin': 'x' * 126}
+
+
+def test_other_owner_cannot_erase_post_cut_creator_state_evidence(tmp_path):
+    first = cache(tmp_path)
+    image = asyncio.run(first.snapshot_state())
+    assert first({'value': 1})['count'] == 1
+    _, key = first.prepare({'value': 1})
+    before = first.store.get(key, _with_origin=True)
+    other = cache(tmp_path, 'another-owner', cache_when=lambda value: False)
+    with pytest.raises(DataflowError, match='another state owner'):
+        other({'value': 1})
+    assert other.fn.count == 0
+    with pytest.raises(ValueError, match='provenance'):
+        first.store.put_many([(key, 99)])
+    first.store.put_many([(key, 1)])
+    assert first.store.get(key, _with_origin=True) == before
+    resumed = cache(tmp_path)
+    asyncio.run(resumed.restore_state(image))
+    assert resumed({'value': 1})['count'] == 1
+    assert resumed({'value': 2})['count'] == 2
 
 
 def test_actual_task_lifetimes_do_not_replay_other_tasks_cache_hits(tmp_path):

@@ -307,15 +307,18 @@ class DurableKVSink:
                 old = db.execute('SELECT length(value) FROM kv WHERE namespace=? AND key=?',
                                  (self.store.namespace, key)).fetchone()
                 count += old is None
-                old_origin = (db.execute('SELECT length(CAST(origin AS BLOB)) FROM kv_origins WHERE namespace=? AND key=?',
-                                         (self.store.namespace, key)).fetchone() if has_origins else None)
-                size += len(value) - (old[0] if old else 0) - (old_origin[0] if old_origin else 0)
+                has_origin = (has_origins and db.execute('SELECT 1 FROM kv_origins WHERE namespace=? AND key=?',
+                                                        (self.store.namespace, key)).fetchone() is not None)
+                if has_origin:
+                    same = db.execute('SELECT CAST(value AS BLOB)=? FROM kv WHERE namespace=? AND key=?',
+                                      (value, self.store.namespace, key)).fetchone()
+                    if same is None or not same[0]:
+                        raise ValueError('Stateful cache provenance forbids replacing this result; use a new version or namespace')
+                size += len(value) - (old[0] if old else 0)
                 if count > self.store.max_entries or size > self.store.max_bytes:
                     raise ValueError('KV capacity exceeded')
                 db.execute('INSERT INTO kv VALUES (?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET value=excluded.value',
                            (self.store.namespace, key, value))
-                if has_origins:
-                    db.execute('DELETE FROM kv_origins WHERE namespace=? AND key=?', (self.store.namespace, key))
             db.execute('INSERT INTO kv_usage VALUES (?,?,?) ON CONFLICT(namespace) DO UPDATE SET entries=excluded.entries,bytes=excluded.bytes',
                        (self.store.namespace, count, size))
             receipt = self._receipt(prepared, context, digest)

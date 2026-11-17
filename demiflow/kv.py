@@ -32,6 +32,32 @@ def encode(value, limit):
     return payload
 
 
+def preserve_cache_origin(previous, proposed, *, same_value):
+    """Keep completed stateful-cache provenance until its owner changes it.
+
+    Ordinary KV entries remain replaceable. An unrelated writer cannot erase
+    the only fact distinguishing an unacknowledged callback from a cache hit.
+    Identical plain writes keep that fact; a new version/namespace is required
+    to replace a result belonging to another state owner.
+    """
+    if previous is None:
+        return proposed
+    if proposed is None:
+        if same_value:
+            return previous
+        raise ValueError('Stateful cache provenance forbids replacing this result; use a new version or namespace')
+    try:
+        old, new = json.loads(previous), json.loads(proposed)
+        owner = old.get('owner') if type(old) is dict else None
+        same_owner = (type(owner) is str and bool(owner) and type(new) is dict
+                      and new.get('owner') == owner)
+    except (ValueError, TypeError):
+        same_owner = False
+    if not same_owner:
+        raise ValueError('Stateful cache provenance cannot be transferred to another owner')
+    return proposed
+
+
 @dataclass(frozen=True)
 class SQLiteKV:
     path: str
@@ -149,22 +175,31 @@ class SQLiteKV:
                 count += int(old is None)
                 old_origin = (db.execute('SELECT length(CAST(origin AS BLOB)) FROM kv_origins WHERE namespace=? AND key=?',
                                          (namespace, key)).fetchone() if has_origins else None)
+                if old_origin is not None and (type(old_origin[0]) is not int or old_origin[0] > 512):
+                    raise ValueError('Invalid KV origin')
+                previous = (db.execute('SELECT origin FROM kv_origins WHERE namespace=? AND key=?',
+                                      (namespace, key)).fetchone()[0] if old_origin else None)
+                if previous is not None and type(previous) is not str:
+                    raise ValueError('Invalid KV origin')
+                current = (db.execute('SELECT CAST(value AS BLOB)=? FROM kv WHERE namespace=? AND key=?',
+                                      (payload, namespace, key)).fetchone() if previous is not None or _origin_only else None)
+                effective = preserve_cache_origin(previous, _origin,
+                    same_value=current is not None and bool(current[0]))
+                effective_bytes = len(effective.encode()) if effective is not None else 0
                 # Provenance is real retained cache data, charged to the same
                 # byte allowance. Plain historical databases have no overhead.
-                size += len(payload) - (old[0] if old else 0) + origin_bytes - (old_origin[0] if old_origin else 0)
+                size += len(payload) - (old[0] if old else 0) + effective_bytes - (len(previous.encode()) if previous else 0)
                 if count > self.max_entries or size > self.max_bytes:
                     raise ValueError('KV capacity exceeded')
                 if _origin_only:
-                    current = db.execute('SELECT CAST(value AS BLOB) FROM kv WHERE namespace=? AND key=?',
-                                         (namespace, key)).fetchone()
-                    if current is None or current[0] != payload:
+                    if current is None or not current[0]:
                         raise ValueError('Completed cache result changed during state replay')
                 else:
                     db.execute('INSERT INTO kv VALUES (?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET value=excluded.value',
                                (namespace, key, payload))
-                if _origin is not None:
+                if effective is not None:
                     db.execute('INSERT INTO kv_origins VALUES (?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET origin=excluded.origin',
-                               (namespace, key, _origin))
+                               (namespace, key, effective))
                 elif has_origins:
                     db.execute('DELETE FROM kv_origins WHERE namespace=? AND key=?', (namespace, key))
             db.execute('INSERT INTO kv_usage VALUES (?,?,?) ON CONFLICT(namespace) DO UPDATE SET entries=excluded.entries,bytes=excluded.bytes',

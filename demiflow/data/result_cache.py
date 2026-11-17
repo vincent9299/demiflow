@@ -258,11 +258,19 @@ class CacheCall:
             yield handle
 
     def cached(self, key):
-        result = self.store.get(key, _with_origin=hasattr(self, '_cache_owner'))
+        result = self.store.get(key, _with_origin=True)
         if result['hit'] and hasattr(self, '_cache_owner') and self._requires_state_replay(result.get('origin'), result['value']):
             return {'hit': False, 'value': result['value'], 'state_replay': True}
         if result['hit'] and selected(self.cache_when, result['value']):
             return result
+        if result['hit'] and result.get('origin') is not None:
+            # Refuse before invoking the business callable: replacing another
+            # owner's evidence would make that owner's later resume unsafe.
+            origin = json.loads(result['origin'])
+            if type(origin) is not dict or origin.get('owner') != getattr(self, '_cache_owner', None):
+                from ..execution.contracts.dataflow_errors import DataflowError
+                raise DataflowError('INCOMPATIBLE_HISTORY',
+                    'Replacing another state owner cache result requires a new version or namespace')
         return {'hit': False, 'value': None, 'rejected_hit': result['hit']}
 
     def save(self, key, result, prior):
