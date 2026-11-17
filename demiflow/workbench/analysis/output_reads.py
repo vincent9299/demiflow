@@ -31,7 +31,8 @@ class ReturnMetadata:
 
 
 class ReturnCase:
-    def __init__(self,controller,value):self.controller,self.value=controller,value
+    def __init__(self,controller,value):
+        self.controller,self.value,self.records=controller,value,controller.records
 
     def route(self,authority,operation,payload):
         from demiflow.workbench.analysis.case_pages import finish

@@ -453,7 +453,7 @@ def test_cli_matches_python_and_rejects_new_workspace_in_legacy_entry(demo):
     value = runner.invoke(
         main,
         [
-            "forge",
+            "workbench",
             "table",
             "sample",
             str(root),
@@ -471,7 +471,7 @@ def test_cli_matches_python_and_rejects_new_workspace_in_legacy_entry(demo):
     bad = runner.invoke(
         main,
         [
-            "forge",
+            "workbench",
             "flow",
             "inspect",
             str(root),

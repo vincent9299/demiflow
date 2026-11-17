@@ -105,6 +105,9 @@ def test_control_root_itself_ancestor_and_child_refuse_before_copy(base_name,tmp
 
 def test_real_workspace_resource_inode_uses_exact_unsigned_identity_without_global_json_relaxation():
     parent=Path(__file__).resolve().parents[2]/'P2'
+    if not parent.is_dir():
+        pytest.skip('not_run: requires the sibling P2 lane worktree and a filesystem yielding '
+                    'inode > 2**63-1; absent in this integration tree (env, not a pass)')
     with tempfile.TemporaryDirectory(prefix='owned-media-inode-',dir=parent) as directory:
         root,raw=declared(Path(directory));locator,source=fixed(root)
         facts=(root/'data').stat()

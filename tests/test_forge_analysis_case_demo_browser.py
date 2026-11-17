@@ -14,6 +14,7 @@ import threading
 
 import lance
 import pyarrow as pa
+import pytest
 from playwright.sync_api import expect
 
 from demiflow.workbench.projects import registry as console
@@ -56,6 +57,7 @@ def representative_case(browser,tmp_path,monkeypatch):
             features={}
             def __init__(self,server,config):self.server=server
             def ceiling(self):return dict(analysis_execute=False,analysis_write=True,case_annotate=True)
+            def execution_profile(self):return None # Metadata-only double has no admitted runtime.
             def assert_ready(self):return True
             def close(self):pass
             def cancel_output(self,key):pass
@@ -91,7 +93,8 @@ def representative_case(browser,tmp_path,monkeypatch):
                 page.goto(app.origin+'/#token='+app.token)
                 page.evaluate('(value)=>new ForgeAnalysisState.Store().saveCaseDraft(value.project,value.source,value.draft)',dict(project=project,source=source['digest'],draft=draft))
                 page.get_by_role('button',name='数据',exact=True).click()
-                expect(page.get_by_role('heading',name='Case 0',exact=True)).to_be_visible()
+                expect(page.get_by_role('heading',name='红色陶瓷杯',exact=True)).to_be_visible()
+                expect(page.locator('p.case-ui-current-key')).to_have_text('Case 0')
                 expect(page.get_by_label('标注 人工结论',exact=True)).to_be_visible()
                 yield dict(page=page,app=app,source=source,project=project,calls=calls,errors=errors,descriptor=descriptor,root=root,draft_id=draft['id'])
                 assert not errors,errors
@@ -99,6 +102,49 @@ def representative_case(browser,tmp_path,monkeypatch):
                 page.screenshot(path=str(tmp_path/'demo-structure-failure.png'),full_page=True);raise
             finally:
                 page.unroute_all(behavior='ignoreErrors');context.close();assert source_files(root)==before,'UI wrote its fixed source'
+
+
+
+def _frozen_legacy_client_bytes(current_client_path):
+    """Missing historical JS is a separate not-run gate, never a passing warning."""
+    source=os.environ.get('FORGE_CASE_LEGACY_JS')
+    expected=os.environ.get('FORGE_CASE_LEGACY_JS_SHA256')
+    if not source:
+        pytest.skip('not_run: frozen pre-codec analysis-case.js and SHA256 required '
+                    '(FORGE_CASE_LEGACY_JS + FORGE_CASE_LEGACY_JS_SHA256); '
+                    'the current client cannot prove old-client rejection')
+    assert expected, 'frozen legacy client requires its exact SHA256'
+    path=Path(source)
+    assert path.stat().st_size<=131072, 'legacy client exceeds the fixture asset budget'
+    legacy_bytes=path.read_bytes();assert len(legacy_bytes)<=131072
+    assert legacy_bytes, 'frozen legacy client is empty'
+    assert hashlib.sha256(legacy_bytes).hexdigest()==expected, 'legacy client SHA256 differs'
+    assert legacy_bytes!=current_client_path.read_bytes(), 'current client is not a legacy artifact'
+    return legacy_bytes
+
+
+def test_frozen_old_client_refuses_field_codec_without_changing_draft(browser,tmp_path,monkeypatch):
+    legacy_bytes=_frozen_legacy_client_bytes(OWN/'analysis-case.js')
+    with representative_case(browser,tmp_path,monkeypatch) as f:
+        p=f['page'];p.get_by_label('标注对象',exact=True).select_option('answer_1200')
+        p.get_by_label('标注 备注',exact=True).fill('旧客户端拒绝前的字段记录')
+        p.get_by_role('button',name='保存本 Case 标注',exact=True).click()
+        expect(p.locator('.analysis-case-review')).to_contain_text('当前答案 v1')
+        cache=p.evaluate('(value)=>new ForgeAnalysisState.Store().caseDraft(value.project,value.digest)',dict(project=f['project'],digest=f['source']['digest']))
+        assert cache['id'].startswith('case-fields-v2:')
+        writes_before=len([name for name,_ in f['calls'] if name=='annotations-save'])
+        legacy=browser.new_context(storage_state=p.context.storage_state());old_page=legacy.new_page();old_page.set_default_timeout(65000)
+        old_page.route('**/analysis-case.js',lambda route:route.fulfill(status=200,content_type='text/javascript',body=legacy_bytes))
+        try:
+            old_page.goto(f['app'].origin+'/#token='+f['app'].token);old_page.get_by_role('button',name='数据',exact=True).click()
+            expect(old_page.locator('.analysis-case')).to_contain_text('无效的记录标识')
+            expect(old_page.get_by_label('标注 备注',exact=True)).to_have_count(0)
+            assert old_page.evaluate('(value)=>new ForgeAnalysisState.Store().caseDraft(value.project,value.digest)',dict(project=f['project'],digest=f['source']['digest']))==cache
+            assert len([name for name,_ in f['calls'] if name=='annotations-save'])==writes_before
+        finally:old_page.unroute_all(behavior='ignoreErrors');legacy.close()
+        (tmp_path/'old-client-field-codec.json').write_text(json.dumps(dict(
+            legacy_client_sha256=hashlib.sha256(legacy_bytes).hexdigest(),
+            old_client_refuses_field_codec=True,draft_unchanged=True,no_annotation_writes=True),indent=2)+'\n')
 
 
 def test_demo_roles_layouts_visible_selection_field_answers_and_configuration(browser,tmp_path,monkeypatch):
@@ -111,6 +157,9 @@ def test_demo_roles_layouts_visible_selection_field_answers_and_configuration(br
         expect(case.locator('.reading-content strong')).to_have_count(3)
         expect(case.locator('.reading-content h3')).to_have_count(1)
         assert not case.get_by_text('等待的预览已被更新的选择替代',exact=False).count()
+        # ui:E (814da24) collapses 选样条件 by default (queryControlsOpen=false);
+        # expand the panel before asserting its controls, keeping the assertion.
+        p.get_by_text('配置选样条件',exact=True).click()
         expect(p.get_by_label('筛选字段',exact=True)).to_be_visible()
         expect(p.get_by_label('分组取值 category',exact=True)).to_be_visible()
         for width in (1440,1024,760,390):
@@ -145,49 +194,45 @@ def test_demo_roles_layouts_visible_selection_field_answers_and_configuration(br
         legacy=browser.new_context(storage_state=p.context.storage_state());old_page=legacy.new_page();old_page.set_default_timeout(65000)
         writes_before=len([name for name,_ in f['calls'] if name=='annotations-save'])
         try:
-            legacy_source=os.environ.get('FORGE_CASE_LEGACY_JS')
-            if legacy_source:
-                legacy_bytes=Path(legacy_source).read_bytes();assert len(legacy_bytes)<=131072
-                expected=os.environ.get('FORGE_CASE_LEGACY_JS_SHA256')
-                assert expected and hashlib.sha256(legacy_bytes).hexdigest()==expected
-                old_page.route('**/analysis-case.js',lambda route:route.fulfill(status=200,content_type='text/javascript',body=legacy_bytes))
+            # Reload the current client and preserve the exact field answer.
             old_page.goto(f['app'].origin+'/#token='+f['app'].token);old_page.get_by_role('button',name='数据',exact=True).click()
-            if legacy_source:
-                expect(old_page.locator('.analysis-case')).to_contain_text('无效的记录标识')
-                expect(old_page.get_by_label('标注 备注',exact=True)).to_have_count(0)
-            else:
-                # Normal current-source collection remounts this same client;
-                # the explicit frozen-source run above proves old refusal.
-                expect(old_page.get_by_role('heading',name='Case 2',exact=True)).to_be_visible()
-                expect(old_page.get_by_label('标注 备注',exact=True)).to_have_value('此输出字段的观察')
+            expect(old_page.get_by_role('heading',name='黄色雨伞',exact=True)).to_be_visible()
+            expect(old_page.locator('p.case-ui-current-key')).to_have_text('Case 2')
+            expect(old_page.get_by_label('标注 备注',exact=True)).to_have_value('此输出字段的观察')
             assert len([name for name,_ in f['calls'] if name=='annotations-save'])==writes_before
         finally:legacy.close()
         p.get_by_label('标注对象',exact=True).select_option('');expect(p.get_by_label('标注 备注',exact=True)).to_have_value('')
         p.get_by_label('标注 备注',exact=True).fill('整个 Case 的草稿')
         p.get_by_label('标注对象',exact=True).select_option('answer_1200');expect(p.get_by_label('标注 备注',exact=True)).to_have_value('此输出字段的观察')
-        note_box=case.locator('.analysis-answer').filter(has=p.get_by_role('heading',name='备注',exact=True));note_box.get_by_text('标注历史与恢复',exact=True).click();note_box.get_by_role('button',name='读取历史',exact=True).click()
-        expect(note_box.locator('.case-ui-history-entry')).to_contain_text('此输出字段的观察')
+        # ui:E (814da24) moved annotation history into one shared review panel;
+        # each question now opens its own section through 历史与恢复.
+        note_box=case.locator('.analysis-answer').filter(has=p.get_by_role('heading',name='备注',exact=True));note_box.get_by_role('button',name='历史与恢复',exact=True).click()
+        note_history=case.locator('.case-ui-review-history-item').filter(has=p.get_by_text('备注',exact=True));note_history.get_by_role('button',name='读取历史',exact=True).click()
+        expect(note_history.locator('.case-ui-history-entry')).to_contain_text('此输出字段的观察')
         assert [payload for name,payload in f['calls'] if name=='annotations'][-1]['target']['field']=='answer_1200'
         p.reload(wait_until='domcontentloaded');p.get_by_role('button',name='数据',exact=True).click()
         expect(p.get_by_label('标注对象',exact=True)).to_have_value('answer_1200')
         expect(p.get_by_label('标注 备注',exact=True)).to_have_value('此输出字段的观察')
         p.get_by_label('标注对象',exact=True).select_option('');expect(p.get_by_label('标注 备注',exact=True)).to_have_value('整个 Case 的草稿')
         p.get_by_role('button',name='Case 0',exact=True).click();p.get_by_label('标注 备注',exact=True).fill('Case 0 已复核')
-        p.get_by_role('button',name='保存并下一条',exact=True).click();expect(p.get_by_role('heading',name='Case 1',exact=True)).to_be_visible()
+        p.get_by_role('button',name='保存并下一条',exact=True).click();expect(p.get_by_role('heading',name='蓝色波点杯',exact=True)).to_be_visible();expect(p.locator('p.case-ui-current-key')).to_have_text('Case 1')
         assert [payload for name,payload in f['calls'] if name=='annotations-save'][-1]['target']['case_key']=='0'
         p.get_by_role('button',name='配置评测',exact=True).click();p.get_by_label('评测题目 2',exact=True).fill('复核结论')
         p.get_by_role('button',name='应用评测定义',exact=True).click();expect(p.get_by_label('标注 复核结论',exact=True)).to_have_value('')
-        p.get_by_role('button',name='内容字段与格式',exact=True).click();p.get_by_label('字段角色 3',exact=True).select_option('reference')
+        p.get_by_role('button',name='材料与布局',exact=True).click();p.get_by_label('字段角色 3',exact=True).select_option('reference')
         p.get_by_label('预览格式 3',exact=True).select_option('code');expect(p.get_by_label('代码语言 3',exact=True)).to_be_visible()
         p.get_by_label('代码语言 3',exact=True).select_option('text')
         p.get_by_role('button',name='字段与评测配置',exact=True).click()
         expect(case.locator('.case-ui-shared-materials [data-role=input]')).to_have_count(1)
         expect(case.locator('.case-ui-shared-materials [data-role=reference]')).to_have_count(2)
         p.get_by_role('button',name='Case 2',exact=True).click()
+        # The reload above re-initialised queryControlsOpen=false, so expand again.
+        p.get_by_text('配置选样条件',exact=True).click()
         p.get_by_label('筛选字段',exact=True).select_option('category');p.get_by_label('筛选值',exact=True).fill('陶瓷杯')
         p.get_by_role('button',name='应用筛选与分组',exact=True).click()
         expect(case.locator('.analysis-case-list button')).to_have_count(2)
-        expect(p.get_by_role('heading',name='Case 2',exact=True)).to_be_visible()
+        expect(p.get_by_role('heading',name='黄色雨伞',exact=True)).to_be_visible()
+        expect(p.locator('p.case-ui-current-key')).to_have_text('Case 2')
         expect(case.locator('.analysis-case-content')).to_contain_text('当前 Case 不在本次选样页')
         expect(p.get_by_label('标注 备注',exact=True)).to_have_value('整个 Case 的草稿')
         p.get_by_role('button',name='清除筛选条件',exact=True).click();expect(case.locator('.analysis-case-list button')).to_have_count(3)

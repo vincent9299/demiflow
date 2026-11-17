@@ -73,7 +73,7 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
         except (ValueError,KeyError,TypeError,RecursionError) as exc:
             raise ObservationResetRequired('cursor_invalid') from exc
     try:
-        _,connection=_connect(root,run_id)
+        target,connection=_connect(root,run_id)
     except (OSError,ForgeError) as exc:
         if cursor:raise ObservationResetRequired('history_unavailable') from exc
         raise
@@ -103,10 +103,24 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
         revision,count,_=_observation_revision(db,attempt)
         if decoded is not None and decoded['observation_revision']!=revision:
             raise ObservationResetRequired('observations_changed')
+        # Page credentials come only from the persisted producer observations.
+        # A selected sealed plan is not evidence that a legacy row ran that plan.
+        scope_clauses=['attempt=?'];scope_values=[attempt]
+        for key,value in [('node_id',node_id),('action_id',action_id)]:
+            if value is not None:
+                scope_clauses.append(key+'=?');scope_values.append(value)
+        scope_fields=('plan_id','dag_id','plan_revision')
+        scope_query=','.join("json_extract(document,'$."+name+"')" for name in scope_fields)
+        scopes=db.execute('SELECT DISTINCT '+scope_query+' FROM node_observations WHERE '+
+                          ' AND '.join(scope_clauses)+' LIMIT 2',scope_values).fetchall()
+        page_scope=(dict(zip(scope_fields,scopes[0])) if len(scopes)==1
+                    and all(value is not None for value in scopes[0]) else None)
         result=dict(format='demiflow_forge_node_observation_page_v1',run_id=run_id,attempt=attempt,
                     node_id=node_id,action_id=action_id,binding=binding,observation_revision=revision,
                     observations=[],availability='available',scope='correlated_node_observations',
                     cursor=None,has_more=False,coverage='one_page_at_observation_revision',attempt_observation_count=count)
+        if page_scope is not None:
+            result.update(page_scope)
         clauses=['attempt=?'];values=[attempt]
         for key,value in [('node_id',node_id),('action_id',action_id)]:
             if value is not None:clauses.append(key+'=?');values.append(value)
@@ -272,8 +286,9 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
             "elapsed_s",
             "timing_scope",
         )
+        scope_fields = ("plan_id", "dag_id", "plan_revision", "occurrence_id")
         query = "SELECT action_id,node_id,occurrence," + ",".join(
-            "json_extract(document,'$." + k + "')" for k in fields
+            "json_extract(document,'$." + k + "')" for k in fields + scope_fields
         )
         query += " FROM node_observations WHERE attempt=? ORDER BY terminal,action_id,node_id,occurrence LIMIT 65"
         for row in db.execute(query, (attempt,)):
@@ -282,7 +297,9 @@ def snapshot(root, run_id, *, attempt=None, revision=None):
                     action_id=row[0],
                     node_id=row[1],
                     occurrence=row[2],
-                    **dict(zip(fields, row[3:])),
+                    **dict(zip(fields, row[3:3 + len(fields)])),
+                    **(dict(zip(scope_fields, row[3 + len(fields):]))
+                       if all(value is not None for value in row[3 + len(fields):]) else {}),
                 )
             )
         outputs = []

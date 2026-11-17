@@ -24,7 +24,7 @@
     catch(error){parent.append(node('p',error.message+'；请使用受控原始 artifact 读取。','muted small'));}
   }
   function original(parent,value,label='原值'){const detail=node('details');detail.append(node('summary',label));detail.ontoggle=()=>{if(detail.open&&detail.children.length===1)raw(detail,value);};parent.append(detail);}
-  function jsonTree(parent,value){
+  function jsonTree(parent,value,toolTarget=parent){
     boundedJSON(value);let remaining=256;
     const render=(item,depth,label)=>{
       if(remaining--<=0)return node('span','… 初始节点预算已用完，请查看原值','muted small');
@@ -39,13 +39,16 @@
       }
       detail.ontoggle=()=>{if(detail.open&&!page.children.length)paint();};return detail;
     };
-    const root=render(value,0);parent.append(root);if(root.tagName==='DETAILS')root.open=true;original(parent,value);
+    const root=render(value,0);parent.append(root);if(root.tagName==='DETAILS')root.open=true;original(toolTarget,value);
   }
   function watch(){if(watching)return;watching=true;new MutationObserver(()=>{for(const handle of handles)if(!handle.element.isConnected)handle.dispose();}).observe(document.documentElement,{childList:true,subtree:true});}
   function disposeWithin(parent){for(const handle of [...handles])if(!parent||parent===handle.element||parent.contains(handle.element))handle.dispose();}
-  function field({parent,format,value,label='',originalLabel='原值',language='',mountText,preview,media,resolveMedia,disposeReaders,isCurrent=()=>parent.isConnected}){
+  function field({parent,format,value,label='',originalLabel='原值',language='',mountText,preview,media,resolveMedia,disposeReaders,isCurrent=()=>parent.isConnected,density='normal',tools='inline'}){
     if(handles.size>=128){const element=node('p','当前字段组件达到 128 项预算，请收起其他输出。','muted small');parent.append(element);return {element,ready:Promise.resolve(),dispose(){element.remove();}};}
-    const host=node('div',undefined,'analysis-field-value');parent.append(host);
+    const compact=density==='compact',moreTools=compact||tools==='menu';
+    const host=node('div',undefined,'analysis-field-value');if(compact)host.classList.add('analysis-field-compact');if(tools==='menu')host.classList.add('analysis-field-menu');parent.append(host);
+    const more=moreTools?node('details',undefined,'analysis-field-more'):null;if(more)more.append(node('summary','更多'));
+    const toolHost=more||host;
     let dead=false;const abort=new AbortController(),owned=new Set();
     const current=()=>!dead&&!abort.signal.aborted&&host.isConnected&&isCurrent();
     function own(handle){if(handle&&typeof handle.dispose==='function'){if(dead)handle.dispose();else owned.add(handle);}}
@@ -62,13 +65,13 @@
         boundedJSON(value);
         if(format==='md'){
           if(typeof mountText!=='function'){fallback('Markdown 阅读器不可用');return;}
-          own(mountText(host,value));
+          own(mountText(host,value,compact?{compactSource:true}:undefined));
         }else{
-          const pre=node('pre',value,'analysis-raw');if(format==='code'){const lines=value.split('\n',2049),shown=lines.slice(0,2048);host.append(node('span',(language||'代码')+' · 只读'+(lines.length>2048?' · 行号预览前 2048 行':''),'muted small'));pre.classList.add('analysis-code');pre.setAttribute('aria-label','代码行号预览（只读）');pre.textContent=shown.map((line,index)=>String(index+1).padStart(4,' ')+'  '+line).join('\n');host.append(pre);original(host,value);}else host.append(pre);
+          const pre=node('pre',value,'analysis-raw');if(format==='code'){const lines=value.split('\n',2049),shown=lines.slice(0,2048);host.append(node('span',(language||'代码')+' · 只读'+(lines.length>2048?' · 行号预览前 2048 行':''),'muted small'));pre.classList.add('analysis-code');pre.setAttribute('aria-label','代码行号预览（只读）');pre.textContent=shown.map((line,index)=>String(index+1).padStart(4,' ')+'  '+line).join('\n');host.append(pre);original(toolHost,value);}else host.append(pre);
         }
-        const copy=node('button','复制原文');copy.type='button';copy.onclick=async()=>{try{await navigator.clipboard.writeText(value);if(current())copy.textContent='已复制';}catch{if(current())copy.textContent='复制不可用，请选择原文';}};host.append(copy);return;
+        const copy=node('button','复制原文');copy.type='button';copy.onclick=async()=>{try{await navigator.clipboard.writeText(value);if(current())copy.textContent='已复制';}catch{if(current())copy.textContent='复制不可用，请选择原文';}};toolHost.append(copy);return;
       }
-      if(format==='json'){try{jsonTree(host,value);}catch(error){fallback(error.message);}return;}
+      if(format==='json'){try{jsonTree(host,value,toolHost);}catch(error){fallback(error.message);}return;}
       if(format==='tag'){
         if(!Array.isArray(value)||value.length>64||value.some(item=>typeof item!=='string'||new TextEncoder().encode(item).length>256)){fallback('Tag 需要最多 64 个字符串标签');return;}
         for(const item of value)host.append(node('span',item,'analysis-tag'));return;
@@ -81,7 +84,7 @@
           const rendered=await preview('html',value,{signal:abort.signal});if(!current())return;
           if(rendered?.format!=='html'||rendered.sandbox!==''||rendered.active_content!==false||typeof rendered.preview!=='string'||new TextEncoder().encode(rendered.preview).length>258*1024)throw Error('HTML 预览协议不匹配');
           const frame=node('iframe');frame.title=label+' HTML 预览';frame.setAttribute('sandbox','');frame.referrerPolicy='no-referrer';frame.srcdoc=rendered.preview;
-          clear();host.append(frame);if(rendered.blocked_media)host.append(node('p','HTML 内嵌图片/音视频已隔离；请使用类型化的授权媒体引用。','muted small'));const source=node('details');source.append(node('summary','HTML 原文'));source.ontoggle=()=>{if(source.open&&source.children.length===1)raw(source,value);};host.append(source);
+          clear();host.append(frame);if(rendered.blocked_media)host.append(node('p','HTML 内嵌图片/音视频已隔离；请使用类型化的授权媒体引用。','muted small'));const source=node('details');source.append(node('summary','HTML 原文'));source.ontoggle=()=>{if(source.open&&source.children.length===1)raw(source,value);};toolHost.append(source);
         }catch(error){if(current())fallback(error.message);}return;
       }
       if(format==='message'||format==='dialogue'){
@@ -92,8 +95,8 @@
         for(const turn of turns){
           const article=node('div',undefined,'analysis-message');article.append(node('strong',turn.role));host.append(article);
           if(typeof turn.content==='string')article.append(node('pre',turn.content));
-          else for(const part of turn.content)own(field({parent:article,format:part.format,value:part.value,label,mountText,preview,resolveMedia,disposeReaders,isCurrent:current}));
-        }original(host,value);return;
+          else for(const part of turn.content)own(field({parent:article,format:part.format,value:part.value,label,mountText,preview,resolveMedia,disposeReaders,isCurrent:current,density,tools}));
+        }original(toolHost,value);return;
       }
       if(['image','audio','video'].includes(format)){
         if(resolveMedia&&globalThis.ForgeAnalysisMedia)own(ForgeAnalysisMedia.create({host,kind:format,reference:value,resolveMedia,signal:abort.signal,isCurrent:current}));
@@ -101,11 +104,11 @@
           const button=node('button','预览图片');button.type='button';host.append(button);
           button.onclick=async()=>{if(!current())return;button.disabled=true;try{const result=await media(host);if(!current()){result?.dispose?.();return;}own(result);}catch(error){if(current())host.append(node('p',error.message,'error-box'));}finally{if(current())button.disabled=false;}};
         }else host.append(node('p','此来源尚未接入经核对的 '+format+' 媒体；可查看原始引用。','muted small'));
-        original(host,value,originalLabel);return;
+        original(toolHost,value,originalLabel);return;
       }
       fallback('未识别的预览格式');
     }
-    handle.ready=Promise.resolve().then(render).catch(error=>{if(current())fallback(error.message);});return handle;
+    handle.ready=Promise.resolve().then(render).then(()=>{if(more&&more.children.length>1&&current())host.append(more);}).catch(error=>{if(current())fallback(error.message);});return handle;
   }
   globalThis.ForgeAnalysisRender=Object.freeze({field,disposeWithin,stats:()=>({fields:handles.size})});
 })();

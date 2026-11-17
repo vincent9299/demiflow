@@ -51,6 +51,25 @@ _SEAL_KEY = "-dataflow-sealed"
 _CONSTANTS_KEY = "-dataflow-constants"
 _SEED_KEYS = ("seed", "shuffle_seed", "sample_seed", "block_order_seed")
 
+_SEAL_FACT_KEYS = frozenset({"schema", "run_id", "action_id", "dag_id", "plan_id",
+                            "logical_ref", "physical_ref", "programs", "code_pin_ref",
+                            "identity_bridge_ref", "source_refs", "constants_ref",
+                            "plan_revision", "graph_digest", "physical_digest"})
+
+
+def _validate_seal_marker(marker):
+    """Validate the original marker and its optional producer metadata."""
+    if type(marker) is not dict:
+        raise DataflowError("INCOMPATIBLE_HISTORY", "v3 seal marker is not a JSON object")
+    if marker.get("schema") != SEAL_SCHEMA:
+        raise DataflowError("INCOMPATIBLE_HISTORY", "unsupported v3 seal schema: " + repr(marker.get("schema")))
+    if not _SEAL_FACT_KEYS <= set(marker) <= _SEAL_FACT_KEYS | {"sealed_at", "observation_labels"}:
+        raise DataflowError("INVALID_CONTRACT", "v3 seal marker key set is unsupported")
+    if "sealed_at" in marker:
+        value = marker["sealed_at"]
+        if type(value) is not int or not 0 <= value <= 2**63 - 1:
+            raise DataflowError("INVALID_CONTRACT", "v3 sealed_at must be nonnegative int64 epoch milliseconds")
+
 
 def _builtin_node(node):
     """Only registered platform implementations may omit a user program."""
@@ -517,6 +536,9 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
         raise DataflowError("INVALID_CONTRACT", "Graph and physical dag id differ")
     bounds = physical.bounds
     context = action.context
+    existing = context.journal.source_binding(action.action_id + _SEAL_KEY)
+    if existing is not None:
+        _validate_seal_marker(existing)
     graph_raw = encode_wire(graph, type_name="DataflowGraph", bounds=bounds)
     physical_raw = encode_wire(physical, type_name="PhysicalDataflow", bounds=bounds)
     logical_ref = store.put(iter([graph_raw]), max_bytes=bounds.max_control_bytes, media_type=GRAPH_MEDIA)
@@ -563,7 +585,7 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
              "constants_ref": _artifact_json(constants_ref),
              "graph_digest": compute_graph_digest(graph),
              "physical_digest": compute_physical_digest(physical)}
-    original = context.journal.source_binding(action.action_id + _SEAL_KEY)
+    original = existing
     if observation_labels is not None:
         labels = dict(observation_labels)
         if (not set(labels) <= {n.occurrence_id for n in graph.nodes}
@@ -582,6 +604,7 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
         facts["sealed_at"] = original["sealed_at"]
     # Older v3 seals omitted the timestamp. Re-sealing must preserve that exact
     # fact rather than inventing a time or rewriting immutable history.
+    _validate_seal_marker(facts)
     # The immutable journal fact is written last: a failed seal never starts a worker,
     # and a differing re-seal of the same action is refused by the native binding.
     try:
@@ -607,8 +630,7 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds):
         raise DataflowError("INCOMPATIBLE_HISTORY",
                             "Historical action schema " + str(binding.schema_version)
                             + " is not a v3 sealed dataflow")
-    if type(facts) is not dict or facts.get("schema") != SEAL_SCHEMA:
-        raise DataflowError("INCOMPATIBLE_HISTORY", "Unsupported or future sealed dataflow version")
+    _validate_seal_marker(facts)
     if facts.get("action_id") != action_id:
         raise DataflowError("INVALID_CONTRACT", "Sealed action differs from the requested action")
     logical_ref = _artifact_from_json(facts["logical_ref"])

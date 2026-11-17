@@ -9,9 +9,16 @@
   const unit=value=>value==null?'未测量':(value/1024**2).toFixed(1)+' MiB';
   const timeText=value=>{const d=new Date(value*1000),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());};
   const inputText=field=>field.value_type==='str'?String(field.value):json(field.value);
+  const identityKey=execution=>execution==null?null:json([execution.project,execution.basisDigest,execution.runId,execution.attempt,execution.actionId,execution.dagId,execution.planId,execution.planRevision,execution.format]);
+  const basisText={report:'检查报告',source:'源码观察',sealed:'封存计划',observation:'运行观测'};
+  const recoveryText={checkpoint:'检查点恢复',final_commit:'最终提交恢复',delivery_only:'仅交付恢复',attempt_only:'仅本次尝试（不可恢复）'};
+  const restrictionText={INCOMPATIBLE_HISTORY:'历史封存与当前运行时不兼容，不能恢复；请新建运行。',UNKNOWN_EFFECT:'存在未知效果的执行，恢复准入待服务端核对。',CAPACITY_PENDING:'容量待满足，尚未执行完成；不会自动新建或重复提交。'};
   async function mount(options) {
     const {main,api,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView=()=>{},
       openResult=async()=>{},navigate=async()=>{},projectSettings={}}=options;
+    const presentation=globalThis.ForgeWorkbenchPresentation;
+    if(!presentation||typeof presentation.chooseGraphView!=='function'||typeof presentation.buildGraphModel!=='function'||typeof presentation.buildNodeDetails!=='function')
+      throw new Error('图呈现模块未加载或不完整：ForgeWorkbenchPresentation');
     let ctx=options.context;
     const state=ForgeWorkbenchState.create(project),commands=ForgeWorkbenchCommands.create({project,api});
     const root=$('section',undefined,'workbench');main.append(root);
@@ -20,7 +27,7 @@
     let logOffset=0,logBody='',eventCursor=null,eventRows=[],lastMetricAt=0,lastEventAt=0;
     let records=null,cursors=[null],page=0,listSequence=0,sourceOpen=true,comparison=null,outputFingerprint=null,runFilter='';
     let observationCursor=null,observationPages=[],graphSequence=0,scopeNode=null,nodeOffset=0,inspectorWhole=false;
-    let graphKind='declared',logicalAction=null,logicalSelected=null,lastRunGraphAt=0,graphStatus=null;
+    let lastRunGraphAt=0,graphStatus=null,graphModel=null,actionExplicit=false;
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     const aliasDrafts=new Map();
     const data=()=>state.current();
@@ -66,18 +73,17 @@
     const graphTools=$('div',undefined,'wb-graph-tools'),graphTitle=$('span','数据算子图'),graphHost=$('div',undefined,'wb-graph');
     graphTools.append(graphTitle);const tools=$('div');graphTools.append(tools);
     const wholeButton=button('整图配置',()=>wholeConfiguration(),tools);
-    const graphView=ForgeWorkbenchGraph.mount(graphHost,{onSelect:id=>chooseNode(id)});
-    const logicalView=ForgeWorkbenchGraph.mountLogical(graphHost,{onSelect:(id,declared)=>chooseLogicalNode(id,declared)});
-    const logicalToggle=button('声明图投影（E2）',()=>toggleGraphKind(),tools);
-    logicalToggle.setAttribute('aria-pressed','false');
-    const activeGraphView=()=>graphKind==='logical'?logicalView:graphView;
-    button('−',()=>activeGraphView().zoom(.8),tools).setAttribute('aria-label','缩小算子图');
-    button('+',()=>activeGraphView().zoom(1.25),tools).setAttribute('aria-label','放大算子图');
-    button('适应',()=>activeGraphView().fit(),tools).setAttribute('aria-label','适应算子图');
+    const graph=ForgeWorkbenchGraph.mount(graphHost,{onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
+    const viewToggle=button('当时检查图',()=>toggleGraphKind(),tools);
+    viewToggle.setAttribute('aria-pressed','false');viewToggle.hidden=true;
+    button('−',()=>graph.zoom(.8),tools).setAttribute('aria-label','缩小算子图');
+    button('+',()=>graph.zoom(1.25),tools).setAttribute('aria-label','放大算子图');
+    button('适应',()=>graph.fit(),tools).setAttribute('aria-label','适应算子图');
     const graphLegend=$('p','实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用','wb-caption');
-    const logicalBar=$('div',undefined,'wb-logical-bar');logicalBar.hidden=true;
+    const actionBar=$('div',undefined,'wb-action-bar');actionBar.hidden=true;
+    const advanced=details('高级诊断',graphSection);advanced.hidden=true;
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
-    graphSection.prepend(graphTools,logicalBar,graphHost,graphLegend);body.append(graphSection,inspector);root.append(body);
+    graphSection.prepend(graphTools,actionBar,graphHost,graphLegend);body.append(graphSection,inspector);root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
     const detailButtons=new Map();
     detailHeader.append($('strong','日志与观测'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
@@ -113,7 +119,7 @@
     documents.addEventListener('toggle',()=>{if(documents.open&&!projectInfoRendered)refreshProjectInfo();});
     button('在开发中查看与修正',()=>navigate('development'),documents);
     function graphLoading(loading){graphHost.inert=inspector.inert=checks.inert=loading;if(loading){graphHost.setAttribute('aria-busy','true');basisLabel.textContent='正在读取图…';disposeReaders(sourceBody);sourceBody.replaceChildren($('p','正在读取绑定来源…','wb-caption'));}else graphHost.removeAttribute('aria-busy');updateActions();}
-    function transition(patch){notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;logicalAction=null;logicalSelected=null;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
+    function transition(patch){notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
     function registered(){return !!working&&ctx.flows.some(f=>f.entry===working.entry&&(f.parameters||[]).includes(working.params));}
     function choices(){
       const entries=new Map();
@@ -135,7 +141,7 @@
     function updateActions(){
       if(!root.isConnected)return;
       const resultsActive=data().mode==='results',checksActive=data().mode==='checks';
-      body.hidden=resultsActive||checksActive;checks.hidden=!checksActive;runDetail.hidden=!run||resultsActive;runFacts.hidden=!run||resultsActive;trend.hidden=!run||resultsActive;
+      body.hidden=resultsActive;checks.hidden=!checksActive;runDetail.hidden=!run||resultsActive;runFacts.hidden=!run||resultsActive;trend.hidden=!run||resultsActive;
       runBar.hidden=!run||!!comparison;
       if(!checksActive&&documents.parentElement===checkIssues){documents.open=false;root.append(documents);}
       const dirty=working&&Object.keys(getDraft().values).length>0;
@@ -144,8 +150,10 @@
       runButton.disabled=busy||!!run||!registered()||!can('run_submit')||dirty||!data().graph?.parameters.available||data().graph?.freshness.current===false;
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
       wholeButton.disabled=!data().graph;
-      logicalToggle.disabled=!data().graph||graphHost.hasAttribute('aria-busy');
-      if(graphKind!=='logical')logicalToggle.textContent=logicalName();
+      const sealedView=!!run&&data().graph?.binding.basis_kind==='run';
+      viewToggle.hidden=!sealedView;
+      viewToggle.textContent=data().graphPreference==='report'?'返回执行图':'当时检查图';
+      viewToggle.setAttribute('aria-pressed',String(data().graphPreference==='report'));
       accessState.hidden=!!run||registered()&&can('run_submit');
       accessState.textContent=!working?.entry?'尚未发现可用入口。可在开发中编写流程，再通过“接入与权限”登记。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；当前仅观察源码，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       for(const[key,b]of modes){b.classList.toggle('active',data().mode===key);b.setAttribute('aria-pressed',String(data().mode===key));}
@@ -163,8 +171,69 @@
         const item=$('div',undefined,'wb-issue'),id=diagnosticTarget(d);
         item.append($('strong',(d.rule||d.code||'诊断')+' · '+({source:'源码或配置',resource:'资源限制',platform:'平台问题',unsupported:'能力未支持',unknown:'原因待核对'}[d.cause||'unknown']||'原因待核对')),
           $('p',d.detail||d.message||''),$('small',(d.path||'整图')+(d.line?':'+d.line:'')+(id?'':' · 未绑定到可见节点')));
-        if(id)button('定位节点',()=>onLocate?onLocate(id):data().graph.nodes.some(n=>n.id===id)?chooseNode(id):locateNode(id),item);parent.append(item);
+        if(id)button('定位节点',()=>onLocate?onLocate(id):chooseNode(id),item);parent.append(item);
       }
+    }
+    function actionStatusLabel(a){return a.status==='sealed'?'已封存':a.status==='projected'?'已投影':a.status==='unavailable'?'不可用':'投影失败';}
+    function paintActionSelector(graphValue,choice){
+      actionBar.replaceChildren();
+      const view=graphValue.logical;
+      const actions=view?.available?view.actions||[]:[];
+      const show=graphValue.binding.basis_kind==='run'&&actions.length>0;
+      actionBar.hidden=!show;
+      if(!show)return;
+      const items=actions.map(a=>({value:a.action_id,label:String(a.action_id||'无效 action').slice(-12)+' · '+actionStatusLabel(a)+(a.version==='v3'?' · v3':'')}));
+      const chosen=choice.actionId??actions[0]?.action_id;
+      const choiceNode=select('执行 action',items,chosen);
+      choiceNode.onchange=()=>{if(disposed||!choiceNode.isConnected)return;actionExplicit=true;state.setGraphView({preference:data().graphPreference,actionId:choiceNode.value,execution:null});paintGraph();afterGraphPaint();};
+      field('action',choiceNode,actionBar);
+      actionBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
+      const selected=actions.find(a=>a.action_id===chosen);
+      if(selected?.status==='sealed'){
+        const value=selected.sealed_at;
+        const stamp=typeof value==='number'&&Number.isSafeInteger(value)&&value>=0?new Date(value)
+          :typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(value)?new Date(value):null;
+        if(stamp&&Number.isFinite(stamp.getTime())){
+          const sealed=$('time','封存于 '+stamp.toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',timeZoneName:'short'}),'wb-caption wb-sealed-time');
+          sealed.dateTime=stamp.toISOString();actionBar.append(sealed);
+        }else actionBar.append($('span','封存时间未提供','wb-caption wb-sealed-time'));
+      }
+      if(choice.kind==='unavailable')actionBar.append($('span',choice.reason||'所选 action 不可用','wb-tag'));
+    }
+    function paintAdvancedDiagnostics(graphValue,choice,model){
+      advanced.hidden=!graphValue;
+      advanced.replaceChildren($('summary','高级诊断'));
+      if(!graphValue)return;
+      const box=$('div',undefined,'wb-advanced');
+      box.append($('p','视角：'+choice.kind+(choice.label?' · '+choice.label:'')+(choice.reason?' · '+choice.reason:''),'wb-caption'));
+      if(model.execution)raw('执行身份（读取票据）',model.execution,box);
+      const view=graphValue.logical;
+      if(view?.available)raw('logical.actions（服务端投影）',{action_count:view.action_count,truncated:!!view.truncated,actions:(view.actions||[]).map(a=>({action_id:a.action_id,status:a.status,binding_level:a.binding_level,version:a.version||null,schema_version:a.dag?.schema_version||null}))},box);
+      raw('图依据与完整性',{binding:graphValue.binding,completeness:graphValue.completeness,freshness:graphValue.freshness},box);
+      advanced.append(box);
+    }
+    function paintGraph(){
+      const g=data().graph;
+      if(!g){graphModel=null;return null;}
+      const preference=data().graphPreference;
+      const choice=presentation.chooseGraphView(g,{actionId:data().actionId,preference});
+      const selection=data().selection;
+      let model=presentation.buildGraphModel(g,{choice,snapshot:snapshot||run,selection});
+      const sameView=data().graphPreference===preference&&data().actionId===choice.actionId&&identityKey(data().execution)===identityKey(model.execution);
+      if(!sameView)state.setGraphView({preference,actionId:choice.actionId,execution:model.execution});
+      if(selection!==null&&data().selection===null)model=presentation.buildGraphModel(g,{choice,snapshot:snapshot||run,selection:null});
+      if(model.selected===null&&data().selection!==null)state.setGraphSelection(null);
+      graphModel=model;
+      graph.update(model);
+      graph.select(model.selected);
+      paintActionSelector(g,choice);
+      paintAdvancedDiagnostics(g,choice,model);
+      graphLegend.textContent=choice.kind==='sealed'?(model.execution?.format==='v3'?'实线：数据流（精确实例端口）　一实例一节点':'实线：逻辑数据流（标注端口）　×N：同一逻辑节点多次出现'):'实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用';
+      return model;
+    }
+    function afterGraphPaint(){
+      const model=graphModel;if(!model)return;
+      if(model.selected){const card=model.nodes.find(n=>n.key===model.selected);if(card)selectGraphNode(card.selection,{quiet:true}).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}
     }
     async function fetchGraph(ticket,{preserveSelection=false,refresh=false}={}){
       const selected=data(),query=selected.run?{basis_kind:'run',run_id:selected.run,attempt:selected.attempt}:selected.report?{basis_kind:'report',report_digest:selected.report}:{basis_kind:'source',entry:selected.entry,...(selected.params?{params:selected.params}:{})};
@@ -174,21 +243,22 @@
       const previous=preserveSelection?data().node:null,keepWhole=preserveSelection&&inspectorWhole;
       if(!state.acceptGraph(ticket,value))return;
       if(selected.run){lastRunGraphAt=Date.now();graphStatus=requestedStatus;}
-      const selectedNode=value.nodes.some(n=>n.id===previous)?previous:value.nodes.some(n=>n.id===scopeNode)?scopeNode:value.nodes[0]?.id;
       if(value.binding.basis_kind==='report')working={entry:value.binding.entry,params:value.binding.params};
       graphTitle.textContent='数据算子图 · '+value.completeness.total_nodes+' 节点 / '+value.completeness.total_edges+' 条边';
       const basis=value.binding.basis_kind;
       basisLabel.textContent=(basis==='run'?'封存运行图':basis==='report'?'检查报告图 · '+value.status:'源码观察图 · 尚未检查')+(scopeNode?' · 节点邻域':value.completeness.display==='clipped'?' · 显示已裁剪':'');
-      graphView.update(value,snapshot||run,selectedNode);paintSelectors();graphLoading(false);paintRunSeal();
-      if(graphKind==='logical')renderLogical(value);
-      paintLocator(value);
+      const model=paintGraph();
+      paintSelectors();graphLoading(false);paintRunSeal();paintLocator(value);
       if(!value.nodes.length){
         paintConfiguration(null);
         if(!['logs','events','observations'].includes(sourceKind)){
           disposeReaders(sourceBody);sourceBody.replaceChildren($('p','本图没有可展示的调用节点。请核对右侧诊断或“检查问题”；没有节点不代表检查通过。','wb-caption'));
         }
+      }else{
+        const cards=model?.nodes||[];
+        const target=cards.find(c=>c.selection.reportNodeId===previous)||cards.find(c=>c.selection.reportNodeId===scopeNode)||cards[0];
+        if(target)await selectGraphNode(target.selection,{quiet:true});
       }
-      else chooseNode(selectedNode);
       if(keepWhole)paintConfiguration(null);
       if(data().mode==='checks')paintIssues();
       updateActions();
@@ -199,214 +269,95 @@
       const ticket=state.capture();scopeNode=id;nodeOffset=offset;graphLoading(true);
       try{await fetchGraph(ticket);}finally{if(current(ticket))graphLoading(false);}
     }
-    function paintLocator(graph){
-      locator.hidden=graph.completeness.total_nodes<=128&&!scopeNode;locatorBody.replaceChildren();
-      const index=graph.node_index;if(!index)return;
+    function paintLocator(graphValue){
+      locator.hidden=graphValue.completeness.total_nodes<=128&&!scopeNode;locatorBody.replaceChildren();
+      const index=graphValue.node_index;if(!index)return;
       const choice=select('定位图节点',index.nodes.map(n=>({value:n.id,label:n.label+' · '+n.source+':'+n.line})),scopeNode);
       choice.onchange=()=>{if(!disposed&&choice.isConnected)locateNode(choice.value).catch(error=>message(error.message,'error-box'));};locatorBody.append(choice);
       button('定位',()=>locateNode(choice.value),locatorBody,{disabled:!index.nodes.length});
       button('上一组节点',()=>locateNode(scopeNode,Math.max(0,index.offset-64)),locatorBody,{disabled:index.offset===0});
       button('下一组节点',()=>locateNode(scopeNode,index.next_offset),locatorBody,{disabled:index.next_offset==null});
       button('返回全图范围',()=>locateNode(null,0),locatorBody,{disabled:!scopeNode});
-      locatorBody.append($('span','已索引 '+index.total+' 个节点 · 当前显示 '+graph.nodes.length+' 个；局部视图仍绑定同一图依据。','wb-caption'));
-    }
-    function logicalName(){return logicalEntry()?.binding_level==='sealed'?'运行封存计划（E2）':'声明图投影（E2）';}
-    function actionStatusLabel(a){return a.status==='sealed'?'已封存':a.status==='projected'?'已投影':a.status==='unavailable'?'不可用':'投影失败';}
-    function logicalEntry(){
-      const view=data().graph?.logical;
-      if(!view?.available||!view.actions.length)return null;
-      const entry=view.actions.find(a=>a.action_id===logicalAction)||view.actions[0];
-      if(entry.status==='sealed'&&entry.version==='v3'&&!entry.dag)return null;
-      return entry;
+      locatorBody.append($('span','已索引 '+index.total+' 个节点 · 当前显示 '+graphValue.nodes.length+' 个；局部视图仍绑定同一图依据。','wb-caption'));
     }
     function toggleGraphKind(){
-      graphKind=graphKind==='logical'?'declared':'logical';
-      logicalToggle.setAttribute('aria-pressed',String(graphKind==='logical'));
-      logicalToggle.classList.toggle('active',graphKind==='logical');
-      logicalToggle.textContent=graphKind==='logical'?'返回数据算子图':logicalName();
-      const g=data().graph;if(!g){updateActions();return;}
-      if(graphKind==='logical')renderLogical(g);
-      else{logicalBar.hidden=true;graphLegend.textContent='实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用';
-        graphTitle.textContent='数据算子图 · '+g.completeness.total_nodes+' 节点 / '+g.completeness.total_edges+' 条边';
-        graphView.update(g,snapshot||run,data().node);}
-      updateActions();
+      if(!run||data().graph?.binding.basis_kind!=='run')return;
+      const preference=data().graphPreference==='report'?'auto':'report';
+      state.setGraphView({preference,actionId:data().actionId,execution:null});
+      paintGraph();afterGraphPaint();updateActions();
     }
-    function logicalPanel(title,detail,extra){
-      const box=$('div',undefined,'wb-logical-panel');
-      box.append($('strong',title),$('p',detail));
-      if(extra)box.append(extra);
-      graphHost.replaceChildren(box);
+    function cardsForReportNode(id){
+      const nodes=graphModel?.nodes||[];
+      return nodes.filter(c=>c.selection.reportNodeId===id||c.occurrences.some(o=>o.reportNodeId===id));
     }
-    function renderLogical(graph){
-      const view=graph.logical;
-      logicalBar.hidden=true;logicalBar.replaceChildren();
-      graphLegend.textContent='实线：逻辑数据流（标注端口）　虚线框：共享祖先 / 复用　×N：同一逻辑节点多次出现';
-      const name=logicalName();
-      if(!view){graphTitle.textContent=name+' · 无投影';logicalPanel(name+'不可用','当前图响应没有逻辑投影字段。');return;}
-      if(!view.available){
-        graphTitle.textContent=name+' · '+(view.semantic_unchecked?'语义未检查':'不可用');
-        logicalPanel(view.semantic_unchecked?'语义未检查':name+'不可用',view.detail||view.reason||'',
-          view.semantic_unchecked?$('p','对当前流程运行“检查”生成报告后，可在此查看按 action 投影的声明图。','wb-caption'):null);
+    async function selectGraphNode(selection,{quiet=false,locate=true}={}){
+      if(disposed||!selection)return;
+      const model=graphModel;
+      let card=model?.nodes.find(c=>c.key===selection.key);
+      if(!card&&selection.reportNodeId&&locate){
+        const candidates=cardsForReportNode(selection.reportNodeId);
+        if(candidates.length)card=candidates[0];
+      }
+      if(!card&&selection.reportNodeId&&locate&&!data().graph?.nodes.some(n=>n.id===selection.reportNodeId)){
+        await locateNode(selection.reportNodeId);
+        return selectGraphNode(selection,{quiet,locate:false});
+      }
+      if(!card){
+        if(!quiet)message('该节点不在当前图中；可定位节点查看局部。','notice');
         return;
       }
-      const entry=logicalEntry();
-      if(!entry){graphTitle.textContent=name+' · 无 action';logicalPanel('没有可投影的 action','报告声明了 action 列表，但当前没有可展示的条目。');return;}
-      logicalAction=entry.action_id;
-      logicalBar.hidden=false;
-      if(view.actions.length>1||view.truncated){
-        const choice=select('逻辑图 action',view.actions.map(a=>({value:a.action_id,label:(a.action_id||'无效 action').slice(-12)+' · '+actionStatusLabel(a)})),entry.action_id);
-        choice.onchange=()=>{if(!disposed&&choice.isConnected){logicalAction=choice.value;logicalSelected=null;renderLogical(data().graph);}};
-        field('action',choice,logicalBar);
-      }
-      logicalBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
-      if(view.run_sealed&&!view.run_sealed.available){
-        logicalBar.append($('span','声明投影（非运行封存计划）','wb-tag'),$('p',view.run_sealed.detail||'','wb-caption'));
-      }
-      if(entry.status==='unavailable'){
-        graphTitle.textContent='运行封存计划（E2）· 不可用';
-        const box=$('div',undefined,'wb-logical-panel');
-        box.append($('strong','此 action 的运行封存计划不可用'),$('p','其它 action 不受影响。','wb-caption'),
-          $('p','reason：'+(entry.reason||'unknown')),$('p','detail：'+(entry.detail||'未提供')));
-        graphHost.replaceChildren(box);return;
-      }
-      if(entry.status!=='projected'&&entry.status!=='sealed'){
-        graphTitle.textContent='声明图投影（E2）· 投影失败';
-        const error=entry.error||{};
-        const box=$('div',undefined,'wb-logical-panel');
-        box.append($('strong','此 action 的逻辑投影失败'),$('p','其它 action 的投影不受影响。','wb-caption'),
-          $('p','code：'+(error.code||'unknown')),$('p','reason：'+(error.reason||'未提供')),$('p','retriable：'+(error.retriable?'true':'false')));
-        graphHost.replaceChildren(box);return;
-      }
-      const dag=entry.dag,sealed=entry.status==='sealed',v3=sealed&&entry.version==='v3';
-      graphTitle.textContent=(sealed?'运行封存计划（E2）':'声明图投影（E2）')+' · '+dag.nodes.length+' 逻辑节点 / '+dag.edges.length+' 条边';
-      logicalBar.append($('span',(sealed?'封存计划结构 · ':'声明投影结构（未执行）· ')+dag.schema_version,'wb-tag'));
-      if(sealed){
-        const sealedAt=entry.sealed_at!=null&&Number.isFinite(Number(entry.sealed_at))?new Date(Number(entry.sealed_at)).toISOString():'未提供';
-        logicalBar.append($('span','已绑定本次执行计划','wb-tag'),
-          $('span','dag_id '+dag.dag_id.slice(0,16),'wb-caption'),
-          $('span','plan_id '+(entry.plan_id||'').slice(0,16),'wb-caption'),
-          $('span','action '+String(entry.action_id).slice(-12),'wb-caption'),
-          $('span','sealed_at '+sealedAt,'wb-caption'));
-      }else{
-        logicalBar.append($('span','未绑定本次执行计划','wb-tag'),$('span','声明图 dag_id '+dag.dag_id.slice(0,16),'wb-caption'));
-        if(entry.fallback)logicalBar.append($('span','声明投影（非运行封存计划）','wb-tag'));
-      }
-      if(v3&&entry.physical){
-        const phys=entry.physical,exchanges=phys.exchanges||[],limitations=phys.limitations||[];
-        const modes=[...new Set(exchanges.map(x=>x.mode))];
-        logicalBar.append($('span','恢复级别 '+String(phys.recovery??'未提供'),'wb-caption'),
-          $('span','交换通道 '+exchanges.length+(modes.length?' · '+modes.join('/'):''),'wb-caption'),
-          $('span','恢复限制 '+limitations.length+' 项','wb-caption'));
-        if(limitations.length)logicalBar.append($('p','恢复限制：'+limitations.join('；'),'wb-caption'));
-        if(entry.recovery_restriction)logicalBar.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。','wb-caption'));
-      }
-      const labels={};for(const n of graph.nodes)labels[n.id]=n.operator?.name||n.api.split(/[.:]/).at(-1)||n.kind;
-      logicalView.update(dag,entry.node_map,labels,logicalSelected,entry.binding_level||(sealed?'sealed':'declared'));
-    }
-    function bridgeEntryFor(entry,logicalId,occurrenceId){
-      const bridge=entry&&entry.identity_bridge;
-      if(!bridge||!bridge.available||!bridge.bridge||!Array.isArray(bridge.bridge.entries))return null;
-      return bridge.bridge.entries.find(e=>e.logical_node_id===logicalId&&e.occurrence_id===occurrenceId)||null;
-    }
-    function observationLabel(entry,logicalId,occurrenceId){
-      const obs=entry&&entry.node_observations;
-      if(!obs)return '未提供观测信息';
-      if(!obs.available){
-        if(obs.reason==='historical_observation_contract')return '历史运行观测契约不支持，无法对应';
-        return '观测页不可用：'+(obs.detail||obs.reason||'未知');
-      }
-      const row=(obs.entries||[]).find(e=>e.logical_node_id===logicalId&&e.occurrence_id===occurrenceId);
-      return row&&row.availability==='observed'?'已有观测':'本页未见观测（不代表整个运行无观测）';
-    }
-    function chooseLogicalNode(id,declared){
-      const entry=logicalEntry();
-      const projected=entry&&(entry.status==='projected'||entry.status==='sealed');
-      const displayId=id;
-      const occurrenceView=entry?.version==='v3';
-      const group=projected?entry.dag.nodes.filter(n=>(occurrenceView?n.occurrence_id:n.logical_node_id)===id):[];
-      if(occurrenceView&&group.length)id=group[0].logical_node_id;
-      const sealed=projected&&entry.status==='sealed';
-      const bridge=sealed&&entry.identity_bridge&&entry.identity_bridge.available?entry.identity_bridge:null;
-      let reportId=declared||null;
-      if(bridge&&group.length===1){const be=bridgeEntryFor(entry,id,group[0].occurrence_id);if(be)reportId=be.report_node_id;}
-      if(reportId&&!data().graph.nodes.some(n=>n.id===reportId)){
-        locateNode(reportId).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
+      const member=selection.occurrenceId!==null?card.occurrences.find(o=>o.occurrenceId===selection.occurrenceId)||card.selection:card.selection;
+      const isGroup=member.occurrenceId===null&&card.occurrences.length>1;
+      const logical=member.logicalNodeId?{logical_node_id:member.logicalNodeId,occurrence_id:member.occurrenceId}:null;
+      state.chooseNode(member.reportNodeId,logical);
+      state.setGraphSelection(member);
+      graph.select(card.key);
+      observationCursor=null;observationPages=[];lastObservationRevision=null;
+      const binding=data().graph.binding;
+      const reportNode=member.reportNodeId?data().graph.nodes.find(n=>n.id===member.reportNodeId):null;
+      sourceTitle.textContent=(binding.basis_kind==='run'?'封存源码 · ':'源码 · ')+(reportNode?(reportNode.operator?.name||reportNode.api.split(/[.:]/).at(-1)||reportNode.kind):card.title);
+      if(binding.basis_kind==='report')rememberView({kind:'inspection',report_digest:binding.basis_digest,node_id:member.reportNodeId});
+      else if(binding.basis_kind==='run')rememberView({kind:'run',run_id:run.run_id,attempt:run.attempt,report_digest:run.report_digest,node_id:member.reportNodeId,
+        ...(member.actionId?{action_id:member.actionId}:{}),...(member.logicalNodeId?{logical_node_id:member.logicalNodeId}:{}),...(member.occurrenceId?{occurrence_id:member.occurrenceId}:{}),
+        ...(member.execution?{dag_id:member.execution.dagId,plan_id:member.execution.planId,plan_revision:member.execution.planRevision,plan_format:member.execution.format}:{})});
+      if(isGroup){
+        paintGroupPicker(card);
         return;
       }
-      // A declaration is identified by its sealed report node; only an executed
-      // plan may ask the backend to resolve a logical occurrence through its bridge.
-      if(reportId)chooseNode(reportId,sealed?{logical_node_id:id,occurrence_id:group[0]?.occurrence_id??null}:null);
-      logicalSelected=displayId;logicalView.select(displayId);
-      if(!group.length)return;
-      const node=group[0];
-      const v3=sealed&&entry.version==='v3';
-      const obsLabelFor=occ=>{
-        const obs=entry.node_observations;
-        if(Array.isArray(obs)){
-          const row=obs.find(o=>o.occurrence_id===occ);
-          if(!row)return '未提供观测信息';
-          return row.availability==='observed'?'已有观测':'本次封存计划未见观测（不代表整个运行无观测）';
-        }
-        return observationLabel(entry,id,occ);
-      };
-      const stageFor=occ=>sealed&&entry.physical&&entry.physical.stages?entry.physical.stages[v3?occ:id]:null;
-      const box=details((sealed?'执行逻辑节点（E2）· ':'声明逻辑节点（E2）· ')+id.slice(0,12),inspector);box.open=true;
-      const facts=$('dl',undefined,'details');
-      const rows=[['op_kind',node.op_kind],['输入端口',node.input_ports.join(', ')||'无'],['输出端口',node.output_ports.join(', ')||'无'],['出现次数',String(group.length)],['operator_spec_ref',node.operator_spec_ref||'未绑定（只读投影）']];
-      const stage=stageFor(node.occurrence_id);
-      if(sealed){
-        if(bridge){
-          rows.push(['执行节点桥','已绑定报告节点（源码与参数按报告节点对应）']);
-          rows.push(['节点观测',group.length===1?obsLabelFor(group[0].occurrence_id):'按出现分别对应（见下方）']);
-        }else{
-          const ib=entry.identity_bridge||{};
-          rows.push(['执行节点桥','尚无节点身份桥'+(ib.reason?'（'+ib.reason+'）':'')]);
-          rows.push(['节点观测',v3?obsLabelFor(node.occurrence_id):'未桥接，无法对应执行观测']);
-        }
-        if(stage){
-          rows.push(['分区数',String(stage.partition_count)],['stage_id',String(stage.stage_id).slice(0,16)]);
-          if(v3)rows.push(['副本目标',String(stage.replica_target??'未提供')],['资源画像',stage.profile&&stage.profile.requests?Object.entries(stage.profile.requests).map(([k,v])=>k+'='+(v&&typeof v==='object'?JSON.stringify(v):v)).join(', '):'未提供']);
-          else rows.push(['worker 角色',stage.role||'未分配']);
-        }
-      }else rows.push(['声明节点',declared||'未映射']);
-      for(const[label,value]of rows)facts.append($('dt',label),$('dd',value));
-      box.append(facts);
-      if(sealed){
-        if(bridge){
-          box.append($('p','执行事实直连本次封存计划；源码、参数与已有观测按报告节点对应。未桥接或缺测如实标注，不猜测。','wb-caption'));
-          if(group.length>1){
-            box.append($('p','该逻辑节点有多次出现，选择一次出现查看其封存源码与观测：','wb-caption'));
-            const picker=$('div',undefined,'wb-inline-actions');box.append(picker);
-            for(const occ of group){
-              const be=bridgeEntryFor(entry,id,occ.occurrence_id);
-              const label='出现 '+String(occ.occurrence_id).slice(0,8)+(be?' · '+obsLabelFor(occ.occurrence_id):' · 未桥接');
-              button(label,()=>{
-                if(!be){message('该出现尚无节点身份桥，无法对应执行节点。','error-box');return;}
-                const rid=be.report_node_id;
-                if(!data().graph.nodes.some(n=>n.id===rid)){locateNode(rid).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});return;}
-                chooseNode(rid,{logical_node_id:id,occurrence_id:occ.occurrence_id});logicalSelected=id;logicalView.select(id);
-              },picker,{disabled:!be});
-            }
-          }
-        }else{
-          const ib=entry.identity_bridge||{};
-          box.append($('p',ib.detail||'该 action 尚无节点身份桥；封存计划仍可查看，执行节点与报告观测的对应不猜测。','wb-caption'));
-        }
-        if(v3){
-          if(stage){raw('stage.profile',stage.profile,box);raw('stage.replicas',{replica_min:stage.replica_min,replica_target:stage.replica_target,replica_max:stage.replica_max,resident_bytes:stage.resident_bytes,output_bytes:stage.output_bytes,state_bytes:stage.state_bytes},box);}
-          if(group.length>1)raw('stages_by_occurrence',Object.fromEntries(group.map(occ=>[occ.occurrence_id,stageFor(occ.occurrence_id)])),box);
-          if(Array.isArray(entry.plan_node_observations))raw('plan_node_observations',entry.plan_node_observations,box);
-          if(entry.recovery_restriction)box.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。已完成的结果仍可读取。','wb-caption'));
-          if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,recovery_restriction:entry.recovery_restriction||null,limitations:entry.physical.limitations,exchanges:entry.physical.exchanges,policy:entry.physical.policy,residency:entry.physical.residency},box);
-        }else{
-          if(stage)raw('stage.budgets',stage.budgets,box);
-          if(entry.recovery_restriction)box.append($('p','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。已完成的结果仍可读取。','wb-caption'));
-          if(entry.physical)raw('plan_facts',{plan_id:entry.physical.plan_id,plan_revision:entry.physical.plan_revision,recovery:entry.physical.recovery,recovery_restriction:entry.recovery_restriction||null,channels:entry.physical.channels,worker_groups:entry.physical.worker_groups},box);
-        }
+      paintConfiguration(reportNode);
+      const ticket=state.capture(true);
+      if(sourceOpen&&member.reportNodeId)loadSource().catch(error=>{if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);});
+      else if(sourceOpen){disposeReaders(sourceBody);sourceBody.replaceChildren($('p','该出现尚无节点身份桥；封存计划与物理详情仍可查看，源码不借用其它节点。','wb-caption'));}
+      if(run&&detailKind==='observations')loadRunDetail(true).catch(error=>{if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);});
+    }
+    function paintGroupPicker(card){
+      paintConfiguration(null);
+      const picker=$('div',undefined,'wb-inline-actions');
+      picker.append($('p','该逻辑节点有多次出现；选择一次出现查看其封存源码与观测。未选择前不读取源码。','wb-caption'));
+      for(const occ of card.occurrences){
+        const label='出现 '+String(occ.occurrenceId).slice(0,8)+(occ.reportNodeId?'':' · 未桥接');
+        button(label,()=>selectGraphNode(occ),picker);
       }
-      if(entry.dag.shared_ancestors.some(s=>occurrenceView?s.occurrence_id===displayId:s.logical_node_id===id))box.append($('p','共享祖先 / 复用：该逻辑节点被多个消费方共享。','wb-caption'));
-      raw('traits',node.traits,box);raw('occurrence_id',group.map(n=>n.occurrence_id),box);
-      inspector.prepend(box);
+      inspector.prepend($('h3',card.title),picker);
+    }
+    async function chooseNode(id,selection=null){
+      if(disposed||!graphModel)return;
+      let candidates=cardsForReportNode(id);
+      if(selection?.occurrence_id!=null)candidates=candidates.filter(c=>c.selection.occurrenceId===selection.occurrence_id||c.occurrences.some(o=>o.occurrenceId===selection.occurrence_id));
+      if(selection?.logical_node_id!=null)candidates=candidates.filter(c=>c.selection.logicalNodeId===selection.logical_node_id||c.occurrences.some(o=>o.logicalNodeId===selection.logical_node_id));
+      if(!candidates.length){
+        if(data().graph?.nodes.some(n=>n.id===id)){message('该报告节点未桥接到当前 action 的可见图；不猜测对应。','notice');return;}
+        await locateNode(id);return chooseNode(id,selection);
+      }
+      if(candidates.length>1&&selection?.occurrence_id==null){
+        inspector.replaceChildren($('h3','选择一次出现'));
+        const picker=$('div',undefined,'wb-inline-actions');inspector.append(picker);
+        for(const c of candidates)button(c.title,()=>selectGraphNode(c.selection),picker);
+        return;
+      }
+      const card=candidates[0];
+      const target=selection?.occurrence_id!=null?(card.occurrences.find(o=>o.occurrenceId===selection.occurrence_id)||card.selection):card.selection;
+      await selectGraphNode(target);
     }
     async function useWorking(entry,params,report=null,mode='config'){
       if(disposed)throw new DOMException('工作台已关闭','AbortError');
@@ -439,7 +390,7 @@
       const checked=g?.binding.basis_kind==='report',passed=checked&&g.status==='checked',draftDirty=working&&Object.keys(getDraft().values).length>0;
       checkIssues.append($('h3',passed?(draftDirty?'已保存配置的接线检查通过':'当前配置的接线检查通过'):checked?'已保存配置的检查问题':'当前配置尚未检查'));
       checkIssues.append($('p',draftDirty?'当前有未保存修改，这里显示已保存配置的检查结果；保存修改后再检查。':passed?'已核对本次入口、配置及固定输入；行为验证和业务质量按各自已有证据判断。':checked?'按问题定位代码、配置或数据；修改后重新检查当前配置。':'读取算子图仅用于理解源码关系，检查后才能得到当前配置的结论。','wb-caption'));
-      if(g?.diagnostics.length)renderDiagnostics(g.diagnostics,checkIssues,async id=>{state.setMode('config');updateActions();if(data().graph.nodes.some(n=>n.id===id))chooseNode(id);else await locateNode(id);});
+      if(g?.diagnostics.length)renderDiagnostics(g.diagnostics,checkIssues,async id=>{await chooseNode(id);});
       if(g?.diagnostics_truncated)checkIssues.append($('p','当前展示部分问题，完整报告共 '+g.diagnostic_count+' 项。','wb-caption'));
       const actions=$('div',undefined,'wb-inline-actions');checkIssues.append(actions);
       scopedCheckButton=button(checked?'重新检查当前配置':'检查当前配置',()=>check(),actions,{disabled:checkButton.disabled});button('返回配置与图',()=>wholeConfiguration(),actions);
@@ -462,12 +413,62 @@
       if(field.value_type==='bool'){if(!['true','false'].includes(raw))throw new Error('布尔值必须为 true 或 false');return raw==='true';}
       const number=Number(raw);if(!raw.trim()||!Number.isFinite(number)||(field.value_type==='int'&&!Number.isSafeInteger(number)))throw new Error('请填写有限且可精确表示的数字');return number;
     }
+    function factLines(parent,title,lines){
+      if(!lines?.length)return;
+      const box=details(title,parent);
+      for(const line of lines){
+        const row=$('div',undefined,'wb-fact');
+        row.append($('span',line.label,'wb-fact-label'),$('span',line.value??(line.reason||'未提供'),'wb-fact-value'));
+        if(line.basis)row.append($('small',basisText[line.basis]||line.basis,'wb-caption'));
+        box.append(row);
+      }
+    }
     function paintConfiguration(node){
       const graph=data().graph;if(!graph)return;
       inspectorWhole=!node;
+      const selection=data().selection;
       inspector.replaceChildren($('h3',!graph.nodes.length?'暂无可展示节点':node?(node.operator?.name||node.api.split(/[.:]/).at(-1)):'整图配置'));
       if(!graph.nodes.length)renderDiagnostics(graph.diagnostics,inspector);
-      if(node){inspector.append($('p',node.api+' · '+node.source+':'+node.line,'wb-caption'));const status=ForgeWorkbenchGraph.status(node,snapshot||run);inspector.append($('span',status.label,'wb-tag'));}
+      if(node){
+        inspector.append($('p',node.api+' · '+node.source+':'+node.line,'wb-caption'));
+        const status=selection?.execution?.format==='v3'
+          ?graphModel?.nodes.find(card=>card.selection.key===selection.key)?.state||{label:'观测尚未载入'}
+          :ForgeWorkbenchGraph.status(node,snapshot||run);
+        inspector.append($('span',status.label,'wb-tag'));
+      }
+      if(selection){
+        let nodeDetails=null;
+        try{nodeDetails=presentation.buildNodeDetails(graph,selection);}catch(error){inspector.append($('p','节点详情暂不可用：'+error.message,'wb-caption'));}
+        if(nodeDetails){
+          factLines(inspector,'输入',nodeDetails.inputs);
+          factLines(inspector,'输出',nodeDetails.outputs);
+          factLines(inspector,'参数来由',nodeDetails.parameters);
+          if(!nodeDetails.sourceAvailable)inspector.append($('p','源码不可用：'+(nodeDetails.sourceReason||'未提供原因'),'wb-caption'));
+          if(nodeDetails.recoveryRestriction)inspector.append($('p',nodeDetails.recoveryRestriction,'wb-caption'));
+          const exec=details('执行详情（只读 · 计划声明，不是实时观测）',inspector);
+          if(nodeDetails.execution)raw('执行身份',nodeDetails.execution,exec);
+          if(nodeDetails.placement){
+            const p=nodeDetails.placement;
+            factLines(exec,'放置与资源',[{label:'stage',value:p.stageId,basis:'sealed',reason:null},
+              {label:'资源角色',value:p.role,basis:'sealed',reason:null},
+              {label:'分区数',value:p.partitionCount==null?null:String(p.partitionCount),basis:'sealed',reason:null},
+              {label:'副本目标（计划）',value:p.replicaTarget==null?null:String(p.replicaTarget),basis:'sealed',reason:null}]);
+            if(p.profile)raw('profile（请求/限额）',p.profile,exec);
+            if(p.fusedOccurrences?.length)exec.append($('p','融合出现：'+p.fusedOccurrences.map(o=>o.slice(0,8)).join(', ')+'；融合组只有阶段观测，不复制为各成员指标。','wb-caption'));
+          }
+          for(const ex of nodeDetails.exchanges||[]){
+            factLines(exec,'通道 '+ex.channelId.slice(0,12),[{label:'模式',value:ex.mode,basis:'sealed',reason:null},
+              {label:'路由',value:ex.routing,basis:'sealed',reason:null},{label:'原因',value:ex.reason,basis:'sealed',reason:null},
+              {label:'信用行/字节',value:ex.creditRows==null&&ex.creditBytes==null?null:safe(ex.creditRows)+' 行 / '+unit(ex.creditBytes),basis:'sealed',reason:null}]);
+          }
+          if(nodeDetails.recovery){
+            const r=nodeDetails.recovery;
+            exec.append($('p','恢复声明：'+(recoveryText[r.declared]||r.declared)+'（计划声明；实际恢复由服务端 manager 判定）','wb-caption'));
+            for(const limitation of r.limitations||[])exec.append($('p',limitation,'wb-caption'));
+            if(r.restriction)exec.append($('p',restrictionText[r.restriction]||r.restriction,'error-box'));
+          }
+        }
+      }
       const fields=graph.parameters.fields.filter(f=>!node||affects(f,node));
       const d=run?{values:{}}:getDraft(),key=draftKey();
       if(graph.parameters.reason)inspector.append($('p','配置不可编辑：'+graph.parameters.reason,'wb-caption'));
@@ -483,13 +484,16 @@
           catch(error){input.value=old??inputText(item);message(error.message+'；已保留之前的草稿。','error-box');}};
         label.append(input);row.append(label);if((item.affected_node_count??item.affected_nodes.length)>1)row.append($('small','本图范围共享影响 '+(item.affected_node_count??item.affected_nodes.length)+' 个节点'));inspector.append(row);
       }
-      if(!run&&graph.parameters.available){
+      const hasWritable=fields.some(f=>f.writable);
+      if(!run&&graph.parameters.available&&hasWritable){
         const bar=$('div',undefined,'wb-inline-actions');inspector.append(bar);
         button('保存配置',()=>saveParameters(),bar,{disabled:!configWrite()});
         button('放弃本地修改',()=>{const next=getDraft();next.values={};storeDraft(next);paintConfiguration(node);},bar);
         if(!configWrite())inspector.append($('p','此项目配置只读；有运行权限时仍可调整本次运行的输入与预算。','wb-caption'));
-        runtimeOptions(inspector);
+      }else if(!run&&graph.parameters.available&&!hasWritable&&fields.length){
+        inspector.append($('p','当前没有可写改动，不显示保存。','wb-caption'));
       }
+      if(!run&&graph.parameters.available)runtimeOptions(inspector);
       if(node?.kind==='source_call')inspector.append($('p','当前仅观察到源码调用；输入输出类型、参数语义与执行可用性尚未核验。','wb-caption'));
       else if(node){const schema=details('字段与实际调用参数',inspector);raw('输出字段',node.fields,schema);raw('实际参数',node.parameters,schema);if(node.contract)raw('原生契约与能力',{contract:node.contract,capability:node.capability},schema);}
       paintParameterPending(inspector);
@@ -520,33 +524,19 @@
         if(current(ticket)){if(result.no_change)message('配置值未变化，未写入文件。');else{await useWorking(working.entry,working.params);message('配置已保存，图和检查需要重新核对。');}}
       }finally{busy=false;if(root.isConnected&&data().graph){if(data().mode==='checks')paintIssues();else paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);}updateActions();}
     }
-    function chooseNode(id,selection=null){
-      if(!data().graph?.nodes.some(n=>n.id===id)||disposed)return;
-      state.chooseNode(id,selection);graphView.select(id);
-      if(graphKind==='logical'){
-        if(selection){logicalSelected=selection.logical_node_id;logicalView.select(logicalSelected);}
-        else{logicalSelected=null;logicalView.select(null);}
-      }
-      observationCursor=null;observationPages=[];lastObservationRevision=null;
-      const node=data().graph.nodes.find(n=>n.id===id),binding=data().graph.binding;
-      sourceTitle.textContent=(binding.basis_kind==='run'?'封存源码 · ':'源码 · ')+(node.operator?.name||node.api.split(/[.:]/).at(-1)||node.kind);
-      if(binding.basis_kind==='report')rememberView({kind:'inspection',report_digest:binding.basis_digest,node_id:id});
-      else if(binding.basis_kind==='run')rememberView({kind:'run',run_id:run.run_id,attempt:run.attempt,report_digest:run.report_digest,node_id:id});
-      if(data().mode==='checks')paintIssues();else paintConfiguration(node);
-      const ticket=state.capture(true);
-      if(sourceOpen)loadSource().catch(error=>{if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);});
-      if(run&&detailKind==='observations')loadRunDetail(true).catch(error=>{if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);});
-    }
     async function loadSource(){
       updateActions();disposeReaders(sourceBody);sourceBody.replaceChildren();
       if(!sourceOpen)return;
-      const g=data().graph,node=data().node,selection=data().logical_selection,ticket=state.capture(true),sequence=++sourceSequence;
+      const g=data().graph,selection=data().selection,node=selection?.reportNodeId??data().node,ticket=state.capture(true),sequence=++sourceSequence;
       if(!g||!node){sourceBody.append($('p','选择节点后查看实现、调用点或公开配置。','wb-caption'));return;}
+      if(g.binding.basis_kind==='run'&&selection&&!selection.reportNodeId){sourceBody.append($('p','该出现尚无节点身份桥；不借用其它节点的源码。','wb-caption'));return;}
       sourceBody.append($('p','正在读取绑定来源…','wb-caption'));
       const query={graph_binding:JSON.stringify(g.binding),node_id:node,kind:sourceKind};
-      if(selection){query.logical_node_id=selection.logical_node_id;if(selection.occurrence_id!=null)query.occurrence_id=selection.occurrence_id;}
+      if(selection?.logicalNodeId){query.logical_node_id=selection.logicalNodeId;if(selection.occurrenceId!=null)query.occurrence_id=selection.occurrenceId;}
+      const capturedKey=selection?.key??null,capturedExecution=identityKey(selection?.execution??null);
       try{const value=await request('graph-source',query);
         if(!current(ticket)||sequence!==sourceSequence)return;
+        if((data().selection?.key??null)!==capturedKey||identityKey(data().selection?.execution??null)!==capturedExecution)return;
         if(value.node_id!==node||json(value.graph_binding)!==json(g.binding))throw new Error('源码响应身份不一致');
         disposeReaders(sourceBody);sourceBody.replaceChildren();
         if(value.availability==='unavailable'){sourceBody.append($('p','该视角没有可用材料：'+value.reason,'wb-caption'));return;}
@@ -596,6 +586,13 @@
       button('刷新状态',()=>observer.refresh(),runBar);button('返回当前配置',()=>useWorking(working?.entry||run.entry,working?.params||run.parameter_path),runBar);
       if(run.state.cancel_requested_at)runBar.append($('span','停止：'+({requested:'等待执行端确认',terminating:'正在请求所属进程退出',killing:'正在终止未退出进程',confirmed:'所属执行已停止',unconfirmed:'尚未确认全部停止'}[run.state.stop_phase]||'等待确认'),'wb-caption'));
       if(run.state.cleanup==='pending')runBar.append($('span','临时资源清理待确认 · 容量保留','wb-caption'));
+      const entry=(data().graph?.logical?.actions||[]).find(a=>a.action_id===data().actionId);
+      if(entry?.recovery_restriction)runBar.append($('span','此执行包含未声明恢复钩子的资源 actor：可完成本次运行；中断后不能继续恢复。已完成的结果仍可读取。','wb-caption'));
+      const declared=entry?.physical?.recovery;
+      if(declared)runBar.append($('span','恢复计划声明：'+(recoveryText[declared]||declared)+'（实际恢复由服务端判定）','wb-caption'));
+      for(const code of ['INCOMPATIBLE_HISTORY','UNKNOWN_EFFECT','CAPACITY_PENDING']){
+        if(run.state?.error?.code===code||run.state?.reason===code)runBar.append($('span',restrictionText[code],'error-box'));
+      }
       paintRunSeal();
     }
     function paintRunSeal(){
@@ -651,10 +648,13 @@
     }
     async function submit(){
       if(busy||run)return;
+      if(working&&Object.keys(getDraft().values).length)throw new Error('先保存当前配置草稿，再提交运行。');
+      if(data().graph&&data().graph.freshness.current===false)throw new Error('检查依据已变化，请先重新检查，再提交运行。');
       const d=getDraft(),body={entry:working.entry,params:working.params,inputs:{...d.inputs},limits:{timeout_s:Number(d.timeout)},new_outputs:true};
       if(!Number.isInteger(body.limits.timeout_s)||body.limits.timeout_s<1||body.limits.timeout_s>ctx.run_limits.timeout_s)throw new Error('运行秒数上限超出项目预算');
       const ticket=state.capture();busy=true;updateActions();let intent=null;
       try{
+        runButton.textContent='正在准备…';
         intent=await commands.identity(body);
         if(!current(ticket))return;
         if(intent.phase==='start'){
@@ -663,13 +663,14 @@
         message('正在检查实际配置并封存本次运行…');
         intent=await commands.prepare(intent);
         if(!current(ticket))return;
+        runButton.textContent='正在提交…';
         await openRun(intent.run_id,intent.attempt);
         if(disposed||!run||data().run!==intent.run_id||data().attempt!==intent.attempt)return;
         const startTicket=state.capture();
         try{await commands.start(intent);if(current(startTicket)){message('运行已提交：'+intent.run_id);await observer.refresh();}}
         catch(error){if(current(startTicket))message('已固定运行 '+intent.run_id+'；启动结果待核对。请查看这次运行，勿另建提交。 '+error.message,'error-box',startTicket);}
       }catch(error){if(current(ticket)){message('提交结果待核对，原请求身份已保留。 '+error.message,'error-box',ticket);paintPending();}throw error;}
-      finally{busy=false;updateActions();if(root.isConnected&&run)paintRunBar();paintPending();}
+      finally{busy=false;runButton.textContent='运行';updateActions();if(root.isConnected&&run)paintRunBar();paintPending();}
     }
     async function listRuns(){
       const ticket=state.capture(),sequence=++listSequence;
@@ -728,6 +729,8 @@
             button('保留为输入表',async()=>{const ticket=state.capture();await request('run-attach',{}, {...captured,alias:alias.value});if(current(ticket)){aliasDrafts.delete(aliasKey);message('已保留固定版本引用：'+alias.value);const fresh=await request('context');if(current(ticket)){ctx=fresh;onContext(fresh);}}},box,{disabled:!can('attach')});
           }else box.append($('p','历史尝试的固定结果引用在下方保留；当前表入口不会代替它。','wb-caption'));
           raw('固定结果引用',output.result,box);
+        }else if(output.status==='committed'){
+          box.append($('p','已提交但登记待完成；暂不作为可打开的固定结果。','wb-caption'));
         }
       }
     }
@@ -739,17 +742,27 @@
       try{
       if(kind==='observations'){
         const node=data().node;if(!node)return;
-        const value=await request('run-observations',{...target,node_id:node,limit:32,...(observationCursor?{cursor:observationCursor}:{})});
+        const selection=data().selection,execution=selection?.execution??null;
+        const value=await request('run-observations',{...target,node_id:node,limit:32,
+          ...(execution?.format==='v3'?{action_id:execution.actionId}:{}),...(observationCursor?{cursor:observationCursor}:{})});
         if(!current(ticket)||sequence!==nodeSequence||detailKind!==kind)return;
+        if(identityKey(data().selection?.execution??null)!==identityKey(execution))return;
         runDetailBody.replaceChildren($('p','节点关联观测 · '+target.run_id+' / 尝试 '+target.attempt+' · 观测 '+(value.observation_revision||'不可用').slice(0,10)+' · 不是完整节点日志','wb-caption'));
         if(value.run_id!==target.run_id||value.attempt!==target.attempt)throw new Error('节点观测身份不一致');
         if(value.availability==='unsupported'){runDetailBody.append($('p','历史运行未记录此类观测。'));return;}
-        if(!value.observations.length)runDetailBody.append($('p','这个节点没有单独观测；不会从整次运行状态推断节点成功。'));
+        if(execution?.format==='v3'&&(value.action_id!==execution.actionId||value.dag_id!==execution.dagId||value.plan_id!==execution.planId||value.plan_revision!==execution.planRevision)){
+          runDetailBody.append($('p','观测页缺少与当前 v3 计划一致的作用域凭据；不提升为当前节点指标。','wb-caption'));return;
+        }
+        const rows=execution?.format==='v3'?value.observations.filter(row=>
+          presentation.matchesExecutionObservation(row,execution,selection.occurrenceId)&&row.node_id===selection.reportNodeId):value.observations;
+        if(execution?.format==='v3'&&rows.length!==value.observations.length)
+          runDetailBody.append($('p','部分观测缺少与当前执行实例一致的完整凭据，未显示为节点指标。','wb-caption'));
+        if(!rows.length)runDetailBody.append($('p',execution?.format==='v3'?'本页没有与当前执行实例一致的完整观测凭据。':'这个节点没有单独观测；不会从整次运行状态推断节点成功。'));
         const paint=rows=>{for(const row of rows){const line=$('div',undefined,'wb-observation');line.append($('strong','动作 '+row.action_id+' · 第 '+(row.occurrence+1)+' 次 · '+(labels[row.state]||row.state)),
           $('p','输入 '+safe(row.rows_input)+' 行 · 输出 '+safe(row.rows_output)+' 行 · 调用 '+safe(row.calls)+' · 错误 '+safe(row.errors)),
           $('p','累计处理时间 '+safe(row.elapsed_s)+' 秒 · '+(row.timing_scope==='group'?'融合组共享范围':'节点观测范围'),'wb-caption'));
           if(row.error)line.append($('pre',json(row.error),'error-box'));raw('关联证据与生命周期',row,line);runDetailBody.append(line);}};
-        paint(value.observations);
+        paint(rows);
         const pager=$('div',undefined,'wb-inline-actions');runDetailBody.append(pager);
         button('上一页观测',async()=>{if(!current(ticket))return;observationCursor=observationPages.pop()??null;await loadRunDetail(true);},pager,{disabled:!observationPages.length});
         button('后续节点观测',async()=>{if(!current(ticket))return;if(observationPages.length>=32)observationPages.shift();observationPages.push(observationCursor);observationCursor=value.cursor;await loadRunDetail(true);},pager,{disabled:!value.has_more});
@@ -760,7 +773,7 @@
         // selection ticket bind their scope; optional future echoes must match.
         if((value.run_id!=null&&value.run_id!==target.run_id)||(value.attempt!=null&&value.attempt!==target.attempt))throw new Error('日志身份不一致');
         logOffset=value.next_offset;const encoded=new TextEncoder().encode((value.truncated?'[较早日志已轮转]\n':logBody)+value.text);logBody=new TextDecoder().decode(encoded.slice(-65536));
-        runDetailBody.replaceChildren($('p','原始运行文本 · '+target.run_id+' / 尝试 '+target.attempt+' · 不按当前节点过滤','wb-caption'),$('pre',logBody||'此范围暂无日志文本。','wb-code'));
+        runDetailBody.replaceChildren($('p','本次尝试日志 · '+target.run_id+' / 尝试 '+target.attempt+' · 不按当前节点过滤','wb-caption'),$('pre',logBody||'此范围暂无日志文本。','wb-code'));
         button('读取后续日志',()=>loadRunDetail(true),runDetailBody);
       }else if(kind==='events'){
         if(!force&&Date.now()-lastEventAt<5000)return;lastEventAt=Date.now();
@@ -900,13 +913,13 @@
       onSnapshot:async(value,target)=>{
         if(!current(target.ticket))return;
         if(notice.dataset.observationError)message('');
-        if(value.availability==='unsupported'){snapshot={...value,observations:[],outputs:run.outputs,observation_availability:'unsupported'};graphView.paint(snapshot);message('此历史运行没有当前观测契约；封存图、记录和原始日志仍按已有材料显示。');return;}
+        if(value.availability==='unsupported'){snapshot={...value,observations:[],outputs:run.outputs,observation_availability:'unsupported'};paintGraph();message('此历史运行没有当前观测契约；封存图、记录和原始日志仍按已有材料显示。');return;}
         // The worker seals plans after the initial graph request. Refresh from
         // the same run/attempt; observation revisions alone do not carry F1.
         const refreshGraph=()=>data().graph&&fetchGraph(target.ticket,{preserveSelection:true});
         if(value.unchanged){paintRunFacts(value.freshness);if(active(run.status)&&Date.now()-lastRunGraphAt>=5000)await refreshGraph();return;}
         snapshot=value;run={...run,...value,attempts:run.attempts?.map(a=>a.attempt===value.attempt?{...a,status:value.status}:a)};
-        paintRunBar();paintRunFacts();paintResults();graphView.paint(value);
+        paintRunBar();paintRunFacts();paintResults();paintGraph();
         if(data().graph&&data().node&&data().mode!=='checks'){
           const stateLabel=inspector.querySelector('.wb-tag');if(stateLabel){const node=data().graph.nodes.find(n=>n.id===data().node);if(node)stateLabel.textContent=ForgeWorkbenchGraph.status(node,value).label;}
         }
@@ -936,7 +949,7 @@
       },
       dirty:()=>!!working&&Object.keys(getDraft().values).length>0,
       projectCheckSettled:()=>{if(!disposed&&documents.open&&projectInfoDirty)refreshProjectInfo();},
-      dispose:()=>{disposed=true;observer.dispose();graphView.dispose();logicalView.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
+      dispose:()=>{disposed=true;observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;
@@ -947,15 +960,38 @@
     else if(view.kind==='run_compare'){await useWorking(firstEntry,firstParams);await compare(view.left,view.right);}
     else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':'config');
     if(view.kind==='runs'){historyOpen=true;historyPanel.hidden=false;historyButton.setAttribute('aria-expanded','true');await listRuns();}
+    if(view.kind==='run'&&data().graph){
+      if(view.action_id!=null){
+        const actions=data().graph.logical?.actions||[];
+        if(!actions.some(a=>a.action_id===view.action_id))throw new Error('定位 action 不属于这份封存图');
+        actionExplicit=true;state.setGraphView({preference:data().graphPreference,actionId:view.action_id,execution:null});paintGraph();
+      }
+      if(view.dag_id!=null||view.plan_id!=null||view.plan_revision!=null||view.plan_format!=null){
+        if(view.dag_id==null||view.plan_id==null||view.plan_revision==null||view.plan_format==null)throw new Error('运行计划定位必须提供完整 dag/plan/revision/format 四元组');
+        const execution=data().execution;
+        if(!execution||execution.dagId!==view.dag_id||execution.planId!==view.plan_id||execution.planRevision!==view.plan_revision||execution.format!==view.plan_format)throw new Error('运行计划定位与当前封存身份不符');
+      }
+      if(view.logical_node_id!=null){
+        const cards=(graphModel?.nodes||[]).filter(c=>c.selection.logicalNodeId===view.logical_node_id||c.occurrences.some(o=>o.logicalNodeId===view.logical_node_id));
+        let target=null;
+        if(view.occurrence_id!=null){
+          for(const c of cards){const occ=c.occurrences.find(o=>o.occurrenceId===view.occurrence_id);if(occ){target=occ;break;}if(c.selection.occurrenceId===view.occurrence_id){target=c.selection;break;}}
+          if(!target)throw new Error('定位 occurrence 不属于当前 action');
+        }else if(cards.length===1)target=cards[0].selection;
+        else if(cards.length>1){inspector.replaceChildren($('h3','选择一次出现'));const picker=$('div',undefined,'wb-inline-actions');inspector.append(picker);for(const c of cards)button(c.title,()=>selectGraphNode(c.selection),picker);}
+        else throw new Error('定位逻辑节点不属于当前 action');
+        if(target)await selectGraphNode(target);
+      }
+    }
     if(view.node_id&&data().graph){
       if(view.kind==='run'&&view.report_digest!==run?.report_digest)throw new Error('运行节点不属于这份封存报告');
       if(!data().graph.nodes.some(n=>n.id===view.node_id)){
-        state.chooseNode(null);graphView.select(null);sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();inspector.replaceChildren();
+        state.chooseNode(null);graph.select(null);sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();inspector.replaceChildren();
         try{await locateNode(view.node_id);}
         catch(error){if(error.code==='not_found')throw new Error('定位节点不属于本图');throw error;}
         if(!data().graph?.nodes.some(n=>n.id===view.node_id))throw new Error('定位节点不属于本图');
       }
-      chooseNode(view.node_id);
+      await chooseNode(view.node_id);
     }
     return handle;
   }

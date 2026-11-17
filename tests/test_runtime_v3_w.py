@@ -1,15 +1,14 @@
-"""Lane W regression gate against the integrated v3 contracts.
+"""Lane W acceptance: workbench real graph & history (cards W001-W021).
 
-DTO construction uses the delivered closed contracts. Adapter tests patch only
-explicit cross-module call boundaries for their unit assertions. Source and
-native queue tests retain their real readers, journal/HTTP/SQLite paths where
-originally exercised. Carrier doubles are unit evidence, not Local/Ray or
-end-to-end acceptance evidence.
+DTOs, codecs, stores, seals and journals are the real modules in this worktree.
+Missing implementation modules fail collection; no cross-lane module is fabricated.
+Pure projection tests use small explicitly constructed DTOs. Store integration
+uses real preparation/sealing, while the existing marked DOM harness remains a
+unit-level test double rather than browser or runtime admission evidence.
 """
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -19,7 +18,6 @@ import subprocess
 import sys
 import types
 from contextlib import closing
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -28,422 +26,14 @@ import demiflow
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Modules that may be stood in by a spec-bound test-domain fake when absent.
+# Kept for evidence consumers: this suite no longer installs module doubles.
 TEST_DOUBLES: set[str] = set()
 
 
 def _assert_worktree() -> None:
-    assert Path(demiflow.__file__).resolve().is_relative_to(ROOT)
-    for name, module in list(sys.modules.items()):
-        if not name.startswith("demiflow"):
-            continue
-        path = getattr(module, "__file__", None)
-        if path is None:
-            continue
-        assert Path(path).resolve().is_relative_to(ROOT), f"module outside worktree: {name} -> {path}"
+    from runtime_v3_support import assert_tree_binding
+    assert_tree_binding()
 
-
-# --- Spec-bound test-domain fakes for lane C / D (installed only when absent). ---
-
-_ERROR_CODES = frozenset({
-    "INVALID_CONTRACT", "UNSUPPORTED_CAPABILITY", "RESOURCE_INFEASIBLE", "BUDGET_EXCEEDED",
-    "SOURCE_CHANGED", "CODE_MISMATCH", "FENCED", "CANCELLED", "DEADLINE_EXCEEDED",
-    "CORRUPT_ARTIFACT", "UNKNOWN_EFFECT", "INCOMPATIBLE_HISTORY", "INTERNAL_PROTOCOL",
-})
-_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_IDENT = re.compile(r"[A-Za-z0-9_.:\-]{1,128}\Z")
-
-
-def _build_errors_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.contracts.dataflow_errors")
-
-    class DataflowError(Exception):
-        def __init__(self, code, message, *, retryable=False, context=None):
-            if type(code) is not str or code not in _ERROR_CODES:
-                raise ValueError("unknown dataflow error code: " + repr(code))
-            if type(message) is not str or not 1 <= len(message) <= 2048:
-                raise ValueError("error message must be a bounded nonempty string")
-            if type(retryable) is not bool:
-                raise ValueError("retryable must be a bool")
-            if code == "UNKNOWN_EFFECT" and retryable:
-                raise ValueError("UNKNOWN_EFFECT must not be retryable")
-            self.code = code
-            self.retryable = retryable
-            self.context = dict(context or {})
-            self._message = message
-            super().__init__(code + ": " + message)
-
-    mod.DataflowError = DataflowError
-    mod.DATAFLOW_ERROR_CODES = _ERROR_CODES
-    return mod
-
-
-def _build_dataflow_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.contracts.dataflow")
-    errors = sys.modules["demiflow.execution.contracts.dataflow_errors"]
-    DataflowError = errors.DataflowError
-
-    def _err(message):
-        return DataflowError("INVALID_CONTRACT", message)
-
-    def _sha256(value, label):
-        if type(value) is not str or _SHA256.fullmatch(value) is None:
-            raise _err(label + " must be lowercase sha256 hex")
-        return value
-
-    def _ident(value, label):
-        if type(value) is not str or _IDENT.fullmatch(value) is None:
-            raise _err(label + " must be a bounded identifier")
-        return value
-
-    def _key(value, label):
-        if type(value) is not str or not 1 <= len(value) <= 1024:
-            raise _err(label + " must be a bounded key")
-        if value.startswith("/") or ".." in value.split("/") or "\\" in value or "?" in value \
-                or "#" in value or "@" in value or "://" in value:
-            raise _err(label + " must be a safe relative POSIX key")
-        return value
-
-    @dataclass(frozen=True)
-    class ArtifactRef:
-        digest: str
-        size_bytes: int
-        store_id: str
-        key: str
-        media_type: str
-
-        def __post_init__(self):
-            _sha256(self.digest, "ArtifactRef.digest")
-            if type(self.size_bytes) is not int or self.size_bytes < 0:
-                raise _err("ArtifactRef.size_bytes must be a nonnegative int")
-            _ident(self.store_id, "ArtifactRef.store_id")
-            _key(self.key, "ArtifactRef.key")
-            if type(self.media_type) is not str or not 1 <= len(self.media_type) <= 256:
-                raise _err("ArtifactRef.media_type must be bounded")
-
-    @dataclass(frozen=True)
-    class Bounds:
-        max_nodes: int
-        max_edges: int
-        max_partitions: int
-        max_depth: int
-        max_control_bytes: int
-        max_row_bytes: int
-        max_batch_bytes: int
-        max_resident_bytes: int
-        max_spill_bytes: int
-        max_state_bytes: int
-        max_pending_events: int
-        max_open_files: int
-        max_output_rows: int
-        timeout_ms: int
-
-    @dataclass(frozen=True)
-    class InputPort:
-        name: str
-        requirement: str
-        ordering: str
-        schema_ref: object = None
-
-    @dataclass(frozen=True)
-    class KernelSpec:
-        kind: str
-        implementation_ref: object
-        configuration: dict
-        inputs: tuple
-        state: str
-        effect: str
-        resource_role: str
-        profile: object
-        output_bound_bytes: int
-        mergeable: bool
-
-    @dataclass(frozen=True)
-    class GraphNode:
-        occurrence_id: str
-        semantic_id: str
-        kind: str
-        kernel: KernelSpec
-        program_ref: object
-        shared_token: str
-
-    @dataclass(frozen=True)
-    class GraphEdge:
-        edge_id: str
-        producer: str
-        output_port: str
-        consumer: str
-        input_port: str
-
-    @dataclass(frozen=True)
-    class DataflowGraph:
-        schema: str
-        action_id: str
-        dag_id: str
-        nodes: tuple
-        edges: tuple
-        terminals: tuple
-        sources: tuple
-
-    @dataclass(frozen=True)
-    class SourceSnapshot:
-        source_id: str
-        kind: str
-        immutable_identity: dict
-        finite: bool
-        replay: str
-        manifest_ref: object
-
-    @dataclass(frozen=True)
-    class SourceSplit:
-        split_id: str
-        source_id: str
-        locator: dict
-        start_cursor: dict
-        estimated_bytes: object
-        required_domain: str
-
-    @dataclass(frozen=True)
-    class SourceCursor:
-        split_id: str
-        offset: dict
-        next_sequence: int
-        end_of_input: bool
-        lease_ref: object
-        pending_refs: tuple
-
-    @dataclass(frozen=True)
-    class StageSpec:
-        stage_id: str
-        occurrences: tuple
-        partitions: tuple
-        profile: object
-        replica_min: int
-        replica_target: int
-        replica_max: int
-        resident_bytes: int
-        output_bytes: int
-        state_bytes: int
-        kernel_refs: tuple
-
-    @dataclass(frozen=True)
-    class ExchangeSpec:
-        channel_id: str
-        edge_id: str
-        producer_partitions: tuple
-        consumer_partitions: tuple
-        mode: str
-        routing: str
-        keys: tuple
-        scope_id: object
-        route_epoch: int
-        credit_rows: int
-        credit_bytes: int
-        storage_bytes: int
-        read_domain: str
-        reason: str
-
-    @dataclass(frozen=True)
-    class RuntimePolicy:
-        provider: str
-        durability: str
-        default_partitions: int
-        max_replicas: int
-        fusion: bool
-        checkpoint_rows: int
-        checkpoint_interval_ms: int
-        fairness_quantum_bytes: int
-        control_timeout_ms: int
-        store_id: str
-        required_recovery: str
-
-    @dataclass(frozen=True)
-    class ResidencyPlan:
-        simultaneous_groups: tuple
-        control_reserved_bytes: int
-        consumer_reserved_slots: int
-        required_spill_bytes: int
-
-    @dataclass(frozen=True)
-    class FiniteScope:
-        scope_id: str
-        generation: int
-        membership: tuple
-        completion_condition: str
-
-    @dataclass(frozen=True)
-    class PhysicalDataflow:
-        schema: str
-        dag_id: str
-        plan_id: str
-        plan_revision: int
-        stages: tuple
-        exchanges: tuple
-        residency: ResidencyPlan
-        scopes: tuple
-        sources: tuple
-        splits: tuple
-        policy: RuntimePolicy
-        bounds: Bounds
-        recovery: str
-        limitations: tuple
-        constants_ref: ArtifactRef
-
-    @dataclass(frozen=True)
-    class SealedExecution:
-        logical_ref: ArtifactRef
-        physical_ref: ArtifactRef
-        programs: tuple
-        code_pin_ref: ArtifactRef
-        identity_bridge_ref: ArtifactRef
-        source_refs: tuple
-        constants_ref: ArtifactRef
-
-    @dataclass(frozen=True)
-    class CutRequest:
-        cut_id: str
-        sequence: int
-        plan_revision: int
-        route_epoch: int
-        participants: tuple
-        final: bool
-
-    @dataclass(frozen=True)
-    class CutContribution:
-        cut_id: str
-        participant_id: str
-        boot_id: str
-        sources: tuple
-        operator_states: dict
-        channels: dict
-        buffers: tuple
-        effects: tuple
-        sinks: dict
-        final: bool
-
-    @dataclass(frozen=True)
-    class RecoveryImage:
-        commit_id: str
-        cut: CutRequest
-        contributions: tuple
-        confirmed_sinks: dict
-        source_vector: tuple
-
-    @dataclass(frozen=True)
-    class CapabilityReport:
-        supported: bool
-        reasons: tuple
-        recovery: str
-        required_domains: tuple
-        required_profiles: tuple
-
-    @dataclass(frozen=True)
-    class HistoricalBinding:
-        schema_version: str
-        original_plan_ref: ArtifactRef
-        original_code_pin_ref: ArtifactRef
-        compatible: bool
-        reason: object
-        restore_image: object
-
-    @dataclass(frozen=True)
-    class NodeObservation:
-        occurrence_id: str
-        attempt: int
-        plan_id: str
-        observed: bool
-        metrics: dict
-
-    for name, value in list(locals().items()):
-        if isinstance(value, type) and value.__module__ == mod.__name__ or name in (
-                "ArtifactRef", "Bounds", "InputPort", "KernelSpec", "GraphNode", "GraphEdge",
-                "DataflowGraph", "SourceSnapshot", "SourceSplit", "SourceCursor", "StageSpec",
-                "ExchangeSpec", "RuntimePolicy", "ResidencyPlan", "FiniteScope", "PhysicalDataflow",
-                "SealedExecution", "CutRequest", "CutContribution", "RecoveryImage",
-                "CapabilityReport", "HistoricalBinding", "NodeObservation"):
-            setattr(mod, name, value)
-    return mod
-
-
-def _build_store_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.dataflow_store")
-    errors = sys.modules["demiflow.execution.contracts.dataflow_errors"]
-    DataflowError = errors.DataflowError
-
-    class RunArtifactStore:
-        """Spec-bound run-rooted store fake: root/store_id/objects/<digest>."""
-
-        def __init__(self, *, root, store_id, journal, bounds):
-            self.root = Path(root)
-            self.store_id = store_id
-            self.journal = journal
-            self.bounds = bounds
-
-        def _path(self, ref):
-            return self.root / self.store_id / "objects" / ref.digest
-
-        def put(self, chunks, *, max_bytes, media_type):
-            raise NotImplementedError("test store fake is read-only")
-
-        def read(self, ref, *, max_bytes):
-            path = self._path(ref)
-            if not path.is_file():
-                raise DataflowError("CORRUPT_ARTIFACT", "artifact is missing")
-            raw = path.read_bytes()
-            if len(raw) > max_bytes:
-                raise DataflowError("BUDGET_EXCEEDED", "artifact exceeds the read budget")
-            if hashlib.sha256(raw).hexdigest() != ref.digest:
-                raise DataflowError("CORRUPT_ARTIFACT", "artifact digest differs")
-            yield raw
-
-        def inspect(self, ref):
-            path = self._path(ref)
-            return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == ref.digest
-
-        def retain(self, ref, *, owner):
-            return None
-
-        def release(self, ref, *, owner):
-            return None
-
-    mod.RunArtifactStore = RunArtifactStore
-    return mod
-
-
-def _build_seal_module() -> types.ModuleType:
-    mod = types.ModuleType("demiflow.execution.dataflow_seal")
-    # Test-domain registry: (directory, action_id) -> (graph, physical, sealed).
-    mod._registry = {}
-
-    def load_dataflow(directory, action_id, *, store, bounds):
-        key = (str(Path(directory).resolve()), action_id)
-        if key not in mod._registry:
-            raise KeyError("no sealed dataflow registered for " + repr(key))
-        return mod._registry[key]
-
-    mod.load_dataflow = load_dataflow
-    return mod
-
-
-def _ensure_cross_lane() -> None:
-    builders = (
-        ("demiflow.execution.contracts.dataflow_errors", _build_errors_module),
-        ("demiflow.execution.contracts.dataflow", _build_dataflow_module),
-        ("demiflow.execution.dataflow_store", _build_store_module),
-        ("demiflow.execution.dataflow_seal", _build_seal_module),
-    )
-    for name, builder in builders:
-        try:
-            importlib.import_module(name)
-        except ImportError:
-            module = builder()
-            sys.modules[name] = module
-            parent_name, attr = name.rsplit(".", 1)
-            setattr(sys.modules[parent_name], attr, module)
-            TEST_DOUBLES.add(name)
-
-
-_ensure_cross_lane()
 
 from demiflow.execution.contracts.dataflow import (  # noqa: E402
     ArtifactRef, Bounds, CapabilityReport, CutContribution, CutRequest, DataflowGraph,
@@ -533,6 +123,10 @@ def make_graph(action_id="a0", *, occurrences=1):
                           nodes=tuple(nodes), edges=tuple(edges), terminals=(transform_occs[-1],),
                           sources=(src_occ,))
     return graph, transform_occs
+
+
+def _logical_id(graph, occurrence):
+    return next(node.semantic_id for node in graph.nodes if node.occurrence_id == occurrence)
 
 
 def make_physical(graph, *, recovery="checkpoint", limitations=()):
@@ -1014,107 +608,93 @@ def test_w006(tmp_path, monkeypatch):
 
 # --- W007 load_sealed_plan v3 ----------------------------------------------
 
-def _register_seal(target, action_id, graph, physical, sealed, monkeypatch):
-    """Unit boundary only; production sealed-byte integration is tested separately."""
-    import demiflow.execution.dataflow_seal as seal_mod
-    (Path(target) / ".dataflow-store").mkdir(exist_ok=True)
-    def load(directory, wanted, *, store, bounds):
-        assert Path(directory).resolve() == Path(target).resolve() and wanted == action_id
-        return graph, physical, sealed
-    monkeypatch.setattr(seal_mod, "load_dataflow", load)
-
-
-def test_w007(tmp_path, monkeypatch):
+def test_w007(tmp_path):
+    from demiflow import data
     from demiflow.execution.plan_interpreter import PlanContractError
-    target, journal, fence, run_id = make_journal(tmp_path)
-    graph, _ = make_graph("a0")
-    physical = make_physical(graph)
-    sealed = make_sealed()
-    marker = v3_marker(run_id, "a0", dag_id=graph.dag_id, plan_id=physical.plan_id)
-    journal.bind_source(fence, "a0-dataflow-sealed", marker)
-    _register_seal(target, "a0", graph, physical, sealed, monkeypatch)
-    bundle = sealed_plans.load_sealed_plan(target, "a0")
-    assert bundle["version"] == "v3"
-    assert bundle["graph"] is graph and bundle["physical"] is physical and bundle["sealed"] is sealed
-    assert bundle["facts"] == marker
-    # Absent facts -> missing_plan (never a fabricated plan).
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_sealed_plan(target, "missing")
-    assert exc.value.reason == "missing_plan"
-    # Absent journal -> missing_plan.
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_sealed_plan(tmp_path / "absent", "a0")
-    assert exc.value.reason == "missing_plan"
+    from test_runtime_v3_real_seams import prepared
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
+        target = services.action.context.directory
+        action_id = services.action.action_id
+        marker = services.action.context.journal.source_binding(action_id + "-dataflow-sealed")
+        bundle = sealed_plans.load_sealed_plan(target, action_id)
+        assert bundle["version"] == "v3"
+        # Real persisted artifacts decode to equal DTOs, never shared fake objects.
+        assert bundle["graph"] == execution._graph
+        assert bundle["physical"] == execution._physical
+        assert bundle["sealed"] == execution._sealed
+        assert bundle["facts"] == marker
+        # Absent facts -> missing_plan (never a fabricated plan).
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_sealed_plan(target, "missing")
+        assert exc.value.reason == "missing_plan"
+        # Absent journal -> missing_plan.
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_sealed_plan(tmp_path / "absent", action_id)
+        assert exc.value.reason == "missing_plan"
 
 
 # --- W008 load_execution_bindings v3 ---------------------------------------
 
-def write_store_json(target, value):
-    ref, raw = json_ref(value)
-    obj = Path(target) / ".dataflow-store" / "run" / "objects" / ref.digest
-    obj.parent.mkdir(parents=True, exist_ok=True)
-    obj.write_bytes(raw)
-    return ref
-
-
-def _v3_bundle(target, graph, physical, bridge_doc):
+def _v3_bundle(store, original, bridge_doc):
     from dataclasses import replace
-    bridge_ref = write_store_json(target, bridge_doc)
-    sealed = replace(make_sealed(), identity_bridge_ref=bridge_ref)
-    return {"version": "v3", "facts": {}, "graph": graph, "physical": physical, "sealed": sealed}
+    raw = json.dumps(bridge_doc).encode("utf-8")
+    bridge_ref = store.put(iter([raw]), max_bytes=4 * 1024 ** 2, media_type="application/json")
+    sealed = replace(original["sealed"], identity_bridge_ref=bridge_ref)
+    return {**original, "sealed": sealed}
 
 
 def test_w008(tmp_path):
+    from demiflow import data
     from demiflow.execution.plan_interpreter import PlanContractError
-    target, journal, fence, run_id = make_journal(tmp_path)
-    graph, _ = make_graph("a0")
-    physical = make_physical(graph)
-    good = {"action_id": "a0", "dag_id": graph.dag_id, "plan_id": physical.plan_id, "entries": []}
-    bundle = _v3_bundle(target, graph, physical, good)
-    result = sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bundle)
-    assert result["version"] == "v3" and result["document"] == good
-    assert result["ref"]["digest"] == bundle["sealed"].identity_bridge_ref.digest
-    # Wrong action_id -> identity_mismatch.
-    bad = _v3_bundle(target, graph, physical, {**good, "action_id": "other"})
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bad)
-    assert exc.value.reason == "identity_mismatch"
-    # Wrong dag_id -> identity_mismatch.
-    bad = _v3_bundle(target, graph, physical, {**good, "dag_id": sha("other-dag")})
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bad)
-    assert exc.value.reason == "identity_mismatch"
-    # v2 driver/worker placement in a v3 bridge -> unsupported_layout, never misread.
-    bad = _v3_bundle(target, graph, physical, {**good, "worker_groups": []})
-    with pytest.raises(PlanContractError) as exc:
-        sealed_plans.load_execution_bindings(target, "a0", sealed_plan=bad)
-    assert exc.value.reason == "unsupported_layout"
+    from test_runtime_v3_real_seams import prepared
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
+        target, action_id = services.action.context.directory, services.action.action_id
+        original = sealed_plans.load_sealed_plan(target, action_id)
+        graph, physical = original["graph"], original["physical"]
+        good = {"action_id": action_id, "dag_id": graph.dag_id, "plan_id": physical.plan_id, "entries": []}
+        bundle = _v3_bundle(services.store, original, good)
+        result = sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bundle)
+        assert result["version"] == "v3" and result["document"] == good
+        assert result["ref"]["digest"] == bundle["sealed"].identity_bridge_ref.digest
+        # Wrong action_id -> identity_mismatch.
+        bad = _v3_bundle(services.store, original, {**good, "action_id": "other"})
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bad)
+        assert exc.value.reason == "identity_mismatch"
+        # Wrong dag_id -> identity_mismatch.
+        bad = _v3_bundle(services.store, original, {**good, "dag_id": sha("other-dag")})
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bad)
+        assert exc.value.reason == "identity_mismatch"
+        # v2 driver/worker placement in a v3 bridge -> unsupported_layout, never misread.
+        bad = _v3_bundle(services.store, original, {**good, "worker_groups": []})
+        with pytest.raises(PlanContractError) as exc:
+            sealed_plans.load_execution_bindings(target, action_id, sealed_plan=bad)
+        assert exc.value.reason == "unsupported_layout"
 
 
 # --- W009 facts.read_sealed_plan v3 ----------------------------------------
 
-def test_w009(tmp_path, monkeypatch):
+def test_w009(tmp_path):
+    from demiflow import data
     from demiflow.workbench.runs import facts
-    target, journal, fence, run_id = make_journal(tmp_path)
-    graph, _ = make_graph("a0")
-    physical = make_physical(graph)
-    sealed = make_sealed()
-    marker = v3_marker(run_id, "a0", dag_id=graph.dag_id, plan_id=physical.plan_id)
-    journal.bind_source(fence, "a0-dataflow-sealed", marker)
-    _register_seal(target, "a0", graph, physical, sealed, monkeypatch)
-    result = facts.read_sealed_plan(target, "a0")
-    assert result["available"] is True and result["version"] == "v3"
-    assert result["dag_id"] == graph.dag_id and result["plan_id"] == physical.plan_id
-    view = result["plan_view"]
-    assert view["schema"] == hist.PLAN_VIEW_SCHEMA
-    assert len(view["dag"]["nodes"]) == len(graph.nodes)
-    assert all(o["observed"] is False for o in view["node_observations"])
-    # Invalid action id -> structured unavailable, never raises.
-    bad = facts.read_sealed_plan(target, "")
-    assert not bad.get("available") and bad["status"] == "unavailable"
-    # No facts -> unavailable.
-    miss = facts.read_sealed_plan(target, "missing")
-    assert not miss.get("available") and miss["status"] == "unavailable"
+    from test_runtime_v3_real_seams import prepared
+    with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
+        target, action_id = services.action.context.directory, services.action.action_id
+        graph, physical = execution._graph, execution._physical
+        result = facts.read_sealed_plan(target, action_id)
+        assert result["available"] is True and result["version"] == "v3"
+        assert result["dag_id"] == graph.dag_id and result["plan_id"] == physical.plan_id
+        view = result["plan_view"]
+        assert view["schema"] == hist.PLAN_VIEW_SCHEMA
+        assert len(view["dag"]["nodes"]) == len(graph.nodes)
+        assert all(o["observed"] is False for o in view["node_observations"])
+        # Invalid action id -> structured unavailable, never raises.
+        bad = facts.read_sealed_plan(target, "")
+        assert not bad.get("available") and bad["status"] == "unavailable"
+        # No facts -> unavailable.
+        miss = facts.read_sealed_plan(target, "missing")
+        assert not miss.get("available") and miss["status"] == "unavailable"
 
 
 # --- W010 facts._physical_summary ------------------------------------------
@@ -1310,22 +890,31 @@ def test_w016(tmp_path, monkeypatch):
     import demiflow.workbench.projects.workspace as ws
     from demiflow.workbench.runs import manager as runs
     run_id = "r" + "1" * 24
-    report = {"digest": "digest-x", "entry": "entry-x", "actions": ["a0"],
+    report = {"digest": "digest-x", "entry": "entry-x", "actions": ["a0", "a1"],
               "binding": {"entry": "entry-x", "parameter_path": "params-x", "sources": {}, "parameters": {}},
               "nodes": [{"id": "n0", "api": "x", "source": "s"}]}
     binding = {"workspace_id": "ws", "basis_kind": "run", "basis_digest": "digest-x",
                "entry": "entry-x", "params": "params-x", "run_id": run_id, "attempt": 1}
-    code_pin = ref_json(aref("code-pin"))
+    pins = {"a0": ref_json(aref("code-pin-a0")), "a1": ref_json(aref("code-pin-a1"))}
     monkeypatch.setattr(ws, "load_workspace", lambda root: (root, {}, None))
     monkeypatch.setattr(ws, "workspace_id", lambda root, control: "ws")
     monkeypatch.setattr(runs, "_load", lambda *a, **k: (tmp_path, {"state": {"attempt": 1},
                                                                   "manifest": {"digest": "digest-x"}}))
     monkeypatch.setattr(runs, "_report", lambda *a, **k: report)
     monkeypatch.setattr(facts, "read_sealed_plan", lambda target, action_id: {
-        "available": True, "version": "v3", "plan_view": {"code_pin_ref": code_pin}})
+        "available": True, "version": "v3", "dag_id": "dag-" + action_id,
+        "plan_view": {"code_pin_ref": pins[action_id]}})
+
+    def fake_bridge(target, action_id, *, dag_id, report_digest):
+        entries = ([{"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+                     "occurrence_id": "occ1", "mode": "execute"}] if action_id == "a1" else [])
+        return {"available": True, "bridge": {"action_id": action_id, "entries": entries}}
+
+    monkeypatch.setattr(facts, "read_identity_bridge", fake_bridge)
     monkeypatch.setattr(parameters, "public_model", lambda *a, **k: {"sha256": "x", "fields": []})
-    result = model.bound_source(tmp_path, binding, "n0")
-    assert result["sealed_code_pin_ref"] == code_pin
+    result = model.bound_source(tmp_path, binding, "n0", logical_node_id="map", occurrence_id="occ1")
+    # U3: the code pin binds to the unique owning action a1, NOT the first v3 action a0.
+    assert result["sealed_code_pin_ref"] == pins["a1"]
     assert result["nodes"][0]["id"] == "n0"
 
 
@@ -1338,22 +927,394 @@ def test_w017(tmp_path, monkeypatch):
     physical = make_physical(graph)
     view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
     bridge = {"available": True, "bridge": {"action_id": "a0", "entries": [
-        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
          "occurrence_id": occs[0], "mode": "execute"}]}}
     entry = {"action_id": "a0", "status": "sealed", "version": "v3",
+             "dag": view["dag"], "plan_id": physical.plan_id, "physical": view["physical"],
              "node_observations": view["node_observations"], "identity_bridge": bridge}
     logical_view = {"actions": [entry]}
     page = {"format": "demiflow_forge_node_observation_page_v1", "attempt": 1, "action_id": "a0",
-            "plan_id": physical.plan_id, "availability": "available",
+            "plan_id": physical.plan_id, "dag_id": graph.dag_id, "plan_revision": physical.plan_revision,
+            "availability": "available",
             "observations": [{"action_id": "a0", "node_id": "n0", "occurrence": 0,
-                              "plan_id": physical.plan_id, "state": "succeeded"}]}
+                              "plan_id": physical.plan_id, "state": "succeeded",
+                              "dag_id": graph.dag_id, "plan_revision": physical.plan_revision,
+                              "occurrence_id": occs[0]}]}
     monkeypatch.setattr(run_view, "observations", lambda *a, **k: page)
     model._join_sealed_observations(tmp_path, "r" + "1" * 24, 1, logical_view)
     # The build_plan_view per-occurrence projection is preserved as plan-level authority.
     assert entry["plan_node_observations"] is view["node_observations"]
     # The attempt-scoped bridge join lands in node_observations (compatible shape).
-    assert entry["node_observations"]["available"] is True
-    assert entry["node_observations"]["entries"][0]["availability"] == "observed"
+    obs = entry["node_observations"]
+    assert obs["available"] is True
+    assert obs["entries"][0]["availability"] == "observed"
+    # U2: this-run scope credentials are attached after server-side verification.
+    assert obs["action_id"] == "a0" and obs["dag_id"] == graph.dag_id
+    assert obs["plan_id"] == physical.plan_id and obs["plan_revision"] == physical.plan_revision
+
+
+# --- U1 edge/occurrence identity (W004/W011/W015 consumption contract) ------
+
+def test_u1_edge_identity():
+    # src -> map0 -> map1: the two transforms share semantic_id "map" but are
+    # distinct occurrences in series (the one-to-many case the contract requires).
+    dag_id = sha("dag-u1")
+    src, m0, m1 = sha("occ-src-u1"), sha("occ-map-u1-0"), sha("occ-map-u1-1")
+    nodes = (
+        GraphNode(occurrence_id=src, semantic_id=sha("src"), kind="source",
+                  kernel=kernel("read_table", inputs=()), program_ref=None, shared_token="0"),
+        GraphNode(occurrence_id=m0, semantic_id=sha("map"), kind="transform",
+                  kernel=kernel("map"), program_ref=None, shared_token="1"),
+        GraphNode(occurrence_id=m1, semantic_id=sha("map"), kind="transform",
+                  kernel=kernel("map"), program_ref=None, shared_token="2"),
+    )
+    e0 = GraphEdge(edge_id=sha("e0"), producer=src, output_port="out", consumer=m0, input_port="in")
+    e1 = GraphEdge(edge_id=sha("e1"), producer=m0, output_port="out", consumer=m1, input_port="in")
+    graph = DataflowGraph(schema="demiflow.dataflow_graph.v3", action_id="a0", dag_id=dag_id,
+                          nodes=nodes, edges=(e0, e1), terminals=(m1,), sources=(src,))
+    physical = make_physical(graph)
+    view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
+    edges = view["dag"]["edges"]
+    assert len(edges) == 2
+    # edge_id, occurrence_id and ports are copied verbatim from the original GraphEdge.
+    assert edges[0]["edge_id"] == e0.edge_id
+    assert edges[0]["from"] == {"logical_node_id": sha("src"), "occurrence_id": src, "port": "out"}
+    assert edges[0]["to"] == {"logical_node_id": sha("map"), "occurrence_id": m0, "port": "in"}
+    assert edges[1]["edge_id"] == e1.edge_id
+    assert edges[1]["from"] == {"logical_node_id": sha("map"), "occurrence_id": m0, "port": "out"}
+    assert edges[1]["to"] == {"logical_node_id": sha("map"), "occurrence_id": m1, "port": "in"}
+    # Same-semantic series edge is not a self loop: endpoints differ by occurrence.
+    assert edges[1]["from"]["logical_node_id"] == edges[1]["to"]["logical_node_id"] == sha("map")
+    assert edges[1]["from"]["occurrence_id"] != edges[1]["to"]["occurrence_id"]
+    # One node per occurrence; the two "map" occurrences are never merged.
+    occs = [n["occurrence_id"] for n in view["dag"]["nodes"]]
+    assert len(occs) == 3 and occs.count(m0) == 1 and occs.count(m1) == 1
+    # physical.stages keyed by occurrence; every exchange joins an actual edge.
+    assert set(view["physical"]["stages"]) == {src, m0, m1}
+    edge_ids = {e["edge_id"] for e in edges}
+    assert all(x["edge_id"] in edge_ids for x in view["physical"]["exchanges"])
+    # source/terminal occurrences fall in the node set; plan identity preserved.
+    assert set(view["dag"]["sources"]) <= set(occs) and set(view["dag"]["terminals"]) <= set(occs)
+    assert view["plan_id"] == physical.plan_id and view["plan_revision"] == physical.plan_revision
+    assert view["dag"]["schema_version"] == "demiflow.dataflow_graph.v3"
+
+
+def test_u1_projection_rejects_dangling_and_bad_scope():
+    from dataclasses import replace
+    graph, occs = make_graph("a0")
+    physical = make_physical(graph)
+    # Dangling edge endpoint (unknown occurrence) -> INVALID_CONTRACT, never guessed.
+    bad = GraphEdge(edge_id=sha("bad"), producer=sha("ghost"), output_port="out",
+                    consumer=occs[0], input_port="in")
+    g2 = replace(graph, edges=graph.edges + (bad,))
+    with pytest.raises(DataflowError) as exc:
+        hist.build_plan_view(g2, make_sealed(), make_physical(g2), observations=())
+    assert exc.value.code == "INVALID_CONTRACT"
+    # Negative plan_revision -> rejected (non-negative safe integer required).
+    with pytest.raises(DataflowError) as exc:
+        hist.build_plan_view(graph, make_sealed(), replace(physical, plan_revision=-1), observations=())
+    assert exc.value.code == "INVALID_CONTRACT"
+    # Source occurrence outside the node set -> rejected (no dangling source).
+    g3 = replace(graph, sources=(sha("ghost-src"),))
+    with pytest.raises(DataflowError) as exc:
+        hist.build_plan_view(g3, make_sealed(), make_physical(g3), observations=())
+    assert exc.value.code == "INVALID_CONTRACT"
+
+
+# --- U2 this-run observation scope credentials (W012/W017) ------------------
+
+def test_u2_observation_scope():
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.runs import facts
+    graph, occs = make_graph("a0")
+    physical = make_physical(graph)
+    plan_id = physical.plan_id
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
+         "occurrence_id": occs[0], "mode": "execute"}]}
+
+    def page(rows, **extra):
+        return dict({"format": "demiflow_forge_node_observation_page_v1", "attempt": 1,
+                     "action_id": "a0", "availability": "available", "observations": rows}, **extra)
+
+    row = {"action_id": "a0", "node_id": "n0", "occurrence": 0, "plan_id": plan_id, "state": "succeeded",
+           "dag_id": graph.dag_id, "plan_revision": physical.plan_revision, "occurrence_id": occs[0]}
+    # Verified v3 scope: a row carrying the matching plan is observed.
+    joined = facts.join_node_observations(bridge, page([row], plan_id=plan_id, dag_id=graph.dag_id,
+                                                       plan_revision=physical.plan_revision),
+                                          action_id="a0", attempt=1, plan_id=plan_id,
+                                          dag_id=graph.dag_id, plan_revision=physical.plan_revision)
+    assert joined[0]["availability"] == "observed" and joined[0]["occurrence_id"] == occs[0]
+    # A page lacking the plan scope is rejected, not promoted with a stitched identity.
+    with pytest.raises(ForgeError) as exc:
+        facts.join_node_observations(bridge, page([row]), action_id="a0", attempt=1, plan_id=plan_id)
+    assert exc.value.code == "conflict"
+    # A plan-less legacy row is never backfilled to the current plan under v3 scope.
+    legacy_row = {"action_id": "a0", "node_id": "n0", "occurrence": 0, "state": "succeeded"}
+    joined = facts.join_node_observations(bridge, page([legacy_row], plan_id=plan_id),
+                                          action_id="a0", attempt=1, plan_id=plan_id)
+    assert joined[0]["availability"] == "not_in_page" and joined[0]["observation"] is None
+    # A row from a different plan is not joined.
+    other = dict(row, plan_id=sha("other-plan"))
+    joined = facts.join_node_observations(bridge, page([other], plan_id=plan_id),
+                                          action_id="a0", attempt=1, plan_id=plan_id)
+    assert joined[0]["availability"] == "not_in_page"
+    # A complete page wrapper cannot supply missing/different native row scope.
+    scope = dict(plan_id=plan_id, dag_id=graph.dag_id, plan_revision=physical.plan_revision)
+    for name, wrong in (("plan_id", sha("other-plan")), ("dag_id", sha("other-dag")),
+                        ("plan_revision", physical.plan_revision + 1), ("occurrence_id", sha("other-occurrence"))):
+        for candidate in ({key: value for key, value in row.items() if key != name},
+                          {**row, name: wrong}):
+            joined = facts.join_node_observations(bridge, page([candidate], **scope),
+                                                  action_id="a0", attempt=1, **scope)
+            assert joined[0]["availability"] == "not_in_page" and joined[0]["observation"] is None
+    # Conversely, a correct row cannot repair a missing/different page credential.
+    for name, wrong in (("plan_id", sha("other-plan")), ("dag_id", sha("other-dag")),
+                        ("plan_revision", physical.plan_revision + 1)):
+        for wrapper in ({key: value for key, value in scope.items() if key != name},
+                        {**scope, name: wrong}):
+            with pytest.raises(ForgeError) as exc:
+                facts.join_node_observations(bridge, page([row], **wrapper),
+                                              action_id="a0", attempt=1, **scope)
+            assert exc.value.code == "conflict"
+    # Legacy (no scope) preserves occurrence-only behaviour.
+    joined = facts.join_node_observations(bridge, page([legacy_row]), action_id="a0", attempt=1)
+    assert joined[0]["availability"] == "observed"
+
+
+def test_u2_v3_no_scope_not_promoted(tmp_path, monkeypatch):
+    from demiflow.workbench.graph import model
+    from demiflow.workbench.runs import view as run_view
+    graph, occs = make_graph("a0")
+    physical = make_physical(graph)
+    view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
+    bridge = {"available": True, "bridge": {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
+         "occurrence_id": occs[0], "mode": "execute"}]}}
+    entry = {"action_id": "a0", "status": "sealed", "version": "v3", "dag": view["dag"],
+             "plan_id": physical.plan_id, "physical": view["physical"],
+             "node_observations": view["node_observations"], "identity_bridge": bridge}
+    logical_view = {"actions": [entry]}
+    # Real producer currently emits no page-level plan scope -> v3 must not promote.
+    page = {"format": "demiflow_forge_node_observation_page_v1", "attempt": 1, "action_id": "a0",
+            "availability": "available",
+            "observations": [{"action_id": "a0", "node_id": "n0", "occurrence": 0, "state": "succeeded"}]}
+    monkeypatch.setattr(run_view, "observations", lambda *a, **k: page)
+    model._join_sealed_observations(tmp_path, "r" + "1" * 24, 1, logical_view)
+    obs = entry["node_observations"]
+    assert obs["available"] is False and obs["reason"] == "observation_plan_scope_unverified"
+    assert obs["plan_id"] == physical.plan_id and obs["dag_id"] == graph.dag_id
+    # The plan-level authority remains the honest "no this-run observation" projection.
+    assert entry["plan_node_observations"] is view["node_observations"]
+    assert all(o["observed"] is False for o in entry["plan_node_observations"])
+
+
+# --- U3 unique-sealed-action source binding (W016) --------------------------
+
+def test_u3_unique_action_resolution(tmp_path, monkeypatch):
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.graph import model
+    from demiflow.workbench.runs import facts
+    report = {"digest": "digest-x", "actions": ["a0", "a1"]}
+    monkeypatch.setattr(facts, "read_sealed_plan", lambda target, action_id: {
+        "available": True, "version": "v3", "dag_id": "dag-" + action_id, "plan_view": {}})
+
+    def bridge_with(action_id, entries):
+        return {"available": True, "bridge": {"action_id": action_id, "entries": entries}}
+
+    entry = {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": "map",
+             "occurrence_id": "occ1", "mode": "execute"}
+    # Ambiguous: both actions bridge the same logical/occurrence -> requires occurrence.
+    monkeypatch.setattr(facts, "read_identity_bridge",
+                        lambda target, action_id, *, dag_id, report_digest: bridge_with(action_id, [entry]))
+    with pytest.raises(ForgeError) as exc:
+        model._resolve_bridge_action(tmp_path, report, "map", "occ1")
+    assert exc.value.code == "conflict"
+    # Unique owner: only a1 bridges the pair -> a1 is returned (not the first action a0).
+    monkeypatch.setattr(facts, "read_identity_bridge",
+                        lambda target, action_id, *, dag_id, report_digest:
+                        bridge_with(action_id, [entry] if action_id == "a1" else []))
+    assert model._resolve_bridge_action(tmp_path, report, "map", "occ1") == "a1"
+    # Unbridged pair -> not_found, never guessed.
+    monkeypatch.setattr(facts, "read_identity_bridge",
+                        lambda target, action_id, *, dag_id, report_digest: bridge_with(action_id, []))
+    with pytest.raises(ForgeError) as exc:
+        model._resolve_bridge_action(tmp_path, report, "map", "occ1")
+    assert exc.value.code == "not_found"
+
+
+# --- U2 real producer (view.observations) + consumer gate integration -------
+
+def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",), scoped=True):
+    """Prepare a real sealed action and persist native observations in its journal.
+
+    No worker is executed and no successful run is claimed. The scope-less case
+    writes old rows before sealing; a later seal must never backfill their identity.
+    """
+    import time
+    from demiflow import data
+    from demiflow.workbench.runs import manager
+    from demiflow.forge.platform import content_digest
+    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.execution.dataflow_api import declare_action_v3, make_action_request
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution.dataflow_services import make_driver_services
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    from test_runtime_v3_real_seams import PreparationOnly
+
+    run_id = "r" + "1" * 24
+    root = tmp_path
+    (Path(root) / "workspace.json").write_text('{"id": "ws-u2"}')
+    target = manager.directory(root, run_id)
+    target.mkdir(parents=True, exist_ok=True)
+    journal = RunJournal(target)
+    journal.initialize(dict(run_id=run_id, root=str(Path(root).absolute()),
+                            digest=content_digest(dict(run_id=run_id)), object_locations=[]), attempts=True)
+    fence = "f" + "1" * 32
+    journal.claim_execution(dict(format=1, stream_protocol="aligned-barrier-v2", run_id=run_id,
+                                 platform_revision=platform_identity(), entry_identity=None,
+                                 limits=execution_limits(), limits_explicit=[], started_at=time.time()), fence)
+    journal.reserve_nodes([(action_id, node, 0) for node in nodes])
+
+    def observe(scope):
+        journal.observe_nodes([dict(action_id=action_id, node_id=node, occurrence=0,
+            document=dict(sequence=1, state="succeeded", rows_output=3, **scope)) for node in nodes])
+
+    if not v3 or not scoped:
+        observe({})
+    plan = None
+    if v3:
+        dataset = data.from_items([{"x": 1}]).map(lambda row: row)
+        declaration = declare_action_v3(dataset._source, dataset._plan, kind="take",
+                                         arguments={"limit": 1}, sink_declaration=None)
+        with pytest.raises(PreparationOnly):
+            with RunContext.attach(journal) as run:
+                with run.action(declaration, action_id=action_id):
+                    request = make_action_request(dataset._executor, dataset._source, dataset._plan,
+                                                  kind="take", arguments={"limit": 1})
+                    policy, limits = resolve_runtime_policy({}, run.limits, provider="local")
+                    services = make_driver_services(request.action, policy=policy, bounds=limits)
+                    execution = DataflowExecution(request, services=services)
+                    try:
+                        execution.prepare()
+                        graph, physical, sealed = execution._graph, execution._physical, execution._sealed
+                        occs = [node.occurrence_id for node in graph.nodes if node.kind == "transform"]
+                        assert len(occs) == 1
+                        if scoped:
+                            observe(dict(plan_id=physical.plan_id, dag_id=graph.dag_id,
+                                         plan_revision=physical.plan_revision, occurrence_id=occs[0]))
+                        plan = (graph, physical, occs, sealed)
+                    finally:
+                        execution.close()
+                    raise PreparationOnly()
+        loaded = sealed_plans.load_sealed_plan(target, action_id)
+        assert (loaded["graph"], loaded["physical"], loaded["sealed"]) == (graph, physical, sealed)
+    return root, run_id, target, journal, fence, plan
+
+
+def _u2_entry(graph, physical, bridge, sealed):
+    view = hist.build_plan_view(graph, sealed, physical, observations=())
+    return {"action_id": "a0", "status": "sealed", "version": "v3", "dag": view["dag"],
+            "plan_id": physical.plan_id, "physical": view["physical"],
+            "node_observations": view["node_observations"],
+            "identity_bridge": {"available": True, "bridge": bridge}}, view
+
+
+def test_u2_producer_page_scope_verified(tmp_path):
+    from demiflow.workbench.runs import view as run_view
+    from demiflow.workbench.runs import facts
+    from demiflow.workbench.graph import model
+    root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=True)
+    graph, physical, occs, sealed = plan
+    with closing(sqlite3.connect(journal.path)) as db:
+        native = json.loads(db.execute("SELECT document FROM node_observations WHERE node_id='n0'").fetchone()[0])
+    scope = dict(plan_id=physical.plan_id, dag_id=graph.dag_id,
+                 plan_revision=physical.plan_revision, occurrence_id=occs[0])
+    assert {name: native[name] for name in scope} == scope
+    # REAL producer: page and rows carry the sealed v3 plan identity verbatim.
+    page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
+    assert page["availability"] == "available"
+    assert page["plan_id"] == physical.plan_id and page["dag_id"] == graph.dag_id
+    assert page["plan_revision"] == physical.plan_revision
+    assert len(page["observations"]) == 1
+    row = page["observations"][0]
+    assert row["plan_id"] == physical.plan_id and row["dag_id"] == graph.dag_id
+    assert row["plan_revision"] == physical.plan_revision
+    assert {name: row[name] for name in scope} == scope
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
+         "occurrence_id": occs[0], "mode": "execute"}]}
+    # REAL consumer: exact-match scope verification promotes the observation.
+    joined = facts.join_node_observations(bridge, page, action_id="a0", attempt=1,
+                                          plan_id=physical.plan_id, dag_id=graph.dag_id,
+                                          plan_revision=physical.plan_revision)
+    assert joined[0]["availability"] == "observed" and joined[0]["occurrence_id"] == occs[0]
+    # REAL model wrapper over the REAL producer (no monkeypatch): credentialed promotion.
+    entry, view = _u2_entry(graph, physical, bridge, sealed)
+    model._join_sealed_observations(root, run_id, 1, {"actions": [entry]})
+    obs = entry["node_observations"]
+    assert obs["available"] is True and obs["entries"][0]["availability"] == "observed"
+    assert obs["action_id"] == "a0" and obs["dag_id"] == graph.dag_id
+    assert obs["plan_id"] == physical.plan_id and obs["plan_revision"] == physical.plan_revision
+    assert entry["plan_node_observations"] is view["node_observations"]
+
+
+@pytest.mark.parametrize("v3", [False, True])
+def test_u2_producer_scopeless_degrades(tmp_path, v3):
+    from demiflow.workbench.runs import view as run_view
+    from demiflow.workbench.runs import facts
+    from demiflow.workbench.graph import model
+    from demiflow.forge.schema import ForgeError
+    # Old unscoped rows stay unscoped both without a seal and after a real v3 seal.
+    root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=v3, scoped=False)
+    with closing(sqlite3.connect(journal.path)) as db:
+        original_documents = db.execute("SELECT document FROM node_observations").fetchall()
+    page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
+    assert page["availability"] == "available"
+    assert "plan_id" not in page and "dag_id" not in page and "plan_revision" not in page
+    assert all(not {"plan_id", "dag_id", "plan_revision", "occurrence_id"}.intersection(r)
+               for r in page["observations"])
+    if plan is not None:
+        graph, physical, occs, sealed = plan
+    else:
+        graph, occs = make_graph("a0")
+        physical, sealed = make_physical(graph), make_sealed()
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
+         "occurrence_id": occs[0], "mode": "execute"}]}
+    # A v3 scope cannot be verified against a scope-less page -> conflict, never promoted.
+    with pytest.raises(ForgeError) as exc:
+        facts.join_node_observations(bridge, page, action_id="a0", attempt=1, plan_id=physical.plan_id)
+    assert exc.value.code == "conflict"
+    entry, view = _u2_entry(graph, physical, bridge, sealed)
+    model._join_sealed_observations(root, run_id, 1, {"actions": [entry]})
+    obs = entry["node_observations"]
+    assert obs["available"] is False and obs["reason"] == "observation_plan_scope_unverified"
+    with closing(sqlite3.connect(journal.path)) as db:
+        assert db.execute("SELECT document FROM node_observations").fetchall() == original_documents
+    assert obs["plan_id"] == physical.plan_id and obs["dag_id"] == graph.dag_id
+    assert entry["plan_node_observations"] is view["node_observations"]
+
+
+def test_u2_producer_missing_row_not_in_page(tmp_path):
+    from demiflow.workbench.runs import view as run_view
+    from demiflow.workbench.runs import facts
+    # Real v3 run observes n0 only; the bridge also references an absent report node.
+    root, run_id, target, journal, fence, plan = _real_obs_run(tmp_path, v3=True, nodes=("n0",))
+    graph, physical, occs, sealed = plan
+    page = run_view.observations(root, run_id, attempt=1, action_id="a0", limit=64)
+    bridge = {"action_id": "a0", "entries": [
+        {"report_node_id": "n0", "report_occurrence": 0, "logical_node_id": _logical_id(graph, occs[0]),
+         "occurrence_id": occs[0], "mode": "execute"},
+        {"report_node_id": "n1", "report_occurrence": 0, "logical_node_id": _logical_id(graph, graph.sources[0]),
+         "occurrence_id": graph.sources[0], "mode": "execute"}]}
+    joined = facts.join_node_observations(bridge, page, action_id="a0", attempt=1,
+                                          plan_id=physical.plan_id, dag_id=graph.dag_id,
+                                          plan_revision=physical.plan_revision)
+    assert joined[0]["availability"] == "observed"
+    # A restricted page missing the item is not_in_page, never "never ran".
+    assert joined[1]["availability"] == "not_in_page" and joined[1]["observation"] is None
 
 
 # --- W018-W021 workbench JS -------------------------------------------------
@@ -1369,9 +1330,10 @@ const vm = require('vm');
 const path = require('path');
 const ROOT = process.env.W_ROOT;
 if (!ROOT) throw new Error('W_ROOT not set');
-const wbPath = path.join(ROOT, 'demiflow/workbench/web/workbench.js');
-const graphPath = path.join(ROOT, 'demiflow/workbench/web/workbench-graph.js');
-const wbSrc = fs.readFileSync(wbPath, 'utf8');
+const WEB = path.join(ROOT, 'demiflow/workbench/web');
+const presentationPath = path.join(WEB, 'workbench-presentation.js');
+const graphPath = path.join(WEB, 'workbench-graph.js');
+const presentationSrc = fs.readFileSync(presentationPath, 'utf8');
 const graphSrc = fs.readFileSync(graphPath, 'utf8');
 
 function assert(cond, msg) { if (!cond) throw new Error('ASSERT: ' + msg); }
@@ -1394,8 +1356,12 @@ function makeEl(tag) {
     replaceChildren(...ns) { this.children = []; this.append(...ns); },
     setAttribute(k, v) { this.attributes[k] = String(v); },
     getAttribute(k) { return k in this.attributes ? this.attributes[k] : null; },
-    contains(n) { return this.children.includes(n); },
+    contains(n) { return this === n || this.children.some(c => c.contains && c.contains(n)); },
     addEventListener() {}, removeEventListener() {},
+    remove() { if (this.parentNode) { const s = this.parentNode.children; const i = s.indexOf(this); if (i >= 0) s.splice(i, 1); this.parentNode = null; } },
+    getBoundingClientRect() { return {x: 0, y: 0, width: this.clientWidth, height: this.clientHeight, top: 0, left: 0, right: this.clientWidth, bottom: this.clientHeight}; },
+    scrollIntoView() {},
+    clientWidth: 800, clientHeight: 400,
     get textContent() { return this._text; },
     set textContent(v) { this._text = String(v); this.children = []; },
     get isConnected() { return true; },
@@ -1407,211 +1373,364 @@ function textOf(el) { if (!el) return ''; let t = el._text || ''; for (const c o
 function walk(el, fn) { fn(el); for (const c of el.children || []) walk(c, fn); }
 function findByAttr(root, attr, val) { let found = null; walk(root, e => { if (e.attributes && e.attributes[attr] === val) found = e; }); return found; }
 
-function extractFn(src, name) {
-  const marker = 'function ' + name + '(';
-  const start = src.indexOf(marker);
-  if (start < 0) throw new Error('missing function ' + name);
-  const i = src.indexOf('{', start);
-  let depth = 0, j = i;
-  for (; j < src.length; j++) { const c = src[j]; if (c === '{') depth++; else if (c === '}') { depth--; if (depth === 0) { j++; break; } } }
-  const body = src.slice(start, j);
-  assert(body.startsWith(marker) && body.endsWith('}'), 'extraction bounds for ' + name);
-  return body;
+// SVG nodes carry class via setAttribute, HTML nodes via the className property.
+function findAllByClass(root, cls) {
+  const out = [];
+  walk(root, e => {
+    const value = (e.attributes && e.attributes.class) || e.className || '';
+    if (String(value).split(/\s+/).includes(cls)) out.push(e);
+  });
+  return out;
 }
 
-function makeHost(state) {
-  const rec = { raw: [], messages: [], locate: [], choose: [], viewUpdate: [], viewSelect: [], details: [] };
-  const host = {
+// The C merge replaced the old workbench.js logical* projection with the pure
+// presentation module (C01-C04/C09). Load the real exported surface instead of
+// extracting deleted function names; no consumer double, no second authority.
+function presentation() {
+  const ctx = vm.createContext({console});
+  vm.runInContext(presentationSrc, ctx, {filename: presentationPath});
+  const api = ctx.ForgeWorkbenchPresentation;
+  assert(api, 'ForgeWorkbenchPresentation exported');
+  for (const name of ['chooseGraphView', 'buildNodeCard', 'buildGraphModel', 'buildNodeDetails', 'normalizeExecutionPlan'])
+    assert(typeof api[name] === 'function', 'presentation export ' + name);
+  return api;
+}
+
+function graphHost() {
+  const host = makeEl('div');
+  const ctx = vm.createContext({
     document: documentDouble, console,
-    disposed: false, logicalAction: null, logicalSelected: null,
-    logicalBar: makeEl('div'), graphLegend: makeEl('div'), graphTitle: makeEl('div'),
-    graphHost: makeEl('div'), inspector: makeEl('div'),
-    data: () => state,
-    $: (tag, text, cls) => { const n = documentDouble.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; },
-    select: (label, items, value) => { const s = makeEl('select'); s.value = value; s._items = items; return s; },
-    field: (name, el, parent) => { parent.append(el); },
-    details: (title, h) => { const b = makeEl('details'); b._title = title; rec.details.push(title); return b; },
-    raw: (name, value, box) => { rec.raw.push({ name, value }); const p = makeEl('pre'); p.textContent = JSON.stringify(value); box.append(p); },
-    button: (label, action, parent, opts) => { const b = makeEl('button'); b._label = label; b._action = action; b.disabled = !!(opts && opts.disabled); parent.append(b); return b; },
-    message: (text, tone) => { rec.messages.push(text); },
-    locateNode: id => { rec.locate.push(id); return Promise.resolve(); },
-    chooseNode: (id, opts) => { rec.choose.push({ id, opts }); },
-    logicalView: { update: (...a) => { rec.viewUpdate.push(a); }, select: id => { rec.viewSelect.push(id); } },
-  };
-  const fns = ['logicalName', 'actionStatusLabel', 'logicalEntry', 'logicalPanel', 'renderLogical', 'bridgeEntryFor', 'observationLabel', 'chooseLogicalNode'];
-  const code = fns.map(n => extractFn(wbSrc, n)).join('\n');
-  vm.createContext(host);
-  vm.runInContext(code, host, { filename: wbPath });
-  return { host, rec };
+    ResizeObserver: class { observe() {} disconnect() {} },
+    requestAnimationFrame: fn => { fn(0); return 1; },
+    cancelAnimationFrame: () => {},
+  });
+  vm.runInContext(graphSrc, ctx, {filename: graphPath});
+  const api = ctx.ForgeWorkbenchGraph;
+  assert(api, 'ForgeWorkbenchGraph exported');
+  for (const name of ['mount', 'layoutGraph', 'status', 'cpuChart'])
+    assert(typeof api[name] === 'function', 'graph export ' + name);
+  assert(!('mountLogical' in api), 'removed mountLogical must not be resurrected');
+  return {api, host, ctx};
 }
 
-function dagNode(logical, occ, extra) {
-  return Object.assign({ logical_node_id: logical, occurrence_id: occ, op_kind: 'map', input_ports: ['in'], output_ports: ['out'], shared_token: null, traits: null, operator_spec_ref: null }, extra || {});
-}
+// Contract-valid fixtures for the merged C projection. v3 identities must be
+// 64-hex (isSha) and edges must carry edge_id + occurrence endpoints; the real
+// schema is demiflow.dataflow_graph.v3 and resource_role must be a known ROLES
+// member. The old short-id / logical_dag.v3 / 'worker' fixtures are not admitted
+// by normalizeExecutionPlan and would fabricate a false refusal.
+const sha = c => c.repeat(64);
+const PROJECT_ID = 'w' + 'a1'.repeat(16);
+const BINDING = {basis_kind: 'run', workspace_id: PROJECT_ID, basis_digest: sha('b'), run_id: 'run-1', attempt: 1};
+const REPORT_DIGEST = sha('c'); // Report identity is distinct from the run manifest binding.
+const ACTION = 'a0', DAG_ID = sha('8'), PLAN_ID = sha('9');
+const L_SRC = sha('1'), L_MAP = sha('2');
+const O_SRC = sha('3'), O_MAP0 = sha('4'), O_MAP1 = sha('5');
+const E0 = sha('6'), E1 = sha('7');
+
 function v3Dag() {
   return {
-    schema_version: 'demiflow.logical_dag.v3', dag_id: 'd'.repeat(64),
-    nodes: [dagNode('src', 'occ-src'), dagNode('map', 'occ-map-0'), dagNode('map', 'occ-map-1')],
-    edges: [{ from: { logical_node_id: 'src', port: 'out' }, to: { logical_node_id: 'map', port: 'in' } }],
-    shared_ancestors: [{ logical_node_id: 'src' }],
+    schema_version: 'demiflow.dataflow_graph.v3', dag_id: DAG_ID, action_id: ACTION,
+    nodes: [
+      {logical_node_id: L_SRC, occurrence_id: O_SRC, op_kind: 'source', input_ports: [], output_ports: ['out'], shared_token: null, traits: null},
+      {logical_node_id: L_MAP, occurrence_id: O_MAP0, op_kind: 'map', input_ports: ['in'], output_ports: ['out'], shared_token: null, traits: {resource_role: 'cpu', effect: 'pure', state: 'stateless'}},
+      {logical_node_id: L_MAP, occurrence_id: O_MAP1, op_kind: 'map', input_ports: ['in'], output_ports: ['out'], shared_token: 'tok-123', traits: {resource_role: 'cpu', effect: 'pure', state: 'stateless'}},
+    ],
+    edges: [
+      {edge_id: E0, from: {logical_node_id: L_SRC, occurrence_id: O_SRC, port: 'out'}, to: {logical_node_id: L_MAP, occurrence_id: O_MAP0, port: 'in'}},
+      {edge_id: E1, from: {logical_node_id: L_SRC, occurrence_id: O_SRC, port: 'out'}, to: {logical_node_id: L_MAP, occurrence_id: O_MAP1, port: 'in'}},
+    ],
+    sources: [O_SRC], terminals: [O_MAP0, O_MAP1],
   };
 }
 function v3Physical() {
   return {
-    plan_id: 'p'.repeat(64), plan_revision: 3, recovery: 'checkpoint',
+    plan_id: PLAN_ID, plan_revision: 3, recovery: 'checkpoint',
     stages: {
-      'occ-map-0': { stage_id: 's0', partition_count: 2, replica_min: 1, replica_target: 2, replica_max: 4, resident_bytes: 10, output_bytes: 20, state_bytes: 30, profile: { requests: { cpu: '2', memory: '1Gi' } } },
-      'occ-map-1': { stage_id: 's1', partition_count: 3, replica_min: 1, replica_target: 3, replica_max: 6, resident_bytes: 11, output_bytes: 21, state_bytes: 31, profile: { requests: { cpu: '3' } } },
+      [O_MAP0]: {stage_id: 's0', partition_count: 2, replica_min: 1, replica_target: 2, replica_max: 4, profile: {requests: {cpu: '2', memory: '1Gi'}}},
+      [O_MAP1]: {stage_id: 's1', partition_count: 3, replica_min: 1, replica_target: 3, replica_max: 6, profile: {requests: {cpu: '3'}}},
     },
-    exchanges: [{ channel_id: 'c0', mode: 'durable_incremental' }, { channel_id: 'c1', mode: 'memory_incremental' }],
-    limitations: ['某资源 actor 未声明恢复钩子'], policy: {}, residency: {},
+    exchanges: [{channel_id: 'c0', edge_id: E0, mode: 'durable_incremental'}, {channel_id: 'c1', edge_id: E1, mode: 'memory_incremental'}],
+    limitations: ['某资源 actor 未声明恢复钩子'],
+  };
+}
+function legacyDag() {
+  return {
+    schema_version: 'demiflow.logical_dag.v1', dag_id: DAG_ID, action_id: ACTION,
+    nodes: [
+      {logical_node_id: 'src', occurrence_id: 'occ-src', op_kind: 'source', input_ports: [], output_ports: ['out']},
+      {logical_node_id: 'map', occurrence_id: 'occ-map-0', op_kind: 'map', input_ports: ['in'], output_ports: ['out']},
+      {logical_node_id: 'map', occurrence_id: 'occ-map-1', op_kind: 'map', input_ports: ['in'], output_ports: ['out']},
+    ],
+    edges: [{from: {logical_node_id: 'src', port: 'out'}, to: {logical_node_id: 'map', port: 'in'}}],
+    sources: ['src'], terminals: ['map'],
+  };
+}
+function legacyPhysical() {
+  return {
+    plan_id: PLAN_ID, plan_revision: 1, recovery: 'final_commit',
+    stages: {map: {stage_id: 's', partition_count: 1, role: 'worker', budgets: {cpu: 1}}},
+    channels: [{channel_id: 'c0', exchange_mode: 'memory'}], worker_groups: [], limitations: [],
+  };
+}
+function sealedEntry(over) {
+  return Object.assign({
+    action_id: ACTION, status: 'sealed', binding_level: 'sealed', version: 'v3',
+    dag: v3Dag(), physical: v3Physical(), plan_id: PLAN_ID, sealed_at: 1700000000,
+    recovery_restriction: {reason: 'actor_without_hook'},
+    node_map: {}, node_observations: {available: false, reason: 'observation_page_unavailable'},
+    identity_bridge: {available: false},
+  }, over || {});
+}
+function legacyEntry(over) {
+  return sealedEntry(Object.assign({version: 'v1', dag: legacyDag(), physical: legacyPhysical()}, over || {}));
+}
+function runGraph(entry, extra) {
+  return Object.assign({
+    binding: BINDING,
+    report_digest: REPORT_DIGEST,
+    logical: {available: true, action_count: 1, actions: [entry]},
+    nodes: [{id: 'n0', api: 'x.y', kind: 'map', fields: {}, source: 'f.py', line: 1}],
+    edges: [],
+  }, extra || {});
+}
+// A real identity bridge + observation page, so the consumer half is exercised
+// against admitted facts rather than a missing-bridge placeholder.
+function bridged(occurrences) {
+  return {
+    identity_bridge: {available: true, bridge: {
+      schema: 'demiflow.identity_bridge.v1', action_id: ACTION, dag_id: DAG_ID, report_digest: REPORT_DIGEST,
+      entries: occurrences.map((occ, i) => ({logical_node_id: L_MAP, occurrence_id: occ, report_node_id: 'n' + i, report_occurrence: 0, mode: 'execute'})),
+    }},
+    node_observations: {available: true, attempt: 1, action_id: ACTION, dag_id: DAG_ID, plan_id: PLAN_ID, plan_revision: 3, has_more: false,
+      entries: occurrences.map((occ, i) => ({logical_node_id: L_MAP, occurrence_id: occ, report_node_id: 'n' + i, report_occurrence: 0, availability: 'observed'}))},
+    node_map: occurrences.reduce((acc, occ, i) => { acc[L_MAP] = 'n' + i; return acc; }, {}),
   };
 }
 
 function w018() {
-  const state = { graph: { logical: { available: true, actions: [] } } };
-  const { host } = makeHost(state);
-  assert(host.logicalEntry() === null, 'empty actions -> null');
-  state.graph.logical.available = false;
-  assert(host.logicalEntry() === null, 'unavailable -> null');
-  state.graph.logical.available = true;
-  const v3noDag = { action_id: 'a0', status: 'sealed', version: 'v3' };
-  state.graph.logical.actions = [v3noDag];
-  assert(host.logicalEntry() === null, 'sealed v3 without dag -> null (no fabricated graph)');
-  const v3dag = { action_id: 'a0', status: 'sealed', version: 'v3', dag: v3Dag() };
-  state.graph.logical.actions = [v3dag];
-  assert(host.logicalEntry() === v3dag, 'sealed v3 with dag -> entry');
-  const v1 = { action_id: 'a1', status: 'sealed', version: 'v1' };
-  state.graph.logical.actions = [v1];
-  assert(host.logicalEntry() === v1, 'sealed v1 without dag still returned (v1 not guarded)');
-  state.graph.logical.actions = [v3dag, { action_id: 'a2', status: 'projected', dag: v3Dag() }];
-  host.logicalAction = 'a2';
-  assert(host.logicalEntry().action_id === 'a2', 'logicalAction selects entry');
+  const P = presentation();
+  // No actions -> no sealed view, never a fabricated graph.
+  const empty = runGraph(sealedEntry()); empty.logical.actions = [];
+  assert(P.chooseGraphView(empty, {}).kind === 'unavailable', 'empty actions -> unavailable');
+  // Sealed v3 WITHOUT dag: the view may be chosen, but the projection must
+  // refuse. The old logicalEntry() guard moved into normalizeExecutionPlan and
+  // now covers BOTH formats (stricter than the old v1-exempt behaviour).
+  const noDag = sealedEntry({dag: undefined});
+  const g = runGraph(noDag);
+  const choice = P.chooseGraphView(g, {});
+  assert(choice.kind === 'sealed' && choice.actionId === ACTION, 'sealed v3 chosen');
+  let proj = P.normalizeExecutionPlan(noDag, BINDING);
+  assert(proj.available === false && proj.reason === 'unsupported_plan_schema', 'sealed v3 without dag -> refused (no fabricated graph)');
+  assert(/缺少 dag/.test(proj.detail), 'refusal names the missing dag');
+  const legacyNoDag = legacyEntry({dag: undefined});
+  proj = P.normalizeExecutionPlan(legacyNoDag, BINDING);
+  assert(proj.available === false, 'sealed legacy without dag also refused (guard covers both formats)');
+  // Sealed v3 WITH a contract-valid dag -> real projection.
+  const withDag = sealedEntry();
+  proj = P.normalizeExecutionPlan(withDag, BINDING);
+  assert(proj.available === true && proj.identity.format === 'v3', 'sealed v3 with dag -> v3 projection');
+  assert(proj.nodes.length === 3 && proj.edges.length === 2, 'v3 topology projected');
+  assert(proj.identity.dagId === DAG_ID && proj.identity.planId === PLAN_ID, 'identity carries dag/plan');
+  // Projected (not sealed) -> honest refusal, never a sealed view.
+  const projected = sealedEntry({status: 'projected', binding_level: 'declared'});
+  const g2 = runGraph(projected);
+  assert(P.chooseGraphView(g2, {}).kind === 'unavailable', 'projected action -> unavailable, not sealed');
+  proj = P.normalizeExecutionPlan(projected, BINDING);
+  assert(proj.available === false && proj.reason === 'not_sealed', 'projected -> not_sealed');
+  // Explicit actionId selects the entry; an unknown id is refused, not guessed.
+  const g3 = runGraph(withDag);
+  assert(P.chooseGraphView(g3, {actionId: ACTION}).actionId === ACTION, 'actionId selects entry');
+  assert(P.chooseGraphView(g3, {actionId: 'nope'}).reason === 'action_not_found', 'unknown actionId refused');
+  // A v3 dag with an inconsistent version marker must not be silently accepted.
+  proj = P.normalizeExecutionPlan(sealedEntry({version: 'v1'}), BINDING);
+  assert(proj.available === false && proj.reason === 'identity_mismatch', 'v3 dag with v1 marker refused');
   return { ok: true };
 }
 
 function w019() {
-  const dag = v3Dag();
-  const sealedEntry = {
-    action_id: 'a0', status: 'sealed', version: 'v3', binding_level: 'sealed',
-    dag, physical: v3Physical(), plan_id: 'p'.repeat(64), sealed_at: 1700000000,
-    recovery_restriction: { reason: 'actor_without_hook' }, node_map: {},
-    node_observations: [], identity_bridge: { available: false },
-  };
-  const state = { graph: { logical: { available: true, action_count: 1, actions: [sealedEntry] }, nodes: [{ id: 'n0', api: 'x.y', kind: 'map' }] } };
-  const { host, rec } = makeHost(state);
-  host.renderLogical(state.graph);
-  const bar = textOf(host.logicalBar);
-  assert(bar.includes('封存计划结构 · '), 'sealed structure tag present');
-  assert(!bar.includes('结构校验通过'), 'no execution-contract-passed claim');
-  assert(bar.includes('恢复级别 checkpoint'), 'recovery level shown');
-  assert(bar.includes('交换通道 2'), 'exchange count shown');
-  assert(bar.includes('durable_incremental') && bar.includes('memory_incremental'), 'exchange modes shown');
-  assert(bar.includes('恢复限制 1 项'), 'limitation count shown');
-  assert(bar.includes('某资源 actor 未声明恢复钩子'), 'limitation detail shown');
-  assert(bar.includes('中断后不能继续恢复'), 'recovery restriction warning shown');
-  assert(bar.includes('已绑定本次执行计划'), 'sealed bound tag');
-  assert(rec.viewUpdate.length === 1 && rec.viewUpdate[0][4] === 'sealed', 'logicalView basis sealed');
-  const projected = { action_id: 'a0', status: 'projected', version: 'v3', binding_level: 'declared', dag, node_map: {}, node_observations: [] };
-  state.graph.logical.actions = [projected];
-  host.logicalAction = null;
-  const h2 = makeHost(state);
-  h2.host.renderLogical(state.graph);
-  const bar2 = textOf(h2.host.logicalBar);
-  assert(bar2.includes('声明投影结构（未执行）'), 'static graph honest label');
-  assert(!bar2.includes('结构校验通过'), 'static graph no execution claim');
-  assert(!bar2.includes('已绑定本次执行计划'), 'static graph not bound to execution');
-  assert(bar2.includes('未绑定本次执行计划'), 'static graph unbound tag');
-  assert(h2.rec.viewUpdate[0][4] === 'declared', 'logicalView basis declared');
+  const P = presentation();
+  const entry = sealedEntry();
+  const g = runGraph(entry);
+  const choice = P.chooseGraphView(g, {});
+  const model = P.buildGraphModel(g, {choice});
+  assert(model.choice.kind === 'sealed' && model.choice.label === '运行封存计划', 'sealed basis label');
+  assert(model.execution && model.execution.format === 'v3', 'sealed model bound to this execution identity');
+  assert(model.nodes.length === 3, 'one card per v3 occurrence');
+  const proj = P.normalizeExecutionPlan(entry, BINDING);
+  assert(proj.recovery.declared === 'checkpoint', 'recovery level shown');
+  assert(proj.exchanges.length === 2, 'exchange count shown');
+  const modes = proj.exchanges.map(item => item.mode);
+  assert(modes.includes('durable_incremental') && modes.includes('memory_incremental'), 'exchange modes shown');
+  assert(proj.recovery.limitations.length === 1 && proj.recovery.limitations[0] === '某资源 actor 未声明恢复钩子', 'limitation detail shown');
+  assert(proj.recovery.restriction === 'actor_without_hook', 'recovery restriction shown');
+  const sealedText = JSON.stringify(model);
+  assert(!sealedText.includes('结构校验通过'), 'no execution-contract-passed claim');
+  assert(!sealedText.includes('执行完成') && !sealedText.includes('成功'), 'no fabricated success without observations');
+  assert(model.notices.includes('该 action 尚无节点身份桥；执行节点与报告观测的对应不猜测。'), 'missing bridge is honest, not guessed');
+  // Projected / declared -> honest unbound view, draws no plan, claims no execution.
+  const projected = sealedEntry({status: 'projected', binding_level: 'declared'});
+  const g2 = runGraph(projected);
+  const c2 = P.chooseGraphView(g2, {});
+  const m2 = P.buildGraphModel(g2, {choice: c2});
+  assert(m2.choice.kind === 'unavailable', 'projected honest unavailable label');
+  assert(m2.execution === null, 'projected not bound to execution');
+  assert(m2.nodes.length === 0, 'projected draws no fabricated plan');
+  assert(m2.notices.some(n => n.includes('该 action 没有封存执行计划')), 'projected refusal is explicit');
+  assert(!JSON.stringify(m2).includes('结构校验通过'), 'static graph no execution claim');
+  // Sealed but unprojectable -> explicit refusal, never a silent old-version plan.
+  const g3 = runGraph(sealedEntry({dag: undefined}));
+  const m3 = P.buildGraphModel(g3, {choice: P.chooseGraphView(g3, {})});
+  assert(m3.choice.kind === 'unavailable' && m3.execution === null, 'unprojectable sealed -> unbound');
+  assert(m3.notices.some(n => n.includes('不会按旧版悄悄画完整计划')), 'honest refusal notice, no silent fallback');
   return { ok: true };
 }
 
 function w020() {
-  const dag = v3Dag();
-  const phys = v3Physical();
-  const obsList = [
-    { occurrence_id: 'occ-map-0', observed: true, availability: 'observed', metrics: {} },
-    { occurrence_id: 'occ-map-1', observed: false, availability: 'unobserved', metrics: {} },
-  ];
-  const entry = {
-    action_id: 'a0', status: 'sealed', version: 'v3', binding_level: 'sealed',
-    dag, physical: phys, node_map: {}, identity_bridge: { available: false },
-    node_observations: obsList, plan_node_observations: obsList,
-    recovery_restriction: { reason: 'actor_without_hook' },
-  };
-  const state = { graph: { logical: { available: true, action_count: 1, actions: [entry] }, nodes: [{ id: 'n0', api: 'x.y', kind: 'map' }] } };
-  const { host, rec } = makeHost(state);
-  host.chooseLogicalNode('occ-map-0', null);
-  const names = rec.raw.map(r => r.name);
-  assert(names.includes('stage.profile'), 'v3 stage.profile raw block');
-  assert(names.includes('stage.replicas'), 'v3 stage.replicas raw block');
-  assert(!names.includes('stages_by_occurrence'), 'v3 selection resolves exactly one occurrence');
-  assert(names.includes('plan_node_observations'), 'plan_node_observations preserved');
-  assert(names.includes('plan_facts'), 'v3 plan_facts raw block');
-  const pf = rec.raw.find(r => r.name === 'plan_facts').value;
-  assert(Array.isArray(pf.exchanges) && pf.exchanges.length === 2, 'plan_facts carries exchanges');
-  assert(!('worker_groups' in pf), 'v3 plan_facts has no worker_groups');
-  const sp = rec.raw.find(r => r.name === 'stage.profile').value;
-  assert(sp.requests.cpu === '2', 'stage resolved by occurrence_id occ-map-0');
-
-  const boxText = textOf(host.inspector);
-  assert(boxText.includes('已有观测'), 'list-shape observation label observed');
-  assert(boxText.includes('副本目标'), 'v3 replica target row');
-  assert(boxText.includes('资源画像'), 'v3 profile row');
-  assert(boxText.includes('中断后不能继续恢复'), 'recovery restriction note');
-  const v1entry = {
-    action_id: 'a0', status: 'sealed', version: 'v1', binding_level: 'sealed',
-    dag, node_map: {}, identity_bridge: { available: false }, node_observations: { available: false, reason: 'x' },
-    physical: { plan_id: 'p'.repeat(64), plan_revision: 1, recovery: 'final_commit', stages: { map: { stage_id: 's', partition_count: 1, role: 'worker', budgets: { cpu: 1 } } }, channels: [], worker_groups: [] },
-  };
-  const state2 = { graph: { logical: { available: true, action_count: 1, actions: [v1entry] }, nodes: [{ id: 'n0', api: 'x.y', kind: 'map' }] } };
-  const h2 = makeHost(state2);
-  h2.host.chooseLogicalNode('map', null);
-  const n2 = h2.rec.raw.map(r => r.name);
-  assert(n2.includes('stage.budgets'), 'v1 stage.budgets raw block');
-  const pf2 = h2.rec.raw.find(r => r.name === 'plan_facts').value;
-  assert('channels' in pf2 && 'worker_groups' in pf2, 'v1 plan_facts channels/worker_groups');
-  assert(!('exchanges' in pf2), 'v1 plan_facts has no exchanges');
-  assert(!n2.includes('stage.replicas'), 'v1 has no replica raw block');
+  const P = presentation();
+  // v3: stages resolve per occurrence, profile/replicas/exchanges are v3 facts.
+  const entry = sealedEntry(bridged([O_MAP0, O_MAP1]));
+  const g = runGraph(entry);
+  const proj = P.normalizeExecutionPlan(entry, BINDING);
+  assert(proj.available === true, 'bridged v3 entry projects');
+  const byOcc = new Map(proj.nodes.map(n => [n.occurrenceId, n]));
+  const m0 = byOcc.get(O_MAP0), m1 = byOcc.get(O_MAP1);
+  assert(m0 && m1, 'both occurrences projected');
+  assert(m0.placement.profile.requests.cpu === '2', 'v3 stage.profile resolved by occurrence O_MAP0');
+  assert(m1.placement.profile.requests.cpu === '3', 'v3 stage.profile resolved by occurrence O_MAP1');
+  assert(m0.placement.replicaTarget === 2 && m1.placement.replicaTarget === 3, 'v3 replica targets per occurrence');
+  assert(m0.placement.replicaMin === 1 && m0.placement.replicaMax === 4, 'v3 replica bounds');
+  assert(m0.placement.stageId === 's0' && m1.placement.stageId === 's1', 'stages keyed per occurrence');
+  assert(m0.placement.role === 'cpu', 'known resource_role admitted');
+  assert(proj.exchanges.length === 2 && proj.exchanges.every(e => e.edgeId), 'v3 exchanges carry edge identity');
+  assert(!('worker_groups' in proj), 'v3 projection has no worker_groups');
+  assert(proj.recovery.restriction === 'actor_without_hook', 'recovery restriction preserved');
+  // Node cards / details come from the real consumer surface.
+  const model = P.buildGraphModel(g, {choice: P.chooseGraphView(g, {})});
+  const card = model.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  assert(card, 'occurrence card present');
+  const summary = JSON.stringify(card.summary);
+  assert(summary.includes('s0') && summary.includes('2 分区'), 'placement summary shows stage and partitions');
+  assert(card.state.label.includes('已有观测'), 'observed availability label, not inferred success');
+  assert(!card.state.label.includes('执行完成') && !card.state.label.includes('成功'), 'no fabricated success state');
+  const details = P.buildNodeDetails(g, card.selection);
+  assert(details.execution && details.execution.format === 'v3', 'details bound to v3 execution identity');
+  assert(details.sourceAvailable === true, 'bridged node exposes source');
+  assert(details.recoveryRestriction === 'actor_without_hook', 'details carry recovery restriction');
+  assert(details.exchanges.length >= 1, 'details carry adjacent v3 exchanges');
+  // A run manifest digest is not the report digest used by the identity bridge.
+  assert(g.report_digest !== g.binding.basis_digest, 'independent report and manifest identities');
+  for (const wrongDigest of [BINDING.basis_digest, sha('d'), undefined]) {
+    const wrongGraph = runGraph(entry, {report_digest: wrongDigest});
+    const wrongModel = P.buildGraphModel(wrongGraph, {choice: P.chooseGraphView(wrongGraph, {})});
+    const wrongCard = wrongModel.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+    assert(wrongCard.state.label === '未桥接 · 无观测关联', 'mismatched or absent report digest refuses observations');
+    assert(P.buildNodeDetails(wrongGraph, wrongCard.selection).sourceAvailable === false,
+      'mismatched or absent report digest refuses source linkage');
+  }
+  const wrongBridgeEntry = sealedEntry(bridged([O_MAP0, O_MAP1]));
+  wrongBridgeEntry.identity_bridge.bridge.report_digest = BINDING.basis_digest;
+  const wrongBridgeGraph = runGraph(wrongBridgeEntry);
+  const wrongBridgeModel = P.buildGraphModel(wrongBridgeGraph, {choice: P.chooseGraphView(wrongBridgeGraph, {})});
+  const wrongBridgeCard = wrongBridgeModel.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  assert(wrongBridgeCard.state.label === '未桥接 · 无观测关联', 'bridge carrying manifest digest is refused');
+  assert(P.buildNodeDetails(wrongBridgeGraph, wrongBridgeCard.selection).sourceAvailable === false,
+    'bridge carrying manifest digest cannot authorize source linkage');
+  // Unbridged node must stay honest rather than guess a correspondence.
+  const unbridged = P.buildGraphModel(runGraph(sealedEntry()), {choice: {kind: 'sealed', actionId: ACTION, label: '运行封存计划', reason: null}});
+  const ucard = unbridged.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  assert(ucard.state.label === '未桥接 · 无观测关联', 'missing bridge is honest');
+  const udetails = P.buildNodeDetails(runGraph(sealedEntry()), ucard.selection);
+  assert(udetails.sourceAvailable === false && udetails.sourceReason === 'identity_bridge_missing', 'unbridged source refused, not fabricated');
+  // legacy v1: budgets instead of profile, channels instead of exchanges, no replicas.
+  const lentry = legacyEntry();
+  const lproj = P.normalizeExecutionPlan(lentry, BINDING);
+  assert(lproj.available === true && lproj.identity.format === 'legacy', 'legacy entry projects as legacy');
+  const lmap = lproj.nodes.find(n => n.logicalNodeId === 'map');
+  assert(lmap.placement.profile.cpu === 1, 'legacy stage.budgets preserved');
+  assert(lmap.placement.replicaTarget === null && lmap.placement.replicaMin === null, 'legacy has no replica facts');
+  assert(lproj.exchanges.length === 1 && lproj.exchanges[0].edgeId === null, 'legacy channels projected without edge identity');
+  assert(!('exchanges' in lentry.physical), 'legacy physical has no exchanges');
+  assert(Array.isArray(lentry.physical.worker_groups), 'legacy physical keeps worker_groups');
+  assert(lproj.recovery.declared === 'final_commit', 'legacy recovery preserved');
+  // Multi-occurrence legacy group must not infer an execution outcome.
+  const lmodel = P.buildGraphModel(runGraph(lentry), {choice: P.chooseGraphView(runGraph(lentry), {})});
+  const lcard = lmodel.nodes.find(c => c.selection.logicalNodeId === 'map');
+  assert(lcard && lcard.occurrences.length === 2, 'legacy group lists both occurrences');
+  assert(lcard.state.label.includes('2 次出现'), 'multi-occurrence badge, no execution inference');
+  assert(!lcard.state.label.includes('成功') && !lcard.state.label.includes('执行完成'), 'no fabricated success state');
   return { ok: true };
 }
 
 function w021() {
-  const ctx = vm.createContext({ document: documentDouble, console });
-  vm.runInContext(graphSrc, ctx, { filename: graphPath });
-  const mountLogical = ctx.ForgeWorkbenchGraph.mountLogical;
-  assert(typeof mountLogical === 'function', 'mountLogical exported');
-  const host = makeEl('div'); host.clientWidth = 800; host.clientHeight = 400;
-  const view = mountLogical(host, {});
-  const dag = v3Dag();
-  dag.nodes[1].traits = { resource_role: 'worker', effect: 'pure', state: 'stateless' };
-  dag.nodes[1].shared_token = 'tok-123';
-  const nodeMap = { map: 'n0' }; const labels = { n0: '映射算子' };
-  view.update(dag, nodeMap, labels, null, 'sealed');
-  const canvas = host.children[0];
-  assert(canvas.getAttribute('aria-label') === '运行封存计划（E2）', 'sealed basis aria-label');
-  const mapGroup = findByAttr(canvas, 'data-node', 'map');
-  assert(mapGroup, 'map node group rendered');
-  const aria = mapGroup.getAttribute('aria-label');
-  assert(aria.includes('画像 worker · pure · stateless'), 'trait hint in aria-label');
-  const titleEl = mapGroup.children.find(c => c.tagName === 'title');
-  const titleText = titleEl ? titleEl._text : '';
-  assert(titleText.includes('shared_token tok-123'), 'shared_token in title');
-  assert(titleText.includes('资源画像 worker · pure · stateless'), 'resource profile in title');
-  assert(titleText.includes('物理 stage/profile/exchange 与恢复限制见节点详情'), 'sealed physical hint in title');
-  const stateEl = mapGroup.children.find(c => c.attributes && c.attributes.class === 'wb-node-state');
-  assert(stateEl && stateEl._text.includes('×2 次出现'), 'multi-occurrence badge, no execution inference');
-  assert(!stateEl._text.includes('成功') && !stateEl._text.includes('执行完成'), 'no fabricated success state');
-  view.select('map');
-  assert(mapGroup.getAttribute('aria-pressed') === 'true', 'selected before rebind');
-  view.update(dag, nodeMap, labels, null, 'declared');
-  const canvas2 = host.children[0];
-  assert(canvas2.getAttribute('aria-label') === '声明图投影（E2）', 'declared basis aria-label');
-  const mapGroup2 = findByAttr(canvas2, 'data-node', 'map');
-  assert(mapGroup2.getAttribute('aria-pressed') === 'false', 'selection cleared on new binding');
-  const title2 = mapGroup2.children.find(c => c.tagName === 'title')._text;
-  assert(!title2.includes('物理 stage/profile/exchange'), 'declared basis omits physical hint');
+  const P = presentation();
+  const {api, host} = graphHost();
+  const view = api.mount(host, {});
+  for (const name of ['update', 'select', 'fit', 'zoom', 'dispose'])
+    assert(typeof view[name] === 'function', 'unified mount controller export ' + name);
+  const canvasOf = () => findByAttr(host, 'class', 'wb-graph-canvas');
+  const tipOf = g => { const t = g.children.find(c => c.tagName === 'title'); return t ? t._text : ''; };
+  const textOfFirst = (g, cls) => { const e = findAllByClass(g, cls)[0]; return e ? e._text : ''; };
+  // Cards no longer carry data-node; locate them by the sealed selection identity
+  // that paintCard writes into <title>, which is the real consumer contract.
+  const groupFor = key => findAllByClass(canvasOf(), 'wb-node').find(g => tipOf(g).includes(key));
+
+  // Sealed v3: the main graph IS the executed plan (the old E2 toggle is gone).
+  const g = runGraph(sealedEntry(bridged([O_MAP0, O_MAP1])));
+  const model = P.buildGraphModel(g, {choice: P.chooseGraphView(g, {})});
+  view.update(model);
+  const canvas = canvasOf();
+  assert(canvas.getAttribute('aria-label') === '运行封存计划', 'sealed basis aria-label on the merged main graph');
+  assert(model.nodes.length === 3 && findAllByClass(canvas, 'wb-node').length === 3, 'one rendered card per v3 occurrence');
+  const mapCard = model.nodes.find(c => c.selection.occurrenceId === O_MAP0);
+  const group = groupFor(mapCard.key);
+  assert(group, 'occurrence card located by execution identity');
+  const tip = tipOf(group);
+  assert(tip.includes('物理 stage/profile/exchange 与恢复限制见节点详情'), 'sealed physical hint in title');
+  assert(tip.includes(mapCard.selection.key), 'title carries the sealed selection identity');
+  // The merged C surface keeps traits.resource_role as placement.role; the old
+  // 'worker' fixture value is not an admitted ROLES member, so it projected null.
+  const aria = group.getAttribute('aria-label');
+  assert(aria.includes('CPU'), 'resource role surfaces in the card aria-label');
+  assert(aria.includes('s0') && aria.includes('2 分区'), 'sealed stage/partition facts in aria-label');
+  assert(!textOfFirst(group, 'wb-node-state').includes('成功')
+    && !textOfFirst(group, 'wb-node-state').includes('执行完成'), 'no fabricated success state');
+
+  // Legacy multi-occurrence group: badge only, never an inferred outcome.
+  const lg = runGraph(legacyEntry());
+  const lmodel = P.buildGraphModel(lg, {choice: P.chooseGraphView(lg, {})});
+  view.update(lmodel);
+  assert(canvasOf().getAttribute('aria-label') === '运行封存计划', 'legacy sealed plan is also the main graph');
+  const lcard = lmodel.nodes.find(c => c.selection.logicalNodeId === 'map');
+  assert(lcard && lcard.occurrences.length === 2, 'legacy group keeps both occurrences');
+  const lgroup = groupFor(lcard.key);
+  assert(lgroup, 'legacy group card rendered');
+  assert(textOfFirst(lgroup, 'wb-node-kind').includes('×2'), 'multi-occurrence badge');
+  assert(textOfFirst(lgroup, 'wb-node-state').includes('2 次出现'), 'occurrence count, no execution inference');
+  assert(!textOfFirst(lgroup, 'wb-node-state').includes('成功')
+    && !textOfFirst(lgroup, 'wb-node-state').includes('执行完成'), 'no fabricated success state');
+  assert(tipOf(lgroup).includes('成员 2 次出现'), 'title lists member occurrences');
+  assert(tipOf(lgroup).includes('物理 stage/profile/exchange 与恢复限制见节点详情'), 'legacy sealed keeps physical hint');
+  view.select(lcard.key);
+  assert(lgroup.getAttribute('aria-pressed') === 'true', 'selected before rebind');
+
+  // Rebinding the same graph to the non-sealed report projection must clear the
+  // selection and drop the sealed physical hint (old 'declared' basis counterpart).
+  const rmodel = P.buildGraphModel(lg, {choice: P.chooseGraphView(lg, {preference: 'report'})});
+  view.update(rmodel);
+  const canvas2 = canvasOf();
+  assert(canvas2.getAttribute('aria-label') === '数据算子图', 'report basis aria-label');
+  assert(rmodel.selected === null, 'selection cleared on new binding');
+  const rgroups = findAllByClass(canvas2, 'wb-node');
+  assert(rgroups.length === 1 && rgroups.every(g2 => g2.getAttribute('aria-pressed') === 'false'), 'no stale pressed card after rebind');
+  assert(!tipOf(rgroups[0]).includes('物理 stage/profile/exchange'), 'report basis omits the sealed physical hint');
+
+  // An unavailable choice must render an honest empty graph, not a fabricated one.
+  const umodel = P.buildGraphModel(lg, {choice: P.chooseGraphView(lg, {actionId: 'nope'})});
+  view.update(umodel);
+  assert(findAllByClass(canvasOf(), 'wb-node').length === 0, 'unavailable choice renders no nodes');
+  assert(textOf(findAllByClass(host, 'wb-graph-notices')[0]).includes('action'), 'unavailable reason is surfaced');
   view.dispose();
+  assert(host.children.length === 0, 'dispose removes the mounted view');
   return { ok: true };
 }
 

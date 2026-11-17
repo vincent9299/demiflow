@@ -1,0 +1,1968 @@
+{
+  "format": "demiflow_workbench_design_tasks_v1",
+  "design": "UI-D1.9/2",
+  "source_head": "267b9144c6bf7447c6822aa716f6d5c0eda16990",
+  "status": "design_ready_runtime_provider_requirements_not_verified",
+  "tasks": [
+    {
+      "id": "A01",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "updateNavigation",
+      "signature": "updateNavigation() -> void",
+      "action": "modify",
+      "contract": "C1",
+      "inputs": "updateNavigation() -> void",
+      "outputs": "读取当前sidebar展开状态与容器尺寸，改壳class/aria-expanded；不重建子页面",
+      "behavior": "读取当前sidebar展开状态与容器尺寸，改壳class/aria-expanded；不重建子页面。窄屏关闭侧栏回焦触发按钮，收起后主列真实变宽。保留项目选择和原updateNavigation调用位置。",
+      "callers": [
+        "A02"
+      ],
+      "acceptance": [
+        "V01"
+      ]
+    },
+    {
+      "id": "A02",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "openView",
+      "signature": "openView(value, {historyMode=\"push\"}={}) -> Promise<void>",
+      "action": "modify",
+      "contract": "C0 C3 C4",
+      "inputs": "openView(value, {historyMode=\"push\"}={}) -> Promise<void>",
+      "outputs": "沿用ForgeView校验和先canLeave后dispose顺序；登记B/D/E新控制器与读取消；四tab保留，run/attempt与版本URL准确恢复",
+      "behavior": "沿用ForgeView校验和先canLeave后dispose顺序；登记B/D/E新控制器与读取消；四tab保留，run/attempt与版本URL准确恢复。加载失败从busy退出，当前项目与重试入口仍可操作。历史/浏览器返回不丢Notebook或Case草稿。 生命周期仅新增currentViewHandles有界Set收集A07/D11等DOM资源，在成功canLeave后统一dispose再清DOM；这是清理登记，不保存业务状态。",
+      "callers": [
+        "A03"
+      ],
+      "acceptance": [
+        "V01",
+        "V08"
+      ]
+    },
+    {
+      "id": "A03",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "switchProject",
+      "signature": "switchProject(id, requested=null, historyMode=\"push\") -> Promise<void>",
+      "action": "modify",
+      "contract": "C0 C1",
+      "inputs": "switchProject(id, requested=null, historyMode=\"push\") -> Promise<void>",
+      "outputs": "切换前询问原控制器canLeave，成功才增加epoch并读取新项目",
+      "behavior": "切换前询问原控制器canLeave，成功才增加epoch并读取新项目。项目读取失败保留身份、可重试按钮和可切其他项目；不同项目迟到响应不污染。调用A01/A02/A04，不修改项目文件。",
+      "callers": [
+        "A01"
+      ],
+      "acceptance": [
+        "V01",
+        "V08"
+      ]
+    },
+    {
+      "id": "A04",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "renderLoadFailure",
+      "signature": "renderLoadFailure(parent, error, {retryRead,scope,isCurrent}) -> void",
+      "action": "add",
+      "contract": "C0",
+      "inputs": "renderLoadFailure(parent, error, {retryRead,scope,isCurrent}) -> void",
+      "outputs": "新增局部失败呈现",
+      "behavior": "新增局部失败呈现。scope为冻结{project,operation,label}，retryRead为只读回调；将会话失效/容量不足/来源变化转成可理解动作，详情保留原code。operationStarted未知写操作只能回到现有回执核对，不提供盲重发。关闭/换页后重试结果不再渲染。",
+      "callers": [
+        "A02",
+        "A03",
+        "A05"
+      ],
+      "acceptance": [
+        "V08"
+      ]
+    },
+    {
+      "id": "A05",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "tables",
+      "signature": "tables(request,onBinding=()=>{}) -> Promise<void>",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "tables(request,onBinding=()=>{}) -> Promise<void>",
+      "outputs": "保留现有原生/原项目/运行产物读取与ForgeAnalysis.mount装配，合并数据toolbar和mode主动作槽",
+      "behavior": "保留现有原生/原项目/运行产物读取与ForgeAnalysis.mount装配，合并数据toolbar和mode主动作槽。目录项改紧凑行，字段列表可直接选分布；通过A06选版本，A07渲染分布，A08插入模板。传给D的setSource始终是原locator；不能以Case新来源重标旧sample。读取样例按binding校验，初次未接入分析仍可看固定表。",
+      "callers": [
+        "A02"
+      ],
+      "acceptance": [
+        "V02",
+        "V05",
+        "V06"
+      ]
+    },
+    {
+      "id": "A06",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "selectTableVersion",
+      "signature": "selectTableVersion({alias,aliasBinding,version}, ticket) -> Promise<DataSelection|null>",
+      "action": "add",
+      "contract": "C4",
+      "inputs": "selectTableVersion({alias,aliasBinding,version}, ticket) -> Promise<DataSelection|null>",
+      "outputs": "新内部函数：先读table-versions的selected，再携version/version_binding及原expected_binding读table",
+      "behavior": "新内部函数：先读table-versions的selected，再携version/version_binding及原expected_binding读table。ticket捕获viewEpoch/project；校验两响应版本/binding/别名一致后一次替换目录上下文、样例读取参数、view链接，返回DataSelection。失败保留旧选择和草稿；不得调用attach。Case/内核是否采用由原显式setSource流程决定。",
+      "callers": [
+        "A05"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "A07",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "catalogProfile",
+      "signature": "catalogProfile(parent,endpoint,parameters) -> FieldHandle",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "catalogProfile(parent,endpoint,parameters) -> FieldHandle",
+      "outputs": "保留table-profile/project-table-profile边界；改为选中字段的可读条形计数、null/other和coverage",
+      "behavior": "保留table-profile/project-table-profile边界；改为选中字段的可读条形计数、null/other和coverage。parameters给固定locator查询，response.binding须匹配实际版本。profile不是完整直方图；只有真实enumeration计数可画。dispose取消本组件读取。 返回handle登记到A02当前view清理集合；分布使用独立计数列表DOM，D11图表若使用须适配合法TableSlice，不能把原profile JSON冒充TableSlice。",
+      "callers": [
+        "A05"
+      ],
+      "acceptance": [
+        "V02",
+        "V05"
+      ]
+    },
+    {
+      "id": "A08",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "insertAnalysisTemplate",
+      "signature": "insertAnalysisTemplate({language,sourceAlias,field,filter}, analysisHandle) -> boolean",
+      "action": "add",
+      "contract": "C4 C5",
+      "inputs": "insertAnalysisTemplate({language,sourceAlias,field,filter}, analysisHandle) -> boolean",
+      "outputs": "新增显式插入模板：language=sql|python，sourceAlias为已登记内核绑定名，field/filter来自有界schema和typed_filter",
+      "behavior": "新增显式插入模板：language=sql|python，sourceAlias为已登记内核绑定名，field/filter来自有界schema和typed_filter。经D.insertTemplate返回接受/拒绝；SQL标识与字面量转义，拒绝未知操作；不执行、不修改既有单元、不自动启动内核。",
+      "callers": [
+        "A05",
+        "A07"
+      ],
+      "acceptance": [
+        "V05"
+      ]
+    },
+    {
+      "id": "A09",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "renderCase",
+      "signature": "renderCase(parent,reference,row,display={}) -> void",
+      "action": "modify",
+      "contract": "C4 C6",
+      "inputs": "renderCase(parent,reference,row,display={}) -> void",
+      "outputs": "保留离线/未接入分析的只读Case和业务键比较；不新建第二标注器",
+      "behavior": "保留离线/未接入分析的只读Case和业务键比较；不新建第二标注器。新增版本引用透传到media/sample等路径：当前row与图片必须同version/binding；新配置Case仍交ForgeCase，legacy入口与旧URL可达。",
+      "callers": [
+        "A05"
+      ],
+      "acceptance": [
+        "V02",
+        "V08"
+      ]
+    },
+    {
+      "id": "A10",
+      "lane": "A",
+      "file": "demiflow/workbench/web/view.js",
+      "symbol": "validateView",
+      "signature": "validateView(value) -> validatedClone",
+      "action": "modify",
+      "contract": "C4 C8",
+      "inputs": "validateView(value) -> validatedClone",
+      "outputs": "扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化",
+      "behavior": "扩C4.2三种v2视图的version/alias_binding成对字段及对应schema；旧v1/v2编码字节不因缺省字段变化。严格正safe-int/SHA校验，未知字段仍拒绝，encode/decode沿用本验证器。 同时按C2扩v2 run action_id/logical_node_id/occurrence_id依赖约束，旧node_id/report_digest成对规则保留，历史链接不重写。 C8进一步定义run URL的dag_id/plan_id/plan_revision/plan_format四元组全部给或全不写；要求action与attempt，v3新生成实例链接有occurrence。旧URL字节保持，不发未声明HTTP参数。",
+      "callers": [
+        "A02",
+        "A06"
+      ],
+      "acceptance": [
+        "V02",
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "A11",
+      "lane": "A",
+      "file": "demiflow/workbench/web/style.css",
+      "symbol": "common-layout",
+      "signature": "声明式CSS：公共壳/数据头/目录/分布，按C1 token和容器宽度",
+      "action": "style",
+      "contract": "C1",
+      "inputs": "声明式CSS：公共壳/数据头/目录/分布，按C1 token和容器宽度",
+      "outputs": "接管原workbench.css公共workspace/data规则，统一正文/说明字号和间距",
+      "behavior": "接管原workbench.css公共workspace/data规则，统一正文/说明字号和间距。项目列208/56，data目录收起grid列归零；table/svg才允许局部横滚。所有新规则限制在shell/data作用域，不影响reading/development内部布局。",
+      "callers": [
+        "A01",
+        "A05"
+      ],
+      "acceptance": [
+        "V01",
+        "V06"
+      ]
+    },
+    {
+      "id": "A12",
+      "lane": "A",
+      "file": "demiflow/workbench/web/index.html",
+      "symbol": "asset-assembly",
+      "signature": "按依赖顺序登记script/link，保留defer及CSP",
+      "action": "assembly",
+      "contract": "C0",
+      "inputs": "按依赖顺序登记script/link，保留defer及CSP",
+      "outputs": "加载workbench-presentation.js在workbench.js之前、analysis-charts.js在analysis-output/app之前、workbench-graph.css在通用style后",
+      "behavior": "加载workbench-presentation.js在workbench.js之前、analysis-charts.js在analysis-output/app之前、workbench-graph.css在通用style后。不给内联脚本/unsafe-eval授权；新文件须被原打包规则覆盖，测试直接检查构建资源可达。",
+      "callers": [
+        "A02"
+      ],
+      "acceptance": [
+        "V01",
+        "V09"
+      ]
+    },
+    {
+      "id": "A13",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "showCase",
+      "signature": "tables内部 showCase(rowId,shownColumns,route=false) -> Promise<void>",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "tables内部 showCase(rowId,shownColumns,route=false) -> Promise<void>",
+      "outputs": "sample/detail/比较/返回表URL都携原version与alias_binding；Case row_id作为字符串保留，版本变化重置选择",
+      "behavior": "sample/detail/比较/返回表URL都携原version与alias_binding；Case row_id作为字符串保留，版本变化重置选择。旧未接入分析只读入口沿用，不以当前表binding读取历史字段。",
+      "callers": [
+        "A05",
+        "A09"
+      ],
+      "acceptance": [
+        "V02",
+        "V08"
+      ]
+    },
+    {
+      "id": "A14",
+      "lane": "A",
+      "file": "demiflow/workbench/web/app.js",
+      "symbol": "load",
+      "signature": "tables内部 load() -> Promise<void>",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "tables内部 load() -> Promise<void>",
+      "outputs": "样例读取仅当前固定version/query scope，offset/page size沿用原界限；期望binding是所选version_binding，alias校验独立透传；失败保留旧页并标来源，迟到旧页不覆盖",
+      "behavior": "样例读取仅当前固定version/query scope，offset/page size沿用原界限；期望binding是所选version_binding，alias校验独立透传；失败保留旧页并标来源，迟到旧页不覆盖。",
+      "callers": [
+        "A05",
+        "A06"
+      ],
+      "acceptance": [
+        "V02",
+        "V08"
+      ]
+    },
+    {
+      "id": "B01",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "mount",
+      "signature": "mount(options) -> Promise<existingWorkbenchHandle>",
+      "action": "modify",
+      "contract": "C0 C2 C3 C8",
+      "inputs": "mount(options) -> Promise<existingWorkbenchHandle>",
+      "outputs": "沿用options和原返回API；重排toolbar、主图、inspector、source与run/results槽位",
+      "behavior": "沿用options和原返回API；重排toolbar、主图、inspector、source与run/results槽位。只构造一个GraphController，加入action选择器和高级诊断入口；按钮调用下列同一控制器方法。完整dispose保留observer/源码阅读器清理。 消费C2的run深链接字段，读取封存图后恢复指定action/成员；未知引用明确错误，不回首个action冒充定位成功。 合流时承接W018–W020的v3语义，按C8恢复旧/新URL并核对真实计划，B/C两处文件交接见05；只维护一张主图。",
+      "callers": [
+        "A02"
+      ],
+      "acceptance": [
+        "V03",
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "B02",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "fetchGraph",
+      "signature": "fetchGraph(ticket,{preserveSelection=false,refresh=false}={}) -> Promise<void>",
+      "action": "modify",
+      "contract": "C2 C8",
+      "inputs": "fetchGraph(ticket,{preserveSelection=false,refresh=false}={}) -> Promise<void>",
+      "outputs": "接受state.acceptGraph后调用C01/C03和graph.update",
+      "behavior": "接受state.acceptGraph后调用C01/C03和graph.update。封存主视角按action保留；partial/空/source-only明确且提供检查入口。保持existing node邻域/分页，不自动拉全图、不调用编译器。状态/桥变化触发派生模型更新，普通metrics轮询不重排。 C调用通过B14统一封装；不保留第二个builder入口。 v3与legacy交C09唯一适配；graph binding相同但action/plan/revision变化也须更新选择与读取票据。",
+      "callers": [
+        "B01",
+        "B07"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "B03",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "selectGraphNode",
+      "signature": "selectGraphNode(selection:NodeSelection) -> Promise<void>",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "selectGraphNode(selection:NodeSelection) -> Promise<void>",
+      "outputs": "新统一入口替代两个相互改选择的处理链",
+      "behavior": "新统一入口替代两个相互改选择的处理链。校验当前GraphModel内key；有reportNodeId才调用state.chooseNode/loadSource，封存occurrence准确透传；不在当前图时定位邻域后按原identity重选。无桥只显示真实封存节点详情，不借别人的源码。 selection可为组或其显式成员；组内多occurrence先展示成员picker，未选成员前不调用graph-source、不用第一条bridge。 rememberView写C2完整action/logical/occurrence引用；读回按封存模型重新核验，不仅保存报告node_id。 NodeSelection新增execution；v3点选是精确occurrence，legacy组规则不变。rememberView按C8写完整dag/plan/revision/format；未知或过期定位不回首节点。",
+      "callers": [
+        "B01",
+        "B04"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "B04",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "paintIssues",
+      "signature": "paintIssues() -> void",
+      "action": "modify",
+      "contract": "C3",
+      "inputs": "paintIssues() -> void",
+      "outputs": "问题列表保留诊断cause/rule/path且主文优先detail；按真实related_nodes调用B03，缺关联走文件/整图",
+      "behavior": "问题列表保留诊断cause/rule/path且主文优先detail；按真实related_nodes调用B03，缺关联走文件/整图。checks模式保留图和可编辑inspector，不以hidden切断定位；未保存/过期/未覆盖明确。",
+      "callers": [
+        "B01",
+        "B02"
+      ],
+      "acceptance": [
+        "V03"
+      ]
+    },
+    {
+      "id": "B05",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "paintConfiguration",
+      "signature": "paintConfiguration(node:RawReportNode|null) -> void",
+      "action": "modify",
+      "contract": "C2 C3 C8",
+      "inputs": "paintConfiguration(node:RawReportNode|null) -> void",
+      "outputs": "用C04展示输入输出/参数来由；可写字段仍affects/parse/CAS原规则",
+      "behavior": "用C04展示输入输出/参数来由；可写字段仍affects/parse/CAS原规则。无修改隐藏保存，readonly显示原因。run配置仅展示sealed值；不读当前params覆盖历史；原共享参数影响数保留。 通过C04在只读运行详情展示真实resource role/profile、exchange原因和恢复限制，计划配额不得当作观测，不能放进可编辑参数列表。",
+      "callers": [
+        "B03",
+        "B04"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "B06",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "loadSource",
+      "signature": "loadSource() -> Promise<void>",
+      "action": "modify",
+      "contract": "C2 C8",
+      "inputs": "loadSource() -> Promise<void>",
+      "outputs": "保持graph-source查询与严格graph_binding/node_id验证；新选择带明确action所对应report node及logical/occurrence",
+      "behavior": "保持graph-source查询与严格graph_binding/node_id验证；新选择带明确action所对应report node及logical/occurrence。异步旧source丢弃，未知/缺封存不得取当前实现。Prompt仅有真实材料时可用，无关节点不把空Prompt页作为默认选项。 请求HTTP字段不扩；捕获execution与detail票据，返回时必须仍属同action/dag/plan/revision/occurrence；选中action的bridge才授权源码。",
+      "callers": [
+        "B03",
+        "B05"
+      ],
+      "acceptance": [
+        "V03",
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "B07",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "submit",
+      "signature": "submit() -> Promise<void>",
+      "action": "modify",
+      "contract": "C3",
+      "inputs": "submit() -> Promise<void>",
+      "outputs": "原commands.identity/prepare/start/inspect串接不变；可见阶段提示合并一个主按钮",
+      "behavior": "原commands.identity/prepare/start/inspect串接不变；可见阶段提示合并一个主按钮。保存/报告过期先引导检查；点击捕获原身份，未知回执保留pending，用户已切走不抢当前页面。",
+      "callers": [
+        "B01"
+      ],
+      "acceptance": [
+        "V03",
+        "V08"
+      ]
+    },
+    {
+      "id": "B08",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "paintRunBar",
+      "signature": "paintRunBar() -> void",
+      "action": "modify",
+      "contract": "C3 C8",
+      "inputs": "paintRunBar() -> void",
+      "outputs": "运行/attempt/动作、当前与历史清楚分离；stop/resume捕获exact目标并保留权限及恢复限制；返回当前配置恢复原草稿，默认action变化不改run",
+      "behavior": "运行/attempt/动作、当前与历史清楚分离；stop/resume捕获exact目标并保留权限及恢复限制；返回当前配置恢复原草稿，默认action变化不改run。高级dag/plan id放详情。 v3 physical.recovery仅是计划声明，实际resume仍由manager能力判定；INCOMPATIBLE_HISTORY/UNKNOWN_EFFECT/CAPACITY_PENDING如实说明，不自动重新提交。",
+      "callers": [
+        "B01",
+        "B02"
+      ],
+      "acceptance": [
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "B09",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "paintResults",
+      "signature": "paintResults() -> void",
+      "action": "modify",
+      "contract": "C3 C4 C8",
+      "inputs": "paintResults() -> void",
+      "outputs": "按真实output状态显示固定版本/行数与打开数据、比较入口；未登记/部分提交/失败不合并为成功",
+      "behavior": "按真实output状态显示固定版本/行数与打开数据、比较入口；未登记/部分提交/失败不合并为成功。原openResult/run_compare契约保留，打开结果到A05且有具体binding。 平台内部ArtifactRef/ResultHandle不直接转浏览器URL；只消费原run-view已确认且有权限的固定结果登记，交A/D/E原分析链。",
+      "callers": [
+        "B01",
+        "B08"
+      ],
+      "acceptance": [
+        "V04",
+        "V05"
+      ]
+    },
+    {
+      "id": "B10",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "loadRunDetail",
+      "signature": "loadRunDetail(force=false,resetRetry=false) -> Promise<void>",
+      "action": "modify",
+      "contract": "C3 C8",
+      "inputs": "loadRunDetail(force=false,resetRetry=false) -> Promise<void>",
+      "outputs": "统一详情tab文案与所选run/attempt；run日志不假node过滤",
+      "behavior": "统一详情tab文案与所选run/attempt；run日志不假node过滤。保留log offset/events cursor/observation分页；折叠不主动读全文，切run清旧响应；缺测单独说明，预算及4096等原上限不扩。 v3节点指标必须具有C8完整作用域凭据；无plan身份的旧页不提升为当前v3指标，run日志仍按原run/attempt分页。",
+      "callers": [
+        "B01",
+        "B08"
+      ],
+      "acceptance": [
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "B11",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench-state.js",
+      "symbol": "create",
+      "signature": "create(project) -> existingStateController",
+      "action": "modify",
+      "contract": "C0 C2 C8",
+      "inputs": "create(project) -> existingStateController",
+      "outputs": "仅在现有state内增加graphPreference=auto|report、actionId和完整NodeSelection；transition重置相应选择；capture/valid/acceptGraph语义保持",
+      "behavior": "仅在现有state内增加graphPreference=auto|report、actionId和完整NodeSelection；transition重置相应选择；capture/valid/acceptGraph语义保持。禁止另外持久化GraphModel或新全局Store；旧draft格式不变。 新增setGraphView({preference,actionId,execution=null})方法，只在原state更新选择并返回capture ticket；不增加持久存储。 在现有state增加ExecutionViewIdentity与setGraphView签名C8；只使图/源码/节点观测读取票据随action/dag/plan/revision失效。运行级stop/日志及原写入pending scope保留，不因换节点丢提交回执。",
+      "callers": [
+        "B01",
+        "B03"
+      ],
+      "acceptance": [
+        "V03",
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "B12",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.css",
+      "symbol": "pipeline-layout",
+      "signature": "声明式CSS：管道容器/检查列表/inspector/代码/运行结果",
+      "action": "style",
+      "contract": "C1",
+      "inputs": "声明式CSS：管道容器/检查列表/inspector/代码/运行结果",
+      "outputs": "按C1图中心结构；删除迁至A/C的公共/图样式，保留既有媒体查询的能力但不叠加永久旧类",
+      "behavior": "按C1图中心结构；删除迁至A/C的公共/图样式，保留既有媒体查询的能力但不叠加永久旧类。errors/partial/pending可见，配置区域不会因source展开推失图。",
+      "callers": [
+        "B01"
+      ],
+      "acceptance": [
+        "V01",
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "B13",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "chooseNode",
+      "signature": "chooseNode(id,selection=null) -> Promise<void>",
+      "action": "modify",
+      "contract": "C2",
+      "inputs": "chooseNode(id,selection=null) -> Promise<void>",
+      "outputs": "保留旧定位/历史URL入口的薄委托：在当前GraphModel找报告node对应完整NodeSelection，已给occurrence须严格匹配；多个候选需显式选择，不能取第一项",
+      "behavior": "保留旧定位/历史URL入口的薄委托：在当前GraphModel找报告node对应完整NodeSelection，已给occurrence须严格匹配；多个候选需显式选择，不能取第一项。最终只调用B03，不保留旧graphView.select(reportId)/logicalView.select双写。",
+      "callers": [
+        "B02",
+        "B04"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "B14",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "paintGraph",
+      "signature": "paintGraph() -> GraphModel|null",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "paintGraph() -> GraphModel|null",
+      "outputs": "统一纯呈现调用入口：从当前state.graph/action/preference/snapshot调C01/C03后graph.update并保留选中key；无graph返回null",
+      "behavior": "统一纯呈现调用入口：从当前state.graph/action/preference/snapshot调C01/C03后graph.update并保留选中key；无graph返回null。B02成功读取及B01 observer.onSnapshot都调用这里，包括unsupported/unchanged分支；不再调用已删除的graphView.paint。模型结构没变不重排。 C03内唯一调用C09；结构版本/plan变更重建精确映射，metrics变化不重排。将W018/W019的真实语义迁入此链，禁止另开v3画布。",
+      "callers": [
+        "B01",
+        "B02",
+        "B15"
+      ],
+      "acceptance": [
+        "V03",
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "B15",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "toggleGraphKind",
+      "signature": "toggleGraphKind() -> void",
+      "action": "modify",
+      "contract": "C2",
+      "inputs": "toggleGraphKind() -> void",
+      "outputs": "原E2开关改为明确当前主视角/当时检查图切换，更新B11同一个state中的preference并调用B14",
+      "behavior": "原E2开关改为明确当前主视角/当时检查图切换，更新B11同一个state中的preference并调用B14。无run时不显示执行计划开关；action选择仍B01显式处理，不重建第二画布。",
+      "callers": [
+        "B01"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "B16",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "renderLogical",
+      "signature": "移除renderLogical(graph)，由paintGraph单一路线替代",
+      "action": "remove",
+      "contract": "C2 C8",
+      "inputs": "移除renderLogical(graph)，由paintGraph单一路线替代",
+      "outputs": "删除旧logicalView.update及仅被它使用的logicalName/logicalPanel等私有helper；仍有高级事实消费者的logicalEntry/桥helper先迁到C或保持单份再删除",
+      "behavior": "删除旧logicalView.update及仅被它使用的logicalName/logicalPanel等私有helper；仍有高级事实消费者的logicalEntry/桥helper先迁到C或保持单份再删除。全文件rg校验无悬空logicalView，不能保留隐藏第二执行UI。 迁入W019的v3物理详情/恢复限制后删除renderLogical；替代消费者C03/C04/B14。",
+      "callers": [
+        "B14"
+      ],
+      "acceptance": [
+        "V09"
+      ]
+    },
+    {
+      "id": "B17",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "chooseLogicalNode",
+      "signature": "移除chooseLogicalNode(id,declared)，统一NodeSelection",
+      "action": "remove",
+      "contract": "C2 C8",
+      "inputs": "移除chooseLogicalNode(id,declared)，统一NodeSelection",
+      "outputs": "源码/参数/观测选择迁B03、C04；删除旧occurrence按钮写logicalSelected逻辑，新的occurrence直接NodeSelection key",
+      "behavior": "源码/参数/观测选择迁B03、C04；删除旧occurrence按钮写logicalSelected逻辑，新的occurrence直接NodeSelection key。原chooseNode兼容委托仅B13，去除旧observer/handle.dispose对logicalView调用。 迁入W020的精确实例及历史定位后删除chooseLogicalNode；唯一入口B03/B13。",
+      "callers": [
+        "B03",
+        "B13"
+      ],
+      "acceptance": [
+        "V04",
+        "V09"
+      ]
+    },
+    {
+      "id": "B18",
+      "lane": "B",
+      "file": "demiflow/workbench/web/workbench.js",
+      "symbol": "logicalEntry",
+      "signature": "移除旧logicalEntry选择入口；选择统一由C01/C09/B14处理",
+      "action": "remove",
+      "contract": "C2 C8",
+      "inputs": "W018交付行为及C8唯一版本适配/选择合同",
+      "outputs": "旧helper及全部消费者删除，W的v3能力保留在新主图",
+      "behavior": "W018先完成其隔离交付；B合流时把按action选择及v3字段处理迁到C01/C09/B14，再移除logicalEntry。旧URL/显式错误保持；禁止两套选择状态同时存活。",
+      "callers": [
+        "B01",
+        "B14",
+        "B16",
+        "B17"
+      ],
+      "acceptance": [
+        "V04",
+        "V09"
+      ]
+    },
+    {
+      "id": "C01",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-presentation.js",
+      "symbol": "chooseGraphView",
+      "signature": "chooseGraphView(graph, {actionId,preference}) -> GraphChoice",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "chooseGraphView(graph, {actionId,preference}) -> GraphChoice",
+      "outputs": "按C2/C8选择source/report/legacy/v3；未知明确action不自动回首项。",
+      "behavior": "按C2选择主视角；sealed版本由C09校验，不能凭exchanges等字段猜测。深链接的明确action不存在时返回unavailable；只有没有明确选择才按服务端顺序默认。缺封存不静默切当前图；report替代须用户显式选。",
+      "callers": [
+        "B14"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "C02",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-presentation.js",
+      "symbol": "buildNodeCard",
+      "signature": "buildNodeCard(graph,selection,snapshot,execution=null) -> NodeCard",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "原graph、NodeSelection、原snapshot；execution为C03本次构建的ExecutionProjection或null（source/report），不是持久状态。",
+      "outputs": "按精确实例生成NodeCard；legacy才保留逻辑组和成员picker。",
+      "behavior": "source/report沿原规则。sealed消费C03传入的ExecutionProjection，不重新建身份。legacy组保留所有成员，不能借首成员状态；v3一occurrence一卡，相同semantic也不合并。title保留真实实名，summary<=2且每项<=160字符。按C8完整作用域核对观测，缺scope/缺页/融合均不猜成功。",
+      "callers": [
+        "C03"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "C03",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-presentation.js",
+      "symbol": "buildGraphModel",
+      "signature": "buildGraphModel(graph,{choice,snapshot,selection}) -> GraphModel",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "buildGraphModel(graph,{choice,snapshot,selection}) -> GraphModel",
+      "outputs": "版本分支明确的GraphModel；execution携带本次真实运行身份。",
+      "behavior": "source/report沿旧投影；sealed先调用C09一次，再把结果传C02。legacy按logical ID分组、成员选择；v3按occurrence单独绘图，用原edge_id和端口连接，禁止同semantic合并或笛卡尔扩边。缺实例端点/不匹配返回明确unavailable及可选当时检查图；不伪画完整计划。保持预算，纯函数不fetch/写Store。",
+      "callers": [
+        "B14"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "C04",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-presentation.js",
+      "symbol": "buildNodeDetails",
+      "signature": "buildNodeDetails(graph,selection) -> NodeDetails",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "buildNodeDetails(graph,selection) -> NodeDetails",
+      "outputs": "NodeDetails增加execution、placement、exchanges与recovery事实，未知为null/reason。",
+      "behavior": "调用C09验证选中action；legacy多成员未选择时只给组概况，v3精确occurrence关联。按C8物理索引读取stage/profile/role/分区/replica目标、与本节点相邻的exchange.mode/reason、recovery/limitations。计划配额不冒充实时用量。源码参数只经真实bridge，缺桥禁用；不读取当前业务源码。",
+      "callers": [
+        "B05"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "C05",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-graph.js",
+      "symbol": "layoutGraph",
+      "signature": "layoutGraph(model,{width,nodeWidth=200,nodeHeight=116,gapX=36,gapY=20}) -> GraphLayout",
+      "action": "add",
+      "contract": "C1 C2",
+      "inputs": "layoutGraph(model,{width,nodeWidth=200,nodeHeight=116,gapX=36,gapY=20}) -> GraphLayout",
+      "outputs": "新增有界DAG排层与分叉布局，按既有节点顺序稳定；循环/引用边不无限拓扑递归，保留原边并单独路由",
+      "behavior": "新增有界DAG排层与分叉布局，按既有节点顺序稳定；循环/引用边不无限拓扑递归，保留原边并单独路由。复杂度O(V+E)或明确有界排序，不按metrics重排；输出像素坐标不修改model。",
+      "callers": [
+        "C06"
+      ],
+      "acceptance": [
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "C06",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-graph.js",
+      "symbol": "mount",
+      "signature": "mount(host,{onSelect}) -> GraphController",
+      "action": "modify",
+      "contract": "C0 C1 C2 C8",
+      "inputs": "mount(host,{onSelect}) -> GraphController",
+      "outputs": "复用SVG/ResizeObserver但统一update(model)路线；C05布局、卡片文本多行与summary，固定screen字号优先、键盘焦点/aria-label完整；选择回调NodeSelection",
+      "behavior": "复用SVG/ResizeObserver但统一update(model)路线；C05布局、卡片文本多行与summary，固定screen字号优先、键盘焦点/aria-label完整；选择回调NodeSelection。resize保持manual视角，fit由显式操作触发。dispose断开全部监听。 update结构不变时仅更新状态/文案，不能每个snapshot清空SVG或恢复滚动位置。 统一mount必须承接runtime-v3:W021的真实v3详情/节点能力，禁止按旧logical ID把v3节点去重；只消费GraphModel，不自行做格式分派。",
+      "callers": [
+        "B01"
+      ],
+      "acceptance": [
+        "V03",
+        "V04",
+        "V08"
+      ]
+    },
+    {
+      "id": "C07",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-graph.js",
+      "symbol": "mountLogical",
+      "signature": "移除重复逻辑绘图入口及其私有helper，仅保留单一mount",
+      "action": "remove",
+      "contract": "C0 C2 C8",
+      "inputs": "移除重复逻辑绘图入口及其私有helper，仅保留单一mount",
+      "outputs": "B01/B02迁移到统一model后删除mountLogical export和重复SVG；status/cpuChart仍有消费者须保留",
+      "behavior": "B01/B02迁移到统一model后删除mountLogical export和重复SVG；status/cpuChart仍有消费者须保留。迁移commit可短期兼容，最终验收不能存在两份普通/逻辑状态和两张隐藏画布。 按05-runtime-v3-wiring的W021→C06迁移表，在W交付后移除；保留真实端口/资源/恢复展示语义，不整文件覆盖W的提交。",
+      "callers": [
+        "B01",
+        "B02",
+        "B16",
+        "B17"
+      ],
+      "acceptance": [
+        "V09"
+      ]
+    },
+    {
+      "id": "C08",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-graph.css",
+      "symbol": "graph-style",
+      "signature": "声明式CSS：.wb-graph内卡片/边/焦点/状态",
+      "action": "style",
+      "contract": "C1",
+      "inputs": "声明式CSS：.wb-graph内卡片/边/焦点/状态",
+      "outputs": "从B移出SVG专属样式，卡片标题/摘要至少12px实际字号；status不靠颜色单独表达",
+      "behavior": "从B移出SVG专属样式，卡片标题/摘要至少12px实际字号；status不靠颜色单独表达。容器滚动不改变页面宽；只声明wb-graph局部规则。",
+      "callers": [
+        "C06"
+      ],
+      "acceptance": [
+        "V01",
+        "V03"
+      ]
+    },
+    {
+      "id": "C09",
+      "lane": "C",
+      "file": "demiflow/workbench/web/workbench-presentation.js",
+      "symbol": "normalizeExecutionPlan",
+      "signature": "normalizeExecutionPlan(entry,binding) -> ExecutionProjection",
+      "action": "add",
+      "contract": "C2 C8",
+      "inputs": "原graph.logical.actions[]的一个action＋原GraphBinding；不读文件/不fetch",
+      "outputs": "available联合类型：legacy逻辑组或v3实例图、完整身份、物理摘要；失败为稳定reason",
+      "behavior": "按05及contracts.d.ts精确版本识别，校验action/dag/plan/revision、节点/端口/边/物理关联、现有预算。legacy保留原字节和组边；v3保留occurrence/edge_id/端口，缺端点返回v3_endpoint_identity_missing。未知schema不能降级旧图；不重算hash，不把投影持久化。",
+      "callers": [
+        "C03",
+        "C04"
+      ],
+      "acceptance": [
+        "V04",
+        "V09"
+      ]
+    },
+    {
+      "id": "D01",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.js",
+      "symbol": "mount",
+      "signature": "mount(existingOptions) -> existingAnalysisHandle + insertTemplate",
+      "action": "modify",
+      "contract": "C0 C5",
+      "inputs": "mount(existingOptions) -> existingAnalysisHandle + insertTemplate",
+      "outputs": "保持已有setSource/setMode/canLeave/dispose等返回；加入insertTemplate供A，模式主动作移至A传入可选toolbarHost（缺省使用原bar）",
+      "behavior": "保持已有setSource/setMode/canLeave/dispose等返回；加入insertTemplate供A，模式主动作移至A传入可选toolbarHost（缺省使用原bar）。挂载与dispose同一Notebook Store，不因Case切换新建内核；既有Case.mount调用保留。",
+      "callers": [
+        "A05"
+      ],
+      "acceptance": [
+        "V05",
+        "V06",
+        "V08"
+      ]
+    },
+    {
+      "id": "D02",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.js",
+      "symbol": "requestCellRun",
+      "signature": "requestCellRun(cellId,{advance=false}={}) -> Promise<CellRunOutcome>",
+      "action": "add",
+      "contract": "C5",
+      "inputs": "requestCellRun(cellId,{advance=false}={}) -> Promise<CellRunOutcome>",
+      "outputs": "严格C5保存→必要启动→提交；捕获代码与绑定，全部网络复用mutate/acknowledge和原poll",
+      "behavior": "严格C5保存→必要启动→提交；捕获代码与绑定，全部网络复用mutate/acknowledge和原poll。readonly/conflict/变更generation/未知回执分别blocked/pending，绝不盲重发。同一cell仅一链，先取消/清理再释放锁。",
+      "callers": [
+        "D05"
+      ],
+      "acceptance": [
+        "V05",
+        "V08"
+      ]
+    },
+    {
+      "id": "D03",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.js",
+      "symbol": "save",
+      "signature": "save(onlyCell=null) -> Promise<SaveOutcome>",
+      "action": "modify",
+      "contract": "C5",
+      "inputs": "save(onlyCell=null) -> Promise<SaveOutcome>",
+      "outputs": "在原实现上返回{kind:saved|pending|conflict,notebookId,revision}供D02；原按钮可忽略返回值",
+      "behavior": "在原实现上返回{kind:saved|pending|conflict,notebookId,revision}供D02；原按钮可忽略返回值。revision来自acknowledge，未确认不能自增；草稿变更期间保留后续编辑，不能覆盖执行捕获内容。旧outbox格式不改。",
+      "callers": [
+        "D02",
+        "D01"
+      ],
+      "acceptance": [
+        "V05",
+        "V08"
+      ]
+    },
+    {
+      "id": "D04",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.js",
+      "symbol": "ensureSessionForRun",
+      "signature": "ensureSessionForRun(capture) -> Promise<SessionOutcome>",
+      "action": "add",
+      "contract": "C5",
+      "inputs": "ensureSessionForRun(capture) -> Promise<SessionOutcome>",
+      "outputs": "capture含project/epoch/notebookId/revision/sources/cellSha；已有generation与sources匹配则复用",
+      "behavior": "capture含project/epoch/notebookId/revision/sources/cellSha；已有generation与sources匹配则复用。无活内核用原session-start，限时读取原session状态；超时pending保留request_id。sources不匹配blocked给显式选择，不自动终止活内核。",
+      "callers": [
+        "D02"
+      ],
+      "acceptance": [
+        "V05",
+        "V08"
+      ]
+    },
+    {
+      "id": "D05",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.js",
+      "symbol": "paintCells",
+      "signature": "paintCells() -> void",
+      "action": "modify",
+      "contract": "C5",
+      "inputs": "paintCells() -> void",
+      "outputs": "按cell.id复用编辑article/textarea与selection；按钮与Ctrl/Cmd+Enter、Shift+Enter调D02；poll只更新执行槽，删除cell才dispose该输出",
+      "behavior": "按cell.id复用编辑article/textarea与selection；按钮与Ctrl/Cmd+Enter、Shift+Enter调D02；poll只更新执行槽，删除cell才dispose该输出。历史输出来自不同source_sha时标旧代码而不丢失。保存/运行主操作简化，更多含删除/详细身份。",
+      "callers": [
+        "D01",
+        "D06"
+      ],
+      "acceptance": [
+        "V05",
+        "V08"
+      ]
+    },
+    {
+      "id": "D06",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.js",
+      "symbol": "paintKernel",
+      "signature": "paintKernel() -> void",
+      "action": "modify",
+      "contract": "C5",
+      "inputs": "paintKernel() -> void",
+      "outputs": "一行展示可运行/准备/执行/停止与明确原因，环境摘要进详情；停止、取消、重启仍显示作用范围",
+      "behavior": "一行展示可运行/准备/执行/停止与明确原因，环境摘要进详情；停止、取消、重启仍显示作用范围。原session/generation权限不变，按钮由D04和原control路由使用，不构造自己的kernel状态。",
+      "callers": [
+        "D01",
+        "D04"
+      ],
+      "acceptance": [
+        "V05",
+        "V08"
+      ]
+    },
+    {
+      "id": "D07",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.js",
+      "symbol": "insertTemplate",
+      "signature": "insertTemplate({language,source,title}) -> boolean",
+      "action": "add",
+      "contract": "C5",
+      "inputs": "insertTemplate({language,source,title}) -> boolean",
+      "outputs": "新增返回handle方法；language仅python/sql，source<=16384且插入后cells<=64",
+      "behavior": "新增返回handle方法；language仅python/sql，source<=16384且插入后cells<=64。生成新cell.id添加草稿并flush，返回成功；无空间/不能安全暂存返回false并保留原稿；不运行、不覆盖当前单元。",
+      "callers": [
+        "A08"
+      ],
+      "acceptance": [
+        "V05"
+      ]
+    },
+    {
+      "id": "D08",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis-output.js",
+      "symbol": "mount",
+      "signature": "mount(existingOptions + {api?}) -> FieldHandle",
+      "action": "modify",
+      "contract": "C5 C6",
+      "inputs": "mount(existingOptions + {api?}) -> FieldHandle",
+      "outputs": "默认展示最佳实际可用representation，人可读格式名称；原provenance摘要一行，完整固定依据收起",
+      "behavior": "默认展示最佳实际可用representation，人可读格式名称；原provenance摘要一行，完整固定依据收起。仅有界含rows的table表示可调D10/D11，table handle仍onTable。onCase必须携原definition_witness/origin和artifact，不能弱化caseEvidence。 table handle若用户选择表格/图表，调用D15真实读取；原handle跳转保留，禁止仅写一个永远没有rows输入的图表组件。 D09向本mount显式传api；旧独立调用缺api时不启用内联取表，只保留原onTable。",
+      "callers": [
+        "D09"
+      ],
+      "acceptance": [
+        "V05",
+        "V06"
+      ]
+    },
+    {
+      "id": "D09",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis-output.js",
+      "symbol": "mountExecution",
+      "signature": "mountExecution(existingOptions) -> FieldHandle",
+      "action": "modify",
+      "contract": "C5",
+      "inputs": "mountExecution(existingOptions) -> FieldHandle",
+      "outputs": "维持同execution/output/generation/binding校验与分页<=8；explicit运行输出内联展开，恢复旧输出默认按需",
+      "behavior": "维持同execution/output/generation/binding校验与分页<=8；explicit运行输出内联展开，恢复旧输出默认按需。开关/换页释放D08旧handle，过期fetch结果不更新；来源/输出不匹配显示错误不换成最新。 调用D08时显式传现有api，不另建fetch。",
+      "callers": [
+        "D05"
+      ],
+      "acceptance": [
+        "V05",
+        "V08"
+      ]
+    },
+    {
+      "id": "D10",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis-charts.js",
+      "symbol": "validateChart",
+      "signature": "validateChart(slice:TableSlice,spec:ChartSpec) -> {allowed,reason}",
+      "action": "add",
+      "contract": "C5",
+      "inputs": "validateChart(slice:TableSlice,spec:ChartSpec) -> {allowed,reason}",
+      "outputs": "校验200行/16列/256KiB、X/Y存在、Y有限安全数值；非有限/unsafe int明确不绘制，null保留缺口",
+      "behavior": "校验200行/16列/256KiB、X/Y存在、Y有限安全数值；非有限/unsafe int明确不绘制，null保留缺口。complete只来自传入coverage。返回原因不用异常替换原值；不fetch。",
+      "callers": [
+        "D11"
+      ],
+      "acceptance": [
+        "V05"
+      ]
+    },
+    {
+      "id": "D11",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis-charts.js",
+      "symbol": "mount",
+      "signature": "mount({parent,slice,spec,isCurrent}) -> FieldHandle",
+      "action": "add",
+      "contract": "C5",
+      "inputs": "mount({parent,slice,spec,isCurrent}) -> FieldHandle",
+      "outputs": "纯呈现表/JSON/bar/line切换；D10不允许时禁图但表和原值可用；bar0轴、line按原行序，明确当前页/采样",
+      "behavior": "纯呈现表/JSON/bar/line切换；D10不允许时禁图但表和原值可用；bar0轴、line按原行序，明确当前页/采样。用SVG/DOM，选X/Y不改变源数据，dispose停止resize。不接受代码/SQL/自由URL。",
+      "callers": [
+        "D08",
+        "A07"
+      ],
+      "acceptance": [
+        "V05"
+      ]
+    },
+    {
+      "id": "D12",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis-render.js",
+      "symbol": "field",
+      "signature": "field(existingOptions + {density=\"normal\",tools=\"inline\"}) -> FieldHandle",
+      "action": "modify",
+      "contract": "C6",
+      "inputs": "field(existingOptions + {density=\"normal\",tools=\"inline\"}) -> FieldHandle",
+      "outputs": "compact/menu仅变装饰与操作位置，正文优先；原typed格式、HTML/markdown安全、media proof、budget和原值保留",
+      "behavior": "compact/menu仅变装饰与操作位置，正文优先；原typed格式、HTML/markdown安全、media proof、budget和原值保留。media需点击，错误/来源失效不折叠。元数据可达且兼容原调用方，isCurrent和dispose语义保持。",
+      "callers": [
+        "D08",
+        "E06"
+      ],
+      "acceptance": [
+        "V06",
+        "V07",
+        "V08"
+      ]
+    },
+    {
+      "id": "D13",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis.css",
+      "symbol": "notebook-style",
+      "signature": "声明式CSS：Notebook正文/工具/内核状态/编辑与输出",
+      "action": "style",
+      "contract": "C1",
+      "inputs": "声明式CSS：Notebook正文/工具/内核状态/编辑与输出",
+      "outputs": "合并工具栏，textarea字号/高度适应内容且有上限；保留focus、局部滚动和旧输出标识，错误不被折叠",
+      "behavior": "合并工具栏，textarea字号/高度适应内容且有上限；保留focus、局部滚动和旧输出标识，错误不被折叠。shared typed field compact规则限定该容器class，不污染Readme。",
+      "callers": [
+        "D01",
+        "D05",
+        "D12"
+      ],
+      "acceptance": [
+        "V01",
+        "V05",
+        "V06"
+      ]
+    },
+    {
+      "id": "D14",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis-output.css",
+      "symbol": "output-style",
+      "signature": "声明式CSS：输出摘要/格式切换/有界图表",
+      "action": "style",
+      "contract": "C1",
+      "inputs": "声明式CSS：输出摘要/格式切换/有界图表",
+      "outputs": "来源摘要单行并可展开，图表与素材max-width:100%，卡片不引入全页横滚；表维持局部滚动",
+      "behavior": "来源摘要单行并可展开，图表与素材max-width:100%，卡片不引入全页横滚；表维持局部滚动。以D08/D11固定类名接线，不覆盖Case/media授权状态。",
+      "callers": [
+        "D08",
+        "D11"
+      ],
+      "acceptance": [
+        "V01",
+        "V05"
+      ]
+    },
+    {
+      "id": "D15",
+      "lane": "D",
+      "file": "demiflow/workbench/web/analysis-output.js",
+      "symbol": "readTableSlice",
+      "signature": "readTableSlice(handle,{project,executionId,outputId,outputIndex,artifactDigest,api,signal,isCurrent}) -> Promise<TableSlice>",
+      "action": "add",
+      "contract": "C5",
+      "inputs": "readTableSlice(handle,{project,executionId,outputId,outputIndex,artifactDigest,api,signal,isCurrent}) -> Promise<TableSlice>",
+      "outputs": "先沿现有analysis-source-from-handle验证id/generation/digest并取source；只投影前16个primitive字段，按C5.1构造只读v1 descriptor+query，analysis-case-page取当前20行，不存view/annotations",
+      "behavior": "先沿现有analysis-source-from-handle验证id/generation/digest并取source；只投影前16个primitive字段，按C5.1构造只读v1 descriptor+query，analysis-case-page取当前20行，不存view/annotations。核验source/view/query/binding，转换为TableSlice供D11；无primitive/预算拒绝保留原固定表跳转。相同output槽最多一项请求，切页释放。",
+      "callers": [
+        "D08"
+      ],
+      "acceptance": [
+        "V05",
+        "V08"
+      ]
+    },
+    {
+      "id": "E01",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "mount",
+      "signature": "mount(existingOptions + {toolbarHost?}) -> existingCaseHandle",
+      "action": "modify",
+      "contract": "C0 C6",
+      "inputs": "mount(existingOptions + {toolbarHost?}) -> existingCaseHandle",
+      "outputs": "保持返回API、Store和变更回执所有权；常用视图/配置/保存动作可移入A提供toolbarHost，缺省原位",
+      "behavior": "保持返回API、Store和变更回执所有权；常用视图/配置/保存动作可移入A提供toolbarHost，缺省原位。释放时只删自己的toolbar节点；三栏/窄屏面板构造唯一，保留beforeunload/flush。",
+      "callers": [
+        "D01",
+        "A05"
+      ],
+      "acceptance": [
+        "V06",
+        "V07",
+        "V08"
+      ]
+    },
+    {
+      "id": "E02",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "paintStatus",
+      "signature": "paintStatus() -> void",
+      "action": "modify",
+      "contract": "C6",
+      "inputs": "paintStatus() -> void",
+      "outputs": "只一行展示视图名、dirty/待核对/不可用等真实状态；完整source摘要在详情，publishContext继续向A报真实source",
+      "behavior": "只一行展示视图名、dirty/待核对/不可用等真实状态；完整source摘要在详情，publishContext继续向A报真实source。未保存答案数量不能被收起，页面title与固定来源变化同步但不改identity。",
+      "callers": [
+        "E01",
+        "E07"
+      ],
+      "acceptance": [
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E03",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "caseTitle",
+      "signature": "caseTitle(descriptor,row,caseKey) -> {title,subtitle}",
+      "action": "add",
+      "contract": "C6",
+      "inputs": "caseTitle(descriptor,row,caseKey) -> {title,subtitle}",
+      "outputs": "按照C6首个context/text非空值生成<=160字符标题，完整key作subtitle；缺标题退为Case key",
+      "behavior": "按照C6首个context/text非空值生成<=160字符标题，完整key作subtitle；缺标题退为Case key。不把标题当业务键、不按名称去重、不改target。",
+      "callers": [
+        "E05",
+        "E06"
+      ],
+      "acceptance": [
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E04",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "paintSettings",
+      "signature": "paintSettings() -> void",
+      "action": "modify",
+      "contract": "C6",
+      "inputs": "paintSettings() -> void",
+      "outputs": "原位配置面板分材料/评测/筛选三个tab；同一descriptor draft，保存仍saveView",
+      "behavior": "原位配置面板分材料/评测/筛选三个tab；同一descriptor draft，保存仍saveView。角色/format/分组编辑有真实字段样例，v1旧配置按原语义打开；v2方案只能依据现有output_groups契约，feature不支持明确不可保存。",
+      "callers": [
+        "E01"
+      ],
+      "acceptance": [
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E05",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "paintList",
+      "signature": "paintList() -> void",
+      "action": "add",
+      "contract": "C6",
+      "inputs": "paintList() -> void",
+      "outputs": "将原当前页选样列表逻辑抽为命名函数（核对原paintRows/paintContent调用后替换）；使用E03标题、固定Case key和server page/cursor，分组摘要紧凑",
+      "behavior": "将原当前页选样列表逻辑抽为命名函数（从paintPage抽取，由E11接线）；使用E03标题、固定Case key和server page/cursor，分组摘要紧凑。窄屏筛选默认收起，page点击不自动保存、不猜下一页；选样时原loadReview与media释放保持。",
+      "callers": [
+        "E11"
+      ],
+      "acceptance": [
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E06",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "paintContent",
+      "signature": "paintContent() -> void",
+      "action": "modify",
+      "contract": "C6",
+      "inputs": "paintContent() -> void",
+      "outputs": "保持现有函数真实行数据/字段映射；material子函数统一传D12 compact/menu",
+      "behavior": "保持现有函数真实行数据/字段映射；material子函数统一传D12 compact/menu。共享输入/参考与v2每group多材料分离；v1三字段仍字段模式。原group proof/field target/read media不动，E03生成标题。窄屏先材料，展开不用全页modal。",
+      "callers": [
+        "E01",
+        "E05"
+      ],
+      "acceptance": [
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E07",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "loadReview",
+      "signature": "loadReview() -> Promise<void>",
+      "action": "modify",
+      "contract": "C6",
+      "inputs": "loadReview() -> Promise<void>",
+      "outputs": "保持现有heads/watermark/definitions/verification，压缩逐题重复历史按钮到统一详情入口，原答案来源仍可定位",
+      "behavior": "保持现有heads/watermark/definitions/verification，压缩逐题重复历史按钮到统一详情入口，原答案来源仍可定位。目标scope显著、选项来自真实case/group/field授权，切scope保留草稿；失效/冲突不能显示保存成功。",
+      "callers": [
+        "E01",
+        "E06"
+      ],
+      "acceptance": [
+        "V07",
+        "V08"
+      ]
+    },
+    {
+      "id": "E08",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "saveCurrent",
+      "signature": "saveCurrent(next) -> Promise<void>",
+      "action": "modify",
+      "contract": "C6",
+      "inputs": "saveCurrent(next) -> Promise<void>",
+      "outputs": "复用原saveEntries/mutation/acknowledge，只改成功后导航与可见反馈；next在全部目标答案确认前不得触发",
+      "behavior": "复用原saveEntries/mutation/acknowledge，只改成功后导航与可见反馈；next在全部目标答案确认前不得触发。未知响应、媒体变化、409冲突留在原case，保留编辑；不使用onfinally无条件下一条。",
+      "callers": [
+        "E07"
+      ],
+      "acceptance": [
+        "V07",
+        "V08"
+      ]
+    },
+    {
+      "id": "E09",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "paintFilterControls",
+      "signature": "paintFilterControls() -> void",
+      "action": "add",
+      "contract": "C6",
+      "inputs": "paintFilterControls() -> void",
+      "outputs": "新增从现有query及review_filter编辑器提取快捷条件/高级条件面板；明确未应用draft，不在客户端做全表结果统计",
+      "behavior": "新增从现有query及review_filter编辑器提取快捷条件/高级条件面板；明确未应用draft，不在客户端做全表结果统计。数值/enum/null等沿用typed_filter，应用调用原load(reset)，版本/source变化清cursor；窄屏默认收起长编辑器。",
+      "callers": [
+        "E11"
+      ],
+      "acceptance": [
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E10",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.css",
+      "symbol": "case-style",
+      "signature": "声明式CSS：三栏/工具栏/材料/评测/窄屏原位面板",
+      "action": "style",
+      "contract": "C1 C6",
+      "inputs": "声明式CSS：三栏/工具栏/材料/评测/窄屏原位面板",
+      "outputs": "按内容容器断点和C1布局；材料优先、按钮与错误可达，评测保存条可sticky但不遮内容；素材contain自适应，重复格式说明收进更多",
+      "behavior": "按内容容器断点和C1布局；材料优先、按钮与错误可达，评测保存条可sticky但不遮内容；素材contain自适应，重复格式说明收进更多。无权改analysis-render全局行为，用D12契约。",
+      "callers": [
+        "E01",
+        "E04",
+        "E06",
+        "E07"
+      ],
+      "acceptance": [
+        "V01",
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E11",
+      "lane": "E",
+      "file": "demiflow/workbench/web/analysis-case.js",
+      "symbol": "paintPage",
+      "signature": "paintPage() -> void",
+      "action": "modify",
+      "contract": "C6",
+      "inputs": "paintPage() -> void",
+      "outputs": "把现有rail/列表/filters主渲染接到E05/E09；保留pageIsCurrent、queryBasis、cursor和不可用来源历史入口",
+      "behavior": "把现有rail/列表/filters主渲染接到E05/E09；保留pageIsCurrent、queryBasis、cursor和不可用来源历史入口。不留下旧长筛选与新快捷筛选两套独立值。只移动DOM，原load/reset仍一个入口。",
+      "callers": [
+        "E01",
+        "E06"
+      ],
+      "acceptance": [
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "F01",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/catalog_versions.py",
+      "symbol": "VersionResolution",
+      "signature": "@dataclass(frozen=True) VersionResolution(alias_binding,binding,reference,ref,uri,metadata)",
+      "action": "add",
+      "contract": "C4",
+      "inputs": "@dataclass(frozen=True) VersionResolution(alias_binding,binding,reference,ref,uri,metadata)",
+      "outputs": "只读内部数据对象；nested mapping深冻结或复制后仅只读视图，ref保持原DatasetRef不可变约束；wire只输出C4规定字段，不把Path暴露为新权限输入",
+      "behavior": "只读内部数据对象；nested mapping深冻结或复制后仅只读视图，ref保持原DatasetRef不可变约束；wire只输出C4规定字段，不把Path暴露为新权限输入。",
+      "callers": [
+        "F02"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F02",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/catalog_versions.py",
+      "symbol": "resolve_version",
+      "signature": "resolve_version(root, *, alias, expected_binding, version, expected_version_binding=None) -> VersionResolution",
+      "action": "add",
+      "contract": "C4",
+      "inputs": "resolve_version(root, *, alias, expected_binding, version, expected_version_binding=None) -> VersionResolution",
+      "outputs": "严格C4.1：当前alias守卫、Catalog同身份registered version、实际schema/rows、virtual control用preview_binding；前后校验、run输出只封存版本",
+      "behavior": "严格C4.1：当前alias守卫、Catalog同身份registered version、实际schema/rows、virtual control用preview_binding；前后校验、run输出只封存版本。无权限/未登记/被删/漂移fail closed，不创建Catalog记录。只能在原worker中调用native读取。",
+      "callers": [
+        "F03",
+        "F11",
+        "F16"
+      ],
+      "acceptance": [
+        "V02",
+        "V08"
+      ]
+    },
+    {
+      "id": "F03",
+      "lane": "F",
+      "file": "demiflow/workbench/worker.py",
+      "symbol": "dispatch",
+      "signature": "dispatch(request) -> existing worker result",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "dispatch(request) -> existing worker result",
+      "outputs": "table_versions selected增固定binding/ref；table/sample/media分支成对取version/version_binding，调用F02后原reader按selected ref读；旧分支严格保持",
+      "behavior": "table_versions selected增固定binding/ref；table/sample/media分支成对取version/version_binding，调用F02后原reader按selected ref读；旧分支严格保持。table_profile继续走F11；所有异常用既有ForgeError协议，不能在HTTP线程直接Lance读。",
+      "callers": [
+        "F04",
+        "F05",
+        "F06",
+        "F12"
+      ],
+      "acceptance": [
+        "V02",
+        "V08"
+      ]
+    },
+    {
+      "id": "F04",
+      "lane": "F",
+      "file": "demiflow/workbench/projects/workspace.py",
+      "symbol": "describe_table",
+      "signature": "describe_table(root,alias,*,expected_binding=None,version=None,version_binding=None) -> dict",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "describe_table(root,alias,*,expected_binding=None,version=None,version_binding=None) -> dict",
+      "outputs": "新参数成对透传worker，不自行推version或改alias；缺省不把None新字段送旧协议，保持旧输出/摘要",
+      "behavior": "新参数成对透传worker，不自行推version或改alias；缺省不把None新字段送旧协议，保持旧输出/摘要。",
+      "callers": [
+        "F09",
+        "F12"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F05",
+      "lane": "F",
+      "file": "demiflow/workbench/projects/workspace.py",
+      "symbol": "sample_table",
+      "signature": "sample_table(root,alias,*,columns=None,offset=0,limit=20,row_id=None,match=None,expected_binding=None,version=None,version_binding=None) -> dict",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "sample_table(root,alias,*,columns=None,offset=0,limit=20,row_id=None,match=None,expected_binding=None,version=None,version_binding=None) -> dict",
+      "outputs": "保持所有现有默认/row_id字符串/columns上限；有新对传worker验证固定版本，返回same binding及rows；不得利用match或版本切换跨过权限/资源限制",
+      "behavior": "保持所有现有默认/row_id字符串/columns上限；有新对传worker验证固定版本，返回same binding及rows；不得利用match或版本切换跨过权限/资源限制。",
+      "callers": [
+        "F09",
+        "F12"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F06",
+      "lane": "F",
+      "file": "demiflow/workbench/projects/workspace.py",
+      "symbol": "profile_table",
+      "signature": "profile_table(root,alias,*,expected_binding,columns,version=None,version_binding=None) -> dict",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "profile_table(root,alias,*,expected_binding,columns,version=None,version_binding=None) -> dict",
+      "outputs": "透传历史版本对到原table_profile worker；project_profile调用不变；统计coverage/budget保持",
+      "behavior": "透传历史版本对到原table_profile worker；project_profile调用不变；统计coverage/budget保持。",
+      "callers": [
+        "F12"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F07",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/sources.py",
+      "symbol": "locator",
+      "signature": "locator(value) -> validated locator",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "locator(value) -> validated locator",
+      "outputs": "旧workspace_table/project_table字段闭集不变；workspace_table只新增version/alias_binding成对可选，严格int/SHA/columns",
+      "behavior": "旧workspace_table/project_table字段闭集不变；workspace_table只新增version/alias_binding成对可选，严格int/SHA/columns。历史binding为版本digest；不改旧source_locator记录，不接受uri/path/rows/schema自证。",
+      "callers": [
+        "F09",
+        "F10",
+        "F11"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F08",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/web_sources.py",
+      "symbol": "_snapshot",
+      "signature": "_snapshot(metadata,value) -> existing SourceSnapshot",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "_snapshot(metadata,value) -> existing SourceSnapshot",
+      "outputs": "沿用value.binding（历史为版本digest）和真实version metadata构造source，旧输入输出摘要必须逐字同基线",
+      "behavior": "沿用value.binding（历史为版本digest）和真实version metadata构造source，旧输入输出摘要必须逐字同基线。禁止将alias_binding替换真实binding或新增污染摘要的UI字段。",
+      "callers": [
+        "F09",
+        "F10"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F09",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/web_sources.py",
+      "symbol": "resolve",
+      "signature": "resolve(root,value) -> {source,locator}",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "resolve(root,value) -> {source,locator}",
+      "outputs": "历史locator经ws.describe_table(expected_binding=alias_binding,version,version_binding=binding)核对；旧分支原行为，原项目不变",
+      "behavior": "历史locator经ws.describe_table(expected_binding=alias_binding,version,version_binding=binding)核对；旧分支原行为，原项目不变。source由F08生成，返回相同locator不悄悄归一到当前版本。",
+      "callers": [
+        "F10"
+      ],
+      "acceptance": [
+        "V02",
+        "V08"
+      ]
+    },
+    {
+      "id": "F10",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/web_sources.py",
+      "symbol": "verify",
+      "signature": "verify(root,*,locator,source,target) -> {verified:true}",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "verify(root,*,locator,source,target) -> {verified:true}",
+      "outputs": "先F09校验整份source，再用F05在同version做真实Case membership；target/group原proof规则保留",
+      "behavior": "先F09校验整份source，再用F05在同version做真实Case membership；target/group原proof规则保留。不允许只resolve历史但verify读当前。",
+      "callers": [
+        "E08"
+      ],
+      "acceptance": [
+        "V02",
+        "V07"
+      ]
+    },
+    {
+      "id": "F11",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/source_export.py",
+      "symbol": "fixed_input",
+      "signature": "fixed_input(root,value) -> (Path,version,SourceSnapshot)",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "fixed_input(root,value) -> (Path,version,SourceSnapshot)",
+      "outputs": "worker-only历史locator走F02，旧分支完整保持；交回原read/export/media共同入口同version",
+      "behavior": "worker-only历史locator走F02，旧分支完整保持；交回原read/export/media共同入口同version。不得递归启动worker或依赖浏览器metadata。宽字段Arrow预算/文件FD/提交等原实现不动。",
+      "callers": [
+        "F13"
+      ],
+      "acceptance": [
+        "V02",
+        "V05",
+        "V07"
+      ]
+    },
+    {
+      "id": "F12",
+      "lane": "F",
+      "file": "demiflow/workbench/api.py",
+      "symbol": "Handler.do_GET",
+      "signature": "Handler.do_GET() -> existing authenticated response",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "Handler.do_GET() -> existing authenticated response",
+      "outputs": "GET_FIELDS/table/sample/table-profile/media扩成对字段；HTTP query严格正int/SHA、别名/权限仍原resolve流程",
+      "behavior": "GET_FIELDS/table/sample/table-profile/media扩成对字段；HTTP query严格正int/SHA、别名/权限仍原resolve流程。调用F04/05/06或worker media，table-versions原selected增强。保持token、origin、超时/队列与原request body限制。 table-evidence也纳入同一版本对校验和F15透传；media明确调F14。",
+      "callers": [
+        "A06",
+        "A07",
+        "A09"
+      ],
+      "acceptance": [
+        "V02",
+        "V08"
+      ]
+    },
+    {
+      "id": "F13",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/catalog_profile.py",
+      "symbol": "profile",
+      "signature": "profile(root,*,kind,columns,alias=None,expected_binding=None,identity=None,expected=None,version=None,binding=None,version_binding=None) -> dict",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "profile(root,*,kind,columns,alias=None,expected_binding=None,identity=None,expected=None,version=None,binding=None,version_binding=None) -> dict",
+      "outputs": "workspace_table历史分支将version/version_binding转F07 locator，binding仍保留project_table语义；version_binding仅workspace，project禁止",
+      "behavior": "workspace_table历史分支将version/version_binding转F07 locator，binding仍保留project_table语义；version_binding仅workspace，project禁止。fixed_input与read必须同source_digest，返回binding实际版本；原采样覆盖不变。",
+      "callers": [
+        "F03"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F14",
+      "lane": "F",
+      "file": "demiflow/workbench/projects/workspace.py",
+      "symbol": "table_media",
+      "signature": "table_media(root,alias,*,row_id,field=None,field_path=None,expected_binding=None,version=None,version_binding=None) -> dict",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "table_media(root,alias,*,row_id,field=None,field_path=None,expected_binding=None,version=None,version_binding=None) -> dict",
+      "outputs": "历史版本对透传原media worker；field与field_path仍互斥，图片读取与row数据用同一selected ref；旧缺省逐字兼容",
+      "behavior": "历史版本对透传原media worker；field与field_path仍互斥，图片读取与row数据用同一selected ref；旧缺省逐字兼容。",
+      "callers": [
+        "F12"
+      ],
+      "acceptance": [
+        "V02",
+        "V07"
+      ]
+    },
+    {
+      "id": "F15",
+      "lane": "F",
+      "file": "demiflow/workbench/projects/workspace.py",
+      "symbol": "table_evidence",
+      "signature": "table_evidence(root,alias,*,row_id,field_path,expected_binding=None,version=None,version_binding=None) -> dict",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "table_evidence(root,alias,*,row_id,field_path,expected_binding=None,version=None,version_binding=None) -> dict",
+      "outputs": "历史版本对透传table_evidence，原资源声明/路径预算保持；case只读证据与同row/version匹配，不用当前版本的附件替换",
+      "behavior": "历史版本对透传table_evidence，原资源声明/路径预算保持；case只读证据与同row/version匹配，不用当前版本的附件替换。",
+      "callers": [
+        "F12"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "F16",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/media_source_export.py",
+      "symbol": "_selection",
+      "signature": "_selection(root,*,source_locator,source_snapshot,case_key,field) -> existing selection",
+      "action": "modify",
+      "contract": "C4",
+      "inputs": "_selection(root,*,source_locator,source_snapshot,case_key,field) -> existing selection",
+      "outputs": "现有fixed_input后另读当前ref并要求ref.version相等会拒历史版本；新历史分支使用F02核验出的selected ref采样，当前alias control仅授予当前公开资源声明",
+      "behavior": "现有fixed_input后另读当前ref并要求ref.version相等会拒历史版本；新历史分支使用F02核验出的selected ref采样，当前alias control仅授予当前公开资源声明。root/declaration/resource_binding与_recheck完全保留；没有声明或历史媒体hash不符仍拒绝。旧分支byte-equivalent witness。",
+      "callers": [
+        "F11"
+      ],
+      "acceptance": [
+        "V02",
+        "V07"
+      ]
+    },
+    {
+      "id": "F17",
+      "lane": "F",
+      "file": "demiflow/workbench/analysis/catalog_versions.py",
+      "symbol": "VersionResolution.to_wire",
+      "signature": "VersionResolution.to_wire(self) -> VersionResolutionWire",
+      "action": "add",
+      "contract": "C4",
+      "inputs": "VersionResolution.to_wire(self) -> VersionResolutionWire",
+      "outputs": "将内部只读mapping/tuple转换为独立JSON dict/list，返回version/alias_binding/binding/reference/metadata，复用原worker输出预算；不返回Path或native DatasetRef对象",
+      "behavior": "将内部只读mapping/tuple转换为独立JSON dict/list，返回version/alias_binding/binding/reference/metadata，复用原worker输出预算；不返回Path或native DatasetRef对象。F03响应与F11调用_snapshot使用此普通JSON元信息，避免MappingProxy不能序列化或被type(dict)拒绝。",
+      "callers": [
+        "F03",
+        "F11"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "V01",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_shell_and_responsive",
+      "signature": "test_ui_d19_shell_and_responsive(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "四tab/项目切换/目录收起及320–1920视口；读取内容宽度、可见焦点、图文字实际字号；截图人工对照，开发/Readme保留。",
+      "callers": [
+        "A01",
+        "A11",
+        "B12",
+        "C08",
+        "D13",
+        "E10"
+      ],
+      "acceptance": [
+        "V01"
+      ]
+    },
+    {
+      "id": "V02",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_versions.py",
+      "symbol": "test_ui_d19_fixed_version_chain",
+      "signature": "test_ui_d19_fixed_version_chain(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "真实Lance两已登记版本不同schema/行/图片；浏览器切版本→sample/profile→Notebook source export→Case membership/media均同版本；alias漂移/被删/未登记/旧locator摘要/URL兼容反例。",
+      "callers": [
+        "A06",
+        "A09",
+        "A10",
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12",
+        "F13",
+        "F14",
+        "F15",
+        "F16",
+        "A13",
+        "A14"
+      ],
+      "acceptance": [
+        "V02"
+      ]
+    },
+    {
+      "id": "V03",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_graph_config_check_run",
+      "signature": "test_ui_d19_graph_config_check_run(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "从source-only入口→显式检查→真实7节点图→节点配置保存/冲突→再次检查→运行→固定输出；验证API命中、节点摘要事实与返回绑定，不靠label通过。 最终运行必须真实经过统一DataflowExecution/封存v3，记录模块路径和实际schema；只在旧executor算出同结果不能通过。Local是基础，Ray Core表面接线另记真实provider结果，缺环境not_run。",
+      "callers": [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B07",
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06"
+      ],
+      "acceptance": [
+        "V03"
+      ]
+    },
+    {
+      "id": "V04",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_sealed_graph_attempts",
+      "signature": "test_ui_d19_sealed_graph_attempts(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "legacy历史＋runtime-v3真实封存的参数化断言与绑定证据。",
+      "behavior": "保留旧两个action/组成员/历史只读反例；新增C8真实v3共享源、同semantic两个occurrence串联和join左右输入，边和端口与封存逐项比对。丢边端点必须unavailable，不同实例不可合并成自环；检验stage/exchange/recovery、缺观测不造数、源码按正确action。新旧URL、计划漂移、历史digest原样；mock仅为反例，基准链须真实W+Runtime。",
+      "callers": [
+        "B02",
+        "B06",
+        "B08",
+        "B09",
+        "B10",
+        "B11",
+        "C01",
+        "C03",
+        "C09",
+        "B18"
+      ],
+      "acceptance": [
+        "V04"
+      ]
+    },
+    {
+      "id": "V05",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_notebook_to_case",
+      "signature": "test_ui_d19_notebook_to_case(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "实际analysis runtime明确pin本树：SQL/Python交互、单击保存启动执行、取消/旧generation、保存重开；固定输出表/图/Case，来源一致。无runtime时标not_run/blocked，不能拿metadata double替代通过。",
+      "callers": [
+        "A08",
+        "D01",
+        "D02",
+        "D03",
+        "D04",
+        "D05",
+        "D06",
+        "D07",
+        "D08",
+        "D09",
+        "D10",
+        "D11",
+        "F11",
+        "D15"
+      ],
+      "acceptance": [
+        "V05"
+      ]
+    },
+    {
+      "id": "V06",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_case_multimaterial",
+      "signature": "test_ui_d19_case_multimaterial(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "真实v2两方案每组image+md+evaluation，共享input/reference；三种layout和配置改动、标题、字段格式、原位预览；v1兼容，不以v1三个字段冒充多方案通过。",
+      "callers": [
+        "E01",
+        "E02",
+        "E03",
+        "E04",
+        "E05",
+        "E06",
+        "E09",
+        "D12",
+        "E11"
+      ],
+      "acceptance": [
+        "V06"
+      ]
+    },
+    {
+      "id": "V07",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_review_scope_and_conflict",
+      "signature": "test_ui_d19_review_scope_and_conflict(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "整个Case/有proof方案/字段各写不同答案；未绑定拒绝、不同source不串、未知回执/409/媒体变更不前进，成功保存下一条；关闭重开草稿/历史/冲突并存无丢失。",
+      "callers": [
+        "E04",
+        "E07",
+        "E08",
+        "F10",
+        "D12"
+      ],
+      "acceptance": [
+        "V07"
+      ]
+    },
+    {
+      "id": "V08",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_late_response_and_cleanup",
+      "signature": "test_ui_d19_late_response_and_cleanup(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "延迟graph/source/output/Case及项目读取，切对象后旧响应不得涂新页；重复点击写只有一intent，容量不足GET有界退避。20次切tab/case后worker/blob/observer/requests回基线，失败不清除草稿。 增加同run/attempt的action/plan/revision变化，旧source/observations响应不能被接收；CAPACITY_PENDING不得自动新建run。",
+      "callers": [
+        "A02",
+        "A03",
+        "A04",
+        "B06",
+        "B07",
+        "D02",
+        "D09",
+        "E01",
+        "E08"
+      ],
+      "acceptance": [
+        "V08"
+      ]
+    },
+    {
+      "id": "V09",
+      "lane": "V",
+      "file": "tests/test_workbench_d19_browser.py",
+      "symbol": "test_ui_d19_asset_and_single_authority",
+      "signature": "test_ui_d19_asset_and_single_authority(owned_fixture, browser) -> None",
+      "action": "test",
+      "contract": "C0 C1 C2 C3 C4 C5 C6 C8",
+      "inputs": "本树实际实现、/tmp私有服务/数据、已声明环境与权限；只在故障/布局单测使用明确替身",
+      "outputs": "绑定源码摘要的真实断言结果/截图/请求事实；无环境或未执行明确not_run",
+      "behavior": "index实际加载新模块、globals可用、所有新函数真实调用；无mountLogical消费者/双画布/第二Store；打包assets可达，冻结七件和旧主仓不变，实际import路径匹配。 真实调用C09，W018–W021能力迁移表逐项有断言；logicalEntry/renderLogical/chooseLogicalNode/mountLogical旧入口最终无消费者。平台tests/test_runtime_v3_w.py仅在W交付后改前端符号/DOM断言，不改Python语义测试。",
+      "callers": [
+        "A12",
+        "C07",
+        "C09",
+        "B18"
+      ],
+      "acceptance": [
+        "V09"
+      ]
+    },
+    {
+      "id": "V10",
+      "lane": "V",
+      "file": "tests/d19_fixtures.py",
+      "symbol": "owned_fixture",
+      "signature": "@pytest.fixture owned_fixture(tmp_path,monkeypatch,request) -> Iterator[OwnedFixture]",
+      "action": "add",
+      "contract": "C0 C7 C8",
+      "inputs": "@pytest.fixture owned_fixture(tmp_path,monkeypatch,request) -> Iterator[OwnedFixture]",
+      "outputs": "建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成",
+      "behavior": "建立本树import断言、独占/tmp域、port=0私有workspace service，复用已存在合成pipeline和Case v2夹具；参数need_runtime=true时只接受WORKBENCH_D19_ANALYSIS_CONFIG的已批准私有候选环境，否则明确门未完成。提供固定表两注册版本和图片/标注真实数据，不伪造service权限；finally关闭自己启动的服务/进程。测试不得链接主仓服务。 C8夹具分别生成/载入真实legacy封存与统一v3封存；测试替身标清、不得计组合通过；候选缺W实现记录not_run，不回退主仓。",
+      "callers": [
+        "V01",
+        "V02",
+        "V03",
+        "V04",
+        "V05",
+        "V06",
+        "V07",
+        "V08",
+        "V09"
+      ],
+      "acceptance": [
+        "V09"
+      ]
+    },
+    {
+      "id": "V11",
+      "lane": "V",
+      "file": "tests/d19_fixtures.py",
+      "symbol": "OwnedFixture",
+      "signature": "@dataclass OwnedFixture(root,project_id,app,evidence_dir,source_head,source_digests,analysis_profile)",
+      "action": "add",
+      "contract": "C0 C7",
+      "inputs": "@dataclass OwnedFixture(root,project_id,app,evidence_dir,source_head,source_digests,analysis_profile)",
+      "outputs": "测试域对象：root/evidence_dir为/tmp Path，project_id来自真实workspace，app是私有WorkspaceServer，source_head/digests绑定候选树，analysis_profile为真实环境事实或None",
+      "behavior": "测试域对象：root/evidence_dir为/tmp Path，project_id来自真实workspace，app是私有WorkspaceServer，source_head/digests绑定候选树，analysis_profile为真实环境事实或None。只有V10持有生命周期，不给产品代码使用；无付费模型、生产数据、共享运行服务。",
+      "callers": [
+        "V10"
+      ],
+      "acceptance": [
+        "V09"
+      ]
+    }
+  ],
+  "legacy_test_compatibility_owner": "V",
+  "legacy_test_compatibility_files": [
+    "tests/test_forge_analysis_case_compact_browser.py",
+    "tests/test_forge_analysis_case_demo_browser.py",
+    "tests/test_forge_analysis_case_groups_ui_browser.py",
+    "tests/test_forge_analysis_http.py",
+    "tests/test_forge_analysis_media_source_export.py",
+    "tests/test_forge_analysis_notebook_history.py",
+    "tests/test_forge_analysis_source_export.py",
+    "tests/test_forge_analysis_web_sources.py",
+    "tests/test_forge_markdown_reading.py",
+    "tests/test_forge_public_api.py",
+    "tests/test_forge_workbench_browser.py",
+    "tests/test_forge_workbench_frontend.py",
+    "tests/test_forge_workspace.py",
+    "tests/test_workbench_execution_binding_browser.py"
+  ],
+  "runtime_wiring": "runtime-wiring.json",
+  "integration_test_compatibility": {
+    "owner": "V",
+    "files": [
+      "tests/test_runtime_v3_w.py"
+    ],
+    "phase": "after_runtime_W_delivery_only",
+    "allowed": "migrate frontend symbol/DOM assertions to final UI functions; retain all behavior and Python assertions"
+  }
+}

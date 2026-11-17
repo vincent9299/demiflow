@@ -60,7 +60,15 @@ def _selection(root,*,source_locator,source_snapshot,case_key,field):
     uri,version,source=fixed_input(root,source_locator)
     if source['digest']!=source_snapshot or field not in {item['name'] for item in source['schema']}:c.reject('Media field/source differs from its registered fixed projection',code='conflict')
     control,ref,current_uri=ws.table_binding(root,workspace,source_locator['alias'])
-    if Path(current_uri)!=uri or ref.lance_version!=version:c.reject('Media table authority changed',code='conflict')
+    if Path(current_uri)!=uri:c.reject('Media table authority changed',code='conflict')
+    if 'version' in source_locator:
+        # Historical rows sample the F02-verified registered ref; the current
+        # alias control above only grants the public resource declaration.
+        from demiflow.workbench.analysis.catalog_versions import resolve_version
+        resolution=resolve_version(root,alias=source_locator['alias'],expected_binding=source_locator['alias_binding'],
+            version=source_locator['version'],expected_version_binding=source_locator['binding'])
+        ref=resolution.ref
+    elif ref.lance_version!=version:c.reject('Media table authority changed',code='conflict')
     from demiflow.lance import preview
     snapshot=preview._open(uri,version)
     path=[field] if field in snapshot.schema.names else field.split('.')

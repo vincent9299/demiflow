@@ -1,0 +1,187 @@
+{
+  "kind": "synthetic_consumer_contract_only",
+  "not_an_engine_artifact": true,
+  "not_runtime_evidence": true,
+  "binding": {
+    "workspace_id": "w11111111111111111111111111111111",
+    "basis_kind": "run",
+    "basis_digest": "0000000000000000000000000000000000000000000000000000000000000050",
+    "entry": "flows/example.py:run",
+    "params": null,
+    "run_id": "fixture-run",
+    "attempt": 1
+  },
+  "entry": {
+    "action_id": "fixture-action",
+    "status": "sealed",
+    "binding_level": "sealed",
+    "plan_id": "0000000000000000000000000000000000000000000000000000000000000051",
+    "dag": {
+      "schema_version": "demiflow.logical_dag.v1",
+      "action_id": "fixture-action",
+      "dag_id": "0000000000000000000000000000000000000000000000000000000000000052",
+      "nodes": [
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000014",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000001",
+          "op_kind": "source",
+          "input_ports": [],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "io",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000002",
+          "op_kind": "map",
+          "input_ports": [
+            "in"
+          ],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "cpu",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000003",
+          "op_kind": "map",
+          "input_ports": [
+            "in"
+          ],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "cpu",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000004",
+          "op_kind": "join",
+          "input_ports": [
+            "left",
+            "right"
+          ],
+          "output_ports": [
+            "out"
+          ],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "cpu",
+            "mergeable": false
+          }
+        },
+        {
+          "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000017",
+          "occurrence_id": "0000000000000000000000000000000000000000000000000000000000000005",
+          "op_kind": "terminal",
+          "input_ports": [
+            "in"
+          ],
+          "output_ports": [],
+          "traits": {
+            "state": "none",
+            "effect": "pure",
+            "resource_role": "io",
+            "mergeable": false
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000014",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "port": "in"
+          }
+        },
+        {
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "port": "in"
+          }
+        },
+        {
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+            "port": "left"
+          }
+        },
+        {
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000015",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+            "port": "right"
+          }
+        },
+        {
+          "from": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000016",
+            "port": "out"
+          },
+          "to": {
+            "logical_node_id": "0000000000000000000000000000000000000000000000000000000000000017",
+            "port": "in"
+          }
+        }
+      ],
+      "sources": [
+        "0000000000000000000000000000000000000000000000000000000000000014"
+      ],
+      "terminals": [
+        "0000000000000000000000000000000000000000000000000000000000000017"
+      ]
+    },
+    "physical": {
+      "plan_id": "0000000000000000000000000000000000000000000000000000000000000051",
+      "plan_revision": 0,
+      "recovery": "checkpoint",
+      "stages": {},
+      "channels": [],
+      "worker_groups": []
+    },
+    "node_observations": {
+      "available": false,
+      "reason": "synthetic_sample_has_no_runtime_observations"
+    }
+  },
+  "expected": {
+    "format": "legacy",
+    "visual_nodes": 4,
+    "edges": 5,
+    "group_member_count": 2,
+    "group_has_no_default_member": true
+  },
+  "required_mutations": []
+}

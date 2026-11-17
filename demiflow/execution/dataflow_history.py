@@ -38,7 +38,7 @@ from .run_journal import RunJournal
 # Original sealed-plan facts schema for the native v1/v2 chain/graph generation.
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"
 # v3 native seal marker bound by seal_dataflow through the same journal slot family.
-from .dataflow_seal import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA
+from .dataflow_seal import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA, _validate_seal_marker
 # The only listed native checkpoint format translated into an in-memory image.
 CHECKPOINT_MANIFEST_SCHEMA = "demiflow.checkpoint_manifest.v1"
 PLAN_VIEW_SCHEMA = "demiflow.plan_view.v3"
@@ -46,10 +46,6 @@ PLAN_VIEW_SCHEMA = "demiflow.plan_view.v3"
 _SEALED_PLAN_KEY = "-sealed-plan"
 _DATAFLOW_SEALED_KEY = "-dataflow-sealed"
 _MAX_SEALED_PLAN_BYTES = 4 * 1024 ** 2
-_MANIFEST_KEYS = frozenset({"schema", "run_id", "action_id", "dag_id", "plan_id",
-                            "logical_ref", "physical_ref", "programs", "code_pin_ref",
-                            "identity_bridge_ref", "source_refs", "constants_ref",
-                            "plan_revision", "graph_digest", "physical_digest"})
 _SEALED_REF_KEYS = ("logical_ref", "physical_ref", "code_pin_ref",
                     "identity_bridge_ref", "constants_ref")
 _CODE_PIN_MEDIA = "application/x-demiflow-code-pin"
@@ -170,16 +166,8 @@ def _engine_run_id(journal):
 
 
 def _load_v3(journal, directory, action_id, marker):
-    if type(marker) is not dict:
-        raise _err("INCOMPATIBLE_HISTORY", "v3 seal marker is not a JSON object")
-    schema = marker.get("schema")
-    if schema != DATAFLOW_SEALED_SCHEMA:
-        raise _err("INCOMPATIBLE_HISTORY",
-                   "unsupported v3 seal schema: " + repr(schema))
-    if not _MANIFEST_KEYS <= set(marker) <= _MANIFEST_KEYS | {"sealed_at", "observation_labels"}:
-        raise _err("INVALID_CONTRACT", "v3 seal marker key set is unsupported")
-    if "sealed_at" in marker and (type(marker["sealed_at"]) is not int or marker["sealed_at"] < 0):
-        raise _err("INVALID_CONTRACT", "v3 seal timestamp must be nonnegative epoch milliseconds")
+    _validate_seal_marker(marker)
+    schema = marker["schema"]
     if marker["run_id"] != _engine_run_id(journal):
         raise _err("INVALID_CONTRACT", "v3 seal run_id differs from the journal recovery identity")
     if marker["action_id"] != action_id:
@@ -595,6 +583,13 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
         raise _err("INVALID_CONTRACT", "observations must be a tuple of NodeObservation")
     if graph.dag_id != physical.dag_id:
         raise _err("INVALID_CONTRACT", "graph and physical dag_id differ")
+    revision = physical.plan_revision
+    if type(revision) is not int or not 0 <= revision <= 2**53 - 1:
+        raise _err("INVALID_CONTRACT", "plan_revision must be a non-negative safe integer")
+    occurrences = {node.occurrence_id for node in graph.nodes}
+    for endpoint in (*graph.sources, *graph.terminals):
+        if endpoint not in occurrences:
+            raise _err("INVALID_CONTRACT", "source/terminal occurrence is outside the node set")
     obs_by_occurrence = {}
     for obs in observations:
         if not isinstance(obs, NodeObservation):
@@ -620,8 +615,11 @@ def build_plan_view(graph: DataflowGraph, sealed: SealedExecution, physical: Phy
             "traits": {"state": node.kernel.state, "effect": node.kernel.effect,
                        "resource_role": node.kernel.resource_role, "mergeable": node.kernel.mergeable},
         })
-    edges = [{"from": {"logical_node_id": _semantic(graph, edge.producer), "occurrence_id": edge.producer, "port": edge.output_port},
-              "to": {"logical_node_id": _semantic(graph, edge.consumer), "occurrence_id": edge.consumer, "port": edge.input_port}}
+    edges = [{"edge_id": edge.edge_id,
+              "from": {"logical_node_id": _semantic(graph, edge.producer),
+                       "occurrence_id": edge.producer, "port": edge.output_port},
+              "to": {"logical_node_id": _semantic(graph, edge.consumer),
+                     "occurrence_id": edge.consumer, "port": edge.input_port}}
              for edge in graph.edges]
     shared = _shared_ancestors(graph)
     dag = {"schema_version": graph.schema, "dag_id": graph.dag_id, "action_id": graph.action_id,

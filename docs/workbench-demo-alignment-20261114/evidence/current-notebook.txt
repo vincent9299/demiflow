@@ -1,0 +1,40 @@
+DemiFlow
+数据工作台
+项目
+D1.8 structure · bounded Case fixture
+D1.8 structure · bounded Case fixture
+数据
+已同步
+自动同步已开启 · 最近同步：8:50:20 PM
+开发
+管道
+数据
+Readme
+展开数据目录
+cases
+cases · v1
+固定版本 v1 · 3 行 · 9 字段 · 当前表 · 可添加为 Notebook 数据源
+数据样例与字段分布
+Notebook
+Case 分析
+草稿 · 未命名 Notebook
+Notebook 名称
+有未保存修改
+保存 Notebook
+新建
+导入 / 导出
+Notebook 数据源 · 0
+Python / SQL · 内核未启动
+启动内核
+Python
+SQL
+Markdown
+单元 1
+保存此单元
+运行
+取消单元
+删除单元
+＋ Python
+＋ SQL
+＋ Markdown
+单元执行记录 · 当前页 0

@@ -168,7 +168,9 @@ def test_upstream_assets_and_public_contract(browser):
         assert provenance['files'][name]['sha256'] == digest
     assert provenance['version'] == '14.1.0' and 'not a verified complete' in provenance['provenance_scope']
     with opened(browser) as (page, _, _):
-        assert page.evaluate('Object.keys(ForgeReading).sort()') == ['createTextReader', 'limits']
+        # The registered reader also publishes its existing readiness contract.
+        assert page.evaluate('Object.keys(ForgeReading).sort()') == ['createTextReader', 'initialReady', 'limits']
+        assert page.evaluate('ForgeReading.initialReady === true')
         assert page.evaluate('Object.isFrozen(ForgeReading.limits)')
         assert page.evaluate("(() => {try {ForgeReading.createTextReader({text:3}); return false;} catch {return true;}})()")
 

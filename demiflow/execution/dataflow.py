@@ -496,6 +496,10 @@ class DataflowExecution:
                 max_bytes=self._bounds.max_control_bytes)))
             self._report_keys = {b['occurrence_id']: (self._action.action_id, b['report_node_id'], b['report_occurrence'])
                                  for b in bridge_doc.get('entries', ())}
+            for occurrence, report_key in self._report_keys.items():
+                self._checked.bind_observation_scope(
+                    report_key, plan_id=physical.plan_id, dag_id=graph.dag_id,
+                    plan_revision=physical.plan_revision, occurrence_id=occurrence)
         from .dataflow_sinks import make_sink_adapter
         for node in graph.nodes:
             if node.kind == "terminal":

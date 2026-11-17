@@ -42,11 +42,23 @@ def _node_key(action_id, node_id, occurrence):
 
 def _node_document(document):
     keys = {'sequence', 'state', 'rows_input', 'rows_output', 'calls', 'dropped', 'errors',
-            'elapsed_s', 'timing_scope', 'group_members', 'evidence', 'detail', 'lifecycle'}
+            'elapsed_s', 'timing_scope', 'group_members', 'evidence', 'detail', 'lifecycle',
+            'plan_id', 'dag_id', 'plan_revision', 'occurrence_id'}
     if type(document) is not dict or set(document) - keys or not {'sequence', 'state'} <= document.keys():
         raise ValueError('Invalid node observation fields')
     if type(document['sequence']) is not int or not 0 <= document['sequence'] < 2**63 or document['state'] not in _NODE_STATES:
         raise ValueError('Invalid node sequence/state')
+    scope = {'plan_id', 'dag_id', 'plan_revision', 'occurrence_id'}
+    if scope.intersection(document):
+        if not scope <= document.keys():
+            raise ValueError('Incomplete native observation plan scope')
+        for name in ('plan_id', 'dag_id', 'occurrence_id'):
+            value = document[name]
+            if type(value) is not str or len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+                raise ValueError('Invalid native observation plan identity')
+        revision = document['plan_revision']
+        if type(revision) is not int or not 0 <= revision < 2**63:
+            raise ValueError('Invalid native observation plan revision')
     for name in ('rows_input', 'rows_output', 'calls', 'dropped', 'errors'):
         value = document.get(name)
         if value is not None and (type(value) is not int or not 0 <= value < 2**63):
@@ -597,11 +609,17 @@ class RunJournal:
             scope, parameters = self._scope(db)
             where = scope + (' AND ' if scope else ' WHERE ') + 'action_id=? AND node_id=? AND occurrence=?'
             for key, sequence, terminal, raw in values:
-                old = db.execute('SELECT sequence,terminal FROM node_observations' + where, (*parameters, *key)).fetchone()
+                old = db.execute('SELECT sequence,terminal,document FROM node_observations' + where, (*parameters, *key)).fetchone()
                 if old is None:
                     raise ValueError('Node observation was not reserved before execution')
                 if old[1] or sequence <= old[0]:
                     continue
+                previous = json.loads(old[2])
+                incoming = json.loads(raw)
+                if 'plan_id' in previous and any(
+                        previous[name] != incoming.get(name)
+                        for name in ('plan_id', 'dag_id', 'plan_revision', 'occurrence_id')):
+                    raise ValueError('Native observation execution scope changed')
                 db.execute('UPDATE node_observations SET sequence=?,terminal=?,document=?' + where,
                            (sequence, int(terminal), raw, *parameters, *key))
 

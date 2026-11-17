@@ -1,0 +1,62 @@
+DemiFlow
+数据工作台
+项目
+question-experiments
+question-experiments
+管道
+正在连接
+正在连接工作区…
+开发
+管道
+数据
+Readme
+流程
+flows/questions.py:select
+配置
+flows/select_a.json
+flows/select_b.json
+源码观察图 · 尚未检查
+读图与配置
+检查问题
+运行监控
+输出结果
+检查
+运行
+运行记录
+接入与权限
+数据算子图 · 1 节点 / 0 条边
+整图配置
+声明图投影（E2）
+−
++
+适应
+源码调用
+_select
+尚未检查
+
+实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用
+
+源码 · _select
+收起代码
+实现
+调用点
+Prompt
+配置
+
+正在读取绑定来源…
+
+_select
+
+_select · flows/questions.py:52
+
+尚未检查
+
+没有能证明来自登记参数文件的可写项。代码字面量与动态计算可在下方源码查看。
+
+保存配置
+放弃本地修改
+本次运行设置
+
+当前仅观察到源码调用；输入输出类型、参数语义与执行可用性尚未核验。
+
+当前项目检查与来源

@@ -27,11 +27,18 @@ def fixed_input(root, value):
     value = locator(value)
     root, workspace, _ = ws.load_workspace(root)
     if value["kind"] == "workspace_table":
-        control, ref, uri = ws.table_binding(root, workspace, value["alias"])
-        if ws.preview_binding(root, control, uri)["digest"] != value["binding"]:
-            c.reject("Source binding changed before Arrow export", code="conflict")
-        metadata = preview.describe_table(uri, ref.lance_version)
-        version = ref.lance_version
+        if "version" in value:
+            from demiflow.workbench.analysis.catalog_versions import resolve_version
+            resolution = resolve_version(root, alias=value["alias"], expected_binding=value["alias_binding"],
+                                         version=value["version"], expected_version_binding=value["binding"])
+            # Plain JSON metadata: _snapshot rejects MappingProxyType fields.
+            uri, version, metadata = resolution.uri, resolution.ref.lance_version, resolution.to_wire()["metadata"]
+        else:
+            control, ref, uri = ws.table_binding(root, workspace, value["alias"])
+            if ws.preview_binding(root, control, uri)["digest"] != value["binding"]:
+                c.reject("Source binding changed before Arrow export", code="conflict")
+            metadata = preview.describe_table(uri, ref.lance_version)
+            version = ref.lance_version
     else:
         metadata = project_discovery.table(root, value["id"], expected=value["discovery"], version=value["version"])
         if metadata["binding"] != value["binding"]:

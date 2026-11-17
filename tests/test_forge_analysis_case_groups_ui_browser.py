@@ -117,7 +117,7 @@ def scene(browser,tmp_path,monkeypatch,*,count=3,reserved=False):
             principal='fixture-reader';features=dict(case_media=True,annotation_media_basis=True,case_output_groups=True,case_review_filter=True)
             def __init__(self,server,config):self.server=server
             def ceiling(self):return dict(analysis_write=True,case_annotate=True,analysis_execute=False)
-            def execution_profile(self):return None  # fixture has no kernel backend
+            def execution_profile(self):return None # Metadata-only double has no admitted runtime.
             def assert_ready(self):return True
             def close(self):pass
             def cancel_output(self,key):pass
@@ -142,12 +142,13 @@ def scene(browser,tmp_path,monkeypatch,*,count=3,reserved=False):
                 return serve
             for name in ['analysis-case.js','analysis-case.css','analysis-case-media.js']:page.route('**/'+name,asset(OWN/'demiflow/workbench/web'/name))
             try:
-                page.goto(app.origin+'/#token='+app.token);page.get_by_role('button',name='数据',exact=True).click();expect(page.get_by_role('heading',name='Case 0',exact=True)).to_be_visible()
+                # The default descriptor chooses the visible title; the source key stays fixed.
+                page.goto(app.origin+'/#token='+app.token);page.get_by_role('button',name='数据',exact=True).click();expect(page.locator('.case-ui-current-heading h3')).to_be_visible();expect(page.locator('p.case-ui-current-key')).to_have_text('Case 0')
                 source=[value['result'] for name,value in responses if name=='source-register' and 'result' in value][-1]
                 descriptor['source_snapshot']=source['digest'];descriptor['case_key']=source['case_key']
                 page.get_by_role('button',name='管道',exact=True).click();expect(page.locator('.analysis-case')).to_have_count(0)
                 page.evaluate('(v)=>new ForgeAnalysisState.Store().saveCaseDraft(v.project,v.source,v.draft)',dict(project=project,source=source['digest'],draft=draft))
-                page.get_by_role('button',name='数据',exact=True).click();expect(page.get_by_role('heading',name='Case 0',exact=True)).to_be_visible()
+                page.get_by_role('button',name='数据',exact=True).click();expect(page.get_by_role('heading',name='红色陶瓷杯',exact=True)).to_be_visible();expect(page.locator('p.case-ui-current-key')).to_have_text('Case 0')
                 assert [payload for name,payload in calls if name=='case-page'][-1]['view']['descriptor']['version']==2, 'fixture draft was not adopted for the actual source'
                 yield dict(page=page,app=app,source=source,descriptor=descriptor,project=project,calls=calls,responses=responses,errors=errors,grant=grant,root=root,asset=asset)
                 assert not errors,errors
@@ -206,7 +207,7 @@ def test_group_semantics_cas_original_receipt_late_source_and_notebook_origin(br
         incoming=copy.deepcopy(f['descriptor']);incoming['output_groups'][0]['label']='Notebook Base';proof=f['app'].analysis.call(f['project'],'fixture-output-register',dict(descriptor=incoming,register=True));assert proof['annotation_origin_registered'] is True
         p.evaluate('value=>fixtureCase.setPresentation(value)',proof);p.get_by_role('button',name='采用 Notebook 输出视图',exact=True).click();expect(case.locator('.case-ui-group-proof')).to_contain_text('Base 图片');save(p,'Notebook 登记来源');sent=latest(f,'annotations-save');assert sent['target']['variant']==old_variant and sent['origin']==proof['origin']
         p.get_by_label('标注对象',exact=True).select_option('old:'+new_variant);expect(p.get_by_label('标注 备注',exact=True)).to_have_value('新方案独立草稿')
-        note=case.locator('.analysis-answer').filter(has=p.get_by_role('heading',name='备注',exact=True));p.get_by_label('标注对象',exact=True).select_option('group:base');note.get_by_text('标注历史与恢复',exact=True).click();note.get_by_role('button',name='读取历史',exact=True).click();expect(note.locator('.case-ui-history-entry').first).to_contain_text('Notebook 登记来源')
+        note=case.locator('.analysis-answer').filter(has=p.get_by_role('heading',name='备注',exact=True));p.get_by_label('标注对象',exact=True).select_option('group:base');note.get_by_role('button',name='历史与恢复',exact=True).click();note_history=case.locator('.case-ui-review-history-item').filter(has=p.get_by_text('备注',exact=True));note_history.get_by_role('button',name='读取历史',exact=True).click();expect(note_history.locator('.case-ui-history-entry').first).to_contain_text('Notebook 登记来源')
         p.get_by_role('button',name='字段与评测配置',exact=True).click();p.get_by_label('字段角色 1',exact=True).select_option('reference');p.get_by_label('预览格式 1',exact=True).select_option('code');p.get_by_label('代码语言 1',exact=True).select_option('text');case.locator('.case-ui-group-config').get_by_role('button',name='应用材料与方案配置',exact=True).click();expect(case.locator('.case-ui-shared-materials [data-role=reference]')).to_have_count(3)
         p.get_by_role('button',name='保存视图',exact=True).click();expect(case.locator('.case-ui-notice')).to_contain_text('视图已保存');p.reload(wait_until='domcontentloaded');p.get_by_role('button',name='数据',exact=True).click();expect(p.get_by_label('标注 备注',exact=True)).to_have_value('Notebook 登记来源');p.get_by_role('button',name='字段与评测配置',exact=True).click();expect(p.get_by_label('字段角色 1',exact=True)).to_have_value('reference');expect(p.get_by_label('预览格式 1',exact=True)).to_have_value('code');expect(p.get_by_label('代码语言 1',exact=True)).to_have_value('text')
         (tmp_path/'semantic-operations.json').write_text(json.dumps(dict(old_variant=old_variant,new_variant=new_variant,label_same_identity=True,members_new_identity=True,cas=True,original_receipt=True,source_switch=True,late_heads_ignored=True,notebook_origin=proof['origin'],role_format_language_persist=True,source_unchanged=True),indent=2)+'\n')
@@ -236,7 +237,48 @@ def test_server_review_filter_full_source_frozen_cursor_explicit_scope_and_defin
         (tmp_path/'filter-operations.json').write_text(json.dumps(dict(rows=24,seeded_saved_cases=23,original_cut=watermark,cursor_keeps_cut=True,fresh_cut_changes_match=True,group_variant=variant,whole_field_group_independent=True,choice_and_multi_options=True,added_and_changed_definition_require_explicit_filter=True,source_unchanged=True),indent=2)+'\n')
 
 
-def test_group_codec_old_client_refuses_and_legacy_case_field_drafts_keep_meaning(browser,tmp_path,monkeypatch):
+
+def _frozen_legacy_client_bytes(current_client_path):
+    """Missing historical JS is a separate not-run gate, never a passing warning."""
+    source=os.environ.get('FORGE_CASE_LEGACY_JS')
+    expected=os.environ.get('FORGE_CASE_LEGACY_JS_SHA256')
+    if not source:
+        pytest.skip('not_run: frozen pre-codec analysis-case.js and SHA256 required '
+                    '(FORGE_CASE_LEGACY_JS + FORGE_CASE_LEGACY_JS_SHA256); '
+                    'the current client cannot prove old-client rejection')
+    assert expected, 'frozen legacy client requires its exact SHA256'
+    path=Path(source)
+    assert path.stat().st_size<=131072, 'legacy client exceeds the fixture asset budget'
+    legacy_bytes=path.read_bytes();assert len(legacy_bytes)<=131072
+    assert legacy_bytes, 'frozen legacy client is empty'
+    assert hashlib.sha256(legacy_bytes).hexdigest()==expected, 'legacy client SHA256 differs'
+    assert legacy_bytes!=current_client_path.read_bytes(), 'current client is not a legacy artifact'
+    return legacy_bytes
+
+
+def test_frozen_old_client_refuses_group_codec_without_changing_draft(browser,tmp_path,monkeypatch):
+    legacy_bytes=_frozen_legacy_client_bytes(OWN/'demiflow/workbench/web/analysis-case.js')
+    with scene(browser,tmp_path,monkeypatch) as f:
+        p=f['page'];registered(p);save(p,'旧客户端拒绝前的方案记录')
+        state=p.context.storage_state()
+        cache=p.evaluate('(v)=>new ForgeAnalysisState.Store().caseDraft(v.project,v.source)',dict(project=f['project'],source=f['source']['digest']))
+        assert cache['id'].startswith('case-groups-v3:')
+        before=len([name for name,_ in f['calls'] if name=='annotations-save'])
+        legacy=browser.new_context(storage_state=state);old=legacy.new_page();old.set_default_timeout(65000)
+        old.route('**/analysis-case.js',lambda route:route.fulfill(status=200,content_type='text/javascript',body=legacy_bytes))
+        try:
+            old.goto(f['app'].origin+'/#token='+f['app'].token);old.get_by_role('button',name='数据',exact=True).click()
+            expect(old.locator('.analysis-case')).to_contain_text('无效的记录标识')
+            expect(old.get_by_label('标注 备注',exact=True)).to_have_count(0)
+            assert old.evaluate('(v)=>new ForgeAnalysisState.Store().caseDraft(v.project,v.source)',dict(project=f['project'],source=f['source']['digest']))==cache
+            assert len([name for name,_ in f['calls'] if name=='annotations-save'])==before
+        finally:old.unroute_all(behavior='ignoreErrors');legacy.close()
+        (tmp_path/'old-client-group-codec.json').write_text(json.dumps(dict(
+            legacy_client_sha256=hashlib.sha256(legacy_bytes).hexdigest(),
+            old_client_refuses_group_codec=True,draft_unchanged=True,no_annotation_writes=True),indent=2)+'\n')
+
+
+def test_group_codec_and_legacy_case_field_drafts_keep_meaning(browser,tmp_path,monkeypatch):
     import copy
     from demiflow.workbench.analysis import contracts as c
     with scene(browser,tmp_path,monkeypatch,reserved=True) as f:
@@ -244,11 +286,6 @@ def test_group_codec_old_client_refuses_and_legacy_case_field_drafts_keep_meanin
         p.evaluate('''()=>{const native=window.fetch;let altered=false;window.fetch=async(...args)=>{const response=await native(...args);if(!altered&&String(args[0]).endsWith('/analysis-case-group-bindings')){altered=true;const value=await response.json();value.groups[0].target.case_key='1';return new Response(JSON.stringify(value),{status:response.status,headers:response.headers});}return response;};}''')
         p.get_by_role('button',name='刷新当前标注',exact=True).click();expect(p.locator('.analysis-case-review')).to_contain_text('方案绑定暂不可用');expect(p.get_by_label('标注 备注',exact=True)).to_have_count(0);assert len([name for name,_ in f['calls'] if name=='annotations-save'])==before
         state=p.context.storage_state();cache=p.evaluate('(v)=>new ForgeAnalysisState.Store().caseDraft(v.project,v.source)',dict(project=f['project'],source=f['source']['digest']));assert cache['id'].startswith('case-groups-v3:')
-        legacy=browser.new_context(storage_state=state);old=legacy.new_page();old.set_default_timeout(65000)
-        try:
-            old.goto(f['app'].origin+'/#token='+f['app'].token);old.get_by_role('button',name='数据',exact=True).click();expect(old.locator('.analysis-case')).to_contain_text('无效的记录标识');expect(old.get_by_label('标注 备注',exact=True)).to_have_count(0)
-            assert old.evaluate('(v)=>new ForgeAnalysisState.Store().caseDraft(v.project,v.source)',dict(project=f['project'],source=f['source']['digest']))==cache
-        finally:legacy.close()
         field_context=browser.new_context(storage_state=state);current=field_context.new_page();current.set_default_timeout(65000)
         for name in ['analysis-case.js','analysis-case.css','analysis-case-media.js']:current.route('**/'+name,f['asset'](OWN/'demiflow/workbench/web'/name))
         descriptor=copy.deepcopy(f['descriptor']);descriptor['version']=1;del descriptor['output_groups'];question=descriptor['questions'][-1]
@@ -260,7 +297,7 @@ def test_group_codec_old_client_refuses_and_legacy_case_field_drafts_keep_meanin
             saved=current.evaluate('(v)=>new ForgeAnalysisState.Store().caseDraft(v.project,v.source)',dict(project=f['project'],source=f['source']['digest']));assert saved['id']==draft['id'];assert all(item.get('target_variant') is None for item in saved['answers'])
         finally:current.unroute_all(behavior='ignoreErrors');field_context.close()
         assert len([name for name,_ in f['calls'] if name=='annotations-save'])==before+1
-        (tmp_path/'codec-operations.json').write_text(json.dumps(dict(removed_unregistered_group_requires_explicit_subject=True,tampered_binding_rejected=True,old_client_refuses_group_codec=True,legacy_case_field_drafts_preserved=True,reserved_physical_field='group:base',reserved_field_variant=None,source_unchanged=True),indent=2)+'\n')
+        (tmp_path/'codec-operations.json').write_text(json.dumps(dict(removed_unregistered_group_requires_explicit_subject=True,tampered_binding_rejected=True,legacy_case_field_drafts_preserved=True,reserved_physical_field='group:base',reserved_field_variant=None,source_unchanged=True),indent=2)+'\n')
 
 
 def test_two_real_schemes_three_scopes_media_history_reload_and_responsive(browser,tmp_path,monkeypatch):
@@ -285,9 +322,11 @@ def test_two_real_schemes_three_scopes_media_history_reload_and_responsive(brows
         p.get_by_label('标注对象',exact=True).select_option('base_answer');expect(p.get_by_label('标注 备注',exact=True)).to_have_value('');save(p,'单字段记录');assert latest(f,'annotations-save')['target']['field']=='base_answer'
         p.get_by_label('标注对象',exact=True).select_option('group:base');expect(p.get_by_label('标注 备注',exact=True)).to_have_value('Base 方案记录');assert len([name for name,_ in f['calls'] if name=='case-media'])==lookups_before
         p.reload(wait_until='domcontentloaded');p.get_by_role('button',name='数据',exact=True).click();expect(p.get_by_label('标注对象',exact=True)).to_have_value('group:base');expect(p.get_by_label('标注 备注',exact=True)).to_have_value('Base 方案记录')
-        note=case.locator('.analysis-answer').filter(has=p.get_by_role('heading',name='备注',exact=True));note.get_by_text('标注历史与恢复',exact=True).click();note.get_by_role('button',name='读取历史',exact=True).click();expect(note.locator('.case-ui-history-entry')).to_contain_text('Base 方案记录');assert latest(f,'annotations')['target']['variant']==variant
+        # ui:E (814da24) keeps one shared history panel; each question opens its
+        # own section through 历史与恢复, so history/revert live outside the box.
+        note=case.locator('.analysis-answer').filter(has=p.get_by_role('heading',name='备注',exact=True));note.get_by_role('button',name='历史与恢复',exact=True).click();note_history=case.locator('.case-ui-review-history-item').filter(has=p.get_by_text('备注',exact=True));note_history.get_by_role('button',name='读取历史',exact=True).click();expect(note_history.locator('.case-ui-history-entry')).to_contain_text('Base 方案记录');assert latest(f,'annotations')['target']['variant']==variant
         f['grant'](analysis_write=False);note.get_by_role('button',name='清除已保存答案',exact=True).click();expect(p.get_by_label('标注 备注',exact=True)).to_have_value('');assert 'media_basis' not in latest(f,'annotations-save')['entries'][0]
-        note.get_by_text('标注历史与恢复',exact=True).click();note.get_by_role('button',name='读取历史',exact=True).click();note.get_by_role('button',name='恢复到 v1',exact=True).click();expect(p.get_by_label('标注 备注',exact=True)).to_have_value('Base 方案记录')
+        note.get_by_role('button',name='历史与恢复',exact=True).click();note_history.get_by_role('button',name='读取历史',exact=True).click();note_history.get_by_role('button',name='恢复到 v1',exact=True).click();expect(p.get_by_label('标注 备注',exact=True)).to_have_value('Base 方案记录')
         receipt=[value['result'] for name,value in f['responses'] if name=='annotations-save' and 'result' in value][-1];assert receipt['target']['variant']==variant and receipt['heads'][0]['media_basis']==group['entries'][0]['media_basis'];f['grant'](analysis_write=True)
         for field in ['reference_image','base_image','next_image']:
             case.locator('.analysis-case-field[data-field='+field+']').get_by_role('button',name='预览图片',exact=True).click()
@@ -295,7 +334,7 @@ def test_two_real_schemes_three_scopes_media_history_reload_and_responsive(brows
         for width in [1440,1024,390]:
             p.set_viewport_size(dict(width=width,height=1100));assert p.evaluate('document.documentElement.scrollWidth<=innerWidth+1');expect(p.get_by_role('button',name='应用筛选与分组',exact=True)).to_be_visible();expect(case.locator('.analysis-case-list button')).to_have_count(3);p.evaluate('()=>scrollTo(0,0)');p.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');p.screenshot(path=str(tmp_path/('groups-'+str(width)+'.png')),full_page=True)
         cache=p.evaluate('(v)=>new ForgeAnalysisState.Store().caseDraft(v.project,v.digest)',dict(project=f['project'],digest=f['source']['digest']));assert cache['id'].startswith('case-groups-v3:');assert len({(item.get('target_variant'),item.get('target_field')) for item in cache['answers']})==3
-        p.get_by_role('button',name='保存并下一条',exact=True).click();expect(p.get_by_role('heading',name='Case 1',exact=True)).to_be_visible();expect(p.get_by_label('标注 备注',exact=True)).to_have_value('')
+        p.get_by_role('button',name='保存并下一条',exact=True).click();expect(p.get_by_role('heading',name='蓝色波点杯',exact=True)).to_be_visible();expect(p.locator('p.case-ui-current-key')).to_have_text('Case 1');expect(p.get_by_label('标注 备注',exact=True)).to_have_value('')
         p.get_by_role('button',name='画廊',exact=True).click();p.get_by_label('显示输出方案或字段',exact=True).select_option('group:next');expect(case.locator('.case-ui-output-group')).to_have_count(3);expect(case.locator('.case-ui-output-group[data-case-key=\"2\"]')).to_contain_text('null');expect(case.locator('.case-media-field')).to_have_count(4);expect(case.get_by_role('button',name='固定媒体供评测',exact=True)).to_have_count(3)
         for host in case.locator('.case-media-field').all():
             capture=host.get_by_role('button',name='固定媒体供评测',exact=True)
