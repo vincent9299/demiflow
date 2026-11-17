@@ -1308,7 +1308,10 @@ def collect_repository(out_dir: Path) -> dict[str, Any]:
     proc = subprocess.run(
         [sys.executable, "-B", "-m", "pytest", "--collect-only", "-q", "tests"],
         cwd=str(WORKTREE),
-        env={**os.environ, "PYTHONPATH": str(WORKTREE)},
+        # Native workers import the test helpers captured by the original
+        # callbacks (for example _worker_event_fixtures). Bind both directories
+        # to this checkout so the child and its workers see the same code.
+        env={**os.environ, "PYTHONPATH": os.pathsep.join((str(WORKTREE), str(WORKTREE / "tests")))},
         capture_output=True,
         text=True,
         timeout=1200,
