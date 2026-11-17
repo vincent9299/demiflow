@@ -56,7 +56,7 @@ def _services(store, port, *, stop=lambda: None):
 
 def _spec(*, version=True, occurrence='shuffle-a'):
     from test_runtime_v3_c import make
-    config = {'seed': 7, 'occurrence_id': occurrence}
+    config = {'seed': 7, 'occurrence_id': hashlib.sha256(occurrence.encode()).hexdigest()}
     if version:
         config['shuffle_order_version'] = 'typed-multiset-v1'
     return make('KernelSpec', kind='RandomShuffleOp', configuration=config,
