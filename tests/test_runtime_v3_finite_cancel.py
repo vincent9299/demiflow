@@ -217,7 +217,7 @@ def test_cancel_inside_intermediate_sort_merge_stops_before_next_spill_frame(tmp
     from demiflow.execution.kernels import ordering
     with _join_worker(tmp_path) as item:
         services = item.kernel._ports[item.port]._services
-        spec = replace(item.kernel._spec, kind='sort', configuration={'keys': ['key']})
+        spec = replace(item.kernel._spec, kind='SortOp', configuration={'keys': ['key']})
         # Three original durable sorted runs force an intermediate merge with
         # fan-in two. The observer delegates every write to the original store.
         runs = tuple(ref for offset in range(3) for ref in ordering.build_sort_runs(
