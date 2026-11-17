@@ -31,22 +31,31 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
         declaration = {'kind': 'dataflow', 'source': {'source_id': 'sink-metadata'}}
         run.journal.bind_execution_action(run.fence, ACTION, declaration)
         action = RunAction(run, ACTION, declaration)
-        store = RunArtifactStore(root=tmp_path / 'store', store_id='test',
+        store = RunArtifactStore(root=run.directory / '.dataflow-store', store_id='test',
             journal=DriverArtifactPort(action, bounds=budget), bounds=budget)
         try:
-            physical = make_physical(ACTION, make_graph(), store)
+            partitions = ('p0', 'p1', 'p2', 'p3', 'p4', 'p-empty', 'p-unknown')
+            physical = make_physical(ACTION, make_graph(), store, partitions=partitions)
             profile = ResourceProfile(requests={'cpu_millis': 100, 'memory_bytes': 65536})
             physical = replace(physical, bounds=budget,
                 stages=tuple(replace(stage, profile=profile) for stage in physical.stages))
             physical = replace(physical, plan_id=compute_physical_digest(physical))
-            runtime = runtime_services(action, physical, store)
+            runtime = runtime_services(action, physical, store, partition_ids=partitions)
             driver = driver_services(action, physical, store)
 
-            def stage(partition, values):
+            def stage(partition, values, *, external=False):
+                from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
                 spec = make_kernel(configuration={'sink_id': SINK_ID, 'partition_id': partition})
-                ref = sinks.prepare_sink_partition(
-                    (make_record(i, value, budget) for i, value in enumerate(values)),
-                    spec=spec, services=runtime)
+                def records():
+                    for i, value in enumerate(values):
+                        record = make_record(i, value, budget)
+                        if external:
+                            payload = _encode_payload(value, max_bytes=budget.max_row_bytes)
+                            ref = store.put(iter((payload,)), max_bytes=budget.max_row_bytes,
+                                media_type='application/octet-stream')
+                            record = replace(record, inline=None, payload_ref=ref)
+                        yield record
+                ref = sinks.prepare_sink_partition(records(), spec=spec, services=runtime)
                 manifest = json.loads(b''.join(store.read(ref, max_bytes=budget.max_control_bytes)))
                 raw = b''.join(store.read(ArtifactRef(**manifest['data_ref']), max_bytes=budget.max_batch_bytes))
                 actual = []
@@ -54,7 +63,11 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
                     document, fields = frames.decode_frame(line, budget)
                     record = frames.decode_document(document, record_id=fields['record_id'],
                         sequence=fields['sequence'], bounds=budget)
-                    actual.append(thaw_record_value(record.inline))
+                    value = thaw_record_value(record.inline)
+                    if record.payload_ref is not None:
+                        value = _decode_payload(b''.join(store.read(record.payload_ref,
+                            max_bytes=budget.max_row_bytes)), max_bytes=budget.max_row_bytes)
+                    actual.append(value)
                 assert actual == values
                 assert manifest['rows'] == len(values)
                 return ref, manifest
@@ -67,21 +80,33 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
             assert consistent['columns'] == ['x'] and consistent['total_rows'] == 2
 
             different, _ = stage('p2', [{'y': 3}])
-            for refs in ((first, different), (different, first)):
+            unknown, unknown_manifest = stage('p-unknown', [{'x': 4}], external=True)
+            assert unknown_manifest['columns'] is None
+            assert 'non_mapping_values' not in unknown_manifest
+            for refs in ((first, different), (different, first),
+                         (first, different, unknown), (unknown, different, first)):
                 with pytest.raises(DataflowError, match='SOURCE_CHANGED.*schema drifted'):
                     sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, services=driver)
 
             value, value_manifest = stage('p3', [['a', 'b']])
             assert value_manifest['columns'] is None
+            assert value_manifest['non_mapping_values'] is True
             for refs in ((first, different, value), (value, different, first)):
                 mixed = sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, services=driver)
                 assert mixed['columns'] is None and 'schema_ref' not in mixed
                 assert mixed['total_rows'] == 3
             mixed_ref, mixed_manifest = stage('p4', [{'x': 1}, ['a', 'b'], {'y': 2}])
             assert mixed_manifest['columns'] is None
+            assert mixed_manifest['non_mapping_values'] is True
             combined = sinks.combine_prepared_sinks((first, mixed_ref), sink_id=SINK_ID, services=driver)
             assert combined['columns'] is None and 'schema_ref' not in combined
             assert combined['total_rows'] == 4
+            for malformed in (None, 0, 1, 'true', []):
+                raw = json.dumps({**unknown_manifest, 'non_mapping_values': malformed}).encode()
+                invalid = store.put(iter((raw,)), max_bytes=budget.max_control_bytes,
+                    media_type=sinks.MANIFEST_MEDIA)
+                with pytest.raises(DataflowError, match='CORRUPT_ARTIFACT.*non_mapping_values'):
+                    sinks.combine_prepared_sinks((first, different, invalid), sink_id=SINK_ID, services=driver)
         finally:
             store.close()
         run.journal.complete_execution_action(run.fence, ACTION, {'kind': 'test-complete'})
