@@ -1,0 +1,87 @@
+"""Sink metadata uses real bounded artifacts for table and value collections."""
+from dataclasses import replace
+import json
+
+import pytest
+
+from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.dataflow_authority import DriverArtifactPort
+from demiflow.execution.dataflow_store import RunArtifactStore
+from demiflow.execution import dataflow_record_frames as frames
+from demiflow.execution import dataflow_sinks as sinks
+from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.resources.contracts import ResourceProfile
+
+
+def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
+    from runtime_v3_regression_inventory import assert_private
+    from test_runtime_v3_c import bounds
+    from test_runtime_v3_d import (ACTION, SINK_ID, make_graph, make_physical,
+        make_kernel, make_record, runtime_services, driver_services)
+    from demiflow.execution.dataflow_seal import compute_physical_digest
+    assert_private()
+    # This new case admits the actual frame workspace. D009/D010 retain their
+    # original 1 KiB grants and are not changed to reach the metadata branch.
+    budget = bounds(max_nodes=16, max_edges=16, max_partitions=8, max_depth=16,
+        max_control_bytes=8192, max_row_bytes=4096, max_batch_bytes=8192,
+        max_resident_bytes=65536, max_state_bytes=65536, max_spill_bytes=1024**2,
+        max_pending_events=16, max_open_files=16, max_output_rows=16)
+    with RunContext.start(tmp_path / 'run') as run:
+        declaration = {'kind': 'dataflow', 'source': {'source_id': 'sink-metadata'}}
+        run.journal.bind_execution_action(run.fence, ACTION, declaration)
+        action = RunAction(run, ACTION, declaration)
+        store = RunArtifactStore(root=tmp_path / 'store', store_id='test',
+            journal=DriverArtifactPort(action, bounds=budget), bounds=budget)
+        try:
+            physical = make_physical(ACTION, make_graph(), store)
+            profile = ResourceProfile(requests={'cpu_millis': 100, 'memory_bytes': 65536})
+            physical = replace(physical, bounds=budget,
+                stages=tuple(replace(stage, profile=profile) for stage in physical.stages))
+            physical = replace(physical, plan_id=compute_physical_digest(physical))
+            runtime = runtime_services(action, physical, store)
+            driver = driver_services(action, physical, store)
+
+            def stage(partition, values):
+                spec = make_kernel(configuration={'sink_id': SINK_ID, 'partition_id': partition})
+                ref = sinks.prepare_sink_partition(
+                    (make_record(i, value, budget) for i, value in enumerate(values)),
+                    spec=spec, services=runtime)
+                manifest = json.loads(b''.join(store.read(ref, max_bytes=budget.max_control_bytes)))
+                raw = b''.join(store.read(ArtifactRef(**manifest['data_ref']), max_bytes=budget.max_batch_bytes))
+                actual = []
+                for line in raw.splitlines(keepends=True):
+                    document, fields = frames.decode_frame(line, budget)
+                    record = frames.decode_document(document, record_id=fields['record_id'],
+                        sequence=fields['sequence'], bounds=budget)
+                    actual.append(thaw_record_value(record.inline))
+                assert actual == values
+                assert manifest['rows'] == len(values)
+                return ref, manifest
+
+            first, first_manifest = stage('p0', [{'x': 1}])
+            same, _ = stage('p1', [{'x': 2}])
+            empty, _ = stage('p-empty', [])
+            assert first_manifest['columns'] == ['x']
+            consistent = sinks.combine_prepared_sinks((first, same, empty), sink_id=SINK_ID, services=driver)
+            assert consistent['columns'] == ['x'] and consistent['total_rows'] == 2
+
+            different, _ = stage('p2', [{'y': 3}])
+            for refs in ((first, different), (different, first)):
+                with pytest.raises(DataflowError, match='SOURCE_CHANGED.*schema drifted'):
+                    sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, services=driver)
+
+            value, value_manifest = stage('p3', [['a', 'b']])
+            assert value_manifest['columns'] is None
+            for refs in ((first, different, value), (value, different, first)):
+                mixed = sinks.combine_prepared_sinks(refs, sink_id=SINK_ID, services=driver)
+                assert mixed['columns'] is None and 'schema_ref' not in mixed
+                assert mixed['total_rows'] == 3
+            mixed_ref, mixed_manifest = stage('p4', [{'x': 1}, ['a', 'b'], {'y': 2}])
+            assert mixed_manifest['columns'] is None
+            combined = sinks.combine_prepared_sinks((first, mixed_ref), sink_id=SINK_ID, services=driver)
+            assert combined['columns'] is None and 'schema_ref' not in combined
+            assert combined['total_rows'] == 4
+        finally:
+            store.close()
+        run.journal.complete_execution_action(run.fence, ACTION, {'kind': 'test-complete'})
