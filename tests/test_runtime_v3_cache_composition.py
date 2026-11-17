@@ -1,4 +1,6 @@
-"""A cached actor resumes into a materialized result on the actual provider."""
+"""Cached state resumes into a materialized result on the actual provider."""
+from functools import partial
+
 import pytest
 
 from demiflow import data
@@ -21,10 +23,38 @@ class Interrupted(Exception):
     pass
 
 
-def test_cached_actor_resume_materialize_shuffle_and_read(provider, tmp_path, monkeypatch):
+def _counter(kind):
+    if kind == 'actor':
+        return Counter()
+    if kind == 'closure':
+        count = 0
+
+        def count_closure(value):
+            nonlocal count
+            count += 1
+            return count
+
+        return count_closure
+    if kind == 'default':
+        def count_default(value, counts=[0]):
+            counts[0] += 1
+            return counts[0]
+
+        return count_default
+    assert kind == 'partial'
+
+    def count_partial(value, *, counts):
+        counts[0] += 1
+        return counts[0]
+
+    return partial(count_partial, counts=[0])
+
+
+@pytest.mark.parametrize('callback_kind', ['actor', 'closure', 'default', 'partial'])
+def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kind, tmp_path, monkeypatch):
     def flow():
         return data.from_items([{'value': n} for n in range(6)]).map_cached(
-            Counter(), cache_dir=tmp_path / 'cache', version='v1',
+            _counter(callback_kind), cache_dir=tmp_path / 'cache', version='v1',
             inputs=['value'], output='count')
 
     original = DataflowExecution.pump
