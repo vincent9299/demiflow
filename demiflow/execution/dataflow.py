@@ -314,9 +314,9 @@ class DataflowExecution:
             lease = replace(lease, grant_ref=staged)
         self._services.journal_service.register_worker(lease, stage.occurrences)
         endpoint = make_host_endpoint(lease, services=self._services)
-        from .dataflow_residency import participants_for
+        from .dataflow_durable_residency import participant_ids
         owns_image = self._restore_image is not None and any(
-            c.participant_id in participants_for(self._physical, (stage.stage_id,))
+            c.participant_id in participant_ids(self._physical, lease.partition_ids)
             for c in self._restore_image.contributions)
         endpoint._recovery_image = self._restore_image if owns_image else None
         endpoint.prepare(self._assignment(lease, stage))

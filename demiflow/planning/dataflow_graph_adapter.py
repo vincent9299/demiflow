@@ -400,9 +400,16 @@ def specialize_graph_exchanges(graph, stages, exchanges, *, bounds):
         declaration = incoming or outgoing
         credit = graph_credit(declaration, bounds=bounds)
         mode = declaration['exchange_mode']
+        storage = bounds.max_spill_bytes
+        if mode != 'memory_incremental' and 'storage_bytes' in declaration:
+            router = edge.consumer if incoming is not None else edge.producer
+            width = sum(1 for item in exchanges if router in (
+                edges[item.edge_id].producer, edges[item.edge_id].consumer))
+            storage = min(storage, declaration['storage_bytes']) // width
+            if storage < 1:
+                raise DataflowError('BUDGET_EXCEEDED', 'graph storage budget cannot admit every declared channel')
         updates = {'mode': mode, 'credit_rows': credit['rows'], 'credit_bytes': credit['bytes'],
-                   'storage_bytes': 0 if mode == 'memory_incremental' else min(
-                       declaration.get('storage_bytes', bounds.max_spill_bytes), bounds.max_spill_bytes),
+                   'storage_bytes': 0 if mode == 'memory_incremental' else storage,
                    'scope_id': 'scope-' + edge.edge_id if mode == 'finite_sealed' else None,
                    'reason': 'explicit graph adapter: original v3 routing and ACK'}
         if incoming is not None:
