@@ -824,9 +824,7 @@
           {label: '范围', value: '首个执行动作', basis: 'compile', reason: null}],
         state: {label: '尚未运行', tone: 'neutral'}};
     });
-    const notices = ['由引擎编译当前入口与已保存配置；仅覆盖首个执行动作，后续依赖运行结果的步骤尚未解析。'];
-    if (Array.isArray(value.limitations)) for (const item of value.limitations.slice(0, 4))
-      if (typeof item === 'string') notices.push(bounded(item, 512));
+    const notices = ['首个 Dataset 执行动作的完整数据流，尚未运行。依赖运行结果的后续动作不在本图。'];
     return {binding: value.basis, choice: {kind: 'preview', actionId: dag.action_id,
       label: '编译计划 · 尚未运行 · 仅首个执行动作', reason: null}, execution: null,
       nodes, edges, selected: selection?.previewDigest === value.basis.digest

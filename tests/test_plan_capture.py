@@ -179,6 +179,19 @@ def test_program_labels_read_only_frozen_compiler_facts(no_execution):
     assert transform['program']['qualname'] == named_transform.__qualname__
 
 
+def test_declared_business_labels_are_compiler_facts_not_topology(no_execution):
+    captured = capture_pipeline(lambda: data.range(2).map(forbidden, label='筛选参考候选').take_all(), {})
+    before = build_logical_plan_view(captured.compiled.graph, declarations=captured.compiled.declarations)
+    after = build_logical_plan_view(captured.compiled.graph, declarations=captured.compiled.declarations,
+                                   observation_labels=captured.compiled.observation_labels)
+    transform = next(n for n in after['nodes'] if n['op_kind'] == 'MapOp')
+    assert transform['label'] == '筛选参考候选'
+    assert before['dag_id'] == after['dag_id'] and before['edges'] == after['edges']
+    assert [n['occurrence_id'] for n in before['nodes']] == [n['occurrence_id'] for n in after['nodes']]
+    with pytest.raises(ValueError, match='compiled graph'):
+        build_logical_plan_view(captured.compiled.graph, observation_labels={'invented': '假节点'})
+
+
 def test_lance_write_keeps_original_program_without_publication(no_execution, tmp_path):
     import pyarrow as pa
     from demiflow.execution.lance_action import bind_lance_action

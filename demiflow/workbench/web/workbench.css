@@ -66,6 +66,12 @@
 .wb-body:fullscreen{padding:16px;background:#fff;overflow:auto;align-content:start}
 .wb-body:fullscreen .wb-graph{height:calc(100dvh - 160px);min-height:300px}
 .wb-body:fullscreen .wb-inspector{max-height:calc(100dvh - 32px)}
+.wb-node-jump{max-width:240px;text-overflow:ellipsis}
+.wb-prompt-summary{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.wb-source-tabs button:disabled{opacity:.45;cursor:not-allowed}
+.wb-material-basis{padding-bottom:6px;border-bottom:1px solid var(--line)}
+.wb-prompt-text,.wb-implementation-text{min-width:0;line-height:1.75}
+.wb-source-body{max-height:520px}
 
 /* Compile controls accept project-local saved configurations without registering a run. */
 .wb-plan-preview-controls{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:4px 0 12px;min-width:0}

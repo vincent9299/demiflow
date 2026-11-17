@@ -30,7 +30,7 @@
   }
 
   /* C05: bounded DAG layering + fork layout, stable in model order, O(V+E). */
-  function layoutGraph(model, {width = 0, nodeWidth = 200, nodeHeight = 116, gapX = 36, gapY = 20} = {}) {
+  function layoutGraph(model, {width = 0, nodeWidth = 200, nodeHeight = 116, gapX = 36, gapY = 20, direction = 'horizontal'} = {}) {
     const nodes = model.nodes, edges = model.edges;
     if (nodes.length > MAX_NODES || edges.length > MAX_EDGES) throw new Error('图超过显示预算');
     const index = new Map(nodes.map((node, i) => [node.key, i]));
@@ -61,6 +61,12 @@
     const levels = [...columns.keys()].sort((a, b) => a - b);
     const colIndex = new Map(levels.map((l, i) => [l, i]));
     const maxRows = Math.max(1, ...[...columns.values()].map(c => c.length));
+    if(direction==='vertical'){
+      const positions=new Array(nodes.length),contentWidth=maxRows*(nodeWidth+gapX)-gapX;
+      for(const l of levels){const col=columns.get(l),offset=(contentWidth-(col.length*(nodeWidth+gapX)-gapX))/2;
+        col.forEach((i,row)=>{positions[i]={key:nodes[i].key,x:24+offset+row*(nodeWidth+gapX),y:24+colIndex.get(l)*(nodeHeight+64),width:nodeWidth,height:nodeHeight};});}
+      return {nodes:positions,width:Math.max(width,48+contentWidth),height:levels.length?48+levels.length*(nodeHeight+64)-64:0};
+    }
     const contentHeight = maxRows * (nodeHeight + gapY) - gapY;
     const positions = new Array(nodes.length);
     for (const l of levels) {
@@ -106,22 +112,26 @@
       toolButton('适应全图', () => {viewMode === 'fit' ? readable() : fit();}),
       toolButton('缩小', () => zoomBy(1 / 1.2)),
       toolButton('放大', () => zoomBy(1.2)));
+    const directionButton=toolButton('改为纵向',()=>{direction=direction==='horizontal'?'vertical':'horizontal';if(currentModel){rebuild(currentModel);highlight(currentModel.selected);}});
+    const zoomText=document.createElement('span');zoomText.className='wb-zoom-level';zoomText.setAttribute('aria-live','polite');
+    toolbar.append(directionButton,zoomText);
     wrapper.append(toolbar, notices, scroll);
     host.replaceChildren(wrapper);
 
-    let layout = null, fingerprint = null, zoomLevel = 1, viewMode = 'readable';
+    let layout = null, fingerprint = null, zoomLevel = 1, viewMode = 'readable', direction='horizontal', currentModel=null;
     let width = 0, height = 0, resizeFrame = null, disposed = false;
     const elements = new Map();
 
     function size() {
       canvas.style.width = Math.round(width * zoomLevel) + 'px';
       canvas.style.height = Math.round(height * zoomLevel) + 'px';
+      zoomText.textContent=Math.round(zoomLevel*100)+'%';
     }
     function readable() {viewMode = 'readable'; zoomLevel = 1; size();}
     function fit() {
       viewMode = 'fit';
       const w = scroll.clientWidth || host.clientWidth || 600, h = scroll.clientHeight || host.clientHeight || 300;
-      zoomLevel = Math.max(.25, Math.min(1, (w - 16) / Math.max(1, width), (h - 16) / Math.max(1, height)));
+      zoomLevel = Math.max(.01, Math.min(1, (w - 16) / Math.max(1, width), (h - 16) / Math.max(1, height)));
       size();
     }
     function zoomBy(factor) {viewMode = 'manual'; zoomLevel = Math.max(.25, Math.min(2, zoomLevel * factor)); size();}
@@ -187,6 +197,10 @@
             const x = a.x + a.width, y = a.y + a.height * fraction;
             d = `M${x} ${y} C${x + 46} ${y - 30},${x + 46} ${y + 30},${x} ${Math.min(a.y + a.height - 8, y + 18)}`;
             labelX = x + 40; labelY = y;
+          } else if(direction==='vertical'&&b.y>a.y){
+            const x1=a.x+a.width*fraction,y1=a.y+a.height,x2=b.x+b.width*fraction,y2=b.y,my=(y1+y2)/2;
+            d=`M${x1} ${y1} C${x1} ${my},${x2} ${my},${x2} ${y2}`;
+            labelX=(x1+x2)/2+30;labelY=my-5;
           } else if (b.x > a.x) {
             const x1 = a.x + a.width, y1 = a.y + a.height * fraction, x2 = b.x, y2 = b.y + b.height * fraction, mx = (x1 + x2) / 2;
             d = `M${x1} ${y1} C${mx} ${y1},${mx} ${y2},${x2} ${y2}`;
@@ -262,7 +276,9 @@
     }
     function rebuild(model) {
       canvas.replaceChildren(); elements.clear();
-      layout = layoutGraph(model, {width: scroll.clientWidth || host.clientWidth || 0});
+      layout = layoutGraph(model, {width: scroll.clientWidth || host.clientWidth || 0,direction});
+      directionButton.textContent=direction==='horizontal'?'改为纵向':'改为横向';
+      directionButton.setAttribute('aria-label',directionButton.textContent);
       width = layout.width; height = layout.height;
       canvas.setAttribute('viewBox', `0 0 ${width} ${height}`);
       canvas.setAttribute('aria-label', model.choice.kind === 'sealed' ? '运行封存计划' : '数据算子图');
@@ -276,6 +292,7 @@
     }
     function update(model) {
       if (disposed || !model) return;
+      currentModel=model;
       if (!host.contains(wrapper)) host.replaceChildren(wrapper);
       const fp = structFingerprint(model);
       if (fingerprint === fp && elements.size) {

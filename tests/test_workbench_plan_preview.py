@@ -59,6 +59,40 @@ def run_pipeline():
     assert business_bytes(original) == before
 
 
+def test_http_node_details_keep_exact_compiled_source_and_require_matching_identity(original):
+    operator = original / 'operators/clean.py'
+    operator.write_text('def clean(row):\n    """Original frozen material."""\n    return row\n')
+    (original / 'dispatch.py').write_text('from demiflow import data\n'
+        'from shipping.operators.clean import clean\n'
+        'def config(): return {}\n'
+        'def run_pipeline(): return data.from_items([{\"id\":1}]).map(clean).take_all()\n')
+    ws.init_workspace(original, existing=True)
+    with service(original) as app:
+        code, result = request(app, '/api/plan-preview', dict(entry='dispatch.py:run_pipeline', params=None))
+        assert code == 200, result
+        assert '_node_details' not in result
+        node = next(n for n in result['dag']['nodes'] if (n.get('program') or {}).get('qualname') == 'clean')
+        assert node['source_views']['implementation']['available']
+        basis = {k: result['basis'][k] for k in ('entry', 'params', 'digest', 'dag_id')}
+        address = dict(basis=dict(basis, kind='preview'), logical_node_id=node['logical_node_id'],
+                       occurrence_id=node['occurrence_id'], kind='implementation')
+        code, detail = request(app, '/api/plan-node-detail', address)
+        assert code == 200, detail
+        assert detail['format'] == 'demiflow.plan_node_detail.v1'
+        assert detail['basis'] == address['basis']
+        assert detail['source_basis'] == 'compiled_snapshot'
+        assert 'Original frozen material' in detail['text']
+        operator.write_text('def clean(row):\n    return {\"changed\": True}\n')
+        code, still_frozen = request(app, '/api/plan-node-detail', address)
+        assert code == 200 and still_frozen == detail
+        code, rejected = request(app, '/api/plan-node-detail', dict(address, logical_node_id='unrelated'))
+        assert code == 409 and rejected['code'] == 'conflict'
+        code, invalid = request(app, '/api/plan-node-detail', dict(address, kind={}))
+        assert code == 400 and invalid['code'] == 'invalid_request'
+        code, newer = request(app, '/api/plan-preview', dict(entry='dispatch.py:run_pipeline', params=None))
+        assert code == 200 and newer['basis']['digest'] != result['basis']['digest']
+
+
 @pytest.mark.parametrize('required', [False, True])
 def test_http_accepts_null_params_and_explains_required_arguments(original, required):
     signature = '*, stage, target' if required else ''

@@ -30,6 +30,16 @@
     let lastRunGraphAt=0,graphStatus=null,graphModel=null,actionExplicit=false;
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     let planPreview=null,previewSelection=null,previewSequence=0,previewBusy=false,previewInputBasis=null;
+    const previewStorage='demiflow.preview-locators.v1';
+    function storedPreviews(){try{const raw=sessionStorage.getItem(previewStorage);if(!raw||raw.length>65536)return {};const value=JSON.parse(raw);return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch{return {};}}
+    function savePreviewLocator(clear=false){
+      try{const values=storedPreviews();delete values[project];
+        if(!clear&&planPreview)values[project]={entry:planPreview.basis.entry,params:planPreview.basis.params,digest:planPreview.basis.digest,occurrence:previewSelection?.occurrenceId||null,kind:sourceKind};
+        const entries=Object.entries(values).slice(-8);let raw=JSON.stringify(Object.fromEntries(entries));
+        while(raw.length>65536&&entries.length){entries.shift();raw=JSON.stringify(Object.fromEntries(entries));}
+        sessionStorage.setItem(previewStorage,raw);
+      }catch{/* Optional navigation memory never replaces current facts. */}
+    }
     const aliasDrafts=new Map();
     const data=()=>state.current();
     const current=t=>!disposed&&root.isConnected&&state.valid(t);
@@ -80,11 +90,10 @@
     previewPath.setAttribute('list',previewPaths.id);field('解析配置',previewPath,previewControls);previewControls.append(previewPaths);
     const previewButton=button('解析执行计划',()=>compilePlanPreview(),previewControls);
     const previewHint=$('span','只编译当前入口与已保存配置，不启动数据处理。','wb-caption');previewControls.append(previewHint);
-    previewPath.oninput=()=>{if(!disposed){clearPlanPreview(true);if(!ctx.flows.find(f=>f.entry===working?.entry)?.parameters?.length)paramsChoice.value=previewPath.value.trim();updateActions();}};
+    previewPath.oninput=()=>{if(!disposed){savePreviewLocator(true);clearPlanPreview(true);if(!ctx.flows.find(f=>f.entry===working?.entry)?.parameters?.length)paramsChoice.value=previewPath.value.trim();updateActions();}};
     const graph=ForgeWorkbenchGraph.mount(graphHost,{onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
-    button('−',()=>graph.zoom(.8),tools).setAttribute('aria-label','缩小算子图');
-    button('+',()=>graph.zoom(1.25),tools).setAttribute('aria-label','放大算子图');
-    button('适应',()=>graph.fit(),tools).setAttribute('aria-label','适应算子图');
+    const nodeJump=select('定位算子',[],null);nodeJump.className='wb-node-jump';tools.append(nodeJump);
+    nodeJump.onchange=()=>{const card=graphModel?.nodes.find(n=>n.key===nodeJump.value);if(card)selectGraphNode(card.selection).catch(e=>message(e.message,'error-box'));};
     const expandGraph=button('展开画布',async()=>{
       if(document.fullscreenElement===body)await document.exitFullscreen();
       else await body.requestFullscreen();
@@ -182,13 +191,19 @@
       accessState.hidden=!!run||registered()&&can('run_submit');
       accessState.textContent=!working?.entry?'尚未发现可用入口。可在开发中编写流程，再通过“接入与权限”登记。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；可解析已保存配置的执行计划，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       for(const[key,b]of modes){b.classList.toggle('active',data().mode===key);b.setAttribute('aria-pressed',String(data().mode===key));}
-      for(const[key,b]of sourceButtons)b.classList.toggle('active',sourceKind===key);
+      const previewNode=planPreview?.dag.nodes.find(n=>n.occurrence_id===previewSelection?.occurrenceId);
+      for(const[key,b]of sourceButtons){
+        b.classList.toggle('active',sourceKind===key);b.setAttribute('aria-pressed',String(sourceKind===key));
+        b.disabled=!!previewNode&&previewNode.source_views?.[key]?.available!==true;
+        b.title=b.disabled?(previewNode.source_views?.[key]?.reason||'本节点没有已核验的这类材料。'):'';
+      }
       for(const[key,b]of detailButtons){b.classList.toggle('active',detailKind===key);b.disabled=!run;}
       sourceToggle.textContent=sourceOpen?'收起代码':'展开代码';sourceToggle.setAttribute('aria-expanded',String(sourceOpen));
       guardSettings();
     }
     entryChoice.onchange=async()=>{if(disposed||!entryChoice.isConnected)return;const entry=entryChoice.value,params=(ctx.flows.find(f=>f.entry===entry)?.parameters||[])[0]||null;await useWorking(entry,params);};
     paramsChoice.onchange=async()=>{
+      savePreviewLocator(true);
       if(disposed||!paramsChoice.isConnected)return;
       if(!(ctx.flows.find(f=>f.entry===entryChoice.value)?.parameters||[]).length){
         previewPath.value=paramsChoice.value;clearPlanPreview(true);updateActions();return;
@@ -260,9 +275,10 @@
         if(value?.basis?.entry!==entry||value?.basis?.params!==params)throw new Error('解析结果与所选入口、配置不一致。');
         presentation.buildPlanPreviewModel(value);
         planPreview=value;previewSelection=null;state.setGraphSelection(null);state.chooseNode(null);
+        savePreviewLocator();
         paintGraph();sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren($('p','这是尚未运行的编译计划。节点来自引擎，不借用静态检查节点的源码或观测。','wb-caption'));
         if(graphModel.nodes[0])paintPreviewNode(graphModel.nodes[0].selection);
-        message('已解析首个执行动作。后续依赖运行结果的步骤尚未解析；实际运行图以运行记录为准。');
+        message('');
       }finally{if(sequence===previewSequence){previewBusy=false;updateActions();}}
     }
     function paintPreviewGraph(){
@@ -270,25 +286,33 @@
       graphModel=model;graph.update(model);graph.select(model.selected);
       graphTitle.textContent='编译计划 · '+model.nodes.length+' 节点 / '+model.edges.length+' 条边';
       basisLabel.textContent=model.choice.label;
-      graphLegend.textContent='实线：引擎编译的数据流与实例端口；尚未运行，不包含运行状态或资源放置。';
+      graphLegend.textContent='点击算子查看实现与 Prompt；箭头表示引擎编译的数据流。';
+      paintNodeJump(model);
       actionBar.hidden=locator.hidden=true;
       advanced.hidden=false;advanced.replaceChildren($('summary','高级诊断'));
       raw('编译依据',{basis:planPreview.basis,scope:planPreview.scope,entry_completed:planPreview.entry_completed,kind:planPreview.kind,provider:planPreview.provider,dag_id:planPreview.dag.dag_id},advanced);
       return model;
     }
+    function paintNodeJump(model){
+      nodeJump.replaceChildren();const empty=$('option','定位算子…');empty.value='';nodeJump.append(empty);
+      for(const card of model.nodes){const option=$('option',card.title);option.value=card.key;nodeJump.append(option);}
+      nodeJump.value=model.selected||'';nodeJump.disabled=!model.nodes.length;
+    }
     function paintPreviewNode(selection){
       if(!planPreview||run||selection.previewDigest!==planPreview.basis.digest)return;
       const node=planPreview.dag.nodes.find(n=>n.occurrence_id===selection.occurrenceId&&n.logical_node_id===selection.logicalNodeId);
       const card=graphModel?.nodes.find(n=>n.key===selection.key);if(!node||!card)return;
-      previewSelection=selection;graph.select(card.key);inspectorWhole=false;
+      previewSelection=selection;graph.select(card.key);nodeJump.value=card.key;inspectorWhole=false;
       inspector.replaceChildren($('h3',card.title),$('span','编译计划 · 尚未运行','wb-tag'));
-      inspector.append($('p','仅首个执行动作；节点声明与实际运行观测分开呈现。','wb-caption'));
+      inspector.append($('p','算子类型：'+node.op_kind,'wb-caption'));
       factLines(inspector,'输入端口',node.input_ports.map(port=>({label:port,value:'引擎输入端口',basis:'compile'})));
       factLines(inspector,'输出端口',node.output_ports.map(port=>({label:port,value:'引擎输出端口',basis:'compile'})));
       raw('算子声明',node.traits,inspector);
       raw('编译节点身份',{logical_node_id:node.logical_node_id,occurrence_id:node.occurrence_id},inspector);
-      sourceSequence++;disposeReaders(sourceBody);sourceTitle.textContent='编译节点';
-      sourceBody.replaceChildren($('p','尚未绑定封存源码与运行观测，不从静态检查节点推测对应关系。','wb-caption'));
+      sourceKind=node.source_views?.prompt?.available?'prompt':node.source_views?.implementation?.available?'implementation':'configuration';
+      savePreviewLocator();
+      sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;
+      loadSource().catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
     }
     function paintGraph(){
       if(planPreview&&!run&&!data().run)return paintPreviewGraph();
@@ -305,6 +329,7 @@
       graphModel=model;
       graph.update(model);
       graph.select(model.selected);
+      paintNodeJump(model);
       const title=model.choice.kind==='sealed'?'运行执行图':'尚无运行执行图';
       graphTitle.textContent=title+(model.nodes.length?' · '+model.nodes.length+' 节点 / '+model.edges.length+' 条边':'');
       basisLabel.textContent=(model.execution?'封存运行图':g.binding.basis_kind==='report'?'静态检查 · '+g.status+' · 尚无运行执行图':choice.label)+(scopeNode?' · 节点邻域':'');
@@ -606,9 +631,54 @@
         if(current(ticket)){if(result.no_change)message('配置值未变化，未写入文件。');else{await useWorking(working.entry,working.params);message('配置已保存，图和检查需要重新核对。');}}
       }finally{busy=false;if(root.isConnected&&data().graph){if(data().mode==='checks')paintIssues();else paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);}updateActions();}
     }
+    async function loadPreviewSource(){
+      savePreviewLocator();
+      const preview=planPreview,selected=previewSelection,kind=sourceKind;
+      const node=preview.dag.nodes.find(n=>n.occurrence_id===selected.occurrenceId&&n.logical_node_id===selected.logicalNodeId);
+      const ticket=state.capture(),sequence=++sourceSequence;
+      const names={implementation:'实现源码',prompt:'Prompt 模板',configuration:'算子配置',callsite:'调用点'};
+      sourceTitle.textContent=names[kind]+' · '+(node?.label||node?.op_kind||'节点');
+      if(!node?.source_views?.[kind]?.available){
+        sourceBody.append($('p',node?.source_views?.[kind]?.reason||'本节点尚无绑定材料；不从静态检查节点推测对应关系。','wb-caption'));return;
+      }
+      const basis={kind:'preview',entry:preview.basis.entry,params:preview.basis.params,digest:preview.basis.digest,dag_id:preview.basis.dag_id};
+      const address={basis,logical_node_id:node.logical_node_id,occurrence_id:node.occurrence_id,kind};
+      const valid=()=>current(ticket)&&sequence===sourceSequence&&sourceOpen&&!run
+        &&planPreview?.basis.digest===basis.digest&&previewSelection?.occurrenceId===node.occurrence_id&&sourceKind===kind;
+      sourceBody.append($('p','正在读取解析时快照…','wb-caption'));
+      try{
+        const value=await request('plan-node-detail',{},address);
+        if(!valid())return;
+        if(value?.format!=='demiflow.plan_node_detail.v1'||value.logical_node_id!==address.logical_node_id
+            ||value.occurrence_id!==address.occurrence_id||value.kind!==kind
+            ||Object.keys(basis).some(k=>value.basis?.[k]!==basis[k])||value.source_basis!=='compiled_snapshot')
+          throw new Error('节点材料身份不一致，请重新解析。');
+        disposeReaders(sourceBody);sourceBody.replaceChildren();
+        if(value.availability!=='available'){sourceBody.append($('p',value.reason||'本节点没有这类材料。','wb-caption'));return;}
+        sourceBody.append($('div','解析时快照'+(value.path?' · '+value.path:'')+(value.start_line?' : '+value.start_line+'–'+value.end_line:''),'wb-caption wb-material-basis'));
+        const meta=value.metadata;
+        if(meta&&kind==='prompt'){
+          const header=$('div',undefined,'wb-prompt-summary');
+          for(const [label,item] of [['版本',meta.version],['模型',meta.model],['服务',meta.transport],['响应格式',meta.response_format],['请求上限',meta.max_requests]])
+            if(item!==undefined&&item!==null)header.append($('span',label+'：'+String(item),'wb-tag'));
+          sourceBody.append(header);
+          const contract=details('输入、输出与响应结构',sourceBody);
+          contract.append($('pre',json({inputs:meta.inputs,output:meta.output,outputs:meta.outputs,response_schema:meta.response_schema,...(meta.routes?{routes:meta.routes}:{})}),'wb-code'));
+        }
+        if(typeof value.text!=='string')throw new Error('节点材料没有可读取的正文。');
+        const text=$('div',undefined,kind==='prompt'?'wb-prompt-text':'wb-implementation-text');sourceBody.append(text);
+        mountText(text,value.text,{sourceOnly:true,compactSource:true});
+        if(value.truncated)sourceBody.append($('p','正文超过 64 KiB 展示上限，当前只显示开头；摘要绑定完整原文。','wb-caption'));
+        raw('来源摘要',{sha256:value.sha256,dag_id:basis.dag_id,occurrence_id:node.occurrence_id},sourceBody);
+      }catch(error){
+        if(!valid()||error.name==='AbortError')return;
+        disposeReaders(sourceBody);sourceBody.replaceChildren($('p',error.message?.includes('preview_expired')?'解析快照已过期，请点击“解析执行计划”重新读取。':error.message,'error-box'));
+      }
+    }
     async function loadSource(){
       updateActions();disposeReaders(sourceBody);sourceBody.replaceChildren();
       if(!sourceOpen)return;
+      if(planPreview&&previewSelection&&!run)return loadPreviewSource();
       const g=data().graph,selection=data().selection,node=selection?.reportNodeId??data().node,ticket=state.capture(true),sequence=++sourceSequence;
       if(!g||!node){sourceBody.append($('p','选择节点后查看实现、调用点或公开配置。','wb-caption'));return;}
       if(g.binding.basis_kind==='run'&&selection&&!selection.reportNodeId){sourceBody.append($('p','该出现尚无节点身份桥；不借用其它节点的源码。','wb-caption'));return;}
@@ -1041,6 +1111,17 @@
     else if(view.kind==='inspection')await useWorking(firstEntry,firstParams,view.report_digest,'checks');
     else if(view.kind==='run_compare'){await useWorking(firstEntry,firstParams);await compare(view.left,view.right);}
     else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':'config');
+    if(!run&&['flows',undefined].includes(view.kind)){
+      const saved=storedPreviews()[project];
+      if(saved&&saved.entry===working?.entry&&(saved.params===null||typeof saved.params==='string'&&saved.params.length<=4096)){
+        previewPath.value=saved.params||'';if([...paramsChoice.options].some(o=>o.value===saved.params))paramsChoice.value=saved.params;
+        try{await compilePlanPreview();
+          if(planPreview?.basis.digest===saved.digest){const card=graphModel?.nodes.find(n=>n.selection.occurrenceId===saved.occurrence);
+            if(card){paintPreviewNode(card.selection);const node=planPreview.dag.nodes.find(n=>n.occurrence_id===saved.occurrence);
+              if(node.source_views?.[saved.kind]?.available){sourceKind=saved.kind;await loadSource();}}}
+        }catch(error){if(error.name!=='AbortError')message('重新解析未完成：'+error.message,'error-box');}
+      }
+    }
     if(view.kind==='runs'){historyOpen=true;historyPanel.hidden=false;historyButton.setAttribute('aria-expanded','true');await listRuns();}
     if(view.kind==='run'&&data().graph){
       if(view.action_id!=null){

@@ -157,6 +157,8 @@ def _preview(root, *, entry, params=None):
                 return function(**arguments)
             result = capture_pipeline(construct, {})
             params_sha = bound['params_sha']
+            from demiflow.workbench.graph.plan_details import build_plan_details
+            details = build_plan_details(result.compiled, sources=sources.digests, root=source_root)
         sources.verify()
         current_params_sha = (hashlib.sha256(read_bounded(ws.validate_parameter_path(root, params), 65536)).hexdigest()
                               if params is not None else None)
@@ -166,12 +168,19 @@ def _preview(root, *, entry, params=None):
         raise ForgeError('解析阶段需要写文件、联网或启动进程，已停止。请把这些操作放到 Dataset 执行阶段。',
                          code='operation_rejected') from exc
     basis = dict(entry=entry, params=params, entry_sha256=entry_sha,
-                 params_sha256=params_sha, sources=sources.digests, dag_id=result.compiled.graph.dag_id)
+                 params_sha256=params_sha, sources=sources.digests, dag_id=result.compiled.graph.dag_id,
+                 details_sha256=content_digest(details))
     basis['digest'] = content_digest(basis)
     value = dict(format='demiflow.plan_preview.v1', available=True, basis=basis,
                  kind=result.kind, provider=result.provider, entry_completed=False,
-                 scope='first_action', dag=build_logical_plan_view(result.compiled.graph, declarations=result.compiled.declarations),
+                 scope='first_action', dag=build_logical_plan_view(result.compiled.graph, declarations=result.compiled.declarations,
+                                                               observation_labels=result.compiled.observation_labels),
                  limitations=['仅解析首个 Dataset 执行动作；依赖执行结果的后续动作尚未解析。',
                               '未启动 Dataset 数据读取与执行；不包含实际资源分配、运行状态或结果。'])
+    for node in value['dag']['nodes']:
+        node['source_views'] = {kind: dict(available=detail['availability'] == 'available', reason=detail['reason'])
+                                for kind, detail in details.get(node['occurrence_id'], {}).items()}
     bounded_json(value, 1024**2)
+    value['_node_details'] = details
+    bounded_json(value, 5 * 1024**2)
     return value

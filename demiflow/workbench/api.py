@@ -122,6 +122,7 @@ POST_FIELDS = {
     'audit-check': ({'kind', 'expected_policy'}, {'digest'}),
     'inspect': ({'entry', 'params'}, set()),
     'plan-preview': ({'entry', 'params'}, set()),
+    'plan-node-detail': ({'basis', 'logical_node_id', 'occurrence_id', 'kind'}, set()),
     'run-admission': ({'entry','params'}, {'limits'}),
     'run-request-reconcile': ({'request_id'},set()),
     'run-reconcile': ({'run_id', 'expected_attempt'}, set()),
@@ -231,6 +232,8 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.control_waiters = threading.BoundedSemaphore(3)
         self.snapshots=OrderedDict()
         self.snapshot_bytes=0
+        from demiflow.workbench.graph.preview_snapshots import PreviewSnapshots
+        self.plan_snapshots = PreviewSnapshots()
         self.development_readers = threading.BoundedSemaphore(2)
         self.development = None
         self.analysis = None
@@ -551,6 +554,9 @@ class Handler(BaseHTTPRequestHandler):
         if name in run_operations.HTTP_POST:
             return run_operations.http_arguments(run_operations.HTTP_POST[name], request)
         _fields(request, POST_FIELDS[name])
+        if name == 'plan-node-detail':
+            from demiflow.workbench.graph.preview_snapshots import validate_request
+            return validate_request(request)
         if name in development_http.POST_FIELDS or name in analysis_http.POST_FIELDS:
             # The fixed services own their closed, typed value schemas.
             return request
@@ -842,9 +848,14 @@ class Handler(BaseHTTPRequestHandler):
                         'config_write' if name in {'parameter-preview','parameters-update'} else
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
-            if name not in {'inspect','plan-preview','audit-check','project-check','run-admission'} and not permissions[permission]:
+            if name not in {'inspect','plan-preview','plan-node-detail','audit-check','project-check','run-admission'} and not permissions[permission]:
                 raise PermissionError('Required run permission is disabled: '+permission)
             request = self._body(name)
+            if name == 'plan-node-detail':
+                # Immutable, bounded in-process presentation material. Reading
+                # it does not occupy the separate source/compilation worker.
+                self._send(self.server.plan_snapshots.read(root, **request))
+                return
             with self._work(control=name=='run-cancel'):
                 if name in {'parameter-preview','parameters-update'}:
                     from demiflow.workbench.graph import parameters
@@ -871,7 +882,7 @@ class Handler(BaseHTTPRequestHandler):
                     value = api.inspect_flow(root, **request)
                 elif name == 'plan-preview':
                     from demiflow.workbench.graph.preview import preview
-                    value = preview(root, **request)
+                    value = self.server.plan_snapshots.put(root, preview(root, **request))
                 elif name == 'project-check':
                     value = api.check_project(root)
                 elif name == 'audit-check':

@@ -102,7 +102,8 @@ def capture_pipeline(entry, arguments) -> CapturedAction:
         _CURRENT.reset(token)
 
 
-def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[ProgramDeclaration, ...] = ()) -> dict:
+def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[ProgramDeclaration, ...] = (),
+                            observation_labels: Mapping[str, str] | None = None) -> dict:
     """Project a compiled graph without inventing placement or execution facts.
 
     IDs and all edges come directly from the engine's immutable DataflowGraph.
@@ -113,6 +114,10 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
     if not isinstance(graph, DataflowGraph):
         raise TypeError('build_logical_plan_view requires a DataflowGraph')
     semantic = {node.occurrence_id: node.semantic_id for node in graph.nodes}
+    labels = observation_labels if observation_labels is not None else {}
+    if (not isinstance(labels, Mapping) or not set(labels) <= set(semantic)
+            or any(type(v) is not str or not v for v in labels.values())):
+        raise ValueError('labels must name compiled graph occurrences')
     if type(declarations) is not tuple or any(type(d) is not ProgramDeclaration for d in declarations):
         raise TypeError('declarations must be the compiled ProgramDeclaration tuple')
     programs = {}
@@ -132,7 +137,7 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
     def presentation(node):
         program = programs.get(node.occurrence_id)
         prompt = node.kernel.configuration.get('prompt_name')
-        label = (prompt if type(prompt) is str else
+        label = labels.get(node.occurrence_id) or (prompt if type(prompt) is str else
                  program['qualname'] if program is not None else node.kernel.kind)
         return dict(label=label[:256], program=program)
 
