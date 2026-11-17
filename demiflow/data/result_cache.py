@@ -36,6 +36,37 @@ def _state_owner(value):
     return value.__self__ if inspect.ismethod(value) else value
 
 
+def _state_policy(value):
+    """Retain function bindings at the existing native function-state boundary."""
+    from ..execution.operator_policy import classify_operator_state
+    from ..execution.kernels.task_scope import function_residency_kind, snapshot_resident_function
+    from ..operator_llm.runtime import PromptActor
+    owner = _state_owner(value)
+    if owner is None:
+        return owner, 'none', None
+    policy = classify_operator_state(owner, phase='instance')
+    if policy.mode == 'unsupported':
+        return owner, policy.mode, policy.reason
+    if policy.mode == 'function':
+        kind = function_residency_kind(value)
+        if kind == 'nonrecoverable':
+            image = snapshot_resident_function(value, max_bytes=1)
+            return owner, kind, image['reason']
+        return owner, 'function_slots_v1' if kind == 'adapter' else 'none', None
+    # Actor hooks own the actor, not mutable values bound outside that actor.
+    # Reuse the existing function call-binding admission without serializing an
+    # actor into a new state format. Immutable partial bindings remain usable.
+    partial = value
+    while isinstance(partial, functools.partial):
+        if function_residency_kind(lambda: None, call_args=partial.args,
+                                   call_kwargs=partial.keywords) != 'none':
+            return owner, 'nonrecoverable', 'Cached partial actor has unadapted bound argument state'
+        partial = partial.func
+    if type(owner) is PromptActor:
+        return owner, 'none', None  # Rebound to the native journal in the worker.
+    return owner, policy.mode, policy.reason
+
+
 class CacheCall:
     def __init__(self, fn, directory, version, *, inputs=None, output=None, outputs=None,
                  when=None, namespace='default', cache_when=None, wait_timeout_s=120.,
@@ -78,13 +109,9 @@ class CacheCall:
         image is the sole authority for whether this owner's state includes it.
         Other owners keep the original result-only sharing semantics.
         """
-        from ..execution.operator_policy import classify_operator_state
-        from ..operator_llm.runtime import PromptActor
-        owners = [_state_owner(value) for value in (self.fn, self.when, self.cache_when)
-                  if value is not None]
-        if not any(type(value) is not PromptActor and
-                   classify_operator_state(value, phase='instance').mode != 'function'
-                   for value in owners):
+        if (self.validate_runtime_state() is not None
+                or not any(_state_policy(value)[1] not in ('none', 'nonrecoverable')
+                           for value in (self.fn, self.when, self.cache_when))):
             return
         if hasattr(self, '_cache_owner'):
             if self._cache_owner != owner:
@@ -144,43 +171,56 @@ class CacheCall:
         await self._hook('aclose')
 
     def validate_runtime_state(self, concurrency=1):
-        from ..execution.operator_policy import classify_operator_state
         from ..execution.recovery_contract import RecoveryContractError
-        for owner in (self.fn, self.when, self.cache_when):
-            if owner is None:
-                continue
-            owner = _state_owner(owner)
-            from ..operator_llm.runtime import PromptActor
-            if type(owner) is PromptActor:
-                continue  # Explicitly rebound to the native journal in the worker.
-            policy = classify_operator_state(owner, phase='instance')
-            if policy.mode == 'unsupported':
-                raise RecoveryContractError('Cached callable requires snapshot_state/restore_state: ' + str(policy.reason))
-            if policy.mode == 'auto_json' and vars(owner) and concurrency != 1:
+        from ..execution.kernels.task_scope import _resident_slots
+        restriction = None
+        functions, mutable = set(), set()
+        for value in (self.fn, self.when, self.cache_when):
+            owner, mode, reason = _state_policy(value)
+            if mode == 'unsupported':
+                raise RecoveryContractError('Cached callable requires snapshot_state/restore_state: ' + str(reason))
+            if mode == 'auto_json' and vars(owner) and concurrency != 1:
                 raise RecoveryContractError('auto_json state requires concurrency 1')
+            if mode == 'nonrecoverable':
+                restriction = reason
+            if mode == 'function_slots_v1' and id(value) not in functions:
+                functions.add(id(value))
+                slots, _bindings, _reason = _resident_slots(value)
+                pending = list(slots.values())
+                while pending:
+                    item = pending.pop()
+                    if type(item) in (list, dict):
+                        if id(item) in mutable:
+                            restriction = 'Cached callbacks share mutable function state; declare one state adapter'
+                        mutable.add(id(item))
+                        pending.extend(item.values() if type(item) is dict else item)
+        return restriction
 
     async def snapshot_state(self):
-        from ..execution.operator_policy import classify_operator_state, snapshot_auto_state
-        from ..operator_llm.runtime import PromptActor
+        from ..execution.operator_policy import snapshot_auto_state
+        from ..execution.kernels.task_scope import snapshot_resident_function
         result = {}
-        self.validate_runtime_state()
+        restriction = self.validate_runtime_state()
+        if restriction is not None:
+            return {'fn': {'mode': 'nonrecoverable', 'reason': restriction},
+                    'when': None, 'cache_when': None}
         for name in ('fn', 'when', 'cache_when'):
-            owner = getattr(self, name)
-            owner = _state_owner(owner)
-            if owner is None or type(owner) is PromptActor:
+            value = getattr(self, name)
+            owner, mode, reason = _state_policy(value)
+            if mode == 'none':
                 result[name] = None
-                continue
-            policy = classify_operator_state(owner, phase='instance')
-            if policy.mode == 'hooks':
+            elif mode == 'function_slots_v1':
+                result[name] = snapshot_resident_function(value, max_bytes=self.max_input_bytes)
+            elif mode == 'nonrecoverable':
+                result[name] = {'mode': mode, 'reason': reason}
+            elif mode == 'hooks':
                 state = owner.snapshot_state()
                 if inspect.isawaitable(state):
                     state = await state
                 result[name] = {'mode': 'hooks', 'value': state}
-            elif policy.mode == 'auto_json':
+            elif mode == 'auto_json':
                 result[name] = {'mode': 'auto_json', 'value': snapshot_auto_state(owner,
                     max_bytes=self.max_input_bytes)}
-            else:
-                result[name] = None
         if hasattr(self, '_cache_owner'):
             result['cache_frontier'] = {'owner': self._cache_owner,
                                         'generation': self._cache_generation}
@@ -192,11 +232,21 @@ class CacheCall:
     async def restore_state(self, state):
         from ..execution.operator_policy import restore_auto_state
         from ..execution.recovery_contract import RecoveryContractError
+        from ..execution.contracts.dataflow_errors import DataflowError
+        from ..execution.kernels.task_scope import restore_resident_function
         if set(state) - {'cache_frontier'} != {'fn', 'when', 'cache_when'}:
             raise RecoveryContractError('Cached callable state ownership differs')
+        for name in ('fn', 'when', 'cache_when'):
+            _owner, mode, reason = _state_policy(getattr(self, name))
+            image = state[name]
+            if mode == 'nonrecoverable' or isinstance(image, dict) and image.get('mode') == 'nonrecoverable':
+                raise DataflowError('INCOMPATIBLE_HISTORY',
+                    'Cached callable is attempt_only: ' + str(reason or image['reason']))
+            if (image is None and mode != 'none'
+                    or image is not None and (type(image) is not dict or image.get('mode') != mode)):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Cached callable state adapter differs')
         frontier = state.get('cache_frontier')
         if hasattr(self, '_cache_owner'):
-            from ..execution.contracts.dataflow_errors import DataflowError
             if frontier is None:
                 raise DataflowError('INCOMPATIBLE_HISTORY',
                     'Stateful cache history has no authenticated cache frontier')
@@ -213,9 +263,11 @@ class CacheCall:
             image = state[name]
             if image is None:
                 continue
-            owner = getattr(self, name)
-            owner = _state_owner(owner)
-            if image['mode'] == 'auto_json':
+            value = getattr(self, name)
+            owner = _state_owner(value)
+            if image['mode'] == 'function_slots_v1':
+                restore_resident_function(value, image, max_bytes=self.max_input_bytes)
+            elif image['mode'] == 'auto_json':
                 restore_auto_state(owner, image['value'], max_bytes=self.max_input_bytes)
             elif image['mode'] == 'hooks':
                 restored = owner.restore_state(image['value'])

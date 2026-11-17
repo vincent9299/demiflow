@@ -577,7 +577,10 @@ class OperatorKernel:
             instance.bind(self._services, self._occurrence)
         from ...data.result_cache import CacheCall
         if isinstance(instance, CacheCall):
-            instance.validate_runtime_state(1 if self._worker_scope else self._concurrency)
+            restriction = instance.validate_runtime_state(1 if self._worker_scope else self._concurrency)
+            if restriction is not None:
+                self.recovery_restriction = restriction
+                self._services.journal.restrict_recovery(self._occurrence)
             state_owner = (self._shared_actor.binding['state_owner']
                            if self._shared_actor is not None else self._occurrence)
             instance.bind_checkpoint_cache(_hash_id(['cache-state-owner-v1',
@@ -1276,6 +1279,12 @@ class OperatorKernel:
                 self._services.journal.restrict_recovery(self._occurrence)
             return state
         if policy.mode == "hooks":
+            from ...data.result_cache import CacheCall
+            if isinstance(owner, CacheCall):
+                restriction = owner.validate_runtime_state()
+                if restriction is not None:
+                    self.recovery_restriction = restriction
+                    self._services.journal.restrict_recovery(self._occurrence)
             return {"mode": "hooks", "value": instance.resolve(owner.snapshot_state())}
         if policy.mode == "auto_json":
             return {"mode": "plain_json", "value": snapshot_auto_state(

@@ -201,7 +201,7 @@ def test_actual_task_lifetimes_do_not_replay_other_tasks_cache_hits(tmp_path):
 
 
 CRASH_DRIVER = r'''
-import json, os, sqlite3, sys, time
+import functools, json, os, sqlite3, sys, time
 from pathlib import Path
 import demiflow
 from demiflow import data
@@ -209,13 +209,53 @@ from demiflow.execution.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
-root=Path(sys.argv[1]); mode=sys.argv[2]
+root=Path(sys.argv[1]); mode=sys.argv[2]; form=sys.argv[3]
 assert Path(demiflow.__file__).resolve().is_relative_to(Path.cwd())
 class Counter:
     def __init__(self): self.count=0
     def __call__(self, value):
         self.count+=1
         return self.count
+class BoundCounter:
+    def __call__(self, value, *, state):
+        assert RunJournal(root/'run').source_binding('action-1-state-recovery-restriction')['recovery']=='attempt_only'
+        state[0]+=1
+        return state[0]
+def callback():
+    if form=='actor': return Counter()
+    if form=='partial_actor': return functools.partial(BoundCounter(),state=[0])
+    state=[0]
+    if form=='closure':
+        def count(value):
+            state[0]+=1
+            return state[0]
+    elif form=='default':
+        def count(value, state=[0]):
+            state[0]+=1
+            return state[0]
+    elif form=='kwdefault':
+        def count(value, *, state=[0]):
+            state[0]+=1
+            return state[0]
+    elif form=='partial_args':
+        def count(state, value):
+            state[0]+=1
+            return state[0]
+        return functools.partial(count,state)
+    elif form=='partial_kwargs':
+        def count(value, *, state):
+            state['count']+=1
+            return state['count']
+        return functools.partial(count,state={'count':0})
+    elif form=='nested_helper':
+        def helper():
+            state[0]+=1
+            return state[0]
+        def count(value):
+            assert RunJournal(root/'run').source_binding('action-1-state-recovery-restriction')['recovery']=='attempt_only'
+            return helper()
+    else: raise AssertionError(form)
+    return count
 pump=DataflowExecution.pump
 def crash_after_original_ack(execution, **kwargs):
     result=pump(execution, **kwargs)
@@ -235,20 +275,22 @@ identity=RunJournal(root/'run').recovery_identity() if (root/'run').exists() els
 scope=(RunContext.resume(RunRef(str(root/'run'),identity['run_id'])) if identity else
        RunContext.start(root/'run',limits={'checkpoint_rows':2}))
 with scope as run, data.local_execution():
-    rows=data.from_items([{'value':n} for n in range(6)]).map_cached(Counter(),cache_dir=root/'cache',
+    rows=data.from_items([{'value':n} for n in range(6)]).map_cached(callback(),cache_dir=root/'cache',
         version='v1',inputs=['value'],output='count').take_all()
-    (root/'result.json').write_text(json.dumps({'rows':rows,'commits':run.journal.execution_commits('action-1')}))
+    (root/'result.json').write_text(json.dumps({'rows':rows,'commits':run.journal.execution_commits('action-1'),
+        'restriction':run.journal.source_binding('action-1-state-recovery-restriction')}))
 '''
 
 
-def test_real_driver_process_death_recovers_original_ack_and_suffix_cache(tmp_path):
+@pytest.mark.parametrize('form', ['actor', 'closure', 'default', 'kwdefault', 'partial_args', 'partial_kwargs'])
+def test_real_driver_process_death_recovers_original_ack_and_suffix_cache(tmp_path, form):
     import os
     import subprocess
     import sys
     tree = Path(__file__).resolve().parents[1]
     environment = dict(os.environ, PYTHONPATH=str(tree) + ':' + str(tree / 'tests'))
     def run(mode):
-        return subprocess.run([sys.executable, '-B', '-c', CRASH_DRIVER, str(tmp_path), mode],
+        return subprocess.run([sys.executable, '-B', '-c', CRASH_DRIVER, str(tmp_path), mode, form],
             cwd=tree, env=environment, capture_output=True, text=True, timeout=90)
     first = run('crash')
     assert first.returncode == 79, first.stderr
@@ -258,3 +300,83 @@ def test_real_driver_process_death_recovers_original_ack_and_suffix_cache(tmp_pa
     result = json.loads((tmp_path / 'result.json').read_text())
     assert result['rows'] == [{'value': n, 'count': n + 1} for n in range(6)]
     assert all(c['status'] == 'acked' for c in result['commits'])
+    assert result['restriction'] is None
+
+
+@pytest.mark.parametrize('form', ['partial_actor', 'nested_helper'])
+def test_public_cache_unadapted_bound_or_nested_state_records_restriction_before_calls(tmp_path, form):
+    import os
+    import subprocess
+    import sys
+    tree = Path(__file__).resolve().parents[1]
+    environment = dict(os.environ, PYTHONPATH=str(tree) + ':' + str(tree / 'tests'))
+    completed = subprocess.run([sys.executable, '-B', '-c', CRASH_DRIVER, str(tmp_path), 'normal', form],
+        cwd=tree, env=environment, capture_output=True, text=True, timeout=90)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert result['rows'] == [{'value': n, 'count': n + 1} for n in range(6)]
+    assert result['restriction']['recovery'] == 'attempt_only'
+
+
+def test_old_function_image_cannot_drop_admitted_closure_state(tmp_path):
+    def callback():
+        state = [0]
+        def count(value):
+            state[0] += 1
+            return state[0]
+        return count
+    actor = cache(tmp_path, counter=callback())
+    image = asyncio.run(actor.snapshot_state())
+    assert image['fn']['mode'] == 'function_slots_v1'
+    image['fn'] = None
+    with pytest.raises(DataflowError, match='state adapter differs'):
+        asyncio.run(cache(tmp_path, counter=callback()).restore_state(image))
+
+
+def test_function_predicate_state_uses_the_same_acknowledged_cache_frontier(tmp_path):
+    def predicate():
+        calls = [0]
+        def accepted(value):
+            calls[0] += 1
+            return True
+        return accepted
+    def build():
+        return cache(tmp_path, counter=lambda value: value, when=predicate(), cache_when=predicate())
+    first = build()
+    assert first({'value': 0})['count'] == 0
+    image = asyncio.run(first.snapshot_state())
+    assert first({'value': 1})['count'] == 1
+    resumed = build()
+    asyncio.run(resumed.restore_state(image))
+    assert resumed({'value': 1})['count'] == 1
+    assert resumed({'value': 2})['count'] == 2
+    state = asyncio.run(resumed.snapshot_state())
+    assert state['when']['value']['cell:calls'] == [3]
+    assert state['cache_when']['value']['cell:calls'] == [3]
+
+
+def test_unadapted_and_shared_function_data_remain_usable_but_cannot_restore(tmp_path):
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.dataflow_model_factory import CacheFactory
+    namespace = {'counter': [0]}
+    exec('def count(value):\n counter[0]+=1\n return counter[0]', namespace)
+    actor = cache(tmp_path / 'global', counter=namespace['count'])
+    assert actor.validate_runtime_state() is not None
+    assert actor({'value': 0})['count'] == 1
+    image = asyncio.run(actor.snapshot_state())
+    assert image['fn']['mode'] == 'nonrecoverable'
+    with pytest.raises(DataflowError, match='attempt_only'):
+        asyncio.run(actor.restore_state(image))
+    shared = [0]
+    def compute(value):
+        return shared[0]
+    def when(row):
+        shared[0] += 1
+        return True
+    actor = CacheFactory(CallableSpec.create(compute), tmp_path / 'shared', 'v1',
+        {'inputs': ['value'], 'output': 'count', 'when': when, 'max_input_bytes': 4096}, True)
+    assert actor.validate_runtime_state() is not None
+    assert actor({'value': 0})['count'] == 1
+    assert actor({'value': 1})['count'] == 2
+    with pytest.raises(DataflowError, match='attempt_only'):
+        asyncio.run(actor.restore_state(asyncio.run(actor.snapshot_state())))

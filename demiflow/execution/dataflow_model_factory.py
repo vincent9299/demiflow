@@ -50,8 +50,21 @@ class RoutedPromptFactory:
 class CacheFactory:
     def __new__(cls, declaration, directory, version, options, synchronous):
         from ..data.result_cache import CachedMap, CachedSyncMap
+        from .kernels.task_scope import function_residency_kind, clone_resident_function
         fn = declaration.instantiate()
-        return (CachedSyncMap if synchronous else CachedMap)(fn, directory, version, **options)
+        actor = (CachedSyncMap if synchronous else CachedMap)(fn, directory, version, **options)
+        if actor.validate_runtime_state() is not None:
+            return actor  # Retain borrowed/aliased identity during this attempt.
+        # A loaded program is a sealed declaration, never the mutable owner of
+        # admitted closure/default/partial slots for a running cache instance.
+        cloned = {}
+        for name in ('fn', 'when', 'cache_when'):
+            value = getattr(actor, name)
+            if value is not None and function_residency_kind(value) == 'adapter':
+                if id(value) not in cloned:
+                    cloned[id(value)] = clone_resident_function(value, max_bytes=options['max_input_bytes'])
+                setattr(actor, name, cloned[id(value)])
+        return actor
 
 
 def native_model_declaration(operation):
