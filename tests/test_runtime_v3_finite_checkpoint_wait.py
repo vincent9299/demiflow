@@ -4,6 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace as NS
 import threading
 import time
+import json
 
 import pytest
 
@@ -48,6 +49,7 @@ def _wait(driver, *, generation=1, sequence=1, occurrence='fold', worker='worker
         operation_id='1' * 64, run_id='run', attempt=1, fence='fence',
         allocation_id=worker, boot_id=boot or driver._scheduler.leases[worker].boot_id,
         plan_revision=0, scope_id='scope', controller_epoch=1,
+        payload_ref=None,
         payload={'activity_generation': generation, 'sequence': sequence,
                  'partition_id': partition, 'occurrence_id': occurrence})
     driver._update_checkpoint_wait_clock()
@@ -99,6 +101,7 @@ def test_finite_business_never_extends_original_run_deadline(monkeypatch):
     run.limits = {'timeout_s': 120, 'checkpoint_timeout_s': 60}
     run._draining = False
     run.check_stop_callback = None
+    run.journal = NS(execution_status=lambda: {'status': 'running'})
     driver._action.context = run
     driver._native_guard = NS(check=lambda: None)
     driver._terminal_stop_deadline = None
@@ -225,7 +228,7 @@ def test_busy_event_uses_original_bounded_wire_and_activation_queue(monkeypatch)
 
 
 @pytest.mark.parametrize('workers', [1, 2])
-def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monkeypatch, workers):
+def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monkeypatch, workers, record_property):
     marker = tmp_path/'fold-started'
     notices, executions = [], []
     start = DataflowExecution.start
@@ -264,3 +267,9 @@ def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monk
     assert commits and all(c['status'] == 'acked' for c in commits)
     assert executions[0]._restore_image.cut.final
     assert executions[0]._scheduler._physical_exit_confirmed
+    record_property('finite_checkpoint_evidence', json.dumps({
+        'run_directory': str(tmp_path/'run'), 'limits': limits,
+        'workers': workers, 'requested_at': requested, 'notices': notices,
+        'commits': [{'commit_id': c['commit_id'], 'sequence': c['sequence'], 'status': c['status']}
+                    for c in commits], 'final': True, 'physical_exit_confirmed': True,
+        'actual': actual}, sort_keys=True))
