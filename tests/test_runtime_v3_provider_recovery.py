@@ -81,7 +81,7 @@ def test_nonfinal_provider_change_rejected_but_original_provider_can_resume(
         def forbidden_launch(execution):
             launches.append(tuple(host.provider for host in execution.services.hosts))
             raise AssertionError('a changed provider reached worker launch for the sealed plan')
-        with executor(alternate), RunContext.resume(ref) as run:
+        with pytest.raises(Interrupted), executor(alternate), RunContext.resume(ref) as run:
             before, seal, image = facts(run)
             assert before[-1]['commit_id'] == cut_ids[0]
             assert not image['cut']['final']
@@ -94,8 +94,9 @@ def test_nonfinal_provider_change_rejected_but_original_provider_can_resume(
             assert not launches
             assert run.journal.execution_commits('action-1') == before
             assert run.journal.source_binding('action-1-dataflow-sealed') == seal
-            # Keep the interrupted run resumable after checking its rejected action.
-            # RunContext.resume permits this completed attempt as well.
+            # The rejection is inspected inside this attempt, but the enclosing
+            # run must remain interrupted rather than be marked successful.
+            raise Interrupted()
         with executor(origin), RunContext.resume(ref) as resumed:
             assert dataset().take_all() == EXPECTED
             after, same_seal, final = facts(resumed)
@@ -126,7 +127,7 @@ def test_ray_completed_result_reads_without_ray_but_requires_original_ack_proof(
         raw = path.read_bytes()
         # Keep the file length and valid JSON; its original journal digest must
         # still reject it, even though the forged document continues to say final.
-        changed = raw.replace(b'action-1', b'action-2', 1)
+        changed = raw.replace(b'demiflow.dataflow_cut.v3', b'demiflow.dataflow_cut.v4', 1)
         assert changed != raw and len(changed) == len(raw)
         assert json.loads(changed)['cut']['final']
         path.write_bytes(changed)
@@ -136,7 +137,7 @@ def test_ray_completed_result_reads_without_ray_but_requires_original_ack_proof(
         raise AssertionError('history reading must not initialize Ray or launch a worker')
     monkeypatch.setattr(ray, 'init', forbidden)
     monkeypatch.setattr(DataflowExecution, '_launch_phase', forbidden)
-    with data.local_execution(), RunContext.resume(ref) as resumed:
+    with pytest.raises(Interrupted), executor('local'), RunContext.resume(ref) as resumed:
         if damage_final_proof:
             with pytest.raises(RecoveryContractError, match='checksum'):
                 dataset().take_all()
@@ -144,6 +145,7 @@ def test_ray_completed_result_reads_without_ray_but_requires_original_ack_proof(
             assert dataset().take_all() == EXPECTED
         assert resumed.journal.execution_commits('action-1') == before
         assert resumed.journal.source_binding('action-1-dataflow-sealed') == seal
+        raise Interrupted()
     assert not launches and not ray.is_initialized()
     record_property('provider_history', json.dumps({
         'original_provider': 'ray_core', 'read_provider': 'local',
