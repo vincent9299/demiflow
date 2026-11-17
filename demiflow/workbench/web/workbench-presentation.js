@@ -24,7 +24,7 @@
     incomplete: '观测不完整', reused: '复用物化结果', cancelled: '已取消',
   };
   const REASON_TEXT = {
-    dataset_plan_unavailable: '尚未取得引擎执行计划。请从运行记录选择已封存的运行；当前源码尚未接通不执行业务的计划解析，静态检查不能代替运行图。',
+    dataset_plan_unavailable: '尚未取得引擎执行计划。可选择已封存的运行，或点击“解析执行计划”读取当前入口和已保存配置；静态检查不能代替运行图。',
     not_sealed: '该 action 没有封存执行计划',
     unsupported_plan_schema: '封存计划版本不受支持',
     identity_mismatch: '封存计划身份不一致',
@@ -762,6 +762,78 @@
     return {binding, choice, execution: identity, nodes: cards, edges, selected, completeness, notices};
   }
 
+  /* A compile preview is a logical plan, never a historical execution identity.
+   * It uses the same renderer, but cannot acquire observations or physical facts. */
+  function buildPlanPreviewModel(value, {selection = null} = {}) {
+    const reject = message => {throw new Error('编译计划不可用：' + message);};
+    const text = item => typeof item === 'string' && item.length > 0 && item.length <= 256;
+    const ports = items => Array.isArray(items) && items.length <= 64
+      && items.every(text) && new Set(items).size === items.length;
+    if (!isRecord(value) || value.format !== 'demiflow.plan_preview.v1' || value.available !== true
+        || value.scope !== 'first_action' || value.entry_completed !== false
+        || !isRecord(value.basis) || !isSha(value.basis.digest) || !isRecord(value.dag))
+      reject('响应缺少明确的编译依据或动作范围');
+    const dag = value.dag;
+    if (dag.schema_version !== V3_SCHEMA || !text(dag.dag_id) || !text(dag.action_id)
+        || !Array.isArray(dag.nodes) || !dag.nodes.length || dag.nodes.length > MAX_NODES
+        || !Array.isArray(dag.edges) || dag.edges.length > MAX_EDGES)
+      reject('计划格式或展示预算不受支持');
+    const byId = new Map(), keys = new Map();
+    for (const node of dag.nodes) {
+      if (!isRecord(node) || !text(node.logical_node_id) || !text(node.occurrence_id)
+          || !text(node.op_kind) || !ports(node.input_ports) || !ports(node.output_ports)
+          || !isRecord(node.traits) || byId.has(node.occurrence_id))
+        reject('节点身份、端口或声明无效');
+      byId.set(node.occurrence_id, node);
+      keys.set(node.occurrence_id, jsonKey(['preview', value.basis.digest, dag.dag_id, node.occurrence_id]));
+    }
+    for (const name of ['sources', 'terminals'])
+      if (!Array.isArray(dag[name]) || !dag[name].length || dag[name].length > MAX_NODES
+          || dag[name].some(id => !byId.has(id)) || new Set(dag[name]).size !== dag[name].length)
+        reject('输入或终端不在计划内');
+    const edgeIds = new Set(), incoming = new Map(dag.nodes.map(n => [n.occurrence_id, 0]));
+    const outgoing = new Map(dag.nodes.map(n => [n.occurrence_id, []]));
+    const edges = dag.edges.map(edge => {
+      if (!isRecord(edge) || !text(edge.edge_id) || edgeIds.has(edge.edge_id)
+          || !isRecord(edge.from) || !isRecord(edge.to)) reject('边身份无效');
+      const from = byId.get(edge.from.occurrence_id), to = byId.get(edge.to.occurrence_id);
+      if (!from || !to || from.logical_node_id !== edge.from.logical_node_id
+          || to.logical_node_id !== edge.to.logical_node_id
+          || !from.output_ports.includes(edge.from.port) || !to.input_ports.includes(edge.to.port))
+        reject('数据边没有连接到准确的实例端口');
+      edgeIds.add(edge.edge_id);incoming.set(to.occurrence_id, incoming.get(to.occurrence_id) + 1);
+      outgoing.get(from.occurrence_id).push(to.occurrence_id);
+      return {edgeId: edge.edge_id, from: keys.get(from.occurrence_id), to: keys.get(to.occurrence_id),
+        kind: 'data', fromPort: edge.from.port, toPort: edge.to.port};
+    });
+    const queue = [...incoming].filter(([, count]) => count === 0).map(([id]) => id);
+    for (let i = 0; i < queue.length; i++) for (const id of outgoing.get(queue[i])) {
+      incoming.set(id, incoming.get(id) - 1);if (incoming.get(id) === 0) queue.push(id);
+    }
+    if (queue.length !== dag.nodes.length) reject('数据图含环');
+    const nodes = dag.nodes.map(node => {
+      const key = keys.get(node.occurrence_id);
+      return {key, selection: {key, reportNodeId: null, actionId: dag.action_id,
+        logicalNodeId: node.logical_node_id, occurrenceId: node.occurrence_id,
+        execution: null, previewDigest: value.basis.digest}, occurrences: [],
+        // Optional labels are supplied by the compiler's declaration, never joined from AST nodes.
+        kindLabel: kindLabel(node.op_kind), title: typeof node.label === 'string' && node.label.trim()
+          && node.label.length <= 256 ? bounded(node.label, 80) : kindLabel(node.op_kind),
+        summary: [{label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
+          + (node.output_ports.join(', ') || '—'), 160), basis: 'compile', reason: null},
+          {label: '范围', value: '首个执行动作', basis: 'compile', reason: null}],
+        state: {label: '尚未运行', tone: 'neutral'}};
+    });
+    const notices = ['由引擎编译当前入口与已保存配置；仅覆盖首个执行动作，后续依赖运行结果的步骤尚未解析。'];
+    if (Array.isArray(value.limitations)) for (const item of value.limitations.slice(0, 4))
+      if (typeof item === 'string') notices.push(bounded(item, 512));
+    return {binding: value.basis, choice: {kind: 'preview', actionId: dag.action_id,
+      label: '编译计划 · 尚未运行 · 仅首个执行动作', reason: null}, execution: null,
+      nodes, edges, selected: selection?.previewDigest === value.basis.digest
+        && nodes.some(n => n.key === selection.key) ? selection.key : null,
+      completeness: {display: 'complete', totalNodes: nodes.length, totalEdges: edges.length}, notices};
+  }
+
   /* ---- C04: node details on demand -------------------------------------- */
 
   function unavailableDetails(selection, title, reason) {
@@ -851,6 +923,6 @@
   }
 
   globalThis.ForgeWorkbenchPresentation = Object.freeze({
-    chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, normalizeExecutionPlan, matchesExecutionObservation,
+    chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, buildPlanPreviewModel, normalizeExecutionPlan, matchesExecutionObservation,
   });
 })();

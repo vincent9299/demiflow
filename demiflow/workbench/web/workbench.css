@@ -66,3 +66,9 @@
 .wb-body:fullscreen{padding:16px;background:#fff;overflow:auto;align-content:start}
 .wb-body:fullscreen .wb-graph{height:calc(100dvh - 160px);min-height:300px}
 .wb-body:fullscreen .wb-inspector{max-height:calc(100dvh - 32px)}
+
+/* Compile controls accept project-local saved configurations without registering a run. */
+.wb-plan-preview-controls{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:4px 0 12px;min-width:0}
+.wb-plan-preview-controls>label{flex:1 1 260px;min-width:0;font-size:12px;color:var(--muted)}
+.wb-plan-preview-controls input{display:block;width:100%;box-sizing:border-box;min-width:0;margin-top:4px}
+.wb-plan-preview-controls>.wb-caption{flex-basis:100%;margin:0}

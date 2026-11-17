@@ -239,9 +239,44 @@ class IndexedLocations:
             finally: temporary.unlink(missing_ok=True)
 
     def get(self,key):
+        from .plan_capture import current_capture
+        if current_capture() is not None:
+            return self.get_readonly(key)
         if type(key) is not str or len(key)>MAX_TOKEN: raise ValueError('Location lookup key exceeds token budget')
         self._check_source()
         value = self._get(key)
+        self._check_source()
+        if self.field == 'tables' and value is not None and not isinstance(value, str):
+            raise ValueError('Invalid relocated table target')
+        return value
+
+    def get_readonly(self, key):
+        """Resolve the authoritative manifest without creating a derivative.
+
+        Construction-only plan inspection has no write permission, even to a
+        disposable index/lock. Reuse the same streaming parser and duplicate-key
+        semantics as indexing, retaining at most the requested bounded value.
+        Always consume/validate the entire manifest: an early match is not proof
+        that a later field does not replace it or make the document invalid.
+        """
+        if type(key) is not str or len(key)>MAX_TOKEN:
+            raise ValueError('Location lookup key exceeds token budget')
+        self._check_source()
+        fd = os.open(self.filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        value, count, started = None, 0, time.monotonic()
+        with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+            if identity(os.fstat(stream.fileno())) != self.source_identity:
+                raise ValueError('Location manifest changed before read-only lookup')
+            for item in _records(stream, self.field):
+                count += 1
+                if count > MAX_RECORDS or time.monotonic() - started > 110:
+                    raise ValueError('Location lookup row/time budget exceeded')
+                if item is None:
+                    value = None
+                elif item[0] == key:
+                    value = json.loads(item[1])
+            if identity(os.fstat(stream.fileno())) != self.source_identity:
+                raise ValueError('Location manifest changed during read-only lookup')
         self._check_source()
         if self.field == 'tables' and value is not None and not isinstance(value, str):
             raise ValueError('Invalid relocated table target')

@@ -150,6 +150,10 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
     declaration = declare_action_v3(source, plan, kind=kind, arguments=args,
                                     sink_declaration=None)
     action = current_action()
+    from .plan_capture import current_capture
+    capture = current_capture()
+    if capture is not None:
+        action = RunAction(capture.context, 'preview', declaration)
     if action is None:
         run = current_run()
         if run is None:
@@ -287,6 +291,12 @@ def resolve_action_runtime(request: ActionRequest):
 
 # -- E016 run_dataset_action ----------------------------------------------
 def run_dataset_action(request: ActionRequest) -> object:
+    from .plan_capture import current_capture
+    capture = current_capture()
+    if capture is not None:
+        # Sink lifecycle hooks are execution, even before driver services exist.
+        policy, bounds = resolve_action_runtime(request)
+        capture.intercept(request, policy=policy, bounds=bounds)
     if request.kind != 'write_datasink':
         return _run_dataset_action(request)
     sink = request.sink

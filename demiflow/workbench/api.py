@@ -121,6 +121,7 @@ POST_FIELDS = {
     'project-check': (set(), set()),
     'audit-check': ({'kind', 'expected_policy'}, {'digest'}),
     'inspect': ({'entry', 'params'}, set()),
+    'plan-preview': ({'entry', 'params'}, set()),
     'run-admission': ({'entry','params'}, {'limits'}),
     'run-request-reconcile': ({'request_id'},set()),
     'run-reconcile': ({'run_id', 'expected_attempt'}, set()),
@@ -839,7 +840,7 @@ class Handler(BaseHTTPRequestHandler):
                         'config_write' if name in {'parameter-preview','parameters-update'} else
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
-            if name not in {'inspect','audit-check','project-check','run-admission'} and not permissions[permission]:
+            if name not in {'inspect','plan-preview','audit-check','project-check','run-admission'} and not permissions[permission]:
                 raise PermissionError('Required run permission is disabled: '+permission)
             request = self._body(name)
             with self._work(control=name=='run-cancel'):
@@ -866,6 +867,9 @@ class Handler(BaseHTTPRequestHandler):
                     value=reconcile(root,request['request_id'])
                 elif name == 'inspect':
                     value = api.inspect_flow(root, **request)
+                elif name == 'plan-preview':
+                    from demiflow.workbench.graph.preview import preview
+                    value = preview(root, **request)
                 elif name == 'project-check':
                     value = api.check_project(root)
                 elif name == 'audit-check':

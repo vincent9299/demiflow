@@ -52,6 +52,10 @@ def _now_ms() -> int:
 
 
 def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds) -> ActionHandle:
+    from .plan_capture import current_capture
+    capture = current_capture()
+    if capture is not None:
+        capture.intercept(request, policy=policy, bounds=bounds)
     services = make_driver_services(request.action, policy=policy, bounds=bounds)
     execution = DataflowExecution(request, services=services)
     try:

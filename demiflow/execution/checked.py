@@ -723,6 +723,17 @@ class CheckedAction:
         self.completed = True
 
 
+def _validate_action_source(kind, value):
+    if value.plan is not None:
+        from .queue_producer import producer_actor, validate_source
+        producer = producer_actor(value.plan)
+        if producer is not None:
+            from .recovery_contract import RecoveryContractError
+            if kind != 'run_stream':
+                raise RecoveryContractError('Incremental enqueue requires run_stream; source capture and other terminals cannot publish tasks')
+            validate_source(value.source, producer[1].producer.source)
+
+
 @contextmanager
 def action(kind, source, plan, spec=None, *, arguments=None):
     from contextlib import nullcontext
@@ -733,6 +744,18 @@ def action(kind, source, plan, spec=None, *, arguments=None):
     if not capability['supported']:
         from .recovery_contract import RecoveryContractError
         raise RecoveryContractError(capability['reason'])
+    from .plan_capture import current_capture
+    capture = current_capture()
+    if capture is not None:
+        # Validate/build ordinary Dataset requests without allocating an implicit
+        # run. The real request is intercepted at the single driver entry.
+        from .payload_limits import payload_scope
+        value = CheckedAction(None, None, source, plan)
+        _validate_action_source(kind, value)
+        with payload_scope(capture.context, plan, arguments=arguments, source=source,
+                           physical_dataflow=True):
+            yield value
+        return
     owner = current()
     checks = (owner.action(kind, source, plan, spec, arguments) if owner is not None
               else nullcontext(CheckedAction(None, None, source, plan)))
@@ -745,14 +768,7 @@ def action(kind, source, plan, spec=None, *, arguments=None):
     with execution_scope() as run, payload_scope(run, plan,
             owner_limits=owner._limits if owner is not None else None, arguments=arguments,source=source,
             physical_dataflow=True), checks as value:
-        if value.plan is not None:
-            from .queue_producer import producer_actor, validate_source
-            producer = producer_actor(value.plan)
-            if producer is not None:
-                from .recovery_contract import RecoveryContractError
-                if kind != 'run_stream':
-                    raise RecoveryContractError('Incremental enqueue requires run_stream; source capture and other terminals cannot publish tasks')
-                validate_source(value.source, producer[1].producer.source)
+        _validate_action_source(kind, value)
         declaration = plan_identity(kind, value.source, value.plan, spec, arguments)
         with run.action(declaration, action_id=value.identity) as execution:
             value.execution = execution

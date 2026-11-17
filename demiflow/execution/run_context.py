@@ -56,6 +56,11 @@ class RunContext:
 
     def __init__(self, directory, *, entry_identity=None, limits=None, resume=False,
                  journal=None, check_stop=None):
+        from .plan_capture import current_capture
+        if current_capture() is not None:
+            from .contracts.dataflow_errors import DataflowError
+            raise DataflowError('UNSUPPORTED_CAPABILITY',
+                               'plan capture cannot start or resume an explicit run; use the construction entry')
         raw = Path(directory).absolute()
         if any(p.is_symlink() for p in (raw, *raw.parents)):
             raise RecoveryContractError("Run directory contains a symlink")
@@ -443,6 +448,11 @@ class RunAction:
 @contextmanager
 def execution_scope():
     """All ordinary actions acquire the same context; a launcher may bind it."""
+    from .plan_capture import current_capture
+    capture = current_capture()
+    if capture is not None:
+        yield capture.context
+        return
     context = current_run()
     if context is not None:
         context.check_stop()

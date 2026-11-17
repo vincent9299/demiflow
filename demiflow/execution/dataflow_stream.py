@@ -24,6 +24,11 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
             raise TypeError('stream hooks must be callable')
     from .dataflow_api import resolve_action_runtime
     policy, bounds = resolve_action_runtime(request)
+    from .plan_capture import current_capture
+    capture = current_capture()
+    if capture is not None:
+        # Do not enter callback ownership: its finally block invokes on_drain.
+        capture.intercept(request, policy=policy, bounds=bounds)
     callbacks = AsyncInstance(lambda value: value,
         SimpleNamespace(bounds=bounds, check_stop=request.action.context.check_stop))
     stats, handle, failure = StreamStats(), None, None

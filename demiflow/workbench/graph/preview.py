@@ -1,0 +1,167 @@
+"""Bounded, disposable construction of the first native Dataset action.
+
+Original project code is imported in place. No discovery command, launcher,
+model, Dataset worker or sink is started. This does not grant run permission.
+"""
+from pathlib import Path
+import hashlib
+import importlib
+import importlib.abc
+import importlib.machinery
+import inspect
+import io
+import json
+import os
+import sys
+
+from demiflow.forge.schema import ForgeError
+from demiflow.forge.platform import bounded_json, content_digest
+from demiflow.forge.platform_environment import read_bounded
+from demiflow.workbench.projects import workspace as ws
+
+
+def preview(root, *, entry, params=None):
+    from demiflow.workbench.worker import operation
+    return operation('plan_preview', root, entry=entry, params=params)
+
+
+def _import_root(root, project):
+    # Discovery already verified the public declaration and exact owner. Use
+    # that repository's namespace; never copy a pipeline into a generated tree.
+    for declaration in project['declarations']:
+        path = Path(declaration['path'])
+        if path.name == 'project.json' and path.parent.name == '.demiforge':
+            base = path.parent.parent
+            if root.is_relative_to(base):
+                return base
+    return root
+
+
+def _parameters(root, control, entry, path):
+    if path is None:
+        return {}, None
+    target = ws.validate_parameter_path(root, path)
+    raw = read_bounded(target, 65536)
+    from demiflow.workbench.projects.discovery import _json
+    document = _json(raw)
+    if type(document) is not dict or type(document.get('arguments')) is not dict:
+        raise ForgeError('解析配置需要 JSON arguments 对象；不会执行配置中的命令。', code='invalid_request')
+    if document.get('format') in {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}:
+        # Preserve the same declared resource binding as native run preparation.
+        arguments, _, _, _ = ws.resolve_arguments(root, control, document)
+    elif set(document) <= {'arguments', 'run_directory'}:
+        arguments = document['arguments']
+    else:
+        raise ForgeError('Unsupported plan parameter document', code='invalid_request')
+    count = 0
+    def visit(value, depth=0):
+        nonlocal count
+        count += 1
+        if count > 4096 or depth > 16:
+            raise ForgeError('Plan parameters exceed structural budget', code='resource_limit')
+        if type(value) is dict:
+            for child in value.values():
+                visit(child, depth + 1)
+        elif type(value) is list:
+            for child in value:
+                visit(child, depth + 1)
+    visit(arguments)
+    return arguments, hashlib.sha256(raw).hexdigest()
+
+
+class _Sources(importlib.abc.MetaPathFinder):
+    """Read original Python bytes, bypassing stale bytecode and pinning imports."""
+    def __init__(self, root):
+        self.root, self.digests, self.total = root, {}, 0
+
+    def read(self, path):
+        path = Path(path)
+        ws.no_symlinks(path)
+        raw = read_bounded(path, 4 * 1024**2)
+        name = path.relative_to(self.root).as_posix()
+        digest = hashlib.sha256(raw).hexdigest()
+        if name in self.digests and self.digests[name] != digest:
+            raise ForgeError('Source changed during plan construction', code='conflict')
+        if name not in self.digests:
+            self.total += len(raw)
+            if len(self.digests) >= 256 or self.total > 32 * 1024**2:
+                raise ForgeError('Plan source closure exceeds budget', code='resource_limit')
+            self.digests[name] = digest
+        return raw
+
+    def find_spec(self, fullname, path=None, target=None):
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if spec and spec.origin and Path(spec.origin).is_relative_to(self.root):
+            if not spec.origin.endswith('.py'):
+                raise ForgeError('Project imports must use original Python source', code='operation_rejected')
+            sources = self
+
+            class Loader(importlib.machinery.SourceFileLoader):
+                def get_code(self, name):
+                    return compile(sources.read(self.path), self.path, 'exec', dont_inherit=True)
+
+            spec.loader = Loader(fullname, spec.origin)
+            return spec
+        return None
+
+    def verify(self):
+        for name in tuple(self.digests):
+            self.read(self.root / name)
+
+
+class _Discard(io.TextIOBase):
+    def write(self, value):
+        return len(value)
+
+
+def _preview(root, *, entry, params=None):
+    """Called only by the fixed one-shot workspace worker, never the server."""
+    from contextlib import redirect_stdout
+    from demiflow.execution.plan_capture import capture_pipeline, build_logical_plan_view
+    from demiflow.workbench.projects.discovery import discover
+    from demiflow.workbench.graph.preview_guard import enter_readonly
+
+    root, control, _ = ws.load_workspace(root)
+    project = discover(root, control)
+    if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
+        raise ForgeError('Entry is not declared by this project', code='not_found')
+    target, symbol = ws.validate_entry(root, entry)
+    source_root = _import_root(root, project)
+    sources = _Sources(source_root)
+    entry_sha = hashlib.sha256(sources.read(target)).hexdigest()
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(source_root))
+    sys.meta_path.insert(0, sources)
+    os.chdir(root)
+    enter_readonly()  # fail closed, before ANY project import/construction
+    try:
+        with redirect_stdout(_Discard()):
+            module = target.relative_to(source_root).as_posix()[:-3].replace('/', '.')
+            function = getattr(importlib.import_module(module), symbol)
+            if not inspect.isfunction(function) or Path(inspect.getfile(function)) != target:
+                raise ForgeError('Entry resolved outside its declared source', code='conflict')
+            bound = {}
+            def construct():
+                arguments, bound['params_sha'] = _parameters(root, control, entry, params)
+                inspect.signature(function).bind(**arguments)
+                return function(**arguments)
+            result = capture_pipeline(construct, {})
+            params_sha = bound['params_sha']
+        sources.verify()
+        current_params_sha = (hashlib.sha256(read_bounded(ws.validate_parameter_path(root, params), 65536)).hexdigest()
+                              if params is not None else None)
+        if current_params_sha != params_sha:
+            raise ForgeError('Parameters changed during plan construction', code='conflict')
+    except PermissionError as exc:
+        raise ForgeError('解析阶段需要写文件、联网或启动进程，已停止。请把这些操作放到 Dataset 执行阶段。',
+                         code='operation_rejected') from exc
+    basis = dict(entry=entry, params=params, entry_sha256=entry_sha,
+                 params_sha256=params_sha, sources=sources.digests, dag_id=result.compiled.graph.dag_id)
+    basis['digest'] = content_digest(basis)
+    value = dict(format='demiflow.plan_preview.v1', available=True, basis=basis,
+                 kind=result.kind, provider=result.provider, entry_completed=False,
+                 scope='first_action', dag=build_logical_plan_view(result.compiled.graph, declarations=result.compiled.declarations),
+                 limitations=['仅解析首个 Dataset 执行动作；依赖执行结果的后续动作尚未解析。',
+                              '未启动 Dataset 数据读取与执行；不包含实际资源分配、运行状态或结果。'])
+    bounded_json(value, 1024**2)
+    return value

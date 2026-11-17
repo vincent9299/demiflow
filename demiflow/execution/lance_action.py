@@ -37,7 +37,8 @@ def execute_lance_write(dataset, spec, *, native_options=None):
         'write_lance', dataset._source, dataset._plan, dataset._executor,
         sink_type='LanceWrite', sink_target=spec.uri,
     ) as observer:
-        if binding is not None:
+        from .plan_capture import current_capture
+        if binding is not None and current_capture() is None:
             _BINDING.set(None)  # Never bind a second action in nested callbacks.
             binding[0](current_action(), spec)
         request = make_action_request(dataset._executor, checked.source, checked.plan,

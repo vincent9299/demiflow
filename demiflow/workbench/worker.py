@@ -142,6 +142,9 @@ def dispatch(request):
             from demiflow.workbench.projects.workspace import _inspect_flow
 
             value = _inspect_flow(root, **args)
+        elif op == 'plan_preview':
+            from demiflow.workbench.graph.preview import _preview
+            value = _preview(root, **args)
         elif op == 'workbench_source':
             from demiflow.workbench.graph.model import _source_tree
             value=_source_tree(root,**args)
