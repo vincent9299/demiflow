@@ -898,12 +898,20 @@ class WorkerGraphRunner:
 
     def _publish(self, record, *, edge=None, spec=None, target=None, delivery=None,
                  route_sequence=None, validated_raw=None):
-        # Only the joint route/encode call above supplies validated_raw. Default
-        # terminal publication keeps its original encoding and validation path.
+        # Routing and the terminal spool may share the already validated,
+        # immutable document for this invocation. No record bytes are cached.
         raw = (self._frame_call(encode_document, record, self.bounds)
                if validated_raw is None else validated_raw)
         if type(raw) is not bytes or len(raw) > document_limit(self.bounds):
             raise DataflowError('INVALID_CONTRACT', 'invalid prevalidated record document')
+        if spec is None and validated_raw is not None:
+            from ..dataflow_record_frames import _typed_shape, admit_workspace
+            native = (_typed_shape(record.inline, self.bounds.max_row_bytes)[1]
+                      if record.inline is not None else 0)
+            # Appending may have grown the terminal index. Re-admit the live
+            # row/document and bounded send metadata against current owners;
+            # the earlier encoding grant cannot stand in for this check.
+            self._frame_call(admit_workspace, native + len(raw) + 4096, self.bounds)
         if spec is not None and spec.mode == 'finite_sealed':
             stream = self._finite_buffer(spec)
             size, chunks = self._frame_call(frame_parts, record, self.bounds, target=target, raw=raw)
@@ -1070,20 +1078,22 @@ class WorkerGraphRunner:
                         encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._limit is not None and self._terminal_rows >= self._limit:
                 return
-            size, chunks = self._frame_call(frame_parts, record, self.bounds)
+            if self._terminal_columns is None and record.inline is not None:
+                self._set_terminal_columns(record.inline, row=record.inline, sort=True)
+            elif self._terminal_columns is None and record.schema_ref is not None:
+                from ..record_schema import RecordSchemas
+                self._set_terminal_columns(RecordSchemas(self.services).read(record.schema_ref), schema=True)
+            raw = self._frame_call(encode_document, record, self.bounds)
+            size, chunks = self._frame_call(frame_parts, record, self.bounds, raw=raw)
             if self._terminal_bytes + size > self.bounds.max_spill_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'terminal durable spool exceeds disk bound')
             self._terminal_blocks.append_parts(record, chunks, size=size)
             self._terminal_bytes += size
             self._terminal_rows += 1
             self._metrics[occ]['rows_output'] += 1
-            if self._terminal_columns is None and record.inline is not None:
-                self._set_terminal_columns(record.inline, row=record.inline, sort=True)
-            elif self._terminal_columns is None and record.schema_ref is not None:
-                from ..record_schema import RecordSchemas
-                self._set_terminal_columns(RecordSchemas(self.services).read(record.schema_ref), schema=True)
             if self._terminal_spec.kind in ('take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches'):
-                self._publish(record)
+                self._publish(record, validated_raw=raw)
+            del raw
             if self._limit is not None and self._terminal_rows >= self._limit:
                 self._finish_node(occ)
                 self._close_inputs(occ)
