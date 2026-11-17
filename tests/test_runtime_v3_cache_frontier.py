@@ -229,6 +229,7 @@ def crash_after_original_ack(execution, **kwargs):
                 os._exit(79)
             time.sleep(.01)
         raise AssertionError('suffix cache write did not reach process crash boundary')
+    return result
 if mode=='crash': DataflowExecution.pump=crash_after_original_ack
 identity=RunJournal(root/'run').recovery_identity() if (root/'run').exists() else None
 scope=(RunContext.resume(RunRef(str(root/'run'),identity['run_id'])) if identity else
