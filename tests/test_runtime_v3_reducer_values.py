@@ -51,7 +51,10 @@ def _fold_typed(state, row, *, calls):
 
 def _slow_keep(value):
     import time
-    assert type(value) is list and type(value[0]) is tuple
+    # A module callback must have identical bytecode in pytest and the worker;
+    # pytest rewrites bare asserts only in the driver import.
+    if type(value) is not list or type(value[0]) is not tuple:
+        raise AssertionError('materialized reducer value changed type')
     time.sleep(.02)
     return True
 
