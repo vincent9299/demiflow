@@ -18,8 +18,9 @@ that the whole platform has completed final acceptance.
 - Worktree: `/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117`.
 - Branch: `engine/gpt-small-terminal-metadata-delivery-20261117`.
 - Integration: original `866395be1a6400d53ea8f31273c83c72d3992be0` on `8928e5b`, then metadata follow-up `ed4b38c`. The latter's parent `d8f9b03` contains only the original delivery documentation.
-- Final tested commit: `51d606677ac2dc498a442c4d5eceb13b1621a640`.
+- Sixteen-case tested commit: `51d606677ac2dc498a442c4d5eceb13b1621a640`.
 - Follow-up delivery and tested commit have identical complete Git tree `9cf13a7c76ebc8e1f18727ddf5c32020af440a5f`.
+- Final narrow production follow-up: `1f4eba64e693efc80285f1850fbff49b9a90c048` (only `SegmentForest._put` plus two new selectors). This exact clean commit passes twelve affected selectors; apply it after `ed4b38c`.
 - Original development branch/commits retained. No original test edited.
 
 ## New-plan contract and actual budget
@@ -86,6 +87,11 @@ a physical grant. No driver, journal or allocator implementation was added.
   original store. Largest token, iterator/key-sorting state, UTF-8/Unicode and
   previous/current writer fragments are admitted before creating/advancing the
   encoder. Old window encoding still calls the original `document` unchanged.
+- Segment merging holds its children from `_put` entry, including entries
+  already popped from `forest.roots`. It releases stored raw bytes before
+  allocating the returned descriptor. An actual two-segment merge preserves
+  original bytes/hash/restore; the corresponding control-body boundary rejects
+  before index publication while both children remain live and roots are empty.
 
 The implementation uses six production files: publication-budget schema constant;
 compiler window selection; `partition_stages` residency; terminal blocks;
@@ -107,6 +113,10 @@ allocator are untouched. Narrow runner/placement diffs are under
 | `/tmp/demiflow-durable-publication-r5-evidence/verification.json` | first metadata fix `a8a46d2` | Original recovery and three small-window tests: 4 passed |
 | `/tmp/demiflow-durable-publication-r6-evidence/verification.json` | metadata fixture/encoding check `8209f3a` | 3 passed, 2 failed: 12 columns actually fit; conservative whole-manifest encoding rejected a feasible two-block snapshot |
 | `/tmp/demiflow-durable-publication-r7-evidence/verification.json` | final `51d6066` | **16 passed**, 63.27 s; **48 complete setup/call/teardown phases** |
+| `/tmp/demiflow-durable-publication-r8-evidence/verification.json` | final merge lifetime `1f4eba6` | **12 passed**, 26.85 s; **36 complete phases**: nine metadata selectors, original 40 KiB recovery and two original segment hash/restore variants |
+
+The last batch targets the only subsequently changed method. It does not rerun
+the unaffected matrix or claim that 16+12 is 28 unique tests on the final HEAD.
 
 Final selection includes the unchanged original 40 KiB recovery node, unchanged
 80 KiB sort/native recovery, unchanged 64 MiB wide join, old sealed-window rules,
@@ -131,7 +141,7 @@ with a scaffolded participant assignment; they are component recovery checks,
 not a separate full Dataset multi-column execution. The original 40 KiB Dataset
 and native-publication recovery cases remain real end-to-end checks.
 
-All 2987 recorded final inputs match the `ed4b38c` delivery tree byte-for-byte, with no
+All 2987 recorded r7 inputs match `ed4b38c` and all 2987 r8 inputs match `1f4eba6` byte-for-byte, with no
 changes during the run, a clean checkout and no surviving child process. Four
 resource domains, TMPDIR, D8, actual import root and the frozen seven are pinned
 by the original runner. The [machine report](SMALL-NATIVE-WORKSPACE-CLOSURE-20261117.json)
@@ -143,5 +153,6 @@ all three phases directly, with no skipped tests.
 The main/root checkout was not edited. No full matrix, GPU, two-host, full V035
 or formal performance run was repeated. Managed working-set admission is not a
 claim that process RSS equals the small pool; platform-owned metadata is still
-explicitly admitted. No failure remains in this final sixteen-case selection.
+explicitly admitted. No failure remains in the sixteen-case batch or its final
+twelve-case affected-method follow-up.
 Parent integration still combines this candidate with its separate wave changes.
