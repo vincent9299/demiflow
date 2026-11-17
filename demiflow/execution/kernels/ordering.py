@@ -76,6 +76,7 @@ class SortWindow:
     merge_codec_bytes: int | None = None
     merge_frame_multiplier: int = 3
     max_runs: int | None = None
+    merge_reader_bytes: int | None = None
 
     def validate(self, bounds):
         values = (self.resident_bytes, self.run_bytes, self.frame_bytes,
@@ -92,13 +93,16 @@ class SortWindow:
                 or type(self.merge_frame_multiplier) is not int or self.merge_frame_multiplier < 3
                 or self.max_runs is not None and (type(self.max_runs) is not int or self.max_runs < 1)):
             raise _err('INVALID_CONTRACT', 'invalid sort codec/metadata subwindow')
+        reader = (self.merge_fan_in * (self.merge_frame_multiplier * self.frame_bytes + self.read_chunk_bytes)
+                  + 2 * self.frame_bytes if self.merge_reader_bytes is None else self.merge_reader_bytes)
+        if type(reader) is not int or reader < self.frame_bytes:
+            raise _err('INVALID_CONTRACT', 'invalid measured merge reader subwindow')
         if (self.resident_bytes > bounds.max_resident_bytes
                 or self.frame_bytes > self.run_bytes
                 or self.read_chunk_bytes > min(1 << 20, bounds.max_row_bytes)
                 or self.merge_fan_in > min(_MERGE_FAN_IN, bounds.max_open_files)
                 or self.run_bytes + codec > self.resident_bytes
-                or self.merge_fan_in * (self.merge_frame_multiplier * self.frame_bytes + self.read_chunk_bytes)
-                   + 2 * self.frame_bytes + (merge_codec if self.codec_bytes is not None else 0) > merge_window):
+                or reader + (merge_codec if self.codec_bytes is not None else 0) > merge_window):
             raise _err('RESOURCE_INFEASIBLE', 'sort subwindow exceeds its admitted live-object window')
 
 
@@ -231,17 +235,24 @@ def _record_sort_key(
     raise _err("INVALID_CONTRACT", "kind is not an ordering kernel", kind=kind)
 
 
-def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes, *, frame_limit=None) -> bytes:
+def _frame_bytes(key: tuple, prov: tuple, rec_bytes: bytes, *, frame_limit=None, admit=None) -> bytes:
     limit = len(rec_bytes) * 4 + 1024 if frame_limit is None else frame_limit
+    if admit is not None:
+        from ..dataflow_record_frames import _typed_shape
+        ks, _, kt = _typed_shape({'value': key}, limit)
+        ps, _, pt = _typed_shape({'value': prov}, limit)
+        # Existing key/provenance/record bytes are retained by the merge.
+        # Admit the tagged trees, JSON/string bytes and final joined frame
+        # before encoding. These three phases do not coexist with each other.
+        admit(max(kt + 2 * ks, ks + pt + 2 * ps,
+                  2 * (ks + ps) + len(rec_bytes) + 12) + 512)
     key_bytes = _encode_payload({"value": key}, max_bytes=limit)
     prov_bytes = _encode_payload({"value": prov}, max_bytes=limit)
     if frame_limit is not None and len(key_bytes)+len(prov_bytes)+len(rec_bytes)+12+_FRAME_OVERHEAD > frame_limit:
         raise _err('BUDGET_EXCEEDED', 'single sort frame exceeds the resident budget')
-    return (
-        struct.pack(">I", len(key_bytes)) + key_bytes
-        + struct.pack(">I", len(prov_bytes)) + prov_bytes
-        + struct.pack(">I", len(rec_bytes)) + rec_bytes
-    )
+    return b''.join((struct.pack(">I", len(key_bytes)), key_bytes,
+        struct.pack(">I", len(prov_bytes)), prov_bytes,
+        struct.pack(">I", len(rec_bytes)), rec_bytes))
 
 
 def _encode_frame(key: tuple, prov: tuple, record: Record, *, max_bytes: int, frame_limit=None) -> bytes:
@@ -251,56 +262,116 @@ def _encode_frame(key: tuple, prov: tuple, record: Record, *, max_bytes: int, fr
     return _frame_bytes(key, prov, encoded, frame_limit=frame_limit)
 
 
+class _MergeReadBudget:
+    """Actual held frames/buffers inside one already admitted merge window."""
+    def __init__(self, window, count):
+        self.limit = window.merge_reader_bytes
+        self.total_limit = window.merge_resident_bytes or window.resident_bytes
+        self.frames = [0] * count
+        self.buffers = [0] * count
+        self.working = [0] * count
+
+    def check(self, extra=0, *, total=False):
+        # Fixed readers/heap/slot tables are small and bounded by fan-in.
+        used = 4096 + sum(self.frames) + sum(self.buffers) + sum(self.working) + extra
+        if used > (self.total_limit if total else self.limit):
+            raise _err('BUDGET_EXCEEDED', 'sort merge frames exceed their measured resident subwindow')
+
+    def external(self, extra):
+        self.check(extra, total=True)
+
+    def finish(self, slot, size):
+        # The old heap frame and the newly decoded frame coexist until next()
+        # returns. Check both before replacing the slot's retained charge.
+        self.check(size)
+        self.frames[slot] = size
+        self.working[slot] = 0
+
+    def close(self, slot):
+        self.frames[slot] = self.buffers[slot] = self.working[slot] = 0
+
+
 class _FrameReader:
     """Streaming length-prefixed frame reader over bounded store chunks."""
 
-    def __init__(self, chunks: Iterator[bytes], *, max_frame_bytes: int) -> None:
+    def __init__(self, chunks: Iterator[bytes], *, max_frame_bytes: int,
+                 budget=None, slot=0, chunk_bytes=0) -> None:
         self._max_frame_bytes = max_frame_bytes
         self._chunks = iter(chunks)
         self._buffer = bytearray()
         self._eof = False
+        self._budget, self._slot, self._chunk_bytes = budget, slot, chunk_bytes
+        if budget is not None:
+            budget.buffers[slot] = sys.getsizeof(self._buffer)
+            budget.check()
 
     def _fill(self, needed: int) -> None:
         while len(self._buffer) < needed and not self._eof:
+            if self._budget is not None:
+                # read()'s next chunk, bytearray growth, and an old chunk can
+                # overlap. The configured read chunk is a hard upper bound.
+                self._budget.check(sys.getsizeof(self._buffer) + 3 * self._chunk_bytes + 256)
             try:
                 chunk = next(self._chunks)
             except StopIteration:
                 self._eof = True
                 break
             self._buffer.extend(chunk)
+            if self._budget is not None:
+                self._budget.buffers[self._slot] = sys.getsizeof(self._buffer)
 
     def _read_exact(self, count: int) -> bytes:
         self._fill(count)
         if len(self._buffer) < count:
             raise _err("CORRUPT_ARTIFACT", "truncated sort run frame")
+        if self._budget is not None:
+            self._budget.check(2 * count + 256)
         data = bytes(self._buffer[:count])
         del self._buffer[:count]
+        if self._budget is not None:
+            self._budget.buffers[self._slot] = sys.getsizeof(self._buffer)
         return data
+
+    def _decode(self, size):
+        raw = self._read_exact(size)
+        if self._budget is not None:
+            from ..dataflow_record_frames import raw_workspace
+            self._budget.check(raw_workspace(raw))
+        return _decode_payload(raw, max_bytes=self._max_frame_bytes)['value']
 
     def next_frame(self) -> tuple | None:
         self._fill(4)
         if not self._buffer:
+            if self._budget is not None:
+                self._budget.finish(self._slot, 0)
             return None
         (key_len,) = struct.unpack(">I", self._read_exact(4))
         if key_len > self._max_frame_bytes:
             raise _err("BUDGET_EXCEEDED", "sort key frame exceeds the resident budget")
-        key = _decode_payload(self._read_exact(key_len), max_bytes=self._max_frame_bytes)["value"]
+        key = self._decode(key_len)
+        if self._budget is not None:
+            self._budget.working[self._slot] = _retained_frame_bytes(key, (), b'')
         (prov_len,) = struct.unpack(">I", self._read_exact(4))
         if key_len + prov_len + 12 > self._max_frame_bytes:
             raise _err("BUDGET_EXCEEDED", "sort provenance frame exceeds the resident budget")
-        prov = _decode_payload(self._read_exact(prov_len), max_bytes=self._max_frame_bytes)["value"]
+        prov = self._decode(prov_len)
+        if self._budget is not None:
+            self._budget.working[self._slot] = _retained_frame_bytes(key, prov, b'')
         (rec_len,) = struct.unpack(">I", self._read_exact(4))
         if key_len + prov_len + rec_len + 12 > self._max_frame_bytes:
             raise _err("BUDGET_EXCEEDED", "sort record frame exceeds the resident budget")
         rec_bytes = self._read_exact(rec_len)
+        if self._budget is not None:
+            self._budget.finish(self._slot, _retained_frame_bytes(key, prov, rec_bytes))
         return (key, prov, rec_bytes)
 
 
-def _run_frames(ref: ArtifactRef, services: RuntimeServices, window=None) -> Iterator[tuple]:
+def _run_frames(ref: ArtifactRef, services: RuntimeServices, window=None, *, budget=None, slot=0) -> Iterator[tuple]:
     kwargs = {} if window is None else {'chunk_bytes': window.read_chunk_bytes}
     chunks = services.store.read(ref, max_bytes=ref.size_bytes, **kwargs)
     reader = _FrameReader(chunks, max_frame_bytes=(services.bounds.max_resident_bytes
-                          if window is None else window.frame_bytes))
+                          if window is None else window.frame_bytes), budget=budget, slot=slot,
+                          chunk_bytes=0 if window is None else window.read_chunk_bytes)
     try:
         while True:
             frame = reader.next_frame()
@@ -311,6 +382,8 @@ def _run_frames(ref: ArtifactRef, services: RuntimeServices, window=None) -> Ite
         close = getattr(chunks, 'close', None)
         if close is not None:
             close()
+        if budget is not None:
+            budget.close(slot)
 
 
 def _write_run(
@@ -416,9 +489,12 @@ def _build_sort_runs(records, *, spec, services, window=None, key_for_record=Non
 
 
 def _merge_into(
-    sources: tuple[ArtifactRef, ...], services: RuntimeServices, window=None,
+    sources: tuple[ArtifactRef, ...], services: RuntimeServices, window=None, *, budget=None,
 ) -> Iterator[tuple]:
-    readers = [_run_frames(ref, services, window) for ref in sources]
+    if budget is None and window is not None and window.merge_reader_bytes is not None:
+        budget = _MergeReadBudget(window, len(sources))
+    readers = [_run_frames(ref, services, window, budget=budget, slot=index)
+               for index, ref in enumerate(sources)]
     try:
         for frame in heapq.merge(*readers, key=lambda item: (item[0], item[1])):
             _check_stop(services)
@@ -467,10 +543,13 @@ def merge_sort_runs(
                     raise _err("BUDGET_EXCEEDED", "merge spill exceeds max_spill_bytes")
 
                 def frames() -> Iterator[bytes]:
-                    with closing(_merge_into(group, services, window)) as source_frames:
+                    budget = (_MergeReadBudget(window, len(group))
+                              if window is not None and window.merge_reader_bytes is not None else None)
+                    with closing(_merge_into(group, services, window, budget=budget)) as source_frames:
                         for key, prov, rec_bytes in source_frames:
                             yield _frame_bytes(key, prov, rec_bytes,
-                                               frame_limit=None if window is None else window.frame_bytes)
+                                frame_limit=None if window is None else window.frame_bytes,
+                                admit=None if budget is None else budget.external)
 
                 with closing(frames()) as output_frames:
                     ref = services.store.put(output_frames, max_bytes=remaining, media_type=RECORD_MEDIA_TYPE)

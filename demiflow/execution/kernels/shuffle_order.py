@@ -54,12 +54,12 @@ def shuffle_windows(services):
     maximum_runs = metadata // 4096
     if maximum_runs < 1:
         raise _err('RESOURCE_INFEASIBLE', 'seeded shuffle lacks its finite metadata/codec windows')
-    frame = grant // 64
+    frame = grant // 16
     window = SortWindow(resident_bytes=grant // 2, run_bytes=grant // 4,
         frame_bytes=frame, read_chunk_bytes=min(4096, services.bounds.max_row_bytes, max(1, frame // 8)),
         merge_fan_in=2, merge_resident_bytes=3 * grant // 8,
         codec_bytes=grant // 4, merge_codec_bytes=grant // 8,
-        merge_frame_multiplier=6, max_runs=maximum_runs)
+        merge_frame_multiplier=6, max_runs=maximum_runs, merge_reader_bytes=grant // 4)
     window.validate(services.bounds)
     return ShuffleWindows(grant, 3 * grant // 8, metadata, window)
 
