@@ -22,8 +22,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.dataflow_hosts import ControlMailbox
 from demiflow.execution.dataflow_model_journal import make_native_action_view
 from demiflow.execution.dataflow_services import make_runtime_services
-from demiflow.execution.recovery_contract import document
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.execution.recovery_contract import document, RecoveryContractError
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
 from test_runtime_v3_b import DirectTransport, _events
@@ -55,6 +54,7 @@ def _join_worker(tmp_path):
             stage.partitions, 'local', 'in-process-test-boundary', grant_ref, grant['expires_at_ms'])
         assignment = execution._assignment(lease, stage)
         driver.journal_service.register_worker(lease, stage.occurrences)
+        file_slots_before = driver.store.open_file_slots
         services = make_runtime_services(assignment, transport=DirectTransport(driver), cache=tmp_path/'cache')
         mailbox = ControlMailbox(bounds=services.bounds, check_stop=services.check_stop)
         worker = DataflowWorkerExecutor(services=services, mailbox=mailbox)
@@ -73,7 +73,7 @@ def _join_worker(tmp_path):
         finally:
             worker.close()
             assert worker._closed and not worker._kernels and not worker._readers
-            assert services.store.open_file_slots == 0
+            assert services.store.open_file_slots == file_slots_before
             if hasattr(worker, '_runner'):
                 peer = worker._runner._peer
                 assert not peer._active and not peer._sending
@@ -183,7 +183,7 @@ def test_real_dataset_cancel_interrupts_finite_authentication_and_releases_worke
         return result
     monkeypatch.setattr(finite, '_decode_record_document', observe_decode)
     monkeypatch.setattr(DataflowWorkerExecutor, 'cancel', observe_cancel)
-    with pytest.raises(ServiceStopped, match='run_cancelled'):
+    with pytest.raises(RecoveryContractError, match='Execution cancellation requested'):
         with RunContext.start(tmp_path/'run', limits={'timeout_s': 30}) as run, \
                 data.local_execution(workers=4, worker_mode='thread'):
             rows = [{'key': n, 'value': str(n)} for n in range(32)]
@@ -225,6 +225,7 @@ def test_cancel_inside_intermediate_sort_merge_stops_before_next_spill_frame(tmp
         assert len(runs) == 3
         monkeypatch.setattr(ordering, '_MERGE_FAN_IN', 2)
         original_put = services.store.put
+        slots_before_merge = services.store.open_file_slots
         written = []
         def put(chunks, **kwargs):
             def observe():
@@ -238,5 +239,33 @@ def test_cancel_inside_intermediate_sort_merge_stops_before_next_spill_frame(tmp
         with pytest.raises(DataflowError, match='CANCELLED'):
             list(ordering.merge_sort_runs(runs, spec=spec, services=services))
         assert len(written) == 1
-        assert services.store.open_file_slots == 0
+        assert services.store.open_file_slots == slots_before_merge
         assert all(services.store.inspect(ref) for ref in runs)
+
+
+def test_finite_credit_retry_checks_cancel_but_native_port_keeps_original_guard(tmp_path, monkeypatch):
+    from demiflow.execution.dataflow_record_frames import admit_workspace, resident_limit
+    with _join_worker(tmp_path) as item:
+        runner = item.worker._runner
+        held = runner._peer.put(b'x' * 4096)
+        requests, sizes = [], []
+        def measure(bounds, *, services, retained):
+            requests.append(retained)
+            if not sizes:
+                sizes.append(resident_limit(bounds, services) - retained + 2048)
+            return admit_workspace(sizes[0], bounds, services=services, retained=retained)
+        original_wait = runner._condition.wait
+        def cancel_at_original_credit_wait(timeout):
+            item.worker.cancel('cancel finite peer-credit wait', deadline_ms=100)
+            return original_wait(0)
+        monkeypatch.setattr(runner._condition, 'wait', cancel_at_original_credit_wait)
+        try:
+            with pytest.raises(DataflowError, match='CANCELLED'):
+                runner._finite_frame_call(measure, runner.bounds)
+            assert len(requests) == 1
+        finally:
+            runner._peer.release(held['key'])
+        # Once original peer ownership is released, the default port still
+        # obeys only the original guard, allowing admitted effects to persist.
+        runner._frame_call(measure, runner.bounds)
+        assert len(requests) == 2 and requests[0] - requests[1] == 4096
