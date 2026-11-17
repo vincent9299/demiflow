@@ -524,6 +524,16 @@ class LocalHostEndpoint(_EndpointBase):
         self._send_k3("Assign", {"assignment": control})
         self._activated = True
 
+    def _read_control(self, *, max_messages):
+        try:
+            return self._control_reader.read_ready(max_messages=max_messages)
+        except (ConnectionResetError, ConnectionAbortedError) as exc:
+            # A killed worker can terminate with a reset instead of EOF. Neither
+            # proves whether its last operation completed; retain original
+            # journal/ACK authority and never retry the unconfirmed command.
+            # Framing, JSON, budget and timeout errors remain their own errors.
+            raise DataflowError("UNKNOWN_EFFECT", "worker control connection terminated before confirmation") from exc
+
     def _send_k3(self, kind: str, payload: dict) -> dict:
         from .worker.bootstrap import send_message
         self.flush_business()
@@ -535,7 +545,7 @@ class LocalHostEndpoint(_EndpointBase):
             if remaining <= 0:
                 raise DataflowError("DEADLINE_EXCEEDED", "Local worker control command timed out")
             self._deliver_pending_journal_replies()
-            messages = self._control_reader.read_ready(max_messages=self._services.bounds.max_pending_events)
+            messages = self._read_control(max_messages=self._services.bounds.max_pending_events)
             if messages is None:
                 raise DataflowError("UNKNOWN_EFFECT", "local worker closed before responding")
             response = None
@@ -564,7 +574,7 @@ class LocalHostEndpoint(_EndpointBase):
         while self._events and len(events) < max_events:
             events.append(self._events.popleft())
         if len(events) < max_events:
-            frames = self._control_reader.read_ready(max_messages=max_events - len(events))
+            frames = self._read_control(max_messages=max_events - len(events))
             if frames is None:
                 raise DataflowError("UNKNOWN_EFFECT", "worker connection closed during execution")
             for frame in frames:
