@@ -159,7 +159,10 @@
         err.resetRequired = value.reset_required === true;
         if (response.status === 403 && path === 'capabilities') authFailed = true;
         if (err.code === 'unauthorized') authFailed = true;
-        if(analysis&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
+        // Keep transient admission contention inside the original project read.
+        // Result-source selection and all writes retain their explicit recovery.
+        const projectRead=!body&&['projects','capabilities','context','changes','graph'].includes(path)&&err.operationStarted===false;
+        if((analysis||projectRead)&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
           await new Promise((resolve,reject)=>{let timer;const cancel=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);reject(staleRequest());};signal.addEventListener('abort',cancel,{once:true});if(signal.aborted){cancel();return;}timer=setTimeout(()=>{signal.removeEventListener('abort',cancel);resolve();},wait);});
           continue;
