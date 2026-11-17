@@ -408,12 +408,19 @@ def frame_stream(chunks, bounds, *, services=None, check_workspace=None):
 def admit_document(raw, bounds, *, services=None, retained=0):
     if type(raw) is not bytes or len(raw) > document_limit(bounds):
         _fail('record document exceeds its frame bound')
-    _admit(retained + raw_workspace(raw), resident_limit(bounds, services))
+    workspace = raw_workspace(raw)
+    _admit(retained + workspace, resident_limit(bounds, services))
+    return workspace
 
 
-def decode_document(raw, *, record_id, sequence, bounds, services=None, retained=0):
+def decode_document(raw, *, record_id, sequence, bounds, services=None, retained=0,
+                    check_workspace=None):
     from .exchange.dataflow_bridge import _decode_record_document, _validate_record
-    admit_document(raw, bounds, services=services, retained=retained)
+    workspace = admit_document(raw, bounds, services=services, retained=retained)
+    if check_workspace is not None:
+        # The caller's collection/read-window check and our codec admission
+        # share one measurement; both still precede every parse/allocation.
+        check_workspace(workspace)
     record = _decode_record_document(raw, record_id=record_id, sequence=sequence,
         max_bytes=document_limit(bounds), payload_max_bytes=bounds.max_row_bytes,
         metadata_max_bytes=bounds.max_control_bytes)

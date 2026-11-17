@@ -1820,7 +1820,7 @@ class _OutputSubscription:
 
     def read_admitted(self, *, max_records, deadline_ms, admit=None, admit_workspace=None):
         from .exchange.dataflow_transport import read_peer_many, MAX_PEER_BATCH, peer_batch_limit
-        from .dataflow_record_frames import decode_document, document_limit, raw_workspace
+        from .dataflow_record_frames import decode_document, document_limit
         from .dataflow_replay import record_encoded_bytes
         e = self.execution
         records = []
@@ -1833,6 +1833,13 @@ class _OutputSubscription:
                 raise DataflowError('BUDGET_EXCEEDED', 'terminal read workspace exceeds resident budget')
             if admit_workspace is not None:
                 admit_workspace(len(records), payload_bytes)
+
+        def decode_admission(required, *, record_bytes, reader_bytes=0):
+            workspace(reader_bytes + required)
+            if admit is not None:
+                # This must observe the updated codec workspace together with
+                # the next row, not two independent smaller peak estimates.
+                admit(record_bytes, len(records), payload_bytes)
 
         try:
             while not self.closed and e._replay is not None and len(records) < max_records:
@@ -1849,11 +1856,10 @@ class _OutputSubscription:
                     raise DataflowError('BUDGET_EXCEEDED', 'terminal replay row exceeds admitted read window')
                 # Existing raw frame, the typed decode/canonical re-encode
                 # workspace and the original leased chunk remain simultaneous.
-                workspace(e._replay.buffered_bytes + raw_workspace(raw))
-                if admit is not None:
-                    admit(size, len(records), payload_bytes)
                 records.append(decode_document(raw, record_id=record_id,
-                    sequence=sequence, bounds=e._bounds, retained=payload_bytes + e._replay.buffered_bytes))
+                    sequence=sequence, bounds=e._bounds, retained=payload_bytes + e._replay.buffered_bytes,
+                    check_workspace=lambda required: decode_admission(required,
+                        record_bytes=size, reader_bytes=e._replay.buffered_bytes)))
                 admitted += required
                 payload_bytes += size
                 e._replay.pop()
@@ -1894,11 +1900,9 @@ class _OutputSubscription:
                             raw = next(frames)
                             size = record_encoded_bytes(raw, maximum=e._bounds.max_row_bytes,
                                 frame_maximum=document_limit(e._bounds))
-                            workspace(raw_workspace(raw))
-                            if admit is not None:
-                                admit(size, len(records), payload_bytes)
                             records.append(decode_document(raw, record_id=payload['record_id'],
-                                sequence=payload['sequence'], bounds=e._bounds, retained=payload_bytes))
+                                sequence=payload['sequence'], bounds=e._bounds, retained=payload_bytes,
+                                check_workspace=lambda required: decode_admission(required, record_bytes=size)))
                             e._terminal_queue.popleft()
                             e._ack(payload['delivery_id'])
                             admitted += payload['peer']['bytes']

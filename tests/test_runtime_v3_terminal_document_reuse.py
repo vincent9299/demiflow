@@ -85,3 +85,36 @@ def test_reused_document_still_checks_current_workspace_before_peer_admission(po
     with pytest.raises(DataflowError, match='workspace'):
         WorkerGraphRunner._publish(runner, record, validated_raw=raw)
     assert calls == [admit_encoded_record]
+
+
+def test_single_decode_measurement_keeps_both_admissions_before_parse(monkeypatch):
+    from demiflow.execution import dataflow_record_frames as frames
+    from dataclasses import replace
+    record = _record({'value': b'x' * 4096})
+    limits = bounds(max_resident_bytes=65536)
+    raw = encode_document(record, limits)
+    measured, allocations, callbacks = [], [], []
+    measure, decode = frames.raw_workspace, bridge._codec_loads
+    def counted(value, **kwargs):
+        measured.append(value)
+        return measure(value, **kwargs)
+    def parsed(*args, **kwargs):
+        allocations.append(True)
+        return decode(*args, **kwargs)
+    def rejected(size):
+        callbacks.append(size)
+        raise DataflowError('BUDGET_EXCEEDED', 'live collection and codec exceed grant')
+    monkeypatch.setattr(frames, 'raw_workspace', counted)
+    monkeypatch.setattr(bridge, '_codec_loads', parsed)
+    kwargs = {'record_id': record.record_id, 'sequence': record.sequence}
+    with pytest.raises(DataflowError, match='live collection'):
+        frames.decode_document(raw, bounds=limits, check_workspace=rejected, **kwargs)
+    assert measured == [raw] and callbacks == [measure(raw)] and not allocations
+    measured.clear(); callbacks.clear()
+    with pytest.raises(DataflowError, match='workspace'):
+        frames.decode_document(raw, bounds=replace(limits, max_resident_bytes=len(raw)),
+                               check_workspace=lambda size: callbacks.append(size), **kwargs)
+    assert measured == [raw] and not callbacks and not allocations
+    measured.clear()
+    assert frames.decode_document(raw, bounds=limits, check_workspace=callbacks.append, **kwargs) == record
+    assert measured == [raw] and callbacks == [measure(raw)] and allocations
