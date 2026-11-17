@@ -670,6 +670,16 @@ class DataflowExecution:
                         if state and state.get("mode") == "nonrecoverable":
                             raise DataflowError("INCOMPATIBLE_HISTORY", "actor state cannot resume: " + state["reason"],
                                                 context={"occurrence_id": occ})
+        # A journal-authenticated completed result above needs no original
+        # carrier. Continuing execution does: prepare retained the sealed
+        # policy, while services/hosts were assembled for the current request.
+        # Never start those hosts under another provider's physical contract.
+        providers = {host.provider for host in self._services.hosts}
+        if providers != {self._physical.policy.provider}:
+            raise DataflowError("INCOMPATIBLE_HISTORY",
+                                "continuing sealed execution requires its original provider",
+                                context={"sealed_provider": self._physical.policy.provider,
+                                         "host_providers": sorted(providers)})
         # This runner keeps its participants alive through the same cut. Never
         # promise phased residency then leave an unstarted participant forever
         # pending. Check before native acquisition or any business activation.
