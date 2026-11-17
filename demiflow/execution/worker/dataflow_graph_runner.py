@@ -177,15 +177,45 @@ class WorkerGraphRunner:
             ref = contribution.sinks.get(self._terminal_spec.kind)
             if ref is None:
                 continue
-            manifest = json.loads(b"".join(self.services.store.read(ref, max_bytes=self.bounds.max_control_bytes)))
-            self._terminal_blocks.restore(manifest)
-            self._terminal_rows, self._terminal_bytes = manifest["rows"], manifest["bytes"]
-            self._terminal_columns = manifest["columns"]
-            from ..record_schema import RecordSchemas
-            self._terminal_schema_ref = (_artifact_from_json(manifest['schema_ref'])
-                                        if manifest.get('schema_ref') is not None else None)
-            RecordSchemas(self.services).read(self._terminal_schema_ref)
+            blocks = self._terminal_blocks
+            if blocks._workspace_limit is not None:
+                from ..dataflow_record_frames import decode_metadata
+                raw = self._frame_call(read_document, ref, self.services.store, self.bounds,
+                                       _maximum=self.bounds.max_control_bytes)
+                manifest = self._frame_call(decode_metadata, raw, self.bounds)
+                del raw
+            else:
+                manifest = json.loads(b"".join(self.services.store.read(ref, max_bytes=self.bounds.max_control_bytes)))
+            with blocks.hold_metadata(manifest):
+                blocks.restore(manifest)
+                self._terminal_rows, self._terminal_bytes = manifest["rows"], manifest["bytes"]
+                blocks.retain_columns(manifest['columns'])
+                self._terminal_columns = manifest["columns"]
+                from ..record_schema import RecordSchemas
+                self._terminal_schema_ref = (_artifact_from_json(manifest['schema_ref'])
+                                            if manifest.get('schema_ref') is not None else None)
+                RecordSchemas(self.services).read(self._terminal_schema_ref)
+            del manifest
             self._restored_terminal = True
+
+    def _set_terminal_columns(self, values, *, row=None, sort=False, schema=False):
+        blocks = self._terminal_blocks
+        if blocks._workspace_limit is not None:
+            from ..dataflow_record_frames import _typed_shape
+            # The first row still owns the aliased key strings. The new list
+            # and sorting scratch must fit before allocating columns.
+            resident = _typed_shape(row, self.bounds.max_row_bytes)[1] if row is not None else 0
+            if schema:
+                import sys
+                # Field names are inspected one at a time before Arrow creates
+                # its full names list; the list and optional sorted copy coexist.
+                resident += sum(sys.getsizeof(field.name) for field in values)
+            blocks._check_workspace(resident + 64 + 16 * len(values))
+        if schema:
+            values = values.names
+        columns = sorted(values) if sort else list(values)
+        blocks.retain_columns(columns)
+        self._terminal_columns = columns
 
     def _source_durable_windows(self):
         """Bound source admission by reachable original durable grants.
@@ -319,7 +349,7 @@ class WorkerGraphRunner:
                 terminal=occurrence, bounds=self.bounds)
             if schema is not None:
                 self._terminal_schema_ref = RecordSchemas(self.services).put(schema)
-                self._terminal_columns = sorted(schema.names)
+                self._set_terminal_columns(schema, sort=True, schema=True)
         from ..recovery_contract import identity
         frontier_ref = self.e._restored_states.get(identity(['worker-frontier', self.partition]))
         if self.e._restore_image is not None:
@@ -1048,10 +1078,10 @@ class WorkerGraphRunner:
             self._terminal_rows += 1
             self._metrics[occ]['rows_output'] += 1
             if self._terminal_columns is None and record.inline is not None:
-                self._terminal_columns = sorted(record.inline)
+                self._set_terminal_columns(record.inline, row=record.inline, sort=True)
             elif self._terminal_columns is None and record.schema_ref is not None:
                 from ..record_schema import RecordSchemas
-                self._terminal_columns = RecordSchemas(self.services).read(record.schema_ref).names
+                self._set_terminal_columns(RecordSchemas(self.services).read(record.schema_ref), schema=True)
             if self._terminal_spec.kind in ('take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches'):
                 self._publish(record)
             if self._limit is not None and self._terminal_rows >= self._limit:
@@ -1338,24 +1368,33 @@ class WorkerGraphRunner:
             'finite_reads': self._finite_input.snapshot()}, self.bounds.max_state_bytes)
         states[identity(['worker-frontier', self.partition])] = self.services.store.put(
             iter([frontier]), max_bytes=len(frontier), media_type='application/json')
+        del frontier
         refs = snapshot_channels(self.e._channels, cut=request, store=self.services.store)
         sinks = {}
         if self._terminal_spec is not None:
-            partitions = self._terminal_blocks.manifest_partitions()
-            sink_id = self._terminal_spec.kind
-            manifest = {'schema': 'demiflow.dataflow_sink_manifest.v3', 'sink_id': sink_id,
-                        'partition_id': self.partition, 'rows': self._terminal_rows,
-                        'bytes': self._terminal_bytes, 'columns': self._terminal_columns,
-                        'partitions': partitions}
-            if self._terminal_schema_ref is not None:
-                manifest['schema_ref'] = _artifact_json(self._terminal_schema_ref)
-            if request.final:
-                from .dataflow_terminal import terminal_scalar
-                occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
-                manifest['scalar'] = terminal_scalar(self._terminal_blocks.stream(), spec=self._terminal_spec,
-                    services=self.services, occurrence_id=occurrence, schema_ref=self._terminal_schema_ref)
-            raw = document(manifest, self.bounds.max_control_bytes)
-            sinks[sink_id] = self.services.store.put(iter([raw]), max_bytes=len(raw), media_type=MANIFEST_MEDIA)
+            blocks = self._terminal_blocks
+            with blocks.hold_metadata((states, refs, sinks)):
+                partitions = blocks.manifest_partitions()
+                with blocks.hold_metadata(partitions):
+                    blocks._check_workspace(2048)
+                    sink_id = self._terminal_spec.kind
+                    manifest = {'schema': 'demiflow.dataflow_sink_manifest.v3', 'sink_id': sink_id,
+                                'partition_id': self.partition, 'rows': self._terminal_rows,
+                                'bytes': self._terminal_bytes, 'columns': self._terminal_columns,
+                                'partitions': partitions}
+                    if self._terminal_schema_ref is not None:
+                        manifest['schema_ref'] = _artifact_json(self._terminal_schema_ref)
+                    with blocks.hold_metadata(manifest):
+                        if request.final:
+                            from .dataflow_terminal import terminal_scalar
+                            occurrence = next(occ for occ, node in self.e._node_specs.items() if node.kind == 'terminal')
+                            manifest['scalar'] = terminal_scalar(blocks.stream(), spec=self._terminal_spec,
+                                services=self.services, occurrence_id=occurrence, schema_ref=self._terminal_schema_ref)
+                        size, chunks = blocks.manifest_chunks(manifest)
+                        try:
+                            sinks[sink_id] = self.services.store.put(chunks, max_bytes=size, media_type=MANIFEST_MEDIA)
+                        finally:
+                            chunks.close() if hasattr(chunks, 'close') else None
         result = CutContribution(cut_id=request.cut_id, participant_id=self.e._participant_ids()[0],
             boot_id=self.e.assignment.lease.boot_id,
             sources=tuple(r.snapshot() for r in self.e._readers.values()),

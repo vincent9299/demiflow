@@ -1,6 +1,7 @@
 """Native terminal logical blocks backed by incremental artifact forests."""
 from dataclasses import asdict
 from collections.abc import Mapping
+from contextlib import contextmanager
 
 from ..contracts.dataflow import BlockPartition
 from ..contracts.dataflow_errors import DataflowError
@@ -49,6 +50,8 @@ class TerminalBlocks:
         self._workspace_limit = None
         self._frame_call = frame_call
         self._pending_resident = 0
+        self._metadata_owners = []
+        self.columns = None
         stages = getattr(getattr(services, 'assignment', None), 'stages', ())
         granted = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in stages) if stages else self.bounds.max_resident_bytes
         from ..dataflow_publication_budget import TERMINAL_WORKSPACE
@@ -95,7 +98,84 @@ class TerminalBlocks:
     def retained_bytes(self):
         if self._workspace_limit is None:
             return 0  # Historical windows keep their original interpretation.
-        return len(self.blocks) * 1024 + sum(len(f.roots) for _, f in self.blocks.values()) * 2048
+        return self._retained_metadata()
+
+    def _retained_metadata(self, extra=()):
+        from ..dataflow_record_frames import metadata_bytes
+        # The fixed charge covers each block/forest and its lookup/layout
+        # containers. Count the actual variable trees in one traversal: a
+        # restored manifest, its columns and forest leaves may alias strings.
+        values = [self.columns, *self._metadata_owners, *extra]
+        for tag, forest in self.blocks.values():
+            values.extend((forest.roots, forest._sealed))
+            if tag is not None:
+                values.append(tag.occurrence_id)
+        return len(self.blocks) * 1024 + metadata_bytes(values)
+
+    @contextmanager
+    def hold_metadata(self, value):
+        if self._workspace_limit is None:
+            yield
+            return
+        self._check_workspace(metadata=self._retained_metadata((value,)))
+        self._metadata_owners.append(value)
+        try:
+            yield
+        finally:
+            self._metadata_owners.pop()
+
+    def retain_columns(self, columns):
+        if self._workspace_limit is not None:
+            self._check_workspace(metadata=self._retained_metadata((columns,)))
+        self.columns = columns
+
+    def manifest_chunks(self, manifest):
+        from ..recovery_contract import document
+        if self._workspace_limit is None:
+            raw = document(manifest, self.bounds.max_control_bytes)
+            return len(raw), iter((raw,))
+        import json
+        from ..dataflow_record_frames import _json_shape, _string_size
+        count = [0]
+        size, _ = _json_shape(manifest, self.bounds.max_control_bytes, count=count)
+        def token_size(value):
+            if isinstance(value, Mapping):
+                return max((max(_string_size(k), token_size(v)) for k, v in value.items()), default=2)
+            if type(value) in (list, tuple):
+                return max((token_size(v) for v in value), default=2)
+            if type(value) is float:
+                import math
+                if not math.isfinite(value):
+                    from ..recovery_contract import RecoveryContractError
+                    raise RecoveryContractError('Nonfinite execution metadata')
+            return _json_shape(value, self.bounds.max_control_bytes)[0]
+        # No complete output string/list of chunks is constructed. Charge the
+        # JSON iterator's sorted-key/recursion state, current Unicode fragment,
+        # UTF-8 fragment and the writer's previous fragment before advancing.
+        workspace = 8 * token_size(manifest) + 64 * count[0] + 1024
+        self._check_workspace(workspace)
+        def chunks():
+            encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=False, allow_nan=False,
+                                       separators=(',', ':')).iterencode(manifest)
+            total = 0
+            try:
+                while True:
+                    self._check_workspace(workspace)
+                    try:
+                        part = next(encoder)
+                    except StopIteration:
+                        break
+                    raw = part.encode('utf-8')
+                    total += len(raw)
+                    if total > size:
+                        raise DataflowError('INVALID_CONTRACT', 'terminal manifest changed while encoding')
+                    yield raw
+                    del part, raw
+                if total != size:
+                    raise DataflowError('INVALID_CONTRACT', 'terminal manifest differs from measured size')
+            finally:
+                encoder.close()
+        return size, chunks()
 
     def _check_workspace(self, extra=0, *, metadata=None):
         if self._workspace_limit is None:
@@ -118,7 +198,7 @@ class TerminalBlocks:
         used += (sum(len(f.roots) for _, f in self.blocks.values()) + roots) * 2048
         if used > self._metadata_limit:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal block index exceeds its admitted state window')
-        self._check_workspace(metadata=used)
+        self._check_workspace(metadata=self.retained_bytes + blocks * 1024 + max(0, roots) * 2048)
 
     def _index_call(self, function, *args, _frame_retained=0, **kwargs):
         retained = self._pending_resident + _frame_retained
@@ -134,7 +214,8 @@ class TerminalBlocks:
                 raise DataflowError('BUDGET_EXCEEDED', 'terminal logical blocks exceed max_partitions')
             self._admit_metadata(blocks=1)
             self.blocks[key] = (tag, SegmentForest(self.services.store, self.bounds,
-                frame_call=self._index_call if self._workspace_limit is not None else None))
+                frame_call=self._index_call if self._workspace_limit is not None else None,
+                metadata_context=self.hold_metadata if self._workspace_limit is not None else None))
         elif self.blocks[key][0] != tag:
             raise DataflowError('INVALID_CONTRACT', 'logical block count changed within an action')
         return key
@@ -240,27 +321,37 @@ class TerminalBlocks:
         self.flush()
         if not self.blocks:
             self._block(None)
+        self._check_workspace(64 + 32 * len(self.blocks))
+        keys = sorted(self.blocks)
         out = []
-        for key, (tag, forest) in sorted(self.blocks.items()):
-            partition = {'partition_id': identity(['terminal-block-v1', self.partition_id, asdict(tag)]) if tag else self.partition_id,
-                         'rows': forest.rows, 'bytes': forest.bytes, 'data_ref': asdict(forest.seal())}
-            if tag is not None:
-                partition['block_partition'] = asdict(tag)
-            out.append(partition)
+        with self.hold_metadata(keys), self.hold_metadata(out):
+            for key in keys:
+                tag, forest = self.blocks[key]
+                ref = forest.seal()
+                # Dict/list growth and a copied ArtifactRef descriptor, before
+                # asdict/identity construct them. Immutable strings are shared.
+                self._check_workspace(2048)
+                partition = {'partition_id': identity(['terminal-block-v1', self.partition_id, asdict(tag)]) if tag else self.partition_id,
+                             'rows': forest.rows, 'bytes': forest.bytes, 'data_ref': asdict(ref)}
+                if tag is not None:
+                    partition['block_partition'] = asdict(tag)
+                out.append(partition)
         return out
 
     def restore(self, manifest):
         from ..contracts.dataflow import ArtifactRef
-        self.blocks.clear()
-        self._layouts.clear()
-        for part in manifest.get('partitions', [manifest]):
-            tag = BlockPartition(**part['block_partition']) if 'block_partition' in part else None
-            key = self._block(tag)
-            self.blocks[key][1].restore(ArtifactRef(**part['data_ref']), rows=part['rows'], size=part['bytes'])
-        self._admit_metadata()
-        self.rows, self.bytes = manifest['rows'], manifest['bytes']
-        if sum(f.rows for _, f in self.blocks.values()) != self.rows or sum(f.bytes for _, f in self.blocks.values()) != self.bytes:
-            raise DataflowError('CORRUPT_ARTIFACT', 'terminal partition totals disagree with manifest')
+        with self.hold_metadata(manifest):
+            self.blocks.clear()
+            self._layouts.clear()
+            for part in manifest.get('partitions', [manifest]):
+                tag = BlockPartition(**part['block_partition']) if 'block_partition' in part else None
+                key = self._block(tag)
+                self.blocks[key][1].restore(ArtifactRef(**part['data_ref']), rows=part['rows'], size=part['bytes'])
+                self._check_workspace()
+            self._admit_metadata()
+            self.rows, self.bytes = manifest['rows'], manifest['bytes']
+            if sum(f.rows for _, f in self.blocks.values()) != self.rows or sum(f.bytes for _, f in self.blocks.values()) != self.bytes:
+                raise DataflowError('CORRUPT_ARTIFACT', 'terminal partition totals disagree with manifest')
 
     def stream(self):
         from ..dataflow_record_frames import frame_stream, read_chunk_bytes

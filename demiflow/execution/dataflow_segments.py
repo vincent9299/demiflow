@@ -5,6 +5,7 @@ prefix bytes are never rewritten. Historical direct record refs remain readable.
 Pins still belong to the original commit/handle owners; no parallel ledger.
 """
 from dataclasses import asdict
+from contextlib import nullcontext
 import json
 
 from .contracts.dataflow import ArtifactRef
@@ -166,9 +167,10 @@ def block_totals(store, root, bounds, *, frame_call=None):
 
 
 class SegmentForest:
-    def __init__(self, store, bounds, *, frame_call=None):
+    def __init__(self, store, bounds, *, frame_call=None, metadata_context=None):
         self.store, self.bounds = store, bounds
         self._frame_call = frame_call
+        self._metadata_context = metadata_context
         self.roots = []
         self.rows = self.bytes = 0
         self._sealed = None
@@ -185,17 +187,23 @@ class SegmentForest:
         self.rows, self.bytes, self._sealed = rows, size, ref
 
     def _put(self, children):
+        if self._metadata_context is not None:
+            from .dataflow_record_frames import admit_workspace
+            self._frame_call(admit_workspace, 768, self.bounds)
         value = {'schema': SCHEMA, 'height': 1 + max(c['height'] for c in children),
                  'rows': sum(c['rows'] for c in children),
                  'bytes': sum(c['bytes'] for c in children), 'children': children}
         if value['height'] > self.bounds.max_depth:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal segment index depth exceeds bound')
-        if self._frame_call is not None:
-            from .dataflow_record_frames import _json_shape, admit_workspace
-            size, resident = _json_shape(value, self.bounds.max_control_bytes)
-            self._frame_call(admit_workspace, resident + 2 * size + 512, self.bounds)
-        raw = json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
-        ref = self.store.put(iter([raw]), max_bytes=self.bounds.max_control_bytes, media_type=SEGMENTS_MEDIA)
+        with self._metadata_context(value) if self._metadata_context is not None else nullcontext():
+            if self._frame_call is not None:
+                from .dataflow_record_frames import _json_shape, admit_workspace
+                size, resident = _json_shape(value, self.bounds.max_control_bytes)
+                if self._metadata_context is not None:
+                    resident = 0  # Children alias retained roots; count the joint tree once.
+                self._frame_call(admit_workspace, resident + 2 * size + 512, self.bounds)
+            raw = json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
+            ref = self.store.put(iter([raw]), max_bytes=self.bounds.max_control_bytes, media_type=SEGMENTS_MEDIA)
         return _entry(ref, rows=value['rows'], size=value['bytes'], height=value['height'])
 
     def append(self, ref, *, rows):
