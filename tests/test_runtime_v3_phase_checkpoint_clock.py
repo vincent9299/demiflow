@@ -19,7 +19,7 @@ def driver(monkeypatch,*,damage=None):
     image=NS(cut=NS(final=False))
     ex._restore_image=image;ex._checkpoint=NS(_last_image=image)
     ex._active_worker_allocations=set();ex._by_partition={};ex._lease_by_operation={}
-    ex._endpoints={};ex._durable_residency=NS(launched=lambda:None)
+    ex._endpoints={};ex._durable_residency=NS(launched=lambda:None,partition_groups=[('p0',)])
     ex._phases=[('stage',)];ex._phase_index=0
     stage=NS(stage_id='stage',partitions=('p0',))
     ex._stage_order=lambda:[stage]
@@ -57,7 +57,7 @@ def test_acked_retired_handoff_starts_original_interval_before_first_activation(
     ex,clock=driver(monkeypatch)
     ex._launch_phase()
     assert ex.activations==[(102.4,102.4)]
-    assert ex.sent == [{'kind': 'resume', 'publishing': False,
+    assert ex.sent == [{'kind': 'resume', 'publishing': False, 'observation_rows': 0,
         'source_credit': {'rows': 4096, 'bytes': 64*1024**2}}]
     ex.sent.clear()
     assert ex._last_checkpoint_rows==23 and ex._checkpoint_deliveries==0
@@ -88,6 +88,7 @@ def test_failed_admission_cannot_extend_checkpoint_or_global_deadline(monkeypatc
 def test_actor_activation_time_is_never_excluded_by_later_ready_workers(monkeypatch):
     ex,clock=driver(monkeypatch)
     stage=ex._stage_order()[0];stage.partitions=('p0','p1')
+    ex._durable_residency.partition_groups=[('p0','p1')]
     ex._initial_work=lambda stage,partition:NS(operation_id=partition)
     ex._place_hosts=lambda pending:{work.operation_id:'host' for _,work in pending}
     place=ex._scheduler.place

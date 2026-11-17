@@ -1236,6 +1236,8 @@ class DataflowExecution:
             if payload['partition_id'] not in lease.partition_ids:
                 raise DataflowError('FENCED', 'finite checkpoint wait differs from worker partition')
             occurrence = payload['occurrence_id']
+            if occurrence is not None and type(occurrence) is not str:
+                raise DataflowError('INVALID_CONTRACT', 'finite checkpoint wait occurrence must be an identifier')
             if occurrence is not None:
                 assigned = {n for stage in endpoint._assignment.stages for n in stage.occurrences}
                 node = next((n for n in self._graph.nodes if n.occurrence_id == occurrence), None)
