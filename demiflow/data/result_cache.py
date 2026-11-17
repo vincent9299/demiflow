@@ -175,6 +175,7 @@ class CacheCall:
         from ..execution.kernels.task_scope import _resident_slots
         restriction = None
         functions, mutable = set(), set()
+        cells, owned_cells = {}, set()
         for value in (self.fn, self.when, self.cache_when):
             owner, mode, reason = _state_policy(value)
             if mode == 'unsupported':
@@ -183,9 +184,14 @@ class CacheCall:
                 raise RecoveryContractError('auto_json state requires concurrency 1')
             if mode == 'nonrecoverable':
                 restriction = reason
-            if mode == 'function_slots_v1' and id(value) not in functions:
+            if mode in ('none', 'function_slots_v1') and inspect.isfunction(owner) and id(value) not in functions:
                 functions.add(id(value))
-                slots, _bindings, _reason = _resident_slots(value)
+                for cell in owner.__closure__ or ():
+                    cells.setdefault(id(cell), set()).add(id(value))
+                if mode == 'none':
+                    continue
+                slots, bindings, _reason = _resident_slots(value)
+                owned_cells.update(id(binding[1]) for binding in bindings.values() if binding[0] == 'cell')
                 pending = list(slots.values())
                 while pending:
                     item = pending.pop()
@@ -194,6 +200,8 @@ class CacheCall:
                             restriction = 'Cached callbacks share mutable function state; declare one state adapter'
                         mutable.add(id(item))
                         pending.extend(item.values() if type(item) is dict else item)
+        if any(len(cells[cell]) > 1 for cell in owned_cells):
+            restriction = 'Cached callbacks share an owned closure cell; declare one state adapter'
         return restriction
 
     async def snapshot_state(self):

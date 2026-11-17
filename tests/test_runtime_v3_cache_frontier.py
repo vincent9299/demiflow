@@ -385,3 +385,17 @@ def test_unadapted_and_shared_function_data_remain_usable_but_cannot_restore(tmp
     assert actor({'value': 1})['count'] == 2
     with pytest.raises(DataflowError, match='attempt_only'):
         asyncio.run(actor.restore_state(asyncio.run(actor.snapshot_state())))
+    scalar = 0
+    def read_scalar(value):
+        return scalar
+    def write_scalar(row):
+        nonlocal scalar
+        scalar += 1
+        return True
+    actor = CacheFactory(CallableSpec.create(read_scalar), tmp_path / 'shared-cell', 'v1',
+        {'inputs': ['value'], 'output': 'count', 'when': write_scalar, 'max_input_bytes': 4096}, True)
+    assert actor.validate_runtime_state() is not None
+    assert actor({'value': 0})['count'] == 1
+    assert actor({'value': 1})['count'] == 2
+    with pytest.raises(DataflowError, match='attempt_only'):
+        asyncio.run(actor.restore_state(asyncio.run(actor.snapshot_state())))
