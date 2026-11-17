@@ -1,0 +1,166 @@
+{
+  "schema": "demiflow.finite_cancel_evidence.v1",
+  "base": "76378d9b5132ec1b381c3f64762d77b286575765",
+  "candidate": "9f75e35e6f237d6d0b36b0e973aa53ece1c0bde0",
+  "branch": "engine/gpt-finite-cancel-20261117",
+  "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_cancel_20261117",
+  "source_sha256": {
+    "demiflow/execution/kernels/dataflow.py": "c9d5cf3f935a9ae7c3be5ddecec3ea1c8a4c645c2094e8af71534b4bd1c88560",
+    "demiflow/execution/kernels/operator.py": "c5aba158e0650d0c7936be3a6954cd31f627df83d42e428040dfc4caf1b35642",
+    "demiflow/execution/kernels/ordering.py": "eae0f87245221e7d769cb2fde7b95eadc16b7e409d16eaad446d30389b02a230",
+    "demiflow/execution/worker/dataflow_execution.py": "b28605fef6d16e683b5e46ab9421f5541d0054964e015cede477654eb2c111f6",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "968d032d2014273e54609310c4c3f3286d82f3513aa2902f0cf32337fe255d0a",
+    "demiflow/execution/worker/finite_input.py": "e7fb915213a97b6895d95439e8896c8ae45db73579697351326e1597289f5f8e",
+    "tests/test_runtime_v3_finite_cancel.py": "44183ff362c86b62e2b8c8e75d0c9540ccefbb2e4c77f3374911ca0254e1e5b9"
+  },
+  "phases": {
+    "red-r1": {
+      "receipt": "/tmp/demiflow-finite-cancel-red-r1-evidence/verification.json",
+      "sha256": "3d78eede135e7837067e2eeac93f6c3cd96fcfbdce9d83c9df843bc6a01eb43f",
+      "head": "27110bc3b11c79515d11c5756de82f3c06fabc20",
+      "tree": "/tmp/demiflow-finite-cancel-red-20261117",
+      "exit_code": 1,
+      "call_counts": {
+        "passed": 0,
+        "failed": 6,
+        "skipped": 0
+      },
+      "phase_reports": 18,
+      "inputs": 2305,
+      "changed_inputs": [],
+      "children_after": [],
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-finite-cancel-red-r1-resource",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-finite-cancel-red-r1-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-finite-cancel-red-r1-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-finite-cancel-red-r1-location",
+        "TMPDIR": "/tmp/demiflow-finite-cancel-red-r1-tmp",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-finite-cancel-red-r1-d8",
+        "PYTHONPATH": "/tmp/demiflow-finite-cancel-red-20261117:/tmp/demiflow-finite-cancel-red-20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "pytest_args": [
+        "-q",
+        "--tb=short",
+        "tests/test_runtime_v3_finite_cancel.py",
+        "--basetemp=/tmp/demiflow-finite-cancel-red-r1-tests",
+        "--junitxml=/tmp/demiflow-finite-cancel-red-r1-evidence/result.xml"
+      ]
+    },
+    "red-r2": {
+      "receipt": "/tmp/demiflow-finite-cancel-red-r2-evidence/verification.json",
+      "sha256": "2b0df8afc4f9974d24d0c8ecdb722738fccc927115a8db6874ac44b9c318125b",
+      "head": "e7284f9239351e0b7fe7bf98191667fb678af6ba",
+      "tree": "/tmp/demiflow-finite-cancel-red-20261117",
+      "exit_code": 1,
+      "call_counts": {
+        "passed": 0,
+        "failed": 6,
+        "skipped": 0
+      },
+      "phase_reports": 18,
+      "inputs": 2305,
+      "changed_inputs": [],
+      "children_after": [],
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-finite-cancel-red-r2-resource",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-finite-cancel-red-r2-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-finite-cancel-red-r2-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-finite-cancel-red-r2-location",
+        "TMPDIR": "/tmp/demiflow-finite-cancel-red-r2-tmp",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-finite-cancel-red-r2-d8",
+        "PYTHONPATH": "/tmp/demiflow-finite-cancel-red-20261117:/tmp/demiflow-finite-cancel-red-20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "pytest_args": [
+        "-q",
+        "--tb=short",
+        "tests/test_runtime_v3_finite_cancel.py",
+        "-k",
+        "not credit_retry",
+        "--basetemp=/tmp/demiflow-finite-cancel-red-r2-tests",
+        "--junitxml=/tmp/demiflow-finite-cancel-red-r2-evidence/result.xml"
+      ]
+    },
+    "green-r1": {
+      "receipt": "/tmp/demiflow-finite-cancel-green-r1-evidence/verification.json",
+      "sha256": "98a85e9589bbfc537aa7b9e279d1fc6072dfeded456882d675c68beb0e053a9d",
+      "head": "9f75e35e6f237d6d0b36b0e973aa53ece1c0bde0",
+      "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_cancel_20261117",
+      "exit_code": 0,
+      "call_counts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0
+      },
+      "phase_reports": 21,
+      "inputs": 2305,
+      "changed_inputs": [],
+      "children_after": [],
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-finite-cancel-green-r1-resource",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-finite-cancel-green-r1-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-finite-cancel-green-r1-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-finite-cancel-green-r1-location",
+        "TMPDIR": "/tmp/demiflow-finite-cancel-green-r1-tmp",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-finite-cancel-green-r1-d8",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_cancel_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "pytest_args": [
+        "-q",
+        "--tb=short",
+        "tests/test_runtime_v3_finite_cancel.py",
+        "--basetemp=/tmp/demiflow-finite-cancel-green-r1-tests",
+        "--junitxml=/tmp/demiflow-finite-cancel-green-r1-evidence/result.xml"
+      ]
+    },
+    "regression-r1": {
+      "receipt": "/tmp/demiflow-finite-cancel-regression-r1-evidence/verification.json",
+      "sha256": "8073456bf057cb9ab19e61f46138e621c8f184afbe758c58d0512c338b14e672",
+      "head": "9f75e35e6f237d6d0b36b0e973aa53ece1c0bde0",
+      "tree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_cancel_20261117",
+      "exit_code": 0,
+      "call_counts": {
+        "passed": 95,
+        "failed": 0,
+        "skipped": 0
+      },
+      "phase_reports": 285,
+      "inputs": 2305,
+      "changed_inputs": [],
+      "children_after": [],
+      "environment": {
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-finite-cancel-regression-r1-resource",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-finite-cancel-regression-r1-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-finite-cancel-regression-r1-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-finite-cancel-regression-r1-location",
+        "TMPDIR": "/tmp/demiflow-finite-cancel-regression-r1-tmp",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-finite-cancel-regression-r1-d8",
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_cancel_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_cancel_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "pytest_args": [
+        "-q",
+        "--tb=short",
+        "tests/test_runtime_v3_cooperative_model_stop.py",
+        "tests/test_runtime_v3_control_drain.py",
+        "tests/test_runtime_v3_finite_input_progress.py",
+        "tests/test_runtime_v3_finite_reader_credit.py",
+        "tests/test_runtime_v3_finite_borrow.py",
+        "tests/test_runtime_v3_b.py",
+        "tests/test_runtime_v3_small_native_workspace.py",
+        "tests/test_runtime_v3_terminal_close.py",
+        "--basetemp=/tmp/demiflow-finite-cancel-regression-r1-tests",
+        "--junitxml=/tmp/demiflow-finite-cancel-regression-r1-evidence/result.xml"
+      ]
+    }
+  },
+  "not_run": [
+    "Ray Core execution on this leaf",
+    "new performance/profile run",
+    "full repository suite",
+    "workbench acceptance"
+  ],
+  "scope": "pure finite scan/merge executor cancellation, original native admitted-effect guard unchanged"
+}
