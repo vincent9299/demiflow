@@ -38,7 +38,7 @@ def test_single_worker_partition_wave_resume_keeps_original_membership(graph_env
         try:
             outputs.extend(stored.rows())
         finally:
-            stored.close()
+            stored.release()
         handles.append(execution)
         return result
     with pytest.raises(Interrupted):
