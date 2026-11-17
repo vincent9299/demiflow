@@ -95,29 +95,37 @@ class CacheCall:
         self._cache_generation = 1
         self._cache_restored_generation = 0
 
-    def _cache_origin(self):
+    def _cache_origin(self, result, *, replayable=True):
         return json.dumps({'owner': self._cache_owner, 'generation': self._cache_generation,
-                           'incarnation': self._cache_incarnation}, separators=(',', ':'))
+                           'incarnation': self._cache_incarnation, 'replayable': replayable,
+                           'result_sha256': hashlib.sha256(encode(result, self.store.max_value_bytes)).hexdigest()},
+                          separators=(',', ':'))
 
-    def _requires_state_replay(self, origin):
+    def _requires_state_replay(self, origin, result):
         if origin is None:
             return False  # Historical result-only entries remain readable.
         from ..execution.contracts.dataflow_errors import DataflowError
         try:
             value = json.loads(origin)
-            valid = (type(value) is dict and set(value) == {'owner', 'generation', 'incarnation'}
+            valid = (type(value) is dict and set(value) == {'owner', 'generation', 'incarnation', 'replayable', 'result_sha256'}
                      and type(value['owner']) is str and len(value['owner']) == 64
                      and all(c in '0123456789abcdef' for c in value['owner'])
                      and type(value['incarnation']) is str and len(value['incarnation']) == 32
                      and all(c in '0123456789abcdef' for c in value['incarnation'])
-                     and type(value['generation']) is int and 1 <= value['generation'] < 2**63)
+                     and type(value['generation']) is int and 1 <= value['generation'] < 2**63
+                     and type(value['replayable']) is bool
+                     and value['result_sha256'] == hashlib.sha256(encode(result, self.store.max_value_bytes)).hexdigest())
         except (ValueError, TypeError):
             valid = False
         if not valid:
             raise DataflowError('CORRUPT_ARTIFACT', 'Invalid cache creator provenance')
-        return (value['owner'] == self._cache_owner
-                and value['incarnation'] != self._cache_incarnation
-                and value['generation'] > self._cache_restored_generation)
+        replay = (value['owner'] == self._cache_owner
+                  and value['incarnation'] != self._cache_incarnation
+                  and value['generation'] > self._cache_restored_generation)
+        if replay and not value['replayable']:
+            raise DataflowError('INCOMPATIBLE_HISTORY',
+                'Cache replacement discarded the rejected predicate input needed for state replay')
+        return replay
 
     async def _hook(self, name):
         hook = getattr(_state_owner(self.fn), name, None)
@@ -251,11 +259,11 @@ class CacheCall:
 
     def cached(self, key):
         result = self.store.get(key, _with_origin=hasattr(self, '_cache_owner'))
-        if result['hit'] and hasattr(self, '_cache_owner') and self._requires_state_replay(result.get('origin')):
+        if result['hit'] and hasattr(self, '_cache_owner') and self._requires_state_replay(result.get('origin'), result['value']):
             return {'hit': False, 'value': result['value'], 'state_replay': True}
         if result['hit'] and selected(self.cache_when, result['value']):
             return result
-        return {'hit': False, 'value': None}
+        return {'hit': False, 'value': None, 'rejected_hit': result['hit']}
 
     def save(self, key, result, prior):
         admitted = selected(self.cache_when, result)
@@ -266,7 +274,7 @@ class CacheCall:
                 raise DataflowError('INCOMPATIBLE_HISTORY',
                     'State replay differs from the completed shared cache result')
         if admitted:
-            origin = self._cache_origin() if hasattr(self, '_cache_owner') else None
+            origin = self._cache_origin(result, replayable=not prior.get('rejected_hit', False)) if hasattr(self, '_cache_owner') else None
             self.store.put_many([(key, result)], _origin=origin, _origin_only=replay)
 
     def error(self, key, error):

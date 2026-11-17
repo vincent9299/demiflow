@@ -104,3 +104,123 @@ def test_origin_and_value_share_capacity_transaction_and_plain_writes_clear_orig
     assert store.get('a', _with_origin=True)['origin'] == 'replayed'
     store.put_many([('a', 3)])
     assert store.get('a', _with_origin=True) == {'hit': True, 'value': 3, 'origin': None}
+
+
+def test_stateful_rejected_cache_input_cannot_be_silently_skipped_on_replay(tmp_path):
+    class Selection:
+        def __init__(self):
+            self.calls = 0
+        def __call__(self, value):
+            self.calls += 1
+            return value != 99
+    selection = Selection()
+    first = cache(tmp_path, cache_when=selection)
+    _, key = first.prepare({'value': 1})
+    first.store.put_many([(key, 99)])
+    image = asyncio.run(first.snapshot_state())
+    assert first({'value': 1})['count'] == 1
+    assert selection.calls == 2  # rejected cached input, then accepted computation
+    completed = first.store.get(key, _with_origin=True)
+    resumed = cache(tmp_path, cache_when=Selection())
+    asyncio.run(resumed.restore_state(image))
+    with pytest.raises(DataflowError, match='rejected predicate input'):
+        resumed({'value': 1})
+    assert first.store.get(key, _with_origin=True) == completed
+    assert resumed.fn.count == resumed.cache_when.calls == 0
+
+
+def test_cache_creator_metadata_obeys_original_byte_capacity(tmp_path):
+    store = SQLiteKV(tmp_path / 'cache.sqlite', 'n', max_value_bytes=128, max_bytes=128)
+    with pytest.raises(ValueError, match='capacity'):
+        store.put_many([('a', 1)], _origin='x' * 128)
+    assert store.get('a') == {'hit': False, 'value': None}
+    store.put_many([('a', 1)], _origin='x' * 127)
+    with pytest.raises(ValueError, match='capacity'):
+        store.put_many([('b', 2)])
+    store.put_many([('a', 3)])  # replacing provenance releases its exact bytes
+    store.put_many([('b', 2)])
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 3, 'origin': None}
+
+
+def test_native_kv_sink_replaces_creator_metadata_in_same_commit(tmp_path):
+    import sqlite3
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    store = SQLiteKV(tmp_path / 'index.sqlite', 'n', max_value_bytes=128, max_bytes=128)
+    store.put_many([('a', 1)], _origin='x' * 127)
+    with RunContext.start(tmp_path / 'run'), data.local_execution():
+        data.from_items([{'key': 'a', 'value': 22}, {'key': 'b', 'value': 3}]).write_datasink(store.datasink())
+    assert store.get('a', _with_origin=True) == {'hit': True, 'value': 22, 'origin': None}
+    with sqlite3.connect(store.path) as db:
+        assert db.execute('SELECT entries,bytes FROM kv_usage WHERE namespace=?', ('n',)).fetchone() == (2, 3)
+
+
+def test_actual_task_lifetimes_do_not_replay_other_tasks_cache_hits(tmp_path):
+    from demiflow import data
+    from demiflow.execution.run_context import RunContext
+    # Each two-input task owns a fresh counter. The second task hits a result
+    # made by task 0, which must not count as an invocation on the fresh owner.
+    with RunContext.start(tmp_path / 'run'), data.local_execution(batch_rows=2):
+        rows = data.from_items([{'value': n} for n in (0, 1, 1, 2, 2, 3)]).map_cached(
+            Counter(), cache_dir=tmp_path / 'cache', version='v1', synchronous=True,
+            inputs=['value'], output='count').take_all()
+    assert [row['count'] for row in rows] == [1, 2, 2, 1, 1, 1]
+
+
+CRASH_DRIVER = r'''
+import json, os, sqlite3, sys, time
+from pathlib import Path
+import demiflow
+from demiflow import data
+from demiflow.execution.dataflow import DataflowExecution
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.recovery_contract import RunRef
+root=Path(sys.argv[1]); mode=sys.argv[2]
+assert Path(demiflow.__file__).resolve().is_relative_to(Path.cwd())
+class Counter:
+    def __init__(self): self.count=0
+    def __call__(self, value):
+        self.count+=1
+        return self.count
+pump=DataflowExecution.pump
+def crash_after_original_ack(execution, **kwargs):
+    result=pump(execution, **kwargs)
+    if execution._restore_image is not None and not execution._restore_image.cut.final:
+        deadline=time.monotonic()+15
+        while time.monotonic()<deadline:
+            with sqlite3.connect(root/'cache/results.sqlite') as db:
+                count=db.execute('SELECT COUNT(*) FROM kv').fetchone()[0]
+            if count>=4:
+                (root/'crashed.json').write_text(json.dumps({'cache_entries':count, 'cut':str(execution._restore_image.cut)}))
+                os._exit(79)
+            time.sleep(.01)
+        raise AssertionError('suffix cache write did not reach process crash boundary')
+if mode=='crash': DataflowExecution.pump=crash_after_original_ack
+identity=RunJournal(root/'run').recovery_identity() if (root/'run').exists() else None
+scope=(RunContext.resume(RunRef(str(root/'run'),identity['run_id'])) if identity else
+       RunContext.start(root/'run',limits={'checkpoint_rows':2}))
+with scope as run, data.local_execution():
+    rows=data.from_items([{'value':n} for n in range(6)]).map_cached(Counter(),cache_dir=root/'cache',
+        version='v1',inputs=['value'],output='count').take_all()
+    (root/'result.json').write_text(json.dumps({'rows':rows,'commits':run.journal.execution_commits('action-1')}))
+'''
+
+
+def test_real_driver_process_death_recovers_original_ack_and_suffix_cache(tmp_path):
+    import os
+    import subprocess
+    import sys
+    tree = Path(__file__).resolve().parents[1]
+    environment = dict(os.environ, PYTHONPATH=str(tree) + ':' + str(tree / 'tests'))
+    def run(mode):
+        return subprocess.run([sys.executable, '-B', '-c', CRASH_DRIVER, str(tmp_path), mode],
+            cwd=tree, env=environment, capture_output=True, text=True, timeout=90)
+    first = run('crash')
+    assert first.returncode == 79, first.stderr
+    assert json.loads((tmp_path / 'crashed.json').read_text())['cache_entries'] >= 4
+    second = run('resume')
+    assert second.returncode == 0, second.stderr
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert result['rows'] == [{'value': n, 'count': n + 1} for n in range(6)]
+    assert all(c['status'] == 'acked' for c in result['commits'])

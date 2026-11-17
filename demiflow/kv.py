@@ -126,11 +126,12 @@ class SQLiteKV:
         if _origin_only and _origin is None:
             raise ValueError('Origin-only write needs provenance')
         # Caller batches both count and bytes before entering this transaction.
+        origin_bytes = len(_origin.encode()) if _origin is not None else 0
         encoded = []
         total = 0
         for key, value in items:
             payload = encode(value, self.max_value_bytes)
-            total += len(payload)
+            total += len(payload) + origin_bytes
             if len(encoded) >= 256 or total > 32 * 1024**2:
                 raise ValueError('KV write batch exceeds 256 rows or 32 MiB')
             encoded.append((self.namespace, self.key(key), payload))
@@ -146,7 +147,11 @@ class SQLiteKV:
             for namespace, key, payload in encoded:
                 old = db.execute('SELECT length(CAST(value AS BLOB)) FROM kv WHERE namespace=? AND key=?', (namespace, key)).fetchone()
                 count += int(old is None)
-                size += len(payload) - (old[0] if old else 0)
+                old_origin = (db.execute('SELECT length(CAST(origin AS BLOB)) FROM kv_origins WHERE namespace=? AND key=?',
+                                         (namespace, key)).fetchone() if has_origins else None)
+                # Provenance is real retained cache data, charged to the same
+                # byte allowance. Plain historical databases have no overhead.
+                size += len(payload) - (old[0] if old else 0) + origin_bytes - (old_origin[0] if old_origin else 0)
                 if count > self.max_entries or size > self.max_bytes:
                     raise ValueError('KV capacity exceeded')
                 if _origin_only:

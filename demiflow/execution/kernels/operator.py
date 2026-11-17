@@ -582,7 +582,8 @@ class OperatorKernel:
                            if self._shared_actor is not None else self._occurrence)
             instance.bind_checkpoint_cache(_hash_id(['cache-state-owner-v1',
                 self._services.assignment.run_id, self._services.assignment.action_id,
-                state_owner, self._partition_id, slot if self._worker_scope else 0]))
+                state_owner, self._partition_id, slot if self._worker_scope else 0,
+                (self._task_ordinal or 0) if self._task_rows and self._shared_actor is None else None]))
             from ...operator_llm.runtime import PromptActor
             if type(instance.fn) is PromptActor:
                 from ..dataflow_model_journal import bind_prompt_adapter, bind_agent_adapter
