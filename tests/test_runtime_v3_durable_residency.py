@@ -212,16 +212,21 @@ def test_durable_write_lance_recovers_without_empty_early_publication(tmp_path, 
     assert lance.dataset(str(target)).to_table().to_pylist() == [{'n': n} for n in range(8)]
 
 
-def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow():
+@pytest.mark.parametrize('schema', ['demiflow.durable_residency.v1', 'demiflow.durable_residency.v2'])
+def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     from types import SimpleNamespace
     from demiflow.execution.dataflow_durable_residency import DurableResidency
     from demiflow.execution.recovery_contract import RecoveryContractError, document
     controller = object.__new__(DurableResidency)
     controller.ex = SimpleNamespace(_bounds=SimpleNamespace(max_state_bytes=65536),
-                                    _finite_seals={}, _checkpoint=SimpleNamespace(_operator_complete=set()))
+                                    _finite_seals={}, _checkpoint=SimpleNamespace(_operator_complete=set()),
+                                    _physical=SimpleNamespace(stages=(
+                                        SimpleNamespace(stage_id='stage', partitions=('partition',)),)))
     controller.epoch = 0
     controller.active_index = 0
     controller.groups = [('stage',)]
+    controller.partition_groups = [('partition',)]
+    controller.schema = schema
     controller.visited = controller.completed = controller.acked_live = controller.edge_eoi = controller.satisfied_inputs = set()
     controller.entries = {'delivery': {'payload': {'ref': 'durable-reference'}, 'consumed': False,
                                        'producer_cut': None, 'consumer_cut': None}}
