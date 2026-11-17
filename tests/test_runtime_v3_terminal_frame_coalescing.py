@@ -88,7 +88,8 @@ def test_real_scratch_writes_one_identical_row_instead_of_original_fragments(
             finally:
                 blocks.close()
                 parts.close()
-            assert not list((store.root/store.store_id/'staging').iterdir())
+            # Original close retains the zero-byte owner evidence for driver reconciliation.
+            assert not list((store.root/store.store_id/'staging').glob('.pending-*'))
         assert counts[0] >= 3 and counts[1] == 1
         record_property('actual_pwrite_counts_original_coalesced', counts)
 
@@ -261,7 +262,7 @@ def test_exception_closes_parts_and_keeps_no_new_copy_in_coalescing_frames(tmp_p
             assert blocks.rows == blocks.bytes == blocks._pending_resident == 0
         finally:
             blocks.close()
-        assert not list((store.root/store.store_id/'staging').iterdir())
+        assert not list((store.root/store.store_id/'staging').glob('.pending-*'))
 
 
 def test_default_newline_false_and_generic_chunks_keep_original_validation(tmp_path):
