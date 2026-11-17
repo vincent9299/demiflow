@@ -165,6 +165,31 @@ def test_false_zero_empty_values_are_outputs_and_only_none_drops(provider, tmp_p
         _assert_rows(flow.reduce_by_key('k', lambda state, row: row['value']).take_all(), values[:-1])
 
 
+@pytest.mark.parametrize('reverse', [False, True])
+def test_mixed_values_do_not_invent_table_columns(provider, tmp_path, reverse):
+    values = [{'first': 1}, ['a', 'b'], 7, {'different': 2}]
+    if reverse:
+        values.reverse()
+    with RunContext.start(tmp_path / 'build', limits=LIMITS):
+        flow = data.from_items([{'k': i, 'value': value} for i, value in enumerate(values)])
+        saved = flow.reduce_by_key('k', lambda state, row: row['value']).materialize()
+    try:
+        assert saved._source.handle._schema is None
+        assert saved._source.handle.declared_schema is None
+        assert saved.schema(fetch_if_missing=False) is None
+        assert saved.columns(fetch_if_missing=False) is None
+        with RunContext.start(tmp_path / 'read', limits=LIMITS):
+            _assert_rows(saved.take_all(), values)
+            _assert_rows(saved.map(_box, fn_kwargs={'expected_tree': str(ROOT)}).take_all(),
+                         [{'type': type(v).__name__, 'value': v} for v in values])
+        for kind in ('schema', 'columns'):
+            with pytest.raises(DataflowError, match='requires mapping rows'):
+                with RunContext.start(tmp_path / kind, limits=LIMITS):
+                    getattr(saved, kind)()
+    finally:
+        saved.release()
+
+
 def test_relational_region_keeps_nonmapping_reducer_result(provider, tmp_path):
     from demiflow.execution.sealed_plans import load_sealed_plan
     with RunContext.start(tmp_path / 'run', limits=LIMITS) as run:

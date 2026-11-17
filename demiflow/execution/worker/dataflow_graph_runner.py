@@ -12,6 +12,7 @@ import threading
 from contextvars import copy_context
 import time
 from collections import deque
+from collections.abc import Mapping
 from itertools import islice
 from dataclasses import asdict
 
@@ -1139,11 +1140,18 @@ class WorkerGraphRunner:
                         encoded_bytes=_row_bytes(row, max_bytes=self.bounds.max_row_bytes))
             if self._limit is not None and self._terminal_rows >= self._limit:
                 return
-            if self._terminal_columns is None and record.inline is not None:
-                self._set_terminal_columns(record.inline, row=record.inline, sort=True)
-            elif self._terminal_columns is None and record.schema_ref is not None:
-                from ..record_schema import RecordSchemas
-                self._set_terminal_columns(RecordSchemas(self.services).read(record.schema_ref), schema=True)
+            if record.inline is not None and not isinstance(record.inline, Mapping):
+                # A value collection has no table columns, even if an earlier
+                # group returned a mapping. None plus a nonempty prefix remains
+                # unknown after restore; no extra checkpoint field is required.
+                self._terminal_columns = self._terminal_schema_ref = None
+                self._terminal_blocks.retain_columns(None)
+            elif self._terminal_columns is None and self._terminal_rows == 0:
+                if isinstance(record.inline, Mapping):
+                    self._set_terminal_columns(record.inline, row=record.inline, sort=True)
+                elif record.schema_ref is not None:
+                    from ..record_schema import RecordSchemas
+                    self._set_terminal_columns(RecordSchemas(self.services).read(record.schema_ref), schema=True)
             raw = self._frame_call(encode_document, record, self.bounds)
             size, chunks = self._frame_call(frame_parts, record, self.bounds, raw=raw)
             if self._terminal_bytes + size > self.bounds.max_spill_bytes:

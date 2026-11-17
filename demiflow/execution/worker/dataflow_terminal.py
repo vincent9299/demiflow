@@ -5,6 +5,7 @@ recovery prefix, so metadata and aggregation see exactly the committed rows.
 """
 import base64
 import json
+from collections.abc import Mapping
 
 from ..contracts.dataflow_errors import DataflowError
 from ..dataflow_record_frames import decode_frame, decode_document, line_limit
@@ -54,6 +55,9 @@ def terminal_scalar(stream, *, spec, services, occurrence_id, schema_ref=None):
                     states[index] = aggregate.merge_states(states[index], partial)
                     state_codec.dumps(states, max_bytes=services.bounds.max_state_bytes)
             else:
+                if not isinstance(row, Mapping):
+                    raise DataflowError('INVALID_CONTRACT',
+                        kind + ' requires mapping rows; this result contains non-mapping business values')
                 import pyarrow as pa
                 next_schema = schemas.read(record.schema_ref)
                 if next_schema is None:

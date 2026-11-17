@@ -19,7 +19,9 @@
 Local 与 Ray Core 共用同一 Record、kernel、Exchange、终端和恢复路径。
 业务值传输使用既有 `demiflow.record.v3` typed document；控制面的
 `encode_wire` 仍维持原严格 JSON 投影边界，不承载这些新增的根业务值。
-按列的 schema、Arrow/NumPy batch 转换等操作保留各自输入要求。
+按列的 schema、Arrow/NumPy batch 转换等操作保留各自输入要求。非 Mapping
+及混合结果不推断列名；物化元数据保持未知，默认 `schema()`/`columns()` 对
+实际非表格值明确报错，`fetch_if_missing=False` 仍返回未知。
 
 Mapping 的既有编码字节与顶层字符串键检查保持。typed tags、document 版本、
 record/source/graph/physical 身份、历史 seal 和原提交/ACK 均不改写。

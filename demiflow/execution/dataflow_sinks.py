@@ -255,7 +255,9 @@ def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServic
             raise DataflowError("BUDGET_EXCEEDED", "Sink partition row count exceeds budget")
         if total > bounds.max_batch_bytes:
             raise DataflowError("BUDGET_EXCEEDED", "Sink partition byte count exceeds budget")
-        if columns is None and record.inline is not None:
+        if record.inline is not None and not isinstance(record.inline, Mapping):
+            columns = None
+        elif rows == 1 and isinstance(record.inline, Mapping):
             columns = sorted(record.inline)
         chunks.append(encoded + b"\n")
     data_ref = store.put(iter(chunks), max_bytes=bounds.max_batch_bytes, media_type=RECORDS_MEDIA)
@@ -278,6 +280,7 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
     from .record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     schema_ref, declared_schema = None, None
+    unknown_columns = column_drift = schema_drift = False
     for ref in refs:
         manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=MANIFEST_MEDIA)
         if type(manifest) is not dict or manifest.get("schema") != _MANIFEST_SCHEMA:
@@ -293,14 +296,15 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
             current_ref = _artifact_from_json(manifest['schema_ref'])
             current = schemas.read(current_ref)
             if declared_schema is not None and not declared_schema.equals(current, check_metadata=True):
-                raise DataflowError('SOURCE_CHANGED', 'Prepared partition Arrow schema drifted')
+                schema_drift = True
             schema_ref, declared_schema = current_ref, current
         manifest_columns = manifest["columns"]
+        unknown_columns |= manifest['rows'] > 0 and manifest_columns is None
         if manifest_columns is not None:
             if columns is None:
                 columns = manifest_columns
             elif manifest_columns != columns:
-                raise DataflowError("SOURCE_CHANGED", "Prepared partition schema drifted")
+                column_drift = True
         entries = manifest.get('partitions', [manifest])
         if not isinstance(entries, list) or len(entries) + len(partitions) > bounds.max_partitions:
             raise DataflowError('BUDGET_EXCEEDED', 'logical sink partition count exceeds bound')
@@ -322,6 +326,12 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
             partitions[pid] = entry
         total_rows += manifest["rows"]
         total_bytes += manifest["bytes"]
+    if unknown_columns:
+        columns = schema_ref = None
+    elif schema_drift:
+        raise DataflowError('SOURCE_CHANGED', 'Prepared partition Arrow schema drifted')
+    elif column_drift:
+        raise DataflowError('SOURCE_CHANGED', 'Prepared partition schema drifted')
     def order(part):
         tag = part.get('block_partition')
         return (tag['occurrence_id'], tag['index']) if tag else (part['partition_id'], -1)
