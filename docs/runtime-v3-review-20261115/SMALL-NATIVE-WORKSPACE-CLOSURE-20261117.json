@@ -1,14 +1,14 @@
 {
   "schema": "demiflow.small_native_workspace_delivery.v1",
   "baseline": "8928e5bef612f00d751b0ec02729cfeccfbb97cf",
-  "tested_head": "f2ed096feea70380171ebdfff09999744ce000d7",
-  "delivery_commit": "866395be1a6400d53ea8f31273c83c72d3992be0",
-  "tree": "57d1c64c480d22c6059d5d783bca4ba1f89f7949",
+  "tested_head": "51d606677ac2dc498a442c4d5eceb13b1621a640",
+  "delivery_commit": "ed4b38c77bee1ec7706be24c0828df93c1032ea4",
+  "tree": "9cf13a7c76ebc8e1f18727ddf5c32020af440a5f",
   "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117",
-  "branch": "engine/gpt-durable-publication-delivery-20261117",
+  "branch": "engine/gpt-small-terminal-metadata-delivery-20261117",
   "original_branch_retained": "engine/gpt-durable-publication-20261117",
-  "passed": 9,
-  "passed_phases": 27,
+  "passed": 16,
+  "passed_phases": 48,
   "sealed_case": {
     "memory_bytes": 40960,
     "max_row_bytes": 8192,
@@ -21,12 +21,13 @@
   "publication_schema": "demiflow.native_publication_workspace.v2",
   "changed_files": {
     "demiflow/execution/dataflow_publication_budget.py": "c68c0f0bfd63a80b072512e4ede0357e169013f4e7437d3c0ea54657705c6dc8",
-    "demiflow/execution/dataflow_segments.py": "885006be03d1bc743fa823a3187dcf4971f5bd8c0af5645ead16d2c81e4450c6",
-    "demiflow/execution/worker/dataflow_graph_runner.py": "323491766b6ea84dacf68d51f403254335e77d63d7f6b68200e117d2f9e51af5",
-    "demiflow/execution/worker/terminal_blocks.py": "bb292c87952d018e747008a30db62956d234e96ea041988b4ed8cdce4a56ad37",
+    "demiflow/execution/dataflow_segments.py": "b1a888d5a43c6f93ff830ece41e5cb130bdca445c6d194b80e8c1c46ccb9e19d",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "41942cf9db949af718a920a956586fb747b984bed6815cf912b76535d3b9104c",
+    "demiflow/execution/worker/terminal_blocks.py": "af95eb9349c3fdde3528f7a574634632f628f27b5964af41021964e3b348a7b2",
     "demiflow/planning/dataflow_compile.py": "4e8879160749e26e456fb4cfa427c424871053d9f8a6a442a2b4185a1285f18d",
     "demiflow/planning/dataflow_place.py": "e4bdb09953dc714f122e56fc3f5c3bcf3ce1dea9402b985350709997f9a5df8b",
-    "tests/test_runtime_v3_small_native_workspace.py": "7b76e4614c3b9b23e22415c2166a44e4fca0b5fa6ae3fc89e61622a0ebce7f6d"
+    "tests/test_runtime_v3_small_native_workspace.py": "7b76e4614c3b9b23e22415c2166a44e4fca0b5fa6ae3fc89e61622a0ebce7f6d",
+    "tests/test_runtime_v3_small_terminal_metadata.py": "39723e6a79e385c3d9c67d842b83b939b1db43d878c67e8ad1fd88745f6f1bac"
   },
   "frozen_seven": {
     "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
@@ -482,6 +483,1047 @@
       },
       "changed_inputs": [],
       "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r5-evidence/verification.json",
+      "sha256": "4a10b701bd3b5e9fddf53f81de1433ab580e8b731b3eb043da7ea6d8ea066d3b",
+      "head": "a8a46d29327df8ed6a44f2702cae1adedff2b5ad",
+      "reports": [
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0007776208221912384,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 18.43461251631379,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.000341758131980896,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006797611713409424,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 17.302139934152365,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00022723153233528137,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005880743265151978,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 3.640925884246826,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00020676106214523315,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005226731300354004,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.5961581692099571,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0006234422326087952,
+          "failure": null,
+          "properties": []
+        }
+      ],
+      "exit_code": 0,
+      "source_count": 2986,
+      "command": [
+        "/tmp/demiflow-ray-api-optional-env/bin/python",
+        "-P",
+        "-B",
+        "/tmp/demiflow-durable-publication-runner-20261117.py",
+        "/tmp/demiflow-durable-publication-r5",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+        "tests/test_runtime_v3_small_native_workspace.py"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-durable-publication-r5-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-durable-publication-r5-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-durable-publication-r5-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-durable-publication-r5-location",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-durable-publication-r5-d8",
+        "TMPDIR": "/tmp/demiflow-durable-publication-r5-temp",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_OUTPUT_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      },
+      "changed_inputs": [],
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r6-evidence/verification.json",
+      "sha256": "0a81b4ba37a08f7e7f30396e93c6f996afa7f5cff2caf3f3b93cc8f8928a26e6",
+      "head": "8209f3af72a5ad61b9707dbbe9510a6dd8630a36",
+      "reports": [
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[2]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0009167976677417755,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[2]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.6709401533007622,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[2]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00023223459720611572,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[12]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006389133632183075,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[12]",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 0.3732636086642742,
+          "failure": "tests/test_runtime_v3_small_terminal_metadata.py:92: in test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index\n    with pytest.raises(DataflowError) as failure:\nE   Failed: DID NOT RAISE DataflowError",
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[12]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0002520233392715454,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[24]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006146281957626343,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[24]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.36088285222649574,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[24]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0003418251872062683,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[48]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0007736757397651672,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[48]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.34960155189037323,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[48]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00020253658294677734,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_encoding",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.00054970383644104,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_encoding",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 0.3498585522174835,
+          "failure": "tests/test_runtime_v3_small_terminal_metadata.py:118: in test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_encoding\n    encoded = blocks.encode_manifest(value)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/worker/terminal_blocks.py:140: in encode_manifest\n    self._check_workspace(5 * size + 128 * count[0] + 512)\ndemiflow/execution/worker/terminal_blocks.py:150: in _check_workspace\n    raise DataflowError('BUDGET_EXCEEDED', 'terminal index, row and scratch exceed sealed workspace')\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: terminal index, row and scratch exceed sealed workspace",
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_encoding",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00019721314311027527,
+          "failure": null,
+          "properties": []
+        }
+      ],
+      "exit_code": 1,
+      "source_count": 2987,
+      "command": [
+        "/tmp/demiflow-ray-api-optional-env/bin/python",
+        "-P",
+        "-B",
+        "/tmp/demiflow-durable-publication-runner-20261117.py",
+        "/tmp/demiflow-durable-publication-r6",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_runtime_v3_small_terminal_metadata.py"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-durable-publication-r6-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-durable-publication-r6-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-durable-publication-r6-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-durable-publication-r6-location",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-durable-publication-r6-d8",
+        "TMPDIR": "/tmp/demiflow-durable-publication-r6-temp",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_OUTPUT_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      },
+      "changed_inputs": [],
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r7-evidence/verification.json",
+      "sha256": "45f0d120a5f20bd0f5a2c6399f91eef66ee04076f3775d7d25b5678e132527fd",
+      "head": "51d606677ac2dc498a442c4d5eceb13b1621a640",
+      "reports": [
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[2]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0009095743298530579,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[2]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 1.374820239841938,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  4793
+                ],
+                [
+                  "admit_workspace",
+                  4793
+                ],
+                [
+                  "read_document",
+                  5873
+                ],
+                [
+                  "decode_metadata",
+                  5873
+                ],
+                [
+                  "admit_workspace",
+                  7909
+                ],
+                [
+                  "admit_workspace",
+                  7909
+                ],
+                [
+                  "read_document",
+                  9045
+                ],
+                [
+                  "decode_metadata",
+                  9045
+                ],
+                [
+                  "admit_workspace",
+                  10791
+                ],
+                [
+                  "admit_workspace",
+                  10791
+                ],
+                [
+                  "admit_workspace",
+                  10727
+                ],
+                [
+                  "admit_workspace",
+                  7408
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[2]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00019307807087898254,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  4793
+                ],
+                [
+                  "admit_workspace",
+                  4793
+                ],
+                [
+                  "read_document",
+                  5873
+                ],
+                [
+                  "decode_metadata",
+                  5873
+                ],
+                [
+                  "admit_workspace",
+                  7909
+                ],
+                [
+                  "admit_workspace",
+                  7909
+                ],
+                [
+                  "read_document",
+                  9045
+                ],
+                [
+                  "decode_metadata",
+                  9045
+                ],
+                [
+                  "admit_workspace",
+                  10791
+                ],
+                [
+                  "admit_workspace",
+                  10791
+                ],
+                [
+                  "admit_workspace",
+                  10727
+                ],
+                [
+                  "admit_workspace",
+                  7408
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[12]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006468035280704498,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[12]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.3719150610268116,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  5809
+                ],
+                [
+                  "admit_workspace",
+                  5809
+                ],
+                [
+                  "read_document",
+                  6889
+                ],
+                [
+                  "decode_metadata",
+                  6889
+                ],
+                [
+                  "admit_workspace",
+                  8853
+                ],
+                [
+                  "admit_workspace",
+                  8853
+                ],
+                [
+                  "read_document",
+                  9989
+                ],
+                [
+                  "decode_metadata",
+                  9989
+                ],
+                [
+                  "admit_workspace",
+                  11663
+                ],
+                [
+                  "admit_workspace",
+                  11663
+                ],
+                [
+                  "admit_workspace",
+                  11599
+                ],
+                [
+                  "admit_workspace",
+                  8280
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[12]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00022460147738456726,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  80
+                ],
+                [
+                  "admit_workspace",
+                  5809
+                ],
+                [
+                  "admit_workspace",
+                  5809
+                ],
+                [
+                  "read_document",
+                  6889
+                ],
+                [
+                  "decode_metadata",
+                  6889
+                ],
+                [
+                  "admit_workspace",
+                  8853
+                ],
+                [
+                  "admit_workspace",
+                  8853
+                ],
+                [
+                  "read_document",
+                  9989
+                ],
+                [
+                  "decode_metadata",
+                  9989
+                ],
+                [
+                  "admit_workspace",
+                  11663
+                ],
+                [
+                  "admit_workspace",
+                  11663
+                ],
+                [
+                  "admit_workspace",
+                  11599
+                ],
+                [
+                  "admit_workspace",
+                  8280
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[24]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0008110217750072479,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[24]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.38490546122193336,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[24]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00021036341786384583,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[48]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0007522962987422943,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[48]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.3801262825727463,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_unfinished_multiblock_restore_admits_outer_manifest_with_each_index[48]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00018215179443359375,
+          "failure": null,
+          "properties": [
+            [
+              "frame_calls",
+              [
+                [
+                  "read_document",
+                  80
+                ],
+                [
+                  "decode_metadata",
+                  80
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_encoding",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005281977355480194,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_encoding",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.4340393394231796,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_encoding",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00017791613936424255,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_index_decode_keeps_the_unfinished_outer_manifest_and_live_control_body",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.00048607587814331055,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_index_decode_keeps_the_unfinished_outer_manifest_and_live_control_body",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.40109580382704735,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_index_decode_keeps_the_unfinished_outer_manifest_and_live_control_body",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00019073486328125,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_before_encoder",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005472488701343536,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_before_encoder",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.37643539160490036,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_terminal_metadata.py::test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_before_encoder",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00018677860498428345,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005364194512367249,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 18.341177854686975,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00025878846645355225,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005052685737609863,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 3.977137438952923,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00036865100264549255,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006952434778213501,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.4653630070388317,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00025975704193115234,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005274005234241486,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 18.316837210208178,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00022218748927116394,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005765147507190704,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 8.38858012482524,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.000343911349773407,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006197169423103333,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 5.28525135666132,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0003238506615161896,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.00019745901226997375,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.0005044750869274139,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 9.524822235107422e-05,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[8193]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006722435355186462,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[8193]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.4040108099579811,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[8193]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00019070878624916077,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[262144]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005976632237434387,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[262144]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.40233657881617546,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[262144]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00037977099418640137,
+          "failure": null,
+          "properties": []
+        }
+      ],
+      "exit_code": 0,
+      "source_count": 2987,
+      "command": [
+        "/tmp/demiflow-ray-api-optional-env/bin/python",
+        "-P",
+        "-B",
+        "/tmp/demiflow-durable-publication-runner-20261117.py",
+        "/tmp/demiflow-durable-publication-r7",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_runtime_v3_small_terminal_metadata.py",
+        "tests/test_runtime_v3_small_native_workspace.py",
+        "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+        "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+        "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+        "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-durable-publication-r7-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-durable-publication-r7-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-durable-publication-r7-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-durable-publication-r7-location",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-durable-publication-r7-d8",
+        "TMPDIR": "/tmp/demiflow-durable-publication-r7-temp",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_OUTPUT_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      },
+      "changed_inputs": [],
+      "children_after": []
     }
   ],
   "scope": [
@@ -496,5 +1538,53 @@
     "two-host",
     "I08 performance",
     "full V035"
-  ]
+  ],
+  "initial_delivery": {
+    "tested_head": "f2ed096feea70380171ebdfff09999744ce000d7",
+    "delivery_commit": "866395be1a6400d53ea8f31273c83c72d3992be0",
+    "tree": "57d1c64c480d22c6059d5d783bca4ba1f89f7949",
+    "branch": "engine/gpt-durable-publication-delivery-20261117",
+    "passed": 9,
+    "passed_phases": 27
+  },
+  "integration_order": [
+    "866395be1a6400d53ea8f31273c83c72d3992be0",
+    "ed4b38c77bee1ec7706be24c0828df93c1032ea4"
+  ],
+  "input_verification": {
+    "count": 2987,
+    "mismatches": 0,
+    "bound_to": "ed4b38c77bee1ec7706be24c0828df93c1032ea4",
+    "complete_tree_equal_to_tested_head": true,
+    "report_changes_after_verification": [
+      "SMALL-NATIVE-WORKSPACE-CLOSURE-20261117.md",
+      "SMALL-NATIVE-WORKSPACE-CLOSURE-20261117.json"
+    ]
+  },
+  "metadata_review_followup": {
+    "review": "/tmp/demiflow-40k-native-independent-review-20261117.md",
+    "initial_claim_correction": "Initial 9-pass scope did not cover outer terminal manifests or columns. Its all-lifecycle claim was incomplete.",
+    "new_contract": "Only sealed TERMINAL_WORKSPACE: actual metadata trees + columns + outer manifest + index + queued bodies share original frame grant. Identity-based traversal de-duplicates aliases.",
+    "encoding": "Same JSON bytes as original document; sorted keys/UTF-8/escaping/finite floats. Largest token/encoder stack/previous+current fragments admitted before iterencode; stream to original store.",
+    "restore_evidence_level": "Real RunArtifactStore and original WorkerGraphRunner._restore_terminal/_frame_call + TerminalBlocks/SegmentForest; scaffold participant/assignment, not a separate full Dataset multi-column scenario.",
+    "real_dataset_evidence": "Unchanged original 40-KiB interrupted durable resume, actual native published-return-loss resume, 80-KiB finite write, 64-MiB wide join.",
+    "new_cases": {
+      "two_block_columns_2": "restored",
+      "two_block_columns_12": "restored",
+      "two_block_columns_24": "outer decode rejected before json.loads",
+      "two_block_columns_48": "outer decode rejected before json.loads",
+      "outer_plus_child_index_plus_control": "original frame limit rejects before child decode",
+      "snapshot_encoding": "joint tree admitted; queued control body makes encoder preflight reject",
+      "byte_identity": "UTF-8/escaping/sort/negative zero positive; nonfinite and long token rejected before encoder"
+    },
+    "r6_reds": "12-column negative expectation was wrong (it fits); whole-document conservative encoding rejected a feasible two-block snapshot, replaced with bounded streaming. Both original receipts retained.",
+    "not_changed": [
+      "R/B/M",
+      "original v1/no-schema execution",
+      "original ACK/native commit/physical exit",
+      "original tests",
+      "frozen seven",
+      "main/root checkout"
+    ]
+  }
 }
