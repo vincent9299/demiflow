@@ -68,7 +68,7 @@ class SQLiteKV:
             raise ValueError('KV key requires a nonempty string of at most 65536 bytes')
         return value
 
-    def get(self, key):
+    def get(self, key, *, _with_origin=False):
         key = self.key(key)
         path = Path(self.path)
         if not path.exists() and self.missing == 'empty':
@@ -83,7 +83,21 @@ class SQLiteKV:
                 raise ValueError('KV result exceeds max_value_bytes')
             value = db.execute('SELECT value FROM kv WHERE namespace=? AND key=?',
                                (self.namespace, key)).fetchone()[0]
-        return {'hit': True, 'value': json.loads(value)}
+            origin = None
+            if _with_origin and db.execute("SELECT 1 FROM sqlite_master WHERE name='kv_origins'").fetchone():
+                size = db.execute('SELECT length(CAST(origin AS BLOB)) FROM kv_origins WHERE namespace=? AND key=?',
+                                  (self.namespace, key)).fetchone()
+                if size is not None:
+                    if type(size[0]) is not int or size[0] > 512:
+                        raise ValueError('Invalid KV origin')
+                    origin = db.execute('SELECT origin FROM kv_origins WHERE namespace=? AND key=?',
+                                        (self.namespace, key)).fetchone()[0]
+                    if type(origin) is not str:
+                        raise ValueError('Invalid KV origin')
+        result = {'hit': True, 'value': json.loads(value)}
+        if _with_origin:
+            result['origin'] = origin
+        return result
 
     def _create_database(self):
         """Create only an absent database; never mutate a concurrent winner."""
@@ -104,7 +118,13 @@ class SQLiteKV:
             finally:
                 os.unlink(temporary)
 
-    def put_many(self, items):
+    def put_many(self, items, *, _origin=None, _origin_only=False):
+        # Optional bounded provenance is not a result or commit authority. It
+        # shares the result transaction, with at most one row per live KV key.
+        if _origin is not None and (type(_origin) is not str or len(_origin.encode()) > 512):
+            raise ValueError('Invalid KV origin')
+        if _origin_only and _origin is None:
+            raise ValueError('Origin-only write needs provenance')
         # Caller batches both count and bytes before entering this transaction.
         encoded = []
         total = 0
@@ -118,6 +138,9 @@ class SQLiteKV:
         with closing(sqlite3.connect(self.path, timeout=self.timeout_s)) as db, db:
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
+            if _origin is not None:
+                db.execute('CREATE TABLE IF NOT EXISTS kv_origins (namespace TEXT, key TEXT, origin TEXT NOT NULL, PRIMARY KEY(namespace,key))')
+            has_origins = _origin is not None or db.execute("SELECT 1 FROM sqlite_master WHERE name='kv_origins'").fetchone() is not None
             usage = db.execute('SELECT entries,bytes FROM kv_usage WHERE namespace=?', (self.namespace,)).fetchone() or (0, 0)
             count, size = usage
             for namespace, key, payload in encoded:
@@ -126,8 +149,19 @@ class SQLiteKV:
                 size += len(payload) - (old[0] if old else 0)
                 if count > self.max_entries or size > self.max_bytes:
                     raise ValueError('KV capacity exceeded')
-                db.execute('INSERT INTO kv VALUES (?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET value=excluded.value',
-                           (namespace, key, payload))
+                if _origin_only:
+                    current = db.execute('SELECT CAST(value AS BLOB) FROM kv WHERE namespace=? AND key=?',
+                                         (namespace, key)).fetchone()
+                    if current is None or current[0] != payload:
+                        raise ValueError('Completed cache result changed during state replay')
+                else:
+                    db.execute('INSERT INTO kv VALUES (?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET value=excluded.value',
+                               (namespace, key, payload))
+                if _origin is not None:
+                    db.execute('INSERT INTO kv_origins VALUES (?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET origin=excluded.origin',
+                               (namespace, key, _origin))
+                elif has_origins:
+                    db.execute('DELETE FROM kv_origins WHERE namespace=? AND key=?', (namespace, key))
             db.execute('INSERT INTO kv_usage VALUES (?,?,?) ON CONFLICT(namespace) DO UPDATE SET entries=excluded.entries,bytes=excluded.bytes',
                        (self.namespace, count, size))
         return len(encoded)

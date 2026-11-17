@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import time
+import uuid
 
 from ..kv import SQLiteKV, encode
 from .plan import CallableSpec, normalize_bound_inputs, normalize_outputs, validate_bound_signature
@@ -70,6 +71,54 @@ class CacheCall:
             setattr(self, name, getattr(fn, name, default))
         self.hard_timeout = getattr(fn, 'hard_timeout', None)
 
+    def bind_checkpoint_cache(self, owner):
+        """Bind stable native state ownership, without changing result keys.
+
+        A result's creator tag is only provenance. The authenticated operator
+        image is the sole authority for whether this owner's state includes it.
+        Other owners keep the original result-only sharing semantics.
+        """
+        from ..execution.operator_policy import classify_operator_state
+        from ..operator_llm.runtime import PromptActor
+        owners = [_state_owner(value) for value in (self.fn, self.when, self.cache_when)
+                  if value is not None]
+        if not any(type(value) is not PromptActor and
+                   classify_operator_state(value, phase='instance').mode != 'function'
+                   for value in owners):
+            return
+        if hasattr(self, '_cache_owner'):
+            if self._cache_owner != owner:
+                raise ValueError('Cached callable state ownership differs')
+            return
+        self._cache_owner = owner
+        self._cache_incarnation = uuid.uuid4().hex
+        self._cache_generation = 1
+        self._cache_restored_generation = 0
+
+    def _cache_origin(self):
+        return json.dumps({'owner': self._cache_owner, 'generation': self._cache_generation,
+                           'incarnation': self._cache_incarnation}, separators=(',', ':'))
+
+    def _requires_state_replay(self, origin):
+        if origin is None:
+            return False  # Historical result-only entries remain readable.
+        from ..execution.contracts.dataflow_errors import DataflowError
+        try:
+            value = json.loads(origin)
+            valid = (type(value) is dict and set(value) == {'owner', 'generation', 'incarnation'}
+                     and type(value['owner']) is str and len(value['owner']) == 64
+                     and all(c in '0123456789abcdef' for c in value['owner'])
+                     and type(value['incarnation']) is str and len(value['incarnation']) == 32
+                     and all(c in '0123456789abcdef' for c in value['incarnation'])
+                     and type(value['generation']) is int and 1 <= value['generation'] < 2**63)
+        except (ValueError, TypeError):
+            valid = False
+        if not valid:
+            raise DataflowError('CORRUPT_ARTIFACT', 'Invalid cache creator provenance')
+        return (value['owner'] == self._cache_owner
+                and value['incarnation'] != self._cache_incarnation
+                and value['generation'] > self._cache_restored_generation)
+
     async def _hook(self, name):
         hook = getattr(_state_owner(self.fn), name, None)
         if hook is not None:
@@ -124,14 +173,36 @@ class CacheCall:
                     max_bytes=self.max_input_bytes)}
             else:
                 result[name] = None
+        if hasattr(self, '_cache_owner'):
+            result['cache_frontier'] = {'owner': self._cache_owner,
+                                        'generation': self._cache_generation}
+            # All callbacks have drained at the native cut. Work admitted while
+            # that cut publishes belongs to the next generation even before ACK.
+            self._cache_generation += 1
         return result
 
     async def restore_state(self, state):
         from ..execution.operator_policy import restore_auto_state
         from ..execution.recovery_contract import RecoveryContractError
-        if set(state) != {'fn', 'when', 'cache_when'}:
+        if set(state) - {'cache_frontier'} != {'fn', 'when', 'cache_when'}:
             raise RecoveryContractError('Cached callable state ownership differs')
-        for name, image in state.items():
+        frontier = state.get('cache_frontier')
+        if hasattr(self, '_cache_owner'):
+            from ..execution.contracts.dataflow_errors import DataflowError
+            if frontier is None:
+                raise DataflowError('INCOMPATIBLE_HISTORY',
+                    'Stateful cache history has no authenticated cache frontier')
+            if (type(frontier) is not dict or set(frontier) != {'owner', 'generation'}
+                    or frontier['owner'] != self._cache_owner
+                    or type(frontier['generation']) is not int
+                    or not 1 <= frontier['generation'] < 2**63 - 1):
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Cached callable frontier differs')
+            self._cache_restored_generation = frontier['generation']
+            self._cache_generation = frontier['generation'] + 1
+        elif frontier is not None:
+            raise RecoveryContractError('Cached callable state ownership differs')
+        for name in ('fn', 'when', 'cache_when'):
+            image = state[name]
             if image is None:
                 continue
             owner = getattr(self, name)
@@ -179,14 +250,24 @@ class CacheCall:
             yield handle
 
     def cached(self, key):
-        result = self.store.get(key)
+        result = self.store.get(key, _with_origin=hasattr(self, '_cache_owner'))
+        if result['hit'] and hasattr(self, '_cache_owner') and self._requires_state_replay(result.get('origin')):
+            return {'hit': False, 'value': result['value'], 'state_replay': True}
         if result['hit'] and selected(self.cache_when, result['value']):
             return result
         return {'hit': False, 'value': None}
 
-    def save(self, key, result):
-        if selected(self.cache_when, result):
-            self.store.put_many([(key, result)])
+    def save(self, key, result, prior):
+        admitted = selected(self.cache_when, result)
+        replay = prior.get('state_replay', False)
+        if replay:
+            from ..execution.contracts.dataflow_errors import DataflowError
+            if not admitted or encode(result, self.store.max_value_bytes) != encode(prior['value'], self.store.max_value_bytes):
+                raise DataflowError('INCOMPATIBLE_HISTORY',
+                    'State replay differs from the completed shared cache result')
+        if admitted:
+            origin = self._cache_origin() if hasattr(self, '_cache_owner') else None
+            self.store.put_many([(key, result)], _origin=origin, _origin_only=replay)
 
     def error(self, key, error):
         # One last error per lock shard, not an unbounded exception history.
@@ -227,10 +308,11 @@ class CachedSyncMap(CacheCall):
                     if inspect.iscoroutine(result):
                         result.close()
                     raise TypeError('synchronous map_cached rejects async callables')
-                self.save(key, result)
+                self.save(key, result, cached)
                 return self.attach(row, result)
             except Exception as exc:
-                self.error(key, exc)
+                if not cached.get('state_replay'):
+                    self.error(key, exc)
                 raise
 
 
@@ -264,8 +346,9 @@ class CachedMap(CacheCall):
                 result = self.call(value)
                 if inspect.isawaitable(result):
                     result = await result
-                await self._io(self.save, key, result)
+                await self._io(self.save, key, result, cached)
                 return self.attach(row, result)
             except Exception as exc:
-                await self._io(self.error, key, exc)
+                if not cached.get('state_replay'):
+                    await self._io(self.error, key, exc)
                 raise
