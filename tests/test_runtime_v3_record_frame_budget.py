@@ -107,8 +107,8 @@ def test_real_nonfinal_ack_resume_and_stored_handle_keep_wide_typed_rows(tmp_pat
     original = DataflowCheckpointCoordinator.commit
     prefixes = []
     class Interrupted(Exception): pass
-    def stop(coordinator, cut_id, *, sinks):
-        image = original(coordinator, cut_id, sinks=sinks)
+    def stop(coordinator, cut_id, *, sinks, native_queue_state=None):
+        image = original(coordinator, cut_id, sinks=sinks, native_queue_state=native_queue_state)
         counts = [json.loads(b''.join(coordinator._store.read(ref, max_bytes=ref.size_bytes)))['manifest']['total_rows']
                   for ref in image.confirmed_sinks.values()]
         count = sum(counts)
