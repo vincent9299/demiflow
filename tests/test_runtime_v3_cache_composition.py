@@ -1,5 +1,7 @@
 """Cached state resumes into a materialized result on the actual provider."""
 from functools import partial
+import sqlite3
+import time
 
 import pytest
 
@@ -63,6 +65,16 @@ def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kin
     def interrupt(execution, **kwargs):
         result = original(execution, **kwargs)
         if execution._restore_image is not None and not execution._restore_image.cut.final:
+            # Require the actual failure window: shared cache is ahead of the
+            # accepted two-row state image, on both Local and Ray workers.
+            deadline = time.monotonic() + 15
+            while True:
+                with sqlite3.connect(tmp_path / 'cache' / 'results.sqlite') as database:
+                    cached = database.execute('SELECT COUNT(*) FROM kv').fetchone()[0]
+                if cached >= 4:
+                    break
+                assert time.monotonic() < deadline, 'cache did not advance beyond the original ACK'
+                time.sleep(.01)
             reached.append(execution._restore_image.commit_id)
             raise Interrupted('after original nonfinal ACK')
         return result
