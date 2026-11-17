@@ -22,6 +22,9 @@ Local 与 Ray Core 共用同一 Record、kernel、Exchange、终端和恢复路�
 按列的 schema、Arrow/NumPy batch 转换等操作保留各自输入要求。非 Mapping
 及混合结果不推断列名；物化元数据保持未知，默认 `schema()`/`columns()` 对
 实际非表格值明确报错，`fetch_if_missing=False` 仍返回未知。
+只有实际见到非 Mapping 值，sink manifest 才附加可选布尔事实
+`non_mapping_values=true`；它随原 manifest 恢复，历史缺省为 false。
+未知列信息或未解码 payload_ref 不代表非表格值，不能掩盖纯表格分区列漂移。
 
 Mapping 的既有编码字节与顶层字符串键检查保持。typed tags、document 版本、
 record/source/graph/physical 身份、历史 seal 和原提交/ACK 均不改写。

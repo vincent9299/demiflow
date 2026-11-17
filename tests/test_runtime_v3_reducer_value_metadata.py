@@ -101,12 +101,38 @@ def test_bounded_sink_table_consistency_drift_and_mixed_values(tmp_path):
             combined = sinks.combine_prepared_sinks((first, mixed_ref), sink_id=SINK_ID, services=driver)
             assert combined['columns'] is None and 'schema_ref' not in combined
             assert combined['total_rows'] == 4
+            from test_runtime_v3_small_terminal_metadata import owner
+            def restored(ref):
+                runner = owner(store, ref)
+                runner._terminal_spec.kind = SINK_ID
+                runner.e._restore_image.contributions[0].sinks = {SINK_ID: ref}
+                return runner
+            # Read the original, authenticated manifests through the real
+            # unfinished-terminal restoration path, including old absent flags.
+            for ref, flag in ((first, False), (unknown, False), (mixed_ref, True)):
+                runner = restored(ref)
+                runner._terminal_non_mapping_values = not flag
+                try:
+                    runner._restore_terminal()
+                    assert runner._restored_terminal
+                    assert runner._terminal_non_mapping_values is flag
+                    if flag:
+                        assert runner._terminal_columns is None
+                finally:
+                    runner._terminal_blocks.close()
             for malformed in (None, 0, 1, 'true', []):
                 raw = json.dumps({**unknown_manifest, 'non_mapping_values': malformed}).encode()
                 invalid = store.put(iter((raw,)), max_bytes=budget.max_control_bytes,
                     media_type=sinks.MANIFEST_MEDIA)
                 with pytest.raises(DataflowError, match='CORRUPT_ARTIFACT.*non_mapping_values'):
                     sinks.combine_prepared_sinks((first, different, invalid), sink_id=SINK_ID, services=driver)
+                runner = restored(invalid)
+                try:
+                    with pytest.raises(DataflowError, match='CORRUPT_ARTIFACT.*non_mapping_values'):
+                        runner._restore_terminal()
+                    assert not runner._restored_terminal
+                finally:
+                    runner._terminal_blocks.close()
         finally:
             store.close()
         run.journal.complete_execution_action(run.fence, ACTION, {'kind': 'test-complete'})

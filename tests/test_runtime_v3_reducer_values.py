@@ -253,6 +253,12 @@ def test_materialized_reducer_values_resume_original_nonfinal_ack(provider, tmp_
     prefixes = []
     def interrupted(coordinator, cut_id, *, sinks, native_queue_state=None):
         image = commit(coordinator, cut_id, sinks=sinks, native_queue_state=native_queue_state)
+        for contribution in image.contributions:
+            for ref in contribution.sinks.values():
+                manifest = json.loads(b''.join(coordinator._store.read(ref,
+                    max_bytes=coordinator._physical.bounds.max_control_bytes)))
+                if manifest['rows']:
+                    assert manifest['non_mapping_values'] is True
         counts = [json.loads(b''.join(coordinator._store.read(ref, max_bytes=ref.size_bytes)))
                   ['manifest']['total_rows'] for ref in image.confirmed_sinks.values()]
         if sum(counts) and not image.cut.final and not prefixes:
@@ -273,7 +279,9 @@ def test_materialized_reducer_values_resume_original_nonfinal_ack(provider, tmp_
             assert before and all(fact['status'] == 'acked' for fact in before)
             original = StateArtifacts(run).read(before[-1]['prepared']['state']['dataflow-cut-v3'])
             assert not original['cut']['final']
-            _assert_rows(saved.filter(_slow_keep).take_all(), expected)
+            with monkeypatch.context() as patch:
+                patch.setattr(DataflowCheckpointCoordinator, 'commit', interrupted)
+                _assert_rows(saved.filter(_slow_keep).take_all(), expected)
             after = run.journal.execution_commits('action-1')
             assert after[:len(before)] == before
             assert StateArtifacts(run).read(after[-1]['prepared']['state']['dataflow-cut-v3'])['cut']['final']

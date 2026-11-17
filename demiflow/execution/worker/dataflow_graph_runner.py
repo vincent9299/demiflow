@@ -21,7 +21,8 @@ from ..contracts.dataflow_errors import DataflowError
 from ..exchange.dataflow_bridge import _encode_record_document, _decode_record_document
 from ..exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
 from ..exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH, peer_batch_limit
-from ..dataflow_sinks import _artifact_json, _encode_record, RECORDS_MEDIA, MANIFEST_MEDIA
+from ..dataflow_sinks import (_artifact_json, _encode_record, _manifest_non_mapping_values,
+    RECORDS_MEDIA, MANIFEST_MEDIA)
 from ..recovery_contract import document
 from ..dataflow_record_frames import (encode_document, decode_document, document_limit,
     frame_parts, decode_frame, line_limit, frame_stream, read_chunk_bytes, admit_receive, read_document)
@@ -138,6 +139,7 @@ class WorkerGraphRunner:
         self._terminal_bytes = 0
         self._terminal_columns = None
         self._terminal_schema_ref = None
+        self._terminal_non_mapping_values = False
         self._restored_terminal = False
         self._terminal_spec = next((n.kernel for n in executor._node_specs.values()
                                     if n.kind == 'terminal'), None)
@@ -192,10 +194,12 @@ class WorkerGraphRunner:
             else:
                 manifest = json.loads(b"".join(self.services.store.read(ref, max_bytes=self.bounds.max_control_bytes)))
             with blocks.hold_metadata(manifest):
+                non_mapping_values = _manifest_non_mapping_values(manifest)
                 blocks.restore(manifest)
                 self._terminal_rows, self._terminal_bytes = manifest["rows"], manifest["bytes"]
                 blocks.retain_columns(manifest['columns'])
                 self._terminal_columns = manifest["columns"]
+                self._terminal_non_mapping_values = non_mapping_values
                 from ..record_schema import RecordSchemas
                 self._terminal_schema_ref = (_artifact_from_json(manifest['schema_ref'])
                                             if manifest.get('schema_ref') is not None else None)
@@ -1141,12 +1145,12 @@ class WorkerGraphRunner:
             if self._limit is not None and self._terminal_rows >= self._limit:
                 return
             if record.inline is not None and not isinstance(record.inline, Mapping):
-                # A value collection has no table columns, even if an earlier
-                # group returned a mapping. None plus a nonempty prefix remains
-                # unknown after restore; no extra checkpoint field is required.
+                # Unknown columns alone do not prove a value collection: a
+                # historical payload_ref can also defer table metadata.
+                self._terminal_non_mapping_values = True
                 self._terminal_columns = self._terminal_schema_ref = None
                 self._terminal_blocks.retain_columns(None)
-            elif self._terminal_columns is None and self._terminal_rows == 0:
+            elif self._terminal_columns is None and not self._terminal_non_mapping_values:
                 if isinstance(record.inline, Mapping):
                     self._set_terminal_columns(record.inline, row=record.inline, sort=True)
                 elif record.schema_ref is not None:
@@ -1474,6 +1478,8 @@ class WorkerGraphRunner:
                                 'partitions': partitions}
                     if self._terminal_schema_ref is not None:
                         manifest['schema_ref'] = _artifact_json(self._terminal_schema_ref)
+                    if self._terminal_non_mapping_values:
+                        manifest['non_mapping_values'] = True
                     with blocks.hold_metadata(manifest):
                         if request.final:
                             from .dataflow_terminal import terminal_scalar

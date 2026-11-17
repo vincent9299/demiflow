@@ -234,6 +234,16 @@ def _encode_record(record: Record, bounds, *, services=None, retained=0) -> byte
     return encode_frame(record, bounds, services=services, retained=retained)[:-1]
 
 
+def _manifest_non_mapping_values(manifest):
+    flag = manifest.get('non_mapping_values', False)
+    if type(flag) is not bool:
+        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values must be a boolean')
+    if flag and (not manifest['rows'] or manifest['columns'] is not None
+                 or manifest.get('schema_ref') is not None):
+        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values contradicts its table metadata')
+    return flag
+
+
 def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServices) -> ArtifactRef:
     if not isinstance(spec, KernelSpec):
         raise DataflowError("INVALID_CONTRACT", "prepare_sink_partition requires a KernelSpec")
@@ -243,6 +253,7 @@ def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServic
     sink_id = spec.configuration.get("sink_id") or spec.kind
     identifier(sink_id)
     rows, total, columns = 0, 0, None
+    non_mapping_values = False
     chunks = []
     for record in records:
         services.check_stop()
@@ -256,14 +267,17 @@ def prepare_sink_partition(records, *, spec: KernelSpec, services: RuntimeServic
         if total > bounds.max_batch_bytes:
             raise DataflowError("BUDGET_EXCEEDED", "Sink partition byte count exceeds budget")
         if record.inline is not None and not isinstance(record.inline, Mapping):
+            non_mapping_values = True
             columns = None
-        elif rows == 1 and isinstance(record.inline, Mapping):
+        elif not non_mapping_values and columns is None and isinstance(record.inline, Mapping):
             columns = sorted(record.inline)
         chunks.append(encoded + b"\n")
     data_ref = store.put(iter(chunks), max_bytes=bounds.max_batch_bytes, media_type=RECORDS_MEDIA)
     manifest = {"schema": _MANIFEST_SCHEMA, "sink_id": sink_id, "partition_id": partition_id,
                 "rows": rows, "bytes": total, "columns": columns,
                 "data_ref": _artifact_json(data_ref)}
+    if non_mapping_values:
+        manifest['non_mapping_values'] = True
     raw = document(manifest, bounds.max_control_bytes)
     return store.put(iter([raw]), max_bytes=bounds.max_control_bytes, media_type=MANIFEST_MEDIA)
 
@@ -280,13 +294,14 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
     from .record_schema import RecordSchemas
     schemas = RecordSchemas(services)
     schema_ref, declared_schema = None, None
-    unknown_columns = column_drift = schema_drift = False
+    non_mapping_values = column_drift = schema_drift = False
     for ref in refs:
         manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=MANIFEST_MEDIA)
         if type(manifest) is not dict or manifest.get("schema") != _MANIFEST_SCHEMA:
             raise DataflowError("CORRUPT_ARTIFACT", "Invalid prepared sink manifest")
         if manifest.get("sink_id") != sink_id:
             raise DataflowError("INVALID_CONTRACT", "Prepared manifest belongs to a different sink")
+        non_mapping_values |= _manifest_non_mapping_values(manifest)
         partition_id = manifest["partition_id"]
         if partition_id in seen:
             raise DataflowError("INVALID_CONTRACT",
@@ -299,7 +314,6 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
                 schema_drift = True
             schema_ref, declared_schema = current_ref, current
         manifest_columns = manifest["columns"]
-        unknown_columns |= manifest['rows'] > 0 and manifest_columns is None
         if manifest_columns is not None:
             if columns is None:
                 columns = manifest_columns
@@ -326,7 +340,7 @@ def combine_prepared_sinks(refs, *, sink_id: str, services: DriverServices):
             partitions[pid] = entry
         total_rows += manifest["rows"]
         total_bytes += manifest["bytes"]
-    if unknown_columns:
+    if non_mapping_values:
         columns = schema_ref = None
     elif schema_drift:
         raise DataflowError('SOURCE_CHANGED', 'Prepared partition Arrow schema drifted')
