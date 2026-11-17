@@ -106,6 +106,29 @@ def capture(page,tmp_path,name):
     page.screenshot(path=str(folder/name),full_page=True)
 
 
+def select_output_mime(page, mime):
+    selector = page.get_by_label('输出 0 格式', exact=True)
+    option = selector.locator(f'option[title="{mime}"]')
+    expect(option).to_have_count(1)
+    selector.select_option(value=option.get_attribute('value'))
+
+
+def test_json_text_keeps_exact_values_without_double_escaping_or_html(browser):
+    value = '{"expected":2,"id":9007199254740993,"score":-0.0,"text":"<img src=x onerror=evil()>"}'
+    with page_for(browser) as (page,state,errors):
+        page.evaluate('value=>draw({format:"json",value})',value)
+        expect(page.locator('.analysis-field-value > pre')).to_have_text(value)
+        expect(page.get_by_text('JSON 字符串 · 原文',exact=True)).to_be_visible()
+        assert page.locator('img').count()==0
+        page.get_by_text('原值',exact=True).click()
+        expect(page.locator('.analysis-field-value details pre')).to_have_text(value)
+        page.evaluate('clear()')
+        page.evaluate('value=>draw({format:"json",value})','x'*(256*1024+1))
+        expect(page.locator('#mount')).to_contain_text('超过 256KiB 预算')
+        assert page.locator('pre').count()==0
+        assert not errors,errors
+
+
 def test_fields_preserve_types_reuse_markdown_and_isolate_html(browser,tmp_path):
     with page_for(browser) as (page,state,errors):
         page.evaluate(r'''async () => {
@@ -199,9 +222,9 @@ def test_notebook_mime_mount_and_execution_identity(browser,tmp_path):
     with page_for(browser) as (page,state,errors):
         page.evaluate('({output,project})=>{window.output=ForgeAnalysisOutput.mount({parent:document.getElementById("mount"),output,project,mountText,disposeReaders});}',dict(output=output,project=PROJECT))
         expect(page.locator('.analysis-output-provenance')).to_contain_text('generation')
-        page.get_by_label('输出 0 MIME 格式').select_option(label='text/html')
+        select_output_mime(page, 'text/html')
         expect(page.frame_locator('iframe').get_by_text('Notebook HTML')).to_be_visible()
-        page.get_by_label('输出 0 MIME 格式').select_option(label='application/javascript · 不可用/原值')
+        select_output_mime(page, 'application/javascript')
         expect(page.get_by_text('unsupported_MIME_no_widgets_or_scripts',exact=False)).to_be_visible()
         assert page.locator('iframe').count()==0
         capture(page,tmp_path,'notebook-mime-provenance.png')
@@ -609,7 +632,7 @@ def test_origin_late_unregistered_response_and_removed_mime_button_cannot_replac
         button.click();assert page.evaluate('adoptions.length')==2
         assert all(item['evidence']['origin']==fixture.rep['origin'] and item['evidence']['annotation_origin_registered'] for item in page.evaluate('adoptions'))
         page.evaluate('window.removedCaseButton=[...document.querySelectorAll("button")].find(button=>button.textContent==="在 Case 工作台查看此描述")')
-        page.get_by_label('输出 0 MIME 格式').select_option(label='text/plain')
+        select_output_mime(page, 'text/plain')
         page.evaluate('removedCaseButton.click()');assert page.evaluate('adoptions.length')==2
         page.evaluate('slot.dispose();removedCaseButton.click()');assert page.evaluate('adoptions.length')==2
         assert not errors,errors

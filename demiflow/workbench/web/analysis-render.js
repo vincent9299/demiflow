@@ -26,6 +26,13 @@
   function original(parent,value,label='原值'){const detail=node('details');detail.append(node('summary',label));detail.ontoggle=()=>{if(detail.open&&detail.children.length===1)raw(detail,value);};parent.append(detail);}
   function jsonTree(parent,value,toolTarget=parent){
     boundedJSON(value);let remaining=256;
+    // A JSON-formatted column may store text. Show that exact text without a
+    // second layer of quotes/escapes; do not parse it and lose large integers,
+    // duplicate keys, or the distinction between a string and an object.
+    if(typeof value==='string'){
+      parent.append(node('span','JSON 字符串 · 原文','muted small'),node('pre',value,'analysis-raw'));
+      original(toolTarget,value);return;
+    }
     const render=(item,depth,label)=>{
       if(remaining--<=0)return node('span','… 初始节点预算已用完，请查看原值','muted small');
       if(item===null||typeof item!=='object')return node('div',(label===undefined?'':label+': ')+JSON.stringify(item),'analysis-json-leaf');

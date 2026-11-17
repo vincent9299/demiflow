@@ -52,7 +52,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/absolute/isolated/demiflow \
 source、对象、题图表、结果表与运行目录均应在本次专属 `/tmp/demiflow-*` 下；不要指向
 生产目录。只读预览不需要启动模型服务或读表，但必须使用同一份明确的配置。
 
-`presentation.json` 提供结果阅读预设：题面、参考图、生成图、条件、评分路、分数与分母。
+`presentation.json` 提供 v2 结果阅读预设：题面、参考图、生成图、条件、评分路、分数与分母。
+生成图和本路分数属于同一输出方案，查看时并列呈现；汇总另存为只含分母材料的视图。
 登记到工作台时由真实固定表产生 `source_snapshot` 和 Case 身份，不能自行编造摘要。
 图片字段需要显式绑定本次公开对象根目录和 SHA。默认不投影较大的 `details_json`，
 完整调用记录仍在结果表中，按单行读取即可；不会修改或删减执行结果。评分与汇总
