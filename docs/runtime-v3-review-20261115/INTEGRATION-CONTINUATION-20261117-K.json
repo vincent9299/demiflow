@@ -1,0 +1,230 @@
+{
+  "root_combination": [
+    {
+      "receipt": "/tmp/demiflow-root-outer-coalesce-cancel-r1-evidence/verification.json",
+      "sha256": "752a519d9e8b1fa26ea52780c88b359a4cde2ee5893a7b485f7da641a3682d02",
+      "head": "e74fec8e999dc12b6dd3cad2ab9713b710cdeca6",
+      "inputs": 2996,
+      "mismatches": [],
+      "proof_mismatches": [],
+      "proof_files": 0,
+      "unchanged": true,
+      "call_outcomes": {
+        "passed": 87,
+        "failed": 1
+      },
+      "phase_count": 264,
+      "children_after": [],
+      "exit_code": 1
+    },
+    {
+      "receipt": "/tmp/demiflow-root-outer-coalesce-cancel-ray-phase-r2-evidence/verification.json",
+      "sha256": "2abf2e7e11107788e04c5faee70edd533ac70cb7374756c8590fa7e7c8ff3701",
+      "head": "e74fec8e999dc12b6dd3cad2ab9713b710cdeca6",
+      "inputs": 2996,
+      "mismatches": [],
+      "proof_mismatches": [],
+      "proof_files": 0,
+      "unchanged": true,
+      "call_outcomes": {
+        "passed": 1
+      },
+      "phase_count": 3,
+      "children_after": [],
+      "exit_code": 0
+    }
+  ],
+  "performance": {
+    "receipt": "/tmp/demiflow-performance-fixes-e74fec8-r1/verification.json",
+    "sha256": "fd62720ec2562b573d54cd9c6d9b56bdcd36be7fc9bd42c13d091273043899ee",
+    "head": "e74fec8e999dc12b6dd3cad2ab9713b710cdeca6",
+    "inputs_audited": 1072,
+    "mismatches": [],
+    "source_unchanged": true,
+    "scope": "Single original workload per case; not a paired or formal performance gate",
+    "trials": [
+      {
+        "case": "fast_cpu",
+        "status": "passed",
+        "elapsed_s": 15.813986845,
+        "first_result_s": 2.261823378,
+        "public_rows_observed": 10000,
+        "input": {
+          "sha256": "b0844263b826f12d5499f90c4e91822b0ba991423c4a749fbcb50dc1eab934f5",
+          "rows": 20000
+        },
+        "returncode": 0,
+        "remaining_observed_descendants_after_driver_exit": []
+      },
+      {
+        "case": "expand_100x100",
+        "status": "passed",
+        "elapsed_s": 14.944042999,
+        "first_result_s": 3.549191665,
+        "public_rows_observed": 10000,
+        "input": {
+          "sha256": "986b4e6bd131d69b98fc1583552860fc575aa03e0be530861c470edb9082e9d4",
+          "rows": 100
+        },
+        "returncode": 0,
+        "remaining_observed_descendants_after_driver_exit": []
+      },
+      {
+        "case": "finite_sealed",
+        "status": "failed",
+        "elapsed_s": 120.597433631,
+        "first_result_s": 80.130716246,
+        "public_rows_observed": 30125,
+        "input": {
+          "sha256": "95c374bf4ed1dd3a8c19486d6af68811b6472fae642d1add8fda1eae44699411",
+          "rows": 80002
+        },
+        "returncode": 1,
+        "remaining_observed_descendants_after_driver_exit": []
+      }
+    ]
+  },
+  "finite_cancel": [
+    {
+      "receipt": "/tmp/demiflow-finite-cancel-red-r2-evidence/verification.json",
+      "sha256": "2b0df8afc4f9974d24d0c8ecdb722738fccc927115a8db6874ac44b9c318125b",
+      "head": "e7284f9239351e0b7fe7bf98191667fb678af6ba",
+      "inputs": 2305,
+      "mismatches": [],
+      "unchanged": true,
+      "call_outcomes": {
+        "failed": 6
+      },
+      "phase_count": 18,
+      "children_after": [],
+      "exit_code": 1
+    },
+    {
+      "receipt": "/tmp/demiflow-finite-cancel-green-r1-evidence/verification.json",
+      "sha256": "98a85e9589bbfc537aa7b9e279d1fc6072dfeded456882d675c68beb0e053a9d",
+      "head": "9f75e35e6f237d6d0b36b0e973aa53ece1c0bde0",
+      "inputs": 2305,
+      "mismatches": [],
+      "unchanged": true,
+      "call_outcomes": {
+        "passed": 7
+      },
+      "phase_count": 21,
+      "children_after": [],
+      "exit_code": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-finite-cancel-regression-r1-evidence/verification.json",
+      "sha256": "8073456bf057cb9ab19e61f46138e621c8f184afbe758c58d0512c338b14e672",
+      "head": "9f75e35e6f237d6d0b36b0e973aa53ece1c0bde0",
+      "inputs": 2305,
+      "mismatches": [],
+      "unchanged": true,
+      "call_outcomes": {
+        "passed": 95
+      },
+      "phase_count": 285,
+      "children_after": [],
+      "exit_code": 0
+    }
+  ],
+  "outer_decode": [
+    {
+      "receipt": "/tmp/demiflow-outer-native-function-r1-evidence/verification.json",
+      "sha256": "a521dbed6bd2e91f4338cdec0042a3210eecde9684c05e649805a19afaa56f3a",
+      "head": "69fce145d9c6ad96b6b54146056879ff1903d97e",
+      "inputs": 2994,
+      "mismatch": [],
+      "source_unchanged": true,
+      "exit_code": 0,
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-outer-native-wide-p1-r1-evidence/verification.json",
+      "sha256": "830bcb2f82f7ff20ac9d76d7834dcecf3e8817bfacb26e8057443ca09cdd0126",
+      "head": "69fce145d9c6ad96b6b54146056879ff1903d97e",
+      "inputs": 2994,
+      "mismatch": [],
+      "source_unchanged": true,
+      "exit_code": 1,
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-outer-native-wide-p1-r2-evidence/verification.json",
+      "sha256": "27096805fa8f421b1c10c0a75024d6b18a1ee6d38b0fbba528a69c1a98f7f4d6",
+      "head": "ddd9a9e168244df65e5fc7576854d11c0d62a768",
+      "inputs": 2994,
+      "mismatch": [],
+      "source_unchanged": true,
+      "exit_code": 1,
+      "children_after": []
+    }
+  ],
+  "coalescing": [
+    {
+      "receipt": "/tmp/demiflow-terminal-frame-baseline-r1-evidence/verification.json",
+      "sha256": "e79d96f973d5c5a5960639e2cff239363fba799848bf2201a6c7bb7679b325d1",
+      "head": "167ee6850512d448ead04fec5547fa2981c7e3f3",
+      "inputs": 2994,
+      "mismatch": [],
+      "source_unchanged": true,
+      "exit_code": 1,
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-terminal-frame-new-r1-evidence/verification.json",
+      "sha256": "56ed46d56a04fc3d73f49489783b3594685af721e73db538f451a909ae3af6aa",
+      "head": "1cd35df5d8d395d7e263ae83fac3a496669a2895",
+      "inputs": 2994,
+      "mismatch": [],
+      "source_unchanged": true,
+      "exit_code": 0,
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-terminal-frame-regression-r1-evidence/verification.json",
+      "sha256": "6c32781e88cd9ba1e446bff2592c89143ae1c2f7c61404af29f9dc95d1871f49",
+      "head": "1cd35df5d8d395d7e263ae83fac3a496669a2895",
+      "inputs": 2994,
+      "mismatch": [],
+      "source_unchanged": true,
+      "exit_code": 0,
+      "children_after": []
+    }
+  ],
+  "boundaries": {
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "main_status": " M \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\346\\226\\207\\346\\241\\243.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201Review-20261110.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\270\\211\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\272\\214\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261113.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2476\\346\\217\\220\\344\\272\\244\\345\\264\\251\\346\\272\\203\\347\\252\\227\\345\\217\\243\\351\\242\\235\\345\\272\\246-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2477\\345\\215\\225\\350\\241\\214\\344\\270\\212\\351\\231\\220-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\350\\201\\212\\345\\244\\251\\350\\256\\260\\345\\275\\225.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\351\\230\\266\\346\\256\\265\\350\\247\\204\\345\\210\\222-20261109.md\"\n?? docs/upgrade-implementation-20261113/\n",
+    "main_dirty_hashes": {
+      "docs/demiflow升级完整记忆文档.md": "502f40c4cbc9543145a8ab23df1190d5be9fdb3752da0410596a35fdc75d935f",
+      "docs/demiflow升级代码Review-20261110.md": "f4507d2dd8b5db7cd48fe8625103d761ceb409ebb12d8720fd7043d57fdd8c2a",
+      "docs/demiflow升级代码复审-20261112-第三轮.md": "ca4bce379310615025acfa3ab192826922af44c1836b8a78a1f498b96d802447",
+      "docs/demiflow升级代码复审-20261112-第二轮.md": "b4e4edc2ad1700833ca5de5b42f387c11c98626d94ae9c1031a374026747a934",
+      "docs/demiflow升级代码复审-20261112.md": "d266ba571633e0888b4c6e43590975bc4646db3b6bc392cf7feaae27d6ef00a6",
+      "docs/demiflow升级代码复审-20261113.md": "f4c96873a0812089c6d29ed17869b4959924258e5b6317f02c9ceb8e683e11c2",
+      "docs/demiflow升级复审-§6提交崩溃窗口额度-裁决-20261112.md": "1636877704b10c495a6639e4b2d8e9b866320eb5f1db6242dc6333b4d686c1f1",
+      "docs/demiflow升级复审-§7单行上限-裁决-20261112.md": "a5e3a5ede68af259b2fc5c3aec72dd006cfb6feda24065ace00e9f42382e6561",
+      "docs/demiflow升级完整记忆聊天记录.md": "0b76b8eff37e14c80948bb25e5cfe8916b622b97fdef35eca46c24cd30b08786",
+      "docs/demiflow升级阶段规划-20261109.md": "4468ead9e0a11f9ecc7a06c6a22269b9584eb574771a286412f00506c76d69f5",
+      "docs/upgrade-implementation-20261113/README.md": "2ab44324a01b430fe2b9ab95596aaf5cd08b79db6f10425b4ecf6d8dbd0e7ba0",
+      "docs/upgrade-implementation-20261113/agent-a-code-pin.md": "7aa38d2705216e52efc02357f098090dee10d9bffc39f306fbea48ecfed53c0b",
+      "docs/upgrade-implementation-20261113/agent-b-plan-contract.md": "eed89338757bcf9dc373bb63cde7b187c6ebe3b4b5645ff61d64d2adcbb28cae",
+      "docs/upgrade-implementation-20261113/agent-c-runtime-integration.md": "b533c05804122703a0188df809e365059d1009f4385a81acf56b13c191ff6605",
+      "docs/upgrade-implementation-20261113/agent-d-workbench.md": "0655e0e574aede390de6f303263826255f0e8b92bb6f94e9b6f71704cc055fad",
+      "docs/upgrade-implementation-20261113/agent-e-business-proof.md": "f1caa0ad22c293f4a4681b64df0078f083ef287b82ce764b5fb1895e680262bf",
+      "docs/upgrade-implementation-20261113/parallel-contracts-v1.md": "7d2207a17d9cba44de859a82741bd3566199e31bae414b09fa3a6f024246e6da",
+      "docs/upgrade-implementation-20261113/progress-review-20261113.md": "db0148eedb3a8ed29329f881127fa102386c64bec19cfc35eafc0df2b1e89919"
+    },
+    "frozen_reference": "49b666f",
+    "frozen": {
+      "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+      "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+      "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+      "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+      "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+      "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+      "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+    },
+    "unchanged": true
+  }
+}
