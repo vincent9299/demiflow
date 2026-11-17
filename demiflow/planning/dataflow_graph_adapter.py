@@ -400,16 +400,8 @@ def specialize_graph_exchanges(graph, stages, exchanges, *, bounds):
         declaration = incoming or outgoing
         credit = graph_credit(declaration, bounds=bounds)
         mode = declaration['exchange_mode']
-        storage = bounds.max_spill_bytes
-        if mode != 'memory_incremental' and 'storage_bytes' in declaration:
-            router = edge.consumer if incoming is not None else edge.producer
-            width = sum(1 for item in exchanges if router in (
-                edges[item.edge_id].producer, edges[item.edge_id].consumer))
-            storage = min(storage, declaration['storage_bytes']) // width
-            if storage < 1:
-                raise DataflowError('BUDGET_EXCEEDED', 'graph storage budget cannot admit every declared channel')
         updates = {'mode': mode, 'credit_rows': credit['rows'], 'credit_bytes': credit['bytes'],
-                   'storage_bytes': 0 if mode == 'memory_incremental' else storage,
+                   'storage_bytes': 0 if mode == 'memory_incremental' else bounds.max_spill_bytes,
                    'scope_id': 'scope-' + edge.edge_id if mode == 'finite_sealed' else None,
                    'reason': 'explicit graph adapter: original v3 routing and ACK'}
         if incoming is not None:
@@ -423,6 +415,34 @@ def specialize_graph_exchanges(graph, stages, exchanges, *, bounds):
             updates.update(producer_partitions=(reader,), consumer_partitions=owners[edge.consumer].partitions,
                            routing='forward', keys=())
         result.append(replace(exchange, **updates))
+    return constrain_graph_storage(graph, tuple(result))
+
+
+def constrain_graph_storage(graph, exchanges):
+    """Preserve the declared per-channel limit after final transport selection.
+
+    The run spill grant remains the additional aggregate ceiling. This function
+    never replans historical channels or requires a worst-case row to fit.
+    """
+    declarations = {node.occurrence_id: node.kernel.configuration['graph_route']
+                    for node in graph.nodes if 'graph_route' in node.kernel.configuration}
+    if not any('storage_bytes' in value for value in declarations.values()):
+        return exchanges
+    edges = {edge.edge_id: edge for edge in graph.edges}
+    result = []
+    for exchange in exchanges:
+        edge = edges[exchange.edge_id]
+        declaration = declarations.get(edge.consumer) or declarations.get(edge.producer)
+        if exchange.mode == 'memory_incremental' or declaration is None or 'storage_bytes' not in declaration:
+            result.append(exchange)
+            continue
+        storage = min(exchange.storage_bytes, declaration['storage_bytes'])
+        # Every native record frame is a JSON object. Even its empty envelope
+        # needs two bytes; this is only a necessary lower bound, not a demand
+        # to reserve the maximum permitted business-row size.
+        if storage < len(b'{}'):
+            raise DataflowError('BUDGET_EXCEEDED', 'graph storage budget cannot admit every declared channel')
+        result.append(replace(exchange, storage_bytes=storage))
     return tuple(result)
 
 

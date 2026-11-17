@@ -888,6 +888,16 @@ def compile_physical_dataflow(
         requested=graph_requested_exchanges, hosts=hosts, bounds=bounds, policy=policy)
     from .dataflow_graph_adapter import tighten_graph_credits
     exchanges = tighten_graph_credits(graph, exchanges, bounds=bounds)
+    from .dataflow_graph_adapter import constrain_graph_storage
+    constrained = constrain_graph_storage(graph, exchanges)
+    if constrained != exchanges:
+        # Automatic durable parking must not discard an explicit graph limit.
+        # Keep the same sole solver's sealed spill/accounting facts consistent.
+        exchanges = _share_exchange_storage(constrained, bounds)
+        from ..execution.dataflow_publication_budget import PublicationReservation
+        residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
+            max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
+            publication_reservation=PublicationReservation(graph, stages, bounds))
     capability = infer_recovery(graph, snapshots, policy=policy)
     if not capability.supported:
         raise _error(

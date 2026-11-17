@@ -106,13 +106,45 @@ def test_single_worker_partition_wave_resume_keeps_original_membership(graph_env
                 value['residency'], **{**kwargs, 'facts': [after[-1]]})
 
 
-def test_explicit_graph_storage_is_sealed_and_not_silently_enlarged(graph_environment):
+@pytest.mark.parametrize('mode,workers', [('finite_sealed', 4), ('memory_incremental', 1)])
+def test_explicit_graph_storage_is_sealed_and_not_silently_enlarged(graph_environment, mode, workers):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     spec = _spec(graph_environment)
-    spec.update(exchange_mode='finite_sealed', storage_bytes=1)
+    spec.update(exchange_mode=mode, storage_bytes=1)
     with pytest.raises(DataflowError, match='(?i)storage|spill'):
         with RunContext.start(graph_environment/'run') as run:
             with run.action({'kind': 'materialize', 'source': {'fixture': 'one-byte-storage'}}):
-                LocalDatasetExecutor(workers=4, unified_graph=True).materialize_graph(spec)
+                LocalDatasetExecutor(workers=workers, unified_graph=True).materialize_graph(spec)
     assert not run.journal.execution_commits('action-1')
     assert not (graph_environment/'ancestor.jsonl').exists()
+
+
+@pytest.mark.parametrize('mode', ['finite_sealed', 'memory_incremental'])
+def test_graph_storage_remains_per_channel_under_original_aggregate_grant(graph_environment, monkeypatch, mode):
+    from demiflow.execution import dataflow
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    original, captures = dataflow.execute_action, []
+    def capture(request, **kwargs):
+        handle = original(request, **kwargs)
+        captures.append(handle)
+        return handle
+    monkeypatch.setattr(dataflow, 'execute_action', capture)
+    spec = _spec(graph_environment)
+    amount = 1024**2
+    spec.update(exchange_mode=mode, storage_bytes=amount)
+    with RunContext.start(graph_environment/'run', limits={'timeout_s': 120}) as run:
+        with run.action({'kind': 'materialize', 'source': {'fixture': 'per-channel-storage'}}) as action:
+            result = LocalDatasetExecutor(workers=1, unified_graph=True).materialize_graph(spec)
+            assert result['target_rows'] == {'left': 3, 'right': 3}
+            action.complete({'kind': 'graph-materialized'})
+        sealed = load_sealed_plan(run.directory, action.action_id, version='v3')
+        graph, physical = sealed['graph'], sealed['physical']
+        router = next(n.occurrence_id for n in graph.nodes if 'graph_route' in n.kernel.configuration)
+        edge_ids = {e.edge_id for e in graph.edges if router in (e.producer, e.consumer)}
+        channels = [e for e in physical.exchanges if e.edge_id in edge_ids and e.mode != 'memory_incremental']
+        assert len(channels) == 3
+        assert all(e.storage_bytes == amount for e in channels), 'declared limit must not be divided by channel count'
+        assert physical.residency.required_spill_bytes == sum(e.storage_bytes for e in physical.exchanges
+                                                              if e.mode != 'memory_incremental')
+        assert physical.residency.required_spill_bytes <= physical.bounds.max_spill_bytes
+        assert len(captures) == 1 and captures[0]._execution._peak_active_workers == 1
