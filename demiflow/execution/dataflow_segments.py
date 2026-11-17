@@ -187,24 +187,30 @@ class SegmentForest:
         self.rows, self.bytes, self._sealed = rows, size, ref
 
     def _put(self, children):
-        if self._metadata_context is not None:
-            from .dataflow_record_frames import admit_workspace
-            self._frame_call(admit_workspace, 768, self.bounds)
-        value = {'schema': SCHEMA, 'height': 1 + max(c['height'] for c in children),
-                 'rows': sum(c['rows'] for c in children),
-                 'bytes': sum(c['bytes'] for c in children), 'children': children}
-        if value['height'] > self.bounds.max_depth:
-            raise DataflowError('BUDGET_EXCEEDED', 'terminal segment index depth exceeds bound')
-        with self._metadata_context(value) if self._metadata_context is not None else nullcontext():
-            if self._frame_call is not None:
-                from .dataflow_record_frames import _json_shape, admit_workspace
-                size, resident = _json_shape(value, self.bounds.max_control_bytes)
+        # append() may already have popped these children from self.roots.
+        # They remain live throughout construction, encoding and store.put.
+        with self._metadata_context(children) if self._metadata_context is not None else nullcontext():
+            if self._metadata_context is not None:
+                from .dataflow_record_frames import admit_workspace
+                self._frame_call(admit_workspace, 768, self.bounds)
+            value = {'schema': SCHEMA, 'height': 1 + max(c['height'] for c in children),
+                     'rows': sum(c['rows'] for c in children),
+                     'bytes': sum(c['bytes'] for c in children), 'children': children}
+            if value['height'] > self.bounds.max_depth:
+                raise DataflowError('BUDGET_EXCEEDED', 'terminal segment index depth exceeds bound')
+            with self._metadata_context(value) if self._metadata_context is not None else nullcontext():
+                if self._frame_call is not None:
+                    from .dataflow_record_frames import _json_shape, admit_workspace
+                    size, resident = _json_shape(value, self.bounds.max_control_bytes)
+                    if self._metadata_context is not None:
+                        resident = 0  # Count the joint tree, including aliased roots, once.
+                    self._frame_call(admit_workspace, resident + 2 * size + 512, self.bounds)
+                raw = json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
+                ref = self.store.put(iter([raw]), max_bytes=self.bounds.max_control_bytes, media_type=SEGMENTS_MEDIA)
+                del raw
                 if self._metadata_context is not None:
-                    resident = 0  # Children alias retained roots; count the joint tree once.
-                self._frame_call(admit_workspace, resident + 2 * size + 512, self.bounds)
-            raw = json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
-            ref = self.store.put(iter([raw]), max_bytes=self.bounds.max_control_bytes, media_type=SEGMENTS_MEDIA)
-        return _entry(ref, rows=value['rows'], size=value['bytes'], height=value['height'])
+                    self._frame_call(admit_workspace, 1024, self.bounds)
+                return _entry(ref, rows=value['rows'], size=value['bytes'], height=value['height'])
 
     def append(self, ref, *, rows):
         entry = _entry(ref, rows=rows, size=ref.size_bytes, height=0)

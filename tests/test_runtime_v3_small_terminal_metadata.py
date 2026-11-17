@@ -197,3 +197,66 @@ def test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_befor
             assert not calls
         finally:
             blocks.close()
+
+
+@pytest.mark.parametrize('blocked', [False, True])
+def test_merge_keeps_popped_children_live_before_index_construction(tmp_path, monkeypatch, blocked):
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    from demiflow.execution.dataflow_segments import SEGMENTS_MEDIA, block_chunks
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    with store_fixture(tmp_path) as (run, store, _):
+        runner = owner(store, None)
+        blocks = runner._terminal_blocks
+        expected = bytearray()
+        original = runner._frame_call
+        observed, indices = [], []
+        def frame(function, *args, **kwargs):
+            if function.__name__ == 'admit_workspace' and args[0] == 768:
+                # Both physical entries have left forest.roots, but neither
+                # has ceased to exist. The original frame must retain them.
+                assert not next(iter(blocks.blocks.values()))[1].roots
+                children = blocks._metadata_owners[-1]
+                assert len(children) == 2 and all(child['rows'] == 1 for child in children)
+                observed.append(blocks.retained_bytes)
+                if blocked:
+                    slack = 14336 - blocks.retained_bytes - 768
+                    assert 0 < slack < 14336
+                    runner._queue.append({'body':'x' * slack})
+            return original(function, *args, **kwargs)
+        runner._frame_call = blocks._frame_call = frame
+        put = store.put
+        def saving(chunks, *, media_type, **kwargs):
+            if media_type == SEGMENTS_MEDIA:
+                indices.append(True)
+            return put(chunks, media_type=media_type, **kwargs)
+        monkeypatch.setattr(store, 'put', saving)
+        try:
+            for index in range(2):
+                row = {'n':index}
+                record = make('Record', inline=row, encoded_bytes=len(_encode_payload(row, max_bytes=8192)))
+                size, chunks = frame_parts(record, runner.bounds, services=runner.services)
+                raw = b''.join(chunks)
+                expected.extend(raw)
+                blocks.append_parts(record, iter((raw,)), size=size)
+                if blocked and index == 1:
+                    with pytest.raises(DataflowError, match='original resident budget'):
+                        blocks.flush()
+                    assert not indices and not blocks._metadata_owners
+                    assert not run.journal.execution_commits('action-1')
+                    return
+                blocks.flush()
+            assert observed and indices
+            # Subsequent seal is a different operation: its root is already
+            # retained, so the pop-specific spy need not apply to it.
+            runner._frame_call = blocks._frame_call = original
+            part = blocks.manifest_partitions()[0]
+            ref = ArtifactRef(**part['data_ref'])
+            assert b''.join(block_chunks(store, ref, runner.bounds)) == bytes(expected)
+            restored = owner(store, None)._terminal_blocks
+            try:
+                restored.restore({'rows':2, 'bytes':len(expected), 'partitions':[part]})
+                assert restored.manifest_partitions() == [part]
+            finally:
+                restored.close()
+        finally:
+            blocks.close()
