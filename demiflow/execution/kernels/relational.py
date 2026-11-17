@@ -239,8 +239,6 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
     sequence = 0
 
     def output(state,key,sequence):
-        if not isinstance(state, Mapping):
-            raise _err("INVALID_CONTRACT", "reducer must return a mapping row or None")
         record_id = _hash_id([RECORD_DOMAIN, occurrence, "reduce", key])
         out = _output_record(record_id, {"group_key": key}, state, sequence, services)
         budget.charge(out)

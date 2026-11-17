@@ -117,17 +117,17 @@ def _group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
     return _canonical([_key_token(row[field]) for field in fields])
 
 
-def _dumps_row(row: Mapping[str, Any], *, max_bytes: int) -> bytes:
+def _dumps_row(row: object, *, max_bytes: int) -> bytes:
     from ..exchange.dataflow_bridge import _encode_payload
     return _encode_payload(row, max_bytes=max_bytes)
 
 
-def _loads_row(data: bytes) -> dict[str, Any]:
+def _loads_row(data: bytes) -> object:
     from ..exchange.dataflow_bridge import _decode_payload
     return _decode_payload(data, max_bytes=max(1, len(data)))
 
 
-def _row_bytes(row: Mapping[str, Any], *, max_bytes: int) -> int:
+def _row_bytes(row: object, *, max_bytes: int) -> int:
     return len(_dumps_row(row, max_bytes=max_bytes))
 
 
@@ -142,7 +142,7 @@ def _input_row_bytes(record: Record) -> int:
     raise _err("INVALID_CONTRACT", "record carries neither inline nor payload_ref")
 
 
-def _materialize_row(record: Record, services: RuntimeServices) -> dict[str, Any]:
+def _materialize_row(record: Record, services: RuntimeServices) -> object:
     if (record.inline is None) == (record.payload_ref is None):
         raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
     if record.inline is not None:
@@ -163,7 +163,7 @@ def _materialize_row(record: Record, services: RuntimeServices) -> dict[str, Any
 def _output_record(
     record_id: str,
     source_position: Mapping[str, Any],
-    row: Mapping[str, Any],
+    row: object,
     sequence: int,
     services: RuntimeServices,
     *, schema_ref=None,
@@ -177,7 +177,7 @@ def _output_record(
         record_id=record_id,
         source_position=_thaw_json(source_position),
         payload_ref=None,
-        inline=dict(row),
+        inline=row,
         encoded_bytes=len(data),
         sequence=sequence,
         schema_ref=schema_ref,

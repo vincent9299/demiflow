@@ -329,6 +329,27 @@ def _row(value, label: str) -> Mapping[str, object]:
     return MappingProxyType(frozen)
 
 
+def _record_value(value, label: str):
+    """Freeze the same closed business domain at the payload root.
+
+    Column rows retain their original string-key check. The shared typed codec
+    validates every leaf and its byte/node budget before transport; this root
+    check does not admit code objects or invoke serialization hooks.
+    """
+    if isinstance(value, _RuntimeMapping):
+        return _row(value, label)
+    if type(value) in (bool, int, float, str, bytes, list, tuple, set, frozenset,
+                       _FrozenRowList, _FrozenRowSet):
+        return _freeze_row_value(value, 0)
+    from .scalar_values import _TYPES
+    if type(value) in _TYPES:
+        return value  # Closed immutable temporal/decimal types; codec checks details.
+    from .array_values import numpy_value
+    if numpy_value(value) is not None:
+        return _freeze_row_value(value, 0)
+    raise _err(label + " must be a non-null data value supported by the record codec")
+
+
 def _profile(value, label: str) -> ResourceProfile:
     if not isinstance(value, ResourceProfile):
         raise _err(label + " must be a ResourceProfile")
@@ -588,10 +609,15 @@ class BlockPartition:
 
 @dataclass(frozen=True)
 class Record:
+    """One typed business value or payload ref; None still means no inline value.
+
+    Row remains the mapping contract for operations addressing named columns.
+    Reducer outputs may instead be any non-null value in the closed data codec.
+    """
     record_id: str
     source_position: Mapping[str, Json]
     payload_ref: ArtifactRef | None
-    inline: Row | None
+    inline: object | None
     encoded_bytes: int
     sequence: int
     schema_ref: ArtifactRef | None = None
@@ -603,7 +629,7 @@ class Record:
         _opt_ref(self.payload_ref, "Record.payload_ref")
         _exactly_one(self.payload_ref, self.inline, "Record payload")
         if self.inline is not None:
-            object.__setattr__(self, "inline", _row(self.inline, "Record.inline"))
+            object.__setattr__(self, "inline", _record_value(self.inline, "Record.inline"))
         _int(self.encoded_bytes, "Record.encoded_bytes")
         _int(self.sequence, "Record.sequence")
         _opt_ref(self.schema_ref, "Record.schema_ref")
@@ -1857,7 +1883,7 @@ class ActionHandle(Protocol):
 
 @runtime_checkable
 class CallableInstance(Protocol):
-    def __call__(self, row: Row) -> object: ...
+    def __call__(self, row: object) -> object: ...
 
 
 @runtime_checkable
@@ -1869,7 +1895,7 @@ class NativeEffectTransport(Protocol):
 @runtime_checkable
 class MaterializedHandle(Protocol):
     def num_blocks(self) -> int: ...
-    def rows(self) -> Iterator[Row]: ...
+    def rows(self) -> Iterator[object]: ...
     def release(self) -> None: ...
 
 

@@ -321,8 +321,8 @@ def _decode_payload(raw, *, max_bytes):
         _fail("BUDGET_EXCEEDED", "encoded record exceeds the row byte budget")
     node = _codec_loads(raw)
     value = _decode_value(node)
-    if type(value) is not dict:
-        _fail("CORRUPT_ARTIFACT", "record payload must decode to a row mapping")
+    if value is None:
+        _fail("CORRUPT_ARTIFACT", "record payload must decode to a non-null data value")
     if _codec_dumps(_encode_value(value)) != raw:
         _fail("CORRUPT_ARTIFACT", "record codec bytes are not canonical")
     return value
@@ -473,8 +473,8 @@ def _decode_record_document(raw, *, record_id, sequence, max_bytes,
         _json_shape({**doc, 'p': None}, metadata_max_bytes)
     if doc["p"] is not None:
         row = _decode_value(doc["p"])
-        if type(row) is not dict:
-            _fail("CORRUPT_ARTIFACT", "record document payload must be a row mapping")
+        if row is None:
+            _fail("CORRUPT_ARTIFACT", "record document payload must be a non-null data value")
         if payload_max_bytes is None:
             payload_raw = _encode_payload(row, max_bytes=payload_limit)
         else:
