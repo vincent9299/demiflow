@@ -42,6 +42,13 @@ def assert_worker_killed(marker, directory):
     return fact
 
 
+def assert_worker_loss(error):
+    """Permit the typed v3 transport failure, never an arbitrary flow error."""
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    if isinstance(error, DataflowError):
+        assert error.code == 'UNKNOWN_EFFECT'
+
+
 def materialize_action_id(run):
     with run.journal._connection() as db:
         rows = db.execute('SELECT action_id,declaration FROM runtime_actions').fetchall()

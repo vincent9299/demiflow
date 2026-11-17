@@ -34,6 +34,7 @@ from demiflow.execution.contracts.checkpoint import validate_checkpoint_manifest
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.ray import RayDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunAction, RunContext
 
 pytestmark = [
@@ -90,31 +91,53 @@ def _graph_spec(n=12, cut_rows=4, mode="memory_incremental", readers=("c0", "c1"
 
 
 def _committed_rows(run, action_id, rid, facts):
-    sink = BlockSink(RunAction(run, action_id + "-graph-" + rid, {"kind": "graph-node"}), rid)
-    rows = []
-    for fact in facts:
-        rows.extend(sink.iter_rows(fact["receipts"][rid]["data"]))
-    return rows
+    from runtime_v3_graph_history import committed_rows
+    return committed_rows(run, action_id, rid, facts)
 
 
 def _commit_shape(run, action_id):
-    facts = run.journal.execution_commits(action_id + "-graph-result")
+    facts = run.journal.execution_commits(action_id)
     return {"sequences": [f["sequence"] for f in facts],
             "positions": [f["intent"]["position"]["next_ordinal"] for f in facts],
             "statuses": [f["status"] for f in facts],
             "commit_ids": [f["commit_id"] for f in facts]}
 
 
-def _k6_shape(result):
+def _k6_shape(run, action_id):
+    from demiflow.execution.state_artifacts import StateArtifacts
     shapes = []
-    for entry in result["checkpoints"].values():
-        m = entry["manifest"]
-        shapes.append({"participants": {k: len(v) for k, v in m["participants"].items()},
-                       "source_progress_components": len(m["source_progress"]),
-                       "channel_cuts": len(m["channel_cuts"]),
-                       "operator_states": len(m["operator_states"]),
-                       "seal_keys": sorted(m["seal"].keys()), "sealed": m["seal"]["sealed"]})
-    return sorted(shapes, key=lambda s: (s["sealed"], s["channel_cuts"]))
+    for fact in run.journal.execution_commits(action_id):
+        value = StateArtifacts(run).read(fact['prepared']['state']['dataflow-cut-v3'])
+        shapes.append({'sequence': fact['sequence'], 'sealed': value['cut']['final'],
+            'participants': list(value['cut']['participants']),
+            'sources': sorted((c['next_sequence'], c['end_of_input']) for c in value['dataflow.sources.v3'])})
+    assert sum(s['sealed'] for s in shapes) == 1 and shapes[-1]['sealed']
+    return shapes
+
+
+def _exit_owned_actor(marker, driver_pid):
+    import psutil
+    pid = os.getpid()
+    assert pid != driver_pid, 'fatal fixture must execute in its owned Ray actor'
+    with Path(marker).open('x') as stream:
+        json.dump({'pid': pid, 'driver_pid': driver_pid, 'created': psutil.Process().create_time(), 'exit_code': 17}, stream)
+        stream.flush(); os.fsync(stream.fileno())
+    os._exit(17)
+
+
+def _assert_actor_exited(marker, run):
+    import psutil
+    fact = json.loads(Path(marker).read_text())
+    assert fact['driver_pid'] == os.getpid() and fact['pid'] != os.getpid() and fact['exit_code'] == 17
+    try:
+        process = psutil.Process(fact['pid'])
+        assert process.create_time() != fact['created'] or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        pass
+    with run.journal._connection() as db:
+        allocations = [json.loads(row[0]) for row in db.execute('SELECT document FROM resource_allocations')]
+    assert allocations and all(a['cleanup'] == 'CONFIRMED' and a['observation'] == 'FRESH'
+        and a['evidence_ref'].startswith('ray-actor-dead:') for a in allocations)
 
 
 def _owner(run):
@@ -135,14 +158,17 @@ def test_ray_graph_two_targets_shared_egress_once(tmp_path, ray_cluster):
             action_id = execution.action_id
             execution.complete(dict(kind="graph-materialized", workers=result["workers"],
                                     egress=result["egress_rows"]))
-        facts = run.journal.execution_commits(action_id + "-graph-result")
-        assert [f["sequence"] for f in facts] == [1, 2, 3]
+        facts = run.journal.execution_commits(action_id)
+        assert [f["sequence"] for f in facts] == list(range(1, len(facts) + 1))
         assert all(f["status"] == "acked" for f in facts)
         for rid in readers:
             rows = _committed_rows(run, action_id, rid, facts)
             assert [r["x"] for r in rows] == [i * 2 for i in range(n)], rid
         assert _owner(run) == (run.attempt, run.fence)
-    assert result["workers"] == 3
+    with run.journal._connection() as db:
+        allocations = db.execute('SELECT count(*) FROM resource_allocations').fetchone()[0]
+    assert result['workers'] == allocations and allocations > 0
+    assert 'ray.data' not in sys.modules
     assert result["egress_rows"] == n  # shared expansion once, not 2n
     for rid in readers:
         assert result["target_rows"][rid] == n
@@ -161,12 +187,12 @@ def test_sem_local_ray_graph_equivalence(tmp_path, ray_cluster):
             local_result = local_executor.materialize_graph(spec)
             local_action = execution.action_id
             execution.complete(dict(kind="graph-materialized"))
-        local_facts = local_run.journal.execution_commits(local_action + "-graph-result")
+        local_facts = local_run.journal.execution_commits(local_action)
         local_rows = {rid: _committed_rows(local_run, local_action, rid, local_facts) for rid in readers}
         local_commits = _commit_shape(local_run, local_action)
         local_owner = _owner(local_run)
         assert local_owner == (local_run.attempt, local_run.fence)
-    local_k6 = _k6_shape(local_result)
+    local_k6 = _k6_shape(local_run, local_action)
 
     ray_executor = RayDatasetExecutor(unified_graph=True)
     with RunContext.start(tmp_path / "ray-run", limits=limits) as ray_run:
@@ -174,12 +200,12 @@ def test_sem_local_ray_graph_equivalence(tmp_path, ray_cluster):
             ray_result = ray_executor.materialize_graph(spec)
             ray_action = execution.action_id
             execution.complete(dict(kind="graph-materialized"))
-        ray_facts = ray_run.journal.execution_commits(ray_action + "-graph-result")
+        ray_facts = ray_run.journal.execution_commits(ray_action)
         ray_rows = {rid: _committed_rows(ray_run, ray_action, rid, ray_facts) for rid in readers}
         ray_commits = _commit_shape(ray_run, ray_action)
         ray_owner = _owner(ray_run)
         assert ray_owner == (ray_run.attempt, ray_run.fence)
-    ray_k6 = _k6_shape(ray_result)
+    ray_k6 = _k6_shape(ray_run, ray_action)
 
     expected = [{"x": i * 2} for i in range(n)]
     for rid in readers:
@@ -187,17 +213,19 @@ def test_sem_local_ray_graph_equivalence(tmp_path, ray_cluster):
         assert ray_rows[rid] == expected
         # Output multiset + record identity (x value) identical across providers.
         assert sorted(local_rows[rid], key=lambda r: r["x"]) == sorted(ray_rows[rid], key=lambda r: r["x"])
-    # Commit sequence/position progression identical (same checkpoint semantics).
-    assert local_commits["sequences"] == ray_commits["sequences"] == [1, 2, 3]
-    assert local_commits["positions"] == ray_commits["positions"] == [4, 8, 12]
-    assert local_commits["statuses"] == ray_commits["statuses"] == ["acked"] * 3
-    assert len(set(local_commits["commit_ids"])) == 3
-    assert len(set(ray_commits["commit_ids"])) == 3
-    # K6 manifest shape identical (participants/source-progress/channel cuts/seal).
-    assert local_k6 == ray_k6
-    assert local_k6
-    assert sum(1 for s in local_k6 if s["sealed"]) == 1
-    assert local_result["egress_rows"] == ray_result["egress_rows"] == n
+    # Physical cuts and worker waves may differ. Each side still has one
+    # contiguous original journal, immutable ordered payload prefixes, one final
+    # seal and the same complete source frontier and target values.
+    for commits in (local_commits, ray_commits):
+        assert commits['sequences'] == list(range(1, len(commits['sequences']) + 1))
+        assert commits['positions'] == commits['sequences']
+        assert commits['statuses'] == ['acked'] * len(commits['sequences'])
+        assert len(set(commits['commit_ids'])) == len(commits['commit_ids'])
+    assert local_k6[-1]['sources'] == ray_k6[-1]['sources'] == [(n, True)]
+    assert local_result['egress_rows'] == ray_result['egress_rows'] == n
+    assert local_result['target_rows'] == ray_result['target_rows'] == {reader: n for reader in readers}
+    assert 'ray.data' not in sys.modules
+
 
 
 # ---------------- ray_object large payload: ref on the wire, consumer ray.get direct ----------------
@@ -234,6 +262,9 @@ def test_ray_object_large_payload_direct_read_not_inline(tmp_path, ray_cluster):
 # ---------------- Ray fault matrix: actor death -> whole-graph restore exactly once ----------------
 
 def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, ray_cluster):
+    from runtime_v3_graph_history import capture_acks, assert_acks_retained
+    from runtime_v3_owned_crash import assert_worker_loss
+    driver_pid = os.getpid()
     from collections import Counter
     from demiflow.execution.graph import run_ray_graph
     crash_marker = tmp_path / "ancestor-crashed-once"
@@ -246,18 +277,19 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
         with open(trace, "a") as stream:
             stream.write(str(row["x"]) + "\n")
         if row["x"] == 8 and not crash_marker.exists():
-            crash_marker.touch()
-            os._exit(17)  # abrupt actor death; max_restarts=0 never auto-replays
+            _exit_owned_actor(crash_marker, driver_pid)
         return {**row, "x": row["x"] * 2}
 
     spec, readers, n = _graph_spec(n=24, cut_rows=8, ancestor_fn=crashing_ancestor)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8, "checkpoint_interval_ms": 60000}
-    with pytest.raises((RecoveryContractError, RayActorError, OSError)):
+    with pytest.raises((RecoveryContractError, RayActorError, OSError, DataflowError)) as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             reference = run.ref
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-producer-fault"}}):
                 run_ray_graph(spec)
-    assert crash_marker.exists(), "the producer death window did not fire"
+    assert_worker_loss(failure.value)
+    _assert_actor_exited(crash_marker, run)
+    original_acks = capture_acks(run, 'action-1')
 
     executor = RayDatasetExecutor(unified_graph=True)
     with RunContext.resume(reference, limits=limits) as run2:
@@ -266,10 +298,11 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
             result = executor.materialize_graph(spec)
             action_id = execution.action_id
             execution.complete(dict(kind="graph-materialized", egress=result["egress_rows"]))
-        facts = run2.journal.execution_commits(action_id + "-graph-result")
-        assert [f["sequence"] for f in facts] == [1, 2, 3]  # contiguous across the fault
+        facts = run2.journal.execution_commits(action_id)
+        assert [f["sequence"] for f in facts] == list(range(1, len(facts) + 1))  # contiguous across the fault
         assert all(f["status"] == "acked" for f in facts)
         assert len({f["commit_id"] for f in facts}) == len(facts)
+        assert_acks_retained(run2, action_id, original_acks)
         for rid in readers:
             rows = _committed_rows(run2, action_id, rid, facts)
             assert [r["x"] for r in rows] == [i * 2 for i in range(n)], rid
@@ -284,7 +317,11 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
             assert counts[i] == 1, (i, counts[i])
 
 
+
 def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ray_cluster):
+    from runtime_v3_graph_history import capture_acks, assert_acks_retained
+    from runtime_v3_owned_crash import assert_worker_loss
+    driver_pid = os.getpid()
     from demiflow.execution.graph import run_ray_graph
     crash_marker = tmp_path / "target-crashed-once"
 
@@ -294,21 +331,21 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
         # only one; cut 8 is already durable when the death lands.
         if row["x"] == 16:
             try:
-                fd = os.open(crash_marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(fd)
+                _exit_owned_actor(crash_marker, driver_pid)
             except FileExistsError:
                 return row
-            os._exit(17)
         return row
 
     spec, readers, n = _graph_spec(n=24, cut_rows=8, target_fns={"c0": crashing_target})
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8, "checkpoint_interval_ms": 60000}
-    with pytest.raises((RecoveryContractError, RayActorError, OSError)):
+    with pytest.raises((RecoveryContractError, RayActorError, OSError, DataflowError)) as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             reference = run.ref
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-consumer-fault"}}):
                 run_ray_graph(spec)
-    assert crash_marker.exists(), "the consumer death window did not fire"
+    assert_worker_loss(failure.value)
+    _assert_actor_exited(crash_marker, run)
+    original_acks = capture_acks(run, 'action-1')
 
     executor = RayDatasetExecutor(unified_graph=True)
     with RunContext.resume(reference, limits=limits) as run2:
@@ -316,15 +353,17 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
             result = executor.materialize_graph(spec)
             action_id = execution.action_id
             execution.complete(dict(kind="graph-materialized", egress=result["egress_rows"]))
-        facts = run2.journal.execution_commits(action_id + "-graph-result")
-        assert [f["sequence"] for f in facts] == [1, 2, 3]
+        facts = run2.journal.execution_commits(action_id)
+        assert [f["sequence"] for f in facts] == list(range(1, len(facts) + 1))
         assert all(f["status"] == "acked" for f in facts)
         assert len({f["commit_id"] for f in facts}) == len(facts)
+        assert_acks_retained(run2, action_id, original_acks)
         for rid in readers:
             rows = _committed_rows(run2, action_id, rid, facts)
             assert [r["x"] for r in rows] == [i * 2 for i in range(n)], rid
         assert _owner(run2) == (run2.attempt, run2.fence)
     assert result["egress_rows"] == n
+
 
 
 # ---------------- Ray fault matrix: sealed storage insufficiency fails early ----------------
@@ -343,5 +382,5 @@ def test_ray_graph_sealed_storage_exhaustion_fails_early_without_publication(tmp
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-sealed-exhaust"}}):
                 run_ray_graph(spec, control_timeout_s=10)
     assert time.monotonic() - start < 40, "sealed exhaustion deadlocked instead of failing early"
-    facts = run.journal.execution_commits("action-1-graph-result")
+    facts = run.journal.execution_commits("action-1")
     assert all(f["status"] != "acked" for f in facts)

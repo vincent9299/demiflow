@@ -42,6 +42,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.graph import run_local_graph
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunAction, RunContext
 
 from test_stage2_unified_plan import _load_modules
@@ -222,13 +223,15 @@ def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
     executor = LocalDatasetExecutor(workers=1, unified_graph=True)
     root = tmp_path / "run"
     try:
-        with pytest.raises((RecoveryContractError, OSError)):
+        with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:
             with RunContext.start(root, limits=limits) as run:
                 reference = run.ref
                 with run.action({"kind": "materialize",
                                  "source": {"fixture": "graph-codepin-crash"}}) as execution:
                     executor.materialize_graph(spec)
                     execution.complete(dict(kind="graph-materialized"))
+        from runtime_v3_owned_crash import assert_worker_loss
+        assert_worker_loss(failure.value)
         assert_worker_killed(crash_marker, root)
         original_records = process_records(root)
         # Edit ONLY the captured helper; the closure's own source + pickle bytes unchanged.

@@ -28,6 +28,7 @@ from demiflow.execution.exchange.graph_router import GraphInputReader
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.graph import run_local_graph
 from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
@@ -116,12 +117,14 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
     executor = LocalDatasetExecutor(workers=1, unified_graph=True)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             reference = run.ref
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-consumer-fault"}}) as execution:
                 executor.materialize_graph(spec)
                 execution.complete(dict(kind="graph-materialized"))
+    from runtime_v3_owned_crash import assert_worker_loss
+    assert_worker_loss(failure.value)
     assert_worker_killed(crash_marker, tmp_path / 'run')
     original_acks = capture_acks(run, execution.action_id)
 
@@ -143,6 +146,7 @@ def test_consumer_crash_recovers_whole_graph_exactly_once(tmp_path):
         assert owner == (run2.attempt, run2.fence)
     assert result["egress_rows"] == n
     _release_crash_orphans(tmp_path / "run-resources")
+
 
 
 # ---------------- exit gate 2: stage failure publishes nothing ----------------

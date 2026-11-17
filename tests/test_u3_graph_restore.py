@@ -24,6 +24,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.block_sink import BlockSink
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunAction, RunContext
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
@@ -104,12 +105,14 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
     # The ancestor dies mid-graph; the driver run exits failed. Recovery re-enters
     # the same action under a new attempt/fence, reconciling the acked cut rather
     # than duplicating it (whole-graph restore, design §4.3/D5).
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             reference = run.ref
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-restore"}}) as execution:
                 executor.materialize_graph(spec)
                 execution.complete(dict(kind="graph-materialized"))
+    from runtime_v3_owned_crash import assert_worker_loss
+    assert_worker_loss(failure.value)
     assert_worker_killed(crash_marker, tmp_path / 'run')
     original_acks = capture_acks(run, execution.action_id)
     original_processes = process_records(tmp_path / 'run')
@@ -151,6 +154,7 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
     pids = {value['identity']['pid'] for _, value in records.values()}
     assert len(pids) == len(records) and os.getpid() not in pids
     _release_crash_orphans(tmp_path / "run-resources")
+
 
 
 def test_completed_graph_short_circuits_reentry(tmp_path):
@@ -209,12 +213,14 @@ def test_graph_restore_across_exchange_modes(tmp_path, mode):
     executor = LocalDatasetExecutor(workers=1, unified_graph=True)
     limits = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
               "checkpoint_interval_ms": 60000}
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             reference = run.ref
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-mode-restore"}}) as execution:
                 executor.materialize_graph(spec)
                 execution.complete(dict(kind="graph-materialized"))
+    from runtime_v3_owned_crash import assert_worker_loss
+    assert_worker_loss(failure.value)
     assert_worker_killed(crash_marker, tmp_path / 'run')
     original_acks = capture_acks(run, execution.action_id)
     with RunContext.resume(reference, limits=limits) as run2:

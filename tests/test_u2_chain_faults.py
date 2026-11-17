@@ -29,6 +29,7 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution import commit as commit_module
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.worker.execution import WorkerChainExecutor
 from demiflow.resources.capacity import LocalCapacityPool
@@ -117,11 +118,13 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
     # The worker dies mid-chain; the driver run exits failed. Recovery re-enters
     # the same action (RunContext.resume resets the action position) under a new
     # allocation, reconciling the acked prefix rather than duplicating it.
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises((RecoveryContractError, OSError, DataflowError)) as failure:
         with RunContext.start(tmp_path / "run",
                               limits={"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}) as run:
             reference = run.ref
             dataset.materialize().take_all()  # worker SIGKILLs mid-chain
+    from runtime_v3_owned_crash import assert_worker_loss
+    assert_worker_loss(failure.value)
     assert_worker_killed(crash_marker, tmp_path / 'run')
     with RunContext.resume(reference) as run2:
         before = {f['commit_id']: f for f in run2.journal.execution_commits(_chain_child_id(run2))
