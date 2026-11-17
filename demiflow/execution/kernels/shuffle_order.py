@@ -22,6 +22,22 @@ VERSION = 'typed-multiset-v1'
 _DOMAIN = b'demiflow-shuffle-typed-multiset-v1\x00'
 
 
+class _WindowServices:
+    """Borrow existing service ports, including the finite-stop wrapper.
+
+    Only bounds narrow; rebuilding RuntimeServices would copy its mappings and
+    would discard the real worker's finite computation cancellation view.
+    """
+    __slots__ = ('_original', 'bounds')
+
+    def __init__(self, original, resident_bytes):
+        self._original = original
+        self.bounds = replace(original.bounds, max_resident_bytes=resident_bytes)
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
 @dataclass(frozen=True)
 class ShuffleWindows:
     resident_bytes: int
@@ -67,8 +83,7 @@ def shuffle_windows(services):
 def input_records(port, services, windows):
     """Borrow the same immutable spool under the reserved input subwindow."""
     scoped = copy(port)
-    scoped._services = replace(services, bounds=replace(services.bounds,
-        max_resident_bytes=windows.input_bytes))
+    scoped._services = _WindowServices(services, windows.input_bytes)
     held = metadata_bytes((port._refs, port._borrowed, port._pending, port._borrowed_proofs))
     if held > windows.metadata_bytes:
         raise _err('BUDGET_EXCEEDED', 'shuffle retained input descriptors exceed their reserved window')
@@ -126,8 +141,7 @@ class _TypedKeys:
         if record.inline is not None:
             row = record.inline
         else:
-            scoped = replace(services, bounds=replace(services.bounds,
-                max_resident_bytes=window.codec_bytes))
+            scoped = _WindowServices(services, window.codec_bytes)
             from ..arrow_payload import is_arrow_record
             if is_arrow_record(record):
                 row = _materialize_row(record, scoped)
