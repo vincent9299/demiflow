@@ -162,8 +162,10 @@ def partition_stages(
         # Per-replica working set: one input batch, the declared output bound
         # and any state ceiling co-reside inside the provisioned worker.
         resident = bounds.max_batch_bytes + kernel.output_bound_bytes + state_bytes
-        from ..execution.dataflow_publication_budget import REF_CARRIER
-        if node.kind == 'terminal' and kernel.configuration.get('input_carrier') == REF_CARRIER:
+        from ..execution.dataflow_publication_budget import REF_CARRIER, TERMINAL_WORKSPACE
+        memory = kernel.configuration.get('terminal_memory', {})
+        if node.kind == 'terminal' and (kernel.configuration.get('input_carrier') == REF_CARRIER
+                or memory.get('schema') == TERMINAL_WORKSPACE):
             resident = kernel.profile.requests['memory_bytes']
         if kernel.kind == 'reduce':
             from ..execution.kernels.reducer_memory import contract, resident_bytes

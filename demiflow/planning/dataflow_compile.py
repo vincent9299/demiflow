@@ -1058,6 +1058,30 @@ class _Capture:
                 configuration={**_plain(source_kernel.configuration), 'output_carrier': REF_CARRIER},
                 profile=replace(source_kernel.profile, requests={**source_kernel.profile.requests,
                     'memory_bytes': memory})))
+        # A small native terminal can stream ordinary Records with a smaller
+        # resident codec window than the *business* R/B ceilings. This versioned
+        # window accounts actual codec, index and flush peaks before allocation;
+        # it does not promise every R-sized object fits an arbitrarily small M.
+        # The existing durable residency protocol parks the upstream worker,
+        # while the native reservation remains beside the live terminal.
+        bounded_workspace = False
+        if native_publication and not compact:
+            # Default working sets are separate from the public R/B ceilings.
+            # In a constrained run leave two shares for worker codec/index and
+            # three for native input/array/writer copies. Both original runtime
+            # peak guards still reject an indivisible row that cannot fit.
+            publication_min = min(self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
+                                  (self.bounds.max_resident_bytes - control) * 3 // 5)
+            terminal_space = self.bounds.max_resident_bytes - control - publication_min
+            legacy_floor = 2 * (self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
+            if (legacy_floor > self.bounds.max_resident_bytes - control
+                    and 8192 <= terminal_space < profile.requests['memory_bytes']):
+                from ..execution.dataflow_publication_budget import PHASE_SCHEMA, TERMINAL_WORKSPACE
+                bounded_workspace = True
+                configuration[FIELD]['schema'] = PHASE_SCHEMA
+                configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE,
+                                                       'resident_bytes': terminal_space}
+                profile = replace(profile, requests={**profile.requests, 'memory_bytes': terminal_space})
         kernel = KernelSpec(
             kind=request.kind, implementation_ref=None, configuration=configuration,
             inputs=(replace(_input_port("main", request.kind), requirement='finite_complete')
@@ -1068,10 +1092,11 @@ class _Capture:
         )
         index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)
         if native_publication:
-            self.publication_windows[index] = (self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
+            self.publication_windows[index] = (publication_min if bounded_workspace else
+                self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
                 _payload_workspace(self.bounds) + self.bounds.max_batch_bytes)
         minimum = (payload if compact else self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
-        if payload + metadata > minimum:
+        if not bounded_workspace and payload + metadata > minimum:
             self.codec_windows[index] = (minimum, payload + metadata)
         if self.checked is not None:
             key = (request.action.action_id, request.action.action_id, 0)

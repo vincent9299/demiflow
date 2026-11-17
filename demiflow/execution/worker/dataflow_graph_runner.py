@@ -143,7 +143,8 @@ class WorkerGraphRunner:
             'count', 'schema', 'columns', 'size_bytes', 'aggregate', 'collect_summary')
         self._terminal_blocks = TerminalBlocks(self.services, self.partition,
             declaration=declaration, partitioned=not scalar,
-            budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None)
+            budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None,
+            frame_call=self._frame_call)
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -845,6 +846,12 @@ class WorkerGraphRunner:
             if _frame_source_reader_growth is not None:
                 source_bytes -= _frame_source_reader_growth.buffered_bytes
             retained = peer_bytes + kernel_bytes + reader_bytes + source_bytes + _frame_retained
+            terminal = getattr(self, '_terminal_blocks', None)
+            if terminal is not None and terminal._workspace_limit is not None:
+                from ..dataflow_record_frames import metadata_bytes
+                with self._condition:
+                    queued = sum(metadata_bytes(command) for command in self._queue)
+                retained += terminal.retained_bytes + queued
             try:
                 return function(*args, services=self.services, retained=retained, **kwargs)
             except DataflowError as exc:
@@ -954,6 +961,7 @@ class WorkerGraphRunner:
             raw = self._frame_call(read_document, ref, self.services.store, self.bounds)
         record = self._frame_call(decode_document, raw, record_id=command['record_id'], sequence=command['sequence'],
                                  bounds=self.bounds)
+        del raw  # Downstream encoding owns the decoded Record, not another raw copy.
         if memory or command['delivery_id'] not in self._consumed_deliveries:
             self._push(edge.consumer, edge.input_port, record)
             if memory:

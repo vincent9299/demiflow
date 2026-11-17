@@ -12,6 +12,7 @@ FIELD = 'publication_workspace'
 SCHEMA = 'demiflow.native_publication_workspace.v1'
 PHASE_SCHEMA = 'demiflow.native_publication_workspace.v2'
 REF_CARRIER = 'stored_typed_row.v1'
+TERMINAL_WORKSPACE = 'demiflow.terminal_workspace.v1'
 
 
 def workspace_bytes(configuration):

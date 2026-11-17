@@ -166,15 +166,16 @@ def block_totals(store, root, bounds, *, frame_call=None):
 
 
 class SegmentForest:
-    def __init__(self, store, bounds):
+    def __init__(self, store, bounds, *, frame_call=None):
         self.store, self.bounds = store, bounds
+        self._frame_call = frame_call
         self.roots = []
         self.rows = self.bytes = 0
         self._sealed = None
 
     def restore(self, ref, *, rows, size):
         if ref.media_type == SEGMENTS_MEDIA:
-            node = _read(self.store, ref, self.bounds)
+            node = _read(self.store, ref, self.bounds, frame_call=self._frame_call)
             if node['rows'] != rows or node['bytes'] != size:
                 _fail('restored terminal index differs from its manifest')
             # Full integrity is checked before exposing historical records.
@@ -189,6 +190,10 @@ class SegmentForest:
                  'bytes': sum(c['bytes'] for c in children), 'children': children}
         if value['height'] > self.bounds.max_depth:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal segment index depth exceeds bound')
+        if self._frame_call is not None:
+            from .dataflow_record_frames import _json_shape, admit_workspace
+            size, resident = _json_shape(value, self.bounds.max_control_bytes)
+            self._frame_call(admit_workspace, resident + 2 * size + 512, self.bounds)
         raw = json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
         ref = self.store.put(iter([raw]), max_bytes=self.bounds.max_control_bytes, media_type=SEGMENTS_MEDIA)
         return _entry(ref, rows=value['rows'], size=value['bytes'], height=value['height'])

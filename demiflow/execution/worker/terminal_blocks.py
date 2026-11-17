@@ -42,13 +42,24 @@ def declared_blocks(graph, terminal, bounds):
 
 class TerminalBlocks:
     """At most one scratch FD is open; block switches seal only new tail bytes."""
-    def __init__(self, services, partition_id, *, declaration=None, partitioned=True, budget=None):
+    def __init__(self, services, partition_id, *, declaration=None, partitioned=True, budget=None, frame_call=None):
         self.services, self.bounds = services, services.bounds
         self.partition_id, self.partitioned = partition_id, partitioned
         self._reference_only = False
+        self._workspace_limit = None
+        self._frame_call = frame_call
+        self._pending_resident = 0
         stages = getattr(getattr(services, 'assignment', None), 'stages', ())
         granted = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in stages) if stages else self.bounds.max_resident_bytes
-        if budget is None:
+        from ..dataflow_publication_budget import TERMINAL_WORKSPACE
+        if isinstance(budget, Mapping) and budget.get('schema') == TERMINAL_WORKSPACE:
+            if (set(budget) != {'schema', 'resident_bytes'}
+                    or type(budget['resident_bytes']) is not int
+                    or not 8192 <= budget['resident_bytes'] <= granted):
+                raise DataflowError('INVALID_CONTRACT', 'invalid bounded terminal workspace')
+            self._workspace_limit = budget['resident_bytes']
+            self._metadata_limit = min(self.bounds.max_state_bytes, self._workspace_limit)
+        elif budget is None:
             # Historical sealed plans and finite-channel helpers keep their
             # original window; a new compiler never rewrites their grants.
             self._metadata_limit = min(self.bounds.max_state_bytes, granted // 2)
@@ -80,12 +91,41 @@ class TerminalBlocks:
             for index in range(count):
                 self._block(BlockPartition(occurrence, index, count))
 
+    @property
+    def retained_bytes(self):
+        if self._workspace_limit is None:
+            return 0  # Historical windows keep their original interpretation.
+        return len(self.blocks) * 1024 + sum(len(f.roots) for _, f in self.blocks.values()) * 2048
+
+    def _check_workspace(self, extra=0, *, metadata=None):
+        if self._workspace_limit is None:
+            return
+        from ..dataflow_record_frames import admit_workspace
+        current = self.retained_bytes
+        peak = (current if metadata is None else metadata) + self._pending_resident + extra
+        if peak > self._workspace_limit:
+            raise DataflowError('BUDGET_EXCEEDED', 'terminal index, row and scratch exceed sealed workspace')
+        if self._frame_call is not None:
+            # Replace the index already included by the shared frame owner;
+            # peer buffers, queued commands and readers remain charged there.
+            self._frame_call(admit_workspace, peak, self.bounds, _frame_retained=-current)
+        else:
+            admit_workspace(peak, self.bounds, services=self.services)
+
     def _admit_metadata(self, *, blocks=0, roots=0):
         # Conservative managed-object charge, in addition to payload/scratch.
         used = (len(self.blocks) + blocks) * 1024
         used += (sum(len(f.roots) for _, f in self.blocks.values()) + roots) * 2048
         if used > self._metadata_limit:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal block index exceeds its admitted state window')
+        self._check_workspace(metadata=used)
+
+    def _index_call(self, function, *args, _frame_retained=0, **kwargs):
+        retained = self._pending_resident + _frame_retained
+        if self._frame_call is not None:
+            return self._frame_call(function, *args, _frame_retained=retained, **kwargs)
+        return function(*args, services=self.services,
+                        retained=self.retained_bytes + retained, **kwargs)
 
     def _block(self, tag):
         key = (tag.occurrence_id, tag.index) if tag is not None else (self.partition_id, -1)
@@ -93,7 +133,8 @@ class TerminalBlocks:
             if len(self.blocks) >= self.bounds.max_partitions:
                 raise DataflowError('BUDGET_EXCEEDED', 'terminal logical blocks exceed max_partitions')
             self._admit_metadata(blocks=1)
-            self.blocks[key] = (tag, SegmentForest(self.services.store, self.bounds))
+            self.blocks[key] = (tag, SegmentForest(self.services.store, self.bounds,
+                frame_call=self._index_call if self._workspace_limit is not None else None))
         elif self.blocks[key][0] != tag:
             raise DataflowError('INVALID_CONTRACT', 'logical block count changed within an action')
         return key
@@ -102,6 +143,21 @@ class TerminalBlocks:
         self.append_parts(record, iter((raw,)), size=len(raw))
 
     def append_parts(self, record, chunks, *, size):
+        if self._workspace_limit is not None:
+            from ..dataflow_record_frames import _typed_shape
+            # frame_parts retains the original encoded document and its
+            # bounded escaping/suffix buffers while a block switch flushes.
+            native = _typed_shape(record.inline, self.bounds.max_row_bytes)[1] if record.inline is not None else 0
+            self._pending_resident = native + size + 4096
+        try:
+            self._append_parts(record, chunks, size=size)
+        finally:
+            self._pending_resident = 0
+            close = getattr(chunks, 'close', None)
+            if close is not None:
+                close()
+
+    def _append_parts(self, record, chunks, *, size):
         if self._reference_only:
             ref = record.payload_ref
             if (record.inline is not None or ref is None or ref.media_type != 'application/octet-stream'
@@ -117,6 +173,7 @@ class TerminalBlocks:
             for index in range(tag.count):
                 self._block(BlockPartition(tag.occurrence_id, index, tag.count))
         key = self._block(tag)
+        self._check_workspace()
         if self._tail_key != key:
             self.flush()
             self._tail_key = key
@@ -157,12 +214,22 @@ class TerminalBlocks:
                           self.bounds.max_row_bytes + self.bounds.max_control_bytes)
         if chunk_bytes < 1:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal batch window cannot hold consecutive scratch chunks')
+        if self._workspace_limit is not None:
+            available = self._workspace_limit - self.retained_bytes - self._pending_resident - 512
+            if available < 2:
+                raise DataflowError('BUDGET_EXCEEDED', 'terminal workspace cannot hold scratch chunks')
+            chunk_bytes = min(chunk_bytes, available // 2)
         stream = self._tail
         stream.flush()
         stream.seek(0)
         def chunks():
-            while chunk := stream.read(chunk_bytes):
+            while True:
+                self._check_workspace(2 * chunk_bytes + 512)
+                chunk = stream.read(chunk_bytes)
+                if not chunk:
+                    break
                 yield chunk
+        self._check_workspace(metadata=self.retained_bytes + 2048)
         ref = self.services.store.put(chunks(), max_bytes=max(1, self._tail_bytes), media_type=RECORDS_MEDIA)
         self.blocks[self._tail_key][1].append(ref, rows=self._tail_rows)
         stream.close()
