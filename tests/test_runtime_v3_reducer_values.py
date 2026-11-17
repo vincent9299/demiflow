@@ -85,18 +85,24 @@ def _assert_exact(actual, expected):
 
 @pytest.fixture(scope='module', params=['local', 'ray_core'])
 def provider(request):
+    from demiflow.data.api import _use_executor
     from runtime_v3_regression_inventory import assert_private
     from runtime_v3_support import _RayDataBlocker
     assert_private()
     name = request.param
     with _RayDataBlocker() as blocker:
         if name == 'local':
-            with data.local_execution(workers=2, worker_mode='thread', partitions=1,
-                                      batch_rows=2):
-                yield name
+            from demiflow.execution.executors.local import LocalDatasetExecutor
+            from demiflow.execution.local_kernel import LocalKernelOptions
+            executor = LocalDatasetExecutor(workers=2, local_kernel=LocalKernelOptions(
+                workers=2, worker_mode='thread', partitions=1, batch_rows=2))
+            try:
+                with _use_executor(executor):
+                    yield name
+            finally:
+                executor.close()
         else:
             import ray
-            from demiflow.data.api import _use_executor
             from demiflow.execution.executors.ray import RayDatasetExecutor
             assert not ray.is_initialized(), 'test must own its Ray Core cluster'
             executor = RayDatasetExecutor(workers=2)
