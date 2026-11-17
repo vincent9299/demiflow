@@ -1,5 +1,7 @@
 """Explicit shuffle seeds keep the same value order across native actions."""
 from collections import Counter
+from dataclasses import replace
+import hashlib
 
 import pytest
 
@@ -33,4 +35,251 @@ def test_seed_repeats_union_flatmap_multiplicity_despite_input_order(tmp_path):
         second = alternate.random_shuffle(seed=7, num_blocks=4).take_all()
     assert Counter(row['v'] for row in first) == {i: 24 for i in range(5)}
     assert first == second
-    assert any(first[i]['v'] != first[i + 1]['v'] for i in range(len(first) - 1))
+    # Every value appears in multiple runs, rather than one digest-equal group.
+    assert sum(first[i]['v'] != first[i + 1]['v'] for i in range(len(first) - 1)) > 10
+
+
+def _record(row, index, action='a'):
+    from demiflow.execution.contracts.dataflow import Record
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    return Record(hashlib.sha256(f'{action}:{index}'.encode()).hexdigest(),
+        {'source': action, 'ordinal': index}, None, row,
+        len(_encode_payload(row, max_bytes=4096)), index)
+
+
+def _services(store, port, *, stop=lambda: None):
+    from test_runtime_v3_c import make, bounds
+    return make('RuntimeServices', store=store, journal=port, check_stop=stop,
+        bounds=bounds(max_resident_bytes=1 << 20, max_row_bytes=4096,
+                      max_batch_bytes=32768, max_open_files=12, max_spill_bytes=16 << 20))
+
+
+def _spec(*, version=True, occurrence='shuffle-a'):
+    from test_runtime_v3_c import make
+    config = {'seed': 7, 'occurrence_id': occurrence}
+    if version:
+        config['shuffle_order_version'] = 'typed-multiset-v1'
+    return make('KernelSpec', kind='RandomShuffleOp', configuration=config)
+
+
+def test_low_window_real_store_spills_twice_and_closes_every_reader(tmp_path, monkeypatch):
+    from demiflow.execution.kernels.shuffle_order import seeded_shuffle, shuffle_windows
+    from test_runtime_v3_artifact_accounting import store_fixture, consumed
+    source = [{'v': i % 23, 'payload': b'x' * 256} for i in range(300)]
+    with store_fixture(tmp_path, ceiling=16 << 20) as (run, store, port):
+        services = _services(store, port)
+        windows = shuffle_windows(services)
+        assert windows.input_bytes + windows.sort.run_bytes + windows.sort.codec_bytes + windows.metadata_bytes <= windows.resident_bytes
+        assert windows.sort.merge_resident_bytes + windows.sort.run_bytes + windows.sort.codec_bytes + windows.metadata_bytes <= windows.resident_bytes
+        original_put, original_read, original_release = store.put, store.read, store.release
+        written, released, active = [], [], [0]
+        def put(*args, **kwargs):
+            ref = original_put(*args, **kwargs)
+            written.append(ref)
+            return ref
+        def read(*args, **kwargs):
+            active[0] += 1
+            chunks = original_read(*args, **kwargs)
+            try:
+                yield from chunks
+            finally:
+                chunks.close()
+                active[0] -= 1
+        def release(ref, **kwargs):
+            released.append(ref)
+            return original_release(ref, **kwargs)
+        monkeypatch.setattr(store, 'put', put)
+        monkeypatch.setattr(store, 'read', read)
+        monkeypatch.setattr(store, 'release', release)
+        one = list(seeded_shuffle((_record(row, i) for i, row in enumerate(source)),
+            spec=_spec(), services=services))
+        assert len(written) > 4  # Both build passes plus finite-fan-in merges.
+        assert set(written) <= set(released)
+        assert active == [0]
+        two = list(seeded_shuffle((_record(row, i, 'another-action') for i, row in enumerate(reversed(source))),
+            spec=_spec(occurrence='shuffle-b'), services=services))
+        assert [r.inline['v'] for r in one] == [r.inline['v'] for r in two]
+        assert Counter(r.inline['v'] for r in one) == Counter(r['v'] for r in source)
+        assert set(written) <= set(released)
+        assert active == [0]
+        assert consumed(run) <= 16 << 20
+        assert not list((store.root / store.store_id / 'staging').iterdir())
+
+
+@pytest.mark.parametrize('boundary', ['first_build', 'second_build', 'output_close', 'disk_failure'])
+def test_real_store_failure_and_close_release_only_owned_shuffle_runs(tmp_path, monkeypatch, boundary):
+    from demiflow.execution.kernels import shuffle_order
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from test_runtime_v3_artifact_accounting import store_fixture
+    source = [{'v': i % 23, 'payload': b'x' * 256} for i in range(300)]
+    with store_fixture(tmp_path, ceiling=16 << 20) as (run, store, port):
+        written, released, active = [], [], [0]
+        original_put, original_release, original_read = store.put, store.release, store.read
+        cancel = [False]
+        def stop():
+            if cancel[0]:
+                raise DataflowError('CANCELLED', 'controlled shuffle cancellation')
+        services = _services(store, port, stop=stop)
+        def put(*args, **kwargs):
+            if boundary == 'disk_failure' and written:
+                raise OSError('controlled disk full')
+            result = original_put(*args, **kwargs)
+            written.append(result)
+            if boundary == 'first_build':
+                cancel[0] = True
+            return result
+        def release(ref, **kwargs):
+            released.append(ref)
+            return original_release(ref, **kwargs)
+        def read(*args, **kwargs):
+            active[0] += 1
+            chunks = original_read(*args, **kwargs)
+            try:
+                yield from chunks
+            finally:
+                chunks.close()
+                active[0] -= 1
+        monkeypatch.setattr(store, 'put', put)
+        monkeypatch.setattr(store, 'release', release)
+        monkeypatch.setattr(store, 'read', read)
+        if boundary == 'second_build':
+            original = shuffle_order._build_sort_runs
+            builds = [0]
+            def build(records, **kwargs):
+                builds[0] += 1
+                if builds[0] == 2:
+                    def interrupt():
+                        for i, record in enumerate(records):
+                            if i == 100:
+                                cancel[0] = True
+                            yield record
+                    return original(interrupt(), **kwargs)
+                return original(records, **kwargs)
+            monkeypatch.setattr(shuffle_order, '_build_sort_runs', build)
+        emitted = shuffle_order.seeded_shuffle((_record(row, i) for i, row in enumerate(source)),
+            spec=_spec(), services=services)
+        if boundary == 'output_close':
+            next(emitted)
+            emitted.close()
+        else:
+            with pytest.raises((DataflowError, OSError), match='cancellation|disk full'):
+                list(emitted)
+        assert written and set(written) <= set(released)
+        assert active == [0]
+        assert not run.journal.execution_commits('action-1')
+        assert not list((store.root / store.store_id / 'staging').iterdir())
+
+
+def test_typed_codec_values_and_mapping_order_contract(tmp_path):
+    import datetime
+    from decimal import Decimal
+    import numpy as np
+    from demiflow.execution.kernels.shuffle_order import seeded_shuffle
+    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from test_runtime_v3_artifact_accounting import store_fixture
+    rows = [{'v': value} for value in (None, True, 1, 1.0, -0.0, float('nan'), float('inf'),
+            b'\x00data', (1, 'x'), [1, 'x'], {1, 2}, frozenset({1, 2}), Decimal('1.20'),
+            datetime.date(2026, 11, 17), np.array([1, 2], dtype='int32'))]
+    rows += [{'v': {'a': 1, 'b': 2}}, {'v': {'b': 2, 'a': 1}}]
+    encoded = lambda row: _encode_payload(row, max_bytes=4096)
+    assert encoded(rows[-2]) != encoded(rows[-1])
+    with store_fixture(tmp_path) as (_, store, port):
+        services = _services(store, port)
+        first = [encoded(r.inline) for r in seeded_shuffle((_record(row, i) for i, row in enumerate(rows * 2)),
+            spec=_spec(), services=services)]
+        second = [encoded(r.inline) for r in seeded_shuffle((_record(row, i, 'b') for i, row in enumerate(reversed(rows * 2))),
+            spec=_spec(occurrence='other'), services=services)]
+    assert first == second
+    assert Counter(first) == Counter(encoded(row) for row in rows * 2)
+
+
+def test_legacy_formula_and_old_sealed_configuration_remain_unchanged(tmp_path, monkeypatch):
+    from demiflow.execution.kernels.ordering import shuffle_key
+    from demiflow.execution import dataflow as execution_module
+    from demiflow.planning import dataflow_compile
+    from test_runtime_v3_real_seams import prepared
+    expected = hashlib.sha256(b'["demiflow-shuffle-v3",7,"occ","rec-1"]').digest()
+    assert shuffle_key('rec-1', seed=7, occurrence_id='occ') == expected
+    compile_kernel = dataflow_compile.compile_kernel_spec
+    def original_config(*args, **kwargs):
+        result = compile_kernel(*args, **kwargs)
+        return replace(result, configuration={k: v for k, v in result.configuration.items()
+                                             if k != 'shuffle_order_version'})
+    with monkeypatch.context() as patch:
+        patch.setattr(dataflow_compile, 'compile_kernel_spec', original_config)
+        with prepared(tmp_path, data.range(30).random_shuffle(seed=7)) as (execution, services):
+            patch.setattr(execution_module, 'lower_action', lambda *a, **k: pytest.fail('sealed plan was recompiled'))
+            reloaded = execution_module.DataflowExecution(execution._request, services=services)
+            try:
+                assert reloaded.prepare() == execution._sealed
+                shuffle = next(n for n in reloaded._graph.nodes if n.kernel.kind == 'RandomShuffleOp')
+                assert 'shuffle_order_version' not in shuffle.kernel.configuration
+            finally:
+                reloaded.close()
+
+
+def test_unknown_version_and_wide_frame_fail_explicitly(tmp_path):
+    from demiflow.execution.kernels.shuffle_order import seeded_shuffle
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from test_runtime_v3_artifact_accounting import store_fixture
+    with store_fixture(tmp_path) as (_, store, port):
+        services = _services(store, port)
+        invalid = replace(_spec(), configuration={'seed': 7, 'occurrence_id': 'x', 'shuffle_order_version': 'future'})
+        with pytest.raises(DataflowError, match='unknown'):
+            list(seeded_shuffle(iter(()), spec=invalid, services=services))
+        small = replace(services, bounds=replace(services.bounds, max_resident_bytes=128 << 10))
+        with pytest.raises(DataflowError, match='subwindow'):
+            list(seeded_shuffle(iter([_record({'v': b'x' * 1800}, 0)]), spec=_spec(), services=small))
+
+
+def test_same_typed_input_order_on_local_and_ray_core(tmp_path):
+    from test_runtime_v3_provider_recovery import executor, private_ray
+    results = []
+    with private_ray():
+        for provider in ('local', 'ray_core'):
+            with executor(provider), RunContext.start(tmp_path / provider,
+                    limits={'memory_bytes': 32 << 20, 'max_row_bytes': 4096,
+                            'max_batch_bytes': 1 << 20}):
+                source = data.range(30).map(lambda row: {
+                    'a': row['id'] % 3, 'b': row['id'], 'v': float(row['id'])})
+                same = source.random_shuffle(seed=7, num_blocks=2)
+                first, again = same.take_all(), same.take_all()
+                changed_layout = source.random_shuffle(seed=7, num_blocks=4).take_all()
+                assert first == again == changed_layout
+                results.append(first)
+    assert results[0] == results[1]
+    assert Counter(row['b'] for row in results[0]) == Counter(range(30))
+
+
+def test_original_nonfinal_cut_resumes_the_same_seeded_order(tmp_path, monkeypatch):
+    from demiflow.execution.dataflow import DataflowExecution
+    from demiflow.execution import dataflow as execution_module
+    class Interrupted(Exception):
+        pass
+    def dataset():
+        return data.from_items(ROWS).random_shuffle(seed=7, num_blocks=2)
+    limits = {'memory_bytes': 32 << 20, 'max_row_bytes': 4096, 'max_batch_bytes': 1 << 20,
+              'checkpoint_interval_ms': 60000}
+    with RunContext.start(tmp_path / 'expected', limits=limits), data.local_execution():
+        expected = dataset().take_all()
+    cuts = []
+    def interrupt(execution, image):
+        assert not image.cut.final
+        assert execution._action.context.journal.execution_commit(image.commit_id)['status'] == 'acked'
+        cuts.append(image.commit_id)
+        raise Interrupted()
+    with pytest.raises(Interrupted):
+        with RunContext.start(tmp_path / 'recover', limits=limits) as run, data.local_execution():
+            ref = run.ref
+            with monkeypatch.context() as patch:
+                patch.setattr(DataflowExecution, '_retire_phase', interrupt)
+                dataset().take_all()
+    assert len(cuts) == 1
+    with RunContext.resume(ref) as run, data.local_execution():
+        original_seal = run.journal.source_binding('action-1-dataflow-sealed')
+        with monkeypatch.context() as patch:
+            patch.setattr(execution_module, 'lower_action', lambda *a, **k: pytest.fail('recovery recompiled the graph'))
+            actual = dataset().take_all()
+        assert run.journal.source_binding('action-1-dataflow-sealed') == original_seal
+        assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
+    assert actual == expected

@@ -401,6 +401,11 @@ def compile_kernel_spec(
         for field in fields(operation)
         if field.name not in _NON_SEMANTIC_FIELDS | {"callable", "native_options", "stream_options"}
     }
+    if kind == 'RandomShuffleOp':
+        # New plans opt in. A sealed graph without this field keeps the exact
+        # original occurrence/record-id shuffle formula when loaded or resumed.
+        from ..execution.kernels.shuffle_order import FIELD, VERSION
+        configuration[FIELD] = VERSION
     # Ordinary CPU kernels do not use native services. Importing every native
     # adapter here initializes Lance/Arrow and model modules even for a map.
     if native_declaration is not None:

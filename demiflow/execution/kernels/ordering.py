@@ -16,6 +16,7 @@ import hashlib
 import heapq
 import struct
 import sys
+from contextlib import closing
 from dataclasses import dataclass, replace
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -69,6 +70,12 @@ class SortWindow:
     merge_fan_in: int = 2
     key_only: bool = False
     merge_resident_bytes: int | None = None
+    # New private callers may admit the actual typed codec tree instead of
+    # reserving six maximum rows. Legacy windows retain the original rule.
+    codec_bytes: int | None = None
+    merge_codec_bytes: int | None = None
+    merge_frame_multiplier: int = 3
+    max_runs: int | None = None
 
     def validate(self, bounds):
         values = (self.resident_bytes, self.run_bytes, self.frame_bytes,
@@ -76,15 +83,22 @@ class SortWindow:
         if any(type(value) is not int or value < 1 for value in values) or type(self.key_only) is not bool:
             raise _err('INVALID_CONTRACT', 'sort subwindow values must be positive integers')
         merge_window = self.resident_bytes if self.merge_resident_bytes is None else self.merge_resident_bytes
+        codec = 6 * bounds.max_row_bytes if self.codec_bytes is None else self.codec_bytes
+        merge_codec = codec if self.merge_codec_bytes is None else self.merge_codec_bytes
         if type(merge_window) is not int or not 1 <= merge_window <= self.resident_bytes:
             raise _err('INVALID_CONTRACT', 'invalid sort merge subwindow')
+        if (type(codec) is not int or codec < 1
+                or type(merge_codec) is not int or not 1 <= merge_codec <= codec
+                or type(self.merge_frame_multiplier) is not int or self.merge_frame_multiplier < 3
+                or self.max_runs is not None and (type(self.max_runs) is not int or self.max_runs < 1)):
+            raise _err('INVALID_CONTRACT', 'invalid sort codec/metadata subwindow')
         if (self.resident_bytes > bounds.max_resident_bytes
                 or self.frame_bytes > self.run_bytes
                 or self.read_chunk_bytes > min(1 << 20, bounds.max_row_bytes)
                 or self.merge_fan_in > min(_MERGE_FAN_IN, bounds.max_open_files)
-                or self.run_bytes + 6 * bounds.max_row_bytes > self.resident_bytes
-                or self.merge_fan_in * (3 * self.frame_bytes + self.read_chunk_bytes)
-                   + 2 * self.frame_bytes > merge_window):
+                or self.run_bytes + codec > self.resident_bytes
+                or self.merge_fan_in * (self.merge_frame_multiplier * self.frame_bytes + self.read_chunk_bytes)
+                   + 2 * self.frame_bytes + (merge_codec if self.codec_bytes is not None else 0) > merge_window):
             raise _err('RESOURCE_INFEASIBLE', 'sort subwindow exceeds its admitted live-object window')
 
 
@@ -308,11 +322,32 @@ def _write_run(
     )
 
 
+def _release_runs(refs, services):
+    """Attempt every owned unpin even when one cleanup reply fails."""
+    active = sys.exc_info()[1]
+    failure = None
+    for ref in refs:
+        try:
+            services.store.release(ref, owner='kernel-sort')
+        except BaseException as exc:
+            failure = exc if failure is None else failure
+    if failure is not None:
+        if active is not None:
+            active.add_note('Sort run cleanup also failed: ' + str(failure))
+        else:
+            raise failure
+
+
 def build_sort_runs(
     records: Iterator[Record], *, spec: KernelSpec, services: RuntimeServices,
     window: SortWindow | None = None,
 ) -> tuple[ArtifactRef, ...]:
     """K009: bounded stable runs, disk reserved before write, single-row rejection."""
+    return _build_sort_runs(records, spec=spec, services=services, window=window)
+
+
+def _build_sort_runs(records, *, spec, services, window=None, key_for_record=None):
+    """Private key hook; public sort/shuffle signatures and legacy keys stay fixed."""
     bounds = services.bounds
     if window is not None:
         window.validate(bounds)
@@ -328,6 +363,8 @@ def build_sort_runs(
         nonlocal frames, used, spill_total
         if not frames:
             return
+        if window is not None and window.max_runs is not None and len(refs) >= window.max_runs:
+            raise _err('BUDGET_EXCEEDED', 'sort run references exceed the metadata window')
         frames.sort(key=lambda item: (item[0], item[1]))
         total = used if window is None else sum(len(frame[2]) for frame in frames)
         if spill_total + total > bounds.max_spill_bytes:
@@ -343,9 +380,15 @@ def build_sort_runs(
             size = _input_row_bytes(record)
             if size > bounds.max_row_bytes:
                 raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=size)
-            row = _materialize_row(record, services)
-            key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
-            prov = _provenance(record)
+            if key_for_record is None:
+                row = _materialize_row(record, services)
+                key = _record_sort_key(record, row, spec, services, ordinal=ordinal)
+                prov = _provenance(record)
+            else:
+                key = key_for_record(record)
+                # New shuffle keys already include their complete typed tie
+                # break. Record identity is carried unchanged inside the frame.
+                prov = ()
             saved_record = record
             if window is not None and window.key_only:
                 # Only the region's key/offset carrier opts in. Offset,
@@ -367,8 +410,7 @@ def build_sort_runs(
             used += resident
         flush()
     except BaseException:
-        for ref in refs:
-            services.store.release(ref, owner="kernel-sort")
+        _release_runs(refs, services)
         raise
     return tuple(refs)
 
@@ -425,11 +467,13 @@ def merge_sort_runs(
                     raise _err("BUDGET_EXCEEDED", "merge spill exceeds max_spill_bytes")
 
                 def frames() -> Iterator[bytes]:
-                    for key, prov, rec_bytes in _merge_into(group, services, window):
-                        yield _frame_bytes(key, prov, rec_bytes,
-                                           frame_limit=None if window is None else window.frame_bytes)
+                    with closing(_merge_into(group, services, window)) as source_frames:
+                        for key, prov, rec_bytes in source_frames:
+                            yield _frame_bytes(key, prov, rec_bytes,
+                                               frame_limit=None if window is None else window.frame_bytes)
 
-                ref = services.store.put(frames(), max_bytes=remaining, media_type=RECORD_MEDIA_TYPE)
+                with closing(frames()) as output_frames:
+                    ref = services.store.put(output_frames, max_bytes=remaining, media_type=RECORD_MEDIA_TYPE)
                 owned.append(ref)
                 merged.append(ref)
                 spill_total += ref.size_bytes
@@ -438,15 +482,23 @@ def merge_sort_runs(
                         services.store.release(source, owner="kernel-sort")
                         owned.remove(source)
             current = tuple(merged)
-        for key, prov, rec_bytes in _merge_into(current, services, window):
-            _check_stop(services)
-            saved = _decode_payload(rec_bytes, max_bytes=(services.bounds.max_resident_bytes
-                                   if window is None else window.frame_bytes))
-            yield _decode_record_document(saved["document"], record_id=saved["record_id"],
-                sequence=saved["sequence"], max_bytes=services.bounds.max_row_bytes)
+        with closing(_merge_into(current, services, window)) as source_frames:
+            for key, prov, rec_bytes in source_frames:
+                _check_stop(services)
+                if window is not None and window.codec_bytes is not None:
+                    from ..dataflow_record_frames import raw_workspace
+                    codec_window = window.codec_bytes if window.merge_codec_bytes is None else window.merge_codec_bytes
+                    if raw_workspace(rec_bytes) > codec_window:
+                        raise _err('BUDGET_EXCEEDED', 'sort record decode exceeds its codec subwindow')
+                saved = _decode_payload(rec_bytes, max_bytes=(services.bounds.max_resident_bytes
+                                       if window is None else window.frame_bytes))
+                if window is not None and window.codec_bytes is not None:
+                    if raw_workspace(saved['document']) + 2 * len(rec_bytes) > codec_window:
+                        raise _err('BUDGET_EXCEEDED', 'sort document decode exceeds its codec subwindow')
+                yield _decode_record_document(saved["document"], record_id=saved["record_id"],
+                    sequence=saved["sequence"], max_bytes=services.bounds.max_row_bytes)
     finally:
-        for ref in owned:
-            services.store.release(ref, owner="kernel-sort")
+        _release_runs(owned, services)
 
 
 class _RepartitionIterator:

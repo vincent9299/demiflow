@@ -285,11 +285,23 @@ class _SpoolPort:
                 pending = next(borrowed, None)
             if index < len(self._refs):
                 ref = self._refs[index]
-                data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes))
+                window = getattr(self, '_shuffle_input_window', None)
+                options = {}
+                if window is not None:
+                    if 2 * ref.size_bytes + 4096 > window:
+                        raise _err('BUDGET_EXCEEDED', 'shuffle input segment exceeds its reader subwindow')
+                    options['chunk_bytes'] = min(4096, max(1, window // 32))
+                data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes, **options))
+                if window is not None:
+                    from .shuffle_order import admit_spool_image
+                    admit_spool_image(data, window)
                 yield from state_codec.loads(data, max_bytes=self._services.bounds.max_batch_bytes)
         for fragment in self._pending:
             _check_stop(self._services)
             raw = b''.join(state_codec.record_list_chunks((fragment,)))
+            if getattr(self, '_shuffle_input_window', None) is not None:
+                from .shuffle_order import admit_spool_image
+                admit_spool_image(raw, self._shuffle_input_window)
             yield from state_codec.loads(raw, max_bytes=self._services.bounds.max_batch_bytes)
 
     def release(self) -> None:
@@ -1024,11 +1036,20 @@ class OperatorKernel:
             from dataclasses import replace
             port = self._ports[self._port_order[0]]
             records = port.records()
+            shuffle_iterator = None
             layout = None
             if kind == 'RandomizeBlockOrderOp':
                 from .block_partition import shuffled_block_layout
                 layout = shuffled_block_layout(port.records(), spec=self._spec, services=services)
-            if kind != 'RepartitionOp' or self._spec.configuration.get('keys'):
+            if kind == 'RandomShuffleOp' and 'shuffle_order_version' in self._spec.configuration:
+                from .shuffle_order import seeded_shuffle, shuffle_windows, input_records
+                windows = shuffle_windows(services)
+                records.close()
+                records = input_records(port, services, windows)
+                shuffle_iterator = seeded_shuffle(records, spec=self._spec, services=services,
+                    windows=windows, retain=lambda amount: setattr(self, 'retained_resident_bytes', amount))
+                records = shuffle_iterator
+            elif kind != 'RepartitionOp' or self._spec.configuration.get('keys'):
                 sort_spec = self._spec
                 if kind == 'RepartitionOp':
                     sort_spec = replace(sort_spec, configuration={**dict(sort_spec.configuration),
@@ -1043,7 +1064,12 @@ class OperatorKernel:
                 records = reordered_records(records, layout=layout, spec=self._spec)
             else:
                 records = preserve_block(records, None)
-            yield from self._emit(records)
+            try:
+                yield from self._emit(records)
+            finally:
+                if shuffle_iterator is not None:
+                    records.close()
+                    shuffle_iterator.close()
         elif kind in _AGGREGATE_KINDS:
             from .aggregate import accumulate_partial
 
