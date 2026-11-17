@@ -37,18 +37,20 @@ def test_unicode_and_escape_boundaries_keep_exact_utf8_size(value):
         frames._json_shape(value, len(encoded) - 1)
 
 
-@pytest.mark.parametrize('value', ['x' * (1024 * 1024), '"\\\n\x00' * (256 * 1024)])
+@pytest.mark.parametrize('value', ['x' * (1024 * 1024), '"\\\n\x00' * (256 * 1024)],
+                         ids=['plain-ascii', 'escaped-ascii'])
 def test_preflight_has_constant_workspace_without_encoding_or_copying(value, monkeypatch):
     expected = len(json.dumps(value, ensure_ascii=False).encode())
     def forbidden(*args, **kwargs):
         raise AssertionError('length preflight must precede JSON allocation')
-    monkeypatch.setattr(json, 'dumps', forbidden)
-    tracemalloc.start()
-    try:
-        actual = frames._string_size(value)
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
+    with monkeypatch.context() as patch:
+        patch.setattr(json, 'dumps', forbidden)
+        tracemalloc.start()
+        try:
+            actual = frames._string_size(value)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
     assert actual == expected
     # The input exists before measurement; neither its encoded bytes nor a
     # list of escape matches may be materialized to decide admission.
