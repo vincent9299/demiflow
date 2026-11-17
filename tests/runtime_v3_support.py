@@ -1036,8 +1036,9 @@ def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str
     resolve, prepare = api.resolve_runtime_policy, DataflowExecution.prepare
     observed, results = [], {}
     for mode in ('memory_incremental', 'durable_incremental', 'finite_sealed'):
-        def policy(options, limits, *, provider):
-            policy, bounds = resolve(options, limits, provider=provider)
+            def policy(options, limits, *, provider, explicit_limits=()):
+                policy, bounds = resolve(options, limits, provider=provider,
+                                         explicit_limits=explicit_limits)
             return replace(policy, fusion=False,
                 durability='durable' if mode == 'durable_incremental' else 'ephemeral'), bounds
         def capture(execution):
