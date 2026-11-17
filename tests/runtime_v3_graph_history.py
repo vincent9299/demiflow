@@ -75,6 +75,16 @@ def assert_acks_retained(run, action_id, before):
                and after[key]['receipts'] == fact['receipts'] for key, fact in before.items())
 
 
+def assert_rejected_before_workers(run, action_id, business_marker):
+    """A declared graph storage shortage must not activate any business owner."""
+    assert not business_marker.exists()
+    assert not run.journal.execution_commits(action_id)
+    assert run.journal.execution_action(action_id)['result'] is None
+    with run.journal._connection() as db:
+        if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resource_allocations'").fetchone():
+            assert db.execute('SELECT count(*) FROM resource_allocations').fetchone()[0] == 0
+
+
 def assert_closed(run_directory, *, allow_unprovisioned=False):
     from runtime_v3_owned_crash import assert_released, process_records
     if process_records(run_directory):

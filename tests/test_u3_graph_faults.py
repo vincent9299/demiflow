@@ -3,7 +3,7 @@
 Composes the frozen recovery contract through the real Local graph: a consumer
 (target) crash and a stage failure never publish an unauthorized cut, the whole
 graph restores from the latest acked cut with an equal output multiset, sealed
-storage insufficiency fails early (non-retriable QUOTA_EXCEEDED) rather than
+storage insufficiency fails early (BUDGET_EXCEEDED before workers) rather than
 deadlocking, and a multi-input reader aligns a cut across channels including an
 EOI channel that contributes an empty barrier. Producer-crash restore is the S4c
 group; segment-corruption detection (verify-before-deserialize) is the S2 carriage
@@ -185,21 +185,26 @@ def test_stage_failure_seals_nothing(tmp_path):
 # ---------------- exit gate 2: sealed storage insufficiency fails early ----------------
 
 def test_sealed_storage_exhaustion_fails_early_without_publication(tmp_path):
-    # finite_sealed charges a bounded storage reservation; a 1-byte budget cannot
-    # hold even one segment, so the producer raises non-retriable QUOTA_EXCEEDED
-    # immediately (no credit deadlock). The graph run fails fast and publishes nothing.
+    from runtime_v3_graph_history import assert_rejected_before_workers
+    business_marker = tmp_path / 'business-started'
+    def double(row):
+        business_marker.write_text('called')
+        return {**row, 'x': row['x'] * 2}
+
+    # The original 1-byte total cannot admit every declared channel even at the
+    # minimum 1 byte per edge. Admission must reject before starting the graph.
     spec, readers, n = _spec({"c0": None}, n=24, cut_rows=8,
-                             mode="finite_sealed", storage_bytes=1)
+                             mode="finite_sealed", storage_bytes=1, ancestor_fn=double)
     limits = {"checkpoint_unconfirmed_rows": 64, "checkpoint_interval_ms": 60000}
     start = time.monotonic()
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match='^graph storage budget cannot admit every declared channel$') as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-graph-sealed-exhaust"}}) as execution:
                 run_local_graph(spec, control_timeout_s=8)
                 execution.complete(dict(kind="graph-materialized"))
     assert time.monotonic() - start < 30, "sealed exhaustion deadlocked instead of failing early"
-    facts = run.journal.execution_commits("action-1")
-    assert all(f["status"] != "acked" for f in facts)
+    assert failure.value.code == 'BUDGET_EXCEEDED'
+    assert_rejected_before_workers(run, 'action-1', business_marker)
     _release_crash_orphans(tmp_path / "run-resources")
 
 

@@ -130,6 +130,13 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         before = {f['commit_id']: f for f in run2.journal.execution_commits(_chain_child_id(run2))
                   if f['status'] == 'acked'}
         assert before, 'the real crash must retain its original ACK prefix'
+        from demiflow.execution.state_artifacts import StateArtifacts
+        latest = max(before.values(), key=lambda fact: fact['sequence'])
+        image = StateArtifacts(run2).read(latest['prepared']['state']['dataflow-cut-v3'])
+        sources = image['dataflow.sources.v3']
+        assert len(sources) == 1 and not sources[0]['pending_refs']
+        acknowledged_prefix = sources[0]['next_sequence']
+        assert 0 < acknowledged_prefix <= 4
         rows = dataset.materialize().take_all()
         assert rows == expected
         facts = run2.journal.execution_commits(_chain_child_id(run2))
@@ -139,7 +146,8 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         assert len({fact["commit_id"] for fact in facts}) == len(facts)
         after = {f['commit_id']: f for f in facts}
         assert before.keys() < after.keys()
-        assert all(after[key]['receipts'] == fact['receipts'] for key, fact in before.items())
+        assert all(after[key]['prepared'] == fact['prepared']
+                   and after[key]['receipts'] == fact['receipts'] for key, fact in before.items())
         with run2.journal._connection() as db:
             owner = db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
         assert owner == (run2.attempt, run2.fence)  # worker crash never moved ownership
@@ -150,8 +158,12 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
     assert len(pids) == 2 and os.getpid() not in pids
     from collections import Counter
     calls = Counter(int(line) for line in trace.read_text().splitlines())
-    assert [calls[i] for i in range(4)] == [1] * 4
-    assert calls[4] == 2 and all(calls[i] == 1 for i in range(5, 10))
+    # Pressure cuts can publish before checkpoint_rows. Only the original ACK
+    # cursor is an exactly-once boundary; the unacknowledged suffix is replayable.
+    assert set(calls) == set(range(10))
+    assert [calls[i] for i in range(acknowledged_prefix)] == [1] * acknowledged_prefix
+    assert all(calls[i] == 2 for i in range(acknowledged_prefix, 5))
+    assert all(calls[i] == 1 for i in range(5, 10))
     assert_released(tmp_path / 'run')
 
 

@@ -370,17 +370,23 @@ def test_ray_graph_consumer_death_recovers_whole_graph_exactly_once(tmp_path, ra
 
 def test_ray_graph_sealed_storage_exhaustion_fails_early_without_publication(tmp_path, ray_cluster):
     from demiflow.execution.graph import run_ray_graph
-    # finite_sealed charges a bounded storage reservation; a 1-byte budget cannot hold
-    # even one segment, so the producer raises non-retriable QUOTA_EXCEEDED immediately
-    # (no credit deadlock). The Ray graph run fails fast and publishes nothing.
-    spec, readers, n = _graph_spec(n=24, cut_rows=8, mode="finite_sealed", readers=("c0",))
+    from runtime_v3_graph_history import assert_rejected_before_workers
+    business_marker = tmp_path / 'business-started'
+    def double(row):
+        business_marker.write_text('called')
+        return {**row, 'x': row['x'] * 2}
+
+    # Reject the original insufficient declared pool before provisioning an actor;
+    # an unrelated planning failure is not proof of the storage boundary.
+    spec, readers, n = _graph_spec(n=24, cut_rows=8, mode="finite_sealed", readers=("c0",),
+                                   ancestor_fn=double)
     spec["storage_bytes"] = 1
     limits = {"checkpoint_unconfirmed_rows": 64, "checkpoint_interval_ms": 60000}
     start = time.monotonic()
-    with pytest.raises((RecoveryContractError, RayActorError, OSError)):
+    with pytest.raises(DataflowError, match='^graph storage budget cannot admit every declared channel$') as failure:
         with RunContext.start(tmp_path / "run", limits=limits) as run:
             with run.action({"kind": "materialize", "source": {"fixture": "u3-ray-sealed-exhaust"}}):
                 run_ray_graph(spec, control_timeout_s=10)
     assert time.monotonic() - start < 40, "sealed exhaustion deadlocked instead of failing early"
-    facts = run.journal.execution_commits("action-1")
-    assert all(f["status"] != "acked" for f in facts)
+    assert failure.value.code == 'BUDGET_EXCEEDED'
+    assert_rejected_before_workers(run, 'action-1', business_marker)
