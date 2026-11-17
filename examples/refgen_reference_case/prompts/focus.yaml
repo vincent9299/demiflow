@@ -1,0 +1,153 @@
+schema_version: demiflow_prompt_pack_v2
+prompts:
+  concept_reference_focus:
+    version: concept-reference-focus-v5
+    model:
+      name: gpt-6.1-sol
+      transport: openai_compatible
+      base_url: http://127.0.0.1:4001/v1
+      api_key_env: MODELHUB_API_KEY
+    schema_retries: 0
+    template: |-
+      你负责为目标概念筛选能够直接提供概念视觉知识的参考图片。
+
+      ## 1．任务与参考范围
+      输入是目标概念、身份说明及带唯一 image_id 的候选图片。身份说明用于明确概念含义与范围。先用简短的 reference_focus 明确该概念值得参考的视觉特征，再逐图判断。
+      只选非常适合作为目标概念视觉知识参考的图片。入选图应直接、清楚、充分地呈现目标概念有代表性的视觉特征及其关系，让使用者能够可靠地观察和学习。仅能辨认概念、找到部分有用信息，不足以入选。不设最低入选数量。图片已通过独立质量审核，本轮判断以下三个要求。依据当前图片及可靠概念知识判断；参考范围由目标概念确定。
+
+      ## 2．三个通过要求
+      - **目标突出（focus）**：目标概念是画面明确的主要观察内容，与非目标概念容易区分；其他内容对观察目标的干扰低。结合展示尺度、构图、遮挡及竞争主体，判断目标的视觉信息是否突出。帮助呈现目标的相关背景或组成关系可以保留。
+      - **特征呈现充分（sufficiency）**：当前视角、尺度和可见范围，能直接、清楚地展示有代表性的目标概念特征及其关系，足以形成具体、可用的视觉参考。图像证据应足以支持输入的具体概念，不能只支持其上位类别或部分组成。参考范围依据输入概念及身份说明确定；不能为保留当前图片，临时改成某个特殊阶段、状态或狭窄用途。局部图只有在仍能充分呈现有代表性的特征组合时才可通过。
+      - **特征忠实可靠（fidelity）**：与目标概念相关的颜色、材质、形态和结构，应具有清楚、可靠的可见依据。合理光照、视角或状态，只说明这种呈现可能真实；是否适合作参考，还取决于相关特征是否得到充分展示。特征被亮部、暗部、强色调等显著掩盖时，不通过；其他特征仍可参考不能抵消。任何一项存在明确失真，或因视觉处理失去可靠依据，fidelity 即判为 reject。结构、轮廓等其他特征仍可参考，不能抵消这一问题，也不能通过限定“只参考结构”等适用范围判为通过。忠实指视觉特征可靠，不限定为实拍。
+
+      接受合理的实例、状态、光照和视角差异，前提是仍满足上述三个要求。依据当前完整图片判断：能认出概念、存在少量局部信息，或文字标签说明了身份，均不能单独证明适合作为参考图；不假设裁切或重新编辑后会变得可用。
+
+      ## 3．结论规则
+      - **选中（select）**：三个要求均明确满足（pass）。
+      - **不选（reject）**：任一要求明确不满足（reject），指出受影响的具体特征或干扰内容。
+      - **待定（uncertain）**：没有明确否决，但证据不足，无法可靠判断（uncertain）。
+      适用范围用于说明合格参考信息的用途，不能通过不断缩小范围，把明显不足的图片判为合格。不设入选数量或淘汰比例。
+
+      ## 4．简短输出
+      仅输出 JSON，外层 result 包含 concept_id、reference_focus、images、selected_image_ids。
+      images 逐图返回 image_id，三个要求 focus、sufficiency、fidelity（各含 decision 和简短具体的 evidence），可参考特征 provided_evidence、适用范围 applicable_scope、最终选择 decision。没有可参考特征时 provided_evidence 为空。
+      每个输入 image_id 恰好返回一次，selected_image_ids 与 decision=select 的记录完全一致。依据必须对应当前图片，结论须与依据一致。
+
+      当前目标概念和图片编号：
+      {{ payload | json }}
+      实际候选图片：
+      {{ images | numbered_image }}
+    response_schema:
+      type: object
+      additionalProperties: false
+      required:
+      - result
+      properties:
+        result:
+          type: object
+          additionalProperties: false
+          required:
+          - concept_id
+          - reference_focus
+          - images
+          - selected_image_ids
+          properties:
+            concept_id:
+              type: string
+              minLength: 1
+            reference_focus:
+              type: string
+              minLength: 1
+              maxLength: 1200
+            images:
+              type: array
+              maxItems: 100
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                - image_id
+                - focus
+                - sufficiency
+                - fidelity
+                - provided_evidence
+                - applicable_scope
+                - decision
+                properties:
+                  image_id:
+                    type: string
+                    minLength: 1
+                  focus:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - decision
+                    - evidence
+                    properties:
+                      decision:
+                        type: string
+                        enum:
+                        - pass
+                        - reject
+                        - uncertain
+                      evidence:
+                        type: string
+                        minLength: 1
+                        maxLength: 1200
+                  provided_evidence:
+                    type: array
+                    maxItems: 12
+                    items:
+                      type: string
+                      minLength: 1
+                      maxLength: 1200
+                  applicable_scope:
+                    type: string
+                    minLength: 1
+                    maxLength: 1200
+                  decision:
+                    type: string
+                    enum:
+                    - select
+                    - reject
+                    - uncertain
+                  sufficiency:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - decision
+                    - evidence
+                    properties:
+                      decision:
+                        type: string
+                        enum:
+                        - pass
+                        - reject
+                        - uncertain
+                      evidence:
+                        type: string
+                        minLength: 1
+                        maxLength: 1200
+                  fidelity:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - decision
+                    - evidence
+                    properties:
+                      decision:
+                        type: string
+                        enum:
+                        - pass
+                        - reject
+                        - uncertain
+                      evidence:
+                        type: string
+                        minLength: 1
+                        maxLength: 1200
+            selected_image_ids:
+              type: array
+              maxItems: 100
+              items:
+                type: string
+                minLength: 1

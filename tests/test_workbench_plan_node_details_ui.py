@@ -44,10 +44,11 @@ def test_real_nodes_open_matching_function_and_prompt_with_unavailable_tabs_disa
         expect(page.locator('.wb-source-body')).to_contain_text('解析时快照')
         expect(page.locator('.wb-source-tabs').get_by_role('button', name='Prompt', exact=True)).to_be_disabled()
         expect(page.locator('.wb-source-tabs').get_by_role('button', name='调用点', exact=True)).to_be_disabled()
-        page.locator('.wb-node').filter(has_text='联合出题').click()
+        page.get_by_role('navigation', name='Prompt 节点').get_by_role('button', name='联合出题', exact=True).click()
         expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('Prompt 模板 · 联合出题')
         expect(page.locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
         expect(page.locator('.wb-prompt-summary')).to_contain_text('请求上限：1')
+        expect(page.get_by_role('navigation', name='Prompt 节点').get_by_role('button', name='联合出题')).to_have_attribute('aria-pressed', 'true')
         expect(page.locator('.wb-source-tabs').get_by_role('button', name='实现', exact=True)).to_be_disabled()
         page.locator('.wb-source-tabs').get_by_role('button', name='配置', exact=True).click()
         expect(page.locator('.wb-source-body')).to_contain_text('prompt_name')
@@ -71,6 +72,13 @@ def test_real_nodes_open_matching_function_and_prompt_with_unavailable_tabs_disa
         assert page.locator('.wb-graph-canvas').bounding_box()['height'] <= page.locator('.wb-graph-scroll').bounding_box()['height']
         page.get_by_role('button', name='可读布局', exact=True).click()
         page.get_by_role('button', name='改为横向', exact=True).click()
+        page.get_by_role('button', name='展开画布', exact=True).click()
+        expect(page.get_by_role('button', name='退出展开', exact=True)).to_be_visible()
+        page.locator('.wb-node').filter(has_text='联合出题').focus()
+        page.keyboard.press('Enter')
+        expect(page.locator('.wb-node').filter(has_text='联合出题')).to_have_attribute('aria-pressed', 'true')
+        page.get_by_role('button', name='退出展开', exact=True).click()
+        expect(page.locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
         assert not errors
         assert all(url.endswith(('/plan-preview', '/plan-node-detail')) for method, url in requests if method == 'POST')
     assert business_bytes(original) == before

@@ -137,9 +137,22 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
     def presentation(node):
         program = programs.get(node.occurrence_id)
         prompt = node.kernel.configuration.get('prompt_name')
+        source = None
+        config = node.kernel.configuration
+        if node.kernel.kind == 'lance':
+            query = config.get('query', {})
+            fields = query.get('fields', {}) if isinstance(query, Mapping) else {}
+            uri = fields.get('uri') if isinstance(fields, Mapping) else None
+            if type(uri) is str:
+                from urllib.parse import urlsplit
+                # Only the frozen table basename, never credentials/query strings.
+                name = urlsplit(uri).path.rstrip('/').rsplit('/', 1)[-1][:160]
+                version = fields.get('version')
+                source = dict(name=name, version=version if type(version) is int else None)
         label = labels.get(node.occurrence_id) or (prompt if type(prompt) is str else
-                 program['qualname'] if program is not None else node.kernel.kind)
-        return dict(label=label[:256], program=program)
+                 program['qualname'] if program is not None else
+                 '读取 ' + source['name'] if source and source['name'] else node.kernel.kind)
+        return dict(label=label[:256], program=program, data_source=source)
 
     ports = {}
     for edge in graph.edges:

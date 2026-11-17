@@ -753,8 +753,13 @@ class DriverJournalService:
         record = self._action.record
         if record is None:
             raise DataflowError("UNKNOWN_EFFECT", "action declaration is unavailable")
-        return {"action_id": action_id, "declaration": record["declaration"],
-                "limits": dict(self._action.context.limits)}
+        # Workers already load their sealed program/graph through authenticated
+        # artifacts. This control read supplies only the action identity and
+        # admitted run limits. Repeating the recursive business declaration in
+        # every reply both wastes the control window and adds an envelope level
+        # to a declaration that may already use its full structural budget.
+        # The original declaration remains unchanged in the driver's journal.
+        return {"action_id": action_id, "limits": dict(self._action.context.limits)}
 
     def _restrict_recovery(self, occurrence_id):
         identifier(occurrence_id)

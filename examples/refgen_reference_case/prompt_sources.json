@@ -1,0 +1,35 @@
+{
+  "copies": [
+    {
+      "copy": "prompts/quality.yaml",
+      "source_repository": "demiwtg",
+      "source_path": "training/sample_refgen_question_references/prompts/concept_reference_quality_sol.yaml",
+      "sha256": "289e1b6922633018b3ac43b22d412c575df5dd4220930120173dacf3479d9996"
+    },
+    {
+      "copy": "prompts/focus.yaml",
+      "source_repository": "demiwtg",
+      "source_path": "training/sample_refgen_question_references/prompts/concept_reference_focus_v5.yaml",
+      "sha256": "b20f993d259fccf9edbc86fa7c044937a01aebb0b4e0164c1daad8fb4da684ef"
+    },
+    {
+      "copy": "prompts/author_v4_1.yaml",
+      "source_repository": "demiwtg",
+      "source_path": "pipelines/refgen_synthetic/prompts/reference_evidence_author_v4_1.yaml",
+      "sha256": "d78a2860f33bc652bcd4169574bd02db103f22477678e4d5e26263c360ddac5e"
+    },
+    {
+      "copy": "prompts/concept_score_v22.yaml",
+      "source_repository": "demiwtg",
+      "source_path": "evaluation/t2i/model_evaluation/prompts/concept_correctness_direct_v22.yaml",
+      "sha256": "6d959665e4fce4f2d3a7ba3bc9dc830333cceb175fa7caab2da54d4b510d4adb"
+    },
+    {
+      "copy": "prompts/alignment_score_v1.yaml",
+      "source_repository": "demiwtg",
+      "source_path": "evaluation/t2i/model_evaluation/prompts/instruction_alignment_v1.yaml",
+      "sha256": "6040c83912a16d13a856ae786425e4c40789d5d3981e5a069d009292fe913e77"
+    }
+  ],
+  "policy": "Exact source bytes; runtime changes only explicit model profile. No imported business launcher or ledger."
+}

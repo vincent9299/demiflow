@@ -91,6 +91,19 @@ def test_lazy_inputs_are_never_acquired(no_execution, tmp_path, source):
     assert not list(tmp_path.iterdir())
 
 
+def test_source_labels_use_frozen_table_name_and_version_without_io(no_execution):
+    captured = capture_pipeline(lambda: data.read_lance(
+        's3://bucket/concepts.lance', version=7).take_all(), {})
+    graph = captured.compiled.graph
+    view = build_logical_plan_view(graph)
+    source = next(node for node in view['nodes'] if node['op_kind'] == 'lance')
+    assert source['label'] == '读取 concepts.lance'
+    assert source['data_source'] == {'name': 'concepts.lance', 'version': 7}
+    assert 's3://' not in json.dumps(view)
+    assert view['dag_id'] == graph.dag_id
+    assert {n['occurrence_id'] for n in view['nodes']} == {n.occurrence_id for n in graph.nodes}
+
+
 def test_actor_factory_is_not_constructed(no_execution):
     class Actor:
         __init__ = forbidden

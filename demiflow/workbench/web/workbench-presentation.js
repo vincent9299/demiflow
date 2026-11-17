@@ -18,6 +18,9 @@
     source_call: '调用入口', source: '数据源', read_table: '读取', write_table: '写出',
     terminal: '写出', map: '自定义算子', join: '关联', filter: '过滤', query: '查询',
     reduce: '聚合', union: '合并',
+    MapOp:'逐行处理',FlatMapOp:'展开',FilterOp:'筛选',prompt:'模型调用',
+    lance:'固定表读取',write_lance:'写出结果',SaveLanceOp:'固定中间交付',
+    materialized:'内存输入',take_all:'读取结果',ReadObjectOp:'读取对象',
   };
   const STATES = {
     pending: '已登记 · 未开始', running: '运行中', succeeded: '执行完成', failed: '执行失败',
@@ -821,7 +824,10 @@
           && node.label.length <= 256 ? bounded(node.label, 80) : kindLabel(node.op_kind),
         summary: [{label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
           + (node.output_ports.join(', ') || '—'), 160), basis: 'compile', reason: null},
-          {label: '范围', value: '首个执行动作', basis: 'compile', reason: null}],
+          node.data_source ? {label: '版本', value: Number.isInteger(node.data_source.version)
+            ? String(node.data_source.version) : '运行时固定', basis: 'compile', reason: null}
+            : {label: '材料', value: node.source_views?.prompt?.available ? 'Prompt 与绑定配置'
+              : node.source_views?.implementation?.available ? '算子源码' : '算子配置', basis: 'compile', reason: null}],
         state: {label: '尚未运行', tone: 'neutral'}};
     });
     const notices = ['首个 Dataset 执行动作的完整数据流，尚未运行。依赖运行结果的后续动作不在本图。'];

@@ -103,9 +103,10 @@
     document.addEventListener('fullscreenchange',fullscreenChanged);
     const graphLegend=$('p','读取引擎执行计划…','wb-caption');
     const actionBar=$('div',undefined,'wb-action-bar');actionBar.hidden=true;
+    const promptNav=$('nav',undefined,'wb-prompt-nav');promptNav.setAttribute('aria-label','Prompt 节点');promptNav.hidden=true;
     const advanced=details('高级诊断',graphSection);advanced.hidden=true;
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
-    graphSection.prepend(graphTools,previewControls,actionBar,graphHost,graphLegend);body.append(graphSection,inspector);root.append(body);
+    graphSection.prepend(graphTools,previewControls,promptNav,actionBar,graphHost,graphLegend);body.append(graphSection,inspector);root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
     const detailButtons=new Map();
     detailHeader.append($('strong','日志与观测'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
@@ -171,6 +172,14 @@
     }
     function updateActions(){
       if(!root.isConnected)return;
+      if(!run&&!ctx.flows.find(f=>f.entry===working?.entry)?.parameters?.length){
+        const path=previewPath.value.trim();
+        for(const option of [...paramsChoice.options])if(option.dataset.manual==='true'&&option.value!==path)option.remove();
+        if(path&&![...paramsChoice.options].some(o=>o.value===path)){const option=$('option',path);option.value=path;option.dataset.manual='true';paramsChoice.append(option);}
+        paramsChoice.value=path;paramsChoice.disabled=paramsChoice.options.length<=1&&!path;
+        paramsChoice.title=path;
+      }
+      previewPath.title=previewPath.value;
       const resultsActive=data().mode==='results',checksActive=data().mode==='checks';
       body.hidden=resultsActive;checks.hidden=!checksActive;runDetail.hidden=!run||resultsActive;runFacts.hidden=!run||resultsActive;trend.hidden=!run||resultsActive;
       runBar.hidden=!run||!!comparison;
@@ -197,6 +206,7 @@
         b.disabled=!!previewNode&&previewNode.source_views?.[key]?.available!==true;
         b.title=b.disabled?(previewNode.source_views?.[key]?.reason||'本节点没有已核验的这类材料。'):'';
       }
+      for(const b of promptNav.querySelectorAll('button')){const active=b.dataset.occurrence===previewSelection?.occurrenceId;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));}
       for(const[key,b]of detailButtons){b.classList.toggle('active',detailKind===key);b.disabled=!run;}
       sourceToggle.textContent=sourceOpen?'收起代码':'展开代码';sourceToggle.setAttribute('aria-expanded',String(sourceOpen));
       guardSettings();
@@ -288,6 +298,12 @@
       basisLabel.textContent=model.choice.label;
       graphLegend.textContent='点击算子查看实现与 Prompt；箭头表示引擎编译的数据流。';
       paintNodeJump(model);
+      promptNav.replaceChildren();
+      const prompts=planPreview.dag.nodes.filter(n=>n.source_views?.prompt?.available);
+      promptNav.hidden=!prompts.length;
+      if(prompts.length){promptNav.append($('span','快速查看 Prompt','wb-caption'));
+        for(const node of prompts.slice(0,32)){const card=model.nodes.find(n=>n.selection.occurrenceId===node.occurrence_id);
+          const b=button(node.label||'Prompt',()=>paintPreviewNode(card.selection),promptNav);b.dataset.occurrence=node.occurrence_id;}}
       actionBar.hidden=locator.hidden=true;
       advanced.hidden=false;advanced.replaceChildren($('summary','高级诊断'));
       raw('编译依据',{basis:planPreview.basis,scope:planPreview.scope,entry_completed:planPreview.entry_completed,kind:planPreview.kind,provider:planPreview.provider,dag_id:planPreview.dag.dag_id},advanced);
@@ -317,6 +333,7 @@
     function paintGraph(){
       if(planPreview&&!run&&!data().run)return paintPreviewGraph();
       const g=data().graph;
+      promptNav.hidden=true;
       if(!g){graphModel=null;return null;}
       const preference=data().graphPreference;
       const choice=presentation.chooseGraphView(g,{actionId:data().actionId,preference});

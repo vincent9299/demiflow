@@ -112,13 +112,13 @@
       toolButton('适应全图', () => {viewMode === 'fit' ? readable() : fit();}),
       toolButton('缩小', () => zoomBy(1 / 1.2)),
       toolButton('放大', () => zoomBy(1.2)));
-    const directionButton=toolButton('改为纵向',()=>{direction=direction==='horizontal'?'vertical':'horizontal';if(currentModel){rebuild(currentModel);highlight(currentModel.selected);}});
+    const directionButton=toolButton('改为纵向',()=>{directionChosen=true;direction=direction==='horizontal'?'vertical':'horizontal';if(currentModel){rebuild(currentModel);highlight(currentModel.selected);}});
     const zoomText=document.createElement('span');zoomText.className='wb-zoom-level';zoomText.setAttribute('aria-live','polite');
     toolbar.append(directionButton,zoomText);
     wrapper.append(toolbar, notices, scroll);
     host.replaceChildren(wrapper);
 
-    let layout = null, fingerprint = null, zoomLevel = 1, viewMode = 'readable', direction='horizontal', currentModel=null;
+    let layout = null, fingerprint = null, zoomLevel = 1, viewMode = 'readable', direction='horizontal', directionChosen=false, currentModel=null;
     let width = 0, height = 0, resizeFrame = null, disposed = false;
     const elements = new Map();
 
@@ -213,7 +213,7 @@
           const path = svg('path', {d, class: 'wb-edge wb-edge-' + edge.kind, 'marker-end': 'url(#' + markerId + ')'});
           path.append(svg('title', {}, (EDGE_LABEL[edge.kind] || edge.kind) + ' · ' + (edge.fromPort || '—') + ' → ' + (edge.toPort || '—')));
           canvas.append(path);
-          if (edge.fromPort || edge.toPort)
+          if ((edge.fromPort || edge.toPort) && !(edge.fromPort==='main'&&edge.toPort==='main'))
             canvas.append(svg('text', {x: labelX, y: labelY, class: 'wb-edge-port'}, (edge.fromPort || '—') + '→' + (edge.toPort || '—')));
         });
       }
@@ -276,6 +276,7 @@
     }
     function rebuild(model) {
       canvas.replaceChildren(); elements.clear();
+      if(!directionChosen)direction=model.nodes.length>12?'vertical':'horizontal';
       layout = layoutGraph(model, {width: scroll.clientWidth || host.clientWidth || 0,direction});
       directionButton.textContent=direction==='horizontal'?'改为纵向':'改为横向';
       directionButton.setAttribute('aria-label',directionButton.textContent);

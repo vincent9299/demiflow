@@ -1,0 +1,5 @@
+configs/generated-preview.json
+__pycache__/
+workspace.json
+.forge/
+tables/*.json

@@ -37,7 +37,16 @@ def safe_json(value, *, depth=0, budget=None):
     budget[0] -= 1
     if depth > 16 or budget[0] < 0:
         raise ValueError('材料超过结构预算')
-    if value is None or type(value) in (str, bool, int, float):
+    if type(value) is str:
+        # URLs also occur in lists (paths, inputs), without a named URL field.
+        # Apply this to passive configuration only, never the exact source text.
+        import re
+        if re.match(r'^[A-Za-z][A-Za-z0-9+.-]*://', value):
+            from urllib.parse import urlsplit, urlunsplit
+            parts = urlsplit(value)
+            return urlunsplit((parts.scheme, parts.netloc.rsplit('@', 1)[-1], parts.path, '', ''))
+        return value
+    if value is None or type(value) in (bool, int, float):
         return value
     if isinstance(value, Mapping):
         result = {}
@@ -45,16 +54,13 @@ def safe_json(value, *, depth=0, budget=None):
             if type(key) is not str:
                 raise ValueError('配置含非文本键')
             normalized = key.lower().replace('-', '_')
-            secret = (normalized in {'api_key', 'token', 'password', 'secret', 'authorization', 'headers', 'env', 'environment'}
-                      or normalized.endswith(('_token', '_password', '_secret', '_api_key')))
+            secret = (normalized in {'api_key', 'token', 'password', 'secret', 'authorization', 'headers', 'env', 'environment',
+                                     'credentials', 'storage_options', 'access_key', 'secret_key', 'private_key'}
+                      or normalized.endswith(('_token', '_password', '_secret', '_api_key', '_access_key', '_secret_key', '_private_key')))
             # Endpoint query/userinfo may embed credentials. Names of environment
             # bindings remain useful; their values are never looked up.
             if secret:
                 result[key] = '[不展示凭据]'
-            elif normalized in {'base_url', 'endpoint', 'url'} and type(item) is str:
-                from urllib.parse import urlsplit, urlunsplit
-                parts = urlsplit(item)
-                result[key] = urlunsplit((parts.scheme, parts.netloc.rsplit('@', 1)[-1], parts.path, '', ''))
             else:
                 result[key] = safe_json(item, depth=depth + 1, budget=budget)
         return result
@@ -150,7 +156,12 @@ def build_plan_details(compiled, *, sources, root):
         declaration = declarations.get(node.occurrence_id)
         if declaration is not None:
             details['implementation'] = _implementation(declaration, root, sources)
-            details['prompt'] = _prompt_detail(declaration)
+            try:
+                details['prompt'] = _prompt_detail(declaration)
+            except ValueError as exc:
+                # Presentation has a narrower budget than legal execution.
+                # A missing material must not discard the actual compiled DAG.
+                details['prompt'] = unavailable(str(exc))
         try:
             configuration = safe_json(node.kernel.configuration)
             details['configuration'] = material(json.dumps(configuration, ensure_ascii=False, indent=2, allow_nan=False), language='json')

@@ -1,0 +1,104 @@
+{
+  "description": "仅呈现已有固定结果，不运行模型、不改变数据。图片与评分为模拟响应。绑定摘要由工作台登记时注入。",
+  "name": "模拟模型 · 作答与评分明细",
+  "version": 1,
+  "fields": [
+    {
+      "id": "field0",
+      "field": "concept_id",
+      "label": "概念",
+      "role": "context",
+      "format": "text"
+    },
+    {
+      "id": "field1",
+      "field": "tier",
+      "label": "题面长度",
+      "role": "context",
+      "format": "text"
+    },
+    {
+      "id": "field2",
+      "field": "conditioning_mode",
+      "label": "参考条件",
+      "role": "context",
+      "format": "text"
+    },
+    {
+      "id": "field3",
+      "field": "execution_kind",
+      "label": "执行依据",
+      "role": "context",
+      "format": "text"
+    },
+    {
+      "id": "field4",
+      "field": "instruction",
+      "label": "固定题面",
+      "role": "input",
+      "format": "text"
+    },
+    {
+      "id": "field5",
+      "field": "reference_image.uri",
+      "label": "参考图（无参条件为空）",
+      "role": "reference",
+      "format": "image"
+    },
+    {
+      "id": "field6",
+      "field": "generated_image.uri",
+      "label": "模拟生成图",
+      "role": "output",
+      "format": "image"
+    },
+    {
+      "id": "field7",
+      "field": "rubric",
+      "label": "评分路",
+      "role": "context",
+      "format": "text"
+    },
+    {
+      "id": "field8",
+      "field": "score",
+      "label": "模拟分数",
+      "role": "evaluation",
+      "format": "json"
+    },
+    {
+      "id": "field9",
+      "field": "status",
+      "label": "状态",
+      "role": "context",
+      "format": "text"
+    },
+    {
+      "id": "field10",
+      "field": "details_json",
+      "label": "原始模拟回答与生成参数",
+      "role": "output",
+      "format": "json"
+    },
+    {
+      "id": "field11",
+      "field": "summary_json",
+      "label": "分母与汇总",
+      "role": "evaluation",
+      "format": "json"
+    }
+  ],
+  "grouping": [
+    "tier",
+    "conditioning_mode",
+    "rubric"
+  ],
+  "filters": {
+    "op": "eq",
+    "field": "record_kind",
+    "value": "score"
+  },
+  "sort": [],
+  "layout": "card",
+  "questions": []
+}

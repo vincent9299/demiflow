@@ -1,4 +1,5 @@
 import hashlib
+import json
 from pathlib import Path
 
 from demiflow import data
@@ -52,3 +53,27 @@ def test_material_bounds_and_credential_fields():
     assert result['model']['api_key_env'] == 'KEY_NAME'
     assert 'never-visible' not in str(result) and 'password' not in str(result) and 'secret' not in str(result)
     assert result['model']['base_url'] == 'https://example.org/v1'
+    source = safe_json({'uri': 'https://user:hidden@example.org/table?access=hidden',
+                       'storage_options': {'aws_access_key_id': 'hidden'}, 'secret_key': 'hidden'})
+    assert 'hidden' not in str(source)
+    assert source['uri'] == 'https://example.org/table'
+    assert safe_json({'paths': ['https://user:hidden@example.org/data?sig=hidden#hidden']}) == {
+        'paths': ['https://example.org/data']}
+
+
+def test_legal_deep_prompt_schema_degrades_material_without_discarding_graph():
+    schema = {'type': 'string'}
+    for _ in range(8):
+        schema = {'type': 'object', 'properties': {'item': schema}, 'required': ['item'], 'additionalProperties': False}
+    pack = parse_prompt_pack(json.dumps({'schema_version': 'demiflow_prompt_pack_v2', 'prompts': {'p': {
+        'version': '1', 'model': {'name': 'fixture', 'transport': 'openai_compatible',
+            'base_url': 'http://127.0.0.1:1/v1', 'api_key_env': 'UNUSED_FIXTURE_KEY'},
+        'template': '{{ value }}', 'response_schema': {'type': 'object', 'properties': {'result': schema},
+            'required': ['result'], 'additionalProperties': False}}}}))
+    compiled = capture_pipeline(lambda: data.from_items([{'value': 'x'}]).map_prompt_async(
+        'p', config=pack, inputs=['value'], output='answer', max_requests=1).take_all(), {}).compiled
+    details = build_plan_details(compiled, sources={}, root=Path('/nonexistent'))
+    assert len(details) == len(compiled.graph.nodes) == 3
+    prompt = next(n for n in compiled.graph.nodes if n.kernel.kind == 'prompt')
+    assert details[prompt.occurrence_id]['prompt']['availability'] == 'unavailable'
+    assert '预算' in details[prompt.occurrence_id]['prompt']['reason']

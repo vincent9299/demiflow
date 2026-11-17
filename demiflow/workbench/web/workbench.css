@@ -68,9 +68,14 @@
 .wb-body:fullscreen .wb-inspector{max-height:calc(100dvh - 32px)}
 .wb-node-jump{max-width:240px;text-overflow:ellipsis}
 .wb-prompt-summary{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.wb-prompt-nav{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin:8px 0 10px}
+.wb-prompt-nav[hidden]{display:none}.wb-prompt-nav button{background:#f7f9ff;border:1px solid #dfe6f5;color:#3b5280;max-width:100%;overflow-wrap:anywhere}
+.wb-prompt-nav button.active{background:#eaf0ff;border-color:#8aa8f1;color:#284fb4}
 .wb-source-tabs button:disabled{opacity:.45;cursor:not-allowed}
 .wb-material-basis{padding-bottom:6px;border-bottom:1px solid var(--line)}
 .wb-prompt-text,.wb-implementation-text{min-width:0;line-height:1.75}
+.wb-prompt-text pre,.wb-prompt-text code{white-space:pre-wrap!important;overflow-wrap:anywhere;word-break:normal;font-size:14px;line-height:1.8}
+.wb-implementation-text pre,.wb-implementation-text code{white-space:pre-wrap!important;overflow-wrap:anywhere;line-height:1.75}
 .wb-source-body{max-height:520px}
 
 /* Compile controls accept project-local saved configurations without registering a run. */
