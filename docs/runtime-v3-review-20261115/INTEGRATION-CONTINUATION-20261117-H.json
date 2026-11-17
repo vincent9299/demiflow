@@ -1,0 +1,139 @@
+{
+  "receipts": [
+    {
+      "receipt": "/tmp/demiflow-root-graph-transport-combined-r1-evidence/verification.json",
+      "sha256": "17dc2f0387d7a56cf4d00363360960e4278cff1122bfe2fb6d9acad907f68e1a",
+      "head": "cea82266e4cfeb9d953f140b7955971209c3ac3e",
+      "inputs": 2988,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 11,
+        "call": 11,
+        "teardown": 11
+      },
+      "call_outcomes": {
+        "passed": 11
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-graph-waves-r5-evidence/verification.json",
+      "sha256": "0be7c531eabf95ac14ac1f1236ceafbf1413b3e33c6cf7164f3da012462c30cb",
+      "head": "2ea4b77d7b184078036a94c6651bfab9cf2c8dd1",
+      "inputs": 2986,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 8,
+        "call": 8,
+        "teardown": 8
+      },
+      "call_outcomes": {
+        "passed": 8
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-graph-waves-r6-evidence/verification.json",
+      "sha256": "f92c3cf638a8c8a614909d8b86b0bac76f36811e5e96c4a8b9119c728f086e7a",
+      "head": "416929fa0a0f889a617cef669e02000c63e70633",
+      "inputs": 2986,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 4,
+        "call": 4,
+        "teardown": 4
+      },
+      "call_outcomes": {
+        "passed": 4
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-v035-core-ray-graph-combined-r1/receipt.json",
+      "sha256": "fea13b6228edf67bddbb53916003a3657c2a4e2f2f634c11dd87d0bb14b9a7ca",
+      "head": "fba93b360239966bbf6915152c3a04c0d1be8884",
+      "inputs": 2988,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 5,
+        "call": 5,
+        "teardown": 5
+      },
+      "call_outcomes": {
+        "passed": 5
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-v035-core-local-graph-combined-r1/receipt.json",
+      "sha256": "ee501818b0225aaf58601b5075c8540d05d7e328fd50de58c88e323624a07e06",
+      "head": "fba93b360239966bbf6915152c3a04c0d1be8884",
+      "inputs": 2988,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 7,
+        "call": 6,
+        "teardown": 6
+      },
+      "call_outcomes": {
+        "passed": 5,
+        "failed": 1
+      },
+      "children_after": [],
+      "returncode": 2
+    },
+    {
+      "receipt": "/tmp/demiflow-v035-core-local-remaining-r2/receipt.json",
+      "sha256": "2ab6e49fdb535c6abe71bb6beae91af15890e7ebf843590ec31410b61aababfe",
+      "head": "5995caa993ad1249984af7189b7966d6bdbdb67a",
+      "inputs": 2988,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 3,
+        "call": 3,
+        "teardown": 3
+      },
+      "call_outcomes": {
+        "passed": 3
+      },
+      "children_after": [],
+      "returncode": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r4-evidence/verification.json",
+      "sha256": "b43a2e05e6f8a76707043adc6700abf1a11b5e3de8fc0b977e902fa250ae8820",
+      "head": "f2ed096feea70380171ebdfff09999744ce000d7",
+      "inputs": 2986,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "phases": {
+        "setup": 9,
+        "call": 9,
+        "teardown": 9
+      },
+      "call_outcomes": {
+        "passed": 9
+      },
+      "children_after": [],
+      "returncode": 0
+    }
+  ],
+  "boundaries": {
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "head_equal": true,
+    "status_equal": true,
+    "dirty_hashes_equal": true,
+    "frozen_equal": true
+  },
+  "not_same_head_suite": true
+}
