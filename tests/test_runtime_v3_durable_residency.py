@@ -133,7 +133,7 @@ def test_ray_core_durable_parking_uses_same_protocol(tmp_path, monkeypatch):
         monkeypatch.setattr(ray.data, name, forbidden)
     try:
         ray.init(address='local', num_cpus=2, include_dashboard=False, object_store_memory=100*1024**2,
-                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-durable-'))
+                 _temp_dir=tempfile.mkdtemp(prefix='demiflow-ray-durable-', dir='/tmp'))
         with RunContext.start(tmp_path/'run', limits=LIMITS) as run:
             ds = data.from_items([{'n': n} for n in range(4)])
             hosted = Dataset(ds._source, ds._plan, RayDatasetExecutor())

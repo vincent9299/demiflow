@@ -12,12 +12,19 @@ from demiflow.execution.state_artifacts import StateArtifacts
 from test_runtime_v3_graph_adapter import _spec, graph_environment
 
 
-@pytest.mark.parametrize('mode', ['durable_incremental', 'memory_incremental', 'finite_sealed'])
-def test_single_worker_partition_wave_resume_keeps_original_membership(graph_environment, monkeypatch, mode):
+@pytest.mark.parametrize('mode,routing', [
+    ('durable_incremental', 'broadcast'), ('memory_incremental', 'broadcast'),
+    ('finite_sealed', 'broadcast'), ('durable_incremental', 'rebalance'),
+    ('durable_incremental', 'hash'), ('durable_incremental', 'target')])
+def test_single_worker_partition_wave_resume_keeps_original_membership(graph_environment, monkeypatch, mode, routing):
     class Interrupted(Exception): pass
     root = graph_environment
     spec = _spec(root)
-    spec.update(exchange_mode=mode, credit_budget={'rows': 8, 'bytes': 8*1024**2})
+    from demiflow.data.sources import ItemsSource
+    spec['source'] = ItemsSource(tuple({'x': i, 'group': 'a' if i % 2 == 0 else 'b'} for i in range(3)))
+    spec.update(exchange_mode=mode, routing=routing, key_fields=['group'], target_field='group',
+                target_classes={'a': ['left'], 'b': ['right']},
+                credit_budget={'rows': 8, 'bytes': 8*1024**2})
     executor = LocalDatasetExecutor(workers=1, unified_graph=True)
     limits = {'checkpoint_rows': 8, 'checkpoint_unconfirmed_rows': 8,
               'checkpoint_interval_ms': 60000, 'timeout_s': 120}
@@ -57,7 +64,8 @@ def test_single_worker_partition_wave_resume_keeps_original_membership(graph_env
                 patch.setattr(DataflowExecution, 'finish', observe)
                 result = executor.materialize_graph(spec)
             assert result['egress_rows'] == 3
-            assert result['target_rows'] == {'left': 3, 'right': 3}
+            assert result['target_rows'] == {reader: sum(row['reader_id'] == reader for row in outputs)
+                                             for reader in ('left', 'right')}
             action.complete({'kind': 'graph-materialized'})
         after = run.journal.execution_commits('action-1')
         assert after[:len(before)] == before
@@ -67,9 +75,17 @@ def test_single_worker_partition_wave_resume_keeps_original_membership(graph_env
         assert all(len(s['cut']['participants']) == 1 for s in states)
         assert {p for s in states for p in s['residency']['active_partitions']} >= {'left', 'right'}
         assert handles[0]._peak_active_workers == 1
-        assert sorted((r['reader_id'], r['row']['x']) for r in outputs) == [
-            ('left', 110), ('left', 111), ('left', 112),
-            ('right', 210), ('right', 211), ('right', 212)]
+        actual = sorted((r['reader_id'], r['row']['x']) for r in outputs)
+        if routing == 'broadcast':
+            assert actual == [('left', 110), ('left', 111), ('left', 112),
+                              ('right', 210), ('right', 211), ('right', 212)]
+        elif routing in ('rebalance', 'target'):
+            assert actual == [('left', 110), ('left', 112), ('right', 211)]
+        else:
+            assert sorted(r['row']['x'] - (100 if r['reader_id'] == 'left' else 200)
+                          for r in outputs) == [10, 11, 12]
+            assert all(len({r['reader_id'] for r in outputs if r['row']['group'] == group}) == 1
+                       for group in ('a', 'b'))
         # Every inherited participant must retain an actual earlier ACKed fact;
         # a forged "completed" partition may not be used to skip business work.
         from demiflow.execution.dataflow_durable_residency import validate_recovered
