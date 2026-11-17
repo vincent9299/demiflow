@@ -96,7 +96,10 @@ def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kin
                 if cached > accepted_calls:
                     break
                 assert time.monotonic() < deadline, 'cache did not advance beyond the original ACK'
-                time.sleep(.01)
+                # Ray workers still need real driver RPC replies to advance.
+                # Hold the next cut, not the original journal/control service.
+                execution._renew_workers()
+                execution._poll_control(min(deadline, time.monotonic() + .01))
             reached.append({'commit': execution._restore_image.commit_id,
                             'accepted_calls': accepted_calls, 'cached_results': cached})
             raise Interrupted('after original nonfinal ACK')
