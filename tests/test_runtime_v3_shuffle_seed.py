@@ -189,6 +189,95 @@ def test_new_shuffle_keeps_original_wide_row_success_budget(tmp_path):
                 kernel.close()
 
 
+@pytest.mark.parametrize('run_lengths', [(3,), (1, 3)])
+def test_measured_merge_drops_old_wide_frames_at_single_reader_tail(tmp_path, monkeypatch, run_lengths):
+    import weakref
+    from demiflow.execution.kernels import ordering
+    from demiflow.execution.kernels.shuffle_order import shuffle_windows, _TypedKeys
+    from test_runtime_v3_artifact_accounting import store_fixture
+
+    class ObservedFrame:
+        # Track the actual yielded frame owner without changing its contents.
+        def __init__(self, value):
+            self.value = value
+        def __getitem__(self, index):
+            return self.value[index]
+
+    with store_fixture(tmp_path, ceiling=16 << 20) as (_, store, port):
+        services = _services(store, port)
+        services = replace(services, bounds=replace(services.bounds,
+            max_row_bytes=32768, max_batch_bytes=1 << 20))
+        window = shuffle_windows(services).sort
+        refs, observed = [], []
+        original = ordering._run_frames
+        def watch(*args, **kwargs):
+            source = original(*args, **kwargs)
+            try:
+                for value in source:
+                    frame = ObservedFrame(value)
+                    observed.append(weakref.ref(frame))
+                    yield frame
+                    del frame
+            finally:
+                source.close()
+        start = 0
+        try:
+            for count in run_lengths:
+                records = (_record({'v': i, 'payload': 'x' * 16384}, i, max_bytes=32768)
+                    for i in range(start, start + count))
+                built = ordering._build_sort_runs(records, spec=_spec(), services=services,
+                    window=window, key_for_record=_TypedKeys(services, window))
+                refs.extend(built)
+                assert len(built) == 1
+                start += count
+            monkeypatch.setattr(ordering, '_run_frames', watch)
+            merged = ordering._merge_into(tuple(refs), services, window)
+            count = 0
+            try:
+                for frame in merged:
+                    count += 1
+                    # The stdlib fast path retains the first tail frame and,
+                    # after a two-to-one transition, an exhausted entry too.
+                    assert sum(ref() is not None for ref in observed) <= len(refs)
+                    del frame
+            finally:
+                merged.close()
+            assert count == sum(run_lengths)
+            assert not any(ref() is not None for ref in observed)
+        finally:
+            ordering._release_runs(refs, services)
+
+
+def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypatch):
+    from demiflow.execution.kernels import shuffle_order
+    from test_runtime_v3_artifact_accounting import store_fixture, consumed
+    with store_fixture(tmp_path, ceiling=256 << 10) as (run, store, port):
+        services = _services(store, port)
+        services = replace(services, bounds=replace(services.bounds, max_spill_bytes=256 << 10))
+        builds, written, released = [], [], []
+        original_build, original_put, original_release = shuffle_order._build_sort_runs, store.put, store.release
+        def build(*args, **kwargs):
+            builds.append(True)
+            return original_build(*args, **kwargs)
+        def put(*args, **kwargs):
+            ref = original_put(*args, **kwargs)
+            written.append(ref)
+            return ref
+        def release(ref, **kwargs):
+            released.append(ref)
+            return original_release(ref, **kwargs)
+        monkeypatch.setattr(shuffle_order, '_build_sort_runs', build)
+        monkeypatch.setattr(store, 'put', put)
+        monkeypatch.setattr(store, 'release', release)
+        records = (_record({'v': i, 'payload': b'x' * 256}, i) for i in range(100))
+        with pytest.raises(Exception, match='[Bb]udget|[Cc]eiling|[Ee]xceed|[Ss]pill'):
+            list(shuffle_order.seeded_shuffle(records, spec=_spec(), services=services))
+        assert len(builds) == 2
+        assert written and set(written) <= set(released)
+        assert consumed(run) == sum({ref.digest: ref.size_bytes for ref in written}.values()) <= 256 << 10
+        assert not list((store.root / store.store_id / 'staging').iterdir())
+
+
 @pytest.mark.parametrize('wide_control', ['seal', 'manifest'])
 def test_borrowed_metadata_is_admitted_while_first_sort_runs_exist(tmp_path, monkeypatch, wide_control):
     import json
@@ -413,7 +502,7 @@ def test_original_nonfinal_cut_resumes_the_same_seeded_order(tmp_path, monkeypat
     def dataset():
         return data.from_items(ROWS).random_shuffle(seed=7, num_blocks=2)
     limits = {'memory_bytes': 32 << 20, 'max_row_bytes': 4096, 'max_batch_bytes': 1 << 20,
-              'checkpoint_interval_ms': 60000}
+              'checkpoint_interval_ms': 60000, 'checkpoint_rows': 5}
     with RunContext.start(tmp_path / 'expected', limits=limits), data.local_execution():
         expected = dataset().take_all()
     cuts = []

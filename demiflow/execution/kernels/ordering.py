@@ -496,9 +496,33 @@ def _merge_into(
     readers = [_run_frames(ref, services, window, budget=budget, slot=index)
                for index, ref in enumerate(sources)]
     try:
-        for frame in heapq.merge(*readers, key=lambda item: (item[0], item[1])):
-            _check_stop(services)
-            yield frame
+        if budget is None:
+            for frame in heapq.merge(*readers, key=lambda item: (item[0], item[1])):
+                _check_stop(services)
+                yield frame
+        else:
+            # heapq.merge's final-reader shortcut keeps its first value and
+            # exhausted heap entry alive while yielding the remaining reader.
+            # These are no longer the frames charged to the reader slots.
+            # Advance explicitly so every retained frame has one live slot.
+            heap = []
+            for index, reader in enumerate(readers):
+                frame = next(reader, None)
+                if frame is not None:
+                    heap.append((frame[0], frame[1], index, frame))
+                del frame
+            heapq.heapify(heap)
+            while heap:
+                entry = heapq.heappop(heap)
+                index, frame = entry[2], entry[3]
+                del entry
+                _check_stop(services)
+                yield frame
+                del frame
+                frame = next(readers[index], None)
+                if frame is not None:
+                    heapq.heappush(heap, (frame[0], frame[1], index, frame))
+                del frame
     finally:
         for reader in readers:
             reader.close()
