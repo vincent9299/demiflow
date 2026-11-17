@@ -1,5 +1,6 @@
 """A finite user fold owns business time, never a fabricated recovery cursor."""
 from collections import deque
+from contextlib import nullcontext
 from dataclasses import replace
 from types import SimpleNamespace as NS
 import threading
@@ -14,6 +15,7 @@ from demiflow.execution.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
+from test_runtime_v3_ray_terminal_seams import private_ray_provider
 
 
 def _driver(monkeypatch, *, peers=1):
@@ -227,8 +229,26 @@ def test_busy_event_uses_original_bounded_wire_and_activation_queue(monkeypatch)
     assert tuple(endpoint._events) == (event,)
 
 
-@pytest.mark.parametrize('workers', [1, 2])
-def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monkeypatch, workers, record_property):
+def test_failed_fold_keeps_original_error_when_wait_cleanup_send_fails():
+    runner = _runner()
+    failure = ValueError('original reducer failure')
+    def finish(port, **kwargs):
+        raise failure
+        yield
+    kernel = NS(_spec=NS(kind='reduce'), finish_replayable=False, finish=finish)
+    runner.receive({'kind': 'pause', 'activity_generation': 1})
+    send = runner._send
+    def notify(kind, payload):
+        if payload['occurrence_id'] is None: raise RuntimeError('closed original control channel')
+        send(kind, payload)
+    runner._send = notify
+    with pytest.raises(ValueError) as caught:
+        list(runner._finite_finish_iterator('fold', kernel, 'left'))
+    assert caught.value is failure and not runner._checkpoint_finishes
+    assert any('closed original control channel' in note for note in failure.__notes__)
+
+
+def _real_long_finite_fold(tmp_path, monkeypatch, workers, record_property, *, provider):
     marker = tmp_path/'fold-started'
     notices, executions = [], []
     start = DataflowExecution.start
@@ -236,6 +256,7 @@ def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monk
     handle = DataflowExecution._handle_event
     requested = []
     def started(execution):
+        assert execution._policy.provider == provider
         executions.append(execution)
         return start(execution)
     def observed(execution, event):
@@ -258,7 +279,8 @@ def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monk
                 'sum': (acc or {}).get('sum', 0) + row['v']}
     limits = {'timeout_s': 60, 'checkpoint_timeout_s': 1,
               'checkpoint_rows': 1000, 'checkpoint_interval_ms': 60000}
-    with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(workers=workers):
+    execution_context = data.local_execution(workers=workers) if provider == 'local' else nullcontext()
+    with RunContext.start(tmp_path/'run', limits=limits) as run, execution_context:
         actual = data.from_items([{'k': 0, 'v': i} for i in range(8)]).reduce_by_key('k', fold).take_all()
         assert actual == [{'k': 0, 'count': 8, 'sum': 28}]
         assert run.limits['checkpoint_timeout_s'] == 1 and run.limits['timeout_s'] == 60
@@ -269,7 +291,17 @@ def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monk
     assert executions[0]._scheduler._physical_exit_confirmed
     record_property('finite_checkpoint_evidence', json.dumps({
         'run_directory': str(tmp_path/'run'), 'limits': limits,
-        'workers': workers, 'requested_at': requested, 'notices': notices,
+        'workers': workers, 'provider': provider, 'requested_at': requested, 'notices': notices,
         'commits': [{'commit_id': c['commit_id'], 'sequence': c['sequence'], 'status': c['status']}
                     for c in commits], 'final': True, 'physical_exit_confirmed': True,
         'actual': actual}, sort_keys=True))
+
+
+@pytest.mark.parametrize('workers', [1, 2])
+def test_real_dataset_long_finite_fold_reaches_original_final_ack(tmp_path, monkeypatch, workers, record_property):
+    _real_long_finite_fold(tmp_path, monkeypatch, workers, record_property, provider='local')
+
+
+def test_real_ray_long_finite_fold_reaches_original_final_ack(tmp_path, monkeypatch, record_property,
+                                                           private_ray_provider):
+    _real_long_finite_fold(tmp_path, monkeypatch, None, record_property, provider='ray_core')

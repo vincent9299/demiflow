@@ -494,16 +494,25 @@ class WorkerGraphRunner:
             with self._condition:
                 self._checkpoint_finishes.add(occurrence)
                 notice = self._checkpoint_wait_notification()
-            if notice is not None:
-                self._send('checkpoint_wait', notice)
+            failure = None
             try:
+                if notice is not None:
+                    self._send('checkpoint_wait', notice)
                 yield from iterator
+            except BaseException as exc:
+                failure = exc
+                raise
             finally:
                 with self._condition:
                     self._checkpoint_finishes.discard(occurrence)
                     notice = self._checkpoint_wait_notification()
                 if notice is not None:
-                    self._send('checkpoint_wait', notice)
+                    try:
+                        self._send('checkpoint_wait', notice)
+                    except BaseException as notification_failure:
+                        if failure is None:
+                            raise
+                        failure.add_note('Finite checkpoint wait cleanup also failed: ' + str(notification_failure))
 
         return observed()
 
