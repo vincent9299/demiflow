@@ -506,16 +506,20 @@ def test_original_nonfinal_cut_resumes_the_same_seeded_order(tmp_path, monkeypat
     with RunContext.start(tmp_path / 'expected', limits=limits), data.local_execution():
         expected = dataset().take_all()
     cuts = []
+    finish_publication = DataflowExecution._finish_publication
     def interrupt(execution, image):
-        assert not image.cut.final
-        assert execution._action.context.journal.execution_commit(image.commit_id)['status'] == 'acked'
-        cuts.append(image.commit_id)
-        raise Interrupted()
+        finish_publication(execution, image)
+        fact = execution._action.context.journal.execution_commit(image.commit_id)
+        prefix = fact['prepared']['sinks']['take_all']['rows']
+        if not image.cut.final and 0 < prefix < len(ROWS):
+            assert fact['status'] == 'acked'
+            cuts.append(image.commit_id)
+            raise Interrupted()
     with pytest.raises(Interrupted):
         with RunContext.start(tmp_path / 'recover', limits=limits) as run, data.local_execution():
             ref = run.ref
             with monkeypatch.context() as patch:
-                patch.setattr(DataflowExecution, '_retire_phase', interrupt)
+                patch.setattr(DataflowExecution, '_finish_publication', interrupt)
                 dataset().take_all()
     assert len(cuts) == 1
     with RunContext.resume(ref) as run, data.local_execution():
