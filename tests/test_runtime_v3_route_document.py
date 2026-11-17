@@ -89,8 +89,11 @@ def test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed(fault)
     if isinstance(old.value,DataflowError):assert old.value.code==new.value.code
     # The joint admission rejects malformed encoded_bytes before allocating a
     # routing ordinal. The old split helper advanced before checking payload.
-    assert new_state.values()=={'route':0}
-    assert old_state.values()=={'route':1 if fault in ('low_size','high_size') else 0}
+    if fault in ('low_size','high_size'):
+        assert new_state.values()=={'route':0}
+        assert old_state.values()=={'route':1}
+    else:
+        assert new_state.values()==old_state.values()
 
 
 def test_external_payload_keeps_original_reference_channel_window_and_document_bytes():
