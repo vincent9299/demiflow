@@ -102,15 +102,19 @@ def discover(root, control=None):
         tree = ast.parse(raw, filename=relative)
         if sum(1 for _ in ast.walk(tree)) > 50000:
             raise ForgeError('Entry AST exceeds discovery budget', code='resource_limit')
-        functions, config_count = {}, 0
+        functions, requirements, config_count = {}, {}, 0
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 count, line = functions.get(node.name, (0, node.lineno))
                 functions[node.name] = (count + 1, line)
+                positional = [*node.args.posonlyargs, *node.args.args]
+                requirements[node.name] = [p.arg for p in positional[:len(positional)-len(node.args.defaults)]]
+                requirements[node.name].extend(p.arg for p, default in zip(node.args.kwonlyargs, node.args.kw_defaults)
+                                               if default is None)
             if isinstance(node, ast.FunctionDef) and node.name == 'config':
                 config_count += 1
         facts = dict(sha256=hashlib.sha256(raw).hexdigest(),
-                     functions=functions, configurations=config_count)
+                     functions=functions, requirements=requirements, configurations=config_count)
         if stamp() != before:
             raise ForgeError('Entry source changed during discovery', code='conflict')
         entry_sources[target] = (before, facts)
@@ -136,6 +140,7 @@ def discover(root, control=None):
                 issue('entry_missing', relative, '声明的顶层入口函数不存在或不唯一。')
             else:
                 item['line'] = line
+                item['required_arguments'] = source['requirements'][symbol]
             if protocol == 'config_run_pipeline':
                 item['configuration_entry'] = relative + ':config'
                 if source['configurations'] != 1:
@@ -320,6 +325,9 @@ def discover(root, control=None):
                     row['format'] = None
                     issue('configuration_format_unknown', path, '未识别为版本化参数协议；仅展示原配置和明确的数据引用，不校验其业务语义。')
                 row['status'] = 'native_parameters' if row['format'] in PARAMETERS else 'original_configuration'
+                row['plan_preview_parameters'] = (type(data) is dict and type(data.get('arguments')) is dict
+                    and (set(data) <= {'arguments', 'run_directory'} or
+                         row['format'] in PARAMETERS and set(data) == {'format', 'arguments'}))
                 pending, visits = [(data, '', 0)], 0
                 while pending:
                     obj, pointer, depth = pending.pop();visits += 1

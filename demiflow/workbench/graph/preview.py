@@ -143,7 +143,17 @@ def _preview(root, *, entry, params=None):
             bound = {}
             def construct():
                 arguments, bound['params_sha'] = _parameters(root, control, entry, params)
-                inspect.signature(function).bind(**arguments)
+                signature = inspect.signature(function)
+                try:
+                    signature.bind(**arguments)
+                except TypeError as exc:
+                    missing = [name for name, p in signature.parameters.items()
+                               if p.default is inspect.Parameter.empty and name not in arguments
+                               and p.kind not in {p.VAR_POSITIONAL, p.VAR_KEYWORD}]
+                    detail = ('请选择配置，入口需要参数：' if params is None else '所选配置缺少入口参数：') + '、'.join(missing[:16])
+                    if not missing:
+                        detail = '所选配置的 arguments 与入口参数不匹配：' + str(exc)[:256]
+                    raise ForgeError(detail, code='invalid_request') from exc
                 return function(**arguments)
             result = capture_pipeline(construct, {})
             params_sha = bound['params_sha']

@@ -79,8 +79,8 @@
     previewPath.setAttribute('aria-label','解析配置路径');previewPaths.id='wb-plan-configs-'+project;
     previewPath.setAttribute('list',previewPaths.id);field('解析配置',previewPath,previewControls);previewControls.append(previewPaths);
     const previewButton=button('解析执行计划',()=>compilePlanPreview(),previewControls);
-    previewControls.append($('span','只编译当前入口与已保存配置，不启动数据处理。','wb-caption'));
-    previewPath.oninput=()=>{if(!disposed){clearPlanPreview(true);updateActions();}};
+    const previewHint=$('span','只编译当前入口与已保存配置，不启动数据处理。','wb-caption');previewControls.append(previewHint);
+    previewPath.oninput=()=>{if(!disposed){clearPlanPreview(true);if(!ctx.flows.find(f=>f.entry===working?.entry)?.parameters?.length)paramsChoice.value=previewPath.value.trim();updateActions();}};
     const graph=ForgeWorkbenchGraph.mount(graphHost,{onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
     button('−',()=>graph.zoom(.8),tools).setAttribute('aria-label','缩小算子图');
     button('+',()=>graph.zoom(1.25),tools).setAttribute('aria-label','放大算子图');
@@ -134,6 +134,7 @@
     function graphLoading(loading){graphHost.inert=inspector.inert=checks.inert=loading;if(loading){graphHost.setAttribute('aria-busy','true');basisLabel.textContent='正在读取图…';disposeReaders(sourceBody);sourceBody.replaceChildren($('p','正在读取绑定来源…','wb-caption'));}else graphHost.removeAttribute('aria-busy');updateActions();}
     function transition(patch){clearPlanPreview();previewInputBasis=null;notice.hidden=true;notice.textContent='';delete notice.dataset.observationError;observer.stop();controller.abort();controller=new AbortController();snapshot=null;sourceSequence++;nodeSequence++;graphSequence++;scopeNode=null;nodeOffset=0;graphModel=null;actionExplicit=false;logOffset=0;logBody='';eventCursor=null;eventRows=[];lastMetricAt=lastEventAt=0;observationCursor=null;observationPages=[];lastObservationRevision=null;trend.hidden=true;trendPlot.replaceChildren();runFacts.hidden=results.hidden=runDetail.hidden=true;runFacts.replaceChildren();results.replaceChildren();runDetailBody.replaceChildren();outputFingerprint=null;graphLoading(true);const ticket=state.transition(patch);markHistorySelection();updateActions();return ticket;}
     function registered(){return !!working&&ctx.flows.some(f=>f.entry===working.entry&&(f.parameters||[]).includes(working.params));}
+    function requiredPreviewArguments(){return ctx.project?.entries?.find(e=>e.entry===working?.entry)?.required_arguments||[];}
     function choices(){
       const entries=new Map();
       for(const e of ctx.project?.entries||[])entries.set(e.entry,{value:e.entry,label:e.entry+(e.protocol==='native_flow'?'':' · 原入口')});
@@ -143,14 +144,18 @@
     }
     function paintSelectors(){
       const selectedEntry=run?.entry||working?.entry,selectedParams=run?.parameter_path||working?.params;
+      const inputBasis=json([selectedEntry||null,selectedParams||null]);
+      if(inputBasis!==previewInputBasis){previewPath.value=selectedParams||'';previewInputBasis=inputBasis;}
       entryChoice.replaceChildren();for(const item of choices()){const option=$('option',item.label);option.value=item.value;entryChoice.append(option);}entryChoice.value=selectedEntry||'';
       entryChoice.disabled=!!run||!entryChoice.options.length;
       const configs=ctx.flows.find(f=>f.entry===selectedEntry)?.parameters||[];
-      paramsChoice.replaceChildren();for(const path of [...new Set([...configs,...(selectedParams?[selectedParams]:[])])]){const option=$('option',path);option.value=path;paramsChoice.append(option);}
+      const originalConfigs=(ctx.project?.configurations||[]).filter(item=>item.plan_preview_parameters===true).map(item=>item.path);
+      const selectable=configs.length||run?configs:originalConfigs;
+      paramsChoice.replaceChildren();
+      if(!run&&!configs.length){const option=$('option',selectable.length?'请选择用于解析的配置':'可在下方填写解析配置路径');option.value='';paramsChoice.append(option);}
+      for(const path of [...new Set([...selectable,...(selectedParams?[selectedParams]:[])])]){const option=$('option',path);option.value=path;paramsChoice.append(option);}
       if(!paramsChoice.options.length){const option=$('option',run?'封存运行使用内联参数':'尚无原生参数绑定');option.value='';paramsChoice.append(option);}
-      paramsChoice.value=selectedParams||'';paramsChoice.disabled=!!run||!configs.length;
-      const inputBasis=json([selectedEntry||null,selectedParams||null]);
-      if(inputBasis!==previewInputBasis){previewPath.value=selectedParams||'';previewInputBasis=inputBasis;}
+      paramsChoice.value=selectedParams||previewPath.value||'';paramsChoice.disabled=!!run||!selectable.length;
       const paths=[...new Set([...configs,...(ctx.project?.configurations||[]).map(item=>item.path).filter(path=>typeof path==='string'&&path.endsWith('.json'))])];
       previewPaths.replaceChildren();for(const path of paths.slice(0,128)){const option=$('option');option.value=path;previewPaths.append(option);}
       updateActions();
@@ -168,7 +173,9 @@
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
       wholeButton.disabled=!data().graph;
       previewControls.hidden=!!run||!!data().run;
-      previewButton.disabled=busy||previewBusy||!!run||!!data().run||!working?.entry||dirty||graphHost.hasAttribute('aria-busy');
+      const needsConfiguration=!previewPath.value.trim()&&requiredPreviewArguments().length>0;
+      previewButton.disabled=busy||previewBusy||!!run||!!data().run||!working?.entry||dirty||needsConfiguration||graphHost.hasAttribute('aria-busy');
+      previewHint.textContent=needsConfiguration?'先在顶部“配置”中选择原项目配置，再点击“解析执行计划”。入口需要：'+requiredPreviewArguments().slice(0,8).join('、')+'。':'只编译当前入口与已保存配置，不启动数据处理。';
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存当前配置草稿，解析使用已保存文件':'读取当前入口和指定配置，由引擎编译首个执行动作';
       previewPath.disabled=previewBusy||!!run||!!data().run;
@@ -181,7 +188,13 @@
       guardSettings();
     }
     entryChoice.onchange=async()=>{if(disposed||!entryChoice.isConnected)return;const entry=entryChoice.value,params=(ctx.flows.find(f=>f.entry===entry)?.parameters||[])[0]||null;await useWorking(entry,params);};
-    paramsChoice.onchange=async()=>{if(!disposed&&paramsChoice.isConnected)await useWorking(entryChoice.value,paramsChoice.value);};
+    paramsChoice.onchange=async()=>{
+      if(disposed||!paramsChoice.isConnected)return;
+      if(!(ctx.flows.find(f=>f.entry===entryChoice.value)?.parameters||[]).length){
+        previewPath.value=paramsChoice.value;clearPlanPreview(true);updateActions();return;
+      }
+      await useWorking(entryChoice.value,paramsChoice.value);
+    };
     function diagnosticTarget(d){return (d.related_nodes||[])[0]||data().graph?.nodes.find(n=>n.source===d.path&&n.line===d.line)?.id;}
     function renderDiagnostics(items,parent,onLocate=null){
       if(!items.length){parent.append($('p','此范围没有诊断；是否通过仍以检查状态和覆盖为准。','wb-caption'));return;}

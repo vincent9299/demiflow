@@ -555,6 +555,8 @@ class Handler(BaseHTTPRequestHandler):
             # The fixed services own their closed, typed value schemas.
             return request
         for key, value in request.items():
+            if name == 'plan-preview' and key == 'params' and value is None:
+                continue  # Explicitly use the entry's default arguments.
             if key in {'expected_attempt', 'attempt'}:
                 if value is not None and (type(value) is not int or not 1 <= value <= 32):
                     raise ForgeError('Invalid attempt', code='invalid_request')

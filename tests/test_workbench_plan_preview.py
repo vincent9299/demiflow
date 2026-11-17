@@ -10,6 +10,7 @@ from test_forge_project_discovery import original, snapshot, cached_snapshot, bu
 from demiflow.workbench.graph.preview import preview
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.schema import ForgeError
+from test_forge_public_api import service, request
 
 
 def test_original_helpers_and_parameter_branches_compile_without_execution(original):
@@ -55,6 +56,28 @@ def run_pipeline():
     before = business_bytes(original)
     with pytest.raises(ForgeError, match='解析阶段'):
         preview(original, entry='dispatch.py:run_pipeline')
+    assert business_bytes(original) == before
+
+
+@pytest.mark.parametrize('required', [False, True])
+def test_http_accepts_null_params_and_explains_required_arguments(original, required):
+    signature = '*, stage, target' if required else ''
+    (original / 'dispatch.py').write_text('from demiflow import data\n'
+        'def config(): return {}\n'
+        f'def run_pipeline({signature}):\n    return data.from_items([1]).take_all()\n')
+    ws.init_workspace(original, existing=True)
+    before = business_bytes(original)
+    with service(original) as app:
+        code, result = request(app, '/api/plan-preview', dict(entry='dispatch.py:run_pipeline', params=None))
+        if required:
+            assert code == 400 and result['code'] == 'invalid_request'
+            assert '请选择配置' in result['error'] and 'stage' in result['error'] and 'target' in result['error']
+        else:
+            assert code == 200 and result['available'] and result['kind'] == 'take_all'
+            assert result['basis']['params'] is None
+        # Null belongs only to this endpoint; malformed path values remain invalid.
+        code, result = request(app, '/api/plan-preview', dict(entry='dispatch.py:run_pipeline', params=True))
+        assert code == 400 and result['code'] == 'invalid_request'
     assert business_bytes(original) == before
 
 

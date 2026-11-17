@@ -15,9 +15,49 @@ from demiflow.execution.plan_capture import capture_pipeline, build_logical_plan
 from demiflow.workbench.projects import registry
 from test_forge_markdown_reading import browser
 from test_forge_project_discovery import original, snapshot, cached_snapshot
+from test_forge_project_discovery import business_bytes
 from test_forge_public_api import service
 from test_forge_web_redesign import opened
 from test_ui_d19_projection_fixes import project
+
+
+def test_original_configuration_selector_compiles_through_real_http(original, tmp_path, browser):
+    (original / 'dispatch.py').write_text('''from demiflow import data
+def config(): return {}
+def forbidden(row): raise AssertionError('must not execute rows')
+def run_pipeline(*, stage):
+    rows = data.from_items([{'id': 1}]).map(forbidden)
+    if stage == 'combined': rows = rows.union(data.from_items([{'id': 2}]))
+    return rows.take_all()
+''')
+    for name in ('plain', 'combined'):
+        (original / f'settings/{name}.json').write_text(json.dumps({'arguments': {'stage': name}}))
+    (original / 'README.md').write_text('[plain](settings/plain.json)\n[combined](settings/combined.json)\n[unrelated](settings/small.json)\n')
+    before = business_bytes(original)
+    registry_path = tmp_path / 'registry.json'
+    registry.add(registry_path, original)
+    with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
+        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        expect(page.locator('.wb-node')).to_have_count(0)
+        compile_button = page.get_by_role('button', name='解析执行计划', exact=True)
+        expect(compile_button).to_be_disabled()
+        expect(page.locator('.wb-plan-preview-controls')).to_contain_text('先在顶部“配置”中选择')
+        choice = page.get_by_role('combobox', name='配置', exact=True)
+        expect(choice).to_be_enabled()
+        assert choice.locator('option[value="settings/small.json"]').count() == 0
+        for name, count in (('plain', 3), ('combined', 5)):
+            choice.select_option('settings/' + name + '.json')
+            expect(page.locator('.wb-node')).to_have_count(0)
+            expect(compile_button).to_be_enabled()
+            with page.expect_response(lambda response: response.url.endswith('/plan-preview')) as pending:
+                compile_button.click()
+            response = pending.value
+            assert response.status == 200, response.text()
+            assert response.json()['basis']['params'] == 'settings/' + name + '.json'
+            expect(page.locator('.wb-node')).to_have_count(count)
+        assert len([url for method, url in requests if method == 'POST' and url.endswith('/plan-preview')]) == 2
+        expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
+    assert business_bytes(original) == before
 
 
 def _transform(row):
@@ -134,6 +174,8 @@ def test_unmounted_preview_response_cannot_repopulate_a_new_view(original, tmp_p
         assert len(held) == 1
         held[0].fulfill(status=200, content_type='application/json', body=json.dumps(preview))
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_disabled()
+        page.get_by_role('combobox', name='解析配置路径').fill('settings/small.json')
         expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_enabled()
         expect(page.locator('.wb-node')).to_have_count(0)
         expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
