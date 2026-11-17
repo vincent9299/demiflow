@@ -56,6 +56,12 @@ def _slow_keep(value):
     return True
 
 
+def _oversized_value(state, row, *, calls):
+    with Path(calls).open('a') as target:
+        target.write('called\n')
+    return ['x' * 6000]
+
+
 def _assert_rows(actual, expected):
     # Group output order is not an API promise; order inside each fold is.
     _assert_exact(sorted(actual, key=repr), sorted(expected, key=repr))
@@ -243,8 +249,11 @@ def test_reducer_value_limits_reject_without_committed_output(tmp_path, bound):
               'max_row_bytes': 8192 if bound == 'state' else 1024}
     with pytest.raises(DataflowError) as failure:
         with RunContext.start(tmp_path / 'run', limits=limits) as run, data.local_execution(workers=1):
-            data.from_items([{'k': 1}]).reduce_by_key('k', lambda state, row: ['x' * 6000]).take_all()
-    assert failure.value.code in {'BUDGET_EXCEEDED', 'RESOURCE_INFEASIBLE'}
+            data.from_items([{'k': 1}]).reduce_by_key('k', _oversized_value,
+                fn_kwargs={'calls': str(tmp_path / 'calls')}).take_all()
+    assert failure.value.code == 'BUDGET_EXCEEDED'
+    assert ('state' if bound == 'state' else 'row byte budget') in str(failure.value)
+    assert (tmp_path / 'calls').read_text() == 'called\n'
     from demiflow.execution.run_journal import RunJournal
     assert RunJournal(tmp_path / 'run').execution_commits('action-1') == []
 
@@ -278,6 +287,8 @@ def test_top_level_mapping_keys_and_closed_data_gate_remain_strict():
     class Code:
         def __reduce__(self):
             raise AssertionError('business transport must never invoke pickle')
+    with pytest.raises(DataflowError):
+        Record('0' * 64, {}, None, Code(), 1, 0)
     for value in (Code(), [Code()]):
         with pytest.raises(DataflowError):
             _encode_payload(value, max_bytes=4096)
