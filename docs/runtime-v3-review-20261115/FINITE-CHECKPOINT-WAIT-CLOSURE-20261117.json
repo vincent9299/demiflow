@@ -1,0 +1,105 @@
+{
+  "schema": "demiflow.finite-checkpoint-wait-closure.v1",
+  "base": "1997f7a5ec174fea0c73a9a3cb4eae6e23cb5d54",
+  "candidate": "aae8c409dca38f8b522c323d1ca7cd6612b8bb53",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_finite_checkpoint_admission_20261117",
+  "branch": "engine/gpt-finite-checkpoint-admission-20261117",
+  "evidence": [
+    {
+      "receipt": "/tmp/demiflow-finite-checkpoint-baseline-r1-evidence/verification.json",
+      "sha256": "e1b0714fbb0f10e4b0faa5badd96a07098957eaca59974051d48d4a71ad1862b",
+      "head": "1997f7a5ec174fea0c73a9a3cb4eae6e23cb5d54",
+      "inputs": 2990,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "head_unchanged": true,
+      "children_after": [],
+      "phases": {
+        "setup:passed": 14,
+        "call:failed": 14,
+        "teardown:passed": 14
+      },
+      "exit_code": 1
+    },
+    {
+      "receipt": "/tmp/demiflow-finite-checkpoint-r1-evidence/verification.json",
+      "sha256": "a796b39ec98a1600647bf79877ce496eebaee67aa0e1832fd0fa7cdfc8ce4ae4",
+      "head": "a9d5031e45ad38b624fb3f9c4e3c858273e67941",
+      "inputs": 2991,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "head_unchanged": true,
+      "children_after": [],
+      "phases": {
+        "setup:passed": 47,
+        "call:failed": 27,
+        "teardown:passed": 47,
+        "call:passed": 20
+      },
+      "exit_code": 1
+    },
+    {
+      "receipt": "/tmp/demiflow-finite-checkpoint-r2-evidence/verification.json",
+      "sha256": "7b46ab879f410f54bccec873f3edf0945b631108e1633b1c63968788c9c78829",
+      "head": "80c16e00e9d197e11e711e5a4db02ddaef7a9151",
+      "inputs": 2991,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "head_unchanged": true,
+      "children_after": [],
+      "phases": {
+        "setup:passed": 151,
+        "call:passed": 151,
+        "teardown:passed": 152,
+        "setup:skipped": 1
+      },
+      "exit_code": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-finite-checkpoint-ray-r1-evidence/verification.json",
+      "sha256": "8b545f541b778d4f9968666594c70ecccd67b80a24dd4eec224e660837af1dbd",
+      "head": "aae8c409dca38f8b522c323d1ca7cd6612b8bb53",
+      "inputs": 2991,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "head_unchanged": true,
+      "children_after": [],
+      "phases": {
+        "setup:passed": 22,
+        "call:passed": 22,
+        "teardown:passed": 22
+      },
+      "exit_code": 0
+    },
+    {
+      "receipt": "/tmp/demiflow-finite-checkpoint-hot-key-r1-evidence/verification.json",
+      "sha256": "8b55d4a674c3b34478514668ea771da6a20f6d39b0e9bd37c0ce4bd737a2c701",
+      "head": "aae8c409dca38f8b522c323d1ca7cd6612b8bb53",
+      "inputs": 2991,
+      "git_mismatches": [],
+      "source_unchanged": true,
+      "head_unchanged": true,
+      "children_after": [],
+      "phases": {
+        "setup:passed": 2,
+        "call:passed": 2,
+        "teardown:passed": 2
+      },
+      "exit_code": 0
+    }
+  ],
+  "external_baseline_test": {
+    "commit": "a4e14c9",
+    "path": "tests/test_runtime_v3_finite_checkpoint_wait.py",
+    "sha256": "c5e2955787fce5e5bf35b2590386dede0cb8e847b02ad130a814e130662e87a1"
+  },
+  "performance_gate": "not_run_by_this_lane",
+  "formal_limits_unchanged": {
+    "checkpoint_timeout_s": 60,
+    "timeout_s": 120
+  },
+  "main_checkout_written": false,
+  "root_worktree_written": false,
+  "active_tests": false,
+  "integration_review": "parent_pending"
+}
