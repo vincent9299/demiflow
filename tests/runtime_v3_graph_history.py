@@ -68,6 +68,43 @@ def capture_acks(run, action_id):
             if fact['status'] == 'acked'}
 
 
+def acknowledged_ancestor_rows(run, action_id, facts):
+    """Read the actual business boundary, not a pre-read source cursor/cut size."""
+    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.dataflow_store import RunArtifactStore
+    from demiflow.execution.dataflow_checkpoint import _artifact_from_json
+    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.contracts.dataflow_codec import compute_participant_id
+    from demiflow.execution.recovery_contract import identity
+    sealed = load_sealed_plan(run.directory, action_id, version='v3')
+    physical = sealed['physical']
+    result_nodes = [node for node in sealed['graph'].nodes
+                    if 'graph_result' in node.kernel.configuration]
+    assert len(result_nodes) == 1 and facts
+    occurrence = result_nodes[0].kernel.configuration['graph_result']['ancestor']
+    owners = [(stage, partition) for stage in physical.stages if occurrence in stage.occurrences
+              for partition in stage.partitions]
+    assert len(owners) == 1, 'this historical ancestor is a single original occurrence'
+    stage, partition = owners[0]
+    owner = compute_participant_id(stage.stage_id, partition)
+    latest = max(facts.values(), key=lambda fact: fact['sequence'])
+    image = StateArtifacts(run).read(latest['prepared']['state']['dataflow-cut-v3'])
+    contributions = [c for c in image['contributions'] if c['participant_id'] == owner]
+    assert len(contributions) == 1
+    ref = _artifact_from_json(contributions[0]['operator_states'][identity(['worker-frontier', partition])])
+    store = RunArtifactStore(root=run.directory / '.dataflow-store', store_id='local',
+        journal=None, bounds=physical.bounds, readonly=True)
+    frontier = json.loads(b''.join(store.read(ref, max_bytes=physical.bounds.max_state_bytes)))
+    assert frontier['schema'] == 'demiflow.worker-frontier.v3'
+    metrics = frontier['metrics'][occurrence]
+    assert set(metrics) == {'rows_input', 'rows_output'}
+    assert type(metrics['rows_output']) is int and metrics['rows_output'] >= 0
+    # The original ancestor is exactly one output per input. No buffer may be
+    # mistaken for a completed business call in this fixture.
+    assert metrics['rows_input'] == metrics['rows_output']
+    return metrics['rows_output']
+
+
 def assert_acks_retained(run, action_id, before):
     after = capture_acks(run, action_id)
     assert before and before.keys() <= after.keys()

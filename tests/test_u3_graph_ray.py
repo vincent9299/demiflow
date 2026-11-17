@@ -1,17 +1,14 @@
 """U3 Ray Core graph carriage + SEM + fault matrix (S5, exit gate 3 Ray).
 
-Single-host Ray Core (env-ray, ray 2.60.0 Core only) is semantic-adaptation
-evidence only (design §8): no multi-host/GPU/performance claim. The whole graph
-runs in independent named Ray actor hosts hosting the *same* WorkerRuntime +
-GraphWorkerExecutor + GraphWorkerProgress as the Local process graph worker; the
-driver owns the control plane, the fixed source capture and the single commit
-authority (GraphCommitTerminal). The data plane is the Ray carriage: one async
-channel actor per physical channel (actor-method frames), ray_object plasma for
-large payloads — business rows flow worker->worker and never transit the driver.
+Single-host Ray Core is semantic-adaptation evidence only (design §8): no
+multi-host/GPU/performance claim. Graph actions run through the unified worker
+runtime with Ray actor hosts, original source capture, RunJournal and the sole
+driver commit authority. The separate large-payload carriage test retains its
+original Ray object read and checksum oracle.
 
 SEM proves the same graph/source yields an identical output multiset, record
-identity, commit sequence/position progression, K6 manifest shape and runtime_owner
-across Local and Ray. The Ray fault matrix covers producer/consumer actor death
+identity, contiguous original commit history, final source cursors and runtime_owner
+across Local and Ray; legal physical stage/cut counts can differ. The fault matrix covers producer/consumer actor death
 (whole-graph restore from the acked cut, exactly once) and sealed storage early
 failure with no unauthorized publication.
 """
@@ -262,7 +259,7 @@ def test_ray_object_large_payload_direct_read_not_inline(tmp_path, ray_cluster):
 # ---------------- Ray fault matrix: actor death -> whole-graph restore exactly once ----------------
 
 def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, ray_cluster):
-    from runtime_v3_graph_history import capture_acks, assert_acks_retained
+    from runtime_v3_graph_history import capture_acks, assert_acks_retained, acknowledged_ancestor_rows
     from runtime_v3_owned_crash import assert_worker_loss
     driver_pid = os.getpid()
     from collections import Counter
@@ -272,8 +269,8 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
 
     def crashing_ancestor(row):
         # Trace each processed row, then kill the actor process once on the first
-        # POST-cut row (x==8). unconfirmed_rows==8 blocks the feed at the cut-8 bound
-        # until the driver acks, so the death lands strictly after cut 8 is durable.
+        # row x==8. The authenticated frontier below proves the committed prefix;
+        # a physical pressure cut need not contain exactly checkpoint_rows rows.
         with open(trace, "a") as stream:
             stream.write(str(row["x"]) + "\n")
         if row["x"] == 8 and not crash_marker.exists():
@@ -290,6 +287,8 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
     assert_worker_loss(failure.value)
     _assert_actor_exited(crash_marker, run)
     original_acks = capture_acks(run, 'action-1')
+    acknowledged_prefix = acknowledged_ancestor_rows(run, 'action-1', original_acks)
+    assert 0 < acknowledged_prefix <= 8
 
     executor = RayDatasetExecutor(unified_graph=True)
     with RunContext.resume(reference, limits=limits) as run2:
@@ -308,13 +307,13 @@ def test_ray_graph_producer_death_recovers_acked_prefix_exactly_once(tmp_path, r
             assert [r["x"] for r in rows] == [i * 2 for i in range(n)], rid
         assert _owner(run2) == (run2.attempt, run2.fence)
     assert result["egress_rows"] == n
-    # The acked prefix (x==0..7) ran once; the crashed post-cut row (x==8) recomputes
-    # once on restore; every later row runs once. No duplication of the acked prefix.
+    # Original committed business calls are never replayed; the unacknowledged
+    # suffix through the fatal call is replayed once, and later inputs run once.
     counts = Counter(int(line) for line in trace.read_text().splitlines())
-    assert counts[8] == 2
-    for i in range(n):
-        if i != 8:
-            assert counts[i] == 1, (i, counts[i])
+    assert set(counts) == set(range(n))
+    assert all(counts[i] == 1 for i in range(acknowledged_prefix))
+    assert all(counts[i] == 2 for i in range(acknowledged_prefix, 9))
+    assert all(counts[i] == 1 for i in range(9, n))
 
 
 

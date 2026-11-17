@@ -82,16 +82,15 @@ def _release_crash_orphans(root):
 
 def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
     from runtime_v3_owned_crash import kill_owned_worker, assert_worker_killed, process_records
-    from runtime_v3_graph_history import capture_acks, assert_acks_retained
+    from runtime_v3_graph_history import capture_acks, assert_acks_retained, acknowledged_ancestor_rows
     driver_pid = os.getpid()
     crash_marker = tmp_path / "crashed-once"
     trace = tmp_path / "ancestor-trace"
 
     def shared_double(row):
         # Trace every row the ancestor actually processes, then crash the whole
-        # worker once on the first POST-cut row (x==8). With unconfirmed_rows==8 the
-        # feed blocks at the cut-8 bound until the driver acks, so the crash lands
-        # strictly after cut 8 is durable: rows x==0..7 are the acked prefix.
+        # worker once on row x==8. The original ACK below proves exactly which
+        # business prefix was durable, independently of physical pressure cuts.
         with open(trace, "a") as stream:
             stream.write(str(row["x"]) + "\n")
         if row["x"] == 8 and not crash_marker.exists():
@@ -115,6 +114,8 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
     assert_worker_loss(failure.value)
     assert_worker_killed(crash_marker, tmp_path / 'run')
     original_acks = capture_acks(run, execution.action_id)
+    acknowledged_prefix = acknowledged_ancestor_rows(run, execution.action_id, original_acks)
+    assert 0 < acknowledged_prefix <= 8
     original_processes = process_records(tmp_path / 'run')
 
     with RunContext.resume(reference, limits=limits) as run2:
@@ -141,13 +142,13 @@ def test_graph_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
     assert result["egress_rows"] == n
     for rid in readers:
         assert result["target_rows"][rid] == n
-    # The acked prefix (x==0..7) ran exactly once; the crashed post-cut row (x==8)
-    # was never acked so it recomputes once; every later row runs once on restore.
+    # Exactly the original committed business prefix is never called again.
+    # The unacknowledged suffix through the fatal row is allowed one replay.
     counts = Counter(int(line) for line in trace.read_text().splitlines())
-    assert counts[8] == 2
-    for i in range(n):
-        if i != 8:
-            assert counts[i] == 1, (i, counts[i])
+    assert set(counts) == set(range(n))
+    assert all(counts[i] == 1 for i in range(acknowledged_prefix))
+    assert all(counts[i] == 2 for i in range(acknowledged_prefix, 9))
+    assert all(counts[i] == 1 for i in range(9, n))
 
     records = process_records(tmp_path / 'run')
     assert original_processes.keys() < records.keys(), 'restore must provision a new physical owner'
