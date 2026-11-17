@@ -379,6 +379,7 @@ def _merge_into(
     readers = [_run_frames(ref, services, window) for ref in sources]
     try:
         for frame in heapq.merge(*readers, key=lambda item: (item[0], item[1])):
+            _check_stop(services)
             yield frame
     finally:
         for reader in readers:

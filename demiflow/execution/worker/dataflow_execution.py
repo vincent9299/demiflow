@@ -36,6 +36,21 @@ _EVENT_SCHEMA = "demiflow.dataflow_event.v3"
 _MAX_LOCAL_EVENTS = 4096
 
 
+class _FiniteServices:
+    """Borrow the original ports/data; override only pure computation's stop.
+
+    Do not rebuild RuntimeServices: its validation copies constants/program
+    mappings, whereas this invocation-local view adds only two references.
+    """
+    __slots__ = ('_original', 'check_stop')
+
+    def __init__(self, original, check_stop):
+        self._original, self.check_stop = original, check_stop
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
 def _dataflow_error(code, message, *, retryable=False, context=None):
     from ..contracts.dataflow_errors import DataflowError
     return DataflowError(code, message, retryable=retryable, context=context or {})
@@ -152,6 +167,11 @@ class DataflowWorkerExecutor:
     def _check_grant(self):
         self._services.journal.check_grant()
         self._services.check_stop()
+
+    def _check_finite_stop(self):
+        self._services.check_stop()
+        if self._cancel_event.is_set():
+            raise _dataflow_error('CANCELLED', 'business execution cancelled')
 
     # ---- B002 load ----
     def load(self, assignment: "WorkerAssignment") -> None:
@@ -288,6 +308,10 @@ class DataflowWorkerExecutor:
                                       context={"state": self._state})
             self._check_grant()
             facts = self._services.journal.read_action(self.assignment.action_id)
+            # Pure finite scans observe executor cancellation. Callable/native
+            # persistence keeps its original service and admitted-effect drain.
+            # This view shares the same authenticated ports/grant/assignment.
+            self._finite_services = _FiniteServices(self._services, self._check_finite_stop)
             self._source_run = source_run_view(self._services, limits=facts['limits'])
             with source_run_scope(self._source_run):
                 assignment = self.assignment
@@ -301,7 +325,8 @@ class DataflowWorkerExecutor:
                     if self._node_specs[occ].kind in ("source", "terminal"):
                         continue
                     for partition in assignment.lease.partition_ids:
-                        kernel = make_kernel(spec, services=self._services, partition_id=partition)
+                        kernel = make_kernel(spec, services=self._services, partition_id=partition,
+                                             finite_services=self._finite_services)
                         if occ in shared:
                             kernel._shared_actor = shared[occ]
                         self._kernels[(occ, partition)] = kernel
@@ -325,7 +350,7 @@ class DataflowWorkerExecutor:
                     partition = assignment.lease.partition_ids[0]
                     members = {occ: self._kernels[(occ, partition)] for occ in region_plan.occurrences}
                     region = RelationalRegionRuntime(region_plan, kernels=members,
-                        services=self._services, edges=self._graph.edges)
+                        services=self._finite_services, edges=self._graph.edges)
                     for kernel in members.values():
                         kernel._relational_region = region
                     self._relational_regions[region_plan.region_id] = region

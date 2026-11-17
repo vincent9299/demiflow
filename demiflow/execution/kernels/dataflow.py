@@ -661,7 +661,8 @@ KERNEL_KINDS = (
 
 
 def make_kernel(
-    spec: KernelSpec, *, services: RuntimeServices, partition_id: str
+    spec: KernelSpec, *, services: RuntimeServices, partition_id: str,
+    finite_services: RuntimeServices | None = None,
 ) -> Kernel:
     """K001: the single registry-backed factory; unknown kinds fail before start."""
     kind = spec.kind
@@ -673,4 +674,5 @@ def make_kernel(
         return bind_cached_map(spec, services=services)
     from .operator import OperatorKernel
 
-    return OperatorKernel(spec, services=services, partition_id=partition_id)
+    return OperatorKernel(spec, services=services, partition_id=partition_id,
+                          finite_services=finite_services)

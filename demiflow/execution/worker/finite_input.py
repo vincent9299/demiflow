@@ -29,8 +29,9 @@ def _metadata_ceiling(states, entries):
 
 
 class FiniteInputDrain:
-    def __init__(self, runner):
+    def __init__(self, runner, *, services=None):
         self.runner = runner
+        self._services = runner.services if services is None else services
         self._states = {}
         self._entries = {}
         self._active = None
@@ -50,6 +51,10 @@ class FiniteInputDrain:
 
     def _retain_index(self, size):
         self._index_bytes = size
+
+    def _frame_call(self, function, *args, **kwargs):
+        return self.runner._frame_call(function, *args,
+                                       _frame_check_stop=self._services.check_stop, **kwargs)
 
     def _edge(self, edge_id):
         runner = self.runner
@@ -71,8 +76,9 @@ class FiniteInputDrain:
             return
         # Authenticate every producer, route and record before ACK or invoking
         # business code. Reuse the existing bounded finite-reference validator.
-        entries = validate_finite_members(runner.services, seal_ref, spec, target=runner.partition,
-                                         frame_call=runner._frame_call)
+        entries = validate_finite_members(self._services, seal_ref, spec, target=runner.partition,
+                                         frame_call=self._frame_call)
+        self._services.check_stop()
         # Old frontiers have no partial read cursor: the old atomic consumer
         # either finished the entire producer or committed no consumption.
         positions = {entry['producer']: (entry['total_rows']
@@ -98,7 +104,7 @@ class FiniteInputDrain:
         # alias the candidate and are already included in its measured tree.
         growth = max(0, ceiling - self._metadata_bytes)
         growth += sys.getsizeof(self._states) + sys.getsizeof(self._entries)
-        runner._frame_call(admit_workspace,
+        self._frame_call(admit_workspace,
             max(workspace + 2 * size + metadata_bytes(entries), growth), runner.bounds)
         document(states, runner.bounds.max_state_bytes)
         self._states, self._entries, self._metadata_bytes = states, members, ceiling
@@ -138,7 +144,7 @@ class FiniteInputDrain:
         while processed < max_records and time.monotonic() < deadline:
             if runner._cut is not None or runner._paused and not runner._park_requested:
                 break
-            runner.services.check_stop()
+            self._services.check_stop()
             current = self._next_member()
             if current is None:
                 break
@@ -162,9 +168,9 @@ class FiniteInputDrain:
                 self._stream = frame_stream(block_chunks(runner.services.store,
                     entry['manifest_ref'], runner.bounds,
                     chunk_bytes=read_chunk_bytes(runner.bounds, runner.services),
-                    frame_call=runner._frame_call, on_retained=self._retain_index),
+                    frame_call=self._frame_call, on_retained=self._retain_index),
                     runner.bounds, services=runner.services,
-                    check_workspace=lambda size: runner._frame_call(admit_workspace, size,
+                    check_workspace=lambda size: self._frame_call(admit_workspace, size,
                         runner.bounds, _frame_reader_growth=True))
             line = self._stream.readline(line_limit(runner.bounds))
             if not line:
@@ -174,7 +180,7 @@ class FiniteInputDrain:
                 runner._edge_eoi(*key)
                 processed += 1
                 continue
-            raw, item = runner._frame_call(decode_frame, line, runner.bounds, finite=True)
+            raw, item = self._frame_call(decode_frame, line, runner.bounds, finite=True)
             del line
             self._scanned += 1
             if self._scanned > entry['total_rows']:
@@ -186,11 +192,12 @@ class FiniteInputDrain:
             record = None
             if advancing:
                 if item['target'] == runner.partition:
-                    record = runner._frame_call(decode_document, raw,
+                    record = self._frame_call(decode_document, raw,
                         record_id=item['record_id'], sequence=item['sequence'], bounds=runner.bounds)
             # No second serialized input copy survives into consumer encoding.
             del raw, item
             if record is not None:
+                self._services.check_stop()
                 runner._push(edge.consumer, edge.input_port, record)
                 del record
             if advancing:

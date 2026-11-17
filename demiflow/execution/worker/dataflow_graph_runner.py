@@ -102,7 +102,7 @@ class WorkerGraphRunner:
             if (edge.consumer not in executor._node_specs or self.partition in spec.consumer_partitions):
                 self._incoming.setdefault(edge.consumer, []).append(edge)
         from .finite_input import FiniteInputDrain
-        self._finite_input = FiniteInputDrain(self)
+        self._finite_input = FiniteInputDrain(self, services=executor._finite_services)
         self._relational_regions = getattr(executor, '_relational_regions', {})
         self._region_members = {occ for region in self._relational_regions.values()
                                 for occ in region.plan.occurrences}
@@ -912,11 +912,11 @@ class WorkerGraphRunner:
                               route_sequence=route_sequence, validated_raw=raw)
 
     def _frame_call(self, function, *args, _frame_retained=0, _frame_reader_growth=False,
-                    _frame_source_reader_growth=None, **kwargs):
+                    _frame_source_reader_growth=None, _frame_check_stop=None, **kwargs):
         """Original peer ACKs release codec room; never add another grant."""
         deadline = time.monotonic() + self.bounds.timeout_ms / 1000
         while True:
-            self.services.check_stop()
+            (self.services.check_stop if _frame_check_stop is None else _frame_check_stop)()
             with self._condition:
                 generation = self._wake_generation
                 peer_bytes = self._peer._bytes
@@ -1385,7 +1385,12 @@ class WorkerGraphRunner:
         part = stream.manifest_partitions()[0]
         return ArtifactRef(**part['data_ref']), part['rows']
 
+    def _finite_frame_call(self, function, *args, **kwargs):
+        return self._frame_call(function, *args,
+                                _frame_check_stop=self.e._finite_services.check_stop, **kwargs)
+
     def _receive_finite(self, command):
+        self.e._finite_services.check_stop()
         spec = self._exchange[command['edge_id']]
         ref = ArtifactRef(**command['seal_ref'])
         edge = next(e for e in self.e._graph.edges if e.edge_id == spec.edge_id)
@@ -1393,9 +1398,11 @@ class WorkerGraphRunner:
         if kernel is not None and kernel.accepts_finite_reference(edge.input_port):
             from ..dataflow_finite_input import validate_finite_members
             # All members are authenticated before mutating the kernel port.
-            entries = validate_finite_members(self.services, ref, spec, target=self.partition,
-                                             frame_call=self._frame_call)
+            entries = validate_finite_members(self.e._finite_services, ref, spec, target=self.partition,
+                                             frame_call=self._finite_frame_call)
+            self.e._finite_services.check_stop()
             for entry in entries:
+                self.e._finite_services.check_stop()
                 if (spec.edge_id, entry['producer']) in self._finished_inputs:
                     continue
                 if edge.consumer not in self._finished:
@@ -1403,11 +1410,13 @@ class WorkerGraphRunner:
                     self._metrics[edge.consumer]['rows_input'] += entry['rows']
                     self._dirty_metrics.add(edge.consumer)
                 self._edge_eoi(spec.edge_id, entry['producer'])
+            self.e._finite_services.check_stop()
             self._send('ack', {'delivery_id': command['delivery_id'], 'producer_partition': None})
             return
         # ACK adopts immutable, fully authenticated references. Consumption
         # proceeds in bounded steps; its cursor shares the original worker cut.
         self._finite_input.adopt(spec.edge_id, ref)
+        self.e._finite_services.check_stop()
         self._send('ack', {'delivery_id': command['delivery_id'], 'producer_partition': None})
 
     def _parkable_credits(self):

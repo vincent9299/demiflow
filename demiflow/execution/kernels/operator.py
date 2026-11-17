@@ -272,6 +272,7 @@ class _SpoolPort:
         pending = next(borrowed, None)
         member_index = 0
         for index in range(len(self._refs) + 1):
+            _check_stop(self._services)
             while pending is not None and pending['position'] == index:
                 if join_keys is None:
                     yield from borrowed_records(self._services, pending['input'])
@@ -287,6 +288,7 @@ class _SpoolPort:
                 data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes))
                 yield from state_codec.loads(data, max_bytes=self._services.bounds.max_batch_bytes)
         for fragment in self._pending:
+            _check_stop(self._services)
             raw = b''.join(state_codec.record_list_chunks((fragment,)))
             yield from state_codec.loads(raw, max_bytes=self._services.bounds.max_batch_bytes)
 
@@ -383,13 +385,15 @@ class _SpoolRecords:
 class OperatorKernel:
     """K016: the only concrete Kernel; construction performs no execution."""
 
-    def __init__(self, spec: KernelSpec, *, services: RuntimeServices, partition_id: str) -> None:
+    def __init__(self, spec: KernelSpec, *, services: RuntimeServices, partition_id: str,
+                 finite_services: RuntimeServices | None = None) -> None:
         if spec.kind not in KERNEL_KINDS:
             raise _err("INVALID_CONTRACT", "unknown kernel kind", kind=spec.kind)
         self._spec = spec
         from ..dataflow_operator_observations import CallbackObservations
         self.observations = CallbackObservations()
         self._services = services
+        self._finite_services = services if finite_services is None else finite_services
         from ..record_schema import RecordSchemas
         self._schemas = RecordSchemas(services)
         self._partition_id = partition_id
@@ -405,7 +409,7 @@ class OperatorKernel:
         self._image: dict[str, Any] | None = None
         self._segment_rows = _segment_rows(services)
         self._ports: dict[str, _SpoolPort] = {
-            port.name: _SpoolPort(port.name, services, self._segment_rows)
+            port.name: _SpoolPort(port.name, self._finite_services, self._segment_rows)
             for port in spec.inputs
             if port.requirement == "finite_complete" or spec.kind in ("union", "StreamPrependOp")
         }
@@ -714,7 +718,7 @@ class OperatorKernel:
 
     def adopt_finite_reference(self, port, entry):
         self._require_started()
-        _check_stop(self._services)
+        _check_stop(self._finite_services)
         if not self.accepts_finite_reference(port):
             raise _err('INVALID_CONTRACT', 'input port cannot borrow finite producer records')
         self._ports[port].adopt(entry)
@@ -982,6 +986,10 @@ class OperatorKernel:
         self._reducer_retained_bytes = size
 
     def _finish_complete(self) -> Iterator[Record]:
+        # This view stops pure reads/merges. Callable/actor construction and
+        # its NativeRunView still use self._services for admitted-effect drain.
+        services = self._finite_services
+        _check_stop(services)
         region = getattr(self, '_relational_region', None)
         if region is not None:
             if self._occurrence != region.plan.exit_occurrence:
@@ -995,21 +1003,21 @@ class OperatorKernel:
             left = self._ports[self._port_order[0]].records()
             right = self._ports[self._port_order[1]].records()
             yield from self._emit(preserve_block(join_partitions(left, right, spec=self._spec,
-                services=self._services, retain=self._retain_reducer_peers), None))
+                services=services, retain=self._retain_reducer_peers), None))
         elif kind == "reduce":
             from .relational import reduce_partition
 
             yield from self._emit(reduce_partition(self._ports[self._port_order[0]].records(), spec=self._spec,
-                services=self._services,retain=self._retain_reducer_peers))
+                services=services,retain=self._retain_reducer_peers))
         elif kind == "groups":
             from .relational import emit_groups
 
-            yield from self._emit(emit_groups(self._ports[self._port_order[0]].records(), spec=self._spec, services=self._services))
+            yield from self._emit(emit_groups(self._ports[self._port_order[0]].records(), spec=self._spec, services=services))
         elif kind == "union":
             from .relational import union_inputs
 
             inputs = tuple(self._ports[name].records() for name in self._port_order)
-            yield from self._emit(preserve_block(union_inputs(inputs, spec=self._spec, services=self._services), None))
+            yield from self._emit(preserve_block(union_inputs(inputs, spec=self._spec, services=services), None))
         elif kind in _ORDERING_KINDS:
             from .ordering import build_sort_runs, merge_sort_runs
             from .block_partition import partition_records, block_count
@@ -1019,17 +1027,17 @@ class OperatorKernel:
             layout = None
             if kind == 'RandomizeBlockOrderOp':
                 from .block_partition import shuffled_block_layout
-                layout = shuffled_block_layout(port.records(), spec=self._spec, services=self._services)
+                layout = shuffled_block_layout(port.records(), spec=self._spec, services=services)
             if kind != 'RepartitionOp' or self._spec.configuration.get('keys'):
                 sort_spec = self._spec
                 if kind == 'RepartitionOp':
                     sort_spec = replace(sort_spec, configuration={**dict(sort_spec.configuration),
                         'keys': list(sort_spec.configuration.get('keys') or ()),
                         'num_blocks': block_count(sort_spec, rows=port._count, bounds=self._services.bounds)})
-                runs = build_sort_runs(records, spec=sort_spec, services=self._services)
-                records = merge_sort_runs(runs, spec=sort_spec, services=self._services)
+                runs = build_sort_runs(records, spec=sort_spec, services=services)
+                records = merge_sort_runs(runs, spec=sort_spec, services=services)
             if kind in ('RepartitionOp', 'RandomShuffleOp'):
-                records = partition_records(records, spec=self._spec, rows=port._count, services=self._services)
+                records = partition_records(records, spec=self._spec, rows=port._count, services=services)
             elif layout is not None:
                 from .block_partition import reordered_records
                 records = reordered_records(records, layout=layout, spec=self._spec)
@@ -1040,7 +1048,7 @@ class OperatorKernel:
             from .aggregate import accumulate_partial
 
             records = self._ports[self._port_order[0]].records()
-            self.aggregate_state = accumulate_partial(records, spec=self._spec, services=self._services)
+            self.aggregate_state = accumulate_partial(records, spec=self._spec, services=services)
         else:
             raise _err("INVALID_CONTRACT", "kind has no finite-complete finish", kind=kind)
 
