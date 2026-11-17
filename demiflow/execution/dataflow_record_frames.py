@@ -427,6 +427,84 @@ def decode_document(raw, *, record_id, sequence, bounds, services=None, retained
     return _validate_record(record)
 
 
+class _RecordFrameParts:
+    """One invocation's original fragments, optionally written as one small row.
+
+    The default iterator keeps the original 512-byte encoding workspace. Only
+    the terminal's current owner can admit the additional single-row peak after
+    a block switch has flushed; this carries no reusable allocation or cache.
+    """
+    __slots__ = ('_record', '_bounds', '_raw', '_suffix', '_size', '_native',
+                 '_metadata', '_chunks', '_started')
+
+    def __init__(self, record, bounds, raw, suffix, size, native, metadata):
+        self._record, self._bounds = record, bounds
+        self._raw, self._suffix, self._size = raw, suffix, size
+        self._native, self._metadata = native, metadata
+        self._started = False
+        self._chunks = self._original_chunks(raw, suffix)
+
+    @staticmethod
+    def _original_chunks(raw, suffix):
+        yield b'{"document":"'
+        for offset in range(0, len(raw), 512):
+            yield raw[offset:offset + 512].replace(b'\\', b'\\\\').replace(b'"', b'\\"')
+        yield suffix
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self._started = True
+        if self._chunks is None:
+            raise StopIteration
+        try:
+            return next(self._chunks)
+        except StopIteration:
+            self.close()
+            raise
+
+    def coalesce(self, record, bounds, *, size, max_write_bytes, admit):
+        if (self._started or self._chunks is None or self._record is not record
+                or self._bounds is not bounds or type(self._raw) is not bytes
+                or size != self._size or size > min(16384, max_write_bytes)):
+            return None
+        # Count original native/provenance objects and document, held suffix,
+        # both replace/concatenation temporaries and the final joined row.
+        # This conservatively covers the previous fragment too. No large
+        # escape/join allocation occurs until the current owner returns True.
+        try:
+            _, source_metadata = _json_shape(_record_metadata(record), bounds.max_control_bytes)
+        except DataflowError as error:
+            # Optional sizing cannot add a new refusal to historical callers
+            # whose original fragments already passed their existing checks.
+            if error.code == 'BUDGET_EXCEEDED':
+                return None
+            raise
+        workspace = (self._native + len(self._raw) + self._metadata + source_metadata
+                     + 3 * size + 4096)
+        if not admit(workspace, record):
+            return None
+        escaped = raw = None
+        try:
+            escaped = self._raw.replace(b'\\', b'\\\\').replace(b'"', b'\\"')
+            raw = b'{"document":"' + escaped + self._suffix
+            if len(raw) != size:
+                raise DataflowError('CORRUPT_ARTIFACT', 'record frame differs from measured size')
+            return raw
+        finally:
+            self.close()
+            # An error may preserve this frame through its traceback. Keep
+            # no additional escaped/joined copies beyond the admitted call.
+            del escaped, raw
+
+    def close(self):
+        chunks, self._chunks = self._chunks, None
+        if chunks is not None:
+            chunks.close()
+        self._record = self._raw = self._suffix = None
+
+
 def frame_parts(record, bounds, *, services=None, target=None, raw=None, retained=0, newline=True):
     """Return exact size and a one-use bounded stream of the OLD JSONL bytes."""
     if raw is None: raw = encode_document(record, bounds, services=services, retained=retained)
@@ -440,12 +518,7 @@ def frame_parts(record, bounds, *, services=None, target=None, raw=None, retaine
     native = _typed_shape(record.inline, bounds.max_row_bytes)[1] if record.inline is not None else 0
     _admit(retained + native + len(raw) + meta_memory + 4096, resident_limit(bounds, services))
     suffix = b'",' + document(metadata, bounds.max_control_bytes)[1:] + (b'\n' if newline else b'')
-    def chunks():
-        yield b'{"document":"'
-        for offset in range(0, len(raw), 512):
-            yield raw[offset:offset + 512].replace(b'\\', b'\\\\').replace(b'"', b'\\"')
-        yield suffix
-    return size, chunks()
+    return size, _RecordFrameParts(record, bounds, raw, suffix, size, native, meta_memory)
 
 
 def encode_frame(record, bounds, *, services=None, target=None, retained=0):

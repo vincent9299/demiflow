@@ -148,7 +148,7 @@ class WorkerGraphRunner:
         self._terminal_blocks = TerminalBlocks(self.services, self.partition,
             declaration=declaration, partitioned=not scalar,
             budget=self._terminal_spec.configuration.get('terminal_memory') if self._terminal_spec else None,
-            frame_call=self._frame_call)
+            frame_call=self._frame_call, coalesce_allowed=lambda: not self._finite)
         args = self._terminal_spec.configuration.get('arguments', {}) if self._terminal_spec else {}
         self._limit = (args.get('limit') if self._terminal_spec and self._terminal_spec.kind == 'take'
                        else args.get('batch_size', 20) if self._terminal_spec and self._terminal_spec.kind == 'take_batch'
@@ -1375,7 +1375,9 @@ class WorkerGraphRunner:
             if (len(self._finite) + 2) * 2 >= self.bounds.max_open_files:
                 raise DataflowError('BUDGET_EXCEEDED', 'finite spool exceeds open file budget')
             from .terminal_blocks import TerminalBlocks
-            self._finite[spec.channel_id] = TerminalBlocks(self.services, self.partition, partitioned=False)
+            self._finite[spec.channel_id] = TerminalBlocks(self.services, self.partition, partitioned=False,
+                frame_call=self._frame_call,
+                coalesce_allowed=lambda: len(self._finite) <= 1 and not self._terminal_blocks.blocks)
         return self._finite[spec.channel_id]
 
     def _seal_finite_producer(self, spec):

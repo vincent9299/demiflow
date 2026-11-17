@@ -43,12 +43,14 @@ def declared_blocks(graph, terminal, bounds):
 
 class TerminalBlocks:
     """At most one scratch FD is open; block switches seal only new tail bytes."""
-    def __init__(self, services, partition_id, *, declaration=None, partitioned=True, budget=None, frame_call=None):
+    def __init__(self, services, partition_id, *, declaration=None, partitioned=True, budget=None, frame_call=None,
+                 coalesce_allowed=None):
         self.services, self.bounds = services, services.bounds
         self.partition_id, self.partitioned = partition_id, partitioned
         self._reference_only = False
         self._workspace_limit = None
         self._frame_call = frame_call
+        self._coalesce_allowed = coalesce_allowed
         self._pending_resident = 0
         self._metadata_owners = []
         self.columns = None
@@ -263,18 +265,54 @@ class TerminalBlocks:
                 max_io_bytes=self.bounds.max_row_bytes + self.bounds.max_control_bytes)
         if self.bytes + size > self.bounds.max_spill_bytes or self.rows >= self.bounds.max_output_rows:
             raise DataflowError('BUDGET_EXCEEDED', 'terminal output exceeds disk/row budget')
+        from ..dataflow_record_frames import _RecordFrameParts
+        joined = (chunks.coalesce(record, self.bounds, size=size, max_write_bytes=self._tail._io,
+                                 admit=self._coalescing_fits)
+                  if (type(chunks) is _RecordFrameParts
+                      and (self._coalesce_allowed is None or self._coalesce_allowed())) else None)
         written = 0
-        for raw in chunks:
-            if written + len(raw) > size:
-                raise DataflowError('CORRUPT_ARTIFACT', 'record frame exceeds measured size')
-            self._tail.write(raw)
-            written += len(raw)
+        if joined is not None:
+            try:
+                self._tail.write(joined)
+                written = len(joined)
+            finally:
+                # Do not add our own full-row reference to an I/O traceback.
+                # The original scratch writer still owns its failure frames.
+                del joined
+        else:
+            for raw in chunks:
+                if written + len(raw) > size:
+                    raise DataflowError('CORRUPT_ARTIFACT', 'record frame exceeds measured size')
+                self._tail.write(raw)
+                written += len(raw)
         if written != size:
             raise DataflowError('CORRUPT_ARTIFACT', 'record frame differs from measured size')
         self._tail_rows += 1
         self._tail_bytes += size
         self.rows += 1
         self.bytes += size
+
+    def _coalescing_fits(self, workspace, record):
+        from ..dataflow_record_frames import resident_limit
+        # Called after a possible old-tail flush. The proposed workspace
+        # includes this row/raw and replaces _pending_resident, not adds to it.
+        # Old metadata/payload windows remain unchanged on the fallback path.
+        try:
+            metadata = self._retained_metadata()
+        except DataflowError as error:
+            if error.code == 'BUDGET_EXCEEDED':
+                return False  # Optional sizing never replaces legacy admission.
+            raise
+        peak = workspace + metadata
+        if self._workspace_limit is not None and peak > self._workspace_limit:
+            return False
+        if self._frame_call is not None:
+            def fits(record, size, bounds, *, services, retained):
+                return retained + size <= resident_limit(bounds, services)
+            # The shared owner already counts this terminal's workspace
+            # metadata. Finite spools are distinct owners and count theirs here.
+            return self._frame_call(fits, record, peak - self.retained_bytes, self.bounds)
+        return peak <= resident_limit(self.bounds, self.services)
 
     def flush(self):
         if self._tail is None:
