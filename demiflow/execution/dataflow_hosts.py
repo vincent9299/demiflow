@@ -410,7 +410,7 @@ class _EndpointBase:
 
     def _early_event(self, event):
         self._check_event_identity(event)
-        if event.kind in ("ready", "data", "ack", "idle", "terminal", "eoi", "cut", "failure", "closed", "progress"):
+        if event.kind in ("ready", "data", "ack", "idle", "terminal", "eoi", "cut", "failure", "closed", "progress", "checkpoint_wait"):
             if len(self._events) >= self._services.bounds.max_pending_events:
                 raise DataflowError("BUDGET_EXCEEDED", "activation event queue exceeds bound")
             self._events.append(event)

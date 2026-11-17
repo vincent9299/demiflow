@@ -138,6 +138,9 @@ class DataflowExecution:
         self._failure = None
         self._checkpoint_requested = False
         self._checkpoint_deadline = None
+        self._checkpoint_finite_wait = {}
+        self._checkpoint_wait_sequence = {}
+        self._checkpoint_wait_at = None
         self._checkpoint_deferred = set()
         # One driver-owned publication task uses the SAME coordinator/journal.
         # No second cut can begin until its receipt or failure has drained.
@@ -207,7 +210,9 @@ class DataflowExecution:
         return self._action.context.ref.run_id
 
     def _start_checkpoint_deadline(self):
-        # One deadline starts at source-pause admission, including alignment.
+        # One coordination allowance starts at source-pause admission. Only
+        # authenticated finite business that cannot yet snapshot is excluded;
+        # ordinary alignment/silence still consumes this original allowance.
         # An already-started publication task drains
         # before timeout is reported and its original receipt is never undone.
         if self._checkpoint_deadline is None:
@@ -215,8 +220,39 @@ class DataflowExecution:
                 self._action.context.limits['checkpoint_timeout_s'])
 
     def _check_checkpoint_deadline(self):
+        self._update_checkpoint_wait_clock()
         if self._checkpoint_deadline is not None and time.monotonic() >= self._checkpoint_deadline:
             raise TimeoutError('Checkpoint coordination exceeded checkpoint_timeout_s')
+
+    def _update_checkpoint_wait_clock(self):
+        """Exclude only confirmed non-replayable business before cut admission.
+
+        This does not replenish the coordination allowance or the action's
+        independent total deadline. A silent peer cannot hide behind another
+        peer's finite work: every remaining participant must name its current
+        finite finish, or the original coordination clock keeps running.
+        """
+        if self._checkpoint_deadline is None:
+            return
+        now = time.monotonic()
+        waiting_at = getattr(self, '_checkpoint_wait_at', None)
+        if waiting_at is not None:
+            self._checkpoint_deadline += now - waiting_at
+        self._checkpoint_wait_at = None
+        if (self._cut is not None or self._publication_future is not None or self._stopping
+                or not self._checkpoint_requested or now >= self._checkpoint_deadline):
+            return
+        pending = set(self._endpoints) - self._idle
+        proofs = getattr(self, '_checkpoint_finite_wait', {})
+        if pending and all(key in proofs and proofs[key] == (
+                self._endpoints[key]._activity_generation,
+                self._scheduler.leases[key].boot_id) for key in pending):
+            self._checkpoint_wait_at = now
+
+    def _clear_checkpoint_wait(self):
+        self._checkpoint_finite_wait = {}
+        self._checkpoint_wait_sequence = {}
+        self._checkpoint_wait_at = None
 
     def _check_stop(self) -> None:
         self._action.context.check_stop()
@@ -827,6 +863,7 @@ class DataflowExecution:
         self._contributions.clear()
         self._checkpoint_requested = False
         self._checkpoint_deferred.clear()
+        self._clear_checkpoint_wait()
         self._launch_phase()
 
     # -- E005 pump --------------------------------------------------------
@@ -927,6 +964,7 @@ class DataflowExecution:
         from .dataflow_hosts import batch_business_commands
         from contextlib import nullcontext
         commands = nullcontext() if draining else batch_business_commands(self._endpoints.values())
+        self._update_checkpoint_wait_clock()
         with commands:
             for event in events:
                 try:
@@ -939,6 +977,7 @@ class DataflowExecution:
                 except BaseException:
                     if not draining:
                         raise
+        self._update_checkpoint_wait_clock()
         return events, replies
 
     def _checkpoint_frontiers(self):
@@ -1186,6 +1225,35 @@ class DataflowExecution:
                 self._checkpoint.observe_input_satisfied(completed)
                 self._checkpoint.observe_source_eoi(cursors)
                 self._done.add(event.allocation_id)
+        elif event.kind == 'checkpoint_wait':
+            if set(payload) != {'activity_generation', 'sequence', 'partition_id', 'occurrence_id'}:
+                raise DataflowError('INVALID_CONTRACT', 'finite checkpoint wait has invalid fields')
+            generation, sequence = payload['activity_generation'], payload['sequence']
+            expected = getattr(endpoint, '_activity_generation', 0)
+            if (type(generation) is not int or not 0 < generation <= expected
+                    or type(sequence) is not int or not 0 < sequence < 2**63):
+                raise DataflowError('FENCED', 'finite checkpoint wait has invalid live generation')
+            if payload['partition_id'] not in lease.partition_ids:
+                raise DataflowError('FENCED', 'finite checkpoint wait differs from worker partition')
+            occurrence = payload['occurrence_id']
+            if occurrence is not None:
+                assigned = {n for stage in endpoint._assignment.stages for n in stage.occurrences}
+                node = next((n for n in self._graph.nodes if n.occurrence_id == occurrence), None)
+                # OperatorKernel has exactly this non-replayable finite path.
+                # An arbitrary UDF/pending model call cannot claim the exemption.
+                if (occurrence not in assigned or node is None or node.kernel.kind != 'reduce'
+                        or not node.kernel.inputs
+                        or any(p.requirement != 'finite_complete' for p in node.kernel.inputs)):
+                    raise DataflowError('FENCED', 'checkpoint wait lacks a sealed non-replayable finite kernel')
+            sequences = self._checkpoint_wait_sequence
+            if generation != expected or sequence <= sequences.get(event.allocation_id, 0):
+                return  # Delayed control evidence never changes the current frontier.
+            sequences[event.allocation_id] = sequence
+            if occurrence is None:
+                self._checkpoint_finite_wait.pop(event.allocation_id, None)
+            else:
+                self._idle.discard(event.allocation_id)
+                self._checkpoint_finite_wait[event.allocation_id] = (generation, event.boot_id)
         elif event.kind == "idle":
             generation = payload.get('activity_generation', 0)
             expected = getattr(endpoint, '_activity_generation', 0)
@@ -1196,6 +1264,7 @@ class DataflowExecution:
             # reaches the driver first; only the current quiet frontier cuts.
             if generation == expected:
                 self._idle.add(event.allocation_id)
+                getattr(self, '_checkpoint_finite_wait', {}).pop(event.allocation_id, None)
                 if payload.get('source_done') is True and endpoint._assignment.source_splits:
                     # Flow-credit availability only. Finality still requires the
                     # original authenticated cursor in an actual contribution.
@@ -1335,6 +1404,7 @@ class DataflowExecution:
         # Calls finishing during publication append to the next generation.
         self._restore_image = image
         self._checkpoint_deadline = None
+        self._clear_checkpoint_wait()
         self._last_checkpoint_rows, self._last_checkpoint_outputs, deliveries, self._last_edge_acks = self._publication_frontiers
         self._checkpoint_deliveries -= deliveries
         self._checkpoint_at = time.monotonic()
@@ -1418,6 +1488,7 @@ class DataflowExecution:
         for key in sources:
             shares.setdefault(key, {'rows': 0, 'bytes': 0})
         self._source_credit_shares = shares
+        self._clear_checkpoint_wait()
         self._idle.clear()
         for key, endpoint in self._endpoints.items():
             endpoint.send_business({'kind': 'resume', 'publishing': publishing,
@@ -1511,6 +1582,7 @@ class DataflowExecution:
         if self._cut is not None or self._checkpoint_requested or self._stopping:
             return
         self._checkpoint_requested = True
+        self._clear_checkpoint_wait()
         self._start_checkpoint_deadline()
         self._idle.clear()
         sources = {allocation_id for allocation_id, endpoint in self._endpoints.items()

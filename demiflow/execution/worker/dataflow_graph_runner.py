@@ -62,6 +62,10 @@ class WorkerGraphRunner:
         self._finished_inputs = set()
         self._finished_ports = set()
         self._active_finishes = {}
+        self._checkpoint_finishes = set()
+        self._checkpoint_wait_requested = False
+        self._checkpoint_wait_signature = None
+        self._checkpoint_wait_sequence = 0
         self._closed_inputs = set()
         self._closed_outputs = set()
         self._emitted_eoi = set()
@@ -461,6 +465,48 @@ class WorkerGraphRunner:
     def _send(self, kind, payload=None, ref=None):
         self.e._mailbox.send(self.e._event(kind, payload=payload, payload_ref=ref))
 
+    def _checkpoint_wait_notification(self):
+        # Called under the same lock as pause/activity admission. This is live
+        # control evidence only: no state, cursor or recovery promise is made.
+        if not getattr(self, '_checkpoint_wait_requested', False):
+            return None
+        occurrence = min(getattr(self, '_checkpoint_finishes', ()), default=None)
+        signature = (getattr(self, '_activity_generation', 0), occurrence)
+        previous = getattr(self, '_checkpoint_wait_signature', None)
+        if signature == previous or occurrence is None and (previous is None or previous[1] is None):
+            return None
+        self._checkpoint_wait_signature = signature
+        self._checkpoint_wait_sequence += 1
+        if self._checkpoint_wait_sequence >= 2**63:
+            raise DataflowError('BUDGET_EXCEEDED', 'finite checkpoint wait sequence exhausted')
+        return {'activity_generation': signature[0], 'sequence': self._checkpoint_wait_sequence,
+                'partition_id': self.partition, 'occurrence_id': occurrence}
+
+    def _finite_finish_iterator(self, occurrence, kernel, port):
+        iterator = iter(kernel.finish(port, wait_for_calls=False))
+        if kernel._spec.kind != 'reduce' or kernel.finish_replayable:
+            return iterator
+
+        def observed():
+            # The caller has observed all original input EOIs before entering
+            # this sealed finite reducer. Keep the evidence across yielded
+            # output: its live fold iterator still cannot be snapshotted.
+            with self._condition:
+                self._checkpoint_finishes.add(occurrence)
+                notice = self._checkpoint_wait_notification()
+            if notice is not None:
+                self._send('checkpoint_wait', notice)
+            try:
+                yield from iterator
+            finally:
+                with self._condition:
+                    self._checkpoint_finishes.discard(occurrence)
+                    notice = self._checkpoint_wait_notification()
+                if notice is not None:
+                    self._send('checkpoint_wait', notice)
+
+        return observed()
+
     def receive(self, command):
         kind = command['kind']
         with self._condition:
@@ -489,6 +535,7 @@ class WorkerGraphRunner:
             elif kind in ('pause', 'park'):
                 self._park_requested = kind == 'park'
                 self._paused = True
+                self._checkpoint_wait_requested = True
                 self._idle_sent = False
             elif kind == 'resume':
                 if 'durable_peers_live' in command:
@@ -518,6 +565,8 @@ class WorkerGraphRunner:
                 self._source_rows_since_cut = 0
                 self._consumed_deliveries.clear()
                 self._paused = False
+                self._checkpoint_wait_requested = False
+                self._checkpoint_wait_signature = None
                 self._idle_sent = False
                 self._cut = None
                 self._sealed_cut = None
@@ -539,6 +588,11 @@ class WorkerGraphRunner:
                 self._idle_sent = False
             self._wake_generation += 1
             self._condition.notify_all()
+            notice = self._checkpoint_wait_notification()
+        # A blocked business fold cannot stop its control thread acknowledging
+        # pause. Conversely, mailbox backpressure must not hold this lock.
+        if notice is not None:
+            self._send('checkpoint_wait', notice)
 
     def _run(self):
         try:
@@ -1176,7 +1230,7 @@ class WorkerGraphRunner:
                         port.finish()
                 port = (kernel._finish_cursor['port'] if kernel._finish_cursor is not None
                         else kernel._port_order[0])
-                iterator = iter(kernel.finish(port, wait_for_calls=False))
+                iterator = self._finite_finish_iterator(occurrence, kernel, port)
                 self._active_finishes[key] = iterator
             while True:
                 try:
@@ -1247,7 +1301,7 @@ class WorkerGraphRunner:
                                 continue
                         iterator = self._active_finishes.get(edge.edge_id)
                         if iterator is None:
-                            iterator = iter(kernel.finish(edge.input_port, wait_for_calls=False))
+                            iterator = self._finite_finish_iterator(occurrence, kernel, edge.input_port)
                             self._active_finishes[edge.edge_id] = iterator
                         try:
                             out = next(iterator)
