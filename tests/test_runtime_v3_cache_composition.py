@@ -1,5 +1,6 @@
 """Cached state resumes into a materialized result on the actual provider."""
 from functools import partial
+import json
 import sqlite3
 import time
 
@@ -53,7 +54,8 @@ def _counter(kind):
 
 
 @pytest.mark.parametrize('callback_kind', ['actor', 'closure', 'default', 'partial'])
-def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kind, tmp_path, monkeypatch):
+def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kind, tmp_path, monkeypatch,
+                                                        record_property):
     def flow():
         return data.from_items([{'value': n} for n in range(6)]).map_cached(
             _counter(callback_kind), cache_dir=tmp_path / 'cache', version='v1',
@@ -65,17 +67,38 @@ def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kin
     def interrupt(execution, **kwargs):
         result = original(execution, **kwargs)
         if execution._restore_image is not None and not execution._restore_image.cut.final:
+            from demiflow.execution.kernels import state_codec
+            from demiflow.execution.dataflow_kernel_pack import PACK_MEDIA
+            nodes = {node.occurrence_id for node in execution._graph.nodes
+                     if node.kernel.kind == 'AsyncMapOp'}
+            images = []
+            for contribution in execution._restore_image.contributions:
+                for occurrence, reference in contribution.operator_states.items():
+                    if occurrence not in nodes:
+                        continue
+                    # Stateful cache images use the original individual object.
+                    assert reference.media_type != PACK_MEDIA
+                    raw = b''.join(execution._store.read(reference,
+                        max_bytes=execution._bounds.max_state_bytes))
+                    images.append(state_codec.loads(raw, max_bytes=execution._bounds.max_state_bytes))
+            if not images or not images[0]['call_ordinal']:
+                return result
+            assert len(images) == 1
+            assert images[0]['state']['value']['cache_frontier']['generation'] >= 1
+            accepted_calls = images[0]['call_ordinal']
             # Require the actual failure window: shared cache is ahead of the
-            # accepted two-row state image, on both Local and Ray workers.
+            # authenticated state image, on both Local and Ray workers. The
+            # number allowed to prefetch belongs to the runtime's finite credit.
             deadline = time.monotonic() + 15
             while True:
                 with sqlite3.connect(tmp_path / 'cache' / 'results.sqlite') as database:
                     cached = database.execute('SELECT COUNT(*) FROM kv').fetchone()[0]
-                if cached >= 4:
+                if cached > accepted_calls:
                     break
                 assert time.monotonic() < deadline, 'cache did not advance beyond the original ACK'
                 time.sleep(.01)
-            reached.append(execution._restore_image.commit_id)
+            reached.append({'commit': execution._restore_image.commit_id,
+                            'accepted_calls': accepted_calls, 'cached_results': cached})
             raise Interrupted('after original nonfinal ACK')
         return result
 
@@ -86,6 +109,7 @@ def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kin
                 patch.setattr(DataflowExecution, 'pump', interrupt)
                 flow().materialize()
     assert reached
+    record_property('cache_frontier_window', json.dumps(reached))
 
     with RunContext.resume(reference) as run:
         result = flow().materialize()
