@@ -250,6 +250,7 @@ def test_measured_merge_drops_old_wide_frames_at_single_reader_tail(tmp_path, mo
 
 def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypatch):
     from demiflow.execution.kernels import shuffle_order
+    from demiflow.execution.run_journal import ExecutionBudgetExceeded
     from test_runtime_v3_artifact_accounting import store_fixture, consumed
     with store_fixture(tmp_path, ceiling=256 << 10) as (run, store, port):
         services = _services(store, port)
@@ -270,8 +271,9 @@ def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypat
         monkeypatch.setattr(store, 'put', put)
         monkeypatch.setattr(store, 'release', release)
         records = (_record({'v': i, 'payload': b'x' * 256}, i) for i in range(100))
-        with pytest.raises(Exception, match='[Bb]udget|[Cc]eiling|[Ee]xceed|[Ss]pill'):
+        with pytest.raises(ExecutionBudgetExceeded) as caught:
             list(shuffle_order.seeded_shuffle(records, spec=_spec(), services=services))
+        assert caught.value.budget == 'artifact_staging_bytes'
         assert len(builds) == 2
         assert written and set(written) <= set(released)
         assert consumed(run) == sum({ref.digest: ref.size_bytes for ref in written}.values()) <= 256 << 10
