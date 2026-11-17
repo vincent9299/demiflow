@@ -905,13 +905,11 @@ class WorkerGraphRunner:
         if type(raw) is not bytes or len(raw) > document_limit(self.bounds):
             raise DataflowError('INVALID_CONTRACT', 'invalid prevalidated record document')
         if spec is None and validated_raw is not None:
-            from ..dataflow_record_frames import _typed_shape, admit_workspace
-            native = (_typed_shape(record.inline, self.bounds.max_row_bytes)[1]
-                      if record.inline is not None else 0)
+            from ..dataflow_record_frames import admit_encoded_record
             # Appending may have grown the terminal index. Re-admit the live
             # row/document and bounded send metadata against current owners;
             # the earlier encoding grant cannot stand in for this check.
-            self._frame_call(admit_workspace, native + len(raw) + 4096, self.bounds)
+            self._frame_call(admit_encoded_record, record, raw, self.bounds)
         if spec is not None and spec.mode == 'finite_sealed':
             stream = self._finite_buffer(spec)
             size, chunks = self._frame_call(frame_parts, record, self.bounds, target=target, raw=raw)

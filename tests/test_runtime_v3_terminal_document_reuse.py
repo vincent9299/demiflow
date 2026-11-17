@@ -48,15 +48,19 @@ def test_public_rows_and_final_replay_keep_original_document_and_ack(tmp_path, m
               'checkpoint_rows': 4, 'checkpoint_interval_ms': 60000}
     def flow():
         return data.from_items(rows).map(project)
-    with RunContext.start(tmp_path / 'run', limits=limits) as run:
-        reference = run.ref
-        with data.local_execution(workers=2, worker_mode='thread'):
-            actual = list(flow().iter_rows())
-        assert actual == [project(row) for row in rows]
-        assert all(type(row['value']) is tuple and type(row['value'][1]) is bytes
-                   and math.copysign(1, row['value'][2]) == -1 for row in actual)
-        commits = run.journal.execution_commits('action-1')
-        assert commits and all(cut['status'] == 'acked' for cut in commits)
+    class Interrupted(Exception):
+        pass
+    with pytest.raises(Interrupted, match='after final action ACK'):
+        with RunContext.start(tmp_path / 'run', limits=limits) as run:
+            reference = run.ref
+            with data.local_execution(workers=2, worker_mode='thread'):
+                actual = list(flow().iter_rows())
+            assert actual == [project(row) for row in rows]
+            assert all(type(row['value']) is tuple and type(row['value'][1]) is bytes
+                       and math.copysign(1, row['value'][2]) == -1 for row in actual)
+            commits = run.journal.execution_commits('action-1')
+            assert commits and all(cut['status'] == 'acked' for cut in commits)
+            raise Interrupted('after final action ACK, before run completion')
     assert len(documents) == len(rows)
     before = dict(encodings)
     with RunContext.resume(reference) as run, data.local_execution(workers=2, worker_mode='thread'):
@@ -65,18 +69,19 @@ def test_public_rows_and_final_replay_keep_original_document_and_ack(tmp_path, m
     assert dict(encodings) == before and len(documents) == len(rows)
 
 
-def test_reused_document_still_checks_current_workspace_before_peer_admission():
-    record = _record({'value': 'x' * 100})
-    limits = bounds(max_resident_bytes=65536)
+@pytest.mark.parametrize('position', [{}, {'group_key': 'k' * 8192}])
+def test_reused_document_still_checks_current_workspace_before_peer_admission(position):
+    record = _record({'value': 'x' * 100}, position)
+    limits = bounds(max_resident_bytes=65536, max_control_bytes=32768)
     raw = encode_document(record, limits)
     native = _typed_shape(record.inline, limits.max_row_bytes)[1]
-    from demiflow.execution.dataflow_record_frames import admit_workspace
+    from demiflow.execution.dataflow_record_frames import admit_encoded_record
     calls = []
     def frame(function, *args, **kwargs):
         calls.append(function)
         # The earlier encoding fit, but another live owner now fills the grant.
-        return function(*args, retained=limits.max_resident_bytes - native - len(raw), **kwargs)
+        return function(*args, retained=limits.max_resident_bytes - native - len(raw) - 4096, **kwargs)
     runner = NS(bounds=limits, _frame_call=frame)
     with pytest.raises(DataflowError, match='workspace'):
         WorkerGraphRunner._publish(runner, record, validated_raw=raw)
-    assert calls == [admit_workspace]
+    assert calls == [admit_encoded_record]

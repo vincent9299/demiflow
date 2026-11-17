@@ -209,8 +209,26 @@ def decode_metadata(raw, bounds, *, services=None, retained=0):
     return json.loads(raw)
 
 
+def _record_metadata(record):
+    from .exchange.dataflow_bridge import _ref_document
+    metadata = {'v':3, 'sp':record.source_position, 'eb':record.encoded_bytes, 'p':None,
+                'r':None if record.payload_ref is None else _ref_document(record.payload_ref)}
+    if record.schema_ref is not None: metadata['s'] = _ref_document(record.schema_ref)
+    if record.block_partition is not None: metadata['bp'] = asdict(record.block_partition)
+    return metadata
+
+
+def admit_encoded_record(record, raw, bounds, *, services=None, retained=0):
+    """Re-admit a same-invocation validated document after other owners grew."""
+    if type(raw) is not bytes or len(raw) > document_limit(bounds):
+        _fail('record document exceeds its frame bound')
+    native = _typed_shape(record.inline, bounds.max_row_bytes)[1] if record.inline is not None else 0
+    _, metadata = _json_shape(_record_metadata(record), bounds.max_control_bytes)
+    _admit(retained + native + metadata + len(raw) + 4096, resident_limit(bounds, services))
+
+
 def encode_document(record, bounds, *, services=None, payload_limit=None, retained=0):
-    from .exchange.dataflow_bridge import _encode_record_document, _ref_document, _validate_record
+    from .exchange.dataflow_bridge import _encode_record_document, _validate_record
     maximum = bounds.max_row_bytes if payload_limit is None else min(bounds.max_row_bytes, payload_limit)
     if record.inline is not None:
         size, native, tree = _typed_shape(record.inline, maximum)
@@ -218,11 +236,7 @@ def encode_document(record, bounds, *, services=None, payload_limit=None, retain
         size, native, tree = record.encoded_bytes, 0, 0
     if type(size) is not int or size < 0 or size > maximum:
         _fail('encoded record exceeds the row byte budget')
-    metadata = {'v':3, 'sp':record.source_position, 'eb':record.encoded_bytes, 'p':None,
-                'r':None if record.payload_ref is None else _ref_document(record.payload_ref)}
-    if record.schema_ref is not None: metadata['s'] = _ref_document(record.schema_ref)
-    if record.block_partition is not None: metadata['bp'] = asdict(record.block_partition)
-    meta_size, meta_memory = _json_shape(metadata, bounds.max_control_bytes)
+    meta_size, meta_memory = _json_shape(_record_metadata(record), bounds.max_control_bytes)
     doc_size = meta_size + (size - 4 if record.inline is not None else 0)
     if doc_size > document_limit(bounds): _fail('record document exceeds its frame bound')
     # Existing row + tagged tree + encoded payload + joined document. Strings

@@ -60,12 +60,15 @@ def test_payload_window_and_full_document_row_budget_are_independent(mode):
     assert record.encoded_bytes<len(raw)
     spec=replace(spec_for(),mode=mode,scope_id='finite' if mode=='finite_sealed' else None,
                  credit_bytes=record.encoded_bytes,storage_bytes=record.encoded_bytes)
-    # Metadata is outside payload credit but inside the exact whole-document limit.
-    assert channels._route_record_document(record,spec=spec,state=state(),bounds=bounds(max_row_bytes=len(raw)))[1]==raw
-    for limited,limit in [(replace(spec,credit_bytes=record.encoded_bytes-1,storage_bytes=record.encoded_bytes-1),len(raw)),
-                           (spec,len(raw)-1)]:
+    # R is the typed business row limit; provenance has its separate C bound.
+    assert channels._route_record_document(record,spec=spec,state=state(),bounds=bounds(max_row_bytes=record.encoded_bytes))[1]==raw
+    for limited,limit in [(replace(spec,credit_bytes=record.encoded_bytes-1,storage_bytes=record.encoded_bytes-1),record.encoded_bytes),
+                           (spec,record.encoded_bytes-1)]:
         with pytest.raises(DataflowError,match='BUDGET_EXCEEDED'):
             channels._route_record_document(record,spec=limited,state=state(),bounds=bounds(max_row_bytes=limit))
+    with pytest.raises(DataflowError,match='control byte budget'):
+        channels._route_record_document(record,spec=spec,state=state(),
+            bounds=bounds(max_row_bytes=record.encoded_bytes,max_control_bytes=64))
 
 
 @pytest.mark.parametrize('fault',['parents','schema','low_size','high_size','missing_key','foreign_target','bad_forward'])
@@ -84,7 +87,10 @@ def test_bad_metadata_payload_counts_and_route_contracts_are_not_bypassed(fault)
     with pytest.raises(type(old.value)) as new:
         channels._route_record_document(record,spec=spec,state=new_state,bounds=bounds())
     if isinstance(old.value,DataflowError):assert old.value.code==new.value.code
-    assert old_state.values()==new_state.values()
+    # The joint admission rejects malformed encoded_bytes before allocating a
+    # routing ordinal. The old split helper advanced before checking payload.
+    assert new_state.values()=={'route':0}
+    assert old_state.values()=={'route':1 if fault in ('low_size','high_size') else 0}
 
 
 def test_external_payload_keeps_original_reference_channel_window_and_document_bytes():
@@ -92,7 +98,9 @@ def test_external_payload_keeps_original_reference_channel_window_and_document_b
     record=Record('f'*64,{'ordinal':0},ref,None,ref.size_bytes,0)
     raw=bridge._encode_record_document(record,max_bytes=65536)
     spec=replace(spec_for(),credit_bytes=ref.size_bytes)
-    assert channels._route_record_document(record,spec=spec,state=state(),bounds=bounds(max_row_bytes=len(raw)))[1]==raw
+    assert channels._route_record_document(record,spec=spec,state=state(),bounds=bounds(max_row_bytes=ref.size_bytes))[1]==raw
+    with pytest.raises(DataflowError,match='row byte budget'):
+        channels._route_record_document(record,spec=spec,state=state(),bounds=bounds(max_row_bytes=ref.size_bytes-1))
     with pytest.raises(DataflowError,match='channel byte window'):
         channels._route_record_document(record,spec=replace(spec,credit_bytes=ref.size_bytes-1),state=state(),bounds=bounds())
     with pytest.raises(DataflowError,match='misreports'):
