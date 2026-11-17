@@ -84,8 +84,7 @@ def _assert_exact(actual, expected):
 
 
 @pytest.fixture(scope='module', params=['local', 'ray_core'])
-def provider(request):
-    from demiflow.data.api import _use_executor
+def value_executor(request):
     from runtime_v3_regression_inventory import assert_private
     from runtime_v3_support import _RayDataBlocker
     assert_private()
@@ -97,8 +96,7 @@ def provider(request):
             executor = LocalDatasetExecutor(workers=2, local_kernel=LocalKernelOptions(
                 workers=2, worker_mode='thread', partitions=1, batch_rows=2))
             try:
-                with _use_executor(executor):
-                    yield name
+                yield name, executor
             finally:
                 executor.close()
         else:
@@ -110,12 +108,19 @@ def provider(request):
                 try:
                     ray.init(address='local', num_cpus=4, num_gpus=0, include_dashboard=False,
                              object_store_memory=128 * 1024**2, _temp_dir=root)
-                    with _use_executor(executor):
-                        yield name
+                    yield name, executor
                 finally:
                     executor.close()
                     ray.shutdown()
         assert not blocker.attempts
+
+
+@pytest.fixture
+def provider(value_executor):
+    from demiflow.data.api import _use_executor
+    name, executor = value_executor
+    with _use_executor(executor):
+        yield name
 
 
 def _flow(reducer, initial):
