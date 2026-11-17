@@ -1,0 +1,500 @@
+{
+  "schema": "demiflow.small_native_workspace_delivery.v1",
+  "baseline": "8928e5bef612f00d751b0ec02729cfeccfbb97cf",
+  "tested_head": "f2ed096feea70380171ebdfff09999744ce000d7",
+  "delivery_commit": "866395be1a6400d53ea8f31273c83c72d3992be0",
+  "tree": "57d1c64c480d22c6059d5d783bca4ba1f89f7949",
+  "worktree": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117",
+  "branch": "engine/gpt-durable-publication-delivery-20261117",
+  "original_branch_retained": "engine/gpt-durable-publication-20261117",
+  "passed": 9,
+  "passed_phases": 27,
+  "sealed_case": {
+    "memory_bytes": 40960,
+    "max_row_bytes": 8192,
+    "max_batch_bytes": 16384,
+    "control_bytes": 5120,
+    "terminal_workspace_bytes": 14336,
+    "native_workspace_bytes": 21504
+  },
+  "new_schema": "demiflow.terminal_workspace.v1",
+  "publication_schema": "demiflow.native_publication_workspace.v2",
+  "changed_files": {
+    "demiflow/execution/dataflow_publication_budget.py": "c68c0f0bfd63a80b072512e4ede0357e169013f4e7437d3c0ea54657705c6dc8",
+    "demiflow/execution/dataflow_segments.py": "885006be03d1bc743fa823a3187dcf4971f5bd8c0af5645ead16d2c81e4450c6",
+    "demiflow/execution/worker/dataflow_graph_runner.py": "323491766b6ea84dacf68d51f403254335e77d63d7f6b68200e117d2f9e51af5",
+    "demiflow/execution/worker/terminal_blocks.py": "bb292c87952d018e747008a30db62956d234e96ea041988b4ed8cdce4a56ad37",
+    "demiflow/planning/dataflow_compile.py": "4e8879160749e26e456fb4cfa427c424871053d9f8a6a442a2b4185a1285f18d",
+    "demiflow/planning/dataflow_place.py": "e4bdb09953dc714f122e56fc3f5c3bcf3ce1dea9402b985350709997f9a5df8b",
+    "tests/test_runtime_v3_small_native_workspace.py": "7b76e4614c3b9b23e22415c2166a44e4fca0b5fa6ae3fc89e61622a0ebce7f6d"
+  },
+  "frozen_seven": {
+    "demiflow/execution/raw_fetch.py": "55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493",
+    "demiflow/execution/queue_execution.py": "2a9851ce7df32da80906a859ef61080ea7dc5535d543a68953ab6cf71666a7c2",
+    "demiflow/execution/queue_sinks.py": "b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074",
+    "demiflow/execution/queue_source.py": "1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307",
+    "demiflow/planning/dag.py": "294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b",
+    "demiflow/execution/contracts/exchange.py": "dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2",
+    "demiflow/resources/contracts.py": "61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff"
+  },
+  "runs": [
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r1-evidence/verification.json",
+      "sha256": "73f0675dd0e27e6ff162964b3c825b0b267a9789ea34aa4fdb79f0d5359fbf89",
+      "head": "8928e5bef612f00d751b0ec02729cfeccfbb97cf",
+      "reports": [
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0007876120507717133,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 3.5115456096827984,
+          "failure": "demiflow/planning/dataflow_place.py:776: in _select_budgeted_residency\n    return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,\ndemiflow/planning/dataflow_place.py:490: in solve_residency\n    raise _error(\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: a memory-connected stage group exceeds the resident budget and cannot be staged\n\nDuring handling of the above exception, another exception occurred:\ntests/test_runtime_v3_durable_residency.py:206: in test_durable_write_lance_recovers_without_empty_early_publication\n    dataset().write_lance(str(target), mode='create', return_receipt=True)\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:314: in _run_dataset_action\n    handle = execute_action(request, policy=policy, bounds=bounds)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:58: in execute_action\n    execution.prepare()\ndemiflow/execution/dataflow.py:424: in prepare\n    physical = compile_physical_dataflow(\ndemiflow/planning/dataflow_place.py:880: in compile_physical_dataflow\n    exchanges, residency = _select_budgeted_residency(\ndemiflow/planning/dataflow_place.py:787: in _select_budgeted_residency\n    solve_residency(stages, (), hosts=hosts, bounds=bounds,\ndemiflow/planning/dataflow_place.py:490: in solve_residency\n    raise _error(\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: RESOURCE_INFEASIBLE: a memory-connected stage group exceeds the resident budget and cannot be staged",
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00024764612317085266,
+          "failure": null,
+          "properties": []
+        }
+      ],
+      "exit_code": 1,
+      "source_count": 2985,
+      "command": [
+        "/tmp/demiflow-ray-api-optional-env/bin/python",
+        "-P",
+        "-B",
+        "/tmp/demiflow-durable-publication-runner-20261117.py",
+        "/tmp/demiflow-durable-publication-r1",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-durable-publication-r1-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-durable-publication-r1-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-durable-publication-r1-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-durable-publication-r1-location",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-durable-publication-r1-d8",
+        "TMPDIR": "/tmp/demiflow-durable-publication-r1-temp",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_OUTPUT_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      },
+      "changed_inputs": [],
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r2-evidence/verification.json",
+      "sha256": "4958afdeadb6d87588b7e8efe32765567108997ad890254dd1f8cd833bd2e64c",
+      "head": "ec591e8d1a2fe50e0ea425c21a6452cdaaa797b2",
+      "reports": [
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0008451268076896667,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "call",
+          "outcome": "failed",
+          "duration": 10.126689199358225,
+          "failure": "tests/test_runtime_v3_durable_residency.py:209: in test_durable_write_lance_recovers_without_empty_early_publication\n    receipt = dataset().write_lance(str(target), mode='create', return_receipt=True)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/data/dataset.py:2444: in write_lance\n    receipt = execute_lance_write(self, spec, native_options=native)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/lance_action.py:46: in execute_lance_write\n    receipt = run_dataset_action(request)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:291: in run_dataset_action\n    return _run_dataset_action(request)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_api.py:375: in _run_dataset_action\n    handle.close()\ndemiflow/execution/dataflow_handles.py:373: in close\n    raise self._failure\ndemiflow/execution/dataflow_api.py:356: in _run_dataset_action\n    result = handle.result()\n             ^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_handles.py:336: in result\n    status = self._pump(min(_CONTROL_POLL_MS, remaining_ms))\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow_handles.py:169: in _pump\n    return self._execution.pump(deadline_ms=deadline_ms)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:838: in pump\n    return self._pump_once(deadline_ms=deadline_ms)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:860: in _pump_once\n    events, replies = self._poll_control(deadline)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ndemiflow/execution/dataflow.py:926: in _poll_control\n    self._handle_event(event)\ndemiflow/execution/dataflow.py:1032: in _handle_event\n    raise self._failure\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: record frame codec workspace exceeds original resident budget (11610 > 11264)\nE   Traceback (most recent call last):\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/worker/dataflow_graph_runner.py\", line 521, in _run\nE       processed = self._step_ready()\nE                   ^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/worker/dataflow_graph_runner.py\", line 568, in _step_ready\nE       return self.step(max_records=1, deadline_ms=50).processed\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/worker/dataflow_graph_runner.py\", line 620, in step\nE       self._receive_data(command)\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/worker/dataflow_graph_runner.py\", line 962, in _receive_data\nE       record = self._frame_call(decode_document, raw, record_id=command['record_id'], sequence=command['sequence'],\nE                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/worker/dataflow_graph_runner.py\", line 856, in _frame_call\nE       return function(*args, services=self.services, retained=retained, **kwargs)\nE              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/dataflow_record_frames.py\", line 393, in decode_document\nE       admit_document(raw, bounds, services=services, retained=retained)\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/dataflow_record_frames.py\", line 388, in admit_document\nE       _admit(retained + raw_workspace(raw), resident_limit(bounds, services))\nE     File \"/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/demiflow/execution/dataflow_record_frames.py\", line 154, in _admit\nE       raise DataflowError('BUDGET_EXCEEDED',\nE   demiflow.execution.contracts.dataflow_errors.DataflowError: BUDGET_EXCEEDED: record frame codec workspace exceeds original resident budget (11610 > 11264)",
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00029670074582099915,
+          "failure": null,
+          "properties": []
+        }
+      ],
+      "exit_code": 1,
+      "source_count": 2985,
+      "command": [
+        "/tmp/demiflow-ray-api-optional-env/bin/python",
+        "-P",
+        "-B",
+        "/tmp/demiflow-durable-publication-runner-20261117.py",
+        "/tmp/demiflow-durable-publication-r2",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-durable-publication-r2-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-durable-publication-r2-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-durable-publication-r2-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-durable-publication-r2-location",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-durable-publication-r2-d8",
+        "TMPDIR": "/tmp/demiflow-durable-publication-r2-temp",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_OUTPUT_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      },
+      "changed_inputs": [],
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r3-evidence/verification.json",
+      "sha256": "a9ce01d4d313221ebc751fdd3f8dfd9e3c6f55218cc05c516f1bbf8ff74a01a4",
+      "head": "988bdb4c0adb921fd0b808222cc2e0205c07fff7",
+      "reports": [
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0008155517280101776,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 20.154540073126554,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00044321268796920776,
+          "failure": null,
+          "properties": []
+        }
+      ],
+      "exit_code": 0,
+      "source_count": 2985,
+      "command": [
+        "/tmp/demiflow-ray-api-optional-env/bin/python",
+        "-P",
+        "-B",
+        "/tmp/demiflow-durable-publication-runner-20261117.py",
+        "/tmp/demiflow-durable-publication-r3",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-durable-publication-r3-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-durable-publication-r3-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-durable-publication-r3-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-durable-publication-r3-location",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-durable-publication-r3-d8",
+        "TMPDIR": "/tmp/demiflow-durable-publication-r3-temp",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_OUTPUT_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      },
+      "changed_inputs": [],
+      "children_after": []
+    },
+    {
+      "receipt": "/tmp/demiflow-durable-publication-r4-evidence/verification.json",
+      "sha256": "b43a2e05e6f8a76707043adc6700abf1a11b5e3de8fc0b977e902fa250ae8820",
+      "head": "f2ed096feea70380171ebdfff09999744ce000d7",
+      "reports": [
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0008025690913200378,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 17.05058142915368,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_small_native_publication_keeps_live_terminal_grant_and_original_receipt",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0002551861107349396,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0006252676248550415,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 3.561937652528286,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00020625069737434387,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005799867212772369,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.5694248601794243,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_small_native_workspace.py::test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00022773444652557373,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005559436976909637,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 16.44607599824667,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0004590824246406555,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0007328949868679047,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 7.80648747086525,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.000199783593416214,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005244798958301544,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 5.175282783806324,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0001946575939655304,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.00015250593423843384,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.00045724213123321533,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 9.173527359962463e-05,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[8193]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005874820053577423,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[8193]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.3608444966375828,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[8193]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.00019145384430885315,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[262144]",
+          "when": "setup",
+          "outcome": "passed",
+          "duration": 0.0005750805139541626,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[262144]",
+          "when": "call",
+          "outcome": "passed",
+          "duration": 0.3771616742014885,
+          "failure": null,
+          "properties": []
+        },
+        {
+          "nodeid": "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore[262144]",
+          "when": "teardown",
+          "outcome": "passed",
+          "duration": 0.0002711564302444458,
+          "failure": null,
+          "properties": []
+        }
+      ],
+      "exit_code": 0,
+      "source_count": 2986,
+      "command": [
+        "/tmp/demiflow-ray-api-optional-env/bin/python",
+        "-P",
+        "-B",
+        "/tmp/demiflow-durable-publication-runner-20261117.py",
+        "/tmp/demiflow-durable-publication-r4",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_runtime_v3_small_native_workspace.py",
+        "tests/test_runtime_v3_durable_residency.py::test_durable_write_lance_recovers_without_empty_early_publication",
+        "tests/test_runtime_v3_residency.py::test_finite_phase_write_lance_commits_once_and_recovers",
+        "tests/test_execution_payload_limits.py::test_native_default_row_floor_remains_compatible_when_pool_supports_it",
+        "tests/test_runtime_v3_terminal_metadata.py::test_sealed_window_requires_original_grant_and_legacy_keeps_old_window",
+        "tests/test_runtime_v3_terminal_flush_budget.py::test_real_store_chunking_preserves_segment_hashes_and_restore"
+      ],
+      "environment": {
+        "PYTHONPATH": "/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117:/yzp/zhaozy/yangzepeng/0905/_demiflow/worktrees/gpt_durable_publication_20261117/tests",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "DEMIFLOW_RESOURCE_ROOT": "/tmp/demiflow-durable-publication-r4-resources",
+        "DEMIFLOW_RESOURCE_HOME": "/tmp/demiflow-durable-publication-r4-home",
+        "DEMIFLOW_FORGE_DOMAIN": "/tmp/demiflow-durable-publication-r4-forge",
+        "DEMIFLOW_LOCATION_CACHE": "/tmp/demiflow-durable-publication-r4-location",
+        "FORGE_CASE_D8_BACKEND_ROOT": "/tmp/demiflow-durable-publication-r4-d8",
+        "TMPDIR": "/tmp/demiflow-durable-publication-r4-temp",
+        "DEMIFLOW_V3_PROVIDER": "local",
+        "DEMIFLOW_V3_ENV": null,
+        "DF_API_TEST_PROVIDER": null,
+        "FORGE_CHROMIUM": null,
+        "FORGE_WORKBENCH_EVIDENCE": null,
+        "FORGE_OUTPUT_EVIDENCE": null,
+        "FORGE_ACCEPTANCE_DIR": null
+      },
+      "changed_inputs": [],
+      "children_after": []
+    }
+  ],
+  "scope": [
+    "New plans whose legacy terminal+publication minimum cannot coexist under original M",
+    "Original durable ACK/physical exit; native future retains live terminal grant",
+    "Actual shared metadata/codec/queued-command/current-row/flush/index peaks before growth",
+    "Original R/B and total memory remain unchanged; genuinely unfit rows reject"
+  ],
+  "not_run": [
+    "Full matrix (separately green on base8928)",
+    "GPU",
+    "two-host",
+    "I08 performance",
+    "full V035"
+  ]
+}
