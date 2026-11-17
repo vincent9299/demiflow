@@ -15,6 +15,13 @@ _RECORDS = frozenset({'thread.json', 'identity.json', 'process.json', 'cleanup.j
 
 
 def _read(path):
+    # The provider root is canonical; descendants must stay in that exact
+    # allocation directory rather than borrowing another file's exit proof.
+    try:
+        if path.resolve() != path:
+            raise ResourceError('INVALID_SPEC', 'resource evidence path contains a symlink')
+    except (OSError, RuntimeError) as exc:
+        raise ResourceError('INVALID_SPEC', 'resource evidence path cannot be resolved') from exc
     try:
         with path.open('rb') as stream:
             raw = stream.read(8193)

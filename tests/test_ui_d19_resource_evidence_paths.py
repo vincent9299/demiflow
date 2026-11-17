@@ -171,12 +171,21 @@ def test_evidence_resolution_is_allocation_bound(local_environment, filename):
     assert exc.value.code == "ARTIFACT_MISMATCH"
 
 
-def test_evidence_resolver_rejects_symlink_escape(tmp_path):
+@pytest.mark.parametrize("symlink_level", ["record", "allocation", "scope"])
+def test_evidence_resolver_rejects_symlink_escape(tmp_path, symlink_level):
     unit = ManagedProcessUnit(tmp_path / "units")
     directory = unit.prepare(SCOPE, ALLOCATION, "c" * 64)
     outside = tmp_path / "outside.json"
     outside.write_text('{"unrelated":true}')
-    (directory / "cleanup.json").symlink_to(outside)
+    if symlink_level == "record":
+        (directory / "cleanup.json").symlink_to(outside)
+    else:
+        original = directory if symlink_level == "allocation" else directory.parent
+        target = tmp_path / ("outside-" + symlink_level)
+        original.rename(target)
+        original.symlink_to(target, target_is_directory=True)
+        proof_directory = target if symlink_level == "allocation" else target / ALLOCATION
+        (proof_directory / "cleanup.json").write_bytes(outside.read_bytes())
     # Reject at reference creation or resolution; neither may turn an outside
     # file into this allocation's authenticated evidence.
     with pytest.raises(ResourceError, match="evidence"):
