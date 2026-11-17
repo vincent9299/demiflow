@@ -1,0 +1,51 @@
+{
+  "schema": "demiflow.continuation-j-independent-audit.v1",
+  "head": "76378d9b5132ec1b381c3f64762d77b286575765",
+  "receipts": [
+    {
+      "path": "/tmp/demiflow-root-performance-fixes-combined-r1-evidence/verification.json",
+      "sha256": "ffdaf3972bcd479c778e93b5c44569095113df9a584d0c3cb49574ad59e3d565",
+      "commit": "76378d9b5132ec1b381c3f64762d77b286575765",
+      "git_inputs": {
+        "count": 2993,
+        "mismatch": []
+      },
+      "source_unchanged": true,
+      "exit_code": 0,
+      "children_after": [],
+      "changed_inputs": []
+    },
+    {
+      "path": "/tmp/demiflow-performance-fixes-76378d9-r1/verification.json",
+      "sha256": "373bc52d9f19e365ae0d3f78eed04d49f6d06e06772a51696571bcd374d1bcd3",
+      "commit": "76378d9b5132ec1b381c3f64762d77b286575765",
+      "git_inputs": {
+        "count": 1073,
+        "mismatch": []
+      },
+      "source_unchanged": true,
+      "status": "preflight_failed_or_incomplete"
+    },
+    {
+      "path": "/tmp/demiflow-i08-wide-profile-76378d9-r1/verification.json",
+      "sha256": "9bcac054510560712cd46b7bb1a997aeceb6303c4581ae1f362f46b8462506d0",
+      "commit": "76378d9b5132ec1b381c3f64762d77b286575765",
+      "git_inputs": {
+        "count": 1073,
+        "mismatch": []
+      },
+      "source_unchanged": true,
+      "status": "diagnostic_unavailable_or_missing_core_profile"
+    }
+  ],
+  "boundaries": {
+    "main_head": "e40a6dd3dd756aba423dca4c7d995ada0a4bff65",
+    "main_status": " M \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\346\\226\\207\\346\\241\\243.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201Review-20261110.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\270\\211\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112-\\347\\254\\254\\344\\272\\214\\350\\275\\256.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\344\\273\\243\\347\\240\\201\\345\\244\\215\\345\\256\\241-20261113.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2476\\346\\217\\220\\344\\272\\244\\345\\264\\251\\346\\272\\203\\347\\252\\227\\345\\217\\243\\351\\242\\235\\345\\272\\246-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\244\\215\\345\\256\\241-\\302\\2477\\345\\215\\225\\350\\241\\214\\344\\270\\212\\351\\231\\220-\\350\\243\\201\\345\\206\\263-20261112.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\345\\256\\214\\346\\225\\264\\350\\256\\260\\345\\277\\206\\350\\201\\212\\345\\244\\251\\350\\256\\260\\345\\275\\225.md\"\n?? \"docs/demiflow\\345\\215\\207\\347\\272\\247\\351\\230\\266\\346\\256\\265\\350\\247\\204\\345\\210\\222-20261109.md\"\n?? docs/upgrade-implementation-20261113/\n",
+    "dirty_file_count": 18,
+    "main_file_mismatch": [],
+    "frozen_count": 7,
+    "frozen_mismatch": [],
+    "unchanged": true
+  },
+  "limitation": "Profile trial failed, lacks driver/authority/complete resource receipt; usable business profiles are diagnostic only. No final I08 pass."
+}
