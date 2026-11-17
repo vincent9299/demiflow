@@ -213,7 +213,7 @@ def test_borrowed_metadata_is_admitted_while_first_sort_runs_exist(tmp_path, mon
                 'children': [child] * 512}, separators=(',', ':')).encode()
             manifest = store.put(iter((raw,)), max_bytes=len(raw), media_type=SEGMENTS_MEDIA)
         producers = tuple(f'p{i:04d}-' + 'x' * 120 for i in range(256 if wide_control == 'seal' else 1))
-        exchange = make('ExchangeSpec', channel_id='shuffle-input', edge_id='edge-shuffle',
+        exchange = make('ExchangeSpec', channel_id='shuffle-input', edge_id=hashlib.sha256(b'edge-shuffle').hexdigest(),
             producer_partitions=producers, consumer_partitions=('p0',), mode='finite_sealed',
             routing='forward', scope_id='shuffle-scope', route_epoch=0, storage_bytes=16 << 20)
         seal = seal_scope(exchange.scope_id, tuple(ProducerCompletion(p, 0, 'succeeded', -1, manifest)
@@ -360,6 +360,8 @@ def test_legacy_formula_and_old_sealed_configuration_remain_unchanged(tmp_path, 
     with monkeypatch.context() as patch:
         patch.setattr(dataflow_compile, 'compile_kernel_spec', original_config)
         with prepared(tmp_path, data.range(30).random_shuffle(seed=7)) as (execution, services):
+            # Reload after the original coordinator has surrendered its lease.
+            execution.close()
             patch.setattr(execution_module, 'lower_action', lambda *a, **k: pytest.fail('sealed plan was recompiled'))
             reloaded = execution_module.DataflowExecution(execution._request, services=services)
             try:
