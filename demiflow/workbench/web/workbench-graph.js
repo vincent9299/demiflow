@@ -268,7 +268,7 @@
       canvas.setAttribute('aria-label', model.choice.kind === 'sealed' ? '运行封存计划' : '数据算子图');
       const pos = new Map(layout.nodes.map(n => [n.key, n]));
       empty.hidden = model.nodes.length > 0;
-      empty.textContent = model.nodes.length ? '' : model.choice.label + (model.choice.reason ? ' · ' + model.choice.reason : '');
+      empty.textContent = model.nodes.length ? '' : model.choice.label;
       drawEdges(model, pos);
       drawCards(model, pos);
       for (const card of model.nodes) paintCard(card);

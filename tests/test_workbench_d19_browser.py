@@ -38,11 +38,12 @@ V3_SCHEMA = 'demiflow.dataflow_graph.v3'
 
 
 def _select_flow(page):
-    """source-only entry -> explicit check -> read the real graph (C2/C3)."""
+    """Current configuration stays separate from a sealed execution graph."""
     page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
     page.get_by_label('流程', exact=True).select_option('flows/questions.py:select')
     expect(page.get_by_label('配置', exact=True)).to_have_value('flows/select_a.json')
-    expect(page.locator('.wb-source-body')).to_contain_text('def _select')
+    expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
+    expect(page.locator('.wb-node')).to_have_count(0)
     for _ in range(5):
         page.get_by_role('button', name='检查', exact=True).click()
         page.wait_for_function(
@@ -53,7 +54,8 @@ def _select_flow(page):
         page.wait_for_timeout(400)
     expect(page.locator('.wb-basis')).to_contain_text('checked')
     page.get_by_role('button', name='读图与配置', exact=True).click()
-    expect(page.locator('.wb-node').filter(has_text='normalize_question')).to_be_visible()
+    expect(page.locator('.wb-node')).to_have_count(0)
+    expect(page.get_by_label('配置 /arguments/minimum', exact=True)).to_be_visible()
 
 
 def _run(page):
@@ -92,6 +94,9 @@ def test_ui_d19_shell_and_responsive(owned_fixture, browser):
 
         # graph node screen font size must stay readable (>=12px), not shrunk
         _select_flow(page)
+        page.get_by_role('button', name='运行记录', exact=True).click()
+        page.locator('.wb-run-record[data-run="' + fx.run_facts['run_id'] + '"]').click()
+        expect(page.locator('.wb-node').first).to_be_visible()
         node_font = page.locator('.wb-node').first.evaluate(
             'el => parseFloat(getComputedStyle(el).fontSize)')
         assert node_font >= 12, node_font
@@ -138,16 +143,14 @@ def test_ui_d19_graph_config_check_run(owned_fixture, browser):
     root = fx.root
     with fx.open_page(browser) as (page, log):
         _select_flow(page)
-        # the graph card must match the server's inspected report, not an old
-        # drawing that happens to look right. Read the real graph back over HTTP.
-        node = page.locator('.wb-node').filter(has_text='normalize_question')
-        node.click()
+        # An inspected configuration is not an execution plan. It remains editable
+        # while the canvas is empty, then real sealed nodes appear after execution.
+        expect(page.locator('.wb-node')).to_have_count(0)
         expect(page.locator('.wb-inspector')).to_be_visible()
         assert _facts(log, '/api/graph') or _facts(log, '/api/inspect'), log['requests'][-5:]
         fx.shot(page, f'v03-graph-{fx.execution_format}')
 
         # Read the graph, repair a real parameter, then invalidate and recheck.
-        page.locator('.wb-node').filter(has_text='above_threshold').click()
         minimum = page.get_by_label('配置 /arguments/minimum', exact=True)
         expect(minimum).to_have_value('0.8')
         before = (root / 'flows/select_a.json').read_bytes()
@@ -171,6 +174,11 @@ def test_ui_d19_graph_config_check_run(owned_fixture, browser):
         assert shown['status'] == 'succeeded'
         assert shown['outputs'][0]['result']['ref']['row_count'] == 1
         expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
+        page.locator('.wb-node').filter(has_text='normalize_question').click()
+        expect(page.locator('.wb-inspector')).to_be_visible()
+        page.get_by_role('button', name='展开代码', exact=True).click()
+        expect(page.locator('.wb-source-body')).to_contain_text('def normalize_question')
+        expect(page.locator('.wb-node')).to_have_count(7)
         fx.record(f'v03-run-{fx.execution_format}', dict(
             run_id=run_id, status=shown['status'],
             row_count=shown['outputs'][0]['result']['ref']['row_count'],

@@ -70,16 +70,21 @@
     const runFacts=$('div',undefined,'wb-run-facts');runFacts.hidden=true;root.append(runFacts);
     const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('aside',undefined,'wb-inspector');
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
-    const graphTools=$('div',undefined,'wb-graph-tools'),graphTitle=$('span','数据算子图'),graphHost=$('div',undefined,'wb-graph');
+    const graphTools=$('div',undefined,'wb-graph-tools'),graphTitle=$('span','运行执行图'),graphHost=$('div',undefined,'wb-graph');
     graphTools.append(graphTitle);const tools=$('div');graphTools.append(tools);
     const wholeButton=button('整图配置',()=>wholeConfiguration(),tools);
     const graph=ForgeWorkbenchGraph.mount(graphHost,{onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
-    const viewToggle=button('当时检查图',()=>toggleGraphKind(),tools);
-    viewToggle.setAttribute('aria-pressed','false');viewToggle.hidden=true;
     button('−',()=>graph.zoom(.8),tools).setAttribute('aria-label','缩小算子图');
     button('+',()=>graph.zoom(1.25),tools).setAttribute('aria-label','放大算子图');
     button('适应',()=>graph.fit(),tools).setAttribute('aria-label','适应算子图');
-    const graphLegend=$('p','实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用','wb-caption');
+    const expandGraph=button('展开画布',async()=>{
+      if(document.fullscreenElement===body)await document.exitFullscreen();
+      else await body.requestFullscreen();
+    },tools);
+    expandGraph.hidden=!document.fullscreenEnabled;
+    function fullscreenChanged(){expandGraph.textContent=document.fullscreenElement===body?'退出展开':'展开画布';}
+    document.addEventListener('fullscreenchange',fullscreenChanged);
+    const graphLegend=$('p','读取引擎执行计划…','wb-caption');
     const actionBar=$('div',undefined,'wb-action-bar');actionBar.hidden=true;
     const advanced=details('高级诊断',graphSection);advanced.hidden=true;
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
@@ -150,10 +155,6 @@
       runButton.disabled=busy||!!run||!registered()||!can('run_submit')||dirty||!data().graph?.parameters.available||data().graph?.freshness.current===false;
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
       wholeButton.disabled=!data().graph;
-      const sealedView=!!run&&data().graph?.binding.basis_kind==='run';
-      viewToggle.hidden=!sealedView;
-      viewToggle.textContent=data().graphPreference==='report'?'返回执行图':'当时检查图';
-      viewToggle.setAttribute('aria-pressed',String(data().graphPreference==='report'));
       accessState.hidden=!!run||registered()&&can('run_submit');
       accessState.textContent=!working?.entry?'尚未发现可用入口。可在开发中编写流程，再通过“接入与权限”登记。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；当前仅观察源码，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       for(const[key,b]of modes){b.classList.toggle('active',data().mode===key);b.setAttribute('aria-pressed',String(data().mode===key));}
@@ -226,9 +227,12 @@
       graphModel=model;
       graph.update(model);
       graph.select(model.selected);
+      const title=model.choice.kind==='sealed'?'运行执行图':'尚无运行执行图';
+      graphTitle.textContent=title+(model.nodes.length?' · '+model.nodes.length+' 节点 / '+model.edges.length+' 条边':'');
+      basisLabel.textContent=(model.execution?'封存运行图':g.binding.basis_kind==='report'?'静态检查 · '+g.status+' · 尚无运行执行图':choice.label)+(scopeNode?' · 节点邻域':'');
       paintActionSelector(g,choice);
       paintAdvancedDiagnostics(g,choice,model);
-      graphLegend.textContent=choice.kind==='sealed'?(model.execution?.format==='v3'?'实线：数据流（精确实例端口）　一实例一节点':'实线：逻辑数据流（标注端口）　×N：同一逻辑节点多次出现'):'实线：数据流　虚线：值依赖 / 动作先后　点线：未核验的源码引用';
+      graphLegend.textContent=model.execution?(model.execution.format==='v3'?'实线：数据流（精确实例端口）　一实例一节点':'实线：逻辑数据流（标注端口）　×N：同一逻辑节点多次出现'):'这里只展示引擎执行计划；源码调用关系与静态检查报告不会作为替代图。';
       return model;
     }
     function afterGraphPaint(){
@@ -244,15 +248,12 @@
       if(!state.acceptGraph(ticket,value))return;
       if(selected.run){lastRunGraphAt=Date.now();graphStatus=requestedStatus;}
       if(value.binding.basis_kind==='report')working={entry:value.binding.entry,params:value.binding.params};
-      graphTitle.textContent='数据算子图 · '+value.completeness.total_nodes+' 节点 / '+value.completeness.total_edges+' 条边';
-      const basis=value.binding.basis_kind;
-      basisLabel.textContent=(basis==='run'?'封存运行图':basis==='report'?'检查报告图 · '+value.status:'源码观察图 · 尚未检查')+(scopeNode?' · 节点邻域':value.completeness.display==='clipped'?' · 显示已裁剪':'');
       const model=paintGraph();
       paintSelectors();graphLoading(false);paintRunSeal();paintLocator(value);
-      if(!value.nodes.length){
+      if(!model.nodes.length){
         paintConfiguration(null);
         if(!['logs','events','observations'].includes(sourceKind)){
-          disposeReaders(sourceBody);sourceBody.replaceChildren($('p','本图没有可展示的调用节点。请核对右侧诊断或“检查问题”；没有节点不代表检查通过。','wb-caption'));
+          disposeReaders(sourceBody);sourceBody.replaceChildren($('p','尚无可展示的数据算子节点。可查看“检查问题”中的解析限制；没有节点不代表检查通过。','wb-caption'));
         }
       }else{
         const cards=model?.nodes||[];
@@ -263,14 +264,14 @@
       if(data().mode==='checks')paintIssues();
       updateActions();
       if(value.freshness.current===false){message('检查依据已变化，请重新检查。 '+value.freshness.changes.join('；'),'notice');button('读取当前配置',()=>useWorking(value.binding.entry,value.binding.params),notice);}
-      else if(value.completeness.display==='clipped')message('当前图只显示部分节点或边，可定位节点查看局部；完整检查以报告为准。');
+      else if(model.execution&&value.completeness.display==='clipped')message('当前图只显示部分节点或边，可定位节点查看局部；完整检查以报告为准。');
     }
     async function locateNode(id,offset=nodeOffset){
       const ticket=state.capture();scopeNode=id;nodeOffset=offset;graphLoading(true);
       try{await fetchGraph(ticket);}finally{if(current(ticket))graphLoading(false);}
     }
     function paintLocator(graphValue){
-      locator.hidden=graphValue.completeness.total_nodes<=128&&!scopeNode;locatorBody.replaceChildren();
+      locator.hidden=(!graphModel?.execution)||(graphValue.completeness.total_nodes<=128&&!scopeNode);locatorBody.replaceChildren();
       const index=graphValue.node_index;if(!index)return;
       const choice=select('定位图节点',index.nodes.map(n=>({value:n.id,label:n.label+' · '+n.source+':'+n.line})),scopeNode);
       choice.onchange=()=>{if(!disposed&&choice.isConnected)locateNode(choice.value).catch(error=>message(error.message,'error-box'));};locatorBody.append(choice);
@@ -279,12 +280,6 @@
       button('下一组节点',()=>locateNode(scopeNode,index.next_offset),locatorBody,{disabled:index.next_offset==null});
       button('返回全图范围',()=>locateNode(null,0),locatorBody,{disabled:!scopeNode});
       locatorBody.append($('span','已索引 '+index.total+' 个节点 · 当前显示 '+graphValue.nodes.length+' 个；局部视图仍绑定同一图依据。','wb-caption'));
-    }
-    function toggleGraphKind(){
-      if(!run||data().graph?.binding.basis_kind!=='run')return;
-      const preference=data().graphPreference==='report'?'auto':'report';
-      state.setGraphView({preference,actionId:data().actionId,execution:null});
-      paintGraph();afterGraphPaint();updateActions();
     }
     function cardsForReportNode(id){
       const nodes=graphModel?.nodes||[];
@@ -342,6 +337,12 @@
     }
     async function chooseNode(id,selection=null){
       if(disposed||!graphModel)return;
+      if(!graphModel.execution&&data().graph?.binding.basis_kind!=='run'){
+        if(!data().graph.nodes.some(n=>n.id===id))await locateNode(id);
+        const node=data().graph?.nodes.find(n=>n.id===id);
+        if(node){state.chooseNode(id);paintConfiguration(node);if(sourceOpen)await loadSource();}
+        return;
+      }
       let candidates=cardsForReportNode(id);
       if(selection?.occurrence_id!=null)candidates=candidates.filter(c=>c.selection.occurrenceId===selection.occurrence_id||c.occurrences.some(o=>o.occurrenceId===selection.occurrence_id));
       if(selection?.logical_node_id!=null)candidates=candidates.filter(c=>c.selection.logicalNodeId===selection.logical_node_id||c.occurrences.some(o=>o.logicalNodeId===selection.logical_node_id));
@@ -949,7 +950,7 @@
       },
       dirty:()=>!!working&&Object.keys(getDraft().values).length>0,
       projectCheckSettled:()=>{if(!disposed&&documents.open&&projectInfoDirty)refreshProjectInfo();},
-      dispose:()=>{disposed=true;observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
+      dispose:()=>{disposed=true;document.removeEventListener('fullscreenchange',fullscreenChanged);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;

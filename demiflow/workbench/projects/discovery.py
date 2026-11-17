@@ -281,7 +281,7 @@ def discover(root, control=None):
     readme = root / 'README.md'
     if readme.exists():
         try:
-            text = read(readme, 65536).decode('utf-8')
+            text = read(readme, ws.README_BYTES).decode('utf-8')
             # Documentation links are evidence of a reference, never executable
             # parameter bindings or an inferred successful historical run.
             for match in re.finditer(r'\[[^\]\n]{0,256}\]\(([^)\s]{1,1024})\)', text):

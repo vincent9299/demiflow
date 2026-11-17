@@ -34,6 +34,7 @@ FORMAT = "demiflow_forge_workspace_v1"
 FORMAT_V2 = "demiflow_forge_workspace_v2"
 FORMAT_V3 = "demiflow_forge_workspace_v3"
 MODERN_FORMATS = {FORMAT_V2, FORMAT_V3}
+README_BYTES = 1024**2
 
 
 
@@ -1625,7 +1626,7 @@ def workspace_context(root):
         flows.extend(dict(entry=e, parameters=registered[e], diagnostic='Registered function is missing') for e in sorted(set(registered) - found))
     report_page = list_reports(root)
     try:
-        readme = (read_bounded(root / "README.md", 64 * 1024).decode("utf-8")
+        readme = (read_bounded(root / "README.md", README_BYTES).decode("utf-8")
                   if (root / "README.md").exists() else "")
     except (ValueError, OSError) as exc:
         readme = '项目说明无法读取：' + str(exc)[:1024]

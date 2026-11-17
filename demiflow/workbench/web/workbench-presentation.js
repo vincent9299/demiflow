@@ -24,6 +24,7 @@
     incomplete: '观测不完整', reused: '复用物化结果', cancelled: '已取消',
   };
   const REASON_TEXT = {
+    dataset_plan_unavailable: '尚未取得引擎执行计划。请从运行记录选择已封存的运行；当前源码尚未接通不执行业务的计划解析，静态检查不能代替运行图。',
     not_sealed: '该 action 没有封存执行计划',
     unsupported_plan_schema: '封存计划版本不受支持',
     identity_mismatch: '封存计划身份不一致',
@@ -630,10 +631,8 @@
   function chooseGraphView(graph, {actionId = null, preference = 'auto'} = {}) {
     const binding = graph && graph.binding;
     const basis = binding ? binding.basis_kind : null;
-    if (basis === 'source') return {kind: 'source', actionId: null, label: '源码观察 · 尚未检查', reason: null};
-    if (basis === 'report') return {kind: 'report', actionId: null, label: '报告检查图', reason: null};
+    if (basis === 'source' || basis === 'report') return {kind: 'unavailable', actionId: null, label: '尚无运行执行图', reason: 'dataset_plan_unavailable'};
     if (basis !== 'run') return {kind: 'unavailable', actionId: null, label: '图基础未知', reason: 'invalid_binding'};
-    if (preference === 'report') return {kind: 'report', actionId: null, label: '当时检查图', reason: null};
     const logical = graph.logical;
     const actions = logical && Array.isArray(logical.actions) ? logical.actions : [];
     if (actionId !== null && actionId !== undefined) {
@@ -672,7 +671,7 @@
     const notices = [];
     if (!choice || choice.kind === 'unavailable') {
       const reason = choice ? choice.reason : 'not_sealed';
-      notices.push(reasonText(reason) + (binding.basis_kind === 'run' ? '；可切换“当时检查图”查看报告投影。' : ''));
+      notices.push(reasonText(reason));
       return emptyModel(binding, choice || {kind: 'unavailable', actionId: null, label: '不可用', reason}, null, notices,
         reportCompleteness(graph, [], []));
     }
@@ -708,7 +707,7 @@
     if (!projection.available) {
       const unavailable = {kind: 'unavailable', actionId: choice.actionId, label: choice.label, reason: projection.reason};
       notices.push(reasonText(projection.reason) + '：' + projection.detail);
-      notices.push('可切换“当时检查图”查看报告投影；不会按旧版悄悄画完整计划。');
+      notices.push('计划不可用时不回退到静态检查图。');
       return emptyModel(binding, unavailable, null, notices, reportCompleteness(graph, [], []));
     }
     const identity = projection.identity;

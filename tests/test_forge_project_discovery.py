@@ -232,7 +232,7 @@ def test_configuration_budget_and_invalid_json_remain_visible(original):
     assert value['configurations'][0]['status'] == 'unreadable'
     assert len(value['evidence']) < 128
     ws.init_workspace(original, existing=True)
-    (original / 'README.md').write_text('x' * 65537)
+    (original / 'README.md').write_text('x' * (ws.README_BYTES + 1))
     context = ws.workspace_context(original)
     assert '无法读取' in context['readme']
     assert any(d['code'] == 'documentation_unreadable' for d in context['project']['diagnostics'])
