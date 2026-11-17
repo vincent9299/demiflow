@@ -39,12 +39,12 @@ def test_seed_repeats_union_flatmap_multiplicity_despite_input_order(tmp_path):
     assert sum(first[i]['v'] != first[i + 1]['v'] for i in range(len(first) - 1)) > 10
 
 
-def _record(row, index, action='a'):
+def _record(row, index, action='a', *, max_bytes=4096):
     from demiflow.execution.contracts.dataflow import Record
     from demiflow.execution.exchange.dataflow_bridge import _encode_payload
     return Record(hashlib.sha256(f'{action}:{index}'.encode()).hexdigest(),
         {'source': action, 'ordinal': index}, None, row,
-        len(_encode_payload(row, max_bytes=4096)), index)
+        len(_encode_payload(row, max_bytes=max_bytes)), index)
 
 
 def _services(store, port, *, stop=lambda: None):
@@ -163,6 +163,30 @@ def test_actual_operator_owned_spool_fills_old_segment_under_original_budget(tmp
         finally:
             kernel.close()
             legacy.release()
+
+
+def test_new_shuffle_keeps_original_wide_row_success_budget(tmp_path):
+    from demiflow.execution.kernels.operator import OperatorKernel
+    from test_runtime_v3_artifact_accounting import store_fixture
+    records = [_record({'v': i, 'payload': 'x' * 16384}, i, max_bytes=32768) for i in range(12)]
+    with store_fixture(tmp_path, ceiling=16 << 20) as (_, store, port):
+        services = _services(store, port)
+        services = replace(services, bounds=replace(services.bounds,
+            max_row_bytes=32768, max_batch_bytes=1 << 20))
+        for version in (False, True):
+            spec = replace(_operator_spec(), configuration=_spec(version=version).configuration,
+                output_bound_bytes=32768)
+            kernel = OperatorKernel(spec, services=services, partition_id='p0')
+            try:
+                kernel.start()
+                for record in records:
+                    list(kernel.push('main', record))
+                output = list(kernel.finish('main'))
+                assert Counter(r.record_id for r in output) == Counter(r.record_id for r in records)
+                assert all(r.inline['payload'] == 'x' * 16384 for r in output)
+                assert services.bounds.max_resident_bytes == 1 << 20
+            finally:
+                kernel.close()
 
 
 @pytest.mark.parametrize('wide_control', ['seal', 'manifest'])
