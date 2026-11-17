@@ -195,6 +195,7 @@ def test_graph_end_to_end_by_reference_udf_succeeds(tmp_path, monkeypatch):
 
 def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
     from runtime_v3_owned_crash import kill_owned_worker, assert_worker_killed, process_records
+    from runtime_v3_graph_history import capture_acks
     driver_pid = os.getpid()
     helper_mod, paths, helper = _helper(tmp_path, monkeypatch, "gcpcrash")
     crash_marker = tmp_path / "target-crashed-once"
@@ -234,17 +235,22 @@ def test_graph_crash_edit_resume_refuses(tmp_path, monkeypatch):
         assert_worker_loss(failure.value)
         assert_worker_killed(crash_marker, root)
         original_records = process_records(root)
+        original_acks = capture_acks(run, 'action-1')
+        assert original_acks
         # Edit ONLY the captured helper; the closure's own source + pickle bytes unchanged.
         paths[helper].write_text("def delta():\n    return 9999\n")
         importlib.reload(sys.modules[helper])
-        with pytest.raises(RecoveryContractError,
-                           match="Business code changed since the plan was sealed") as excinfo:
+        with pytest.raises(DataflowError) as excinfo:
             with RunContext.resume(reference, limits=limits) as run2:
                 with run2.action({"kind": "materialize",
                                   "source": {"fixture": "graph-codepin-crash"}}) as execution:
                     executor.materialize_graph(spec)
                     execution.complete(dict(kind="graph-materialized"))
-        assert not isinstance(excinfo.value, TimeoutError)
+        assert excinfo.value.code == 'INVALID_CONTRACT'
+        assert str(excinfo.value) == ('INVALID_CONTRACT: Loaded program code differs from the sealed pin '
+                                     '(edited code or wrong module)')
         assert process_records(root) == original_records, 'code drift must refuse before a new worker launches'
+        assert capture_acks(run2, 'action-1') == original_acks, 'code drift must not rewrite or extend original ACKs'
+        assert run2.journal.execution_action('action-1')['result'] is None
     finally:
         _release_crash_orphans(tmp_path / "run-resources")
