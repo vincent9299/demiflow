@@ -18,7 +18,7 @@
 
 | 原始意图 | 已核对的能力与架构 | 当前保留项 |
 | --- | --- | --- |
-| I01/I02：同一 Dataset、Local/Ray 承载 | 两适配器下沉同一 execute_action；原公开 API 矩阵与禁止 Ray Data 导入有真实证据 | reducer 返回值、显式种子 shuffle 的两处兼容退步正在修；矩阵通过本身未覆盖它们 |
+| I01/I02：同一 Dataset、Local/Ray 承载 | 两适配器下沉同一 execute_action；原公开 API 矩阵与禁止 Ray Data 导入有真实证据 | reducer 返回值兼容已修并合流；显式种子 shuffle 尚在修，矩阵通过本身未覆盖这两处退步 |
 | I03/I05/I06：三种交接、多输入/共享/路由、及时背压 | memory_incremental、durable_incremental、finite_sealed；共享调用执行一次，独立调用不误合并；有字节/行 credit | 原三种交接验收观察器已补 explicit_limits 原样透传；性能不在本轮加验 |
 | I04：CPU/GPU 独立调度 | stage/资源兼容融合、GPU 隔离和原 ResourceManager 准入；已有真实 H100 与四卡证据 | 不宣称任意有状态模型自动副本化、MIG、硬 VRAM 限额或在线 rescale |
 | I07/I10/I13：状态、效果、提交恢复、单一权威与历史 | worker 不持第二 coordinator；恢复基于原 ACK、代码与来源核验；未知付费效果不自动重发 | 本轮补拒绝未完成任务静默变更 provider，已完成结果仍可跨 provider 只读 |
@@ -38,11 +38,15 @@ root 提交：`8ce7adc`、`8ba214e`、`e58da95`。叶 30 项完整通过，另�
 
 证据：`/tmp/demiflow-architecture-audit-bd8a642-20261117/PROVIDER-RECOVERY-FIX.md`；`/tmp/demiflow-provider-recovery-independent-audit-20261117.json`。
 
-### FC-01：恢复 reducer 返回 list/scalar 的原能力——修复验收中
+### FC-01：恢复 reducer 返回 list/scalar 的原能力——已修、已合流，待最终组合验收
 
 旧 `267b914` 六个实际场景全部成功；新实现四个 list/scalar 场景被顶层 Mapping 限制拒绝、两个 dict 场景成功。修复沿现有封闭类型 codec 传递非空业务值，不增加 pickle、不修改旧 Mapping 编码。`None` 仍表示不输出；`False`、`0` 和空容器不能被误丢。
 
-已完成的定向证据支持 Local/Ray 返回、map、物化、原 ACK 读取及恢复。但独立复核发现：`columns=None` 不能证明实际存在非 Mapping 值；把它用作清除表格漂移证据的条件不成立。正在补明确的非 Mapping 事实及对应封存/恢复反例，未按前一候选宣布闭环。
+独立复核又发现 `columns=None` 不能证明实际存在非 Mapping 值，不能用来清除表格漂移证据。已补明确的 `non_mapping_values` 事实及原 manifest 封存/恢复：仅实际非 Mapping 写 true，历史缺省 false，非法类型与矛盾字段拒绝；真实 payload_ref 未知列不能掩盖纯表格漂移。审查者在最终 `e740652` 确认该问题闭环。
+
+最终叶 `e740652` 的 metadata 10、Local 20、Ray 8、原相关 99 项具有完整阶段回执，合计 135 通过、2 项下述既有失败；同版本 3,000 个输入摘要已逐 Git 比对，零不符、零残留子进程。12 个叶提交已合入 root 至 `8e2da6d`；`0ac0056` 对齐公开返回值注解和契约说明，与叶生产代码的差异仅为注解/文档，已用 AST 对比确认。最终合流组合测试仍待 shuffle 完成，不冒称 root 同提交全绿。
+
+完整精简证据及各原收据摘要见 [REDUCER-VALUE-CLOSURE-20261117.json](REDUCER-VALUE-CLOSURE-20261117.json)。此前两次退出 143 的长批没有最终回执，仍不计通过；最终短组均正常收尾。
 
 兼容对照：`/tmp/demiflow-functional-compat-independent-audit-20261117.json`。当前叶证据逐 Git 复核：`/tmp/demiflow-reducer-independent-audit-20261117.json`。
 
@@ -76,7 +80,7 @@ root 提交：`8ce7adc`、`8ba214e`、`e58da95`。叶 30 项完整通过，另�
 
 ## 完成条件与保留边界
 
-下一步是接收上述两项兼容修复，在隔离 root 合流后完成受影响 Local/Ray、原生业务、历史与产品接线的组合验收。有证据的原通过场景仅在受影响时重跑，不为测试计数重复执行。
+下一步是接收 shuffle 兼容修复，与已经合入的 reducer 修复组合，完成受影响 Local/Ray、原生业务、历史与产品接线的验收。有证据的原通过场景仅在受影响时重跑，不为测试计数重复执行。
 
 本报告不宣称产品或平台 100%。未部署、工作台 Local 提交范围、性能延期、当前版本未做双机复验、没有 DSN 的 PostgreSQL、外部真实付费服务和未完成全仓回归，必须分别保留；不能把这些项目写成已验能力。
 

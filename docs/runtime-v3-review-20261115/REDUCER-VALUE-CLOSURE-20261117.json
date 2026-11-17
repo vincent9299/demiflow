@@ -1,0 +1,230 @@
+{
+  "root_head": "0ac0056da26db12b37f717ca5aa0c4b0fc3a66c9",
+  "leaf_head": "e740652054d822a429e64872a5890ba18034b2ad",
+  "root_production_difference_checks": [
+    {
+      "path": "demiflow/data/dataset.py",
+      "leaf_sha256": "57a403b95781a48b8d89f98f89e1165000ae27e02a7cc0d0235068074a4f3ba9",
+      "root_sha256": "744a7e3dc641ed50a41b4a4a0ecd4780839c7d54743011f4b2a7b37220114020",
+      "equal_after_removing_function_annotations_and_docstrings": true
+    },
+    {
+      "path": "demiflow/execution/dataflow_handles.py",
+      "leaf_sha256": "70d4dcc196d06b6487d35e05e7ca0d355c47bfe81704b6f8bb2a4d5b16855aec",
+      "root_sha256": "c8b6a94f5d99e6137d8a2984179c44f0127ce510b1afbf0d8019a75fcab78124",
+      "equal_after_removing_function_annotations_and_docstrings": true
+    },
+    {
+      "path": "demiflow/execution/executors/local.py",
+      "leaf_sha256": "a0bd078d9ab7de90ad4f5ec056c7371044258e5dd84dc07a25ce0743e8191cde",
+      "root_sha256": "2697f6d608a2a6ee4b395b4ab3eca3bde0b2834529671d0c00ea7ceaa3a29aac",
+      "equal_after_removing_function_annotations_and_docstrings": true
+    },
+    {
+      "path": "demiflow/execution/executors/ray.py",
+      "leaf_sha256": "af4ab89b4976c2ead1e4a623cfe6ea357231b5ee96266e75762cfa01ea7299eb",
+      "root_sha256": "1da004c305b3405b51da2c7652df8d5ea235f3f3ba7db394319abc38971bae4f",
+      "equal_after_removing_function_annotations_and_docstrings": true
+    }
+  ],
+  "final_leaf_call_counts": {
+    "passed": 135,
+    "failed": 2
+  },
+  "receipts": [
+    {
+      "receipt": "/tmp/demiflow-rv-local-6/receipt.json",
+      "sha256": "e58e6fdb7da40da117accf9868b9f1be8bc25db6718b39eb98114e5ed115f431",
+      "head": "9e9ecf838490dca095662f49b94305edbaa4a5d5",
+      "inputs": 2999,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 0,
+      "collected": 20,
+      "call_counts": {
+        "passed": 20
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 60
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-codec-7/receipt.json",
+      "sha256": "3bb03f83df25388a38f7181aa3bc3ebbd615f732bc9255863c9dc33c34ceadaa",
+      "head": "9e9ecf838490dca095662f49b94305edbaa4a5d5",
+      "inputs": 2999,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 0,
+      "collected": 64,
+      "call_counts": {
+        "passed": 64
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 192
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-budget-8/receipt.json",
+      "sha256": "d739251b37b36867f3a0b3d67ad443241307a1ec64c0b3b1635be250abbaee0f",
+      "head": "9e9ecf838490dca095662f49b94305edbaa4a5d5",
+      "inputs": 2999,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 1,
+      "collected": 35,
+      "call_counts": {
+        "passed": 33,
+        "failed": 2
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 105
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-old-d-9/receipt.json",
+      "sha256": "8b2adbe33c4081af58a29b55f3a038a848253bb60df8ac1ee857a879ed6e61bb",
+      "head": "c3393e45ec6321b6f7994cc9cd7925d2dfee39d4",
+      "inputs": 2997,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 1,
+      "collected": 2,
+      "call_counts": {
+        "failed": 2
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 6
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-ray-5/receipt.json",
+      "sha256": "2d2b6ab9ca55529cb220e1b7201a999ec958ddb377ec84df35a948412764547a",
+      "head": "9e9ecf838490dca095662f49b94305edbaa4a5d5",
+      "inputs": 2999,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 0,
+      "collected": 5,
+      "call_counts": {
+        "passed": 5
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 15
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-metadata-red-12/receipt.json",
+      "sha256": "84d51c5da075ef8f7b6f76f0ec0f6e4377323aff0f06cea4ac2863f1936c6ec9",
+      "head": "629a5f3a113dd5c3ff7592ba43dcac63a846dce4",
+      "inputs": 3000,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 1,
+      "collected": 1,
+      "call_counts": {
+        "failed": 1
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 3
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-meta-13/receipt.json",
+      "sha256": "603c0cc617c9eebfbf42bb1c08d9bb7d1db6f8780c0831204d341f55ef5cffeb",
+      "head": "e740652054d822a429e64872a5890ba18034b2ad",
+      "inputs": 3000,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 0,
+      "collected": 10,
+      "call_counts": {
+        "passed": 10
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 30
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-local-14/receipt.json",
+      "sha256": "b6c783e9ad39278342614190cfc68c6c7b55c9129bfe611ec3ebea16a56e489c",
+      "head": "e740652054d822a429e64872a5890ba18034b2ad",
+      "inputs": 3000,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 0,
+      "collected": 20,
+      "call_counts": {
+        "passed": 20
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 60
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-ray-15/receipt.json",
+      "sha256": "42a90f6067dcfbc4063d40ac405fdb85f3a098a1d27e23bfa91ec9e43150f9bf",
+      "head": "e740652054d822a429e64872a5890ba18034b2ad",
+      "inputs": 3000,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 0,
+      "collected": 5,
+      "call_counts": {
+        "passed": 5
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 15
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-ray-16/receipt.json",
+      "sha256": "6aac6172a50f91d188126e9a33a46da538b23e33444d6d55ff99da94ff1d6b94",
+      "head": "e740652054d822a429e64872a5890ba18034b2ad",
+      "inputs": 3000,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 0,
+      "collected": 3,
+      "call_counts": {
+        "passed": 3
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 9
+    },
+    {
+      "receipt": "/tmp/demiflow-rv-original-17/receipt.json",
+      "sha256": "4b5fb5e1787e8221825b0b1d5b430eadbdf6d88b6394a0d63ebc719967c2f9e3",
+      "head": "e740652054d822a429e64872a5890ba18034b2ad",
+      "inputs": 3000,
+      "git_mismatches": [],
+      "unchanged": true,
+      "returncode": 1,
+      "collected": 99,
+      "call_counts": {
+        "passed": 97,
+        "failed": 2
+      },
+      "phase_faults": [],
+      "collection_problems": [],
+      "remaining_live": [],
+      "node_phase_count": 297
+    }
+  ],
+  "root_runtime_tests": "not yet run after integration; final combined acceptance remains",
+  "known_baseline_failures": [
+    "tests/test_runtime_v3_d.py::test_d009",
+    "tests/test_runtime_v3_d.py::test_d010"
+  ]
+}
