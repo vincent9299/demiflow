@@ -644,6 +644,10 @@
         const caption=$('h4',(roles[field.role]||field.role)+' · '+field.label);caption.title='源字段：'+field.field+' · 格式：'+field.format;item.append(caption);const meta=$('details',undefined,'case-ui-field-meta');meta.append($('summary','字段信息'),$('p','源字段 '+field.field+' · 格式 '+field.format,'muted small'));item.append(meta);parent.append(item);
         if(!Object.hasOwn(record,field.field)){item.append($('p','该字段尚未读取，请重新读取 Case 或选择本次选样结果。','muted'));return item;}
         if(field.role==='output'&&record[field.field]===null)item.append($('p','此输出字段为 null，未提供结果内容或失败原因。','muted small'));
+        if(record[field.field]===null&&['image','audio','video'].includes(field.format)){
+          if(field.role!=='output')item.append($('p','未提供媒体（字段值为 null）。','muted small'));
+          return item;
+        }
         const isCurrent=()=>live(context)&&selectionTicket===version&&item.isConnected;
         let rendered;
         if(fieldMedia&&['image','audio','video'].includes(field.format)){

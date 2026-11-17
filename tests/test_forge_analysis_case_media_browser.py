@@ -42,7 +42,7 @@ def fixture_media():
 
 
 @contextmanager
-def media_case(browser, tmp_path, *, mode='ready', capability=False, write=True):
+def media_case(browser, tmp_path, *, mode='ready', capability=False, write=True, null_media=False):
     context = browser.new_context(viewport=dict(width=1440, height=1100))
     page = context.new_page(); page.set_default_timeout(12000); errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
@@ -59,7 +59,7 @@ def media_case(browser, tmp_path, *, mode='ready', capability=False, write=True)
         for name, root in [('analysis-state.js', ASSETS), ('analysis-output-media.js', RENDERER),
                            ('analysis-render.js', RENDERER), ('analysis-case-media.js', ASSETS), ('analysis-case.js', ASSETS)]:
             page.add_script_tag(path=str(root / name))
-        page.evaluate(BOOT, dict(project=PROJECT, assets=fixture_media(), mode=mode, capability=capability, write=write))
+        page.evaluate(BOOT, dict(project=PROJECT, assets=fixture_media(), mode=mode, capability=capability, write=write, nullMedia=null_media))
         expect(page.get_by_label('标注 结果是否符合预期', exact=True)).to_be_visible()
         yield page, errors
     except BaseException:
@@ -115,7 +115,7 @@ BOOT = r'''async options => {
     if(name==='analysis-source-register')return payload.locator.alias==='other'?clone(f.other):clone(f.source);
     if(name==='analysis-source')return clone(query.digest===f.other.digest?f.other:f.source);
     if(name==='analysis-documents')return {items:[]};
-    if(name==='analysis-case-page')return {kind:'cases',source_snapshot:payload.digest,columns:payload.query.columns,rows:['17','18'].map(id=>({_rowid:id,picture:'/private/image-'+id+'.png',sound:'file:///private/sound-'+id+'.wav',input:'合成 Case '+id})),offset:0,next_cursor:null,next_offset:null,view_digest:'a'.repeat(64),query_digest:'b'.repeat(64),scope_digest:'c'.repeat(64),annotation_watermark:f.calls.length,groups:[],other_groups:0,matching_in_scope:2,coverage:{requested_scope:payload.query.scope,complete:true,total_rows:2,rows_scanned:2}};
+    if(name==='analysis-case-page')return {kind:'cases',source_snapshot:payload.digest,columns:payload.query.columns,rows:['17','18'].map(id=>({_rowid:id,picture:f.nullMedia?null:'/private/image-'+id+'.png',sound:f.nullMedia?null:'file:///private/sound-'+id+'.wav',input:'合成 Case '+id})),offset:0,next_cursor:null,next_offset:null,view_digest:'a'.repeat(64),query_digest:'b'.repeat(64),scope_digest:'c'.repeat(64),annotation_watermark:f.calls.length,groups:[],other_groups:0,matching_in_scope:2,coverage:{requested_scope:payload.query.scope,complete:true,total_rows:2,rows_scanned:2}};
     if(name==='analysis-annotation-heads')return {target:clone(payload.target),annotation_watermark:0,items:payload.definitions.map(digest=>({definition_digest:digest,head:clone(f.records.get(recordKey(payload.target,digest))?.at(-1)||null)}))};
     if(name==='analysis-annotations')return {items:clone([...(f.records.get(recordKey(JSON.parse(query.target),query.definition))||[])].reverse()),annotation_watermark:0,next_before:null};
     if(name==='analysis-receipt')return clone(f.receipts.get(query.request_id)?.value);
@@ -204,7 +204,8 @@ def test_missing_root_keeps_raw_values_and_late_lookup_capture_never_rebinds(bro
         page.wait_for_function('fixture.held.some(i=>i.kind==="lookup")')
         page.get_by_role('button', name='Case 18', exact=True).click()
         page.evaluate('flushHeld("lookup")')
-        expect(page.get_by_role('heading', name='Case 18', exact=True)).to_be_visible()
+        expect(page.get_by_role('heading', name='合成 Case 18', exact=True)).to_be_visible()
+        expect(page.locator('.case-ui-current-key')).to_have_text('Case 18')
         assert page.evaluate('fixture.releases.some(i=>i.includes("17"))')
         page.evaluate('fixture.mode="required"')
         page.get_by_role('button', name='重新核对媒体', exact=True).first.click()
@@ -256,8 +257,7 @@ def test_media_basis_save_receipt_history_clear_revert_preserve_exact_consumer_e
         page.get_by_role('button', name='清除已保存答案', exact=True).click()
         expect(page.get_by_label('标注 结果是否符合预期', exact=True)).to_have_value('')
         assert draft(page)['answers'][0]['media_basis']==before
-        page.get_by_text('标注历史与恢复', exact=True).click()
-        page.get_by_role('button', name='读取历史', exact=True).click()
+        page.get_by_role('button', name='历史与恢复', exact=True).click()
         history=page.locator('.case-ui-history-entry')
         expect(history).to_have_count(2)
         expect(history.first).to_contain_text('固定媒体依据 · 2 个字段')
@@ -334,3 +334,12 @@ def test_inexact_media_receipt_preserves_draft_then_original_receipt_recovers(br
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
             page.screenshot(path=str(tmp_path / ('case-media-'+str(width)+'.png')), full_page=True)
         assert not errors, errors
+
+
+def test_null_optional_media_is_absent_not_an_authority_error(browser, tmp_path):
+    with media_case(browser, tmp_path, null_media=True) as (page, errors):
+        expect(page.get_by_text('未提供媒体（字段值为 null）。', exact=True)).to_have_count(2)
+        assert page.evaluate('fixture.lookups.length===0&&fixture.captures.length===0&&fixture.resolves.length===0')
+        expect(page.get_by_role('button', name='重新核对媒体', exact=True)).to_have_count(0)
+        expect(page.locator('.analysis-case .error-box')).to_have_count(0)
+        assert not errors

@@ -134,7 +134,7 @@
       zoomLevel = Math.max(.01, Math.min(1, (w - 16) / Math.max(1, width), (h - 16) / Math.max(1, height)));
       size();
     }
-    function zoomBy(factor) {viewMode = 'manual'; zoomLevel = Math.max(.25, Math.min(2, zoomLevel * factor)); size();}
+    function zoomBy(factor) {viewMode = 'manual'; zoomLevel = Math.max(.01, Math.min(2, zoomLevel * factor)); size();}
     const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
       if (disposed || resizeFrame !== null) return;
       resizeFrame = requestAnimationFrame(() => {resizeFrame = null; if (viewMode === 'fit') fit();});

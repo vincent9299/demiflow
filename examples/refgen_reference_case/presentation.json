@@ -1,5 +1,5 @@
 {
-  "description": "仅呈现已有固定结果，不运行模型、不改变数据。图片与评分为模拟响应。绑定摘要由工作台登记时注入。",
+  "description": "仅呈现已有固定结果，不运行模型、不改变数据。图片与评分为模拟响应。绑定摘要由工作台登记时注入。 默认不投影较大的 details_json；完整记录保留在结果表，可按单行读取。",
   "name": "模拟模型 · 作答与评分明细",
   "version": 1,
   "fields": [
@@ -72,13 +72,6 @@
       "label": "状态",
       "role": "context",
       "format": "text"
-    },
-    {
-      "id": "field10",
-      "field": "details_json",
-      "label": "原始模拟回答与生成参数",
-      "role": "output",
-      "format": "json"
     },
     {
       "id": "field11",
