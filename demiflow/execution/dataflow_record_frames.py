@@ -35,8 +35,17 @@ def line_limit(bounds):
                bounds.max_resident_bytes)
 
 
+_JSON_STRING_ESCAPE = re.compile(r'["\\\x00-\x1f]')
+
+
 def _string_size(value):
     if value.isascii():
+        # Ordinary keys, ids and strings need no escaping. One native scan
+        # avoids 34 full scans and both generators without encoding a copy.
+        if _JSON_STRING_ESCAPE.search(value) is None:
+            return len(value) + 2
+        # Keep native count loops for escape-heavy strings: a Python loop over
+        # every matching character is slower and needs one match per escape.
         escaped = sum(value.count(char) for char in '"\\\b\f\n\r\t')
         controls = sum(value.count(chr(n)) for n in range(32) if n not in (8, 9, 10, 12, 13))
         return len(value) + 2 + escaped + 5 * controls
