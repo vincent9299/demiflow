@@ -347,7 +347,7 @@ def compile_kernel_spec(
     # Ray Data pool controls must not be silently discarded by this compiler.
     from ..data.native_options import validate_stream_native_options
     validate_stream_native_options(getattr(operation, 'native_options', None))
-    from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory, RoutedPromptFactory
+    from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory, RoutedPromptFactory, CacheFactory
     native_declaration = native_model_declaration(operation)
     if native_declaration is not None and native_declaration.target is RoutedPromptFactory:
         from ..execution.dataflow_routed_prompt import compile_routed_prompt
@@ -391,6 +391,12 @@ def compile_kernel_spec(
             from ..execution.kernels.task_scope import function_residency_kind
             state = function_residency_kind(declaration.target, call_args=declaration.call_args,
                                             call_kwargs=declaration.call_kwargs)
+        elif native_declaration is not None and native_declaration.target is CacheFactory:
+            owner = getattr(declaration.target, '__self__', declaration.target)
+            if owner.validate_runtime_state() is not None:
+                # The wrapper's hooks do not make unadapted nested callback
+                # state safe to park and reconstruct within the same attempt.
+                state = 'nonrecoverable'
         if state != "none":
             mergeable = False
     # Semantic descriptions are for identity, not executable parameters. The

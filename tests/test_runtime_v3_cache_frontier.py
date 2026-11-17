@@ -209,6 +209,7 @@ from demiflow.execution.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.sealed_plans import load_sealed_plan
 root=Path(sys.argv[1]); mode=sys.argv[2]; form=sys.argv[3]
 assert Path(demiflow.__file__).resolve().is_relative_to(Path.cwd())
 class Counter:
@@ -277,8 +278,10 @@ scope=(RunContext.resume(RunRef(str(root/'run'),identity['run_id'])) if identity
 with scope as run, data.local_execution():
     rows=data.from_items([{'value':n} for n in range(6)]).map_cached(callback(),cache_dir=root/'cache',
         version='v1',inputs=['value'],output='count').take_all()
+    bundle=load_sealed_plan(run.ref.directory,'action-1')
     (root/'result.json').write_text(json.dumps({'rows':rows,'commits':run.journal.execution_commits('action-1'),
-        'restriction':run.journal.source_binding('action-1-state-recovery-restriction')}))
+        'restriction':run.journal.source_binding('action-1-state-recovery-restriction'),
+        'map_states':[node.kernel.state for node in bundle['graph'].nodes if node.kernel.kind=='AsyncMapOp']}))
 '''
 
 
@@ -301,6 +304,7 @@ def test_real_driver_process_death_recovers_original_ack_and_suffix_cache(tmp_pa
     assert result['rows'] == [{'value': n, 'count': n + 1} for n in range(6)]
     assert all(c['status'] == 'acked' for c in result['commits'])
     assert result['restriction'] is None
+    assert result['map_states'] == ['adapter']
 
 
 @pytest.mark.parametrize('form', ['partial_actor', 'nested_helper'])
@@ -316,6 +320,7 @@ def test_public_cache_unadapted_bound_or_nested_state_records_restriction_before
     result = json.loads((tmp_path / 'result.json').read_text())
     assert result['rows'] == [{'value': n, 'count': n + 1} for n in range(6)]
     assert result['restriction']['recovery'] == 'attempt_only'
+    assert result['map_states'] == ['nonrecoverable']
 
 
 def test_old_function_image_cannot_drop_admitted_closure_state(tmp_path):
