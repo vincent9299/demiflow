@@ -56,10 +56,10 @@ def _slow_keep(value):
     return True
 
 
-def _oversized_value(state, row, *, calls):
+def _oversized_value(state, row, *, calls, width):
     with Path(calls).open('a') as target:
         target.write('called\n')
-    return ['x' * 6000]
+    return ['x' * width]
 
 
 def _assert_rows(actual, expected):
@@ -253,7 +253,7 @@ def test_materialized_reducer_values_resume_original_nonfinal_ack(provider, tmp_
         return image
     try:
         with pytest.raises(InterruptedAfterAck):
-            with RunContext.start(tmp_path / 'run', limits={**LIMITS, 'checkpoint_rows': 1,
+            with RunContext.start(tmp_path / 'run', limits={**LIMITS, 'checkpoint_rows': 4,
                     'checkpoint_interval_ms': 60000}) as run:
                 reference = run.ref
                 with monkeypatch.context() as patch:
@@ -276,14 +276,18 @@ def test_materialized_reducer_values_resume_original_nonfinal_ack(provider, tmp_
 
 @pytest.mark.parametrize('bound', ['state', 'row'])
 def test_reducer_value_limits_reject_without_committed_output(tmp_path, bound):
-    limits = {**LIMITS, 'max_state_bytes': 1024 if bound == 'state' else 16384,
-              'max_row_bytes': 8192 if bound == 'state' else 1024}
+    limits = {**LIMITS, 'max_state_bytes': 8192 if bound == 'state' else 32768,
+              'max_row_bytes': 32768 if bound == 'state' else 4096,
+              'max_batch_bytes': 65536 if bound == 'state' else 8192}
     with pytest.raises(DataflowError) as failure:
         with RunContext.start(tmp_path / 'run', limits=limits) as run, data.local_execution(workers=1):
             data.from_items([{'k': 1}]).reduce_by_key('k', _oversized_value,
-                fn_kwargs={'calls': str(tmp_path / 'calls')}).take_all()
+                fn_kwargs={'calls': str(tmp_path / 'calls'),
+                           'width': 16000 if bound == 'state' else 6000}).take_all()
     assert failure.value.code == 'BUDGET_EXCEEDED'
-    assert ('state' if bound == 'state' else 'row byte budget') in str(failure.value)
+    assert any(message in str(failure.value) for message in (
+        ('reducer state', 'Reducer retained objects') if bound == 'state' else
+        ('record string exceeds byte budget', 'encoded record exceeds the row byte budget')))
     assert (tmp_path / 'calls').read_text() == 'called\n'
     from demiflow.execution.run_journal import RunJournal
     assert RunJournal(tmp_path / 'run').execution_commits('action-1') == []
