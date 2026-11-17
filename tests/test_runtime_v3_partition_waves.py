@@ -94,9 +94,9 @@ def test_explicit_graph_storage_is_sealed_and_not_silently_enlarged(graph_enviro
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     spec = _spec(graph_environment)
     spec.update(exchange_mode='finite_sealed', storage_bytes=1)
-    with RunContext.start(graph_environment/'run') as run:
-        with pytest.raises(DataflowError, match='(?i)storage|spill'):
+    with pytest.raises(DataflowError, match='(?i)storage|spill'):
+        with RunContext.start(graph_environment/'run') as run:
             with run.action({'kind': 'materialize', 'source': {'fixture': 'one-byte-storage'}}):
                 LocalDatasetExecutor(workers=4, unified_graph=True).materialize_graph(spec)
-        assert not run.journal.execution_commits('action-1')
+    assert not run.journal.execution_commits('action-1')
     assert not (graph_environment/'ancestor.jsonl').exists()
