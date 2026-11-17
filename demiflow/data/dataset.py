@@ -1,7 +1,7 @@
-"""Lazy, backend-neutral Dataset API compatible with Ray Data concepts.
+"""Lazy, backend-neutral Dataset API for DemiFlow's unified dataflow runtime.
 
-Demiflow is a Ray-compatible superset: standard row map/filter APIs coexist
-with the first-class field-bound map extension.
+Local and Ray Core share execution semantics. Standard row map/filter APIs
+coexist with the first-class field-bound map extension.
 """
 
 from __future__ import annotations
@@ -2485,10 +2485,8 @@ class Dataset:
     ) -> None:
         """Write rows as JSON Lines to a backend-native output location.
 
-        This terminal action returns ``None``. Local currently writes one JSON
-        Lines file; Ray delegates to Ray Data and may treat ``path`` as a
-        directory containing part files. A ``.json`` suffix therefore does not
-        guarantee one physical file across backends. Dataset row fields become
+        This terminal action returns ``None``. Local and Ray Core use the same
+        native file sink and commit protocol. Dataset row fields become
         top-level JSON record fields; select required conclusion fields directly
         instead of wrapping them in an extra container field.
         """
