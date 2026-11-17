@@ -15,7 +15,7 @@ def test_actual_bytes_group_small_records_in_original_store_and_restore(tmp_path
     with pytest.raises(PreparationOnly),RunContext.start(tmp_path/'run') as run:
         store,_,bounds=_store(run,ceiling=4*1024**2)
         bounds=replace(bounds,max_row_bytes=65536,max_batch_bytes=65536,max_state_bytes=8192)
-        services=SimpleNamespace(store=store,bounds=bounds)
+        services=SimpleNamespace(store=store,bounds=bounds,check_stop=lambda: None)
         port=_SpoolPort('left',services,_segment_rows(services))
         expected=[rec({'id':i,'value':'x'*20},sequence=i) for i in range(300)]
         for record in expected:port.push(record)
@@ -37,7 +37,7 @@ def test_old_snapshot_pending_rows_remain_readable_and_new_input_respects_bytes(
     with pytest.raises(PreparationOnly),RunContext.start(tmp_path/'run') as run:
         store,_,bounds=_store(run,ceiling=4*1024**2)
         bounds=replace(bounds,max_row_bytes=2048,max_batch_bytes=4096)
-        services=SimpleNamespace(store=store,bounds=bounds)
+        services=SimpleNamespace(store=store,bounds=bounds,check_stop=lambda: None)
         first=rec({'text':'a'*1200},sequence=0);second=rec({'text':'b'*1200},sequence=1)
         old={'refs':[],'pending':[first],'eoi':False,'count':1,'bytes':0}
         port=_SpoolPort('left',services,_segment_rows(services));port.restore(old);port.push(second);port.finish()
@@ -52,7 +52,7 @@ def test_streamed_port_bytes_equal_original_kernel_state_and_pending_read(tmp_pa
     with pytest.raises(PreparationOnly), RunContext.start(tmp_path/'run') as run:
         store, _, bounds = _store(run, ceiling=4 * 1024**2)
         bounds = replace(bounds, max_row_bytes=16384, max_batch_bytes=65536)
-        services = SimpleNamespace(store=store, bounds=bounds)
+        services = SimpleNamespace(store=store, bounds=bounds, check_stop=lambda: None)
         records = [rec({'id': i, 'blob': b'\x00\xff' * 1000,
                         'tuple': (-0.0, 0.0), 'nested': ['中文', None]}, sequence=i) for i in range(3)]
         original = state_codec.dumps(records, max_bytes=bounds.max_batch_bytes)

@@ -183,11 +183,19 @@ class _SpoolPort:
             raise _err("BUDGET_EXCEEDED", "input spool row exceeds max_row_bytes", port=self.name)
         raw = state_codec.record_fragment(record, max_bytes=self._services.bounds.max_batch_bytes)
         contribution = len(raw)
+        workspace = 0
+        if getattr(self, '_shuffle_write_window', None) is not None:
+            from .shuffle_order import spool_fragment_workspace
+            workspace = spool_fragment_workspace(raw, self._shuffle_write_window)
+            if self._pending and self._pending_workspace + workspace > self._shuffle_write_window:
+                self._flush()
         projected = self._pending_bytes + contribution + bool(self._pending)
         if self._pending and (projected > self._segment_bytes or len(self._pending) >= self._segment_rows):
             self._flush()
         self._pending_bytes += contribution + bool(self._pending)
         self._pending.append(raw)
+        if workspace:
+            self._pending_workspace += workspace
         self._count += 1
         if len(self._pending) >= self._segment_rows or self._pending_bytes >= self._segment_bytes:
             self._flush()
@@ -205,6 +213,8 @@ class _SpoolPort:
         self._bytes += self._pending_bytes
         self._pending = []
         self._pending_bytes = self._empty_bytes
+        if getattr(self, '_shuffle_write_window', None) is not None:
+            self._pending_workspace = 4096
 
     def finish(self) -> None:
         self._flush()
@@ -275,7 +285,8 @@ class _SpoolPort:
             _check_stop(self._services)
             while pending is not None and pending['position'] == index:
                 if join_keys is None:
-                    yield from borrowed_records(self._services, pending['input'])
+                    yield from borrowed_records(self._services, pending['input'],
+                        frame_call=getattr(self, '_shuffle_frame_call', None))
                 else:
                     from .join_spool import _resident_limit
                     yield from borrowed_join_records(self._services, pending['input'],
@@ -285,11 +296,23 @@ class _SpoolPort:
                 pending = next(borrowed, None)
             if index < len(self._refs):
                 ref = self._refs[index]
-                data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes))
+                window = getattr(self, '_shuffle_input_window', None)
+                options = {}
+                if window is not None:
+                    if 2 * ref.size_bytes + 4096 > window:
+                        raise _err('BUDGET_EXCEEDED', 'shuffle input segment exceeds its reader subwindow')
+                    options['chunk_bytes'] = min(4096, max(1, window // 32))
+                data = b"".join(self._services.store.read(ref, max_bytes=ref.size_bytes, **options))
+                if window is not None:
+                    from .shuffle_order import admit_spool_image
+                    admit_spool_image(data, window)
                 yield from state_codec.loads(data, max_bytes=self._services.bounds.max_batch_bytes)
         for fragment in self._pending:
             _check_stop(self._services)
             raw = b''.join(state_codec.record_list_chunks((fragment,)))
+            if getattr(self, '_shuffle_input_window', None) is not None:
+                from .shuffle_order import admit_spool_image
+                admit_spool_image(raw, self._shuffle_input_window)
             yield from state_codec.loads(raw, max_bytes=self._services.bounds.max_batch_bytes)
 
     def release(self) -> None:
@@ -347,6 +370,12 @@ class _SpoolPort:
         self._pending = [state_codec.record_fragment(record,
             max_bytes=self._services.bounds.max_batch_bytes) for record in pending]
         self._pending_bytes = self._empty_bytes + sum(map(len, self._pending)) + max(0, len(self._pending) - 1)
+        if getattr(self, '_shuffle_write_window', None) is not None:
+            from .shuffle_order import spool_fragment_workspace
+            self._pending_workspace = 4096 + sum(spool_fragment_workspace(raw,
+                self._shuffle_write_window) for raw in self._pending)
+            if self._pending_workspace > self._shuffle_write_window:
+                raise _err('BUDGET_EXCEEDED', 'restored shuffle pending rows exceed their reader subwindow')
         if self._pending_bytes > self._services.bounds.max_batch_bytes:
             raise _err('BUDGET_EXCEEDED', 'restored spool exceeds batch byte bound')
         self._eoi = bool(snap["eoi"])
@@ -404,6 +433,7 @@ class OperatorKernel:
         self._recovery_buffering = False
         self._started = False
         self._reducer_retained_bytes = 0
+        self._shuffle_retained_bytes = 0
         self._closed = False
         self._restored = False
         self._image: dict[str, Any] | None = None
@@ -413,6 +443,19 @@ class OperatorKernel:
             for port in spec.inputs
             if port.requirement == "finite_complete" or spec.kind in ("union", "StreamPrependOp")
         }
+        if spec.kind == 'RandomShuffleOp' and 'shuffle_order_version' in spec.configuration:
+            from .shuffle_order import FIELD, VERSION, shuffle_windows
+            if spec.configuration[FIELD] != VERSION:
+                raise _err('INVALID_CONTRACT', 'unknown seeded shuffle ordering version')
+            windows = shuffle_windows(self._finite_services)
+            window = windows.input_bytes - windows.metadata_bytes
+            for port in self._ports.values():
+                # New plans write original-format segments that fit the same
+                # reader subwindow. Never reject a large segment made only of
+                # otherwise fitting small rows at finish time.
+                port._shuffle_write_window = window
+                port._pending_workspace = 4096
+                port._segment_bytes = min(port._segment_bytes, max(1, (window - 4096) // 2))
         self._port_order = tuple(port.name for port in spec.inputs)
         self._batch: list[Record] = []
         self._batch_deadline = None
@@ -980,10 +1023,13 @@ class OperatorKernel:
         measured under the original grant. This is not a budget authority or
         checkpoint field; the frame codec adds it to its own output allocation.
         """
-        return self._reducer_retained_bytes
+        return self._reducer_retained_bytes + self._shuffle_retained_bytes
 
     def _retain_reducer_peers(self, size: int) -> None:
         self._reducer_retained_bytes = size
+
+    def _retain_shuffle_peers(self, size: int) -> None:
+        self._shuffle_retained_bytes = size
 
     def _finish_complete(self) -> Iterator[Record]:
         # This view stops pure reads/merges. Callable/actor construction and
@@ -1024,11 +1070,20 @@ class OperatorKernel:
             from dataclasses import replace
             port = self._ports[self._port_order[0]]
             records = port.records()
+            shuffle_iterator = None
             layout = None
             if kind == 'RandomizeBlockOrderOp':
                 from .block_partition import shuffled_block_layout
                 layout = shuffled_block_layout(port.records(), spec=self._spec, services=services)
-            if kind != 'RepartitionOp' or self._spec.configuration.get('keys'):
+            if kind == 'RandomShuffleOp' and 'shuffle_order_version' in self._spec.configuration:
+                from .shuffle_order import seeded_shuffle, shuffle_windows, input_records
+                windows = shuffle_windows(services)
+                records.close()
+                records, windows = input_records(port, services, windows)
+                shuffle_iterator = seeded_shuffle(records, spec=self._spec, services=services,
+                    windows=windows, retain=self._retain_shuffle_peers)
+                records = shuffle_iterator
+            elif kind != 'RepartitionOp' or self._spec.configuration.get('keys'):
                 sort_spec = self._spec
                 if kind == 'RepartitionOp':
                     sort_spec = replace(sort_spec, configuration={**dict(sort_spec.configuration),
@@ -1043,7 +1098,14 @@ class OperatorKernel:
                 records = reordered_records(records, layout=layout, spec=self._spec)
             else:
                 records = preserve_block(records, None)
-            yield from self._emit(records)
+            try:
+                yield from self._emit(records)
+            finally:
+                if shuffle_iterator is not None:
+                    try:
+                        records.close()
+                    finally:
+                        shuffle_iterator.close()
         elif kind in _AGGREGATE_KINDS:
             from .aggregate import accumulate_partial
 
@@ -1384,6 +1446,7 @@ class OperatorKernel:
     # -- K022 close ---------------------------------------------------------
     def close(self) -> None:
         self._reducer_retained_bytes = 0
+        self._shuffle_retained_bytes = 0
         if self._closed:
             return
         for instance in self._instances:

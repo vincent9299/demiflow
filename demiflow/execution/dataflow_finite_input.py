@@ -268,8 +268,8 @@ def validate_borrowed_entry(services, entry):
     return spec
 
 
-def borrowed_records(services, entry):
-    yield from _borrowed_records(services, entry)
+def borrowed_records(services, entry, *, frame_call=None):
+    yield from _borrowed_records(services, entry, frame_call=frame_call)
 
 
 def borrowed_join_records(services, entry, proof, *, fields, row_window):
@@ -290,16 +290,23 @@ def borrowed_join_records(services, entry, proof, *, fields, row_window):
     yield from _borrowed_records(services, entry, project=project)
 
 
-def _borrowed_records(services, entry, *, project=None):
+def _borrowed_records(services, entry, *, project=None, frame_call=None):
     spec = validate_borrowed_entry(services, entry)
-    members = _scope(services, entry['seal_ref'], spec, entry['target'])
+    held = metadata_bytes(entry) if frame_call is not None else 0
+    def call(function, *args, _frame_retained=0, **kwargs):
+        return frame_call(function, *args, _frame_retained=held + _frame_retained, **kwargs)
+    scoped_call = call if frame_call is not None else None
+    members = _scope(services, entry['seal_ref'], spec, entry['target'], frame_call=scoped_call)
+    if frame_call is not None:
+        held = metadata_bytes((entry, members))
     member = next(m for m in members if m['partition_id'] == entry['producer'])
     if (ArtifactRef(**member['manifest_ref']) != entry['manifest_ref']
             or member['last_sequence'] + 1 != entry['total_rows']):
         _fail('borrowed input no longer matches its original producer seal')
     count = size = 0
     for record in _records(services, entry['manifest_ref'], spec, target=entry['target'],
-                           total_rows=entry['total_rows'], total_bytes=entry['total_bytes'], project=project):
+                           total_rows=entry['total_rows'], total_bytes=entry['total_bytes'],
+                           project=project, frame_call=scoped_call):
         count += 1
         size += record.encoded_bytes
         yield record
