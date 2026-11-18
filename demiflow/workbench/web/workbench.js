@@ -841,7 +841,7 @@
       headings.forEach(name=>tr.append($('th',name)));head.append(tr);table.append(head,body);scroll.append(table);parent.append(scroll);
       for(const values of rows){const row=$('tr');values.forEach(value=>row.append($('td',value)));body.append(row);}
     }
-    function parameterRows(parent, meta){
+    function parameterRows(parent, meta, advanced){
       const rows=meta.arguments||[],provided=rows.filter(p=>p.origin!=='default'),defaults=rows.filter(p=>p.origin==='default');
       const value=p=>{
         if(p.value?.type==='Dataset')return 'Dataset · 上游数据流';
@@ -852,15 +852,14 @@
       };
       const render=(target,items)=>materialTable(target,['参数','调用表达式 / 来源','绑定值'],items.map(p=>[p.name,
         p.expression||(p.origin==='default'?'API 默认值':'字典展开或 API 默认值'),value(p)]));
-      if(meta.expansions?.length)parent.append($('p','字典展开：'+meta.expansions.map(x=>'**'+x).join('，'),'wb-caption'));
-      if(provided.length)render(parent,provided);
-      if(defaults.length)render(details('API 默认参数（'+defaults.length+'）',parent),defaults);
+      if(meta.expansions?.length)advanced.append($('p','字典展开：'+meta.expansions.map(x=>'**'+x).join('，'),'wb-caption'));
+      render(parent,[...provided,...defaults]);
     }
     function sourceAvailable(node,kind){
       return node?.source_views?.[kind]?.available===true
         ||kind==='configuration'&&node?.source_views?.schema?.available===true;
     }
-    function schemaMaterial(parent,meta,{input=false}={}){
+    function schemaMaterial(parent,meta,{input=false,advanced=parent}={}){
       function schemaBlock(title,schema,folded=false){
         const section=$('section',undefined,'wb-schema-section');section.append($('h4',title));parent.append(section);
         section.append($('p',schema.basis||schema.reason||'尚无 Schema 声明','wb-caption'));
@@ -880,7 +879,7 @@
         if(meta.note)parent.append($('p',meta.note,'wb-caption'));
       }
       const bindings=Object.fromEntries(Object.entries(meta.bindings||{}).filter(([key])=>input?key==='inputs':key!=='inputs'));
-      if(Object.keys(bindings).length){const box=details('字段绑定（不等于完整 Schema）',parent);box.append($('pre',json(bindings),'wb-code'));}
+      if(Object.keys(bindings).length){const box=details('字段绑定（不等于完整 Schema）',advanced);box.append($('pre',json(bindings),'wb-code'));}
     }
     async function loadPreviewSource(){
       savePreviewLocator();
@@ -911,19 +910,24 @@
         }
         disposeReaders(sourceBody);sourceBody.replaceChildren();
         if(kind==='configuration'){
-          sourceBody.append($('div','解析时快照','wb-caption wb-material-basis'));
+          const advanced=details('高级信息',sourceBody);advanced.classList.add('wb-input-advanced');
+          advanced.append($('div','解析时快照','wb-caption wb-material-basis'));
           for(const value of values){
             if(value.availability!=='available'){sourceBody.append($('p',value.reason||'本节点没有这类材料。','wb-caption'));continue;}
-            if(value.kind==='schema'){schemaMaterial(sourceBody,value.metadata,{input:true});continue;}
+            if(value.kind==='schema'){schemaMaterial(sourceBody,value.metadata,{input:true,advanced});continue;}
             const meta=value.metadata;
-            if(meta?.note)sourceBody.append($('p',meta.note,'wb-caption wb-parameter-explanation'));
-            if(meta?.arguments)parameterRows(sourceBody,meta);
-            else if(typeof value.text==='string')mountText(sourceBody,value.text,{sourceOnly:true,compactSource:true});
-            if(meta?.engine_configuration)raw('引擎内部描述（只读）',meta.engine_configuration,sourceBody);
+            if(meta?.note)advanced.append($('p',meta.note,'wb-caption wb-parameter-explanation'));
+            if(meta?.arguments)parameterRows(sourceBody,meta,advanced);
+            else{
+              sourceBody.append($('p','尚未取得公开 API 参数绑定。','wb-caption'));
+              if(typeof value.text==='string')mountText(advanced,value.text,{sourceOnly:true,compactSource:true});
+            }
+            if(meta?.engine_configuration)raw('引擎内部描述（只读）',meta.engine_configuration,advanced);
             if(value.truncated)sourceBody.append($('p','正文超过展示上限，当前只显示开头。','wb-caption'));
           }
           if(!kinds.includes('schema'))sourceBody.append($('p',node.source_views?.schema?.reason||'这份快照没有上游数据的 Schema 材料。','wb-caption'));
-          raw('来源摘要',{materials:values.map(v=>({kind:v.kind,sha256:v.sha256})),dag_id:basis.dag_id,occurrence_id:node.occurrence_id},sourceBody);
+          raw('来源摘要',{materials:values.map(v=>({kind:v.kind,sha256:v.sha256})),dag_id:basis.dag_id,occurrence_id:node.occurrence_id},advanced);
+          sourceBody.append(advanced);
           return;
         }
         const value=values[0];

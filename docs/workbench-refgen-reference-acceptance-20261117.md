@@ -290,3 +290,12 @@ Prompt 模板、模型、请求预算、输入输出字段绑定及响应 JSON S
 `test_workbench_operator_directory.py`、`test_workbench_compact_navigation.py`。
 新增断言并入现有真实浏览器用例，覆盖双 Dataset 参数及可展开 Schema、输出不混入参数、
 刷新恢复“输入”、组合读取迟到不覆盖新选择。现场证据在预览目录的 `input-output-tabs-live.json`。
+
+#### 输入页精简（同日真人追加）
+
+输入页直接展示参数表（含默认参数，并标明来源）与上游 Dataset Schema。
+解析时快照、入参说明、字典展开说明、内部编译描述、附加字段绑定与来源摘要统一收进
+末尾的“高级信息”，默认折叠。未取得 API 参数绑定或 Schema、截断等会影响理解的信息
+仍在正文明确提示；不将内部编译参数冒充公开 API 参数。复用原读取、身份校验及材料范围。
+现有真实浏览器用例验证默认参数直接可见、高级信息默认隐藏且可展开、刷新及双输入
+Schema、目录/管道共用呈现、迟到响应与过期保护。现场证据见预览目录 `input-compact-live.json`。
