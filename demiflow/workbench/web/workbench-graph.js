@@ -262,7 +262,7 @@
         const group = svg('g', {class: 'wb-node', transform: `translate(${p.x} ${p.y})`, tabindex: 0, role: 'button', 'aria-pressed': 'false'});
         const kindText = svg('text', {x: 14, y: 22, class: 'wb-node-kind'});
         const titleLines = [svg('text', {x: 14, y: 42, class: 'wb-node-title'}), svg('text', {x: 14, y: 60, class: 'wb-node-title'})];
-        const summaryLines = [svg('text', {x: 14, y: 78, class: 'wb-node-summary'})];
+        const summaryLines = [78,94].map(y=>svg('text', {x:14,y,class:'wb-node-summary'}));
         const stateText = svg('text', {x: 14, y: 94, class: 'wb-node-state'});
         const tip = svg('title', {});
         group.append(svg('rect', {width: p.width, height: p.height, rx: 10}), kindText, ...titleLines, ...summaryLines, stateText, tip);
@@ -281,7 +281,8 @@
       const titleLines = wrapText(card.title, el.width - 28, 14, 2);
       el.titleLines.forEach((node, i) => {node.textContent = titleLines[i] || '';});
       const summary=visibleSummary(card),preview=currentModel?.choice.kind==='preview';
-      el.summaryLines.forEach((node, i) => {node.textContent = fitWidth(summaryText(summary[i]), el.width - 28, 12);});
+      const lines=preview?wrapText(summaryText(summary[0]),el.width-28,12,2):[fitWidth(summaryText(summary[0]),el.width-28,12)];
+      el.summaryLines.forEach((node,i)=>{node.textContent=lines[i]||'';});
       el.stateText.textContent = preview?'':fitWidth((TONE_GLYPH[card.state.tone] || '') + card.state.label, el.width - 28, 12);
       el.group.dataset.state = card.state.tone;
       const facts = summary.map(summaryText).filter(Boolean);

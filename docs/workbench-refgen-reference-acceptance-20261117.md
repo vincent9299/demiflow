@@ -270,3 +270,7 @@ Prompt 模板、模型、请求预算、输入输出字段绑定及响应 JSON S
 机器证据在 `/tmp/demiflow-combined-preview-20261117-q0st03t2/operator-contracts-verification.json`；
 现场材料为该目录 `operator-contracts-live.json` 以及 `operator-*.png`，继续使用端口 59866。
 这轮只验呈现和只读编译，不据此声称新执行了真实外部模型或新增运行能力。
+
+现场复核追加：图上 API 摘要显示两行，join 键不再被单行截断；上游 Dataset 用人类可读
+文字展示。真实页面发现 Schema 读取入口曾有第二份材料类型白名单，已合并为共享 KINDS，
+并补入真实 HTTP 与浏览器 Schema 读取断言，防止只在 Python 材料构建层通过。

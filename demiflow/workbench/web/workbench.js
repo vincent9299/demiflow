@@ -843,7 +843,13 @@
     }
     function parameterRows(parent, meta){
       const rows=meta.arguments||[],provided=rows.filter(p=>p.origin!=='default'),defaults=rows.filter(p=>p.origin==='default');
-      const value=p=>typeof p.value==='string'?p.value:json(p.value);
+      const value=p=>{
+        if(p.value?.type==='Dataset')return 'Dataset · 上游数据流';
+        if(p.value?.type==='function')return p.value.reference;
+        if(p.value?.type==='Schema'&&p.value.fields)return 'Schema · '+p.value.fields.length+' 个字段（见输入 / 输出）';
+        if(p.value?.unavailable)return p.value.type+' · '+p.value.unavailable;
+        return typeof p.value==='string'?p.value:json(p.value);
+      };
       const render=(target,items)=>materialTable(target,['入参','调用表达式 / 来源','绑定值'],items.map(p=>[p.name,
         p.expression||(p.origin==='default'?'API 默认值':'字典展开或 API 默认值'),value(p)]));
       if(meta.expansions?.length)parent.append($('p','字典展开：'+meta.expansions.map(x=>'**'+x).join('，'),'wb-caption'));

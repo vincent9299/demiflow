@@ -11,7 +11,7 @@ import time
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.schema import ForgeError
 
-KINDS = frozenset({'implementation', 'prompt', 'configuration', 'callsite'})
+from .plan_details import KINDS
 
 
 def validate_basis(basis):

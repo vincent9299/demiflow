@@ -59,6 +59,13 @@ def test_read_callsite_and_entire_pipeline_share_immutable_preview(original):
             assert not {'occurrence_id','type','fields'} & set(bound)
             assert parameters['metadata']['display_title']=='API 入参'
             assert parameters['metadata']['engine_configuration']['occurrence_id']==node['occurrence_id']
+            status, schema=request(app, '/api/plan-node-detail', dict(basis=address(preview),
+                logical_node_id=node['logical_node_id'], occurrence_id=node['occurrence_id'], kind='schema'))
+            assert status==200, schema
+            assert schema['metadata']['output']['status']=='fields_only'
+            assert [f['name'] for f in schema['metadata']['output']['fields']]==bound['columns']
+            assert all(f['type'] is None for f in schema['metadata']['output']['fields'])
+
         assert texts == ["data.read_lance(table, version=1, columns=['order'])",
                          "data.read_lance(table, version=1, columns=['amount'])"]
         status, full = request(app, '/api/plan-pipeline-source', dict(basis=address(preview)))
@@ -88,6 +95,10 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
         page.locator('.wb-source-tabs').get_by_role('button', name='入参', exact=True).click()
         expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('API 入参')
         expect(page.locator('.wb-parameter-explanation')).to_contain_text('外层配置字典')
+        page.locator('.wb-source-tabs').get_by_role('button', name='输入 / 输出', exact=True).click()
+        expect(page.locator('.wb-schema-section')).to_contain_text('order')
+        expect(page.locator('.wb-schema-section')).to_contain_text('字段类型和可空性尚未取得')
+
         page.locator('.wb-source-tabs').get_by_role('button', name='API 调用', exact=True).click()
         expect(page.locator('.wb-source-body')).to_contain_text("columns=['order']")
         page.get_by_role('button', name='Pipeline 源码', exact=True).click()
