@@ -633,8 +633,7 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
 
 def test_worker_constructs_zero_commit_coordinator():
     import demiflow.execution.worker.execution as chain_worker
-    import demiflow.execution.worker.queue_transform as carrier_worker
-    for module in (chain_worker, carrier_worker):
+    for module in (chain_worker,):
         tree = ast.parse(Path(module.__file__).read_text())
         referenced, imported_modules = set(), set()
         for node in ast.walk(tree):

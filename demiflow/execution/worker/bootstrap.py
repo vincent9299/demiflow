@@ -322,7 +322,6 @@ def run_worker(launch_spec, sock):
 
     from ..chain import COMMIT_RECEIPT_SCHEMA
     from .execution import WorkerChainExecutor
-    from .queue_transform import QueueTransformExecutor, TRANSFORM_REQUEST_SCHEMA
     from .runtime import WorkerRuntime
     if "dataflow_v3" in launch_spec:
         return _run_v3_worker(launch_spec, sock)
@@ -334,8 +333,6 @@ def run_worker(launch_spec, sock):
 
     if "execution" in launch_spec:
         executor = WorkerChainExecutor(launch_spec, send=send)
-    elif "queue_transform" in launch_spec:
-        executor = QueueTransformExecutor(launch_spec, send=send)
     else:
         executor = None
     runtime = WorkerRuntime(
@@ -351,10 +348,6 @@ def run_worker(launch_spec, sock):
             if message.get("schema_version") == COMMIT_RECEIPT_SCHEMA:
                 if executor is not None:
                     executor.deliver_receipt(message)
-                continue
-            if message.get("schema_version") == TRANSFORM_REQUEST_SCHEMA:
-                if executor is not None:
-                    executor.feed(message["request_id"], message["row_ref"])
                 continue
             if "kind" not in message:
                 continue

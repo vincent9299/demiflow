@@ -155,9 +155,7 @@
      "status": "old",
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
-     "users": [
-      "demiflow.execution.queue_chain"
-     ]
+     "users": []
     },
     "build_commit_cut": {
      "status": "old",
@@ -265,8 +263,7 @@
      "reason": "旧链式执行的一部分；产品代码里没有活的调用方。批次 4，需单独评审。",
      "batch": 4,
      "users": [
-      "demiflow.execution.worker.execution",
-      "demiflow.execution.worker.queue_transform"
+      "demiflow.execution.worker.execution"
      ]
     }
    },
@@ -637,24 +634,12 @@
   },
   "demiflow.execution.queue_chain": {
    "status": "mixed",
-   "reason": "兼容入口和旧转换载体在同一个文件里。GPT 评审 2026-11-18：按符号清理，不整删。",
+   "reason": "只剩兼容入口；旧转换载体和它的准入判断已在批次 2 按符号清掉（GPT 评审 2026-11-18：按符号清理，不整删）。",
    "symbols": {
-    "_TransformClient": {
-     "status": "old",
-     "reason": "旧转换载体的驱动侧；没有产品调用方。批次 2。",
-     "batch": 2,
-     "users": []
-    },
     "run_local_queue_chain": {
      "status": "compat_entry",
      "reason": "MIGRATION「替换与退出」：chain/graph/queue_chain 公开兼容入口保留，翻译请求交 execute_action。tests/test_runtime_v3_f.py::test_f017 验证。",
      "translates_through": "execute_action"
-    },
-    "unified_queue_chain_eligible": {
-     "status": "old",
-     "reason": "旧载体的准入判断；没有产品调用方。批次 2。",
-     "batch": 2,
-     "users": []
     }
    },
    "measured": {
@@ -848,8 +833,7 @@
      "reason": "旧流式驱动及其内部实现。公开的 Dataset.run_stream() 走 v3 的 run_stream_action，不走它。批次 5，需单独评审。",
      "users": [
       "demiflow.data.dataset",
-      "demiflow.execution.worker.execution",
-      "demiflow.execution.worker.queue_transform"
+      "demiflow.execution.worker.execution"
      ]
     }
    },
@@ -1013,8 +997,7 @@
    "batch": 4,
    "importers": [
     "demiflow.execution.chain",
-    "demiflow.execution.worker.execution",
-    "demiflow.execution.worker.queue_transform"
+    "demiflow.execution.worker.execution"
    ],
    "measured": {
     "at": "74d2f99",
@@ -1049,27 +1032,6 @@
     "never_ran": 2
    }
   },
-  "demiflow.execution.worker.queue_transform": {
-   "status": "old",
-   "reason": "11-12 那一代的队列转换执行器。启动它的只有 run_worker 里 queue_transform 分支，产品代码不再产生这种启动参数。批次 2。",
-   "batch": 2,
-   "importers": [
-    "demiflow.execution.queue_chain",
-    "demiflow.execution.worker.bootstrap"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 147,
-     "historical_set_139_files": 62
-    },
-    "functions": 16,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 16
-   }
-  },
   "demiflow.execution.worker.ray_host": {
    "status": "undecided",
    "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
@@ -1101,7 +1063,7 @@
    "module": "demiflow.execution.worker.bootstrap",
    "name": "run_worker",
    "status": "live",
-   "reason": "v3 worker 的启动入口。函数里 execution 和 queue_transform 两个分支以及它们的导入属于旧执行器：批次 2 去掉 queue_transform 分支，批次 4 去掉 execution 分支。"
+   "reason": "v3 worker 的启动入口。函数里 execution 分支和它的导入属于旧执行器，批次 4 去掉；queue_transform 分支已在批次 2 去掉。"
   }
  ],
  "removed": [
@@ -1144,6 +1106,23 @@
    "module": "demiflow.execution.exchange.carriage_ray",
    "batch": 1,
    "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+  },
+  {
+   "module": "demiflow.execution.worker.queue_transform",
+   "batch": 2,
+   "reason": "11-12 那一代的队列转换执行器。启动它的只有 run_worker 里 queue_transform 分支，产品代码不再产生这种启动参数。批次 2。"
+  },
+  {
+   "module": "demiflow.execution.queue_chain",
+   "symbol": "_TransformClient",
+   "batch": 2,
+   "reason": "旧转换载体的驱动侧；没有产品调用方。批次 2。"
+  },
+  {
+   "module": "demiflow.execution.queue_chain",
+   "symbol": "unified_queue_chain_eligible",
+   "batch": 2,
+   "reason": "旧载体的准入判断；没有产品调用方。批次 2。"
   }
  ]
 }
