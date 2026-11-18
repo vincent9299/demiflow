@@ -46,7 +46,9 @@ def wait_turn(service, tid, terminal=True):
     raise AssertionError(service.store.turn(tid))
 
 
-def test_defaults_off_and_partition_scope(tmp_path):
+def test_defaults_off_and_partition_scope(tmp_path, monkeypatch):
+    monkeypatch.setattr('demiflow.workbench.conversations.policy.execution_facts',lambda _:dict(
+        available=False,filesystem_enforcement='unverified',reason='fixture unavailable'))
     root,path,value=configuration(tmp_path)
     value['mode']='restricted';deployment=Deployment(value)
     assert not deployment.capabilities('wfixture',root)['start']
@@ -431,3 +433,40 @@ def test_private_disk_counts_allocated_blocks_and_policy_history_is_bounded(tmp_
     fd = os.open(state / 'service.lock', os.O_RDWR)
     try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally: os.close(fd)
+
+
+@pytest.mark.parametrize('removed', ['root', 'directory', 'file'])
+def test_private_state_sampling_tolerates_owned_cleanup_without_losing_retained_bytes(tmp_path, monkeypatch, removed):
+    """Review profile cleanup can overlap the supervisor's disk observation."""
+    from contextlib import contextmanager
+    import shutil
+    from demiflow.workbench.conversations import common
+    home = tmp_path / 'profile'; home.mkdir()
+    retained = home / 'retained'; retained.write_bytes(b'x' * 65536)
+    disappearing = home / 'storages'; disappearing.mkdir()
+    (disappearing / 'entry').write_bytes(b'ephemeral')
+    original = common.os.scandir
+    if removed == 'root':
+        shutil.rmtree(home)
+        assert common.directory_bytes(home) == 0
+        return
+
+    @contextmanager
+    def scan(path):
+        with original(path) as rows:
+            def entries():
+                for row in rows:
+                    if removed == 'file' and Path(row.path) == disappearing / 'entry':
+                        Path(row.path).unlink()
+                    yield row
+            yield entries()
+    # Preserve the real call's eager error behavior for a vanished directory.
+    def eager_scan(path):
+        if removed == 'directory' and Path(path) == disappearing:
+            (disappearing / 'entry').unlink()
+            disappearing.rmdir()
+            return original(path)
+        return scan(path)
+    monkeypatch.setattr(common.os, 'scandir', eager_scan)
+    assert common.directory_bytes(home) >= retained.stat().st_size
+    assert retained.read_bytes() == b'x' * 65536

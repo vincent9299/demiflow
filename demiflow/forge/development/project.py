@@ -283,11 +283,12 @@ def changes(before, after):
 
 
 class Project:
-    def __init__(self, root):
+    def __init__(self, root, *, task_store=None):
         self.root = Path(root).absolute()
         no_symlinks(self.root)
         self.control = no_symlinks(self.root / ".demiforge")
         self.path = self.control / "project.json"
+        self.task_store = task_store
         self.config = read_json(self.path)
         self.validate()
 

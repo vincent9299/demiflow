@@ -127,7 +127,7 @@ def test_acp_mcp_bridge_uses_public_registered_cli_and_delivery_gate(tmp_path):
     from test_forge_development import DevelopmentTests
     from test_forge_development_chat import configuration
     from demiflow.workbench.conversations.service import Service
-    from demiflow.workbench.conversations.context import assemble
+    from demiflow.workbench.conversations.context import assemble, ProtocolBridge, BridgeServer
     from demiflow.workbench.conversations.common import root_identity
     from demiflow.workbench.conversations.common import wire
     from demiflow.workbench.conversations import mcp_bridge
@@ -139,7 +139,7 @@ def test_acp_mcp_bridge_uses_public_registered_cli_and_delivery_gate(tmp_path):
     config['projects'] = {'wregistered': project}
     config_path.write_text(json.dumps(config))
     service = Service(config_path)
-    child = None
+    child = bridge = None
     try:
         sid = service.create('wregistered', fixture.root, 'mcp', 'codex')['id']
         turn, _ = service.store.submit('wregistered', sid, 'bridge', 0, 'Read and check the existing fixture',
@@ -147,7 +147,10 @@ def test_acp_mcp_bridge_uses_public_registered_cli_and_delivery_gate(tmp_path):
         scratch = service.root / sid / turn['id']; scratch.mkdir(parents=True)
         manifest, _ = assemble(project, turn['text'], scratch, service.deployment.limits)
         service.store.update(turn['id'], context=wire(manifest).decode(), delivery='acknowledged')
-        child = subprocess.Popen([sys.executable, '-I', '-B', mcp_bridge.__file__, str(config_path), turn['id']],
+        bridge = BridgeServer(ProtocolBridge(service.store, turn['id'], project, scratch),
+                              epoch=turn['epoch'], deadline=time.time()+35)
+        child = subprocess.Popen([sys.executable, '-I', '-B', mcp_bridge.__file__, '--connect',
+                                  str(bridge.path), bridge.token, turn['id'], turn['epoch']],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         serial = 0
         def rpc(method, params):
@@ -182,4 +185,5 @@ def test_acp_mcp_bridge_uses_public_registered_cli_and_delivery_gate(tmp_path):
         if child is not None:
             child.terminate(); child.wait(timeout=5)
             child.stdin.close(); child.stdout.close(); child.stderr.close()
+        if bridge is not None: bridge.close()
         service.close(); fixture.doCleanups()

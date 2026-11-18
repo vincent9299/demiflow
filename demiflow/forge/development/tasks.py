@@ -7,13 +7,14 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import time
 import uuid
 
 from .io import atomic_write_json, atomic_write_text
 from .launcher import SCRIPT
 from .checks import structural
 from .project import (ForgeError, PAGE_SIZE, REVIEW_RULES, SKIP, VERSION, PROJECT_LOCAL_STANDARDS, Project,
-                      changes, digest, no_symlinks, read_json, relative, safe_id, within)
+                      changes, digest, file_hash, no_symlinks, read_json, relative, safe_id, within)
 from .runner import run
 
 
@@ -45,11 +46,15 @@ def init(root, config_path):
 
 
 @contextmanager
-def locked(project, task_id, *, create=False):
+def locked(project, task_id, *, create=False, write=True):
     safe_id(task_id)
-    directory = no_symlinks(project.control / "tasks" / task_id)
+    store = getattr(project, "task_store", None)
+    directory = store.directory(task_id) if store else no_symlinks(project.control / "tasks" / task_id)
     if create:
-        directory.mkdir(parents=True, exist_ok=False)
+        if store:
+            store.create(task_id)
+        else:
+            directory.mkdir(parents=True, exist_ok=False)
     elif not directory.is_dir():
         raise ForgeError(f"Unknown task: {task_id}")
     lockpath = no_symlinks(directory / ".lock")
@@ -61,10 +66,11 @@ def locked(project, task_id, *, create=False):
         path = no_symlinks(directory / "task.json")
         state = {} if create else read_json(path)
         yield directory, state
-        atomic_write_json(path, state)
+        if write:
+            atomic_write_json(path, state)
 
 
-def start(project, task_id, pipeline, goal, writes, non_goals):
+def start(project, task_id, pipeline, goal, writes, non_goals, *, metadata=None):
     project.pipeline(pipeline)
     if not goal.strip() or not writes or not non_goals:
         raise ForgeError("Task requires a goal, explicit writable paths and non-goals")
@@ -97,6 +103,14 @@ def start(project, task_id, pipeline, goal, writes, non_goals):
                "reads": {}, "notes": [], "check": None, "verification": None, "review": None}
     if observation.coverage is not None:
         initial['baseline_coverage'] = observation.coverage
+    if metadata:
+        if set(metadata) != {'managed'}:
+            raise ForgeError('Unsupported trusted task metadata')
+        initial.update(metadata)
+        managed = initial['managed']
+        managed['bound_contract']['baseline_fingerprint'] = digest({
+            key: initial.get(key) for key in ('baseline', 'readonly_baseline', 'baseline_coverage')})
+        managed['contract_digest'] = digest(managed['bound_contract'])
     with locked(project, task_id, create=True) as (_, state):
         state.update(initial)
     return {"task": task_id, "status": "started", "writes": initial["writes"],
@@ -104,6 +118,8 @@ def start(project, task_id, pipeline, goal, writes, non_goals):
 
 
 def current(project, state, *, with_observation=False):
+    if state.get('managed', {}).get('context_binding_problem'):
+        raise ForgeError('Supplementary authority source set changed; an explicit contract update is required')
     binding = project.binding()
     if binding != state["binding"]:
         raise ForgeError("Tool, standard or project configuration changed; use read-only history. "
@@ -120,9 +136,43 @@ def current(project, state, *, with_observation=False):
                                         (n["kind"] == "question" and n.get("resolved"))]}
     if observation.coverage is not None:
         basis['coverage'] = observation.coverage
+    if 'managed' in state:
+        basis['managed_contract'] = state['managed']['contract_digest']
+        supplemental = state['managed']['bound_contract'].get('context_baseline')
+        if supplemental is not None:
+            basis['managed_context'] = supplemental_context(supplemental)
     fingerprint = digest(basis)
     values = (tree, readonly, sources, fingerprint)
     return (*values, observation) if with_observation else values
+
+
+def supplemental_context(sources):
+    """Recheck controller-delivered full files, without granting new write scope."""
+    if type(sources) is not list or len(sources) > 64:
+        raise ForgeError('Supplementary context requires at most 64 full-file sources')
+    deadline = time.monotonic() + 5
+    result = {}
+    for source in sources:
+        if time.monotonic() > deadline:
+            raise ForgeError('Supplementary context scan exceeded five seconds')
+        if type(source) is not dict or set(source) != {'canonical_path', 'sha256'}:
+            raise ForgeError('Supplementary context requires canonical_path and raw sha256')
+        label, expected = source['canonical_path'], source['sha256']
+        if not isinstance(label, str) or len(label) > 4096:
+            raise ForgeError('Invalid supplementary context path')
+        path = no_symlinks(Path(label))
+        if not path.is_absolute() or str(path) != label or str(path.resolve()) != label:
+            raise ForgeError('Supplementary context requires a canonical absolute file path')
+        if (not isinstance(expected, str) or len(expected) != 64 or
+                any(char not in '0123456789abcdef' for char in expected)):
+            raise ForgeError('Supplementary context requires a raw SHA-256 digest')
+        actual = file_hash(path, limit=1024 * 1024, deadline=deadline)
+        if actual != expected:
+            raise ForgeError(f'Supplementary authoritative context changed: {label}')
+        if label in result and result[label] != expected:
+            raise ForgeError('Conflicting supplementary context source digests')
+        result[label] = expected
+    return [dict(canonical_path=path, sha256=sha) for path, sha in sorted(result.items())]
 
 
 def context(project, state, source_id=None, page=1):
@@ -172,6 +222,10 @@ def check(project, state):
     violations = [f"DF-01 out-of-scope change: {name}" for name in changed
                   if not any(within(name.rstrip("/"), w) for w in state["writes"])]
     violations += [f"DF-01 readonly changed: {name}" for name in changes(state["readonly_baseline"], readonly)]
+    managed = state.get('managed')
+    if (managed and managed['request']['contract'].get('require_context_binding', False)
+            and 'context_baseline' not in managed['bound_contract']):
+        violations.append('DF-01 supplemental authority context has not been bound by the controller')
     if observation.coverage is not None and 'baseline_coverage' in state:
         for scope in ('tree', 'readonly'):
             before_unknown = set(state['baseline_coverage'][scope]['unverified_ranges'])
@@ -193,7 +247,7 @@ def check(project, state):
     return state["check"]
 
 
-def verify(project, state, directory, allow_tests):
+def verify(project, state, directory, allow_tests, *, timeout_seconds=None, launch=None):
     if not allow_tests:
         raise ForgeError("Verification runs trusted project code; explicit --allow-tests required")
     result = check(project, state)
@@ -207,15 +261,25 @@ def verify(project, state, directory, allow_tests):
                              "status": "running", "invocation": invocation, "commands": []}
     atomic_write_json(directory / "task.json", state)
     commands = state["verification"]["commands"]
+    deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
     for command in project.pipeline(state["pipeline"])["verify"]:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            command = {**command, "timeout": min(command["timeout"], remaining)}
         try:
-            outcome = run(command, project, evidence / (command["id"] + "-scratch"))
+            outcome = run(command, project, evidence / (command["id"] + "-scratch"), **({'launch': launch} if launch else {}))
         except OSError as error:
             outcome = {"id": command["id"], "passed": False, "failure": str(error), "output": ""}
         output = outcome.pop("output")
         logfile = evidence / (command["id"] + ".log")
         atomic_write_text(logfile, output)
-        outcome["log"] = str(logfile.relative_to(project.root))
+        if getattr(getattr(project, 'task_store', None), 'managed', False):
+            outcome["log"] = str(logfile.relative_to(directory))
+            outcome["log_base"] = "task"
+        else:
+            outcome["log"] = str(logfile.relative_to(project.root))
         outcome["log_sha256"] = digest(output)
         commands.append(outcome)
         if not outcome["passed"]:
@@ -225,22 +289,32 @@ def verify(project, state, directory, allow_tests):
     result["source_changed_during_tests"] = after != fingerprint
     result["passed"] = after == fingerprint and all(c["passed"] for c in commands) and len(commands) == len(project.pipeline(state["pipeline"])["verify"])
     result["status"] = "passed" if result["passed"] else "failed"
-    result["sandbox"] = False
+    result["sandbox"] = bool(launch and commands and all(c.get('execution', {}).get('assurance') == 'enforced' for c in commands))
     return result
 
 
 def review(project, state, review_path, reviewer):
+    if 'managed' in state:
+        raise ForgeError("Managed Review requires the trusted controller reviewer channel")
     tree, readonly, _, fingerprint = current(project, state)
     if not reviewer.strip():
         raise ForgeError("Identify the reviewer; self-review is not independent review")
     claims = read_json(Path(review_path).absolute())
+    validate_review_claims(project, tree, readonly, claims)
+    state["review"] = {"fingerprint": fingerprint, "time": now(), "passed": True,
+                       "reviewer": reviewer, "type": "reviewer-attestation", "claims": claims}
+    return state["review"]
+
+
+def validate_review_claims(project, tree, readonly, claims, *, allow_failure=False):
     if not isinstance(claims, dict) or set(claims) != set(REVIEW_RULES):
         raise ForgeError(f"Review must cover exactly {', '.join(REVIEW_RULES)}")
     known = {str((project.root / p).resolve()) for p, h in {**tree, **readonly}.items() if h not in (None, "directory")}
     for rule, claim in claims.items():
         if not isinstance(claim, dict) or set(claim) != {"status", "reason", "evidence"}:
             raise ForgeError(f"{rule}: requires status, reason, evidence")
-        if claim["status"] not in {"pass", "not_applicable"} or not isinstance(claim["reason"], str) or not claim["reason"].strip():
+        statuses = {"pass", "not_applicable", "fail"} if allow_failure else {"pass", "not_applicable"}
+        if claim["status"] not in statuses or not isinstance(claim["reason"], str) or not claim["reason"].strip():
             raise ForgeError(f"{rule}: unjustified/failed review cannot be accepted")
         if rule != "DF-05" and claim["status"] == "not_applicable":
             raise ForgeError(f"{rule} is mandatory; only prompt review permits justified N/A")
@@ -249,9 +323,6 @@ def review(project, state, review_path, reviewer):
         for path in claim["evidence"]:
             if not isinstance(path, str) or str((project.root / path).resolve()) not in known:
                 raise ForgeError(f"{rule}: evidence is not a snapshotted source: {path}")
-    state["review"] = {"fingerprint": fingerprint, "time": now(), "passed": True,
-                       "reviewer": reviewer, "type": "reviewer-attestation", "claims": claims}
-    return state["review"]
 
 
 def evidence_status(record, fingerprint):
@@ -263,15 +334,12 @@ def evidence_status(record, fingerprint):
 
 
 def handoff(project, state, directory, accept):
+    if 'managed' in state and accept:
+        raise ForgeError("Managed acceptance requires the trusted controller channel")
     result = check(project, state)
     fingerprint = result["fingerprint"]
     gates = {k: evidence_status(state[k], fingerprint) for k in ("check", "verification", "review")}
-    log_problems = []
-    if state["verification"]:
-        for command in state["verification"]["commands"]:
-            path = no_symlinks(project.root / command["log"])
-            if not path.is_file() or digest(path.read_text(encoding="utf-8")) != command["log_sha256"]:
-                log_problems.append(f"Missing/changed verification log: {path}")
+    log_problems = verification_log_problems(project, state, directory)
     if log_problems:
         gates["verification"] = "corrupt"
     unresolved = [n["text"] for n in state["notes"] if n["kind"] == "question" and not n.get("resolved")]
@@ -313,3 +381,22 @@ def handoff(project, state, directory, accept):
     return {"status": report["status"], "gates": gates, "ready": ready,
             "handoff": str(directory / "handoff.md"), "violations": report["violations"],
             "unresolved_questions": unresolved}
+
+
+def verification_log_problems(project, state, directory):
+    problems = []
+    if state.get("verification"):
+        for command in state["verification"]["commands"]:
+            base = directory if command.get("log_base") == "task" else project.root
+            label = command.get("log", "")
+            try:
+                if command.get("log_base") == "task":
+                    path = Path(label)
+                    if path.is_absolute() or '..' in path.parts or not label:
+                        raise ForgeError("Invalid task-relative verification log")
+                path = no_symlinks(base / label)
+                if not path.is_file() or path.stat().st_size > 4 * 1024 * 1024 or digest(path.read_text(encoding="utf-8")) != command["log_sha256"]:
+                    problems.append(f"Missing/changed verification log: {path}")
+            except (OSError, ValueError, KeyError) as error:
+                problems.append(f"Invalid verification log: {label}: {error}")
+    return problems

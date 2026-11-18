@@ -63,7 +63,7 @@ def inspection_environment(pass_fds=(), *, allow_preparation=True):
 
 
 @operation_budget.controlled
-def capture(argv, request, limits, *, response_formats=None, input_limit=16384, pass_fds=(), tree_rss_limit=None):
+def capture(argv, request, limits, *, response_formats=None, input_limit=16384, pass_fds=(), tree_rss_limit=None, launch=None):
     from .platform import bounded_json
     from .schema import ForgeError
     # One-shot calls inherit the remaining control scope; reusable readers
@@ -77,8 +77,9 @@ def capture(argv, request, limits, *, response_formats=None, input_limit=16384, 
             input_file.write(bounded_json(request, input_limit))
             input_file.seek(0)
             operation_budget.check(deadline)
-            process = subprocess.Popen(argv, stdin=input_file, stdout=subprocess.PIPE,
+            process = (subprocess.Popen(argv, stdin=input_file, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, cwd=scratch, env=env, start_new_session=True, pass_fds=inherited_fds)
+                if launch is None else launch(argv, cwd=scratch, env=env, input_file=input_file, deadline=deadline))
             outputs = {"stdout": bytearray(), "stderr": bytearray()}
             ceilings = {"stdout": limits["catalog_bytes"], "stderr": limits["stderr_bytes"]}
             selector = selectors.DefaultSelector()

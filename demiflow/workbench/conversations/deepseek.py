@@ -34,7 +34,13 @@ class DeepSeek:
     @staticmethod
     def launch(config, home, root):
         home=Path(home);dsh_home=home/'dsh'
-        profile_name='devchat-compact' if config.get('_compaction') else 'devchat'
+        boundary = config.get('_boundary')
+        if sum(bool(config.get(k)) for k in ('_compaction', '_review', '_model_broker')) > 1:
+            reject('A provider process cannot compact and review at once')
+        if boundary is not None and (type(boundary) is not dict or set(boundary) != {'token'} or
+                type(boundary['token']) is not str or len(boundary['token']) != 64):
+            reject('Invalid fixed model channel')
+        profile_name='devchat-model-broker' if config.get('_model_broker') else 'devchat-review' if config.get('_review') else 'devchat-compact' if config.get('_compaction') else 'devchat'
         profile=dsh_home/'profiles'/profile_name
         profile.mkdir(parents=True,mode=0o700,exist_ok=True)
         (home/'tmp').mkdir(mode=0o700,exist_ok=True)
@@ -45,12 +51,14 @@ class DeepSeek:
             if version!=config['version']:reject('Harness package version differs from qualified version')
         manifest={'name':'demiflow-development-acp','private':True,'dsh':{'profile':{'bundles':['@deepseek-ai/dsh-base','@deepseek-ai/dsh-acp-app']}}}
         (profile/'package.json').write_bytes(wire(manifest))
+        if boundary and (config.get('native_credentials') or config.get('credential_env') or config.get('base_url') or config.get('inherit_proxy')):
+            reject('Restricted CLI configuration must not carry upstream authentication or endpoints')
         enabled = {'credentials'} if config.get('native_credentials') else set()
         route = config.get('model_provider', 'deepseek-official')
         if route == 'deepseek-account':
-            if not config.get('native_credentials'):
+            if not config.get('native_credentials') and not boundary:
                 reject('DeepSeek account route requires an explicit native credential reference')
-            enabled.update({'deepseek-account', 'llm-deepseek-account', 'authorization'})
+            if not boundary: enabled.update({'deepseek-account', 'llm-deepseek-account', 'authorization'})
         overlay=[{'id':name,'disabled':True} for name in DISABLED if name not in enabled]
         if config.get('native_credentials'):
             overlay.append(dict(id='credentials', config=dict(path=config['native_credentials'], watch=False)))
@@ -65,6 +73,28 @@ class DeepSeek:
             overlay += [dict(id='acp',disabled=True),dict(insert=[dict(id='demiflow-compaction',
                 name=str(Path(__file__).with_name('deepseek_compact.cjs')),
                 config=dict(cwd=root,provider=route,model=config['model']))])]
+        if config.get('_review'):
+            # A trusted one-shot LLM service request: no agent/session or tool
+            # execution loop. The plugin location is fixed by this package.
+            timeout = config.get('_review_timeout_ms', 180000)
+            if type(timeout) is not int or not 1 <= timeout <= 180000:
+                reject('Invalid independent review deadline')
+            overlay = [row for row in overlay if row['id'] != 'acp']
+            overlay += [dict(id='acp',disabled=True),dict(id='llm-retry',disabled=True),dict(insert=[dict(id='demiflow-review',
+                name=str(Path(__file__).with_name('deepseek_review.cjs')),
+                config=dict(provider=route,model=config['model'],reasoningEffort=config.get('effort','high'),
+                            timeoutMs=timeout,maxOutputBytes=65536))])]
+        if config.get('_model_broker'):
+            overlay = [row for row in overlay if row['id'] != 'acp']
+            overlay += [dict(id='acp',disabled=True),dict(id='llm-retry',disabled=True),dict(insert=[dict(id='demiflow-model-broker',
+                name=str(Path(__file__).with_name('deepseek_model_broker.cjs')),
+                config=dict(provider=route,model=config['model'],reasoningEffort=config.get('effort','high')))])]
+        if boundary:
+            if package is None: reject('Restricted model transport requires the pinned installed Harness')
+            overlay += [dict(id='llm-deepseek',disabled=True),dict(insert=[dict(id='demiflow-model-proxy',
+                name=str(Path(__file__).with_name('deepseek_model_proxy.cjs')),
+                config=dict(provider=route,model=config['model'],token=boundary['token'],
+                    llmModule=str(package/'node_modules/@deepseek-ai/dsh-llm/lib/index.js')))])]
         (profile/'cordis.patch.yml').write_bytes(wire(overlay,65536))
         env=dict(PATH=str(Path(config.get('node',config['executable'])).parent)+':/usr/bin:/bin',HOME=str(home),DSH_HOME=str(dsh_home),
                  TMPDIR=str(home/'tmp'),LANG='C.UTF-8',DSH_PERMISSION_MODE='danger-full-access',OMP_NUM_THREADS='2',OPENBLAS_NUM_THREADS='2')

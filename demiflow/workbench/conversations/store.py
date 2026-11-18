@@ -82,6 +82,12 @@ class Store:
                     db.execute("ALTER TABLE turns ADD COLUMN launch_phase TEXT NOT NULL DEFAULT 'unknown'")
                 if 'operation' not in {r[1] for r in db.execute('PRAGMA table_info(turns)')}:
                     db.execute("ALTER TABLE turns ADD COLUMN operation TEXT NOT NULL DEFAULT 'message'")
+                columns = {r[1] for r in db.execute('PRAGMA table_info(turns)')}
+                for name, definition in {'development': 'TEXT', 'development_control': 'TEXT', 'gate_process': 'TEXT',
+                        'gate_phase': "TEXT NOT NULL DEFAULT 'none'",
+                        'gate_cleanup': "TEXT NOT NULL DEFAULT 'complete'"}.items():
+                    if name not in columns:
+                        db.execute(f'ALTER TABLE turns ADD COLUMN {name} {definition}')
             os.chmod(self.path, 0o600)
             reserve = self.root / 'control.reserve'
             if not reserve.exists() and not (self.root / 'storage-pressure').exists():
@@ -221,7 +227,13 @@ class Store:
 
     @staticmethod
     def public_turn(turn):
-        return {k: v for k, v in turn.items() if k not in {'text', 'process', 'baseline', 'context'}}
+        value = {k: v for k, v in turn.items() if k not in {'text', 'process', 'baseline', 'context', 'gate_process', 'gate_phase', 'development_control'}}
+        value['development'] = json.loads(value['development']) if value.get('development') else None
+        if value['development'] is not None and turn.get('development_control'):
+            control = json.loads(turn['development_control'])
+            value['development'].update(repair_round=control['repair_round'], review_attempts=control['review_attempts'],
+                deadline=control['deadline'], remaining_repairs=3-control['repair_round'], segments=control['segments'])
+        return value
 
     def session(self, sid):
         with self.connect() as db:
@@ -244,7 +256,7 @@ class Store:
             row = db.execute('SELECT * FROM turns WHERE session=? AND submission=?', (sid, identifier(key))).fetchone()
             return dict(row) if row else None
 
-    def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message"):
+    def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message", development=None):
         text(message); identifier(submission_id); integer(expected_revision, 0, 2**31)
         if operation not in {'message','compact'}:reject('Unknown conversation operation')
         hashed = digest({'text': message, **({'operation':operation} if operation!='message' else {})})
@@ -256,7 +268,7 @@ class Store:
                 return dict(old), False
             if session['revision'] != expected_revision or session['policy_hash'] != policy_hash or json.loads(session['root']) != identity:
                 reject('Session policy, root or revision changed', 'conflict')
-            active = db.execute("SELECT t.*,s.root FROM turns t JOIN sessions s ON s.id=t.session WHERE t.cleanup != 'complete'").fetchall()
+            active = db.execute("SELECT t.*,s.root FROM turns t JOIN sessions s ON s.id=t.session WHERE t.cleanup != 'complete' OR t.gate_cleanup != 'complete' OR t.gate_phase='repair_pending'").fetchall()
             if len(active) >= self.limits.active: reject('Development capacity reserved', 'busy')
             root = Path(identity['path'])
             for turn in active:
@@ -267,9 +279,10 @@ class Store:
                 reject('Turn count budget exhausted', 'resource_limit')
             reserve = (self.limits.output_bytes + self.limits.context_total * 4 +
                        32 * (32768 + 16384) + 32768 + 2 * 16384 + 32 * 16384)
+            if development is not None: reserve += 96 * 16384
             for where, args, maximum in [('id=?', (sid,), self.limits.session_bytes), ('workspace=?', (workspace,), self.limits.project_bytes), ('1=1', (), self.limits.global_bytes)]:
                 used = db.execute('SELECT coalesce(sum(bytes+metadata_bytes),0) FROM sessions WHERE ' + where, args).fetchone()[0]
-                held = db.execute("SELECT coalesce(sum(t.reserve),0) FROM turns t WHERE cleanup != 'complete' AND session IN (SELECT id FROM sessions WHERE " + where + ')', args).fetchone()[0]
+                held = db.execute("SELECT coalesce(sum(t.reserve),0) FROM turns t WHERE (cleanup != 'complete' OR gate_cleanup != 'complete' OR gate_phase='repair_pending') AND session IN (SELECT id FROM sessions WHERE " + where + ')', args).fetchone()[0]
                 if used + held + reserve > maximum: reject('Development history byte reservation exhausted', 'resource_limit')
             tid, epoch = 't' + secrets.token_hex(16), secrets.token_hex(16)
             db.execute('INSERT INTO turns(id,session,submission,body_hash,text,state,dispatch,cleanup,epoch,created,reserve,launch_phase) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -277,6 +290,12 @@ class Store:
             db.execute('UPDATE sessions SET revision=revision+1,title=CASE WHEN title=\'\' THEN ? ELSE title END WHERE id=?', (message[:80], sid))
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (len(message.encode()), sid))
             db.execute('UPDATE turns SET operation=? WHERE id=?',(operation,tid))
+            if development is not None:
+                created = db.execute('SELECT created FROM turns WHERE id=?', (tid,)).fetchone()[0]
+                control = dict(repair_round=0, review_attempts=0, deadline=created+self.limits.turn_seconds,
+                    failure_signature=None, failure_repeats=0, feedback=None, segments=[])
+                self._update(db, tid, {'development': wire(development, 16384).decode(),
+                                     'development_control': wire(control, 32768).decode()})
             self._event(db,sid,tid,epoch,'message.user' if operation=='message' else 'compaction.requested',{'text':message})
             return dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone()), True
 
@@ -288,7 +307,11 @@ class Store:
         raw = wire(value, self.limits.event_bytes)
         if not control and (turn['bytes'] + len(raw) > self.limits.output_bytes or turn['events'] >= self.limits.events_per_turn):
             reject('Turn event budget exceeded', 'resource_limit')
-        if control and (len(raw) > 16384 or turn['events'] >= self.limits.events_per_turn + 32):
+        # Four provider segments and their gate states share this one bounded turn.
+        maximum_control = 32
+        if control and 'development_control' in {r[1] for r in db.execute('PRAGMA table_info(turns)')}:
+            if db.execute('SELECT development_control FROM turns WHERE id=?', (tid,)).fetchone()[0]: maximum_control = 128
+        if control and (len(raw) > 16384 or turn['events'] >= self.limits.events_per_turn + maximum_control):
             reject('Control event budget exceeded', 'resource_limit')
         db.execute('INSERT INTO events VALUES(?,?,?,?,?)', (sid, seq, tid, len(raw), raw.decode()))
         db.execute('UPDATE sessions SET sequence=?,bytes=bytes+? WHERE id=?', (seq, len(raw), sid))
@@ -305,13 +328,14 @@ class Store:
             self._update(db, tid, changes)
 
     def _update(self, db, tid, changes):
-        allowed = {'state', 'dispatch', 'cleanup', 'provider_turn', 'process', 'context', 'delivery', 'baseline', 'result', 'launch_phase'}
+        allowed = {'state', 'dispatch', 'cleanup', 'provider_turn', 'process', 'context', 'delivery', 'baseline', 'result', 'launch_phase',
+                   'development', 'development_control', 'gate_phase', 'gate_cleanup', 'gate_process'}
         if changes.keys() - allowed: raise ValueError('Unknown turn fields')
         old = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
         delta = 0
-        for key in ('context', 'baseline', 'result', 'process'):
+        for key in ('context', 'baseline', 'result', 'process', 'development', 'gate_process', 'development_control'):
             if key in changes:
-                maximum = self.limits.context_total * 2 if key in {'context', 'baseline'} else 16384
+                maximum = self.limits.context_total * 2 if key in {'context', 'baseline'} else 32768 if key == 'development_control' else 16384
                 size = len(changes[key].encode())
                 if size > maximum:
                     reject('Persistent turn metadata exceeds byte budget', 'resource_limit')
@@ -323,7 +347,9 @@ class Store:
         if delta:
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (delta, old['session']))
         if 'state' in changes or 'delivery' in changes:
-            self._event(db, old['session'], tid, old['epoch'], 'turn.state', {k: v for k, v in changes.items() if k not in {'context', 'baseline', 'process'}}, control=True)
+            self._event(db, old['session'], tid, old['epoch'], 'turn.state', {k: v for k, v in changes.items() if k not in {'context', 'baseline', 'process', 'development', 'development_control', 'gate_process', 'gate_phase'}}, control=True)
+        if 'development' in changes:
+            self._event(db, old['session'], tid, old['epoch'], 'development.state', json.loads(changes['development']), control=True)
         if changes.get('cleanup') == 'complete':
             db.execute("UPDATE pending SET status='expired' WHERE turn=? AND status IN ('waiting','responding')", (tid,))
 
@@ -337,6 +363,149 @@ class Store:
                 reject('Worker launch identity is stale', 'conflict')
             ownership['supervisor'] = supervisor
             self._update(db, tid, dict(process=wire(ownership).decode(), launch_phase='claimed', state='starting'))
+
+    def finish_provider(self, tid, *, state, cleanup, result):
+        """The provider drain receipt and managed gate outbox commit together."""
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            changes = dict(state=state, cleanup=cleanup, result=wire(result).decode())
+            if turn.get('development'):
+                development = json.loads(turn['development'])
+                eligible = (cleanup == 'complete' and state == 'completed' and not turn['stop_at']
+                            and result.get('provider_completed') and turn['delivery'] == turn['dispatch'] == 'acknowledged')
+                uncertain = cleanup != 'complete' or turn['delivery'] == 'unknown' or turn['dispatch'] == 'unknown'
+                status = ('queued' if eligible else 'cancelled' if turn['stop_at'] or state == 'cancelled'
+                          else 'unknown' if uncertain else 'failed')
+                changes.update(development=wire(dict(development, state=status, busy=eligible or cleanup != 'complete',
+                    reason=None if eligible else result.get('reason') or 'Provider did not produce a drained completed candidate')).decode(),
+                    gate_phase='queued' if eligible else 'none', gate_cleanup='pending' if eligible else 'complete')
+                if turn.get('development_control'):
+                    control = json.loads(turn['development_control'])
+                    receipt = dict(round=control['repair_round'], epoch=turn['epoch'], provider_turn=turn['provider_turn'],
+                        state=state, dispatch=turn['dispatch'], cleanup=cleanup, context_digest=(json.loads(turn['context'] or '{}')).get('digest'),
+                        reason=result.get('reason'), execution_assurance=result.get('execution_assurance', 'gate_only'),
+                        changed_files=result.get('changed_files', 0), source_revision=result.get('revision'))
+                    if not any(item['epoch'] == turn['epoch'] for item in control['segments']):
+                        control['segments'].append(receipt)
+                    changes['development_control'] = wire(control, 32768).decode()
+            self._update(db, tid, changes)
+
+    def claim_gate(self, tid, epoch, unit_identity, supervisor):
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            ownership = json.loads(turn['gate_process'] or '{}')
+            if (turn['epoch'] != epoch or turn['gate_phase'] != 'spawning' or turn['gate_cleanup'] == 'complete'
+                    or turn['cleanup'] != 'complete' or ownership.get('nonce') != epoch
+                    or ownership.get('unit_identity') != unit_identity):
+                reject('Development gate launch identity is stale', 'conflict')
+            ownership['supervisor'] = supervisor
+            self._update(db, tid, dict(gate_process=wire(ownership).decode(), gate_phase='claimed'))
+
+    def gate_state(self, tid, development, *, phase=None, cleanup=None):
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            if turn['stop_at'] and cleanup is None:
+                reject('Development gate was cancelled', 'conflict')
+            if cleanup is None:
+                development = dict(development, busy=True)
+            changes = {'development': wire(development, 16384).decode()}
+            if phase is not None: changes['gate_phase'] = phase
+            if cleanup is not None: changes['gate_cleanup'] = cleanup
+            self._update(db, tid, changes)
+
+    def gate_pending(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("SELECT * FROM turns WHERE gate_cleanup != 'complete' OR gate_phase='repair_pending' ORDER BY created LIMIT ?", (self.limits.active + 1,))]
+
+    def accept_drained_gate(self, tid, accept, *, drained):
+        """Caller proved gate-tree drain; serialize acceptance against cancellation.
+
+        The domain receipt and SQLite cannot commit atomically. Consumers must
+        require this committed turn receipt as well as the domain fingerprint.
+        A crash between those writes therefore remains closed, never replayed.
+        """
+        if drained is not True:
+            reject('Acceptance requires confirmed owned-process cleanup', 'conflict')
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            if (turn['gate_phase'] != 'ready' or turn['cleanup'] != 'complete'
+                    or turn['dispatch'] != 'acknowledged' or turn['delivery'] != 'acknowledged'):
+                reject('Acceptance requires a completed provider and ready gate', 'conflict')
+            value = json.loads(turn['development'])
+            deadline = json.loads(turn.get('development_control') or '{}').get('deadline', turn['created']+self.limits.turn_seconds)
+            if turn['stop_at']:
+                value = dict(value, state='cancelled', busy=False, reason='stop_requested')
+            elif time.time() >= deadline:
+                value = dict(value, state='unknown', busy=False, reason='Development request deadline exhausted before acceptance')
+            else:
+                try:
+                    value = accept(value)
+                except Exception as exc:
+                    value = dict(value, state='unknown', busy=False, reason=(type(exc).__name__+': '+str(exc))[:2048])
+            self._update(db, tid, dict(development=wire(value, 16384).decode(), gate_phase='finished', gate_cleanup='complete'))
+            return value
+
+    def claim_review(self, tid, fingerprint):
+        """Persist the possibly paid request boundary before contacting a reviewer."""
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            control = json.loads(turn['development_control'])
+            if turn['stop_at'] or control['deadline'] <= time.time() or control['review_attempts'] >= 2:
+                return False
+            control['review_attempts'] += 1
+            control['review_fingerprint'] = fingerprint
+            self._update(db, tid, dict(development_control=wire(control, 32768).decode(), gate_phase='reviewing'))
+            return True
+
+    def schedule_repair(self, tid, development, feedback):
+        """Only a determined failed gate can produce a bounded continuation."""
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            control = json.loads(turn['development_control'])
+            feedback = json.loads(wire(feedback, 12000))
+            # Log invocation paths and excerpt formatting are observations, not
+            # implementation progress. Same source and failure reasons stop twice.
+            reasons = [{key: issue.get(key) for key in ('rule_id', 'path', 'reason')}
+                       for issue in feedback]
+            signature = digest(dict(fingerprint=development.get('source_fingerprint'), feedback=reasons))
+            repeats = control['failure_repeats'] + 1 if control['failure_signature'] == signature else 1
+            control.update(failure_signature=signature, failure_repeats=repeats, feedback=feedback)
+            review_exhausted = development.get('gates', {}).get('review') == 'failed' and control['review_attempts'] >= 2
+            allowed = not turn['stop_at'] and control['deadline'] > time.time() and control['repair_round'] < 3 and repeats < 2 and not review_exhausted
+            reason = ('Repeated identical failure without source changes' if repeats >= 2 else
+                      'Independent review budget exhausted' if review_exhausted else
+                      'Automatic repair budget exhausted' if control['repair_round'] >= 3 else
+                      'Development request deadline exhausted' if control['deadline'] <= time.time() else
+                      'stop_requested' if turn['stop_at'] else 'Controller is preparing the next bounded repair')
+            value = dict(development, state='repair_pending' if allowed else 'cancelled' if turn['stop_at'] else 'failed',
+                         busy=True, reason=reason)
+            self._update(db, tid, dict(development=wire(value, 16384).decode(), development_control=wire(control, 32768).decode(),
+                gate_phase='repair_pending' if allowed else 'finished'))
+            return allowed
+
+    def begin_repair(self, tid):
+        """Move one fully drained gate to one provider segment without a new user turn."""
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            control = json.loads(turn['development_control'])
+            if turn['gate_phase'] != 'repair_pending' or turn['gate_cleanup'] != 'complete' or turn['cleanup'] != 'complete':
+                reject('Repair requires confirmed provider and gate cleanup', 'conflict')
+            if turn['stop_at'] or control['deadline'] <= time.time() or control['repair_round'] >= 3:
+                value = dict(json.loads(turn['development']), state='cancelled' if turn['stop_at'] else 'failed', busy=False,
+                    reason='stop_requested' if turn['stop_at'] else 'Automatic repair budget exhausted')
+                self._update(db, tid, dict(development=wire(value).decode(), gate_phase='finished'))
+                return None
+            control['repair_round'] += 1
+            epoch = secrets.token_hex(16)
+            db.execute('UPDATE turns SET epoch=? WHERE id=?', (epoch, tid))
+            value = dict(json.loads(turn['development']), state='repairing', busy=True, reason=None)
+            self._update(db, tid, dict(development=wire(value).decode(), development_control=wire(control, 32768).decode(),
+                state='preparing', dispatch='not_sent', cleanup='pending', launch_phase='admitted',
+                provider_turn='', process='', context='', baseline='', result='', delivery='prepared',
+                gate_phase='none', gate_cleanup='complete', gate_process=''))
+            self._event(db, turn['session'], tid, epoch, 'development.repair.started',
+                        dict(round=control['repair_round'], feedback=control['feedback']), control=True)
+            return dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
 
     def interrupt_unresolved(self, tid):
         with self.connect(write=True) as db:
@@ -355,9 +524,14 @@ class Store:
             if (saved['launch_phase'] not in {'admitted', 'spawning'} or
                     any(current[k] != saved[k] for k in ('epoch', 'launch_phase', 'process'))):
                 return False
-            self._update(db, saved['id'], dict(state='cancelled' if current['stop_at'] else 'failed', cleanup='complete',
+            changes = dict(state='cancelled' if current['stop_at'] else 'failed', cleanup='complete',
                 result=wire(dict(reason='worker_not_started', cleanup='complete', proof='pre_spawn' if
-                    saved['launch_phase'] == 'admitted' else 'unclaimed_unit_stopped')).decode()))
+                    saved['launch_phase'] == 'admitted' else 'unclaimed_unit_stopped')).decode())
+            if current['development']:
+                changes.update(development=wire(dict(json.loads(current['development']),
+                    state='cancelled' if current['stop_at'] else 'failed', busy=False, reason='worker_not_started')).decode(),
+                    gate_phase='none', gate_cleanup='complete')
+            self._update(db, saved['id'], changes)
             return True
 
     def bind_provider(self, sid, provider_session):
@@ -381,10 +555,14 @@ class Store:
             self._session(db, workspace, sid)
             row = db.execute('SELECT * FROM turns WHERE id=? AND session=?', (identifier(tid), sid)).fetchone()
             if row is None: reject('Turn does not belong to session', 'not_found')
-            if row['cleanup'] != 'complete' and row['stop_at'] is None:
-                db.execute("UPDATE turns SET stop_at=?,state='stopping' WHERE id=?", (time.time(), tid))
-                self._event(db, sid, tid, row['epoch'], 'turn.state', {'state': 'stopping'}, control=True)
-            return dict(db.execute('SELECT id,state,cleanup,stop_at FROM turns WHERE id=?', (tid,)).fetchone())
+            if (row['cleanup'] != 'complete' or row['gate_cleanup'] != 'complete' or row['gate_phase'] == 'repair_pending') and row['stop_at'] is None:
+                db.execute('UPDATE turns SET stop_at=? WHERE id=?', (time.time(), tid))
+                changes = {'state': 'stopping'} if row['cleanup'] != 'complete' else {}
+                if row['development']:
+                    development = json.loads(row['development'])
+                    changes['development'] = wire(dict(development, state='stopping', busy=True, reason='stop_requested')).decode()
+                if changes: self._update(db, tid, changes)
+            return self.public_turn(dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone()))
 
     def request(self, tid, request):
         raw = wire(request, 32768).decode(); hashed = digest(request)
@@ -404,6 +582,16 @@ class Store:
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (len(raw.encode()), turn['session']))
             self._event(db, turn['session'], tid, turn['epoch'], 'input.requested', dict(id=key, digest=hashed, request=request, expires=expires))
             return key
+
+    def dispatch_provider_reply(self, tid, epoch, send):
+        """Serialize a bounded transport send against stop and epoch changes."""
+        with self.connect(write=True) as db:
+            turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
+            deadline = json.loads(turn.get('development_control') or '{}').get('deadline', turn['created']+self.limits.turn_seconds)
+            if turn['epoch'] != epoch or turn['stop_at'] or turn['cleanup'] == 'complete' or time.time() >= deadline:
+                return False
+            send()
+            return True
 
     def respond(self, workspace, sid, tid, pending_id, expected_digest, answer):
         raw = wire(answer, 16384).decode()

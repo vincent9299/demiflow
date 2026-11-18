@@ -27,6 +27,13 @@ for line in sys.stdin:
             send(dict(id=value['id'],error=dict(code=-32603,message='fixture compaction failed')));continue
         result=dict(status='compacted',compaction_id='fixture-summary',shadowed_items=4,estimated_tokens_before=1200)
     elif method == 'session/prompt':
+        if '受信任务上下文' in params['prompt'][0]['text']:
+            (Path.home() / 'received-context.txt').write_text(params['prompt'][0]['text'])
+        if params['prompt'][0]['text'].rsplit('当前请求：\n', 1)[-1].startswith('managed-edit'):
+            with (root / 'orders/operators/map.py').open('a') as stream:
+                stream.write('# managed ACP fixture change\n')
+            send(dict(method='session/update', params=dict(sessionId='acp-fixture', update=dict(
+                sessionUpdate='agent_message_chunk', content=dict(type='text', text='Managed fixture edit completed')))))
         if 'stream fixture' in params['prompt'][0]['text']:
             send(dict(method='session/update',params=dict(sessionId='acp-fixture',update=dict(
                 sessionUpdate='agent_message_chunk',content=dict(type='text',text='First streamed paragraph.\n\n'+'Streaming fixture line.\n\n'*60)))))

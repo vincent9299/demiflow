@@ -2,7 +2,9 @@
 
 ## Forge / 工作台的工作位置与修改范围
 
-2026-11-08 真人明确：后续 Forge / 工作台任务直接在本主仓 checkout 修改，不使用 worktree；可以按需新建 Git 分支。当前基线已新增 `demiflow/workbench/`，并完整替换 `demiflow/forge/`。
+**2026-11-18 最新真人工作位置要求**：后续不要在主仓直接修改。Forge / 工作台开发先核对用户指定会话的最新分支与 worktree，在对应隔离工作区修改、Review 和验证；试用前合入该候选，不能把主仓、最新开发候选与当前运行预览混为一处。本批目标为 `_demiflow/worktrees/gpt_prompt_replay_20261118`，分支 `fix/prompt-replay-delivery-20261118`，基线 `dab45bb3018dc922a85f4753f207fd89d61e6407`（平台总控 (2) 的最新平台交付）。本条覆盖下文及仓库 AGENTS 中历史“直接主仓、不用 worktree”要求。保护既有 dirty/staging、业务数据和历史；实际运行版本另行核对。
+
+历史：2026-11-08 曾要求主仓直接开发；该工作位置要求已被 2026-11-18 最新真人指令覆盖。产品目录及修改范围继续如下。
 
 - 产品代码范围为 `demiflow/workbench/`、`demiflow/forge/`。工作台公共进程支持在 `workbench/process.py`，Pipeline 运行管理在 `workbench/runs/`；Notebook、数据读取和开发对话不依赖 Pipeline 运行管理。
 - 必要配套范围包括 `demiflow/cli.py` 的入口装配、`pyproject.toml`/`MANIFEST.in` 的对应打包配置、相关测试、工作台/Forge 文档与 README、相关示例、`tools/forge_analysis/` 和 `integrations/coding-agent/demiflow-workspace/`。只改与当前交付直接相关的部分。

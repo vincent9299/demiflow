@@ -11,8 +11,8 @@ import time
 OUTPUT_LIMIT = 1024 * 1024
 
 
-def run(command, project, scratch):
-    scratch.mkdir(parents=True, exist_ok=False)
+def run(command, project, scratch, *, launch=None):
+    scratch.mkdir(mode=0o700, parents=True, exist_ok=False)
 
     def expand(value):
         for key, path in {"project": project.root, "tool": project.tool_root,
@@ -28,12 +28,17 @@ def run(command, project, scratch):
     started = time.monotonic()
     output = bytearray()
     reason = None
-    process = subprocess.Popen(argv, cwd=project.root, env=env, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, start_new_session=True)
+    process = (subprocess.Popen(argv, cwd=project.root, env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, start_new_session=True) if launch is None else
+               launch(argv, cwd=project.root, env=env, scratch=scratch, timeout=command['timeout']))
     selector = selectors.DefaultSelector()
     try:
-        os.set_blocking(process.stdout.fileno(), False)
-        selector.register(process.stdout, selectors.EVENT_READ)
+        if launch is not None and process.stdin is not None:
+            process.stdin.close()
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ)
         while selector.get_map():
             if time.monotonic() - started > command["timeout"]:
                 reason = "timeout"
@@ -64,7 +69,21 @@ def run(command, project, scratch):
         process.wait()
         selector.close()
         process.stdout.close()
-    return {"id": command["id"], "argv": argv, "returncode": process.returncode,
+        if process.stderr is not None:
+            process.stderr.close()
+    result = {"id": command["id"], "argv": argv, "returncode": process.returncode,
             "failure": reason, "seconds": round(time.monotonic() - started, 3),
             "output": output.decode("utf-8", errors="replace"),
             "passed": reason is None and process.returncode == 0}
+    if launch is not None:
+        evidence = getattr(process, 'execution_evidence', {})
+        result['execution'] = dict(assurance=getattr(process, 'execution_assurance', 'gate_only'),
+            backend=evidence.get('backend'), implementation=evidence.get('implementation'),
+            id=evidence.get('execution_id'))
+        # The trusted PID-namespace supervisor reserves these exit statuses for
+        # deadline/resource/admission failures or signalled children. They must
+        # not become a determined fixture failure which triggers another run.
+        if (result['execution']['assurance'] == 'enforced' and result['failure'] is None and
+                (process.returncode in {124, 125, 126} or 128 <= process.returncode <= 192)):
+            result['failure'] = 'sandbox_execution_incomplete'
+    return result

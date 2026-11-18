@@ -201,6 +201,12 @@ SOFTWARE.
   try { const saved=sessionStorage.getItem('forge-development-drafts'); if(saved&&bytes(saved)<=2*1024*1024){const entries=JSON.parse(saved);if(Array.isArray(entries)&&entries.length<=64)for(const pair of entries)if(Array.isArray(pair)&&pair.length===2&&typeof pair[0]==='string'&&typeof pair[1]==='string'&&bytes(pair[1])<=32768)drafts.set(pair[0],pair[1]);}}catch{}
   const saveDrafts=()=>{try{sessionStorage.setItem('forge-development-drafts',JSON.stringify([...drafts]));}catch{}};
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
+  const developmentLabels={preparing:'准备开发依据',developing:'正在开发',queued:'等待检查',checking:'正在检查',verifying:'正在验证',reviewing:'正在独立审阅',repair_pending:'发现问题，准备自动修复',repairing:'正在自动修复',stopping:'已请求停止，正在清理',failed:'开发检查未通过',stale:'内容已改变，需要重新检查',review_unavailable:'检查尚未完成 · 待独立审阅',not_applicable:'本轮没有开发变更',cancelled:'开发检查已停止',unknown:'开发检查结果待核对'};
+  function developmentLabel(value){
+    if(value.state==='accepted')return value.source_fingerprint&&value.accepted_fingerprint===value.source_fingerprint&&['check','verify','review'].every(k=>value.gates?.[k]==='passed')?(value.assurance==='enforced'?'本次开发完成 · 受限执行':'本次开发完成 · 可信本地'):'开发检查结果待核对';
+    if(value.state==='review_unavailable'&&value.gates?.check==='passed'&&value.gates?.verify==='passed')return '检查与验证通过 · 待独立审阅';
+    return developmentLabels[value.state]||'开发检查结果待核对';
+  }
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',path);svg.append(p);b.append(svg);return b;};
   async function mount({main,api,workspaceId,view,mountText,disposeReaders,openSession,error,register}) {
@@ -277,7 +283,7 @@ SOFTWARE.
     input.oninput=()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,220)+'px';if(bytes(input.value)>32768){input.setCustomValidity('要求不能超过 32 KiB');return;}input.setCustomValidity('');if(!drafts.has(draftKey)&&drafts.size>=64){input.setCustomValidity('已保存 64 份草稿，请先清空不再需要的草稿。');return;}if(input.value)drafts.set(draftKey,input.value);else drafts.delete(draftKey);saveDrafts();availability();};
     input.onkeydown=e=>{if(e.isComposing||e.keyCode===229)return;if(e.key==='Enter'&&(!e.shiftKey||e.ctrlKey||e.metaKey)){e.preventDefault();form.requestSubmit();}if(e.key==='Escape'&&!stop.disabled)stop.click();};
     function availability(){
-      const t=state.session?.turn,busy=t&&t.cleanup!=='complete';
+      const t=state.session?.turn,busy=t&&(t.cleanup!=='complete'||t.development?.busy===true);
       const provider=(capabilities.providers||[]).find(p=>p.id===(state.session?.provider||providers.value));
       const readonly=capabilities.read_only===true;
       const unapproved=capabilities.service_configured===true&&capabilities.project_authorized===false;
@@ -291,9 +297,9 @@ SOFTWARE.
       title.textContent=readonly||state.historyOnly?'历史消息 · 只读':'项目对话';
       hero.hidden=!!state.items.size;layout.classList.toggle('development-empty',!state.items.size);
       disconnected.textContent=unapproved?'本项目未授予开发能力':capabilities.service_configured?'已有开发服务连接不可用':'未连接 CLI';
-      status.textContent=t?(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(labels[t.state]||t.state))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':''):
+      status.textContent=t?(t.operation==='compact'?(t.cleanup!=='complete'?'正在归档历史…':t.state==='completed'?'归档处理完成':'归档未完成'):(t.development?developmentLabel(t.development):(labels[t.state]||t.state)))+(t.dispatch==='unknown'?' · 发送结果未知，请先核对':''):
         readonly?'已有开发历史 · 只读':unapproved?'本项目未授予开发能力':provider?.available?'Enter 发送 · Shift+Enter 换行':capabilities.service_configured?'已有开发服务当前不可用':'尚未连接开发代理';
-      reason.textContent=capabilities.reason+(provider?.reason?' '+provider.reason:'')+(provider?.input_requests==='unsupported'?' 此代理不支持轮内补充输入；停止后可继续。':'')+(provider?.history_replay==='unsupported'?' 恢复时仅展示本应用已保存的历史。':'');
+      reason.textContent=capabilities.reason+(t?.development?' 开发验收由 Forge 独立检查；'+(t.development.assurance==='enforced'?'开发进程受外部执行边界约束。':capabilities.mode==='restricted'?'本次受限开发的验收证据尚未齐备。':'当前为可信本地模式，未防篡改。')+(t.development.reason?' '+t.development.reason:''):'')+(provider?.reason?' '+provider.reason:'')+(provider?.input_requests==='unsupported'?' 此代理不支持轮内补充输入；停止后可继续。':'')+(provider?.history_replay==='unsupported'?' 恢复时仅展示本应用已保存的历史。':'');
     }
     providers.onchange=availability;
     function trackDialog(dialog){state.dialogs.add(dialog);dialog.addEventListener('close',()=>{state.dialogs.delete(dialog);dialog.remove();},{once:true});}
@@ -327,6 +333,11 @@ SOFTWARE.
         const item=card(d.id,d.type==='fileChange'?'文件变更':'工具');putText(item,JSON.stringify(d,null,2));
       }else if(event.type==='change.observed'){
         const item=card('change:'+event.sequence,'观察到的变化 · 验证待更新');putText(item,d.files.map(f=>f.path+(f.within_scope?'':' · 超出范围')+'\n'+(f.diff||f.diff_unavailable||'')).join('\n'));
+      }else if(event.type==='development.state'){
+        if(!d.busy){const item=card('development:'+event.turn_id,'开发检查记录');item.source.hidden=true;putText(item,developmentLabel(d)+(d.reason?'\n'+d.reason:''));}
+      }else if(event.type==='development.repair.started'){
+        const item=card('repair:'+event.sequence,'自动修复 · 第 '+d.round+' 次');item.source.hidden=true;
+        putText(item,'根据检查与审阅结果继续当前任务。'+(Array.isArray(d.feedback)?'\n'+d.feedback.map(f=>f.reason||'').filter(Boolean).join('\n'):''));
       }else if(event.type==='check.reference'){putText(card('check:'+event.sequence,'公开开发检查记录'+(d.review_kind==='self'?' · 自身审查':'')),JSON.stringify(d.result,null,2));
       }else if(event.type==='provider.error'){putText(card('error:'+event.sequence,'代理报告错误'),JSON.stringify(d));}
       else if(event.type==='compaction.completed'){if(d.status==='compacted'&&!state.historyOnly){clearTimeline();earlier.hidden=false;}const item=card('archive:'+event.sequence,'历史归档');item.node.classList.add('development-archive-card');item.node.open=true;item.source.hidden=true;putText(item,d.status==='compacted'?'较早上下文已压缩为摘要。原始消息已保留，可从左侧定位查看。':'当前没有需要压缩的较早上下文。');}
@@ -365,7 +376,7 @@ SOFTWARE.
           if(capabilities.enabled&&!capabilities.read_only)for(const request of current.pending||[])pending(request);
           for(const node of pendingHost.children)if(capabilities.read_only||!(current.pending||[]).some(p=>p.id===node.dataset.request))node.remove();
           if(!state.historyOnly){
-            const busy=current.turn&&current.turn.cleanup!=='complete';
+            const busy=current.turn&&(current.turn.cleanup!=='complete'||current.turn.development?.busy===true);
             const epoch=state.feedEpoch;const page=await api('dev-events',{session_id:current.id,after_sequence:state.sequence,limit:50,wait_ms:busy?1500:0});if(state.disposed||epoch!==state.feedEpoch)return;
             for(const event of page.events)project(event);state.sequence=page.next_sequence;
             delay=state.sequence<page.last_sequence||busy?25:1500;

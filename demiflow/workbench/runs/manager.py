@@ -4,6 +4,7 @@ The native RunJournal owns run facts. This module never schedules graph nodes,
 interprets Python for execution, writes Lance data, or replaces native receipts.
 """
 from contextlib import contextmanager
+from contextlib import nullcontext
 import copy
 import fcntl
 import hashlib
@@ -250,6 +251,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         raise ForgeError('telemetry must be boolean',code='invalid_request')
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, 'run_submit')
+    from demiflow.workbench.conversations import admission as development_admission
+    development_acceptance = development_admission.check(root, entry=entry)
     root, workspace, platform = ws.load_workspace(root)
     change_scope = workspace.get('audit', {}).get('change_scope')
     audit.require_scope(ws._check_change_scope(root), expected_scope=change_scope)
@@ -459,12 +462,14 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             if native_execution is not None:
                 native_resources.seal(target, native_execution)
                 manifest['native_execution'] = native_execution
+            if development_acceptance is not None:
+                manifest['development_acceptance'] = development_acceptance
             manifest['digest'] = content_digest(manifest)
             operation_budget.check()
             # Expensive freshness checks precede the authorization commit guard.
             ws.verify_run_basis(root, manifest)
             durable_tree(target)
-            with authority.guard(root, 'run_submit'):
+            with authority.guard(root, 'run_submit'), development_admission.guard(root, entry=entry, expected=development_acceptance):
                 run = RunJournal(target)
                 run.initialize(manifest, attempts=True)
                 run = RunJournal(target, attempt=1)
@@ -699,6 +704,9 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
         if value['manifest']['format'] != FORMAT:
             raise ForgeError('Older prepared seals have no managed runtime contract; prepare a new run')
         attempt = value['state'].get('attempt')
+        from demiflow.workbench.conversations import admission as development_admission
+        if attempt == 1:
+            development_admission.check(root, entry=value['manifest']['entry'], expected=value['manifest'].get('development_acceptance'))
         run = RunJournal(target, attempt=attempt)
         from demiflow.workbench.projects import index
         with ws.control_lock(root):
@@ -712,7 +720,9 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
             operation_budget.check()
             # Establish the durable execution fence before any visible admission.
             # A prepared retry may reuse an unlocked fence left before reservation.
-            with authority.guard(root, 'run_submit'), _launch_unit(target, attempt) as (unit, unit_identity):
+            development_guard = (development_admission.guard(root, entry=value['manifest']['entry'], expected=value['manifest'].get('development_acceptance'))
+                                 if attempt == 1 else nullcontext())
+            with authority.guard(root, 'run_submit'), development_guard, _launch_unit(target, attempt) as (unit, unit_identity):
                 process = reservation = None
                 spawn_attempted = False
                 try:
@@ -781,6 +791,9 @@ def _preflight(root, run_id, *, expected, authority=None):
         raise ForgeError('Prepared digest differs', code='conflict')
     if value['state']['status'] != 'prepared':
         return {'status': value['state']['status']}
+    if value['state'].get('attempt') == 1:
+        from demiflow.workbench.conversations import admission as development_admission
+        development_admission.check(root, entry=m['entry'], expected=m.get('development_acceptance'))
     identity = m.get('prepare_request_id')
     if identity and not value['state'].get('preparation_ready'):
         from demiflow.workbench.runs.requests import read

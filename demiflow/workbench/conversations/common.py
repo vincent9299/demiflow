@@ -139,23 +139,51 @@ def snapshot(root, paths, *, max_files=4096, max_bytes=64 * 1024**2):
     return result
 
 
-def directory_bytes(root, *, entries=16384):
+def directory_bytes(root, *, entries=16384, deadline=None):
     # Include directory blocks and small-file allocation overhead. Logical size
     # alone undercounts retained provider state; sparse files still reserve their
     # logical size here because later writes can allocate their holes.
-    info = Path(root).stat()
+    try:
+        info = Path(root).stat()
+    except FileNotFoundError:
+        return 0  # A finished owned profile may be removed during sampling.
     total, count, pending = max(info.st_size, info.st_blocks * 512), 0, [Path(root)]
-    deadline = time.monotonic() + 2
+    deadline = min(deadline, time.monotonic() + 2) if deadline is not None else time.monotonic() + 2
     while pending:
-        with os.scandir(pending.pop()) as rows:
+        try:
+            rows = os.scandir(pending.pop())
+        except FileNotFoundError:
+            continue
+        with rows as rows:
             for row in rows:
                 count += 1
                 if count > entries or time.monotonic() > deadline:
                     reject('Private state scan exceeded entry/time budget', 'resource_limit')
                 if row.is_symlink():
                     reject('Unexpected link in private provider state')
-                info = row.stat(follow_symlinks=False)
+                try:
+                    info = row.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
                 total += max(info.st_size, info.st_blocks * 512)
                 if row.is_dir(follow_symlinks=False):
                     pending.append(Path(row.path))
     return total
+
+
+def private_directory_bytes(root, *, entries):
+    """One shared inventory for retained provider homes and Forge evidence.
+
+    Top-level database/control files use their own reservations. Count every
+    physical child directory, including its allocated blocks; retain the
+    existing per-directory entry limit within one total scan deadline.
+    """
+    sizes = {}
+    deadline = time.monotonic() + 3
+    with os.scandir(root) as children:
+        for count, child in enumerate(children):
+            if count > entries or time.monotonic() > deadline:
+                reject('State inventory exceeds entry/time budget', 'resource_limit')
+            if child.is_dir(follow_symlinks=False):
+                sizes[child.name] = directory_bytes(child.path, deadline=deadline)
+    return sizes

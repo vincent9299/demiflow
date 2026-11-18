@@ -39,7 +39,7 @@ def implementation_files():
         *("forge/development/" + name for name in (
             "__init__.py", "__main__.py", "coverage.py", "checks.py", "cli.py", "click_entry.py",
             "history.py", "io.py", "launcher.py", "notebook.py", "project.py",
-            "resources.py", "runner.py", "tasks.py", "skill/SKILL.md", "skill/scripts/forge.py",
+            "resources.py", "runner.py", "tasks.py", "taskstore.py", "managed.py", "skill/SKILL.md", "skill/scripts/forge.py",
         )),
     )
     return {"demiflow/" + name: PACKAGE_ROOT / name for name in names}

@@ -10,6 +10,7 @@ from demiflow.workbench.conversations.common import safe_path
 from demiflow.workbench.conversations.common import text
 from demiflow.workbench.conversations.common import wire
 from demiflow.workbench.conversations.context import BRIDGE
+from demiflow.workbench.conversations.context import bridge_spec
 from demiflow.workbench.conversations.policy import proxy_environment
 
 
@@ -23,6 +24,11 @@ class Codex:
         for parent in (Path(root), *Path(root).parents):
             if (parent / '.codex/config.toml').exists():
                 reject('Project Codex configuration requires a reviewed isolated profile')
+        boundary = config.get('_boundary')
+        if boundary is not None and (type(boundary) is not dict or set(boundary) != {'token'} or
+                type(boundary['token']) is not str or len(boundary['token']) != 64 or
+                any(config.get(k) for k in ('base_url', 'credential_env', 'native_credentials', 'inherit_proxy'))):
+            reject('Restricted Codex requires a fixed task model channel without upstream credentials')
         home = Path(home)
         codex_home = home / 'codex'; codex_home.mkdir(mode=0o700, exist_ok=True)
         env = dict(PATH=str(Path(config['executable']).parent) + ':/usr/local/bin:/usr/bin:/bin',
@@ -46,13 +52,17 @@ class Codex:
             'mcp_servers': {}, 'plugins': {},
         }
         (home / 'tool-home').mkdir(mode=0o700, exist_ok=True)
-        if config.get('base_url'):
+        if config.get('base_url') or boundary:
             values['model_provider'] = 'devchat'
             values.update({'model_providers.devchat.name': 'Configured development provider',
-                'model_providers.devchat.base_url': config['base_url'],
+                'model_providers.devchat.base_url': 'http://__DEMIFLOW_MODEL_ENDPOINT__/v1' if boundary else config['base_url'],
                 'model_providers.devchat.wire_api': 'responses',
                 'model_providers.devchat.requires_openai_auth': False})
-            if config.get('credential_env'):
+            if boundary:
+                env['DEMIFLOW_MODEL_TOKEN'] = boundary['token']
+                values['model_providers.devchat.env_key'] = 'DEMIFLOW_MODEL_TOKEN'
+                values['model_providers.devchat.supports_websockets'] = False
+            elif config.get('credential_env'):
                 name = config['credential_env']; env[name] = os.environ[name]
                 values['model_providers.devchat.env_key'] = name
         elif config.get('credential_env'):
@@ -97,12 +107,12 @@ class Codex:
     def open(self, prompt):
         params = dict(cwd=self.project['root'], model=self.config['model'],
             approvalPolicy='on-request', approvalsReviewer='user', sandbox='danger-full-access', developerInstructions=prompt)
-        if self.config.get('base_url'): params['modelProvider'] = 'devchat'
+        if self.config.get('base_url') or self.config.get('_boundary'): params['modelProvider'] = 'devchat'
         if self.thread:
             params.update(threadId=self.thread, excludeTurns=True)
             return self.transport.request('thread/resume', params)
         params.update(ephemeral=False, experimentalRawEvents=False, allowProviderModelFallback=False,
-                      dynamicTools=[dict(type='function', **BRIDGE)] if self.project['kind'] == 'demiforge_registered' else [])
+                      dynamicTools=[dict(type='function', **bridge_spec(self.project))] if self.project['kind'] == 'demiforge_registered' else [])
         return self.transport.request('thread/start', params)
 
     def opened(self, result):

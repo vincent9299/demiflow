@@ -1,0 +1,80 @@
+"""One external provider launch boundary, independent of the CLI protocol.
+
+Restricted execution requires an explicit controller-bound sandbox specification
+and passes through the same externally enforced boundary for every provider.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+from demiflow.resources.process_observation import UNIT_ENV
+from demiflow.workbench.conversations.common import reject
+
+
+def execution_facts(mode):
+    """Return implementation facts, never provider claims or check results."""
+    if type(mode) is not str or mode not in {'trusted_local', 'restricted'}:
+        reject('Unsupported development execution mode')
+    if mode == 'trusted_local':
+        return dict(available=True, filesystem_enforcement='unsupported',
+            anti_tamper=False,
+            reason='可信本地模式：使用宿主权限，无 OS 文件/进程隔离。应用范围检查不能阻止同 UID 工具越界或联网。')
+    from demiflow.workbench.conversations.sandbox import backend_readiness
+    facts = backend_readiness()
+    return dict(available=facts['available'],
+        filesystem_enforcement='landlock_seccomp' if facts['available'] else 'unverified',
+        anti_tamper=facts['available'], reason=facts['reason'],
+        backend=facts['backend'], implementation=facts['implementation'],
+        host_identity=facts['identity_model'])
+
+
+def require_available(mode):
+    facts = execution_facts(mode)
+    if not facts['available']:
+        reject(facts['reason'])
+
+
+def launch_provider(*, mode, adapter, config, home, root, lease_fd,
+                    sandbox_spec=None, control_socket=None, model_socket=None):
+    """Prepare and spawn one provider under the explicitly admitted mode.
+
+Admission precedes adapter preparation, which may create files or read model
+credentials. The caller retains subreaping, budgets, transport and cleanup.
+The inherited unit FD preserves the existing cooperative ownership protocol;
+it is not proof that hostile descendants stopped and cannot authorize L2.
+"""
+    if mode == 'restricted':
+        from demiflow.workbench.conversations.sandbox import SandboxSpec, specification, launch_sandbox
+        if type(sandbox_spec) is not SandboxSpec:
+            reject('Restricted provider execution requires an explicit controller sandbox scope')
+        if Path(home).resolve() != Path(sandbox_spec.private_home).resolve():
+            reject('Restricted provider HOME differs from its controller-bound private scope')
+        # Validate before the trusted adapter creates profiles. This also rejects
+        # symlink/hardlink poisoning left in an earlier untrusted provider HOME.
+        specification(sandbox_spec, [sys.executable], {}, root)
+        if config.get('native_credentials') or config.get('credential_env'):
+            if not config.get('_boundary') or model_socket is None:
+                reject('Restricted model authentication requires the fixed external credential broker')
+        private = {key: value for key, value in config.items()
+                   if key not in {'native_credentials', 'credential_env', 'inherit_proxy'}}
+        command, environment = adapter.launch(private, home, root)
+        process = launch_sandbox(command, spec=sandbox_spec, env=environment, cwd=root,
+            lease_fd=lease_fd, control_socket=control_socket, model_socket=model_socket)
+        return process
+    require_available(mode)
+    if type(lease_fd) is not int or lease_fd < 3:
+        reject('Invalid development process lease descriptor')
+    os.fstat(lease_fd)
+    command, environment = adapter.launch(config, home, root)
+    environment = dict(environment)
+    environment[UNIT_ENV] = str(lease_fd)
+    launcher = Path(__file__).with_name('provider_exec.py')
+    return subprocess.Popen(
+        [sys.executable, '-I', '-B', str(launcher), str(os.getpid()), *command],
+        cwd=home, env=environment,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        shell=False, close_fds=True, start_new_session=True,
+        pass_fds=(lease_fd,))

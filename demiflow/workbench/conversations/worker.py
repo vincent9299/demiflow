@@ -32,8 +32,77 @@ from demiflow.workbench.conversations.transport import Transport
 from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.workbench.conversations.context import assemble
 from demiflow.workbench.conversations.context import ProtocolBridge
+from demiflow.workbench.conversations.context import BridgeServer
 from demiflow.workbench.conversations.changes import capture
 from demiflow.workbench.conversations.changes import differences
+from demiflow.workbench.conversations.execution import launch_provider
+from demiflow.workbench.conversations.development import managed, prepare, provider_message, request_deadline, runtime_paths, project_tasks
+
+
+def sandbox_spec(deployment, project, session, turn, manifest, config, private_home):
+    """Assemble only controller-declared scope; no provider-supplied path grants."""
+    from demiflow.workbench.conversations.sandbox import SandboxSpec
+    root = Path(project['root'])
+    sources = [Path(source['canonical_path']) for source in manifest.get('sources', [])
+               if source.get('origin') in {'authoritative_file', 'managed_development_api'}]
+    read = [root, *[path for path in sources if path.is_file()]]
+    openssl = Path('/etc/ssl/openssl.cnf')
+    if openssl.is_file(): read.append(openssl)
+    writes = [] if turn.get('operation') == 'compact' else [root / name for name in project['writes']]
+    protected = [root / '.git', root / '.forge', root / '.demiforge', root / 'AGENTS.md']
+    protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
+    # The immutable registered declaration owns verifier argv and readonly roots.
+    if managed(project):
+        from demiflow.forge.development.project import Project
+        declared = Project(root)
+        protected.extend((root / path).resolve() for path in declared.config['readonly'])
+        read.extend(path for path in protected if path.exists())
+    denied = [deployment.state / 'chat.sqlite3', deployment.state / 'forge-development',
+              deployment.state / 'service.lock', deployment.state / 'control.reserve']
+    if deployment.value.get('runtime_domain'): denied.append(Path(deployment.value['runtime_domain']))
+    with os.scandir(deployment.state) as entries:
+        for index, entry in enumerate(entries):
+            if index > deployment.limits.sessions + 64: reject('Sandbox control inventory exceeds budget', 'resource_limit')
+            if entry.name == session['id']:
+                with os.scandir(entry.path) as owned:
+                    for count, item in enumerate(owned):
+                        if count > deployment.limits.turns * 8 + 32: reject('Sandbox session inventory exceeds budget', 'resource_limit')
+                        if Path(item.path) != private_home: denied.append(Path(item.path))
+            elif entry.is_dir(follow_symlinks=False) or entry.name.endswith('.json'):
+                denied.append(Path(entry.path))
+    for provider in deployment.providers.values():
+        if provider.get('native_credentials'): denied.append(Path(provider['native_credentials']))
+    unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
+    return SandboxSpec(read_paths=unique(read), write_paths=unique(writes), runtime_paths=runtime_paths(config),
+        protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
+        role='readonly' if turn.get('operation') == 'compact' else 'developer',
+        seconds=max(.1, request_deadline(turn, deployment.limits)-time.time()), rss_bytes=deployment.limits.rss_bytes,
+        processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
+        private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes))
+
+
+def automatic_approval(project, request, *, assurance):
+    """Reuse an existing grant; business input and permission expansion still wait."""
+    if not managed(project) or not request.get('allow_once'): return False
+    method = request['method']
+    if method.endswith('requestUserInput') or method == 'item/permissions/requestApproval': return False
+    if method == 'item/fileChange/requestApproval':
+        # The adapter has already matched every effective changed path to writes.
+        return True
+    if assurance == 'enforced' and method in {'item/commandExecution/requestApproval', 'session/request_permission'}:
+        return True
+    if method == 'session/request_permission':
+        item = request.get('params', {}).get('known_tool') or {}
+        raw = item.get('rawInput') or {}
+        path = raw.get('path') if type(raw) is dict else None
+        if item.get('kind') == 'edit' and isinstance(path, str):
+            from demiflow.workbench.conversations.common import safe_path
+            try:
+                relative = str(Path(path).relative_to(project['root'])) if Path(path).is_absolute() else path
+                safe_path(project['root'], relative, missing=True)
+                return any(relative == allowed or relative.startswith(allowed + '/') for allowed in project['writes'])
+            except (ValueError, OSError): pass
+    return False
 
 
 def run(config_path, tid, lease_fd, parent_fd):
@@ -49,11 +118,13 @@ def run(config_path, tid, lease_fd, parent_fd):
     process = transport = provider = None
     final, reason, completed, draining = 'failed', None, False, False
     requested = False
-    deadline = turn['created'] + limits.turn_seconds
+    deadline = request_deadline(turn, limits)
     stop_started = None
     last_sample, peaks = 0, {'rss_bytes': 0, 'private_bytes': 0, 'processes': 0}
     outstanding = {}
     protocol_bridge = None
+    control_bridge = None
+    model_broker = None
     os.set_blocking(parent_fd, False)
     stopping_signal = [False]
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -123,6 +194,8 @@ def run(config_path, tid, lease_fd, parent_fd):
     try:
         tick()
         if requested: raise InterruptedError(reason)
+        if deployment.mode == 'restricted' and project['kind'] == 'demiforge_registered' and not managed(project):
+            reject('Restricted registered development requires controller-managed tasks')
         baseline = capture(project['root'], project['watch'])
         store.update(tid, baseline=wire(baseline).decode())
         if compact:
@@ -130,7 +203,10 @@ def run(config_path, tid, lease_fd, parent_fd):
             manifest = dict(operation='compact', provider=session['provider'], delivery='not_applicable')
             store.update(tid, context=wire(manifest).decode(), delivery='not_applicable')
         else:
-            manifest, prompt = assemble(project, turn['text'], scratch, limits)
+            managed_tasks = prepare(deployment, store, turn, session, project) if managed(project) else None
+            manifest, prompt = assemble(project, turn['text'], scratch, limits,
+                managed_tasks=managed_tasks, task_id=session['id'] if managed_tasks is not None else None,
+                execution_mode=deployment.mode)
             store.update(tid, context=wire(manifest).decode(), delivery='prepared')
             protocol_bridge = ProtocolBridge(store, tid, project, scratch)
             store.event(tid, 'context.bound', {'digest': manifest['digest'], 'kind': manifest['kind'],
@@ -140,21 +216,36 @@ def run(config_path, tid, lease_fd, parent_fd):
         config = deployment.providers[session['provider']]
         adapter = adapter_for(session['provider'],turn.get('operation','message'))
         acp = getattr(adapter, 'acp', False)
-        command, env = adapter.launch(config, home, project['root'])
-        env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(lease_fd)
-        launcher = Path(__file__).with_name('provider_exec.py')
-        process = subprocess.Popen([sys.executable, '-I', '-B', str(launcher), str(os.getpid()), *command],
-            cwd=home, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, pass_fds=(lease_fd,))
+        if not compact and acp and project['kind'] == 'demiforge_registered':
+            control_bridge = BridgeServer(protocol_bridge, epoch=turn['epoch'], deadline=deadline)
+        provider_home = home / 'provider' if deployment.mode == 'restricted' else home
+        provider_home.mkdir(mode=0o700, exist_ok=True)
+        if deployment.mode == 'restricted':
+            broker_home = home / 'control' / (tid + '-' + turn['epoch']) / 'model'
+            broker_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+        confined = sandbox_spec(deployment, project, session, turn, manifest, config, provider_home) if deployment.mode == 'restricted' else None
+        if confined is not None:
+            from demiflow.workbench.conversations.sandbox import specification
+            specification(confined, [sys.executable], {}, project['root'])
+            from demiflow.workbench.conversations.model_broker import start_model_broker
+            model_broker = start_model_broker(deployment, turn, session, broker_home)
+            config = model_broker.child_config
+        process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,
+            home=provider_home, root=project['root'], lease_fd=lease_fd, sandbox_spec=confined,
+            control_socket=control_bridge.path if control_bridge is not None else None,
+            model_socket=model_broker.socket_path if model_broker is not None else None)
         transport = Transport(process, limits, acp=acp)
-        saved_session = session['provider_session'] if acp or store.has_dispatched(session['id']) else None
+        continuing_repair = bool(json.loads(turn.get('development_control') or '{}').get('repair_round'))
+        saved_session = session['provider_session'] if acp or continuing_repair or store.has_dispatched(session['id']) else None
         provider = adapter(transport, config, project, saved_session)
         if not compact and acp and project['kind'] == 'demiforge_registered':
             provider.mcp_servers = [dict(name='development-protocol', command=sys.executable,
-                args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), str(config_path), tid], env=[])]
+                args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), '--connect', str(control_bridge.path),
+                      control_bridge.token, tid, turn['epoch']], env=[])]
         handshake = wait(provider.initialize(), timeout=40)
         configuration_key = provider.initialized(handshake)
         effective = provider.verify_config(wait(configuration_key) if configuration_key else {})
+        effective['execution_assurance'] = getattr(process, 'execution_assurance', 'gate_only')
         store.event(tid, 'provider.bound', effective)
         store.update(tid, delivery='not_applicable' if compact else 'sent')
         thread = provider.opened(wait(provider.open(prompt)))
@@ -170,7 +261,8 @@ def run(config_path, tid, lease_fd, parent_fd):
         # Persist unknown BEFORE writing to the provider pipe: a crash cannot
         # turn an uncertain paid request into a supposedly safe automatic retry.
         store.update(tid, dispatch='unknown')
-        start_key = provider.start(turn['text'], turn['submission'])
+        message, submission = provider_message(turn)
+        start_key = provider.start(message, submission)
         if acp:
             native_turn = provider.turn
             store.update(tid, dispatch='sent', delivery='not_applicable' if compact else 'sent', provider_turn=native_turn, state='running')
@@ -178,6 +270,10 @@ def run(config_path, tid, lease_fd, parent_fd):
             started = wait(start_key)
             native_turn = provider.started(started)
             store.update(tid, dispatch='acknowledged', provider_turn=native_turn, state='running')
+        if turn.get('development'):
+            development = json.loads(store.turn(tid)['development'])
+            repair = json.loads(turn.get('development_control') or '{}').get('repair_round', 0)
+            store.update(tid, development=wire(dict(development, state='repairing' if repair else 'developing')).decode())
         while not completed:
             current = tick()
             transport.poll()
@@ -195,9 +291,18 @@ def run(config_path, tid, lease_fd, parent_fd):
                         final = data['status']; completed = True
                         if data.get('error'): reason = str(data['error'])[:2048]
                     elif kind == 'request':
+                        tick()
+                        if requested: continue
+                        if automatic_approval(project, data, assurance=getattr(process, 'execution_assurance', 'gate_only')):
+                            reply = dict(id=data['rpc_id'], result=provider.answer(data, 'allow_once'))
+                            if store.dispatch_provider_reply(tid, turn['epoch'], lambda: transport.send(reply)):
+                                store.event(tid, 'approval.automatic', dict(method=data['method'], authorization='existing_deployment_scope'))
+                            continue
                         key = store.request(tid, data); outstanding[key] = data
                         store.update(tid, state='waiting_input' if data['method'].endswith('requestUserInput') else 'waiting_approval')
                     elif kind == 'bridge':
+                        tick()
+                        if requested: continue
                         try:
                             answer = protocol_bridge.invoke(data['arguments'])
                             result = dict(success=True, contentItems=[dict(type='inputText', text=wire(answer, 65536).decode())])
@@ -207,12 +312,17 @@ def run(config_path, tid, lease_fd, parent_fd):
                         if result['success']: protocol_bridge.sent()
                     else: emit(kind, data)
             for pending in store.pending(tid):
+                tick()
+                if requested: break
                 request = outstanding.get(pending['id'])
                 if request is None: reject('Pending request belongs to a lost provider connection')
                 if pending['expires'] < time.time(): raise TimeoutError('Input request expired without approval')
                 if pending['answer'] is not None:
                     answer = provider.answer(request, json.loads(pending['answer']))
-                    transport.send(dict(id=request['rpc_id'], result=answer))
+                    if not store.dispatch_provider_reply(tid, turn['epoch'], lambda: transport.send(dict(id=request['rpc_id'], result=answer))):
+                        break
+                    if not compact and managed_tasks is not None and request['method'].endswith('requestUserInput'):
+                        managed_tasks.note(session['id'], 'decision', pending['answer'], event_id=pending['id'])
                     store.resolved(pending['id']); del outstanding[pending['id']]
                     store.update(tid, state='running' if not outstanding else 'waiting_input')
             if acp and start_key in transport.responses:
@@ -232,6 +342,7 @@ def run(config_path, tid, lease_fd, parent_fd):
         if current['delivery'] == 'sent': store.update(tid, delivery='unknown')
         if current['dispatch'] == 'sent': store.update(tid, dispatch='unknown')
     finally:
+        if control_bridge is not None: control_bridge.close()
         drained = False
         try:
             if process is not None:
@@ -254,6 +365,11 @@ def run(config_path, tid, lease_fd, parent_fd):
             if transport is not None: transport.close()
         except BaseException as exc:
             reason = reason or ('Cleanup failed: ' + type(exc).__name__)
+        if model_broker is not None:
+            try: model_broker.close()
+            except BaseException as exc:
+                reason = reason or ('Model broker cleanup failed: ' + type(exc).__name__)
+                drained = False
         try:
             changes = []; revision = None
             saved = store.turn(tid)
@@ -274,6 +390,18 @@ def run(config_path, tid, lease_fd, parent_fd):
         try:
             result = dict(reason=reason, peaks=peaks, changed_files=len(changes), evidence='stale' if changes else 'missing',
                           cleanup='complete' if drained else 'unknown', provider_completed=completed)
+            result['execution_assurance'] = getattr(process, 'execution_assurance', 'gate_only')
+            if (not compact and managed(project) and drained and completed and final == 'completed'
+                    and result['execution_assurance'] == 'enforced'):
+                evidence = getattr(process, 'execution_evidence', None)
+                if evidence is None: reject('Enforced provider omitted its actual boundary evidence')
+                tasks = project_tasks(deployment, session, project)
+                candidate = tasks.status(session['id'])
+                if candidate['source_fingerprint'] is not None:
+                    receipt = tasks.review_authority.issue_execution(session['id'], candidate['source_fingerprint'],
+                        phase='developer', backend=evidence['backend'], implementation=evidence['implementation'], execution_id=evidence['execution_id'])
+                    tasks.record_execution(session['id'], candidate['source_fingerprint'], receipt=receipt)
+                result['execution'] = evidence
             if revision: result['revision'] = revision
             if compact and completed and final == 'completed':
                 metadata = getattr(provider,'compaction_result',None)
@@ -282,7 +410,7 @@ def run(config_path, tid, lease_fd, parent_fd):
                 else:
                     result['compaction'] = dict(metadata,history_through_sequence=history_boundary)
                     store.event(tid,'compaction.completed',result['compaction'])
-            store.update(tid, state=final if drained else 'stopping', cleanup='complete' if drained else 'unknown', result=wire(result).decode())
+            store.finish_provider(tid, state=final if drained else 'stopping', cleanup='complete' if drained else 'unknown', result=result)
         except BaseException:
             # No false cleanup receipt on disk-full, observation or descendant
             # ownership failure. The persistent reservation remains held.

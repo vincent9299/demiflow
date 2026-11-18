@@ -1,0 +1,173 @@
+"""Trusted PID 1: exec confinement, task deadline and kernel-owned child domain.
+
+The host /proc mount is never exposed to the untrusted child. PID 1 can use it
+for bounded observation; killing PID 1 kills every descendant in this namespace.
+"""
+import json
+import os
+from pathlib import Path
+import resource
+import select
+import signal
+import socket
+import stat
+import sys
+import threading
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sandbox_native import drop_capabilities, landlock, prctl, seccomp, tree_usage
+from sandbox_relay import loopback, namespace_channel, namespace_listener
+
+
+def close_except(keep):
+    for name in os.listdir('/proc/self/fd'):
+        fd = int(name)
+        if fd not in keep:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def sample(owner, maximum, *, files=False):
+    pending, seen, rss = [owner], set(), 0
+    anonymous, seen_files, descriptors = 0, set(), 0
+    while pending:
+        if len(seen) > maximum or len(pending) > maximum:
+            raise RuntimeError('Sandbox process budget exceeded')
+        pid = pending.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        try:
+            raw = bounded_read(f'/proc/{pid}/stat')
+            fields = raw.decode().rsplit(')', 1)[1].split()
+            rss += int(fields[21]) * os.sysconf('SC_PAGE_SIZE')
+            if files:
+                with os.scandir(f'/proc/{pid}/fd') as entries:
+                    for entry in entries:
+                        descriptors += 1
+                        if descriptors > 8192:
+                            raise RuntimeError('Sandbox observed descriptor budget exceeded')
+                        try:
+                            info = entry.stat()
+                        except FileNotFoundError:
+                            continue  # a closed FD has released its reference
+                        identity = info.st_dev, info.st_ino
+                        if stat.S_ISREG(info.st_mode) and info.st_nlink == 0 and identity not in seen_files:
+                            seen_files.add(identity)
+                            anonymous += info.st_size
+            with os.scandir(f'/proc/{pid}/task') as tasks:
+                for index, task in enumerate(tasks):
+                    if index >= 256:
+                        raise RuntimeError('Sandbox thread budget exceeded')
+                    try:
+                        pending.extend(int(p) for p in bounded_read(task.path + '/children').split())
+                    except FileNotFoundError:
+                        pass
+        except FileNotFoundError:
+            pass
+    return rss, anonymous
+
+
+def bounded_read(path):
+    with open(path, 'rb') as stream:
+        raw = stream.read(32769)
+    if len(raw) > 32768:
+        raise RuntimeError('Sandbox process observation exceeded byte budget')
+    return raw
+
+
+def main():
+    if os.getpid() != 1:
+        raise RuntimeError('Sandbox launcher did not become namespace PID 1')
+    spec_fd, status_fd = map(int, sys.argv[1:3])
+    raw = os.read(spec_fd, 131073)
+    if len(raw) > 131072:
+        raise RuntimeError('Sandbox launch specification exceeded byte budget')
+    spec = json.loads(raw)
+    os.close(spec_fd)
+    status = bounded_read('/proc/self/status').decode()
+    host_pid = int(next(line for line in status.splitlines() if line.startswith('NSpid:')).split()[1])
+    prctl(4, 0, 0, 0, 0)  # trusted PID 1 memory/FDs are not dumpable
+    channels = []
+    if spec.get('channels'):
+        loopback()
+    for name, fd in spec.get('channels', {}).items():
+        listener = namespace_listener()
+        spec['env']['DEMIFLOW_' + name.upper() + '_ENDPOINT'] = '127.0.0.1:' + str(listener.getsockname()[1])
+        channels.append((socket.socket(fileno=fd), listener))
+    placeholder = '__DEMIFLOW_MODEL_ENDPOINT__'
+    if any(placeholder in argument for argument in spec['command']):
+        endpoint = spec['env'].get('DEMIFLOW_MODEL_ENDPOINT')
+        if endpoint is None:
+            raise RuntimeError('Model endpoint placeholder requires the fixed model channel')
+        spec['command'] = [argument.replace(placeholder, endpoint) for argument in spec['command']]
+    read_error, write_error = os.pipe2(os.O_CLOEXEC)
+    child = os.fork()
+    if child == 0:
+        try:
+            os.close(read_error)
+            os.chdir(spec['cwd'])
+            for kind, cap in ((resource.RLIMIT_NOFILE, 256), (resource.RLIMIT_FSIZE, spec['file_bytes']),
+                              (resource.RLIMIT_CPU, max(1, int(spec['seconds']))), (resource.RLIMIT_CORE, 0)):
+                _, hard = resource.getrlimit(kind)
+                cap = cap if hard == resource.RLIM_INFINITY else min(cap, hard)
+                resource.setrlimit(kind, (cap, cap))
+            close_except({0, 1, 2, write_error})
+            landlock(spec['read_paths'], spec['write_paths'], spec['runtime_paths'], spec['identities'])
+            drop_capabilities()
+            seccomp()
+            os.execve(spec['command'][0], spec['command'], spec['env'])
+        except BaseException as error:
+            os.write(write_error, (type(error).__name__ + ': ' + str(error))[:2048].encode())
+            os._exit(126)
+    os.close(write_error)
+    if not select.select([read_error], [], [], 5)[0]:
+        raise RuntimeError('Sandbox child confinement timed out')
+    failure = os.read(read_error, 2049)
+    os.close(read_error)
+    if failure:
+        os.write(status_fd, b'error:' + failure)
+        return 126
+    relay_failed = threading.Event()
+    for channel, listener in channels:
+        threading.Thread(target=namespace_channel,
+            args=(channel, listener, spec['seconds'], relay_failed), daemon=True).start()
+    os.write(status_fd, b'ready\n')
+    os.close(status_fd)
+    deadline = time.monotonic() + spec['seconds']
+    last_disk = 0
+    while time.monotonic() < deadline:
+        pid, state = os.waitpid(child, os.WNOHANG)
+        if pid:
+            return os.waitstatus_to_exitcode(state) if os.WIFEXITED(state) else 128 + os.WTERMSIG(state)
+        if relay_failed.is_set():
+            return 125
+        check_disk = time.monotonic() - last_disk >= .2
+        rss, anonymous = sample(host_pid, spec['processes'], files=check_disk)
+        if rss > spec['rss_bytes']:
+            return 125
+        if check_disk:
+            last_disk = time.monotonic()
+            private_size, private_files = tree_usage([spec['private_home']])
+            source_size, source_files = tree_usage(spec['source_roots'])
+            if (private_size + max(0, source_size - spec['source_baseline_bytes']) + anonymous > spec['private_bytes'] or
+                    private_files + max(0, source_files - spec['source_baseline_files']) > 8192):
+                return 125
+        time.sleep(.05)
+    return 124
+
+
+if __name__ == '__main__':
+    try:
+        result = main()
+    except BaseException as exc:
+        try:
+            os.write(int(sys.argv[2]), ('error:' + type(exc).__name__ + ': ' + str(exc))[:2048].encode())
+        except OSError:
+            pass
+        result = 126
+    # Exiting namespace PID 1 is the kernel's whole-domain kill operation.
+    os._exit(result)

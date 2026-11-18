@@ -1,8 +1,7 @@
-"""Compile preview projection and UI lifecycle; transport fixture is explicit.
+"""Native preview compilation and lifecycle through registered flow parameters.
 
-The graph comes from the native compiler. Browser transport is injected only to
-exercise preview/clear/rejection without admitting the unrelated legacy fixture.
-Original business pipeline/HTTP integration is covered by the service acceptance.
+Only lifecycle/rejection tests inject preview transport; parameter edits use the
+real HTTP API, and the first browser test also uses the real native compiler.
 """
 import copy
 import json
@@ -13,6 +12,8 @@ from playwright.sync_api import expect
 from demiflow import data
 from demiflow.execution.plan_capture import capture_pipeline, build_logical_plan_view
 from demiflow.workbench.projects import registry
+from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.platform import content_digest
 from test_forge_markdown_reading import browser
 from test_forge_project_discovery import original, snapshot, cached_snapshot
 from test_forge_project_discovery import business_bytes
@@ -21,43 +22,73 @@ from test_forge_web_redesign import opened
 from test_ui_d19_projection_fixes import project
 
 
-def test_original_configuration_selector_compiles_through_real_http(original, tmp_path, browser):
+def register_preview_project(original, registry_path, *, writable=False):
+    """Use the current declaration and a unique, explicitly registered input."""
     (original / 'dispatch.py').write_text('''from demiflow import data
-def config(): return {}
 def forbidden(row): raise AssertionError('must not execute rows')
-def run_pipeline(*, stage):
+def run_pipeline(*, stage: str):
     rows = data.from_items([{'id': 1}]).map(forbidden)
     if stage == 'combined': rows = rows.union(data.from_items([{'id': 2}]))
     return rows.take_all()
 ''')
-    for name in ('plain', 'combined'):
-        (original / f'settings/{name}.json').write_text(json.dumps({'arguments': {'stage': name}}))
-    (original / 'README.md').write_text('[plain](settings/plain.json)\n[combined](settings/combined.json)\n[unrelated](settings/small.json)\n')
-    before = business_bytes(original)
-    registry_path = tmp_path / 'registry.json'
+    (original / 'settings/small.json').write_text(json.dumps({
+        'format': 'demiflow_forge_flow_parameters_v1', 'arguments': {'stage': 'plain'}}))
+    declaration = dict(schema='demiforge-project-v3', standard='1.0.0-candidate.10',
+                       projects={'shipping': dict(path='shipping', flows={
+                           'shipments': dict(path='shipping/dispatch.py', symbol='run_pipeline')},
+                           operators=['shipping/operators'])})
+    (original.parent / '.demiforge/project.json').write_text(json.dumps(declaration))
+    ws.init_workspace(original, existing=True)
+    ws.register_flow(original, 'dispatch.py:run_pipeline', params='settings/small.json')
     registry.add(registry_path, original)
-    with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
+    if writable:
+        registry.migrate(registry_path, expected=content_digest(registry.load_registry(registry_path)))
+        inventory = registry.load_registry(registry_path)
+        registry.set_capabilities(registry_path, next(iter(inventory['projects'])),
+                                  expected=content_digest(inventory),
+                                  capabilities={k: k == 'config_write' for k in registry.CAPABILITIES})
+
+
+def test_original_configuration_selector_compiles_through_real_http(original, tmp_path, browser):
+    registry_path = tmp_path / 'registry.json'
+    register_preview_project(original, registry_path, writable=True)
+    before = business_bytes(original)
+    with service(None, registry=registry_path, enable_config_write=True) as app, opened(browser, app) as (page, requests):
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
-        expect(page.locator('.wb-node')).to_have_count(0)
         compile_button = page.get_by_role('button', name='解析执行计划', exact=True)
+        expect(compile_button).to_be_enabled()
+        initial_requests = len([url for method, url in requests if method == 'POST' and url.endswith('/plan-preview')])
+        with page.expect_response(lambda response: response.url.endswith('/plan-preview')) as pending:
+            compile_button.click()
+        response = pending.value
+        assert response.status == 200, response.text()
+        plain = response.json()
+        assert plain['basis']['entry'] == 'dispatch.py:run_pipeline'
+        assert plain['basis']['params'] == 'settings/small.json'
+        expect(page.locator('.wb-node')).to_have_count(3)
+        page.get_by_role('button', name='业务参数', exact=True).click()
+        expect(page.get_by_label('stage', exact=True)).to_have_value('plain')
+        page.get_by_label('stage', exact=True).fill('combined')
         expect(compile_button).to_be_disabled()
-        expect(page.locator('.wb-plan-preview-controls')).to_contain_text('先在顶部“入参文件”中选择')
-        choice = page.get_by_role('combobox', name='入参文件', exact=True)
-        expect(choice).to_be_enabled()
-        assert choice.locator('option[value="settings/small.json"]').count() == 0
-        for name, count in (('plain', 3), ('combined', 5)):
-            choice.select_option('settings/' + name + '.json')
-            expect(page.locator('.wb-node')).to_have_count(0)
-            expect(compile_button).to_be_enabled()
-            with page.expect_response(lambda response: response.url.endswith('/plan-preview')) as pending:
-                compile_button.click()
-            response = pending.value
-            assert response.status == 200, response.text()
-            assert response.json()['basis']['params'] == 'settings/' + name + '.json'
-            expect(page.locator('.wb-node')).to_have_count(count)
-        assert len([url for method, url in requests if method == 'POST' and url.endswith('/plan-preview')]) == 2
+        expect(page.locator('.wb-node')).to_have_count(0)
+        page.get_by_role('button', name='保存参数', exact=True).click()
+        expect(page.locator('.flow-argument-status')).to_contain_text('已保存', timeout=45000)
+        page.get_by_role('button', name='关闭业务参数', exact=True).click()
+        expect(page.locator('.wb-node')).to_have_count(0)
+        with page.expect_response(lambda response: response.url.endswith('/plan-preview')) as pending:
+            compile_button.click()
+        response = pending.value
+        assert response.status == 200, response.text()
+        combined = response.json()
+        assert combined['basis']['params'] == plain['basis']['params']
+        assert combined['basis']['params_sha256'] != plain['basis']['params_sha256']
+        expect(page.locator('.wb-node')).to_have_count(5)
+        assert len([url for method, url in requests if method == 'POST' and url.endswith('/plan-preview')]) == initial_requests + 2
         expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
-    assert business_bytes(original) == before
+    after = business_bytes(original)
+    assert after.pop('settings/small.json') != before.pop('settings/small.json')
+    assert after == before
+    assert json.loads((original / 'settings/small.json').read_text())['arguments'] == {'stage': 'combined'}
 
 
 def _transform(row):
@@ -86,14 +117,6 @@ def project_preview(value, selection=None):
 try {console.log(JSON.stringify({model:P.buildPlanPreviewModel(payload.preview,{selection:payload.selection})}));}
 catch(error) {console.log(JSON.stringify({error:error.message}));}
 """)
-
-
-def fill_other_configuration(page, value):
-    page.locator('.wb-more > summary').click()
-    if not page.get_by_role('combobox', name='解析配置路径').is_visible():
-        page.locator('.wb-more').get_by_text('其他入参文件', exact=True).click()
-    page.get_by_role('combobox', name='解析配置路径').fill(value)
-    page.locator('.wb-more > summary').click()
 
 
 def test_native_compiler_graph_projects_without_runtime_or_static_facts(preview):
@@ -134,28 +157,35 @@ def test_bad_preview_fails_closed_without_static_fallback(preview, corrupt):
 
 def test_preview_ui_is_explicit_and_clears_on_configuration_change(original, tmp_path, browser, preview):
     registry_path = tmp_path / 'registry.json'
-    registry.add(registry_path, original)
-    with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
+    register_preview_project(original, registry_path, writable=True)
+    with service(None, registry=registry_path, enable_config_write=True) as app, opened(browser, app) as (page, requests):
         received = []
         def compiled(route):
             received.append(route.request.post_data_json)
-            route.fulfill(status=200, content_type='application/json', body=json.dumps(preview))
+            value = copy.deepcopy(preview)
+            if len(received) > 1:
+                value['basis']['params'] = 'settings/other.json'
+            route.fulfill(status=200, content_type='application/json', body=json.dumps(value))
         page.route('**/plan-preview', compiled)
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
-        expect(page.locator('.wb-node')).to_have_count(0)
-        assert not received
-        fill_other_configuration(page, 'settings/small.json')
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(len(preview['dag']['nodes']))
         expect(page.locator('.wb-basis')).to_have_text('编译计划 · 尚未运行 · 仅首个执行动作')
         assert received == [{'entry': 'dispatch.py:run_pipeline', 'params': 'settings/small.json'}]
         page.locator('.wb-node').first.click()
         expect(page.locator('.wb-inspector')).to_contain_text('尚未运行')
-        expect(page.locator('.wb-source-body')).to_contain_text('不从静态检查节点推测')
-        fill_other_configuration(page, 'settings/other.json')
+        page.get_by_role('button', name='业务参数', exact=True).click()
+        page.get_by_label('stage', exact=True).fill('combined')
         expect(page.locator('.wb-node')).to_have_count(0)
-        expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
+        expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_disabled()
         expect(page.locator('.wb-inspector')).to_contain_text('编译依据已改变')
+        assert len(received) == 1
+        page.get_by_role('button', name='保存参数', exact=True).click()
+        expect(page.locator('.flow-argument-status')).to_contain_text('已保存', timeout=45000)
+        page.get_by_role('button', name='关闭业务参数', exact=True).click()
+        expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
+        expect(page.locator('.wb-inspector').get_by_role('heading', name='整图配置', exact=True)).to_have_count(1)
+        expect(page.get_by_role('textbox', name='配置 /arguments/stage', exact=True)).to_have_value('combined')
         # Deliberately mismatch the response binding: do not leave the old graph.
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.locator('.wb-notice')).to_contain_text('解析结果与所选入口、配置不一致')
@@ -163,33 +193,49 @@ def test_preview_ui_is_explicit_and_clears_on_configuration_change(original, tmp
         for width in (320, 768, 1440):
             page.set_viewport_size({'width': width, 'height': 1000})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
-        assert all('/plan-preview' in url for method, url in requests if method == 'POST')
+        assert received == [{'entry': 'dispatch.py:run_pipeline', 'params': 'settings/small.json'}] * 2
+        # Preview detail/source reads use POST too; saving these parameters is
+        # the only permitted mutation, never a run/check submission.
+        posts = [url for method, url in requests if method == 'POST']
+        assert all(url.endswith(('/plan-preview', '/plan-node-detail',
+                                 '/plan-pipeline-source', '/flow-arguments-save'))
+                   for url in posts), posts
 
 
 def test_unmounted_preview_response_cannot_repopulate_a_new_view(original, tmp_path, browser, preview):
     registry_path = tmp_path / 'registry.json'
-    registry.add(registry_path, original)
+    register_preview_project(original, registry_path)
     with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
         held = []
-        page.route('**/plan-preview', lambda route: held.append(route))
+        received = []
+        def compiled(route):
+            received.append(route.request.post_data_json)
+            if len(received) == 1:
+                route.fulfill(status=200, content_type='application/json', body=json.dumps(preview))
+            else:
+                held.append(route)
+        page.route('**/plan-preview', compiled)
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
-        fill_other_configuration(page, 'settings/small.json')
+        page.get_by_role('button', name='解析执行计划', exact=True).click()
+        expect(page.locator('.wb-node')).to_have_count(len(preview['dag']['nodes']))
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.get_by_role('button', name='正在解析…', exact=True)).to_be_disabled()
         page.locator('.function-nav').get_by_role('button', name='Readme', exact=True).click()
         expect(page.locator('.workbench')).to_have_count(0)
         assert len(held) == 1
-        held[0].fulfill(status=200, content_type='application/json', body=json.dumps(preview))
         page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
-        # Wait for the new mount to finish. Entering parameters during its
-        # initial load legitimately triggers the current automatic preview.
-        expect(page.locator('.function-nav').get_by_role('button', name='管道', exact=True)).to_be_enabled(timeout=65000)
-        expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_disabled()
-        fill_other_configuration(page, 'settings/small.json')
-        expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_enabled()
+        expect(page.get_by_role('button', name='正在解析…', exact=True)).to_be_disabled(timeout=65000)
+        assert len(held) == 2
+        # A new mount has its own in-flight compile. The old response must not
+        # paint its graph or clear the new mount's busy state.
+        held[0].fulfill(status=200, content_type='application/json', body=json.dumps(preview))
         expect(page.locator('.wb-node')).to_have_count(0)
         expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
-        assert len(held) == 1
+        expect(page.get_by_role('button', name='正在解析…', exact=True)).to_be_disabled()
+        held[1].fulfill(status=200, content_type='application/json', body=json.dumps(preview))
+        expect(page.locator('.wb-node')).to_have_count(len(preview['dag']['nodes']))
+        expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_enabled()
+        assert len(received) == 3
 
 
 def test_optional_compiler_label_does_not_change_operator_kind_or_identity(preview):

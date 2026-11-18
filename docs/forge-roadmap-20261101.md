@@ -1,10 +1,22 @@
 # Forge 工作区与数据加工阶段规划
 
+**2026-11-18 工作位置更新**：当前实现位于 `fix/prompt-replay-delivery-20261118` / `gpt_prompt_replay_20261118`，基线 `dab45bb`；后续不直接主仓开发。当时 59866 运行 `74d2f99`，最终运行版本以后续交付记录为准。v1 原件按原字节保留，其相对路径以编写时主仓位置解释；当前入口以本页和实施契约为准。
+
 创建日期：2026-11-01；更新日期：2026-11-08。
 
 长期角色、协作方式和工程标准以工作区 [Forge 总控工作指引](../../FORGE_COORDINATION_GUIDE.md) 为准；本文件维护当前分工、进展和交付证据。
 
 ## 当前推进顺序
+
+**2026-11-19 Harness 最终试用验收**：按真人明早试用要求，G2/B1/I1 已在指定 worktree 实现并经模块交叉 Review。现使用冻结代码验真实 DeepSeek CLI 修改、自动门禁/续修、独立模型 Review 和受限接受，并复验严格准入、旧记录及原试用入口。实施与边界见[契约](forge-development-harness-contract-20261118.md)。首次真实试跑暴露的只读 Lance 二进制审阅、临时 profile 清理竞态已补修；保留失败证据，不重写旧任务基线。当前仍需最终结果和预览切换确认，不能将“实现”与“已上线”混同。
+
+**2026-11-18 本批 G1 已验收**：自动检查/验证、同任务原意图/来源/证据绑定、门禁生命周期与准确 UI、共同 CLI 启动入口已在迁移前验收；原先落主仓的位置错误现已纠正，改动已迁入指定 worktree，组合复验已通过，主仓本批改动已撤回；[详细证据与限制](forge-development-harness-g1-acceptance-20261118.md)。保持 trusted_local / 未防篡改；无安全独立 reviewer 就保持待审。完整 Review/修复、只读验证快照、L2 和 require 仍未交付，整体原意图不标完成。未修改运行服务或 staging。
+
+**2026-11-18 深入 Review 后模块实施**：已获真人 subagent Review+实现授权，公共契约见[本批 G1 合同](forge-development-harness-contract-20261118.md)。三个模块原先在主仓实现，现已按真人纠偏迁入指定 worktree；主协调集成 policy/UI 并验正常、失效、停止与历史兼容。L2 仍关闭，默认独立模型审阅、自动修复、只读验证快照与 require 运行准入不计为本批已交付；最终 DH.1—DH.9 不变。
+
+**2026-11-18 开发入口方案 v2（外部 Review 后修订）**：当前设计转为独立交付 L1 门禁/续修与推进 L2 实际边界；L1 不冒充最终硬规范。新增本机探针、默认就地编辑、项目外权威 TaskStore、审阅默认值、实际写入口和运行策略。见[方案 v2](forge-development-harness-design-20261118-v2.md)及[Review 回应](../../../shared-review/GPT-RESPONSE-forge-harness-design-v1-20261118.md)。具体设计尚待 Review；未启动产品实施、模型或业务任务。原意图、v1、历史记录、其他任务和自动唤起状态保持。
+
+**2026-11-18 开发入口专项：原意图固化与完整方案 v1**。真人确认底层复用通用 coding harness，由 Forge 强制落实适用规范并保持用户无感。已纳入[原始意图 DH.1—DH.9](../../../forge_coordination_20261104/original_task_intents.md#dh-20261118开发入口-harness-与-forge-硬规范原始意图)，方案见[开发入口 Harness 与 Forge 硬规范](forge-development-harness-design-20261118.md)。本阶段交付架构/边界、源码依据、复用与缺口、硬门禁和用户流程、实施顺序及验收条件；尚待方案 Review，不把文档交付当实现完成。现有主仓与 candidate.10 隔离候选分别标识，不改动候选代码、业务项目、服务或历史证据。该记录仅覆盖本专项，不覆盖其他会话当前工作；自动唤起关闭。
 
 **2026-11-08T02:00:22.630773+08:00 R2.2真实页面示例总控验收通过**：R5.1非引擎主仓合入和R2.2真实示例链路均已由总控接受。R2.2已从页面完成配置错误→检查定位→修复→真实提交→固定结果，run r1158279da33d49e88217b8fc/attempt1成功，实际读回c01一行/score0.95，输入版本及清理保持。只补主仓示例说明和浏览器回归，无引擎改动。后续仍直接主仓修改，不用worktree，可建分支；限定workbench、forge及AGENTS列出的非引擎配套。当前无在途执行任务，其他历史暂停项未恢复，整体产品不据此宣称全部验收。自动唤起保持关闭。 验收：`../../_demiflow/forge_coordination_20261104/r22_example_20261108/coordinator-acceptance.json`。复现说明见`../../demiflow/examples/forge_workspace/README.md`；服务已清理，可按说明重新启动。
 
