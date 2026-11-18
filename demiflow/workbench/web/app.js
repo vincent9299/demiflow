@@ -176,7 +176,7 @@
         if (err.code === 'unauthorized') authFailed = true;
         // Keep transient admission contention inside the original project read.
         // Result-source selection and all writes retain their explicit recovery.
-        const projectRead=!body&&['projects','capabilities','context','changes','graph'].includes(path)&&err.operationStarted===false;
+        const projectRead=!body&&['projects','capabilities','context','changes','graph','project-operators','operator-definition','operator-history','flow-arguments'].includes(path)&&err.operationStarted===false;
         if((analysis||projectRead)&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
           await new Promise((resolve,reject)=>{let timer;const cancel=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);reject(staleRequest());};signal.addEventListener('abort',cancel,{once:true});if(signal.aborted){cancel();return;}timer=setTimeout(()=>{signal.removeEventListener('abort',cancel);resolve();},wait);});
@@ -185,7 +185,7 @@
         if (authFailed) err.message = '会话授权已失效，请使用当前服务的有效授权入口重新打开。';
         else if (err.code === 'conflict') err.message += '；对象已变化，请刷新并核对后再操作。';
         else if(write&&err.code==='busy'&&err.operationStarted===false&&['inspect','project-check'].includes(path))err.message='检查未受理，尚未开始。服务繁忙，请稍后再次点击检查。已有检查结果及其原依据保留。';
-        else if (write && response.status >= 500) err.message += ' 写入结果可能尚未确认，请先查询，不要直接重复提交。';
+        else if (write && err.operationStarted !== false && response.status >= 500) err.message += ' 写入结果可能尚未确认，请先查询，不要直接重复提交。';
         throw err;
       }
       if(options.outputRange){

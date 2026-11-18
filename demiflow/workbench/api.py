@@ -37,6 +37,9 @@ from demiflow.workbench.analysis import http as analysis_http
 ASSETS = Path(__file__).with_name("web")
 # One closed asset allowlist serves both live pages and self-contained reports.
 STATIC_ASSETS = {
+    '/operator-browser.js': ('operator-browser.js', 'text/javascript; charset=utf-8'),
+    '/flow-arguments.js': ('flow-arguments.js', 'text/javascript; charset=utf-8'),
+    '/workbench-modern.css': ('workbench-modern.css', 'text/css; charset=utf-8'),
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/development.js": ("development.js", "text/javascript; charset=utf-8"),
@@ -76,6 +79,10 @@ BODY_BYTES = 65536
 RESPONSE_BYTES = 9 * 1024**2
 # Required and optional wire fields; these describe transport, never Flow operators.
 GET_FIELDS = {
+    'project-operators': (set(), set()),
+    'operator-definition': ({'id'}, {'revision'}),
+    'operator-history': ({'id'}, set()),
+    'flow-arguments': ({'entry'}, set()),
     'forge-context': (set(), {'task'}),
     'forge-tools': (set(), set()),
     'run-context': ({'run_id'}, {'attempt'}),
@@ -111,6 +118,7 @@ GET_FIELDS = {
     'report': ({'digest'}, set()), 'diff': ({'left', 'right'}, set()),
 }
 POST_FIELDS = {
+    'flow-arguments-save': ({'entry', 'revision', 'source_sha256', 'arguments'}, set()),
     'project-capabilities': ({'workspace_id','expected','capabilities'}, set()),
     'parameter-preview': ({'path','expected_sha256','graph_binding','replace'}, set()),
     'parameters-update': ({'path','expected_sha256','proposed_sha256','graph_binding','replace'}, set()),
@@ -228,6 +236,10 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.token = _session_token(token_file)
         self.requests = threading.BoundedSemaphore(10)
         self.workers = threading.BoundedSemaphore(1)
+        # Bounded author metadata/parameter I/O must remain usable while the
+        # native reader compiles a plan. This slot never executes candidate code
+        # and does not consume the reserved stop/control slot.
+        self.project_workers = threading.BoundedSemaphore(1)
         from demiflow.workbench.reader import Reader
         self.native_reader = Reader(owner_loop=True)
         self.control_workers = threading.BoundedSemaphore(1)
@@ -454,8 +466,8 @@ class Handler(BaseHTTPRequestHandler):
             raise SessionUnauthorized("Invalid workspace session token")
 
     @contextmanager
-    def _work(self, *, control=False):
-        semaphore=self.server.control_workers if control else self.server.workers
+    def _work(self, *, control=False, project=False):
+        semaphore=self.server.control_workers if control else self.server.project_workers if project else self.server.workers
         waiter=self.server.control_waiters if control else None
         if waiter is not None and not waiter.acquire(blocking=False):
             raise RequestNotDispatched('Control request queue is full')
@@ -572,7 +584,7 @@ class Handler(BaseHTTPRequestHandler):
             if key in {'expected_attempt', 'attempt'}:
                 if value is not None and (type(value) is not int or not 1 <= value <= 32):
                     raise ForgeError('Invalid attempt', code='invalid_request')
-            elif key in {'inputs', 'outputs', 'limits','graph_binding','capabilities'}:
+            elif key in {'inputs', 'outputs', 'limits','graph_binding','capabilities', 'arguments'}:
                 if type(value) is not dict:
                     raise ForgeError('Expected an object: ' + key, code='invalid_request')
             elif key=='replace':
@@ -646,7 +658,8 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(value,OutputRange):media_http.send_range(self,value)
                 else:self._send(value)
                 return
-            with self._work(control=url.path in {'/api/run-snapshot','/api/run-events'}):
+            with self._work(control=url.path in {'/api/run-snapshot','/api/run-events'},
+                            project=name in {'project-operators','operator-definition','operator-history','flow-arguments'}):
                 if url.path == "/api/context":
                     value = api.workspace_context(root)
                     value['runs_enabled'] = permissions['run_submit']
@@ -701,6 +714,14 @@ class Handler(BaseHTTPRequestHandler):
                     value=read(root,query['request_id'])
                 elif url.path == '/api/project-status':
                     value = api.project_check_status(root)
+                elif url.path in {'/api/project-operators', '/api/operator-definition', '/api/operator-history'}:
+                    from demiflow.workbench.projects import definitions
+                    value = (definitions.catalog(root) if url.path == '/api/project-operators' else
+                             definitions.read(root, **query) if url.path == '/api/operator-definition' else
+                             definitions.history(root, **query))
+                elif url.path == '/api/flow-arguments':
+                    from demiflow.workbench.projects.flow_arguments import read
+                    value = read(root, **query)
                 elif url.path == '/api/project-discovery':
                     value = api.discover_project(root)
                 elif url.path == '/api/project-document':
@@ -854,7 +875,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(analysis_http.post(self.server,key,root,name,self._body(name),consumer_closed=self._consumer_closed))
                 return
             permission=(run_operations.HTTP_POST[name].permission if name in run_operations.HTTP_POST else
-                        'config_write' if name in {'parameter-preview','parameters-update'} else
+                        'config_write' if name in {'parameter-preview','parameters-update','flow-arguments-save'} else
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
             if name not in {'inspect','plan-preview','plan-node-detail','plan-pipeline-source','audit-check','project-check','run-admission'} and not permissions[permission]:
@@ -868,8 +889,15 @@ class Handler(BaseHTTPRequestHandler):
                 # it does not occupy the separate source/compilation worker.
                 self._send(self.server.plan_snapshots.read(root, **request))
                 return
-            with self._work(control=name=='run-cancel'):
-                if name in {'parameter-preview','parameters-update'}:
+            with self._work(control=name=='run-cancel', project=name=='flow-arguments-save'):
+                if name == 'flow-arguments-save':
+                    from demiflow.workbench.projects.flow_arguments import save
+                    def authorize():
+                        _, current_root, current_permissions = self.server.resolve(self.path)
+                        if current_root != root or not current_permissions['config_write']:
+                            raise PermissionError('Project membership or config-write grant changed')
+                    value = save(root, authorize=authorize, **request)
+                elif name in {'parameter-preview','parameters-update'}:
                     from demiflow.workbench.graph import parameters
                     def authorize():
                         _,current_root,current_permissions=self.server.resolve(self.path)

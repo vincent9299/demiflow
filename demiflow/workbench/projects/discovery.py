@@ -21,7 +21,7 @@ from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
 
 FORMAT = 'demiflow_forge_project_discovery_v1'
-STANDARDS = {f'1.0.0-candidate.{i}' for i in range(1, 10)}
+STANDARDS = {f'1.0.0-candidate.{i}' for i in range(1, 11)}
 LEGACY_STANDARDS = {f'1.0.0-candidate.{i}' for i in range(1, 7)}
 PARAMETERS = {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}
 MAX_FILES, MAX_BYTES, MAX_ITEMS = 128, 4 * 1024**2, 256
@@ -51,7 +51,7 @@ def discover(root, control=None):
     if control is None:
         control = ws.read_control(root / 'workspace.json')
     evidence, diagnostics, entries, configurations, tables, runs = {}, [], [], [], {}, []
-    operator_paths, total = {}, 0
+    operator_paths, prompt_paths, total = {}, {}, 0
     entry_sources = {}
     declarations = []
 
@@ -157,11 +157,12 @@ def discover(root, control=None):
             if standard:
                 existing['standard'] = standard
 
-    def add_operator(path, origin):
+    def add_operator(path, origin, kind='code'):
         target = local(path)
         relative = target.relative_to(root).as_posix()
-        state = 'available' if target.is_dir() or target.is_file() and target.suffix == '.py' else 'missing'
-        operator_paths[relative] = dict(path=relative, evidence=origin, status=state)
+        extensions = {'.py'} if kind == 'code' else {'.yaml', '.yml', '.json'}
+        state = 'available' if target.is_dir() or target.is_file() and target.suffix in extensions else 'missing'
+        (operator_paths if kind == 'code' else prompt_paths)[relative] = dict(path=relative, evidence=origin, status=state)
         if state == 'missing':
             issue('operator_missing', relative, '声明的算子文件或目录不存在。')
 
@@ -189,9 +190,10 @@ def discover(root, control=None):
         try:
             raw = read(declaration)
             value = _json(raw)
-            if type(value) is not dict or value.get('schema') not in {'demiforge-project-v1', 'demiforge-project-v2'}:
+            if type(value) is not dict or value.get('schema') not in {'demiforge-project-v1', 'demiforge-project-v2', 'demiforge-project-v3'}:
                 raise ForgeError('Unsupported project declaration schema')
-            records = value.get('pipelines')
+            multi = value['schema'] == 'demiforge-project-v3'
+            records = value.get('projects' if multi else 'pipelines')
             if type(records) is not dict or len(records) > MAX_ITEMS:
                 raise ForgeError('Invalid or oversized pipeline declarations')
             base = declaration.parent.parent
@@ -222,8 +224,25 @@ def discover(root, control=None):
                     issue('unsupported_standard', declaration, f'不支持的原项目规范版本：{standard}')
                 else:
                     entry = record.get('entry')
-                    origin = str(declaration) + '#pipelines.' + name
-                    if standard in LEGACY_STANDARDS and type(entry) is str and '/' not in entry and entry.endswith('.py'):
+                    origin = str(declaration) + ('#projects.' if multi else '#pipelines.') + name
+                    if multi:
+                        if standard != '1.0.0-candidate.10' or type(record.get('flows')) is not dict or not 1 <= len(record['flows']) <= 64:
+                            raise ForgeError('Invalid multi-flow declaration')
+                        for flow_id, flow in record['flows'].items():
+                            if (type(flow_id) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,95}', flow_id)
+                                    or type(flow) is not dict or set(flow) != {'path', 'symbol'}):
+                                raise ForgeError('Invalid flow declaration')
+                            target = ws.relative_path(base, flow['path'])
+                            add_entry(target, flow['symbol'], 'native_flow', origin, standard)
+                            found = next(e for e in entries if e['entry'] == target.relative_to(root).as_posix() + ':' + flow['symbol'])
+                            found['flow_id'] = flow_id
+                        for role, kind in (('operators', 'code'), ('prompts', 'prompt')):
+                            paths = record.get(role)
+                            if type(paths) is not list or len(paths) > 64:
+                                raise ForgeError('Invalid definition paths')
+                            for path in paths:
+                                add_operator(ws.relative_path(base, path), origin, kind)
+                    elif standard in LEGACY_STANDARDS and type(entry) is str and '/' not in entry and entry.endswith('.py'):
                         add_entry(entry, 'run_pipeline', 'config_run_pipeline', origin, standard)
                         # This role is part of the supported legacy standard,
                         # not a rule imposed on arbitrary registered projects.
@@ -354,7 +373,8 @@ def discover(root, control=None):
         elif not entry['parameters']:
             issue('parameters_unbound', entry['path'], '已识别入口，但缺少入口与原生参数配置的明确绑定；文档引用不自动成为执行配置。',cause='source',scope='entry')
     result = dict(format=FORMAT, status='partial' if diagnostics else 'recognized',
-        declarations=declarations, entries=entries, operators=[operator_paths[p] for p in sorted(operator_paths)], configurations=configurations,
+        declarations=declarations, entries=entries, operators=[operator_paths[p] for p in sorted(operator_paths)],
+        prompts=[prompt_paths[p] for p in sorted(prompt_paths)], configurations=configurations,
         tables=list(tables.values()), runs=runs, diagnostics=diagnostics,
         evidence=[dict(path=p, sha256=h) for p, h in sorted(evidence.items())],
         coverage=dict(candidate_code_executed=False, complete=False,

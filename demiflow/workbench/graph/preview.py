@@ -137,6 +137,10 @@ def _preview(root, *, entry, params=None):
     arguments, params_sha = _parameters(root, control, entry, params)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(source_root))
+    # A registered owner may use project-local imports as well as repository
+    # namespaces. Both remain inside the same bounded source snapshot.
+    if root != source_root:
+        sys.path.insert(0, str(root))
     sys.meta_path.insert(0, sources)
     os.chdir(root)
     enter_readonly()  # fail closed, before ANY project import/construction

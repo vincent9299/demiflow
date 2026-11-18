@@ -114,3 +114,20 @@ Dataset、编译器、journal、writer、图或执行结果。验收结果应以
   注册/认证，不能继承原生产 pipeline 的 certification。
 - 分阶段生产入口各有一个真实 action 时，first-action 预览只展示该入口当前 action，
   不能声称自动追踪多个历史表和独立运行。本例通过一个真实 lazy 图覆盖完整流程。
+
+## 多流程与可复用定义（2026-11-18）
+
+工作台直接读取本项目。`flows/reference.py:run` 是完整参考图对照实验；
+`flows/quality.py:run` 是独立图片质量审核。二者共用 `refgen_operators.py`
+与 `prompts/quality.yaml`，不互相调用流程入口。原 `flow.py` 只保留旧夹具调用兼容入口。
+
+每个流程只绑定一个当前业务参数文件：`settings/reference.json`、
+`settings/quality.json`。文件由隔离预览部署生成，不提交地址或运行状态。
+业务参数包含固定输入 Dataset、输出位置及业务数量上限；模型连接配置属于
+`settings/runtime.json`，算子默认值位于代码签名，Prompt 定义与输出协议位于
+`prompts/`。`image.yaml` 显式管理原先内联的合成与 Boogu 图片指令。
+
+工作台“算子”读取声明定义与真实 Git 历史；“管道”选择具体流程，显示
+引擎编译图并可编辑该流程的唯一当前业务参数。预览只编译，运行使用原生
+Dataset/RunContext。标杆 HTTP 服务仅模拟外部模型响应；数据读取、算子、
+图片对象、提交与结果均走真实引擎。这不表示已验证真实模型效果。

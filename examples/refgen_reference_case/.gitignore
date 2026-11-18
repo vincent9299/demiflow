@@ -3,3 +3,4 @@ __pycache__/
 workspace.json
 .forge/
 tables/*.json
+/settings/*.json

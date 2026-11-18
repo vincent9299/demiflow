@@ -1,0 +1,102 @@
+/* Project definitions, independent of the selected flow or run. */
+(() => {
+  'use strict';
+  const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!=null)n.textContent=text;if(cls)n.className=cls;return n;};
+  function mount({host,request,mountText,disposeReaders,project}){
+    let index=null,selected=null,revision='current',sequence=0,disposed=false,detail=null;
+    const root=el('div',null,'op-browser'),tree=el('nav',null,'op-tree'),viewer=el('section',null,'op-viewer');
+    tree.setAttribute('aria-label','项目算子目录');viewer.setAttribute('aria-label','算子定义');
+    const search=el('input'),list=el('div',null,'op-tree-items');search.type='search';search.placeholder='查找算子…';search.setAttribute('aria-label','查找算子');
+    tree.append(search,list);root.append(tree,viewer);host.replaceChildren(root);
+    const key='demiflow.operator-selection.'+project;
+    try{selected=sessionStorage.getItem(key);}catch{}
+    function button(text,action,parent,cls='op-text-button'){
+      const b=el('button',text,cls);b.type='button';b.onclick=()=>Promise.resolve(action()).catch(error=>showError(error));parent.append(b);return b;
+    }
+    function showError(error){if(!disposed){const n=el('p',error.message,'op-error');n.setAttribute('role','alert');viewer.replaceChildren(n);}}
+    function paintTree(){
+      list.replaceChildren();const term=search.value.trim().toLocaleLowerCase();
+      for(const [kind,label] of [['code','代码算子'],['prompt','Prompt']]){
+        const rows=(index?.definitions||[]).filter(d=>d.kind===kind&&(d.symbol+' '+d.path+' '+d.description).toLocaleLowerCase().includes(term));
+        if(!rows.length)continue;
+        const group=el('details',null,'op-tree-group');group.open=true;group.append(el('summary',label));
+        const paths=new Map();for(const row of rows){if(!paths.has(row.path))paths.set(row.path,[]);paths.get(row.path).push(row);}
+        for(const [path,items]of paths){
+          const folder=el('details',null,'op-tree-file');folder.open=!!term||items.some(i=>i.id===selected)||paths.size<4;
+          const title=el('summary',path);folder.append(title);
+          for(const item of items){const b=button('',()=>open(item.id),folder,'op-tree-leaf');
+            b.append(el('span',kind==='code'?'ƒ':'P','op-glyph'),el('span',item.symbol));
+            b.dataset.definition=item.id;b.setAttribute('aria-pressed',String(selected===item.id));b.title=item.path+' · '+item.symbol;
+          }group.append(folder);
+        }list.append(group);
+      }
+      if(!list.childNodes.length)list.append(el('p',index?.definitions.length?'没有匹配的算子':'项目尚未声明可复用算子或 Prompt。','op-muted'));
+      for(const issue of index?.diagnostics||[])list.append(el('p',issue.path+'：'+issue.detail,'op-error'));
+    }
+    async function open(id,version='current'){
+      selected=id;revision=version;const ticket=++sequence;paintTree();
+      try{sessionStorage.setItem(key,id);}catch{}
+      disposeReaders(viewer);viewer.replaceChildren(el('p','读取定义…','op-muted'));
+      const value=await request('operator-definition',{id,revision:version});
+      if(disposed||ticket!==sequence)return;detail=value;paintDetail();
+    }
+    function paintDetail(){
+      disposeReaders(viewer);viewer.replaceChildren();
+      const header=el('header',null,'op-heading'),identity=el('div');
+      identity.append(el('span',detail.kind==='code'?'代码算子':'Prompt','op-eyebrow'),el('h2',detail.symbol),el('div',detail.path,'op-location'));
+      const actions=el('div',null,'op-heading-actions');
+      button(revision==='current'?'版本历史':revision.slice(0,8)+' · 历史版本',()=>versions(),actions);
+      header.append(identity,actions);viewer.append(header);
+      if(detail.description)viewer.append(el('p',detail.description.split('\n')[0],'op-description'));
+      if(detail.historical){const n=el('div',null,'op-history-notice');n.append(el('span','正在阅读已保存版本；不会修改当前代码。'));button('返回当前',()=>open(selected),n);viewer.append(n);}
+      const tabs=el('nav',null,'op-tabs'),content=el('div',null,'op-content');tabs.setAttribute('aria-label','定义内容');viewer.append(tabs,content);
+      const render=kind=>{
+        for(const b of tabs.children)b.setAttribute('aria-pressed',String(b.dataset.tab===kind));
+        disposeReaders(content);content.replaceChildren();
+        if(kind==='source'){mountText(content,detail.kind==='prompt'?(detail.template??JSON.stringify(detail.messages??{},null,2)):detail.source,{sourceOnly:true,compactSource:true});const status=content.querySelector('.reading-status');if(status?.textContent==='源码完整显示。')status.hidden=true;}
+        else{
+          if(detail.kind==='code'){
+            const table=el('table',null,'op-contract');const head=el('tr');for(const title of ['参数','类型','默认值'])head.append(el('th',title));table.append(head);
+            for(const f of detail.parameters||[]){const row=el('tr');row.append(el('td',f.name),el('td',f.annotation||'未声明'),el('td',f.required?'必填':f.default_expression??'未声明'));table.append(row);}content.append(table,el('p','输出：'+(detail.returns||'未声明静态返回类型'),'op-muted'));
+          }else{
+            const meta={版本:detail.declared_version,模型:detail.model,响应格式:detail.response_format,输出Schema:detail.output_schema};
+            content.append(el('pre',JSON.stringify(meta,null,2),'op-contract-source'));
+          }
+        }
+      };
+      for(const [kind,label]of [['source',detail.kind==='prompt'?'Prompt':'代码'],['contract','接口与默认值']]){const b=button(label,()=>render(kind),tabs);b.dataset.tab=kind;}
+      render('source');
+    }
+    async function versions(){
+      const ticket=sequence,id=selected;const value=await request('operator-history',{id});
+      if(disposed||ticket!==sequence||id!==selected)return;
+      viewer.querySelector('.op-history')?.remove();const panel=el('aside',null,'op-history'),heading=el('div',null,'op-history-heading');heading.append(el('strong','版本历史'));button('关闭',()=>panel.remove(),heading);panel.append(heading);
+      button('当前工作区',()=>open(id),panel,'op-version');
+      for(const v of value.versions){const b=button('',()=>open(id,v.revision),panel,'op-version');b.append(el('span',new Date(v.timestamp*1000).toLocaleString()),el('code',v.revision.slice(0,8)));}
+      if(!value.versions.length)panel.append(el('p',value.reason||'尚无已保存提交。','op-muted'));
+      else panel.append(el('p',value.scope,'op-muted'));
+      viewer.append(panel);
+    }
+    search.oninput=paintTree;
+    return {
+      async load({force=false}={}){
+        if(index&&!force)return;
+        const ticket=++sequence;const next=await request('project-operators');if(disposed||ticket!==sequence)return;
+        index=next;paintTree();const item=index.definitions.find(d=>d.id===selected)||index.definitions[0];
+        if(item)await open(item.id);else viewer.replaceChildren(el('p','在开发中声明项目的 operators / prompts，即可在这里阅读定义。','op-empty'));
+      },
+      async selectSource(path,line,sha256){
+        await this.load();const normalized=path?.replaceAll('\\','/');
+        const matches=index.definitions.filter(d=>(normalized===d.path||normalized===[index.source_prefix,d.path].filter(Boolean).join('/'))
+          &&d.file_sha256===sha256&&(!line||d.line<=line&&d.end_line>=line));
+        if(matches.length===1){await open(matches[0].id);return true;}return false;
+      },
+      async selectPrompt(target){
+        await this.load();const matches=index.definitions.filter(d=>d.kind==='prompt'&&d.symbol===target.name&&d.declared_version===target.version&&d.template_sha256===target.template_sha256);
+        if(matches.length===1){await open(matches[0].id);return true;}return false;
+      },
+      dispose(){disposed=true;sequence++;disposeReaders(viewer);root.remove();}
+    };
+  }
+  globalThis.DemiFlowOperators=Object.freeze({mount});
+})();
