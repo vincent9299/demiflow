@@ -36,6 +36,8 @@ LEGACY_TRAITS = 'planning/traits.py'
 # Files on the call chain of capture_graph(): the compile stage proper.
 COMPILE_STAGE = (COMPILER, 'planning/dataflow_shared.py', 'planning/dataflow_graph_adapter.py',
                  REGISTRY, 'planning/dataflow_relational_regions.py')
+# The one module that reads the compiler's inputs from its surroundings and hands them over explicitly.
+INPUT_RESOLVER = 'execution/dataflow_compile_inputs.py'
 
 
 def source(relative):
@@ -269,16 +271,16 @@ def class_dispatch():
     }
 
 
-def implicit_inputs():
+def implicit_inputs(files=COMPILE_STAGE):
     """Ambient reads in the compile-stage files, as ``file::function: source line``.
 
     Not every function in these files runs during compilation; the enclosing
     function is recorded so the two can be told apart.
     """
     patterns = (r'_dataflow_executor', r'\bcurrent\(\)', r'os\.environ', r'ContextVar\(', r'\.journal\b',
-                r'\.directory\b')
+                r'\.directory\b', r'_local_kernel', r'_block_size')
     found = []
-    for relative in COMPILE_STAGE:
+    for relative in files:
         text = source(relative)
         lines = text.splitlines()
         owner = {}
@@ -353,6 +355,7 @@ def inventory():
         'entries': entries(),
         'class_dispatch': class_dispatch(),
         'implicit_inputs': implicit_inputs(),
+        'input_resolver': implicit_inputs((INPUT_RESOLVER,)),
         'configuration_access': configuration_access(),
     })
 

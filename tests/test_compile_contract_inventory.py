@@ -93,16 +93,24 @@ def test_sdk_native_entries_only_preflight_their_declaration():
     assert set(ENTRIES['aliases'].values()) <= registered
 
 
-def test_compile_stage_reads_ambient_state_only_here():
+def test_compilation_reads_nothing_from_its_surroundings():
     functions = sorted({item.split(': ', 1)[0] for item in inventory.implicit_inputs()})
     assert functions == [
-        # Compilation proper: executor defaults and the workbench report bindings.
-        'planning/dataflow_compile.py::__init__',
-        'planning/dataflow_compile.py::capture_chain',
         # Not on the compile call chain: result summary and sealed-replay validation.
         'planning/dataflow_graph_adapter.py::graph_result',
         'planning/dataflow_graph_adapter.py::validate_graph_replay',
     ]
+
+
+def test_one_function_resolves_the_compiler_inputs():
+    """Executor defaults and report bindings are read in one module and handed over explicitly."""
+    reads = inventory.implicit_inputs((inventory.INPUT_RESOLVER,))
+    assert sorted({item.split(': ', 1)[0] for item in reads}) == [
+        'execution/dataflow_compile_inputs.py::compile_inputs',       # the action's executor, the report context
+        'execution/dataflow_compile_inputs.py::executor_defaults',    # the three executor attributes
+    ]
+    compiler = inventory.source(inventory.COMPILER)
+    assert compiler.count('compile_inputs(request)') == 1             # resolved once, at the capture entry
 
 
 def test_source_tables_equal_the_imported_objects():

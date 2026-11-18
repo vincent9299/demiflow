@@ -683,13 +683,15 @@
   "preflight_result_used": []
  },
  "implicit_inputs": [
-  "planning/dataflow_compile.py::__init__: self.checked = current()",
-  "planning/dataflow_compile.py::capture_chain: executor = getattr(self.request.action, '_dataflow_executor', None)",
-  "planning/dataflow_compile.py::capture_chain: executor = getattr(self.request.action, '_dataflow_executor', None)",
-  "planning/dataflow_compile.py::capture_chain: executor = getattr(self.request.action, '_dataflow_executor', None)",
   "planning/dataflow_graph_adapter.py::graph_result: journal = execution.request.action.context.journal",
   "planning/dataflow_graph_adapter.py::validate_graph_replay: bundle = load_sealed_plan(action.context.directory, action.action_id, version='v3')",
   "planning/dataflow_graph_adapter.py::validate_graph_replay: if action.context.journal.source_binding(action.action_id + '-dataflow-sealed') is None:"
+ ],
+ "input_resolver": [
+  "execution/dataflow_compile_inputs.py::compile_inputs: context = current()",
+  "execution/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",
+  "execution/dataflow_compile_inputs.py::executor_defaults: block_size=getattr(executor, '_block_size', None),",
+  "execution/dataflow_compile_inputs.py::executor_defaults: local = getattr(executor, '_local_kernel', None)"
  ],
  "predicates": {
   "AddColumnOp": {

@@ -620,17 +620,19 @@ class _LiteralEmptySource(SourcePlan):
 class _Capture:
     """One bounded preorder traversal building node/edge drafts and declarations."""
 
-    def __init__(self, request: ActionRequest, bounds: Bounds) -> None:
+    def __init__(self, request: ActionRequest, bounds: Bounds, inputs) -> None:
         self.request = request
         self.bounds = bounds
+        # Everything else the capture needs was resolved before it started:
+        # executor defaults and the report bindings (execution.dataflow_compile_inputs).
+        self.defaults = inputs.defaults
+        self.report = inputs.report
         self.nodes: list[GraphNode] = []
         self.edges: list[tuple[int, str, int, str]] = []
         self.declarations: list[tuple[int, ProgramDeclaration]] = []
         self.alias_source: dict[int, int] = {}
         self.alias_op: dict[tuple[int, int], int] = {}
         self.visiting: set[int] = set()
-        from ..execution.checked import current
-        self.checked = current()
         self.report_bindings = []
         self.observation_labels = {}
         # Optional codec targets are not independent hard per-node minima.
@@ -740,13 +742,13 @@ class _Capture:
                         'memory_bytes': memory})))
 
     def _bind_report(self, index, key):
-        if key is None or self.checked is None:
+        if key is None or self.report is None:
             return
         node = self.nodes[index]
-        observation = self.checked.observations.get(tuple(key), {})
+        reused = self.report.reused(key)
         self.report_bindings.append({"report_node_id": key[1], "report_occurrence": key[2],
             "occurrence_id": node.occurrence_id, "logical_node_id": node.semantic_id,
-            "mode": "reuse" if observation.get("state") == "reused" else "execute"})
+            "mode": "reuse" if reused else "execute"})
 
     def _check_node_budget(self) -> None:
         if len(self.nodes) >= self.bounds.max_nodes:
@@ -795,8 +797,8 @@ class _Capture:
                 index = self._capture_relational(source, path)
             else:
                 index = self._capture_leaf(source, path)
-            if self.checked is not None:
-                self._bind_report(index, self.checked.source_bindings.get(id(source)))
+            if self.report is not None:
+                self._bind_report(index, self.report.source(source))
             self.alias_source[key] = index
             return index
         finally:
@@ -900,16 +902,12 @@ class _Capture:
             kernel = compile_kernel_spec(operation, program_ref=None, bounds=self.bounds)
             semantic = _operation_semantic_facts(operation)
             if kernel.kind == 'MapBatchesOp' and not kernel.configuration.get('batch_size'):
-                executor = getattr(self.request.action, '_dataflow_executor', None)
-                local = getattr(executor, '_local_kernel', None)
-                default_batch = getattr(local, 'batch_rows', None) or getattr(executor, '_block_size', None)
+                default_batch = self.defaults.map_batch_size
                 if default_batch is not None:
                     kernel = replace(kernel, configuration={**dict(kernel.configuration),
                         'default_batch_size': int(default_batch)})
             if kernel.kind == 'RandomShuffleOp' and kernel.configuration.get('num_blocks') is None:
-                executor = getattr(self.request.action, '_dataflow_executor', None)
-                local = getattr(executor, '_local_kernel', None)
-                partitions = getattr(local, 'partitions', None)
+                partitions = self.defaults.partitions
                 if partitions is not None:
                     kernel = replace(kernel, configuration={**dict(kernel.configuration),
                         'num_blocks': int(partitions)})
@@ -933,9 +931,7 @@ class _Capture:
                 callable_spec = operation.factory
             from ..execution.kernels.task_scope import TASK_KINDS
             if kernel.kind in TASK_KINDS and not kernel.configuration.get('streaming_map'):
-                executor = getattr(self.request.action, '_dataflow_executor', None)
-                local = getattr(executor, '_local_kernel', None)
-                task_rows = getattr(local, 'batch_rows', None) or 8192
+                task_rows = self.defaults.task_batch_rows
                 state = kernel.state
                 group = self.nodes[index].kernel.configuration.get('task_group')
                 origin = group is None
@@ -965,8 +961,8 @@ class _Capture:
                 suffix += 1
                 label = base + '#' + str(suffix)
             self.observation_labels[self.nodes[new_index].occurrence_id] = label
-            if self.checked is not None:
-                self._bind_report(new_index, self.checked.operation_bindings.get(id(operation)))
+            if self.report is not None:
+                self._bind_report(new_index, self.report.operation(operation))
             self._add_edge(index, "main", new_index, "main")
             if isinstance(callable_spec, CallableSpec):
                 self.declarations.append((new_index, ProgramDeclaration(
@@ -1097,9 +1093,9 @@ class _Capture:
         minimum = (payload if compact else self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
         if not bounded_workspace and payload + metadata > minimum:
             self.codec_windows[index] = (minimum, payload + metadata)
-        if self.checked is not None:
+        if self.report is not None:
             key = (request.action.action_id, request.action.action_id, 0)
-            if key in self.checked.observations:
+            if self.report.observed(key):
                 self._bind_report(index, key)
         self._add_edge(producer, "main", index, "main")
         programs = list(request.programs)
@@ -1129,12 +1125,20 @@ def _lower_request(request: ActionRequest) -> ActionRequest:
     return request
 
 
-def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
-    """Capture the real source/plan/PlanInput topology into a v3 graph."""
+def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None) -> CompiledDataflow:
+    """Capture the real source/plan/PlanInput topology into a v3 graph.
+
+    ``inputs`` is a ``CompileInputs``: the executor defaults and report bindings
+    this plan is compiled with. When it is not given, it is resolved here once,
+    from the request's action and the current report context.
+    """
     if terminal_registry().get(request.kind) is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     request = _lower_request(request)
-    capture = _Capture(request, bounds)
+    if inputs is None:
+        from ..execution.dataflow_compile_inputs import compile_inputs
+        inputs = compile_inputs(request)
+    capture = _Capture(request, bounds, inputs)
     producer = capture.capture_chain(request.source, request.plan, ())
     terminal = capture.capture_terminal(producer)
     from .dataflow_graph_adapter import decorate_graph_capture
@@ -1172,11 +1176,16 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
                             observation_labels=capture.observation_labels)
 
 
-def lower_action(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
-    """Compile terminal collect/statistics/write semantics into the graph."""
+def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None) -> CompiledDataflow:
+    """Compile terminal collect/statistics/write semantics into the graph.
+
+    The compiler's whole input is ``request``, ``bounds`` and ``inputs``
+    (``execution.dataflow_compile_inputs.CompileInputs``). It reads nothing else
+    from its surroundings; when ``inputs`` is omitted it is resolved once at entry.
+    """
     definition = terminal_registry().get(request.kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     if request.kind == "write_datasink" and request.sink is None:
         raise _error("INVALID_CONTRACT", "write terminal requires a registered sink declaration")
-    return capture_graph(request, bounds=bounds)
+    return capture_graph(request, bounds=bounds, inputs=inputs)

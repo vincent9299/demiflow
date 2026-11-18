@@ -67,11 +67,11 @@ PRE_V3_MODULES = {
 # orchestration are one module by intent, so this dependency is allowed; what
 # must not happen is the compiler learning about yet another runtime module.
 PLANNING_MAY_IMPORT = {
-    'demiflow.execution.checked',
     'demiflow.execution.contracts.dataflow',
     'demiflow.execution.contracts.dataflow_codec',
     'demiflow.execution.contracts.dataflow_errors',
     'demiflow.execution.contracts.errors',
+    'demiflow.execution.dataflow_compile_inputs',
     'demiflow.execution.dataflow_managed_devices',
     'demiflow.execution.dataflow_model_factory',
     'demiflow.execution.dataflow_models',
