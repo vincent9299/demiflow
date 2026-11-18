@@ -115,14 +115,16 @@ def workspace_structural(project, name, *, observation=None):
     problems = []
     root = project.root
     local = project.standard(name) in PROJECT_LOCAL_STANDARDS
+    entries = project.entries(name)
     paths = [pipeline['path'] + '/README.md', pipeline['path'] + '/tests',
-             pipeline['entry']['path'], *pipeline['operators'], *pipeline['notebooks']]
+             *(e['path'] for e in entries.values()), *pipeline['operators'],
+             *pipeline.get('prompts', []), *pipeline['notebooks']]
     for relative in paths:
         if not no_symlinks(root / relative).exists():
             problems.append(f'DF-02 missing {relative}')
     if (root / pipeline['path'] / 'tests').exists() and not (root / pipeline['path'] / 'tests').is_dir():
         problems.append('DF-02 tests must be a directory')
-    source_files = set() if local else {root / pipeline['entry']['path']}
+    source_files = set() if local else {root / e['path'] for e in entries.values()}
     for relative in ([] if local else pipeline['operators']):
         path = root / relative
         if path.is_file():
@@ -135,9 +137,9 @@ def workspace_structural(project, name, *, observation=None):
                 source_files.update(Path(directory) / f for f in files if f.endswith('.py'))
                 if len(source_files) > 20000:
                     raise ForgeError('Too many registered Python sources')
-    registered = {p['entry']['path'][:-3].replace('/', '.') + '.' + p['entry']['symbol']
-                  for p in project.config['pipelines'].values() if isinstance(p['entry'], dict)}
-    own = pipeline['entry']['path'][:-3].replace('/', '.') + '.' + pipeline['entry']['symbol']
+    registered = {e['path'][:-3].replace('/', '.') + '.' + e['symbol']
+                  for owner in project.registrations for e in project.entries(owner).values()}
+    own = {e['path'][:-3].replace('/', '.') + '.' + e['symbol'] for e in entries.values()}
     if local:
         observation = observation or project.observe(name)
         problems.extend(project_python_checks(project, name, facts=observation.facts))
@@ -168,7 +170,7 @@ def workspace_structural(project, name, *, observation=None):
                         parts = relative[:-3].split('/')[:-1]
                         prefix = '.'.join(parts[:len(parts) - node.level + 1] + ([prefix] if prefix else []))
                     modules = [prefix] + [prefix + '.' + a.name for a in node.names]
-                if any(m in registered - {own} for m in modules):
+                if any(m in registered - own for m in modules):
                     problems.append(f'DF-03 cross-entry import in {relative}:{node.lineno}')
                 if relative.startswith('operators/') and any(m == 'flows' or m.startswith('flows.') for m in modules):
                     problems.append(f'DF-03 operator imports flows in {relative}:{node.lineno}')

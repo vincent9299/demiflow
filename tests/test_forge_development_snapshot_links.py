@@ -10,6 +10,9 @@ from demiflow.forge.development import project as module, tasks
 from demiflow.forge.development.coverage import Observation
 from demiflow.forge.development.project import ForgeError, Project, TOOL_ROOT, VERSION, snapshot
 
+# These fixtures exercise the preserved candidate.9 registration contract.
+VERSION = '1.0.0-candidate.9'
+
 
 class SnapshotLinkTests(unittest.TestCase):
     def setUp(self):

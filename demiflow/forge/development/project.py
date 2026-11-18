@@ -11,13 +11,13 @@ import time
 
 from .resources import TOOL_ROOT, configured_tool_root, implementation_files, resource_path
 
-VERSION = "1.0.0-candidate.9"
-PROJECT_LOCAL_STANDARDS = frozenset({VERSION})
-WORKSPACE_STANDARDS = frozenset({"1.0.0-candidate.7", "1.0.0-candidate.8", VERSION})
+VERSION = "1.0.0-candidate.10"
+PROJECT_LOCAL_STANDARDS = frozenset({"1.0.0-candidate.9", VERSION})
+WORKSPACE_STANDARDS = frozenset({"1.0.0-candidate.7", "1.0.0-candidate.8", *PROJECT_LOCAL_STANDARDS})
 STANDARDS = {
     f"1.0.0-candidate.{number}": resource_path("standards/" +
         ("pipeline-v1.md" if number == 1 else f"pipeline-v1.0.0-candidate.{number}.md"))
-    for number in range(1, 10)
+    for number in range(1, 11)
 }
 STANDARD = STANDARDS[VERSION]
 SKIP = frozenset({".git", ".demiforge", "__pycache__", ".pytest_cache", ".venv",
@@ -293,18 +293,22 @@ class Project:
 
     def validate(self):
         c = self.config
-        required = {"schema", "standard", "tool_root", "sources", "watch", "readonly", "pipelines"}
+        multi = isinstance(c, dict) and c.get('schema') == 'demiforge-project-v3'
+        registration_key = 'projects' if multi else 'pipelines'
+        required = {"schema", "standard", "tool_root", "sources", "watch", "readonly", registration_key}
         if not isinstance(c, dict) or set(c) - (required | {"snapshot_limits"}) or required - set(c):
             raise ForgeError(f"project.json requires: {sorted(required)}")
-        if c["schema"] not in {"demiforge-project-v1", "demiforge-project-v2"} or c["standard"] not in STANDARDS:
+        if c["schema"] not in {"demiforge-project-v1", "demiforge-project-v2", "demiforge-project-v3"} or c["standard"] not in STANDARDS:
             raise ForgeError(f"Unsupported project schema/standard; expected {VERSION}")
-        modern = c["schema"] == "demiforge-project-v2"
+        if multi != (c['standard'] == VERSION):
+            raise ForgeError('candidate.10 requires project-v3; historical standards retain their original schema')
+        modern = c["schema"] in {"demiforge-project-v2", "demiforge-project-v3"}
         if modern != (c["standard"] in WORKSPACE_STANDARDS) or not modern and "snapshot_limits" in c:
             raise ForgeError("The workspace standard requires project-v2; legacy bindings retain project-v1")
         snapshot_limits(c.get("snapshot_limits"))
         modern_paths = c["standard"] in PROJECT_LOCAL_STANDARDS or (
-            isinstance(c["pipelines"], dict) and any(isinstance(p, dict) and
-            p.get("standard", c["standard"]) in PROJECT_LOCAL_STANDARDS for p in c["pipelines"].values()))
+            isinstance(c[registration_key], dict) and any(isinstance(p, dict) and
+            p.get("standard", c["standard"]) in PROJECT_LOCAL_STANDARDS for p in c[registration_key].values()))
         try:
             self.tool_root = configured_tool_root(self.root, c["tool_root"])
         except ValueError as error:
@@ -313,7 +317,8 @@ class Project:
             raise ForgeError("sources must include project-rules (current project instructions)")
         for key, source in c["sources"].items():
             safe_id(key)
-            if key in {"standard", "pipeline-readme", "pipeline-entry"}:
+            if key in {"standard", "pipeline-readme", "pipeline-entry"} or (
+                    multi and (key == 'project-readme' or key.startswith('flow-entry-'))):
                 raise ForgeError(f"Reserved source ID: {key}")
             if not isinstance(source, dict) or set(source) - {"path", "lines"} or "path" not in source:
                 raise ForgeError(f"Invalid context source: {key}")
@@ -337,15 +342,19 @@ class Project:
                 raise ForgeError(f"Missing readonly source: {path}")
             if path.resolve() in {self.root, self.control} or self.control.is_relative_to(path.resolve()):
                 raise ForgeError("Readonly root cannot contain project/control state")
-        if not isinstance(c["pipelines"], dict) or not c["pipelines"]:
+        if not isinstance(c[registration_key], dict) or not c[registration_key]:
             raise ForgeError("At least one pipeline registration is required")
-        for name, p in c["pipelines"].items():
+        if multi and len(c[registration_key]) > 128:
+            raise ForgeError('Project registration count exceeds budget')
+        for name, p in c[registration_key].items():
             safe_id(name)
             if type(p) is not dict:
                 raise ForgeError(f"Invalid pipeline registration: {name}")
             legacy = p.get("standard", c["standard"]) not in WORKSPACE_STANDARDS
             local = p.get("standard", c["standard"]) in PROJECT_LOCAL_STANDARDS
-            required_pipeline = {"path", "entry", "verify"}
+            required_pipeline = {"path", "flows" if multi else "entry", "verify"}
+            if multi:
+                required_pipeline.add('prompts')
             if modern and legacy:
                 required_pipeline.add("standard")
             elif modern:
@@ -354,6 +363,8 @@ class Project:
                     required_pipeline.add("standard")
             if type(p) is not dict or set(p) != required_pipeline or p.get("standard", c["standard"]) not in STANDARDS:
                 raise ForgeError(f"Invalid pipeline registration: {name}")
+            if (multi and p.get('standard', VERSION) != VERSION) or (not multi and p.get('standard') == VERSION):
+                raise ForgeError('Multi-flow ownership requires a candidate.10 project-v3 registration')
             relative(p["path"], modern=local)
             watched = [p["path"]]
             if legacy:
@@ -361,16 +372,24 @@ class Project:
                 if "/" in p["entry"] or not p["entry"].endswith("_pipeline.py"):
                     raise ForgeError("entry must be a local <prefix>_pipeline.py")
             else:
-                entry = p["entry"]
-                if type(entry) is not dict or set(entry) != {"path", "symbol"}:
-                    raise ForgeError("Entry requires project-relative path and symbol")
-                relative(entry["path"], modern=local)
-                if not entry["path"].endswith(".py") or not isinstance(entry["symbol"], str) or not entry["symbol"].isidentifier() or entry["symbol"].startswith('_'):
-                    raise ForgeError("Entry must name a public function in a Python module")
-                if not local and not entry["path"].startswith("flows/"):
-                    raise ForgeError("Historical standard requires an entry in flows/*.py; adopt candidate.9 for project-local ownership")
-                watched.append(entry["path"])
-                for key, suffix in (("operators", None), ("notebooks", '.ipynb')):
+                entries = p['flows'] if multi else {'main': p['entry']}
+                if not isinstance(entries, dict) or not 1 <= len(entries) <= 64:
+                    raise ForgeError('Register 1..64 named flows per project')
+                modules = set()
+                for flow, entry in entries.items():
+                    safe_id(flow)
+                    if type(entry) is not dict or set(entry) != {"path", "symbol"}:
+                        raise ForgeError("Entry requires project-relative path and symbol")
+                    relative(entry["path"], modern=local)
+                    if not entry["path"].endswith(".py") or not isinstance(entry["symbol"], str) or not entry["symbol"].isidentifier() or entry["symbol"].startswith('_'):
+                        raise ForgeError("Entry must name a public function in a Python module")
+                    if not local and not entry["path"].startswith("flows/"):
+                        raise ForgeError("Historical standard requires an entry in flows/*.py; adopt candidate.9 for project-local ownership")
+                    if entry['path'] in modules:
+                        raise ForgeError('Each named flow owns a distinct entry module')
+                    modules.add(entry['path'])
+                    watched.append(entry["path"])
+                for key, suffix in (("operators", None), ("notebooks", '.ipynb'), *((('prompts', None),) if multi else ())):
                     if type(p[key]) is not list or len(p[key]) > 64 or any(not isinstance(v, str) for v in p[key]) or len(set(p[key])) != len(p[key]):
                         raise ForgeError(f"Invalid registered {key}")
                     for path in p[key]:
@@ -400,12 +419,12 @@ class Project:
 
     def validate_ownership(self):
         """New bindings own their code; old bindings keep their recorded layout."""
-        for name, pipeline in self.config['pipelines'].items():
+        for name, pipeline in self.registrations.items():
             if self.standard(name) not in PROJECT_LOCAL_STANDARDS:
                 continue
             owner = pipeline['path']
-            entry = pipeline['entry']['path']
-            roles = [entry, *pipeline['operators'], *pipeline['notebooks']]
+            entries = [e['path'] for e in self.entries(name).values()]
+            roles = [*entries, *pipeline['operators'], *pipeline.get('prompts', []), *pipeline['notebooks']]
             no_symlinks(self.root / owner)
             for path in roles:
                 if path == owner or not within(path, owner):
@@ -415,26 +434,39 @@ class Project:
                        (self.root / ro).resolve().is_relative_to(target)
                        for ro in self.config['readonly']):
                     raise ForgeError(f'Owned source overlaps a readonly path: {path}')
-            for operator in pipeline['operators']:
-                if within(entry, operator):
-                    raise ForgeError(f'Entry and operator roles overlap: {entry}')
-                if (self.root / operator).is_file() and not operator.endswith('.py'):
-                    raise ForgeError(f'Operator source must be Python: {operator}')
-                for other_name, other in self.config['pipelines'].items():
-                    for other_operator in other.get('operators', []):
-                        if (other_name == name and other_operator == operator):
-                            continue
-                        if within(operator, other_operator) or within(other_operator, operator):
-                            raise ForgeError(f'Operator ownership overlaps: {operator}, {other_operator}')
-                    if other_name != name and within(self.entry_path(other_name), operator):
-                        raise ForgeError(f'Operator source contains another entry: {operator}')
-            for other_name in self.config['pipelines']:
-                if other_name != name and self.entry_path(other_name) == entry:
-                    raise ForgeError(f'Entry module has multiple owners: {entry}')
+            for role in ('operators', 'prompts'):
+                for operator in pipeline.get(role, []):
+                    if any(within(entry, operator) or within(operator, entry) for entry in entries):
+                        raise ForgeError(f'Entry and {role} roles overlap: {operator}')
+                    if (self.root / operator).is_file() and not operator.endswith(('.py',) if role == 'operators' else ('.yaml', '.yml', '.json')):
+                        raise ForgeError(f'Invalid {role} source type: {operator}')
+                    for other_name, other in self.registrations.items():
+                        for other_role, other_operator in ((r, o) for r in ('operators', 'prompts') for o in other.get(r, [])):
+                            if (other_name == name and other_role == role and other_operator == operator):
+                                continue
+                            if within(operator, other_operator) or within(other_operator, operator):
+                                raise ForgeError(f'Operator ownership overlaps: {operator}, {other_operator}')
+                        if other_name != name and any(within(e['path'], operator) for e in self.entries(other_name).values()):
+                            raise ForgeError(f'Operator source contains another entry: {operator}')
+            for other_name in self.registrations:
+                if other_name != name and set(entries) & {e['path'] for e in self.entries(other_name).values()}:
+                    raise ForgeError(f'Entry module has multiple owners: {name}, {other_name}')
+
+    @property
+    def registrations(self):
+        return self.config['projects' if self.config['schema'] == 'demiforge-project-v3' else 'pipelines']
+
+    def entries(self, name):
+        p = self.pipeline(name)
+        if 'flows' in p:
+            return p['flows']
+        entry = p['entry']
+        return {'main': entry if isinstance(entry, dict) else
+                dict(path=p['path'] + '/' + entry, symbol='run_pipeline')}
 
     def pipeline(self, name):
         try:
-            return self.config["pipelines"][name]
+            return self.registrations[name]
         except KeyError as error:
             raise ForgeError(f"Unregistered pipeline: {name}") from error
 
@@ -443,6 +475,11 @@ class Project:
 
     def source_defs(self, pipeline):
         p = self.pipeline(pipeline)
+        if 'flows' in p:
+            return {'standard': {'path': str(STANDARDS[self.standard(pipeline)])}, **self.config['sources'],
+                    'project-readme': {'path': p['path'] + '/README.md', 'allow_missing': True},
+                    **{'flow-entry-' + name: {'path': entry['path'], 'allow_missing': True}
+                       for name, entry in p['flows'].items()}}
         return {"standard": {"path": str(STANDARDS[self.standard(pipeline)])}, **self.config["sources"],
                 "pipeline-readme": {"path": p["path"] + "/README.md", "allow_missing": True},
                 "pipeline-entry": {"path": self.entry_path(pipeline), "allow_missing": True}}
@@ -452,6 +489,8 @@ class Project:
 
     def entry_path(self, name):
         p = self.pipeline(name)
+        if 'flows' in p:
+            raise ForgeError('Select an explicit flow; a project has no default execution entry')
         return p['entry']['path'] if isinstance(p['entry'], dict) else p['path'] + '/' + p['entry']
 
     def source(self, definition, *, identities=None, deadline=None):
@@ -598,7 +637,7 @@ def binding(config_path, config, *, hash_file=None):
     """Tool/config identity only; this does not certify current project sources."""
     hash_file = hash_file or file_hash
     standards = {config["standard"], *(p.get("standard", config["standard"])
-                                      for p in config["pipelines"].values())}
+                                      for p in config['projects' if config['schema'] == 'demiforge-project-v3' else 'pipelines'].values())}
     files = implementation_files()
     for version in sorted(standards):
         path = STANDARDS[version]

@@ -12,6 +12,9 @@ from demiflow.forge.development import cli, tasks
 from demiflow.forge.development.checks import structural
 from demiflow.forge.development.project import ForgeError, Project, TOOL_ROOT, VERSION
 
+# These fixtures exercise the preserved candidate.9 registration contract.
+VERSION = '1.0.0-candidate.9'
+
 
 class ProjectLocalTests(unittest.TestCase):
     def setUp(self):

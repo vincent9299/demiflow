@@ -1,25 +1,27 @@
 # DemiForge 最小闭环
 
-当前版本：`1.0.0-candidate.9`。Python 3.10+、POSIX、源码检出或正常解压安装的 wheel 均可使用。
+当前版本：`1.0.0-candidate.10`。Python 3.10+、POSIX、源码检出或正常解压安装的 wheel 均可使用。
 项目 launcher 与 dev core 只依赖标准库；公共 Click CLI 使用已安装平台依赖，不调用模型。
 使用公开 CLI/项目 launcher；`development` 内部 Python API 不是稳定集成接口。
 
 candidate.8 新增 [DF-03 性能与精简编排](../demiflow/forge/development/standards/pipeline-v1.0.0-candidate.8.md#efficient-and-minimal-orchestration)：审查全量扫描、关联、物化和重复执行；用已有回执统计，避免为启动校验另扫全表。该要求由语义审查和针对性测试确认，未宣称自动识别所有性能问题。
 
-本版使用 `demiforge-project-v2`，一个 pipeline 对应一个完整项目目录。
-以实际路径登记入口 `entry: {path, symbol}`、算子文件/目录和可选 Notebook。
-入口及这些角色必须归属于该 pipeline 的 `path`，但没有固定目录名或函数名要求：
-`orders/recipe.py:select_orders` + `orders/processing.py` 与项目内的 flows/operators 布局都支持。
-共享算子从已声明的维护方导入，不复制、不重复登记所有权。
-[DF-02](../demiflow/forge/development/standards/pipeline-v1.0.0-candidate.9.md#df-02-layout-and-one-entrypoint)
-是唯一布局权威。源码归属、角色重叠、监测范围、只读路径和静态导入检查不能由配置关闭。
-静态解析包括相对导入、别名、包初始化和本地 helper/re-export；不执行候选代码，
-不证明动态导入、反射或函数效果安全，实际执行闭包仍由平台验证。
-新格式示例见 [project-workspace.json](../examples/development/project-workspace.json)。
+本版使用 `demiforge-project-v3`：一个业务项目拥有多条具名流程、共享代码算子和 Prompt 定义。
+按 `projects.<id>` 登记项目归属；`flows` 下逐条登记实际 `{path, symbol}`，不设项目默认入口。
+推荐项目内 `flows/ + operators/ + prompts/`，已有明确登记的其他文件名仍可用。
+不再要求把不同业务流程硬合成一个 `run(stage=...)`，也不为每条流程复制算子或 Prompt。
+每条流程只有一份接线必需的业务参数及当前值；不要求参数文件、参数方案或配置下拉框。
+算子默认值、Prompt 定义、引擎/部署设置分别维护，运行记录封存当时实际值。
 
-candidate.7/.8 标准文件和旧任务保持原绑定；其集中目录要求不用于新版本。
-迁移时同时更新该 pipeline 的路径、导入、文档/测试和显式 `standard`，再新建任务。
-工具或登记变化会使旧任务绑定过期；不要重置旧基线或伪造新的通过证据。
+[新规范 DF-02](../demiflow/forge/development/standards/pipeline-v1.0.0-candidate.10.md#df-02-project-flows-and-reusable-definitions)
+规定归属、复用、参数和迁移边界。[project-multiflow.json](../examples/development/project-multiflow.json)
+展示两条流程共享一份算子目录和 Prompt 目录；不执行业务代码即可检查所有入口和静态依赖。
+源码、Prompt 和历史保护保持；没有因支持多流程而放宽 watch、资源预算或跨入口依赖限制。
+当前升级是规范与开发工具，新的算子库和单份参数页面仍按独立产品设计实施。
+
+历史 project-v1/v2 和 candidate.1–9 保留原绑定。[candidate.9 示例](../examples/development/project-workspace.json)
+继续验证当时的一项目一入口契约。显式迁移时更新项目规则、角色登记和工具位置，创建新任务；
+不覆盖历史快照、认证、Notebook 输出或已有 dirty，不批量移动生产代码和数据。
 
 candidate.5 的 DF-03 收敛业务模型入口：demiflow 使用 `map_prompt`、`map_prompt_async`、
 `agentmap_async`，固定评测只需 `map_prompt_async`；不在业务回调中直连模型或自建模型 Actor。
@@ -28,7 +30,7 @@ candidate.5 的 DF-03 收敛业务模型入口：demiflow 使用 `map_prompt`、
 
 ## 规范和归属
 
-当前候选标准是 [candidate.9](../demiflow/forge/development/standards/pipeline-v1.0.0-candidate.9.md)，
+当前候选标准是 [candidate.10](../demiflow/forge/development/standards/pipeline-v1.0.0-candidate.10.md)，
 包含 DF-01 到 DF-07 的要求、来源、例子和验收方式。项目配置不能关闭其中任何条款。
 具体 Dataset/模型 API 是平台适配；业务表、字段、prompt 正文和阈值归项目。
 demiwtg 的 PIPELINE_SPEC.md 仍是现行强制规范，本次只提炼候选，不删除原规范或
@@ -42,7 +44,7 @@ DF-02 的 [README 持续维护要求](../demiflow/forge/development/standards/pi
 
 ## 接入项目
 
-1. 参考 [新布局示例](../examples/development/project-workspace.json) 创建项目配置；
+1. 参考 [多流程示例](../examples/development/project-multiflow.json) 创建项目配置；
    [旧布局示例](../examples/development/project.json) 保留用于旧标准：绑定版本、
    当前规则、全部相关源码根、只读平台路径，以及已审阅的 fixture 测试命令。
    `tool_root` 相对业务仓根或为绝对路径，须指向实际加载的 demiflow checkout 根，
@@ -54,12 +56,11 @@ DF-02 的 [README 持续维护要求](../demiflow/forge/development/standards/pi
    将唯一正文所在的 `demiflow/forge/development/skill` 链接到 Codex 的 skills 目录。
    wheel 中也在相同包资源位置，配套脚本可直接运行；若导出部署副本，记录来源版本与完整资源哈希，不能将副本当第二维护源。
    安装位置不等于当前聊天已加载；新聊天中确认 skill 可发现，也可直接读其 SKILL.md。
-4. 新增 pipeline 先登记文档/测试归属 `path`、`entry: {path, symbol}`、
-   `operators` 路径列表、可选 `notebooks` 列表和可信验证命令，再创建开发任务。
-   文档/测试、入口、算子、Notebook 路径必须在 watch 内。缺失实现可 start，不能通过 check。
-5. v2 项目分阶段迁移时，旧入口须逐条显式保留 `standard` 和旧登记格式；
-   新入口继承 candidate.9；尚未迁移的 candidate.7/.8 入口显式保留旧版本。不能只改默认标准就把旧入口当作已迁移。绑定变化后新建任务，
-   旧任务仅保留历史证据；不得复用旧通过状态。
+4. 登记业务项目的 `path`、`flows` 映射、`operators`/`prompts` 路径列表、`notebooks` 列表和可信验证命令。
+   每条流程一个独立入口模块和明确函数符号；项目没有默认执行入口。未用角色可用空列表。
+   所有角色与文档/测试必须在 watch 内；缺失实现可 start，不能通过 check。
+5. v3 采用 candidate.10。已有 v1/v2 项目先继续原版本；迁移须显式更新完整登记与项目规则，
+   不能只改默认版本或沿用旧通过状态。`--project-name` 选择开发任务所属业务项目；旧 `--pipeline` 别名保留。
 6. `snapshot_limits` 可显式设置 `total_bytes`、`file_bytes`、`notebook_bytes`、`entries`、
    `seconds`。默认分别为 256 MiB、16 MiB、256 MiB、20,000 项和 120 秒；
    硬上限分别为 16 GiB、256 MiB、1 GiB、200,000 项和 600 秒。先统计完整监测范围，
@@ -69,8 +70,8 @@ DF-02 的 [README 持续维护要求](../demiflow/forge/development/standards/pi
 从项目根开始：
 
 ```bash
-python3 .demiforge/forge start --id orders-fix --pipeline orders \
-  --goal '修复已确认的订单输入边界' --write orders/processing.py \
+python3 .demiforge/forge start --id orders-fix --project-name orders \
+  --goal '修复已确认的订单输入边界' --write orders/operators/quality.py \
   --write orders/tests --write orders/README.md \
   --non-goal '不改平台、不执行生产、不安装共享依赖'
 python3 .demiforge/forge context --id orders-fix
@@ -140,7 +141,7 @@ Review 是署名人的语义判断，不是工具自动证明，更不自动等�
 日志丢失/变化也会拒绝接受。文件摘要是本地可信工作流的证据，不是防篡改签名。
 
 当前程序检查：必读页回执、声明路径边界、只读变更、目录/入口、Python 语法、
-notebook 隐藏定义、README 规范入口。candidate.9 还在同次观察中复用本地静态导入依据，
+notebook 隐藏定义、README 规范入口。candidate.9/10 在同次观察中复用本地静态导入依据，
 检查缺失模块/符号、包初始化、受支持的再导出及通过 helper 的反向/跨入口依赖。
 它不执行候选 import，也不探测安装环境；外部绝对 import 明确列为未检查。
 这些检查不证明 Agent 已理解规范，也不证明动态 import、反射、任意文件读取、
@@ -154,7 +155,7 @@ notebook 隐藏定义、README 规范入口。candidate.9 还在同次观察中�
 历史手工改动、权限变更、解释器/第三方包升级和未登记目录不受源码指纹完整覆盖；涉及这些
 变化时重新确认环境并重新验证。本版仅支持本地 Python/POSIX 项目。
 
-### candidate.9 的本地源码覆盖
+### candidate.9/10 的本地源码覆盖
 
 策略由任务实际绑定标准选择；混合项目中的 candidate.1–8 任务仍使用原路径与剪枝规则。
 现代路径允许 `runs/datasets` 名称，角色、所有者、watch、readonly 和写权限仍分别校验。
@@ -234,3 +235,11 @@ candidate.3/4/5/6 第三格默认内嵌可离线交互的 srcdoc HTML，完整 H
 Python 格源码上限仍为 16 MiB。工具检查 Notebook/源码大小，HTML 大小及真实离线交互须提供行为验证。
 
 候选标准 `1.0.0-candidate.2` 固定三格 notebook；旧 `candidate.1` 文本与绑定仍保留，项目显式升级后新建任务。格 2 的处理漏斗逐算子分列“已处理完（输入行）”“待处理（输入行）”“产出（输出行）”，并说明粒度、分母、在途、失败及缺失遥测；不可用产出数反推处理数。
+
+### 单份参数与产品边界
+
+流程入口的具名参数及其默认值/类型是业务参数契约。产品展示该契约的一份当前值，不列配置方案。
+复杂值需要明确结构；未知类型不猜字段。修改参数使旧编译预览过期；历史运行只读当时的封存值。
+算子库与管道引用同一代码或具名 Prompt 定义；Prompt 文件可含多条定义。
+工具目前检查角色归属、源码覆盖、静态依赖和证据绑定；不自动证明参数是否必要、Prompt 语义正确，
+也不声称新的产品表单/算子库已经实现。产品方案见 [算子库与多流程设计](forge-project-flows-product-20261118.md)。

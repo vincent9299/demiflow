@@ -55,7 +55,7 @@ from demiflow.forge.development.cli import main
 from demiflow.forge.development.project import Project, STANDARDS, VERSION, TOOL_ROOT
 from demiflow.forge.development.resources import PACKAGE_ROOT, resource_path, implementation_files
 assert TOOL_ROOT == PACKAGE_ROOT == installed/'demiflow'
-assert len(STANDARDS)==9
+assert len(STANDARDS)==10
 assert json.loads(expected_path.read_text()) == {p.name:__import__('hashlib').sha256(p.read_bytes()).hexdigest() for p in STANDARDS.values()}
 assert resource_path('skill/SKILL.md').read_text().startswith('---')
 assert all(p.is_relative_to(installed) and p.is_file() for p in implementation_files().values())
@@ -64,10 +64,10 @@ business=root/'business';business.mkdir();(business/'orders/tests').mkdir(parent
 (business/'orders/README.md').write_text('DemiForge fixture')
 (business/'orders/recipe.py').write_text('def select_orders(source): return source\n')
 (business/'orders/rules.py').write_text('def keep(row): return True\n')
-config=dict(schema='demiforge-project-v2',standard=VERSION,tool_root=str(PACKAGE_ROOT),
+config=dict(schema='demiforge-project-v3',standard=VERSION,tool_root=str(PACKAGE_ROOT),
  sources={'project-rules':{'path':'AGENTS.md'}},watch=['orders'],readonly=[],
- pipelines={'orders':dict(path='orders',entry=dict(path='orders/recipe.py',symbol='select_orders'),
- operators=['orders/rules.py'],notebooks=[],verify=[dict(id='fixture',argv=['/bin/python3','-c',"import sys;print(sys.argv[1])",'{tool}'],env={'TOOL':'{tool}'},timeout=5)])})
+ projects={'orders':dict(path='orders',flows={'select':dict(path='orders/recipe.py',symbol='select_orders')},
+ operators=['orders/rules.py'],prompts=[],notebooks=[],verify=[dict(id='fixture',argv=['/bin/python3','-c',"import sys;print(sys.argv[1])",'{tool}'],env={'TOOL':'{tool}'},timeout=5)])})
 source=root/'bootstrap.json';source.write_text(json.dumps(config))
 tasks.init(business,source);project=Project(business)
 tasks.start(project,'wheel','orders','Test wheel',['orders'],['No production'])
