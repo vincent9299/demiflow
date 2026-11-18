@@ -90,6 +90,8 @@ catch(error) {console.log(JSON.stringify({error:error.message}));}
 
 def fill_other_configuration(page, value):
     page.locator('.wb-more > summary').click()
+    if not page.get_by_role('combobox', name='解析配置路径').is_visible():
+        page.locator('.wb-more').get_by_text('其他入参文件', exact=True).click()
     page.get_by_role('combobox', name='解析配置路径').fill(value)
     page.locator('.wb-more > summary').click()
 

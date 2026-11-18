@@ -146,3 +146,36 @@
 .wb-contract-table th:first-child{width:22%}.wb-contract-table tr:last-child td{border-bottom:0}
 .wb-schema-section h4{margin:18px 0 6px}.wb-api-name{display:block;color:#355aa4;margin:12px 0;font-size:13px}
 .wb-operator-api{grid-column:2;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#506b91;min-width:0}
+
+/* Pipeline context and actions share one compact bar; canvas tools stay on the canvas. */
+.wb-toolbar{gap:10px;padding:0 0 8px;flex-wrap:wrap;align-items:center}
+.wb-plan-context{display:flex;flex-direction:column;gap:2px;min-width:0;flex:0 1 210px}
+.wb-plan-context>strong{font-size:12px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-plan-context>.wb-basis{font-size:10px;line-height:1.5;margin:0;flex-basis:auto;text-align:left;color:#7c899e}
+.wb-toolbar .wb-selectors{flex:1 1 300px;gap:10px;flex-wrap:nowrap}
+.wb-toolbar .wb-selectors>label{flex:1 1 100px;min-width:0;max-width:none;gap:6px;white-space:nowrap}
+.wb-toolbar .wb-selectors>label:last-child{flex:2 1 200px}
+.wb-toolbar .wb-selectors select{width:100%;max-width:none}
+.wb-toolbar .wb-actions{margin-left:auto;gap:6px;min-width:0}
+.wb-canvas-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:auto;min-width:0}
+.wb-canvas-tools .wb-node-jump{width:190px;max-width:100%}
+.wb-graph-section{padding:0}.wb-body{margin-top:8px}
+.wb-more-body{display:flex;flex-direction:column;align-items:stretch;gap:2px;width:min(290px,calc(100vw - 32px));padding:7px}
+.wb-more-body>button{text-align:left;border-color:transparent;background:transparent;padding:6px 8px}
+.wb-more-body>button:hover,.wb-more-body>details>summary:hover{background:#f0f4fb}
+.workbench .wb-more-body>details{margin:0;padding:0;flex-basis:auto}
+.wb-more-body>details>summary{padding:7px 8px;cursor:pointer;border-radius:5px}
+.wb-more-body>details>div,.wb-more-body>details>p{padding:4px 8px}
+.wb-more-body .wb-plan-preview-controls{margin:0 0 6px}
+.wb-more-body .wb-plan-preview-controls>label{width:100%;max-width:100%;white-space:normal}
+.wb-more-body .wb-plan-preview-controls input{width:100%}
+@media(max-width:1100px){.wb-toolbar .wb-selectors{flex:1 1 300px}.wb-toolbar .wb-actions{margin-left:auto}.wb-plan-context{flex-basis:200px}}
+@media(max-width:760px){.wb-toolbar .wb-selectors{flex:1 1 100%;flex-wrap:wrap}.wb-toolbar .wb-selectors>label{flex:1 1 130px}.wb-toolbar .wb-selectors>label:last-child{flex:2 1 180px}.wb-toolbar .wb-actions{flex:1 1 100%;margin:0;justify-content:flex-start;flex-wrap:wrap}.wb-plan-context{flex-basis:100%}.wb-canvas-tools{margin-left:0;max-width:100%}.wb-more-body{position:fixed;left:auto;right:12px;top:230px;max-height:calc(100dvh - 245px)}}
+
+.workbench .wb-plan-scope{position:relative;margin:0;font-weight:400}
+.wb-plan-scope>summary{cursor:pointer;color:#7c899e;font-size:11px;white-space:nowrap}
+.wb-plan-scope>.wb-graph-notices{position:absolute;right:0;top:100%;z-index:4;width:min(340px,calc(100vw - 48px));border:1px solid var(--line);border-radius:6px;box-shadow:0 3px 12px #26375315;background:#fff}
+@media(max-width:760px){.wb-plan-scope>.wb-graph-notices{right:auto;left:0;width:min(250px,calc(100vw - 48px))}}
+
+/* Anchor the menu inside the current viewport, including wrapped toolbars. */
+.wb-more-body{position:fixed;right:auto;left:12px;top:100px}

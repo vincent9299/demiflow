@@ -122,7 +122,7 @@
   }
 
   /* C06: single mount/update controller; consumes only GraphModel. */
-  function mount(host, {onSelect = () => {}} = {}) {
+  function mount(host, {onSelect = () => {}, controls = null} = {}) {
     const wrapper = document.createElement('div'); wrapper.className = 'wb-graph-view';
     const toolbar = document.createElement('div'); toolbar.className = 'wb-graph-bar';
     const notices = document.createElement('div'); notices.className = 'wb-graph-notices'; notices.setAttribute('role', 'status');
@@ -143,7 +143,10 @@
     const directionButton=toolButton('改为纵向',()=>{directionChosen=true;direction=direction==='horizontal'?'vertical':'horizontal';if(currentModel){rebuild(currentModel);highlight(currentModel.selected);}});
     const zoomText=document.createElement('span');zoomText.className='wb-zoom-level';zoomText.setAttribute('aria-live','polite');
     toolbar.append(directionButton,zoomText);
-    wrapper.append(toolbar, notices, scroll);
+    if(controls)toolbar.append(controls);
+    const scopeInfo=document.createElement('details');scopeInfo.className='wb-plan-scope';
+    const scopeLabel=document.createElement('summary');scopeLabel.textContent='计划范围';scopeInfo.append(scopeLabel);scopeInfo.hidden=true;
+    toolbar.append(scopeInfo);wrapper.append(toolbar, notices, scroll);
     host.replaceChildren(wrapper);
 
     let layout = null, fingerprint = null, zoomLevel = 1, viewMode = 'readable', direction='horizontal', directionChosen=false, currentModel=null;
@@ -293,6 +296,10 @@
       notices.replaceChildren();
       const list = model.notices || [];
       notices.hidden = list.length === 0;
+      const previewScope=model.choice?.kind==='preview'&&list.length===1;
+      scopeInfo.hidden=!previewScope;
+      if(previewScope)scopeInfo.append(notices);
+      else{scopeInfo.open=false;wrapper.insertBefore(notices,scroll);}
       for (const text of list.slice(0, 6)) {
         const line = document.createElement('div'); line.className = 'wb-graph-notice'; line.textContent = text; notices.append(line);
       }
