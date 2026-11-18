@@ -7,10 +7,11 @@ without repeating confirmed model requests or regrouping a published write.
 import hashlib
 from .contracts.dataflow import NativeJournalCommand, NativeJournalReply
 from .contracts.dataflow_errors import DataflowError
+from .contracts.dataflow_kinds import kinds_with
 from .recovery_contract import document, identity, identifier
 
 SCHEMA='demiflow.native_batch_membership.v1'
-KINDS=frozenset({'embedding','EmbeddingMapOp','SaveLanceOp'})
+KINDS=kinds_with('batch_membership')
 
 
 def bind_contracts(service, graph, physical):

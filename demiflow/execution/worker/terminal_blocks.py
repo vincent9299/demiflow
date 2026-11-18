@@ -16,8 +16,8 @@ def declared_blocks(graph, terminal, bounds):
     incoming = {}
     for edge in graph.edges:
         incoming.setdefault(edge.consumer, []).append(edge.producer)
-    from ..kernels.dataflow import _UNARY_KINDS, _BATCH_KINDS
-    preserving = _UNARY_KINDS | _BATCH_KINDS | {'RepartitionOp', 'RandomShuffleOp', 'RandomizeBlockOrderOp'}
+    from ..contracts.dataflow_kinds import kinds_with
+    preserving = kinds_with('keeps_layout')
     current = terminal
     reorder = None
     seen = set()
