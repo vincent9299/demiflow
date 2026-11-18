@@ -131,3 +131,8 @@
 @media(max-width:1100px){.wb-selectors{flex-basis:auto}.wb-toolbar{align-items:center}.wb-actions{margin-left:auto}.wb-selectors>label{max-width:330px}}
 @media(max-width:950px){.wb-body.wb-detail-open{grid-template-columns:minmax(0,1fr)}.wb-node-panel>.wb-source{height:560px}.wb-graph-tools>.wb-basis{flex-basis:auto}}
 @media(max-width:760px){.wb-toolbar{gap:8px}.wb-selectors{flex-basis:100%;gap:8px}.wb-selectors>label{flex:1 1 140px;max-width:100%}.wb-selectors select{width:100%}.wb-actions{margin:0}.wb-graph{height:clamp(360px,calc(100dvh - 270px),800px)}.wb-graph-tools{flex-wrap:wrap}.wb-graph-tools>div{margin-left:0}.wb-node-panel>.wb-source{height:500px}.wb-more-body{right:auto;left:max(-220px,calc(30px - 50vw))}.wb-operator-heading>.wb-caption{margin-left:0}.wb-operator-sidebar{height:250px}.wb-operator-viewer{height:clamp(420px,70dvh,700px)}}
+
+/* Pipeline source shares the graph context and fills its canvas area. */
+.wb-pipeline-code{min-width:0;padding:16px;border:1px solid var(--border,#d8e0ed);border-radius:10px;max-height:calc(100dvh - 200px);overflow:auto}
+.wb-pipeline-code[hidden],.wb-graph[hidden]{display:none}
+.wb-pipeline-code h3{margin:0 0 10px}.wb-pipeline-text{min-width:0}

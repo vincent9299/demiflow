@@ -70,3 +70,21 @@ def test_snapshot_byte_budget_rejects_without_retaining_large_material():
         cache.put('/root', value)
     assert caught.value.code == 'resource_limit'
     assert cache._bytes == 0 and not cache._entries
+
+
+def test_pipeline_snapshot_obeys_same_project_digest_ttl_and_copy_boundary():
+    now=[0];cache=PreviewSnapshots(ttl=10,clock=lambda:now[0])
+    value, request=specimen()
+    value['_pipeline_detail']=deepcopy(value['_node_details']['occurrence']['implementation'])
+    public=cache.put('/one',value)
+    assert '_pipeline_detail' not in public
+    first=cache.read_pipeline('/one',basis=request['basis'])
+    first['text']='tampered'
+    assert cache.read_pipeline('/one',basis=request['basis'])['text'].startswith('def actual')
+    with pytest.raises(ForgeError, match='preview_expired'):
+        cache.read_pipeline('/two',basis=request['basis'])
+    with pytest.raises(ForgeError, match='does not belong'):
+        cache.read_pipeline('/one',basis=dict(request['basis'],dag_id='different'))
+    now[0]=10
+    with pytest.raises(ForgeError, match='preview_expired'):
+        cache.read_pipeline('/one',basis=request['basis'])

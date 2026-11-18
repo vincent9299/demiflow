@@ -43,7 +43,7 @@ def test_real_nodes_open_matching_function_and_prompt_with_unavailable_tabs_disa
         expect(page.locator('.wb-source-body')).to_contain_text('准确的业务函数正文')
         expect(page.locator('.wb-source-body')).to_contain_text('解析时快照')
         expect(page.locator('.wb-source-tabs').get_by_role('button', name='Prompt', exact=True)).to_be_disabled()
-        expect(page.locator('.wb-source-tabs').get_by_role('button', name='调用点', exact=True)).to_be_disabled()
+        expect(page.locator('.wb-source-tabs').get_by_role('button', name='调用代码', exact=True)).to_be_disabled()
         page.locator('.wb-node').filter(has_text='联合出题').click()
         expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('Prompt 模板 · 联合出题')
         expect(page.locator('.wb-source-body')).to_contain_text('{{ payload | json }}')

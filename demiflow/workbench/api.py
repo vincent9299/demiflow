@@ -81,6 +81,7 @@ GET_FIELDS = {
     'run-context': ({'run_id'}, {'attempt'}),
     'run-tools': (set(), set()),
     'graph': ({'basis_kind'}, {'entry','params','report_digest','run_id','attempt','node_id','node_offset'}),
+    'pipeline-source': ({'graph_binding'}, set()),
     'graph-source': ({'graph_binding','node_id','kind'}, {'resource','logical_node_id','occurrence_id'}),
     'parameter-state': ({'path'}, set()),
     'run-observations': ({'run_id','attempt'}, {'node_id','action_id','cursor','limit'}),
@@ -122,6 +123,7 @@ POST_FIELDS = {
     'audit-check': ({'kind', 'expected_policy'}, {'digest'}),
     'inspect': ({'entry', 'params'}, set()),
     'plan-preview': ({'entry', 'params'}, set()),
+    'plan-pipeline-source': ({'basis'}, set()),
     'plan-node-detail': ({'basis', 'logical_node_id', 'occurrence_id', 'kind'}, set()),
     'run-admission': ({'entry','params'}, {'limits'}),
     'run-request-reconcile': ({'request_id'},set()),
@@ -554,6 +556,10 @@ class Handler(BaseHTTPRequestHandler):
         if name in run_operations.HTTP_POST:
             return run_operations.http_arguments(run_operations.HTTP_POST[name], request)
         _fields(request, POST_FIELDS[name])
+        if name == 'plan-pipeline-source':
+            from demiflow.workbench.graph.preview_snapshots import validate_basis
+            validate_basis(request.get('basis'))
+            return request
         if name == 'plan-node-detail':
             from demiflow.workbench.graph.preview_snapshots import validate_request
             return validate_request(request)
@@ -669,6 +675,9 @@ class Handler(BaseHTTPRequestHandler):
                     for key in ('attempt','node_offset'):
                         if key in args:args[key]=int(args[key])
                     value=get(root,**args)
+                elif url.path == '/api/pipeline-source':
+                    from demiflow.workbench.graph.source_view import pipeline
+                    value=pipeline(root,**query)
                 elif url.path == '/api/graph-source':
                     from demiflow.workbench.graph.source_view import get
                     value=get(root,**query)
@@ -848,9 +857,12 @@ class Handler(BaseHTTPRequestHandler):
                         'config_write' if name in {'parameter-preview','parameters-update'} else
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
-            if name not in {'inspect','plan-preview','plan-node-detail','audit-check','project-check','run-admission'} and not permissions[permission]:
+            if name not in {'inspect','plan-preview','plan-node-detail','plan-pipeline-source','audit-check','project-check','run-admission'} and not permissions[permission]:
                 raise PermissionError('Required run permission is disabled: '+permission)
             request = self._body(name)
+            if name == 'plan-pipeline-source':
+                self._send(self.server.plan_snapshots.read_pipeline(root, **request))
+                return
             if name == 'plan-node-detail':
                 # Immutable, bounded in-process presentation material. Reading
                 # it does not occupy the separate source/compilation worker.

@@ -138,7 +138,7 @@
   function revokeImages() { for (const url of blobs) URL.revokeObjectURL(url); blobs.clear();blobSizes.clear(); mediaBytes = 0; }
   async function api(path, query = {}, body, projectId = workspaceId, options = {}) {
     if (offline) throw new Error('离线报告不能读取工作区或重新检查');
-    const write=!!body&&!['plan-preview','plan-node-detail','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
+    const write=!!body&&!['plan-preview','plan-node-detail','plan-pipeline-source','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
     const cleanup=options.cleanup===true&&path==='analysis-media'&&body?.action==='revoke';
     if(options.range&&!['analysis-output-media','analysis-artifact-media'].includes(path))throw new Error('不支持的媒体 Range 路由');
     const epoch = viewEpoch;

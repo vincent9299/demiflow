@@ -145,7 +145,23 @@ def _prompt_detail(declaration):
                     metadata=metadata[0] if len(metadata) == 1 else {'routes': metadata})
 
 
-def build_plan_details(compiled, *, sources, root):
+def _configuration_detail(node):
+    configuration = safe_json(node.kernel.configuration)
+    public = {k: v for k, v in configuration.items() if k not in {'occurrence_id', 'program'}}
+    title = '算子参数'
+    # This is the public Lance API's immutable scan declaration, not a
+    # pipeline-specific mapping or another input to execution.
+    query = configuration.get('query')
+    if node.kernel.kind == 'lance' and type(query) is dict and type(query.get('fields')) is dict:
+        public = query['fields']
+        title = '读取参数'
+    return material(json.dumps(public, ensure_ascii=False, indent=2, allow_nan=False), language='json',
+        metadata=dict(display_title=title,
+            note='这是引擎编译时已绑定的参数，包含展开后的传参与默认值，不是另一份执行配置；具体写法可在 Pipeline 源码中核对。',
+            engine_configuration=configuration))
+
+
+def build_plan_details(compiled, *, sources, root, callsites=None):
     root = Path(root)
     if len(compiled.graph.nodes) > 256:
         raise ValueError('Plan materials exceed node budget')
@@ -163,14 +179,15 @@ def build_plan_details(compiled, *, sources, root):
                 # A missing material must not discard the actual compiled DAG.
                 details['prompt'] = unavailable(str(exc))
         try:
-            configuration = safe_json(node.kernel.configuration)
-            details['configuration'] = material(json.dumps(configuration, ensure_ascii=False, indent=2, allow_nan=False), language='json')
+            details['configuration'] = _configuration_detail(node)
         except ValueError as exc:
             details['configuration'] = unavailable(str(exc))
-        details['callsite'] = unavailable('编译声明未记录精确调用行；不会按函数名称猜测。')
+        details['callsite'] = (callsites.detail(declaration.source_spec)
+            if callsites is not None and declaration is not None and declaration.source_spec is not None
+            else unavailable('编译声明未记录精确调用行；不会按函数名称猜测。'))
         for kind, detail in details.items():
             size = len(json.dumps(detail, ensure_ascii=False).encode())
-            if size > 128 * 1024 or total + size > 4 * 1024**2 - 65536:
+            if size > 128 * 1024 or total + size > 4 * 1024**2 - 256 * 1024:
                 details[kind] = unavailable('材料超过展示预算。')
                 size = len(json.dumps(details[kind], ensure_ascii=False).encode())
             total += size

@@ -159,9 +159,12 @@ def _preview(root, *, entry, params=None):
                         detail = '所选配置的 arguments 与入口参数不匹配：' + str(exc)[:256]
                     raise ForgeError(detail, code='invalid_request') from exc
                 return function(**arguments)
-            result = capture_pipeline(construct, {})
+            from demiflow.workbench.graph.plan_callsite import SourceCallsites, pipeline_material
+            with SourceCallsites(source_root, sources.digests) as callsites:
+                result = capture_pipeline(construct, {})
             from demiflow.workbench.graph.plan_details import build_plan_details
-            details = build_plan_details(result.compiled, sources=sources.digests, root=source_root)
+            details = build_plan_details(result.compiled, sources=sources.digests, root=source_root, callsites=callsites)
+            pipeline = pipeline_material(source_root, target, sources.digests)
         sources.verify()
         current_params_sha = (hashlib.sha256(read_bounded(ws.validate_parameter_path(root, params), 65536)).hexdigest()
                               if params is not None else None)
@@ -172,7 +175,7 @@ def _preview(root, *, entry, params=None):
                          code='operation_rejected') from exc
     basis = dict(entry=entry, params=params, entry_sha256=entry_sha,
                  params_sha256=params_sha, sources=sources.digests, dag_id=result.compiled.graph.dag_id,
-                 details_sha256=content_digest(details))
+                 details_sha256=content_digest(details), pipeline_sha256=content_digest(pipeline))
     basis['digest'] = content_digest(basis)
     value = dict(format='demiflow.plan_preview.v1', available=True, basis=basis,
                  kind=result.kind, provider=result.provider, entry_completed=False,
@@ -184,6 +187,8 @@ def _preview(root, *, entry, params=None):
         node['source_views'] = {kind: dict(available=detail['availability'] == 'available', reason=detail['reason'])
                                 for kind, detail in details.get(node['occurrence_id'], {}).items()}
     bounded_json(value, 1024**2)
+    value['pipeline_source'] = dict(available=pipeline['availability'] == 'available', path=pipeline['path'])
+    value['_pipeline_detail'] = pipeline
     value['_node_details'] = details
     bounded_json(value, 5 * 1024**2)
     return value

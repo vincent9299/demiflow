@@ -161,3 +161,30 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
     return {**result,'kind':actual_kind,'path':path,'sha256':expected,
             'reason':('source_callsite_only' if node['kind']=='source_call' else 'builtin_callsite_only') if kind=='implementation' and not target else None,
             **_excerpt(text,line,end)}
+
+
+def pipeline(root, *, graph_binding):
+    """Read the entry file from the same current/report/run source authority."""
+    from .model import from_binding
+    from .plan_details import material
+    graph = from_binding(root, graph_binding)
+    entry = graph_binding.get('entry')
+    if type(entry) is not str or ':' not in entry:
+        raise ForgeError('This graph has no bound pipeline entry', code='not_found')
+    path = entry.split(':', 1)[0]
+    expected = graph['sources'].get(path)
+    if expected is None:
+        raise ForgeError('Pipeline entry is outside this graph source closure', code='not_found')
+    historical = graph_binding['basis_kind'] == 'run'
+    if historical:
+        from demiflow.workbench.runs.manager import source
+        text = source(root, graph_binding['run_id'], path)['text']
+    else:
+        text = ws.source_text(root, path, expected_sha256=expected)['text']
+    if hashlib.sha256(text.encode()).hexdigest() != expected:
+        raise ForgeError('Pipeline source differs from graph', code='conflict')
+    result = material(text, language='python', path=path, sha256=expected,
+                      start_line=1, end_line=len(text.splitlines()))
+    return dict(result, format='demiflow.pipeline_source.v1', graph_binding=graph_binding,
+                read_only=True, source_basis='sealed' if historical else
+                'report_bound' if graph_binding['basis_kind']=='report' else 'current')
