@@ -79,6 +79,12 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
         page.set_viewport_size({'width': 780, 'height': 1000})
         expect(operator(page, '联合出题')).to_be_visible()
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.set_viewport_size({'width': 390, 'height': 1000})
+        source_header = page.locator('.wb-operator-viewer .wb-source-header').bounding_box()
+        source_tabs = page.locator('.wb-operator-viewer .wb-source-tabs').bounding_box()
+        assert source_tabs['height'] < 90
+        assert source_tabs['y'] - source_header['y'] - source_header['height'] <= 2
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         page.get_by_role('button', name='检查问题', exact=True).click()
         provenance = page.locator('.wb-checks details').filter(has=page.locator('summary', has_text='当前项目检查与来源'))
         expect(provenance).to_be_visible()
