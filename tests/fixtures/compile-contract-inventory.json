@@ -1,0 +1,3066 @@
+{
+ "class_dispatch": {
+  "execution.native_model_declaration": [
+   "CachedMap",
+   "CachedSyncMap",
+   "EmbeddingMapOp",
+   "LanceLookup",
+   "OperatorLLMMapOp",
+   "PromptActor",
+   "QueueAcknowledge",
+   "QueueProducer",
+   "RawFetch",
+   "RoutedPromptActor",
+   "SaveLanceOp",
+   "SearchWeb",
+   "VectorSearch",
+   "VectorSearchOp"
+  ],
+  "execution.plan_facts": [
+   "AgentMapOp",
+   "AsyncMapOp",
+   "BatchMapOp",
+   "BoundMapOp",
+   "DecodeDocument",
+   "EncodeImage",
+   "LanceLookup",
+   "MapOp",
+   "NativeOperation",
+   "PackPromptInputs",
+   "ParseWikitext",
+   "PromptActor",
+   "QueueAcknowledge",
+   "QueueProducer",
+   "RawFetch",
+   "ReadLocalObject",
+   "SaveLanceOp",
+   "SearchWeb",
+   "SearchWebOp",
+   "StreamLanceSink"
+  ],
+  "planning.compiler": [
+   "AcquisitionCall",
+   "AgentMapOp",
+   "CacheFactory",
+   "DatasourceSource",
+   "FileSource",
+   "ItemsSource",
+   "IterableSource",
+   "KeyedSource",
+   "LanceKeySource",
+   "LanceSource",
+   "MaterializedSource",
+   "NativeOperation",
+   "NativeSearchCall",
+   "ProducerCall",
+   "PromptFactory",
+   "QueueDatasource",
+   "QueueHistoryDatasource",
+   "QueueResultSink",
+   "RangeSource",
+   "RoutedPromptFactory",
+   "SqlSource",
+   "StreamLanceFactory",
+   "StreamPrependOp",
+   "UnionSource"
+  ],
+  "planning.legacy_traits": [
+   "AddColumnOp",
+   "BatchMapOp",
+   "BoundMapOp",
+   "EmbeddingMapOp",
+   "FilterOp",
+   "FlatMapOp",
+   "MapBatchesOp",
+   "MapOp",
+   "MaterializedSource",
+   "OperatorLLMMapOp",
+   "RandomShuffleOp",
+   "RandomizeBlockOrderOp",
+   "RepartitionOp",
+   "SaveLanceOp",
+   "SearchWebOp",
+   "SortOp",
+   "VectorSearchOp"
+  ]
+ },
+ "configuration_access": {
+  "accessor": {
+   "aggregates": [
+    "execution/kernels/aggregate.py"
+   ],
+   "buffer_bytes": [
+    "execution/kernels/operator.py"
+   ],
+   "chunk_bytes": [
+    "execution/kernels/operator.py"
+   ],
+   "column": [
+    "execution/kernels/dataflow.py"
+   ],
+   "columns": [
+    "execution/kernels/dataflow.py"
+   ],
+   "flush_interval": [
+    "execution/kernels/operator.py"
+   ],
+   "fraction": [
+    "execution/kernels/dataflow.py"
+   ],
+   "how": [
+    "execution/kernels/relational.py"
+   ],
+   "keys": [
+    "execution/kernels/ordering.py"
+   ],
+   "max_groups": [
+    "execution/kernels/operator.py"
+   ],
+   "max_rows": [
+    "execution/kernels/relational.py"
+   ],
+   "names": [
+    "execution/kernels/dataflow.py"
+   ],
+   "occurrence_id": [
+    "execution/kernels/dataflow.py"
+   ],
+   "on": [
+    "execution/kernels/operator.py",
+    "execution/kernels/relational.py"
+   ],
+   "output": [
+    "execution/kernels/relational.py"
+   ],
+   "reducer_program": [
+    "execution/kernels/relational.py"
+   ],
+   "right_on": [
+    "execution/kernels/relational.py"
+   ],
+   "suffix": [
+    "execution/kernels/relational.py"
+   ]
+  },
+  "constant": {
+   "FIELD": [
+    "execution/dataflow_publication_budget.py",
+    "execution/kernels/operator.py",
+    "execution/kernels/reducer_memory.py",
+    "execution/kernels/shuffle_order.py",
+    "planning/dataflow_compile.py"
+   ],
+   "KEY": [
+    "execution/dataflow_schema.py"
+   ],
+   "_KEY": [
+    "execution/dataflow_managed_devices.py"
+   ]
+  },
+  "literal": {
+   "actor_binding_version": [
+    "execution/dataflow_shared.py"
+   ],
+   "actor_recovery_rows": [
+    "planning/dataflow_shared.py"
+   ],
+   "ancestor": [
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "arguments": [
+    "execution/dataflow_native_limits.py",
+    "execution/worker/dataflow_graph_runner.py",
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "batch_size": [
+    "execution/dataflow_batch_membership.py",
+    "execution/kernels/operator.py",
+    "planning/dataflow_compile.py"
+   ],
+   "cache": [
+    "execution/dataflow_models.py"
+   ],
+   "cache_namespace": [
+    "execution/kernels/dataflow.py"
+   ],
+   "callable_scope": [
+    "execution/kernels/operator.py",
+    "planning/dataflow_shared.py"
+   ],
+   "concurrency": [
+    "execution/dataflow_model_observations.py",
+    "execution/kernels/operator.py",
+    "planning/dataflow_compile.py",
+    "planning/dataflow_finite_fusion.py",
+    "planning/dataflow_fusion.py",
+    "planning/dataflow_graph_adapter.py",
+    "planning/dataflow_single_worker.py",
+    "planning/dataflow_thread_fusion.py"
+   ],
+   "default_batch_size": [
+    "execution/dataflow_batch_membership.py",
+    "execution/kernels/operator.py"
+   ],
+   "descending": [
+    "execution/kernels/ordering.py"
+   ],
+   "execution": [
+    "execution/dataflow_seal.py",
+    "execution/kernels/operator.py",
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "flush_interval": [
+    "execution/kernels/operator.py",
+    "planning/dataflow_finite_fusion.py",
+    "planning/dataflow_fusion.py",
+    "planning/dataflow_single_worker.py",
+    "planning/dataflow_thread_fusion.py"
+   ],
+   "graph_literal_prefix": [
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "graph_observe": [
+    "execution/worker/dataflow_graph_runner.py",
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "graph_private_tag": [
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "graph_reader": [
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "graph_result": [
+    "execution/dataflow.py",
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "graph_route": [
+    "planning/dataflow_graph_adapter.py",
+    "planning/dataflow_single_worker.py",
+    "planning/dataflow_thread_fusion.py"
+   ],
+   "hard_timeout": [
+    "execution/kernels/operator.py"
+   ],
+   "how": [
+    "execution/kernels/relational_region.py"
+   ],
+   "initial": [
+    "execution/kernels/relational.py"
+   ],
+   "initial_program": [
+    "execution/kernels/relational.py"
+   ],
+   "input_carrier": [
+    "execution/worker/dataflow_graph_runner.py",
+    "planning/dataflow_place.py"
+   ],
+   "inputs": [
+    "execution/kernels/operator.py"
+   ],
+   "keys": [
+    "execution/kernels/block_partition.py",
+    "execution/kernels/operator.py",
+    "execution/kernels/ordering.py"
+   ],
+   "lance_key_source": [
+    "execution/kernels/lance_keys.py"
+   ],
+   "limit": [
+    "execution/kernels/operator.py",
+    "execution/worker/dataflow_graph_runner.py"
+   ],
+   "limits": [
+    "execution/run_context.py",
+    "execution/run_journal.py",
+    "execution/worker/authority.py"
+   ],
+   "limits_explicit": [
+    "execution/run_context.py",
+    "execution/worker/authority.py"
+   ],
+   "managed_http_service_digest": [
+    "execution/dataflow_prompt_service.py"
+   ],
+   "max_batch": [
+    "execution/dataflow_batch_membership.py",
+    "execution/dataflow_embedding_journal.py",
+    "execution/kernels/operator.py"
+   ],
+   "max_requests": [
+    "execution/dataflow_embedding_journal.py",
+    "execution/dataflow_images.py",
+    "execution/dataflow_prompt_journal.py"
+   ],
+   "max_row_bytes": [
+    "execution/kernels/operator.py"
+   ],
+   "max_rows": [
+    "execution/kernels/operator.py"
+   ],
+   "native_key": [
+    "execution/dataflow_fetch.py",
+    "execution/dataflow_search.py"
+   ],
+   "native_operation": [
+    "execution/dataflow.py",
+    "execution/dataflow_fetch.py",
+    "execution/dataflow_producer.py",
+    "execution/dataflow_queue.py",
+    "execution/dataflow_search.py",
+    "planning/dataflow_compile.py"
+   ],
+   "node_id": [
+    "execution/dataflow_models.py"
+   ],
+   "num_blocks": [
+    "execution/kernels/block_partition.py",
+    "execution/kernels/ordering.py",
+    "execution/worker/terminal_blocks.py",
+    "planning/dataflow_compile.py"
+   ],
+   "occurrence_id": [
+    "execution/dataflow_models.py",
+    "execution/kernels/dataflow.py",
+    "execution/kernels/lance_keys.py",
+    "execution/kernels/relational_region.py"
+   ],
+   "on": [
+    "execution/kernels/lance_keys.py",
+    "execution/kernels/relational_region.py",
+    "planning/dataflow_relational_regions.py"
+   ],
+   "output": [
+    "execution/kernels/operator.py"
+   ],
+   "output_carrier": [
+    "execution/kernels/relational.py"
+   ],
+   "outputs": [
+    "execution/kernels/operator.py"
+   ],
+   "partition_id": [
+    "execution/dataflow_sinks.py"
+   ],
+   "payload_columns": [
+    "execution/kernels/lance_keys.py"
+   ],
+   "private_journal": [
+    "execution/dataflow_embedding_journal.py",
+    "execution/dataflow_models.py",
+    "execution/dataflow_prompt_journal.py",
+    "execution/dataflow_routed_prompt.py"
+   ],
+   "program": [
+    "execution/kernels/operator.py",
+    "execution/kernels/recovery_rows.py"
+   ],
+   "prompt_name": [
+    "execution/plan_capture.py"
+   ],
+   "reducer_kwargs": [
+    "execution/kernels/relational.py"
+   ],
+   "response_format": [
+    "execution/dataflow_models.py"
+   ],
+   "right_on": [
+    "execution/kernels/relational_region.py"
+   ],
+   "routes": [
+    "execution/dataflow_model_observations.py",
+    "execution/dataflow_models.py",
+    "execution/dataflow_offline.py",
+    "execution/dataflow_routed_prompt.py"
+   ],
+   "run_id": [
+    "execution/run_context.py",
+    "execution/run_journal.py",
+    "execution/worker/authority.py"
+   ],
+   "seed": [
+    "execution/kernels/dataflow.py"
+   ],
+   "shared_actor": [
+    "execution/dataflow_shared.py",
+    "execution/kernels/operator.py"
+   ],
+   "shuffle": [
+    "execution/kernels/block_partition.py"
+   ],
+   "shuffle_order_version": [
+    "execution/kernels/operator.py"
+   ],
+   "sink_id": [
+    "execution/dataflow_sinks.py"
+   ],
+   "sort": [
+    "execution/kernels/block_partition.py",
+    "execution/kernels/ordering.py"
+   ],
+   "started_at": [
+    "execution/run_context.py",
+    "execution/worker/authority.py"
+   ],
+   "streaming_map": [
+    "execution/dataflow_seal.py",
+    "execution/kernels/operator.py",
+    "planning/dataflow_compile.py",
+    "planning/dataflow_finite_fusion.py",
+    "planning/dataflow_fusion.py",
+    "planning/dataflow_graph_adapter.py",
+    "planning/dataflow_single_worker.py",
+    "planning/dataflow_thread_fusion.py"
+   ],
+   "suffix": [
+    "execution/kernels/relational_region.py"
+   ],
+   "target_num_rows_per_block": [
+    "execution/kernels/block_partition.py"
+   ],
+   "targets": [
+    "planning/dataflow_graph_adapter.py"
+   ],
+   "task_batch_rows": [
+    "execution/kernels/operator.py",
+    "planning/dataflow_place.py"
+   ],
+   "task_group": [
+    "execution/kernels/operator.py",
+    "planning/dataflow_compile.py"
+   ],
+   "task_origin": [
+    "execution/kernels/operator.py"
+   ],
+   "terminal_memory": [
+    "execution/worker/dataflow_graph_runner.py",
+    "planning/dataflow_compile.py",
+    "planning/dataflow_place.py"
+   ],
+   "thread_attempt": [
+    "execution/dataflow.py",
+    "planning/dataflow_place.py"
+   ]
+  },
+  "written": {
+   "actor_binding_version": [
+    "planning/dataflow_shared.py"
+   ],
+   "callable_scope": [
+    "planning/dataflow_compile.py"
+   ],
+   "catch": [
+    "planning/dataflow_compile.py"
+   ],
+   "concurrency": [
+    "planning/dataflow_compile.py"
+   ],
+   "default_batch_size": [
+    "planning/dataflow_compile.py"
+   ],
+   "descending": [
+    "execution/kernels/relational.py"
+   ],
+   "execution": [
+    "planning/dataflow_compile.py"
+   ],
+   "input_carrier": [
+    "planning/dataflow_compile.py"
+   ],
+   "keys": [
+    "execution/kernels/operator.py",
+    "execution/kernels/relational.py"
+   ],
+   "lance_key_source": [
+    "planning/dataflow_compile.py"
+   ],
+   "managed_http_devices": [
+    "execution/dataflow_prompt_service.py"
+   ],
+   "native_key": [
+    "planning/dataflow_compile.py"
+   ],
+   "native_operation": [
+    "planning/dataflow_compile.py"
+   ],
+   "node_id": [
+    "execution/dataflow_routed_prompt.py"
+   ],
+   "num_blocks": [
+    "execution/kernels/operator.py",
+    "planning/dataflow_compile.py"
+   ],
+   "occurrence_id": [
+    "planning/dataflow_compile.py"
+   ],
+   "output_carrier": [
+    "planning/dataflow_compile.py"
+   ],
+   "payload_columns": [
+    "planning/dataflow_compile.py"
+   ],
+   "program": [
+    "planning/dataflow_compile.py"
+   ],
+   "queue_depth": [
+    "planning/dataflow_compile.py"
+   ],
+   "reducer_program": [
+    "planning/dataflow_compile.py"
+   ],
+   "streaming_map": [
+    "planning/dataflow_compile.py"
+   ],
+   "task_batch_rows": [
+    "planning/dataflow_compile.py"
+   ],
+   "task_group": [
+    "planning/dataflow_compile.py"
+   ],
+   "task_origin": [
+    "planning/dataflow_compile.py"
+   ],
+   "terminal_memory": [
+    "planning/dataflow_compile.py"
+   ],
+   "thread_attempt": [
+    "execution/dataflow_seal.py"
+   ]
+  }
+ },
+ "differences": {
+  "ordering_kinds_runtime_minus_compiler": [
+   "RepartitionOp"
+  ],
+  "registered_operators_not_admitted_by_runtime": [
+   "decode_document",
+   "deduplicate",
+   "encode_image",
+   "group_batches",
+   "lance_lookup",
+   "pack_prompt_inputs",
+   "parse_wikitext",
+   "queue_ack",
+   "queue_produce",
+   "raw_fetch",
+   "read_documents",
+   "read_local_object",
+   "register_documents",
+   "register_documents_batch",
+   "save_lance",
+   "search_vectors",
+   "search_web",
+   "stream_prepend"
+  ],
+  "registered_operators_without_traits": [],
+  "runtime_kinds_in_several_sets": {
+   "EmbeddingMapOp": [
+    "batch",
+    "model"
+   ],
+   "RegisterDocumentsBatchOp": [
+    "batch",
+    "model"
+   ],
+   "SaveLanceOp": [
+    "batch",
+    "model"
+   ]
+  },
+  "runtime_kinds_not_registered_anywhere": [
+   "document",
+   "fetch"
+  ],
+  "runtime_kinds_registered_as_sources": [
+   "exclude_keys",
+   "groups",
+   "join",
+   "reduce",
+   "union"
+  ],
+  "runtime_kinds_registered_as_terminals": [
+   "aggregate"
+  ],
+  "traits_for_unregistered_operators": []
+ },
+ "entries": {
+  "aliases": {
+   "ack_queue": "queue_ack",
+   "admit": "deduplicate",
+   "embeddings": "embedding",
+   "enqueue": "queue_produce",
+   "fetch": "raw_fetch",
+   "lookup": "lance_lookup",
+   "prepend": "stream_prepend",
+   "read_object": "read_local_object"
+  },
+  "names_exempt_from_registry": [
+   "cache",
+   "run_stream"
+  ],
+  "preflight_result_discarded": [
+   [
+    "ack_queue",
+    "ack_queue"
+   ],
+   [
+    "admit_rows",
+    "admit"
+   ],
+   [
+    "agentmap_async",
+    "agent"
+   ],
+   [
+    "decode_document",
+    "decode_document"
+   ],
+   [
+    "deduplicate",
+    "deduplicate"
+   ],
+   [
+    "encode_image",
+    "encode_image"
+   ],
+   [
+    "enqueue",
+    "enqueue"
+   ],
+   [
+    "fetch",
+    "fetch"
+   ],
+   [
+    "lookup",
+    "lookup"
+   ],
+   [
+    "lookup_lance",
+    "lookup"
+   ],
+   [
+    "map_cached",
+    "cache"
+   ],
+   [
+    "map_embeddings",
+    "embeddings"
+   ],
+   [
+    "map_prompt",
+    "prompt"
+   ],
+   [
+    "map_prompt_async",
+    "prompt"
+   ],
+   [
+    "parse_wikitext",
+    "parse_wikitext"
+   ],
+   [
+    "prepend",
+    "prepend"
+   ],
+   [
+    "read_documents",
+    "read_documents"
+   ],
+   [
+    "read_object",
+    "read_object"
+   ],
+   [
+    "register_documents",
+    "register_documents"
+   ],
+   [
+    "run_stream",
+    "run_stream"
+   ],
+   [
+    "save_lance",
+    "save_lance"
+   ],
+   [
+    "search_vectors",
+    "search_vectors"
+   ],
+   [
+    "search_web",
+    "search_web"
+   ]
+  ],
+  "preflight_result_used": []
+ },
+ "implicit_inputs": [
+  "planning/dataflow_compile.py::__init__: self.checked = current()",
+  "planning/dataflow_compile.py::capture_chain: executor = getattr(self.request.action, '_dataflow_executor', None)",
+  "planning/dataflow_compile.py::capture_chain: executor = getattr(self.request.action, '_dataflow_executor', None)",
+  "planning/dataflow_compile.py::capture_chain: executor = getattr(self.request.action, '_dataflow_executor', None)",
+  "planning/dataflow_graph_adapter.py::graph_result: journal = execution.request.action.context.journal",
+  "planning/dataflow_graph_adapter.py::validate_graph_replay: bundle = load_sealed_plan(action.context.directory, action.action_id, version='v3')",
+  "planning/dataflow_graph_adapter.py::validate_graph_replay: if action.context.journal.source_binding(action.action_id + '-dataflow-sealed') is None:"
+ ],
+ "predicates": {
+  "AddColumnOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": true
+  },
+  "AgentMapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": true,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "AsyncMapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "BatchMapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": true,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "BoundMapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": true
+  },
+  "DeduplicateOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "DropColumnsOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "EmbeddingMapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": true,
+   "input_finite_complete": true,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": true,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "FilterOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": true
+  },
+  "FlatMapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": true
+  },
+  "LimitOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "MapBatchesOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": true,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "MapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": true
+  },
+  "NoSuchOp": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "OperatorLLMMapOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": true,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "RandomSampleOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "RandomShuffleOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": true,
+   "input_global_ordering": true,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": true,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "RandomizeBlockOrderOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": true,
+   "input_global_ordering": true,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": true,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "ReadDocumentsOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "RegisterDocumentsBatchOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": true,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "RegisterDocumentsOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "RenameColumnsOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "RepartitionOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": true,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": true,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "SaveLanceOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": true,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": true,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "SearchWebOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "SelectColumnsOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": true,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "SortOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": true,
+   "input_global_ordering": true,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": true,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "StreamGroupBatchesOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": true,
+   "task_scoped": false
+  },
+  "StreamPrependOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "VectorSearchOp": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "agent": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "aggregate": {
+   "admitted": true,
+   "aggregate_finish": true,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "collect_summary": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "columns": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "count": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "datasource": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "decode_document": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "deduplicate": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "document": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "embedding": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": true,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": true,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "encode_image": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "exclude_keys": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "fetch": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "file": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "group_batches": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "groups": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "items": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "iter_batches": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "iter_rows": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "iterable": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "join": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "lance": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "lance_lookup": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "materialize": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "materialized": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "no_such_native": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "pack_prompt_inputs": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "parse_wikitext": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "producer": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "prompt": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": true,
+   "ordering_finish": false,
+   "row_call": true,
+   "row_call_uses_slot_instance": true,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "queue": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "queue_ack": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "queue_history": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "queue_produce": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "range": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "raw_fetch": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "read_documents": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "read_local_object": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "reduce": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "register_documents": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "register_documents_batch": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "run_stream": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "save_lance": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "schema": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "search_vectors": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "search_web": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "size_bytes": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "sql": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "stream_prepend": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": true,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "take": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "take_all": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "take_batch": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "union": {
+   "admitted": true,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "write_datasink": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "write_file": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  },
+  "write_lance": {
+   "admitted": false,
+   "aggregate_finish": false,
+   "batch_call": false,
+   "input_finite_complete": false,
+   "input_global_ordering": false,
+   "layout_preserving": false,
+   "native_batch_membership": false,
+   "needs_instance": false,
+   "ordering_finish": false,
+   "row_call": false,
+   "row_call_uses_slot_instance": false,
+   "sealable_without_program_as_transform": false,
+   "stream_group": false,
+   "task_scoped": false
+  }
+ },
+ "tables": {
+  "compiler.finite_complete_kinds": [
+   "AgentMapOp",
+   "EmbeddingMapOp",
+   "OperatorLLMMapOp",
+   "RandomShuffleOp",
+   "RandomizeBlockOrderOp",
+   "RepartitionOp",
+   "SortOp"
+  ],
+  "compiler.native_traits": {
+   "agent": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "decode_document": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "deduplicate": [
+    "adapter",
+    "journaled",
+    "cpu",
+    false
+   ],
+   "embedding": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "encode_image": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "group_batches": [
+    "auto_json",
+    "pure",
+    "cpu",
+    false
+   ],
+   "lance_lookup": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "pack_prompt_inputs": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "parse_wikitext": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "prompt": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "queue_ack": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "queue_produce": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "raw_fetch": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "read_documents": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "read_local_object": [
+    "none",
+    "pure",
+    "io",
+    true
+   ],
+   "register_documents": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "register_documents_batch": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "save_lance": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "search_vectors": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "search_web": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "stream_prepend": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ]
+  },
+  "compiler.ordering_kinds": [
+   "RandomShuffleOp",
+   "RandomizeBlockOrderOp",
+   "SortOp"
+  ],
+  "compiler.traits": {
+   "AddColumnOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "AgentMapOp": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "AsyncMapOp": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ],
+   "BatchMapOp": [
+    "auto_json",
+    "pure",
+    "cpu",
+    false
+   ],
+   "BoundMapOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "DeduplicateOp": [
+    "adapter",
+    "journaled",
+    "cpu",
+    false
+   ],
+   "DropColumnsOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "EmbeddingMapOp": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "FilterOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "FlatMapOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "LimitOp": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ],
+   "MapBatchesOp": [
+    "auto_json",
+    "pure",
+    "cpu",
+    false
+   ],
+   "MapOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "OperatorLLMMapOp": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "RandomSampleOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "RandomShuffleOp": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ],
+   "RandomizeBlockOrderOp": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ],
+   "ReadDocumentsOp": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "RegisterDocumentsBatchOp": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "RegisterDocumentsOp": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "RenameColumnsOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "RepartitionOp": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ],
+   "SaveLanceOp": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ],
+   "SearchWebOp": [
+    "adapter",
+    "journaled",
+    "remote_api",
+    false
+   ],
+   "SelectColumnsOp": [
+    "none",
+    "pure",
+    "cpu",
+    true
+   ],
+   "SortOp": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ],
+   "StreamGroupBatchesOp": [
+    "auto_json",
+    "pure",
+    "cpu",
+    false
+   ],
+   "StreamPrependOp": [
+    "none",
+    "pure",
+    "cpu",
+    false
+   ],
+   "VectorSearchOp": [
+    "adapter",
+    "journaled",
+    "io",
+    false
+   ]
+  },
+  "registry.operators": {
+   "AddColumnOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "AgentMapOp": {
+    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+   },
+   "AsyncMapOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "BatchMapOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "BoundMapOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "DeduplicateOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "DropColumnsOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "EmbeddingMapOp": {
+    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+   },
+   "FilterOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "FlatMapOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "LimitOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "MapBatchesOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "MapOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "OperatorLLMMapOp": {
+    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+   },
+   "RandomSampleOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "RandomShuffleOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.ordering:build_sort_runs"
+   },
+   "RandomizeBlockOrderOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.ordering:build_sort_runs"
+   },
+   "ReadDocumentsOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "RegisterDocumentsBatchOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "RegisterDocumentsOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "RenameColumnsOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "RepartitionOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.ordering:repartition_records"
+   },
+   "SaveLanceOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "SearchWebOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "SelectColumnsOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "SortOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.ordering:build_sort_runs"
+   },
+   "StreamGroupBatchesOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "StreamPrependOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main",
+     "prefix"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "VectorSearchOp": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "agent": {
+    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+   },
+   "decode_document": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "deduplicate": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "embedding": {
+    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+   },
+   "encode_image": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "group_batches": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "lance_lookup": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "pack_prompt_inputs": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "parse_wikitext": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "prompt": {
+    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+   },
+   "queue_ack": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "queue_produce": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "raw_fetch": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "read_documents": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "read_local_object": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "register_documents": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "register_documents_batch": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "save_lance": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_batch"
+   },
+   "search_vectors": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "search_web": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   },
+   "stream_prepend": {
+    "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
+    "inputs": [
+     "main",
+     "prefix"
+    ],
+    "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
+   }
+  },
+  "registry.sources": {
+   "datasource": {
+    "cursor_fields": [
+     "segment",
+     "record"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:TaskReader"
+   },
+   "exclude_keys": {
+    "cursor_fields": [],
+    "reader_symbol": "demiflow.execution.kernels.relational:join_partitions"
+   },
+   "file": {
+    "cursor_fields": [
+     "file_index",
+     "record_index"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:FileReader"
+   },
+   "groups": {
+    "cursor_fields": [],
+    "reader_symbol": "demiflow.execution.kernels.relational:emit_groups"
+   },
+   "items": {
+    "cursor_fields": [
+     "index"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:ItemsReader"
+   },
+   "iterable": {
+    "cursor_fields": [
+     "segment",
+     "record"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:IteratorReader"
+   },
+   "join": {
+    "cursor_fields": [],
+    "reader_symbol": "demiflow.execution.kernels.relational:join_partitions"
+   },
+   "lance": {
+    "cursor_fields": [
+     "version",
+     "fragment_id",
+     "row_offset"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:LanceReader"
+   },
+   "materialized": {
+    "cursor_fields": [
+     "index"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:ItemsReader"
+   },
+   "producer": {
+    "cursor_fields": [
+     "producer_position",
+     "producer_cursor"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:ProducerReader"
+   },
+   "queue": {
+    "cursor_fields": [
+     "claim_ref",
+     "record_index"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:QueueReader"
+   },
+   "queue_history": {
+    "cursor_fields": [
+     "claim_ref",
+     "record_index"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:HistoryReader"
+   },
+   "range": {
+    "cursor_fields": [
+     "next"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:RangeReader"
+   },
+   "reduce": {
+    "cursor_fields": [],
+    "reader_symbol": "demiflow.execution.kernels.relational:reduce_partition"
+   },
+   "sql": {
+    "cursor_fields": [
+     "snapshot_id",
+     "partition",
+     "last_key"
+    ],
+    "reader_symbol": "demiflow.execution.source_readers:SqlReader"
+   },
+   "union": {
+    "cursor_fields": [],
+    "reader_symbol": "demiflow.execution.kernels.relational:union_inputs"
+   }
+  },
+  "registry.terminals": {
+   "aggregate": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "result_kind": "scalar"
+   },
+   "collect_summary": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "result_kind": "rows"
+   },
+   "columns": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "result_kind": "columns"
+   },
+   "count": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "result_kind": "scalar"
+   },
+   "iter_batches": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_batches",
+    "result_kind": "batch_iterator"
+   },
+   "iter_rows": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_rows",
+    "result_kind": "row_iterator"
+   },
+   "materialize": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:materialized_handle",
+    "result_kind": "materialized"
+   },
+   "run_stream": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_rows",
+    "result_kind": "row_iterator"
+   },
+   "schema": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "result_kind": "schema"
+   },
+   "size_bytes": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "result_kind": "scalar"
+   },
+   "take": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "result_kind": "rows"
+   },
+   "take_all": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "result_kind": "rows"
+   },
+   "take_batch": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "result_kind": "batches"
+   },
+   "write_datasink": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "result_kind": "write_result"
+   },
+   "write_file": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "result_kind": "write_result"
+   },
+   "write_lance": {
+    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "result_kind": "write_result"
+   }
+  },
+  "runtime.aggregate_kinds": [
+   "aggregate"
+  ],
+  "runtime.batch_instance_kinds": [
+   "BatchMapOp",
+   "EmbeddingMapOp",
+   "MapBatchesOp",
+   "RegisterDocumentsBatchOp",
+   "SaveLanceOp",
+   "embedding"
+  ],
+  "runtime.batch_kinds": [
+   "BatchMapOp",
+   "EmbeddingMapOp",
+   "MapBatchesOp",
+   "RegisterDocumentsBatchOp",
+   "SaveLanceOp"
+  ],
+  "runtime.batch_membership_kinds": [
+   "EmbeddingMapOp",
+   "SaveLanceOp",
+   "embedding"
+  ],
+  "runtime.instance_kinds": [
+   "AddColumnOp",
+   "AgentMapOp",
+   "AsyncMapOp",
+   "BatchMapOp",
+   "BoundMapOp",
+   "DeduplicateOp",
+   "EmbeddingMapOp",
+   "FilterOp",
+   "FlatMapOp",
+   "MapBatchesOp",
+   "MapOp",
+   "OperatorLLMMapOp",
+   "ReadDocumentsOp",
+   "RegisterDocumentsBatchOp",
+   "RegisterDocumentsOp",
+   "SaveLanceOp",
+   "SearchWebOp",
+   "StreamPrependOp",
+   "VectorSearchOp",
+   "agent",
+   "document",
+   "embedding",
+   "fetch",
+   "prompt"
+  ],
+  "runtime.kernel_kinds": [
+   "AddColumnOp",
+   "AgentMapOp",
+   "AsyncMapOp",
+   "BatchMapOp",
+   "BoundMapOp",
+   "DeduplicateOp",
+   "DropColumnsOp",
+   "EmbeddingMapOp",
+   "FilterOp",
+   "FlatMapOp",
+   "LimitOp",
+   "MapBatchesOp",
+   "MapOp",
+   "OperatorLLMMapOp",
+   "RandomSampleOp",
+   "RandomShuffleOp",
+   "RandomizeBlockOrderOp",
+   "ReadDocumentsOp",
+   "RegisterDocumentsBatchOp",
+   "RegisterDocumentsOp",
+   "RenameColumnsOp",
+   "RepartitionOp",
+   "SaveLanceOp",
+   "SearchWebOp",
+   "SelectColumnsOp",
+   "SortOp",
+   "StreamGroupBatchesOp",
+   "StreamPrependOp",
+   "VectorSearchOp",
+   "agent",
+   "aggregate",
+   "document",
+   "embedding",
+   "exclude_keys",
+   "fetch",
+   "groups",
+   "join",
+   "prompt",
+   "reduce",
+   "union"
+  ],
+  "runtime.model_kinds": [
+   "AgentMapOp",
+   "AsyncMapOp",
+   "DeduplicateOp",
+   "EmbeddingMapOp",
+   "OperatorLLMMapOp",
+   "ReadDocumentsOp",
+   "RegisterDocumentsBatchOp",
+   "RegisterDocumentsOp",
+   "SaveLanceOp",
+   "SearchWebOp",
+   "StreamPrependOp",
+   "VectorSearchOp",
+   "agent",
+   "document",
+   "embedding",
+   "fetch",
+   "prompt"
+  ],
+  "runtime.ordering_kinds": [
+   "RandomShuffleOp",
+   "RandomizeBlockOrderOp",
+   "RepartitionOp",
+   "SortOp"
+  ],
+  "runtime.relational_kinds": [
+   "exclude_keys",
+   "groups",
+   "join",
+   "reduce",
+   "union"
+  ],
+  "runtime.stream_group_kinds": [
+   "StreamGroupBatchesOp"
+  ],
+  "runtime.task_kinds": [
+   "AddColumnOp",
+   "BoundMapOp",
+   "FilterOp",
+   "FlatMapOp",
+   "MapOp"
+  ],
+  "runtime.unary_kinds": [
+   "AddColumnOp",
+   "BoundMapOp",
+   "DropColumnsOp",
+   "FilterOp",
+   "FlatMapOp",
+   "LimitOp",
+   "MapOp",
+   "RandomSampleOp",
+   "RenameColumnsOp",
+   "SelectColumnsOp"
+  ]
+ }
+}
