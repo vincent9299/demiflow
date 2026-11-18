@@ -251,6 +251,14 @@ def compile_kernel_spec(
     definition = registry.get(kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator kind is not registered: " + kind)
+    if type(operation) is NativeOperation:
+        # A native declaration is the name a public entry preflights against. It has no
+        # callable and no typed fields to lower; the entry that declares it appends a typed
+        # operation, and that is what gets lowered. Refuse it here, by name, instead of
+        # failing further down on whichever part of the declaration does not fit a kernel.
+        raise _error("UNSUPPORTED_CAPABILITY",
+                     "native declaration cannot be lowered directly: " + kind
+                     + "; declare it through its Dataset entry, which lowers to a typed operation")
     # Synchronous and streaming plans share one resource/host policy. Retired
     # Ray Data pool controls must not be silently discarded by this compiler.
     from ..data.native_options import validate_stream_native_options

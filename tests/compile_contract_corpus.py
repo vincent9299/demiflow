@@ -482,6 +482,23 @@ CASES = {
     'refuse_depth': lambda c: case(c.rows().join(c.rows().join(c.rows(), on='k'), on='k'), bounds='depth1'),
 }
 
+# A native declaration placed in a plan directly, for each registered native name. The public
+# entries never do this: they preflight the name and append a typed operation.
+def _direct_native(c, name):
+    from demiflow.data.plan import LogicalPlan
+    from demiflow.execution.dataflow_api import make_native_operation
+    base = c.rows()
+    return dict(dataset=None, source=base._source, plan=LogicalPlan((make_native_operation(name, {}, bindings={}),)),
+                kind='take', arguments={'limit': 1})
+
+
+NATIVE_NAMES = ('prompt', 'embedding', 'agent', 'raw_fetch', 'queue_produce', 'queue_ack', 'lance_lookup',
+                'search_vectors', 'search_web', 'deduplicate', 'group_batches', 'stream_prepend', 'save_lance',
+                'register_documents', 'register_documents_batch', 'read_documents', 'pack_prompt_inputs',
+                'read_local_object', 'decode_document', 'encode_image', 'parse_wikitext')
+for _name in NATIVE_NAMES:
+    CASES['native/' + _name] = lambda c, name=_name: _direct_native(c, name)
+
 # Executor defaults: the same plans with and without each stand-in executor.
 for _name, _plan in {
     'map_batches': lambda c: c.rows().map_batches(batch),

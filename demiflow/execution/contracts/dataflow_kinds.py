@@ -16,9 +16,14 @@ A row gives, for one kind name:
               direct callers produce).
 ``roles``     every role the kind has; see ``ROLES``. A registered operator
               with no kernel family is one the kernel factory does not admit:
-              the eighteen native names at the end of the operator rows. The
-              public entries of those names lower to a typed operation, and a
-              directly declared ``NativeOperation`` is refused at compile time.
+              the eighteen native names at the end of the operator rows.
+
+A ``NATIVE`` row is a declaration name: what a public entry preflights against
+before it appends a typed operation, which is what gets lowered and run. The
+compiler refuses a native declaration placed in a plan directly, for all
+twenty-one names, by name. So the symbols and traits of a native row describe
+no lowering that exists today; they are kept because the registry record needs
+them and because the names, and their order, are load-bearing (see below).
 ``operator``  compiler symbol, kernel symbol and input ports, for a registered
               operator. The symbols are strings and are resolved on use.
 ``traits``    default state model, effect, resource role and mergeability a
