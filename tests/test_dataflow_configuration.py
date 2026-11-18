@@ -6,6 +6,7 @@ each kind of defect when one is introduced.
 """
 import logging
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -94,6 +95,28 @@ def test_every_key_a_reader_asks_for_is_explained():
                            'ancestor', 'targets'}                                    # inside graph_result
     assert set(schema.READ_WITHOUT_WRITER) <= read and not set(schema.READ_WITHOUT_WRITER) & written
     assert schema.SEAL_KEYS <= read
+
+
+def test_keys_without_a_writer_are_one_of_two_things(graphs):
+    assert set(schema.HISTORICAL_KEYS) == {'initial', 'initial_program', 'reducer_kwargs'}
+    assert set(schema.UNPRODUCED_KEYS) == {'aggregates', 'cache', 'cache_namespace'}
+    assert not set(schema.HISTORICAL_KEYS) & set(schema.UNPRODUCED_KEYS)
+    root = Path(__file__).resolve().parents[1]
+    relational = (root / 'demiflow/execution/kernels/relational.py').read_text(encoding='utf-8')
+    # The earlier reduce form is read on purpose, and a test holds it.
+    assert 'Legacy sealed plans keep their original' in relational
+    assert all(repr(name)[1:-1] in relational for name in schema.HISTORICAL_KEYS)
+    assert 'def test_legacy_unfinished_reduce_validates_original_grant_without_rewriting_seal' in (
+        root / 'tests/test_runtime_v3_reducer_memory.py').read_text(encoding='utf-8')
+    # No compiled plan reaches the kernels the other keys declare.
+    nodes = [node for graph in graphs.values() for node in graph.nodes]
+    assert not any(set(node.kernel.configuration) & set(schema.READ_WITHOUT_WRITER) for node in nodes)
+    assert {node.kind for node in nodes if node.kernel.kind == 'aggregate'} == {'terminal'}
+    assert not any(node.kernel.kind in ('fetch', 'document') for node in nodes)
+    engine = root / 'demiflow'
+    writers = [path.relative_to(engine).as_posix() for path in sorted(engine.rglob('*.py'))
+               if 'cache_namespace' in path.read_text(encoding='utf-8')]
+    assert writers == ['execution/kernels/dataflow.py', 'planning/dataflow_configuration.py']   # one reader, this schema
 
 
 def _mutate(graph, kernel_kind, change):

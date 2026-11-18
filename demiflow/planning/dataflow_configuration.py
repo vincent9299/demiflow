@@ -191,18 +191,32 @@ SCHEMA_KEY = 'declared_arrow_schema'
 # Written after compilation, when a plan is sealed for thread programs. A newly
 # compiled graph does not carry it yet.
 SEAL_KEYS = frozenset({'thread_attempt'})
-# Keys a kernel reads that no compile stage writes today. Each is a reader without
-# a writer in this tree: an older sealed plan may carry it, or the read is dead.
-# They are listed so that the gap is visible; a newly compiled graph that carried
-# one would be reported.
-READ_WITHOUT_WRITER: Mapping[str, str] = {
-    'initial': 'reduce kernel: inline initial accumulator; a new reduce names reducer_program instead',
-    'initial_program': 'reduce kernel: program holding the initial accumulator',
-    'reducer_kwargs': 'reduce kernel: inline reducer keyword arguments',
-    'aggregates': 'aggregate kernel: inline aggregate declarations; a new aggregate terminal uses action programs',
-    'cache': 'model binding: result-cache declaration',
-    'cache_namespace': 'kernel factory: result-cache namespace of a non-aggregate kernel',
+# Keys a kernel reads that no compile stage writes. They are two different things.
+#
+# The earlier sealed form of a reduce node. A reduce is sealed today as one
+# reducer program that carries its initial accumulator and keyword arguments.
+# Before that, the node carried them inline. The reduce kernel still reads the
+# inline form so that an unfinished run sealed in it is validated against its
+# original grant (kernels/relational.py, "Legacy sealed plans keep their original
+# identity and grant"; pinned by the reducer memory tests).
+HISTORICAL_KEYS: Mapping[str, str] = {
+    'initial': 'inline initial accumulator of a reduce sealed in the earlier form',
+    'initial_program': 'program holding the initial accumulator of a reduce sealed in the earlier form',
+    'reducer_kwargs': 'inline reducer keyword arguments of a reduce sealed in the earlier form',
 }
+# The declaration of a kernel that exists and has unit tests, but that no compile
+# stage produces. No compiled plan can reach these kernels:
+# - the kernel-level aggregate (kernels/aggregate.py): the aggregate terminal of a
+#   compiled plan is computed in the worker terminal from its action program;
+# - the cached-map kernel (dataflow_models.bind_cached_map): map_cached is lowered
+#   as a cache declaration on an ordinary kernel.
+UNPRODUCED_KEYS: Mapping[str, str] = {
+    'aggregates': 'aggregate declarations of the kernel-level aggregate',
+    'cache': 'cache declaration of the cached-map kernel',
+    'cache_namespace': 'what makes the kernel factory choose the cached-map kernel',
+}
+# A newly compiled graph that carried one of either group would be reported.
+READ_WITHOUT_WRITER: Mapping[str, str] = {**HISTORICAL_KEYS, **UNPRODUCED_KEYS}
 
 
 def declared_fields(kind: str):
