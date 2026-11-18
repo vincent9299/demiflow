@@ -15,76 +15,17 @@ from ..execution.contracts.dataflow import (
     SourceDefinition,
     TerminalDefinition,
 )
+from ..execution.contracts.dataflow_kinds import operator_rows
 
-_COMPILE = "demiflow.planning.dataflow_compile:compile_kernel_spec"
-_MODEL_COMPILE = "demiflow.execution.dataflow_models:build_model_factory"
-_UNARY = "demiflow.execution.kernels.dataflow:invoke_unary"
-_BATCH = "demiflow.execution.kernels.dataflow:invoke_batch"
-_ORDER = "demiflow.execution.kernels.ordering:build_sort_runs"
-_REPARTITION = "demiflow.execution.kernels.ordering:repartition_records"
-_MODEL_KERNEL = "demiflow.execution.dataflow_models:bind_model_services"
 _RELATIONAL = "demiflow.execution.kernels.relational:"
 _READERS = "demiflow.execution.source_readers:"
 _TERMINALS = "demiflow.execution.dataflow_terminals:"
 
 # kind -> (compiler_symbol, kernel_symbol, input ports). Every public LogicalOp
 # in demiflow.data.plan is registered exactly once, plus the native declaration
-# kinds produced by make_native_operation. Unary ops take a single ``main``
-# port; StreamPrependOp adds a finite ``prefix`` port ahead of ``main``.
-_OPERATORS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("MapOp", _COMPILE, _UNARY, ("main",)),
-    ("FlatMapOp", _COMPILE, _UNARY, ("main",)),
-    ("MapBatchesOp", _COMPILE, _BATCH, ("main",)),
-    ("BoundMapOp", _COMPILE, _UNARY, ("main",)),
-    ("OperatorLLMMapOp", _MODEL_COMPILE, _MODEL_KERNEL, ("main",)),
-    ("FilterOp", _COMPILE, _UNARY, ("main",)),
-    ("AsyncMapOp", _COMPILE, _UNARY, ("main",)),
-    ("DeduplicateOp", _COMPILE, _UNARY, ("main",)),
-    ("AgentMapOp", _MODEL_COMPILE, _MODEL_KERNEL, ("main",)),
-    ("BatchMapOp", _COMPILE, _BATCH, ("main",)),
-    ("EmbeddingMapOp", _MODEL_COMPILE, _MODEL_KERNEL, ("main",)),
-    ("StreamGroupBatchesOp", _COMPILE, _BATCH, ("main",)),
-    ("StreamPrependOp", _COMPILE, _UNARY, ("main", "prefix")),
-    ("LimitOp", _COMPILE, _UNARY, ("main",)),
-    ("SelectColumnsOp", _COMPILE, _UNARY, ("main",)),
-    ("DropColumnsOp", _COMPILE, _UNARY, ("main",)),
-    ("RenameColumnsOp", _COMPILE, _UNARY, ("main",)),
-    ("AddColumnOp", _COMPILE, _UNARY, ("main",)),
-    ("RandomSampleOp", _COMPILE, _UNARY, ("main",)),
-    ("SortOp", _COMPILE, _ORDER, ("main",)),
-    ("RepartitionOp", _COMPILE, _REPARTITION, ("main",)),
-    ("RandomShuffleOp", _COMPILE, _ORDER, ("main",)),
-    ("RandomizeBlockOrderOp", _COMPILE, _ORDER, ("main",)),
-    ("VectorSearchOp", _COMPILE, _UNARY, ("main",)),
-    ("SearchWebOp", _COMPILE, _UNARY, ("main",)),
-    ("RegisterDocumentsOp", _COMPILE, _UNARY, ("main",)),
-    ("RegisterDocumentsBatchOp", _COMPILE, _BATCH, ("main",)),
-    ("ReadDocumentsOp", _COMPILE, _UNARY, ("main",)),
-    ("SaveLanceOp", _COMPILE, _BATCH, ("main",)),
-    # Native declaration kinds (NativeOperation.kind). Model/acquisition/cache
-    # nodes are assembled inside workers from the sealed CallableSpec factory.
-    ("prompt", _MODEL_COMPILE, _MODEL_KERNEL, ("main",)),
-    ("embedding", _MODEL_COMPILE, _MODEL_KERNEL, ("main",)),
-    ("agent", _MODEL_COMPILE, _MODEL_KERNEL, ("main",)),
-    ("raw_fetch", _COMPILE, _UNARY, ("main",)),
-    ("queue_produce", _COMPILE, _UNARY, ("main",)),
-    ("queue_ack", _COMPILE, _UNARY, ("main",)),
-    ("lance_lookup", _COMPILE, _UNARY, ("main",)),
-    ("search_vectors", _COMPILE, _UNARY, ("main",)),
-    ("search_web", _COMPILE, _UNARY, ("main",)),
-    ("deduplicate", _COMPILE, _UNARY, ("main",)),
-    ("group_batches", _COMPILE, _BATCH, ("main",)),
-    ("stream_prepend", _COMPILE, _UNARY, ("main", "prefix")),
-    ("save_lance", _COMPILE, _BATCH, ("main",)),
-    ("register_documents", _COMPILE, _UNARY, ("main",)),
-    ("register_documents_batch", _COMPILE, _BATCH, ("main",)),
-    ("read_documents", _COMPILE, _UNARY, ("main",)),
-    ("pack_prompt_inputs", _COMPILE, _UNARY, ("main",)),
-    ("read_local_object", _COMPILE, _UNARY, ("main",)),
-    ("decode_document", _COMPILE, _UNARY, ("main",)),
-    ("encode_image", _COMPILE, _UNARY, ("main",)),
-    ("parse_wikitext", _COMPILE, _UNARY, ("main",)),
-)
+# kinds produced by make_native_operation. The rows live in the kind table, with
+# everything else the compiler and the runtime agree on about each kind.
+_OPERATORS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = operator_rows()
 
 # kind -> (reader_symbol, cursor offset fields per C04). Composite relational
 # kinds are computed from their expanded input ports and carry no source cursor.

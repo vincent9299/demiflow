@@ -119,6 +119,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         materialize_memory_limit: int = 64 * 1024 * 1024,
         aggregate_state_max_bytes: int = 8 * 1024 * 1024,
         resource_root=None,
+        diagnostics_root=None,
         usage_callback=None,
         planning_policy=None,
         candidate_execution=None,
@@ -159,6 +160,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         self._spill_paths: set[str] = set()
         self._spill_bytes = 0
         self.resource_root = Path(resource_root or '.').resolve()
+        self.diagnostics_root = Path(diagnostics_root).resolve() if diagnostics_root is not None else None
         self._prompt_coordinators = {}
         self._usage_callback = usage_callback
 

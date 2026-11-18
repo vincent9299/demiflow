@@ -165,7 +165,7 @@ def _preview(root, *, entry, params=None):
                 return function(**arguments)
             from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
             with PlanCallsites(source_root, sources.digests) as callsites:
-                result = capture_pipeline(construct, {})
+                result = capture_pipeline(construct, {}, on_compiled=callsites.bind_compilation)
             from demiflow.workbench.graph.plan_details import build_plan_details
             details = build_plan_details(result.compiled, sources=sources.digests, root=source_root, callsites=callsites, bounds=result.bounds)
             pipeline = pipeline_material(source_root, target, sources.digests)

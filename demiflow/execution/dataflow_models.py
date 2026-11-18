@@ -86,8 +86,8 @@ def _model_profile(resource_role, bounds, concurrency, state, *, operation=None,
     # Native actors carry the same typed records as ordinary kernels. Their
     # codec copies must fit the original stage grant too; input+output alone
     # is not that peak. Keep one planner and every explicit worker constraint.
-    from ..planning.dataflow_compile import _default_profile
-    profile = _default_profile(operation, bounds=bounds, state=state,
+    from ..planning.dataflow_budget import default_profile
+    profile = default_profile(operation, bounds=bounds, state=state,
         codec_workspace=codec_workspace, concurrency=concurrency)
     requests = dict(profile.requests)
     resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
@@ -184,6 +184,31 @@ def build_model_factory(operation: LogicalOp, *, program_ref: ArtifactRef | None
     return KernelSpec(kind=kind, implementation_ref=program_ref, configuration=config, inputs=ports,
                       state=state, effect=effect, resource_role=role, profile=profile,
                       output_bound_bytes=bounds.max_row_bytes, mergeable=False)
+
+
+def lower_prompt_declaration(operation: LogicalOp, declaration, *, program_ref: ArtifactRef | None,
+                             bounds: Bounds) -> KernelSpec:
+    """Lower a validated prompt-factory declaration (map_prompt_async, agentmap_async, typed prompt).
+
+    The declaration carries the native operation and the actor settings. The model
+    kernel is the one build_model_factory freezes; concurrency, the caught
+    exception types and an owned service are settings of the declaration.
+    Registered in execution.dataflow_native.DECLARATION_LOWERINGS; the plan
+    compiler resolves it by symbol and never names this module.
+    """
+    from dataclasses import replace
+    native_op, settings = declaration.constructor_args
+    model = build_model_factory(operation if isinstance(operation, AgentMapOp) else native_op,
+                                program_ref=program_ref, bounds=bounds)
+    # A KernelSpec configuration is frozen strict Json, for which _json_config is the plain copy.
+    configuration = _json_config(model.configuration)
+    configuration.update(concurrency=settings.get('concurrency', 1),
+                         catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
+    model = replace(model, configuration=configuration,
+        profile=_model_profile(model.resource_role, bounds, configuration["concurrency"],
+                               model.state, operation=operation))
+    from .dataflow_prompt_service import service_kernel
+    return service_kernel(model, settings)
 
 
 class _EffectTransport:

@@ -69,13 +69,12 @@ def safe_json(value, *, depth=0, budget=None):
     raise ValueError('配置不是可直接呈现的 JSON')
 
 
-def _implementation(declaration, root, sources):
+def _implementation(declaration, root, sources, prompts):
     spec = declaration.callable_spec
     target = spec.target if spec is not None else None
     identity = declaration.code_identity.get('target', {})
-    prompts = _prompts(spec)
-    if prompts:
-        predicates = [settings['when'] for _, _, _, settings in prompts if type(settings.get('when')) is FunctionType]
+    if prompts.prompts:
+        predicates = [item.predicate for item in prompts.prompts if item.predicate is not None]
         if len(predicates) == 1:
             target = predicates[0]
             path = Path(target.__code__.co_filename)
@@ -123,36 +122,16 @@ def _implementation(declaration, root, sources):
                     sha256=expected, start_line=start, end_line=node.end_lineno, metadata=dict(definition=definition))
 
 
-def _prompts(spec, *, depth=0):
-    from demiflow.data.plan import CallableSpec, OperatorLLMMapOp
-    from demiflow.execution.dataflow_model_factory import PromptFactory, CacheFactory, RoutedPromptFactory
-    from demiflow.operator_llm.model import PromptPack, PromptDefinition
-    if type(spec) is not CallableSpec or depth > 4:
-        return []
-    args = spec.constructor_args
-    if spec.target is CacheFactory and args:
-        return _prompts(args[0], depth=depth + 1)
-    if spec.target is RoutedPromptFactory and args and type(args[0]) is dict and len(args[0]) <= 32:
-        return [(route + '/' + name, definition, operation, settings)
-                for route, child in args[0].items()
-                for name, definition, operation, settings in _prompts(child, depth=depth + 1)]
-    if spec.target is PromptFactory and args:
-        operation = args[0]
-        if type(operation) is OperatorLLMMapOp and type(operation.config) is PromptPack:
-            definition = operation.config.prompt_definitions.get(operation.prompt_name)
-            if type(definition) is PromptDefinition:
-                return [(operation.prompt_name, definition, operation, args[1] if len(args) > 1 and type(args[1]) is dict else {})]
-    return []
-
-
-def _prompt_detail(declaration):
-    definitions = _prompts(declaration.callable_spec)
-    if not definitions:
+def _prompt_detail(prompts):
+    if prompts.state == 'unavailable':
+        return unavailable(prompts.reason)
+    if prompts.state == 'none':
         return unavailable('这个节点没有声明 Prompt。')
     texts, metadata = [], []
-    for name, definition, operation, settings in definitions:
+    for item in prompts.prompts:
+        name, definition = item.name, item.definition
         text = definition.template.source
-        texts.append(text if len(definitions) == 1 else f'### {name}\n\n{text}')
+        texts.append(text if len(prompts.prompts) == 1 else f'### {name}\n\n{text}')
         from demiflow.workbench.definition_contracts import prompt_definition
         contract = prompt_definition(name, dict(version=definition.version, template=text,
             response_schema=definition.response_schema, response_format=definition.response_format,
@@ -162,8 +141,8 @@ def _prompt_detail(declaration):
         metadata.append(safe_json(dict(name=name, version=definition.version, definition=contract,
             model=definition.model.name, transport=definition.model.transport,
             response_format=definition.response_format, response_schema=definition.response_schema,
-            inputs=operation.inputs, output=operation.output, outputs=operation.outputs,
-            max_requests=operation.max_requests, template_sha256=hashlib.sha256(text.encode()).hexdigest())))
+            inputs=item.inputs, output=item.output, outputs=item.outputs,
+            max_requests=item.max_requests, template_sha256=hashlib.sha256(text.encode()).hexdigest())))
     return material('\n\n'.join(texts), language='text',
                     metadata=metadata[0] if len(metadata) == 1 else {'routes': metadata})
 
@@ -193,6 +172,9 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
     root = Path(root)
     if len(compiled.graph.nodes) > 256:
         raise ValueError('Plan materials exceed node budget')
+    if callsites is not None:
+        callsites.check_compilation(compiled.graph)
+    from demiflow.execution.program_materials import program_prompt_materials
     declarations = {d.occurrence_id: d for d in compiled.declarations}
     from .plan_schema import build_schema_details
     schemas = build_schema_details(compiled, bounds=bounds) if bounds is not None else {}
@@ -201,20 +183,20 @@ def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None):
         details = {kind: unavailable('本节点没有已核验的这类材料。') for kind in KINDS}
         declaration = declarations.get(node.occurrence_id)
         if declaration is not None:
-            details['implementation'] = _implementation(declaration, root, sources)
+            prompts = program_prompt_materials(declaration)
+            details['implementation'] = _implementation(declaration, root, sources, prompts)
             spec = declaration.callable_spec
-            prompt_refs = _prompts(spec)
             target = spec.target if spec is not None else None
             details['implementation']['referenced'] = (type(target) is FunctionType
                 or type(target) is type and not target.__module__.startswith('demiflow.')
-                or any(type(settings.get('when')) is FunctionType for _, _, _, settings in prompt_refs))
+                or any(item.predicate is not None for item in prompts.prompts))
             try:
-                details['prompt'] = _prompt_detail(declaration)
+                details['prompt'] = _prompt_detail(prompts)
             except ValueError as exc:
                 # Presentation has a narrower budget than legal execution.
                 # A missing material must not discard the actual compiled DAG.
                 details['prompt'] = unavailable(str(exc))
-            details['prompt']['referenced'] = bool(prompt_refs)
+            details['prompt']['referenced'] = prompts.state != 'none'
         details['callsite'] = (callsites.detail(node.occurrence_id) if callsites is not None
                                else unavailable('这份计划未记录精确 API 调用；不会按函数名猜测。'))
         details['schema'] = schemas.get(node.occurrence_id, unavailable('这份计划未提供 Schema 材料。'))

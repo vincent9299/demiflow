@@ -38,11 +38,15 @@ PUBLIC = {
     'demiflow.execution': {'run_telemetry'},
     'demiflow.execution.artifacts': {'resolve_local_artifact'},
     'demiflow.execution.capabilities': {'VERSION', 'stream_residency'},
+    # Managed host contract: docs/p4-workbench-boundaries-20261118.md.
+    'demiflow.execution.checked': {'CheckedExecution'},
+    'demiflow.execution.local_kernel': {'local_execution'},
     'demiflow.execution.dataflow_stage_facts': {'native_stage_commit', 'iter_native_stage_commits'},
     'demiflow.execution.datafusion': {'DataFusionOptions', 'DataFusionSession'},
     'demiflow.execution.output_watch': {'OutputWatch'},
     'demiflow.execution.payload_limits': {'resolve_payload_bounds', 'stream_limits'},
     'demiflow.execution.plan_capture': {'build_logical_plan_view', 'capture_pipeline'},
+    'demiflow.execution.program_materials': {'program_prompt_materials'},
     'demiflow.execution.plan_facts': {'execution_instances'},
     'demiflow.execution.publication_facts': {
         'PreparedPublicationUnresolved', 'PublicationMismatch', 'admit_prepared_stage',
@@ -51,7 +55,7 @@ PUBLIC = {
     'demiflow.execution.recovery_contract': {
         'MAX_DOCUMENT_BYTES', 'RecoveryContractError', 'document', 'identity'},
     'demiflow.execution.recovery_identity': {'platform_identity'},
-    'demiflow.execution.run_context': {'create_target_absent_binding'},
+    'demiflow.execution.run_context': {'create_target_absent_binding', 'RunContext'},
     'demiflow.execution.run_journal': {'OBSERVATION_COUNT', 'RunJournal'},
     'demiflow.execution.run_reader': {
         'JOURNAL_BYTES', 'RunReadError', 'RunReader', 'open_journal', 'read_run', 'storage_snapshot'},
@@ -64,30 +68,11 @@ PUBLIC = {
         'compile_declared_dag', 'validate_logical_dag', 'validate_physical_execution_plan'},
 }
 
-STEP2 = 'step 2: publication inspection moves to execution.publication_facts'
-STEP3 = 'step 3: bounded read-only journal reader'
-STEP4 = 'step 4: sealed plan view and identity bridge reader'
-STEP5 = 'step 5: single engine launch entry'
-HEAD = 'unreviewed (added after b4396f8): node description should come from the engine'
-
-# (workbench file, engine module, imported name) -> why it is still allowed
-# Added on the newer integration base, audited separately: callsite capture
-# observes compiler frame locals. This presentation seam remains pending; it
-# must not be described as a stable public compiler API or a step 0-4 fix.
-PENDING_IMPORTS = {
-    ('graph/plan_callsite.py', 'demiflow.planning.dataflow_compile', 'capture_graph'): HEAD,
-    ('runs/worker.py', 'demiflow.execution.checked', 'CheckedExecution'): 'step 5: single engine launch entry',
-    ('runs/worker.py', 'demiflow.execution.local_kernel', 'local_execution'): 'step 5: single engine launch entry',
-    ('runs/worker.py', 'demiflow.execution.run_context', 'RunContext'): 'step 5: single engine launch entry',
-    ('graph/plan_details.py', 'demiflow.data.plan', 'CallableSpec'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.data.plan', 'OperatorLLMMapOp'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'CacheFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'PromptFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
-    ('graph/plan_details.py', 'demiflow.execution.dataflow_model_factory', 'RoutedPromptFactory'): 'unreviewed (added after b4396f8): node description should come from the engine',
-}
+# (workbench file, engine module, imported name) -> reason for an existing exception.
+PENDING_IMPORTS = {}
 
 # (workbench file, private attribute) -> exact number of uses still allowed
-PENDING_PRIVATE_ATTRIBUTES = {('runs/worker.py', '_executor'): 3}  # step 5
+PENDING_PRIVATE_ATTRIBUTES = {}
 
 
 # workbench/runs file -> exact number of direct sqlite3.connect calls (step 3)

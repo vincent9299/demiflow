@@ -43,77 +43,39 @@ from ..execution.contracts.dataflow import (
 )
 from ..execution.contracts.dataflow_codec import compute_graph_digest
 from ..execution.contracts.dataflow_errors import DataflowError
+from ..execution.contracts.dataflow_kinds import NATIVE, TYPED, kinds_with, traits_of
 from ..execution.local_kernel import KeyedSource, PlanInput, UnionSource
 from ..execution.recovery_contract import identity
 from ..execution.recovery_identity import describe
-from ..resources.contracts import ResourceProfile
+from .dataflow_budget import (
+    codec_window, default_profile, fit_codec_windows, relational_profile, terminal_budget,
+)
 from .dataflow_registry import operator_registry, source_registry, terminal_registry
 
 _SCHEMA = "demiflow.dataflow_graph.v3"
 _NON_SEMANTIC_FIELDS = frozenset({"runtime_contract", "label", "node_id", "source_dataset"})
-_MODEL_COMPILER = "demiflow.execution.dataflow_models:build_model_factory"
+# The compiler symbol of a kind lowered by compile_kernel_spec itself. Any other
+# registered compiler symbol names the kind's own lowering function:
+#     lower(operation, *, program_ref, bounds) -> KernelSpec
+_GENERIC_LOWERING = "demiflow.planning.dataflow_compile:compile_kernel_spec"
 
 # kind -> (state, effect, resource_role, mergeable). Traits are declarations; the
 # physical planner refines resources. Unknown UDF state is never claimed pure.
-_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
-    "MapOp": ("none", "pure", "cpu", True),
-    "FlatMapOp": ("none", "pure", "cpu", True),
-    "MapBatchesOp": ("auto_json", "pure", "cpu", False),
-    "BoundMapOp": ("none", "pure", "cpu", True),
-    "OperatorLLMMapOp": ("adapter", "journaled", "remote_api", False),
-    "FilterOp": ("none", "pure", "cpu", True),
-    "AsyncMapOp": ("none", "pure", "cpu", False),
-    "DeduplicateOp": ("adapter", "journaled", "cpu", False),
-    "AgentMapOp": ("adapter", "journaled", "remote_api", False),
-    "BatchMapOp": ("auto_json", "pure", "cpu", False),
-    "EmbeddingMapOp": ("adapter", "journaled", "remote_api", False),
-    "StreamGroupBatchesOp": ("auto_json", "pure", "cpu", False),
-    "StreamPrependOp": ("none", "pure", "cpu", False),
-    "LimitOp": ("none", "pure", "cpu", False),
-    "SelectColumnsOp": ("none", "pure", "cpu", True),
-    "DropColumnsOp": ("none", "pure", "cpu", True),
-    "RenameColumnsOp": ("none", "pure", "cpu", True),
-    "AddColumnOp": ("none", "pure", "cpu", True),
-    "RandomSampleOp": ("none", "pure", "cpu", True),
-    "SortOp": ("none", "pure", "cpu", False),
-    "RepartitionOp": ("none", "pure", "cpu", False),
-    "RandomShuffleOp": ("none", "pure", "cpu", False),
-    "RandomizeBlockOrderOp": ("none", "pure", "cpu", False),
-    "VectorSearchOp": ("adapter", "journaled", "io", False),
-    "SearchWebOp": ("adapter", "journaled", "remote_api", False),
-    "RegisterDocumentsOp": ("adapter", "journaled", "io", False),
-    "RegisterDocumentsBatchOp": ("adapter", "journaled", "io", False),
-    "ReadDocumentsOp": ("adapter", "journaled", "io", False),
-    "SaveLanceOp": ("adapter", "journaled", "io", False),
+# Typed operations and native declarations are looked up separately, as before:
+# a NativeOperation that names a typed operation finds no traits and is refused.
+_TRAITS: Mapping[str, tuple[str, str, str, bool]] = traits_of(TYPED)
+_NATIVE_TRAITS: Mapping[str, tuple[str, str, str, bool]] = traits_of(NATIVE)
+# Service declarations whose state hooks and original commit scopes own recovery
+# replace the traits of the operation that carries them. The names are the ones
+# execution.dataflow_native.native_variant reports. A stream write that carries a
+# user predicate has unproven state and is deliberately absent: it is not upgraded.
+_VARIANT_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
+    "producer": ("adapter", "journaled", "io", False),
+    "search": ("adapter", "journaled", "io", False),
+    "stream_write": ("adapter", "journaled", "io", False),
 })
-_NATIVE_TRAITS: Mapping[str, tuple[str, str, str, bool]] = MappingProxyType({
-    "prompt": ("adapter", "journaled", "remote_api", False),
-    "embedding": ("adapter", "journaled", "remote_api", False),
-    "agent": ("adapter", "journaled", "remote_api", False),
-    "raw_fetch": ("adapter", "journaled", "io", False),
-    "queue_produce": ("adapter", "journaled", "io", False),
-    "queue_ack": ("adapter", "journaled", "io", False),
-    "lance_lookup": ("adapter", "journaled", "io", False),
-    "search_vectors": ("adapter", "journaled", "io", False),
-    "search_web": ("adapter", "journaled", "remote_api", False),
-    "deduplicate": ("adapter", "journaled", "cpu", False),
-    "group_batches": ("auto_json", "pure", "cpu", False),
-    "stream_prepend": ("none", "pure", "cpu", False),
-    "save_lance": ("adapter", "journaled", "io", False),
-    "register_documents": ("adapter", "journaled", "io", False),
-    "register_documents_batch": ("adapter", "journaled", "io", False),
-    "read_documents": ("adapter", "journaled", "io", False),
-    "pack_prompt_inputs": ("none", "pure", "cpu", True),
-    "read_local_object": ("none", "pure", "io", True),
-    "decode_document": ("none", "pure", "cpu", True),
-    "encode_image": ("none", "pure", "cpu", True),
-    "parse_wikitext": ("none", "pure", "cpu", True),
-})
-_ORDERING_KINDS = frozenset({"SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp"})
-_FINITE_COMPLETE_KINDS = frozenset({
-    "SortOp", "RandomShuffleOp", "RandomizeBlockOrderOp", "RepartitionOp",
-    "OperatorLLMMapOp", "EmbeddingMapOp", "AgentMapOp",
-})
+_ORDERING_KINDS = kinds_with("global_ordering")
+_FINITE_COMPLETE_KINDS = kinds_with("finite_complete")
 
 
 def _freeze(value: Any) -> Any:
@@ -201,9 +163,10 @@ def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
                 "options": dict(source.options),
                 "connection_factory": describe(source.connection_factory)}
     if isinstance(source, LanceSource):
-        from ..execution.lance_key_source import LanceKeySource
+        from ..execution.dataflow_native import is_key_only
+        key_only = is_key_only(source)
         return {"kind": "lance", "query": describe(source.query),
-                **({"key_only": True} if isinstance(source, LanceKeySource) else {})}
+                **({"key_only": True} if key_only else {})}
     if isinstance(source, MaterializedSource):
         ref = getattr(source.handle, "recovery_reference", None)
         return {"kind": "materialized", "row_count": source.row_count,
@@ -246,78 +209,23 @@ def _source_kind(source: SourcePlan) -> str:
     if isinstance(source, IterableSource):
         return "iterable"
     if isinstance(source, DatasourceSource):
-        from ..execution.queue_source import QueueDatasource
-        from ..execution.queue_history import QueueHistoryDatasource
-        if type(source.datasource) is QueueDatasource:
-            return "queue"
-        if type(source.datasource) is QueueHistoryDatasource:
-            return "queue_history"
-        return "datasource"
+        from ..execution.dataflow_native import datasource_kind
+        return datasource_kind(source.datasource)
     if type(source).__name__ == "_LiteralEmptySource":
         return "literal_empty"
     raise _error("INVALID_CONTRACT", "unknown source plan: " + type(source).__name__)
 
 
-def _payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
-    """Provision codec room in a new plan without enlarging the run budget.
-
-    The old batch + row window can be smaller than one near-limit row's
-    typed-document/JSONL decode. Small nested tuple/list rows also retain
-    Python containers far larger than their encoded bytes: give their codec
-    a 128-KiB default target, in addition to the scalar/bytes copy window.
-    The runtime still measures actual
-    structure and rejects anything that cannot fit the sealed allocation.
-    Small runs retain their original batch/row minimum and may use a smaller
-    codec window, rather than losing all small-row execution capability.
-    """
-    payload = bounds.max_batch_bytes + bounds.max_row_bytes
-    control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
-    available = max(0, bounds.max_resident_bytes - control - metadata_bytes)
-    codec = max(128 * 1024, 6 * bounds.max_row_bytes + 4096)
-    return max(payload, min(codec, available))
-
-
-def _default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none",
-                     codec_workspace=True, concurrency=None) -> ResourceProfile:
-    # The run memory budget covers admitted data, separately from process RSS.
-    # Reserve the same working set used by physical residency, not a fixed
-    # per-stage 64 MiB allowance multiplied by pipeline length.
-    minimum = bounds.max_batch_bytes + bounds.max_row_bytes
-    working_set = _payload_workspace(bounds) if codec_workspace else minimum
-    options = getattr(operation, 'stream_options', None)
-    if concurrency is None:
-        concurrency = getattr(options, 'concurrency', getattr(operation, 'concurrency', 1))
-    working_set *= concurrency
-    minimum *= concurrency
-    if state != "none":
-        owners = concurrency if getattr(options, "callable_scope", None) == "worker" else 1
-        working_set += bounds.max_state_bytes * owners
-        minimum += bounds.max_state_bytes * owners
-    requests = {"cpu_millis": 1000, "memory_bytes": working_set}
-    native = getattr(operation, "native_options", None) if operation is not None else None
-    resources = getattr(native, "worker_resources", None) or {}
-    if isinstance(resources, Mapping):
-        import math
-        if "memory_bytes" in resources:
-            # An explicit worker limit remains authoritative. It must retain
-            # the original payload/state minimum; actual codec admission may
-            # reject a row that cannot fit it, without silently increasing it.
-            if resources["memory_bytes"] < minimum:
-                raise _error("RESOURCE_INFEASIBLE", "worker memory request is below the admitted working set")
-            requests["memory_bytes"] = resources["memory_bytes"]
-        if "cpu" in resources:
-            if resources["cpu"] <= 0:
-                raise _error("RESOURCE_INFEASIBLE", "workers require a positive CPU reservation")
-            requests["cpu_millis"] = math.ceil(resources["cpu"] * 1000)
-        if resources.get("gpu", 0):
-            gpu = resources["gpu"]
-            if not float(gpu).is_integer():
-                raise _error("UNSUPPORTED_CAPABILITY", "fractional GPU sharing is not declared by the device authority")
-            requests["accelerators"] = [{"type": "gpu", "count": int(gpu)}]
-        if resources.get("custom_resources"):
-            requests["custom"] = {key: {"amount": math.ceil(value * 1000), "unit": "milli"}
-                                  for key, value in resources["custom_resources"].items()}
-    return ResourceProfile(requests=requests)
+def _lowering(symbol: str):
+    """Resolve a registered lowering function from its ``module:name`` symbol, on use."""
+    module_name, separator, name = symbol.partition(":")
+    if not separator or not module_name.startswith("demiflow."):
+        raise _error("INVALID_CONTRACT", "lowering symbol is outside the engine: " + symbol)
+    import importlib
+    function = getattr(importlib.import_module(module_name), name, None)
+    if not callable(function):
+        raise _error("INVALID_CONTRACT", "unknown lowering symbol: " + symbol)
+    return function
 
 
 def _input_port(name: str, kind: str) -> InputPort:
@@ -347,28 +255,19 @@ def compile_kernel_spec(
     # Ray Data pool controls must not be silently discarded by this compiler.
     from ..data.native_options import validate_stream_native_options
     validate_stream_native_options(getattr(operation, 'native_options', None))
-    from ..execution.dataflow_model_factory import native_model_declaration, PromptFactory, RoutedPromptFactory, CacheFactory
+    from ..execution.dataflow_model_factory import native_model_declaration
+    from ..execution.dataflow_native import cache_runtime_state, declaration_lowering, model_variant, native_variant
     native_declaration = native_model_declaration(operation)
-    if native_declaration is not None and native_declaration.target is RoutedPromptFactory:
-        from ..execution.dataflow_routed_prompt import compile_routed_prompt
-        return compile_routed_prompt(operation, native_declaration, program_ref=program_ref, bounds=bounds)
-    if native_declaration is not None and native_declaration.target is PromptFactory:
-        from ..execution.dataflow_models import build_model_factory, _model_profile
-        native_op, settings = native_declaration.constructor_args
-        from ..data.plan import AgentMapOp
-        model = build_model_factory(operation if isinstance(operation, AgentMapOp) else native_op,
-                                    program_ref=program_ref, bounds=bounds)
-        configuration = _plain(model.configuration)
-        configuration.update(concurrency=settings.get('concurrency', 1),
-                             catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
-        model = replace(model, configuration=configuration,
-            profile=_model_profile(model.resource_role, bounds, configuration["concurrency"],
-                                   model.state, operation=operation))
-        from ..execution.dataflow_prompt_service import service_kernel
-        return service_kernel(model, settings)
-    if definition.compiler_symbol == _MODEL_COMPILER:
-        from ..execution.dataflow_models import build_model_factory
-        return build_model_factory(operation, program_ref=program_ref, bounds=bounds)
+    # The compiler asks which declaration this is; the classes stay on the execution side.
+    model_kind = model_variant(native_declaration)
+    # A recognised model declaration is lowered by the function registered for it,
+    # and a kind that registers its own lowering is lowered by that function. Both
+    # are resolved from their registered symbols; neither module is named here.
+    declared = declaration_lowering(model_kind)
+    if declared is not None:
+        return _lowering(declared)(operation, native_declaration, program_ref=program_ref, bounds=bounds)
+    if definition.compiler_symbol != _GENERIC_LOWERING:
+        return _lowering(definition.compiler_symbol)(operation, program_ref=program_ref, bounds=bounds)
     traits = (_NATIVE_TRAITS if isinstance(operation, NativeOperation) else _TRAITS).get(kind)
     if traits is None:
         raise _error("UNSUPPORTED_CAPABILITY", "operator traits are not registered: " + kind)
@@ -391,9 +290,8 @@ def compile_kernel_spec(
             from ..execution.kernels.task_scope import function_residency_kind
             state = function_residency_kind(declaration.target, call_args=declaration.call_args,
                                             call_kwargs=declaration.call_kwargs)
-        elif native_declaration is not None and native_declaration.target is CacheFactory:
-            owner = getattr(declaration.target, '__self__', declaration.target)
-            if owner.validate_runtime_state() is not None:
+        elif model_kind == 'cache':
+            if cache_runtime_state(declaration) is not None:
                 # The wrapper's hooks do not make unadapted nested callback
                 # state safe to park and reconstruct within the same attempt.
                 state = 'nonrecoverable'
@@ -414,30 +312,11 @@ def compile_kernel_spec(
         configuration[FIELD] = VERSION
     # Ordinary CPU kernels do not use native services. Importing every native
     # adapter here initializes Lance/Arrow and model modules even for a map.
-    if native_declaration is not None:
-        from ..execution.dataflow_acquisition_call import AcquisitionCall
-        from ..execution.dataflow_producer import ProducerCall
-        if native_declaration is not None and native_declaration.target is AcquisitionCall:
-            configuration['native_operation'] = native_declaration.constructor_args[0]
-            if configuration['native_operation'] == 'acquire':
-                actor = getattr(operation.callable.target, '__self__', operation.callable.target)
-                from ..execution.dataflow_fetch import fetch_declaration_key
-                configuration['native_key'] = fetch_declaration_key(actor)
-        if native_declaration is not None and native_declaration.target is ProducerCall:
-            configuration['native_operation'] = 'producer'
-            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
-        from ..execution.dataflow_search import NativeSearchCall
-        if native_declaration is not None and native_declaration.target is NativeSearchCall:
-            configuration['native_operation'] = 'search'
-            configuration['native_key'] = native_declaration.constructor_args[0]
-            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
-        from ..execution.dataflow_stream_lance import StreamLanceFactory
-        if (native_declaration is not None and native_declaration.target is StreamLanceFactory
-                and native_declaration.constructor_args[1] is None):
-            # This is the verified passive RPC factory, not the original driver
-            # writer object. Its state hooks and original child-commit scopes own
-            # recovery. A user predicate with unproven state is not upgraded here.
-            state, effect, role, mergeable = 'adapter', 'journaled', 'io', False
+    variant = native_variant(operation, native_declaration)
+    if variant is not None:
+        configuration.update(variant.configuration)
+        if variant.name in _VARIANT_TRAITS:
+            state, effect, role, mergeable = _VARIANT_TRAITS[variant.name]
     stream_options = getattr(operation, 'stream_options', None)
     if stream_options is not None:
         configuration.update(streaming_map=True, concurrency=stream_options.concurrency,
@@ -445,7 +324,7 @@ def compile_kernel_spec(
             queue_depth=stream_options.queue_depth,
             catch=[c.__module__ + '.' + c.__qualname__ for c in stream_options.catch])
     inputs = tuple(_input_port(name, kind) for name in definition.inputs)
-    profile = _default_profile(operation, bounds=bounds, state=state)
+    profile = default_profile(operation, bounds=bounds, state=state)
     if profile.requests.get("accelerators"):
         role, mergeable = "gpu", False
     return KernelSpec(
@@ -632,17 +511,19 @@ class _LiteralEmptySource(SourcePlan):
 class _Capture:
     """One bounded preorder traversal building node/edge drafts and declarations."""
 
-    def __init__(self, request: ActionRequest, bounds: Bounds) -> None:
+    def __init__(self, request: ActionRequest, bounds: Bounds, inputs) -> None:
         self.request = request
         self.bounds = bounds
+        # Everything else the capture needs was resolved before it started:
+        # executor defaults and the report bindings (execution.dataflow_compile_inputs).
+        self.defaults = inputs.defaults
+        self.report = inputs.report
         self.nodes: list[GraphNode] = []
         self.edges: list[tuple[int, str, int, str]] = []
         self.declarations: list[tuple[int, ProgramDeclaration]] = []
         self.alias_source: dict[int, int] = {}
         self.alias_op: dict[tuple[int, int], int] = {}
         self.visiting: set[int] = set()
-        from ..execution.checked import current
-        self.checked = current()
         self.report_bindings = []
         self.observation_labels = {}
         # Optional codec targets are not independent hard per-node minima.
@@ -651,114 +532,18 @@ class _Capture:
         self.publication_windows: dict[int, tuple[int, int]] = {}
 
     def _remember_codec_window(self, index, operation=None):
-        resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
-        if 'memory_bytes' in resources:
-            return  # An explicit user grant is never redistributed.
-        kernel = self.nodes[index].kernel
-        if kernel.kind in {'join', 'exclude_keys', 'reduce'}:
-            return  # These kernels own explicit copy/reducer working sets.
-        if kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-            from ..execution.dataflow_models import _model_profile
-            concurrency = kernel.configuration.get('concurrency', 1)
-            expected = _model_profile(kernel.resource_role, self.bounds, concurrency,
-                                      kernel.state, operation=operation)
-            minimum = _model_profile(kernel.resource_role, self.bounds, concurrency,
-                kernel.state, operation=operation, codec_workspace=False).requests['memory_bytes']
-            # Managed-service declarations may refine the accelerator profile;
-            # this planner only redistributes proven default memory slack.
-            matches = kernel.profile.requests['memory_bytes'] == expected.requests['memory_bytes']
-        else:
-            expected = _default_profile(operation, bounds=self.bounds, state=kernel.state)
-            minimum = _default_profile(operation, bounds=self.bounds, state=kernel.state,
-                                       codec_workspace=False).requests['memory_bytes']
-            matches = kernel.profile == expected
-        if not matches:
-            return  # Native models, reducers and other specialized grants retain their authority.
-        target = kernel.profile.requests['memory_bytes']
-        if target > minimum:
-            self.codec_windows[index] = (minimum, target)
-
-    def fit_codec_windows(self):
-        """Share only optional codec slack inside each incremental component.
-
-        Input/output/state and terminal index minima remain fully additive.
-        Finite-complete edges separate natural phases; no source is upgraded to
-        checkpointable and no existing sealed graph is passed through this code.
-        The physical solver still accounts for replicas, hosts and real grants;
-        actual typed codec allocations must still pass the runtime peak guard.
-        """
-        parents = list(range(len(self.nodes)))
-        def owner(index):
-            while parents[index] != index:
-                parents[index] = parents[parents[index]]
-                index = parents[index]
-            return index
-        for producer, _, consumer, port in self.edges:
-            spec = next(p for p in self.nodes[consumer].kernel.inputs if p.name == port)
-            if spec.requirement == 'incremental':
-                parents[owner(consumer)] = owner(producer)
-        groups = {}
-        for index in range(len(self.nodes)):
-            groups.setdefault(owner(index), []).append(index)
-        control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
-        available = self.bounds.max_resident_bytes - control
-        phased_publication = False
-        if self.publication_windows:
-            from fractions import Fraction
-            from ..execution.dataflow_publication_budget import FIELD
-            publication_min = max(v[0] for v in self.publication_windows.values())
-            publication_target = max(v[1] for v in self.publication_windows.values())
-            from ..execution.dataflow_publication_budget import phased
-            phased_publication = all(phased(self.nodes[i].kernel.configuration)
-                                     for i in self.publication_windows)
-            factor = Fraction(1)
-            for members in groups.values():
-                if phased_publication and not set(members).intersection(self.publication_windows):
-                    continue
-                targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
-                minima = {i: self.codec_windows.get(i, (target, target))[0]
-                          for i, target in targets.items()}
-                demand = sum(targets.values()) - sum(minima.values()) + publication_target - publication_min
-                if demand:
-                    factor = min(factor, Fraction(max(0, available - sum(minima.values()) - publication_min), demand))
-            publication = publication_min + int((publication_target - publication_min) * factor)
-            for index in self.publication_windows:
-                node = self.nodes[index]
-                configuration = _plain(node.kernel.configuration)
-                configuration[FIELD]['resident_bytes'] = publication
-                self.nodes[index] = replace(node, kernel=replace(node.kernel, configuration=configuration))
-        for members in groups.values():
-            group_available = available - (publication if self.publication_windows and
-                (not phased_publication or set(members).intersection(self.publication_windows)) else 0)
-            targets = {i: self.nodes[i].kernel.profile.requests['memory_bytes'] for i in members}
-            adjustable = {i: self.codec_windows[i] for i in members if i in self.codec_windows
-                          and self.codec_windows[i][1] == targets[i]}
-            minima = {i: adjustable[i][0] if i in adjustable else targets[i] for i in members}
-            floor, desired = sum(minima.values()), sum(targets.values())
-            if not adjustable or desired <= group_available or floor > group_available:
-                continue
-            slack, demand = group_available - floor, desired - floor
-            for index, (minimum, target) in adjustable.items():
-                memory = minimum + (target - minimum) * slack // demand
-                node = self.nodes[index]
-                kernel = node.kernel
-                configuration = _plain(kernel.configuration)
-                if node.kind == 'terminal' and 'terminal_memory' in configuration:
-                    contract = configuration['terminal_memory']
-                    contract['payload_bytes'] = memory - contract['metadata_bytes']
-                self.nodes[index] = replace(node, kernel=replace(kernel,
-                    configuration=configuration,
-                    profile=replace(kernel.profile, requests={**kernel.profile.requests,
-                        'memory_bytes': memory})))
+        window = codec_window(self.nodes[index].kernel, operation, self.bounds)
+        if window is not None:
+            self.codec_windows[index] = window
 
     def _bind_report(self, index, key):
-        if key is None or self.checked is None:
+        if key is None or self.report is None:
             return
         node = self.nodes[index]
-        observation = self.checked.observations.get(tuple(key), {})
+        reused = self.report.reused(key)
         self.report_bindings.append({"report_node_id": key[1], "report_occurrence": key[2],
             "occurrence_id": node.occurrence_id, "logical_node_id": node.semantic_id,
-            "mode": "reuse" if observation.get("state") == "reused" else "execute"})
+            "mode": "reuse" if reused else "execute"})
 
     def _check_node_budget(self) -> None:
         if len(self.nodes) >= self.bounds.max_nodes:
@@ -807,8 +592,8 @@ class _Capture:
                 index = self._capture_relational(source, path)
             else:
                 index = self._capture_leaf(source, path)
-            if self.checked is not None:
-                self._bind_report(index, self.checked.source_bindings.get(id(source)))
+            if self.report is not None:
+                self._bind_report(index, self.report.source(source))
             self.alias_source[key] = index
             return index
         finally:
@@ -826,7 +611,7 @@ class _Capture:
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=(),
             state="none", effect="pure", resource_role="io",
-            profile=_default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
+            profile=default_profile(None, bounds=self.bounds), output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("source", kernel, semantic, {}, {"source_kind": kind}, None)
@@ -843,8 +628,8 @@ class _Capture:
         child_indices = []
         for binding in bindings:
             if isinstance(source, KeyedSource) and source.kind == "exclude_keys" and binding.port == "left":
-                from ..execution.lance_key_source import LanceKeySource
-                narrowed = LanceKeySource(replace(binding.source.query, columns=tuple(source.on)))
+                from ..execution.dataflow_native import narrow_to_keys
+                narrowed = narrow_to_keys(binding.source, source.on)
                 child = self.capture_chain(narrowed, binding.plan, binding.path)
             else:
                 child = self.capture_chain(binding.source, binding.plan, binding.path)
@@ -860,18 +645,7 @@ class _Capture:
             reducer = replace(reducer, runtime_contract=source.reducer_contract)
         code_identity = _callable_code_identity(reducer) if reducer is not None else {}
         inputs = tuple(_input_port(port, kind) for _, port in child_indices)
-        profile = _default_profile(None, bounds=self.bounds)
-        if kind in ('join', 'exclude_keys'):
-            requests = dict(profile.requests)
-            requests['memory_bytes'] = self.bounds.max_batch_bytes + 6 * self.bounds.max_row_bytes
-            profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
-        reducer_memory = None
-        if kind == 'reduce':
-            from ..execution.kernels.reducer_memory import declare, resident_bytes, FIELD
-            reducer_memory = declare(source.initial, self.bounds)
-            profile = ResourceProfile(requests={**profile.requests,
-                'memory_bytes':resident_bytes(reducer_memory,self.bounds)},
-                limits=profile.limits,requirements=profile.requirements)
+        profile, reducer_memory = relational_profile(kind, source, self.bounds)
         kernel = KernelSpec(
             kind=kind, implementation_ref=None, configuration=_plain(semantic), inputs=inputs,
             state="none", effect="pure", resource_role="cpu",
@@ -879,7 +653,8 @@ class _Capture:
             mergeable=False,
         )
         if reducer_memory is not None:
-            kernel = replace(kernel,configuration={**_plain(kernel.configuration),FIELD:reducer_memory})
+            field, declared = reducer_memory
+            kernel = replace(kernel, configuration={**_plain(kernel.configuration), field: declared})
         if isinstance(source, KeyedSource) and source.kind == "exclude_keys":
             configuration = _plain(kernel.configuration)
             configuration.update(lance_key_source=self.nodes[child_indices[0][0]].occurrence_id,
@@ -912,16 +687,12 @@ class _Capture:
             kernel = compile_kernel_spec(operation, program_ref=None, bounds=self.bounds)
             semantic = _operation_semantic_facts(operation)
             if kernel.kind == 'MapBatchesOp' and not kernel.configuration.get('batch_size'):
-                executor = getattr(self.request.action, '_dataflow_executor', None)
-                local = getattr(executor, '_local_kernel', None)
-                default_batch = getattr(local, 'batch_rows', None) or getattr(executor, '_block_size', None)
+                default_batch = self.defaults.map_batch_size
                 if default_batch is not None:
                     kernel = replace(kernel, configuration={**dict(kernel.configuration),
                         'default_batch_size': int(default_batch)})
             if kernel.kind == 'RandomShuffleOp' and kernel.configuration.get('num_blocks') is None:
-                executor = getattr(self.request.action, '_dataflow_executor', None)
-                local = getattr(executor, '_local_kernel', None)
-                partitions = getattr(local, 'partitions', None)
+                partitions = self.defaults.partitions
                 if partitions is not None:
                     kernel = replace(kernel, configuration={**dict(kernel.configuration),
                         'num_blocks': int(partitions)})
@@ -945,9 +716,7 @@ class _Capture:
                 callable_spec = operation.factory
             from ..execution.kernels.task_scope import TASK_KINDS
             if kernel.kind in TASK_KINDS and not kernel.configuration.get('streaming_map'):
-                executor = getattr(self.request.action, '_dataflow_executor', None)
-                local = getattr(executor, '_local_kernel', None)
-                task_rows = getattr(local, 'batch_rows', None) or 8192
+                task_rows = self.defaults.task_batch_rows
                 state = kernel.state
                 group = self.nodes[index].kernel.configuration.get('task_group')
                 origin = group is None
@@ -956,7 +725,7 @@ class _Capture:
                 kernel = replace(kernel, configuration={**_plain(kernel.configuration),
                     'task_batch_rows': int(task_rows), 'task_group': group, 'task_origin': origin}, state=state,
                     mergeable=kernel.mergeable and state == 'none',
-                    profile=_default_profile(operation, bounds=self.bounds, state=state))
+                    profile=default_profile(operation, bounds=self.bounds, state=state))
             elif kernel.kind in {'SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp', 'RandomSampleOp'}:
                 group = self.nodes[index].kernel.configuration.get('task_group')
                 if group is not None:
@@ -977,8 +746,8 @@ class _Capture:
                 suffix += 1
                 label = base + '#' + str(suffix)
             self.observation_labels[self.nodes[new_index].occurrence_id] = label
-            if self.checked is not None:
-                self._bind_report(new_index, self.checked.operation_bindings.get(id(operation)))
+            if self.report is not None:
+                self._bind_report(new_index, self.report.operation(operation))
             self._add_edge(index, "main", new_index, "main")
             if isinstance(callable_spec, CallableSpec):
                 self.declarations.append((new_index, ProgramDeclaration(
@@ -999,119 +768,23 @@ class _Capture:
         if definition is None:
             raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
         semantic = {"kind": request.kind, "arguments": _plain(request.arguments)}
-        # The first terminal block and its first forest root occupy 3 KiB
-        # while the input/output payload is still resident. Seal both windows
-        # into the original profile; do not borrow half of that payload grant.
-        payload = self.bounds.max_batch_bytes + self.bounds.max_row_bytes
-        # A larger index is optional. Keep the exact control reservation used
-        # by solve_residency and the whole live payload; cap only this new-plan
-        # metadata window by the remaining single-worker space. The original
-        # solver/provider still admit the resulting profile and historical
-        # sealed profiles are never recalculated here.
-        control = max(1, min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 8))
-        metadata = min(self.bounds.max_state_bytes, max(3072, payload // 2),
-                       self.bounds.max_resident_bytes - control - payload)
-        if metadata < 3072:
-            raise _error("RESOURCE_INFEASIBLE", "terminal state budget cannot hold one block and root")
-        # Retain the already promised index capacity. Codec room uses only
-        # remaining capacity, never space borrowed from that index or control.
-        payload = _payload_workspace(self.bounds, metadata_bytes=metadata)
-        profile = _default_profile(None, bounds=self.bounds)
-        profile = replace(profile, requests={**profile.requests, "memory_bytes": payload + metadata})
-        configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
-        native_publication = request.kind in {'write_lance', 'write_file', 'write_datasink'}
-        if request.kind == 'write_datasink':
-            from ..execution.queue_sinks import QueueResultSink
-            # Queue tasks were settled by their original authority already;
-            # this terminal only publishes the result manifest, without Arrow.
-            native_publication = not isinstance(request.sink, QueueResultSink)
-        if native_publication:
-            from ..execution.dataflow_publication_budget import FIELD, SCHEMA
-            # A native consumer can still hold its previous yielded Arrow
-            # batch when asking this generator to decode the next record.
-            configuration[FIELD] = {'schema': SCHEMA,
-                'resident_bytes': _payload_workspace(self.bounds) + self.bounds.max_batch_bytes}
-        finite_producer = self.nodes[producer].kernel
-        phased_publication = (native_publication and finite_producer.effect == 'pure'
-            and bool(finite_producer.inputs)
-            and all(p.requirement == 'finite_complete' for p in finite_producer.inputs))
-        if phased_publication:
-            from ..execution.dataflow_publication_budget import PHASE_SCHEMA
-            configuration[FIELD]['schema'] = PHASE_SCHEMA
-        # A pure completed join can publish immutable typed row artifacts.
-        # Its terminal handles only the original bounded Record references;
-        # native hydration occurs later, under the single driver reservation.
-        # No user UDF/queue callback is placed across this carrier boundary.
-        compact = (request.kind == 'write_lance'
-            and self.nodes[producer].kernel.kind == 'join'
-            # A fused multi-join/reducer region owns a different output
-            # iterator. It retains its current carrier/profile until that
-            # producer explicitly implements this sealed representation.
-            and sum(n.kind == 'relational' for n in self.nodes) == 1
-            and self.nodes[producer].kernel.profile.requests['memory_bytes']
-                + self.bounds.max_batch_bytes + self.bounds.max_row_bytes + control
-                > self.bounds.max_resident_bytes
-            and all(n.kernel.kind in {'items', 'range', 'materialized'}
-                    for n in self.nodes if n.kind == 'source'))
-        if compact:
-            from ..execution.dataflow_publication_budget import PHASE_SCHEMA, REF_CARRIER
-            metadata = min(self.bounds.max_state_bytes, max(3072, self.bounds.max_resident_bytes // 128))
-            payload = min(128 * 1024, max(4096, self.bounds.max_resident_bytes // 64))
-            configuration['terminal_memory'] = {'payload_bytes': payload, 'metadata_bytes': metadata,
-                                                 'carrier': REF_CARRIER}
-            configuration['input_carrier'] = REF_CARRIER
-            configuration[FIELD]['schema'] = PHASE_SCHEMA
-            profile = replace(profile, requests={**profile.requests, 'memory_bytes': payload + metadata})
-            source_node = self.nodes[producer]
-            source_kernel = source_node.kernel
-            memory = min(source_kernel.profile.requests['memory_bytes'], self.bounds.max_resident_bytes - control)
-            self.nodes[producer] = replace(source_node, kernel=replace(source_kernel,
-                configuration={**_plain(source_kernel.configuration), 'output_carrier': REF_CARRIER},
-                profile=replace(source_kernel.profile, requests={**source_kernel.profile.requests,
-                    'memory_bytes': memory})))
-        # A small native terminal can stream ordinary Records with a smaller
-        # resident codec window than the *business* R/B ceilings. This versioned
-        # window accounts actual codec, index and flush peaks before allocation;
-        # it does not promise every R-sized object fits an arbitrarily small M.
-        # The existing durable residency protocol parks the upstream worker,
-        # while the native reservation remains beside the live terminal.
-        bounded_workspace = False
-        if native_publication and not compact:
-            # Default working sets are separate from the public R/B ceilings.
-            # In a constrained run leave two shares for worker codec/index and
-            # three for native input/array/writer copies. Both original runtime
-            # peak guards still reject an indivisible row that cannot fit.
-            publication_min = min(self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
-                                  (self.bounds.max_resident_bytes - control) * 3 // 5)
-            terminal_space = self.bounds.max_resident_bytes - control - publication_min
-            legacy_floor = 2 * (self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
-            if (legacy_floor > self.bounds.max_resident_bytes - control
-                    and 8192 <= terminal_space < profile.requests['memory_bytes']):
-                from ..execution.dataflow_publication_budget import PHASE_SCHEMA, TERMINAL_WORKSPACE
-                bounded_workspace = True
-                configuration[FIELD]['schema'] = PHASE_SCHEMA
-                configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE,
-                                                       'resident_bytes': terminal_space}
-                profile = replace(profile, requests={**profile.requests, 'memory_bytes': terminal_space})
+        budget = terminal_budget(request, self.nodes, producer, bounds=self.bounds, semantic=semantic)
         kernel = KernelSpec(
-            kind=request.kind, implementation_ref=None, configuration=configuration,
+            kind=request.kind, implementation_ref=None, configuration=budget.configuration,
             inputs=(replace(_input_port("main", request.kind), requirement='finite_complete')
-                    if phased_publication else _input_port("main", request.kind),),
+                    if budget.phased_publication else _input_port("main", request.kind),),
             state="none", effect="pure", resource_role="cpu",
-            profile=profile, output_bound_bytes=self.bounds.max_row_bytes,
+            profile=budget.profile, output_bound_bytes=self.bounds.max_row_bytes,
             mergeable=False,
         )
         index = self._add_node("terminal", kernel, semantic, _plain(request.arguments), {}, None)
-        if native_publication:
-            self.publication_windows[index] = (publication_min if bounded_workspace else
-                self.bounds.max_batch_bytes + self.bounds.max_row_bytes,
-                _payload_workspace(self.bounds) + self.bounds.max_batch_bytes)
-        minimum = (payload if compact else self.bounds.max_batch_bytes + self.bounds.max_row_bytes) + metadata
-        if not bounded_workspace and payload + metadata > minimum:
-            self.codec_windows[index] = (minimum, payload + metadata)
-        if self.checked is not None:
+        if budget.publication_window is not None:
+            self.publication_windows[index] = budget.publication_window
+        if budget.codec_window is not None:
+            self.codec_windows[index] = budget.codec_window
+        if self.report is not None:
             key = (request.action.action_id, request.action.action_id, 0)
-            if key in self.checked.observations:
+            if self.report.observed(key):
                 self._bind_report(index, key)
         self._add_edge(producer, "main", index, "main")
         programs = list(request.programs)
@@ -1141,17 +814,25 @@ def _lower_request(request: ActionRequest) -> ActionRequest:
     return request
 
 
-def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
-    """Capture the real source/plan/PlanInput topology into a v3 graph."""
+def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None) -> CompiledDataflow:
+    """Capture the real source/plan/PlanInput topology into a v3 graph.
+
+    ``inputs`` is a ``CompileInputs``: the executor defaults and report bindings
+    this plan is compiled with. When it is not given, it is resolved here once,
+    from the request's action and the current report context.
+    """
     if terminal_registry().get(request.kind) is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     request = _lower_request(request)
-    capture = _Capture(request, bounds)
+    if inputs is None:
+        from ..execution.dataflow_compile_inputs import compile_inputs
+        inputs = compile_inputs(request)
+    capture = _Capture(request, bounds, inputs)
     producer = capture.capture_chain(request.source, request.plan, ())
     terminal = capture.capture_terminal(producer)
     from .dataflow_graph_adapter import decorate_graph_capture
     terminal = decorate_graph_capture(capture, request, terminal=terminal)
-    capture.fit_codec_windows()
+    fit_codec_windows(capture.nodes, capture.edges, capture.codec_windows, capture.publication_windows, bounds)
     # DTO constructors validate identities. Keep integer graph indices private;
     # never construct invalid public DTOs merely to replace their IDs later.
     bound_nodes = tuple(capture.nodes)
@@ -1179,16 +860,32 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow
         terminals=graph.terminals, sources=graph.sources,
     )
     validate_graph(graph, bounds=bounds)
-    return CompiledDataflow(graph=graph, declarations=declarations,
-                            report_bindings=tuple(capture.report_bindings),
-                            observation_labels=capture.observation_labels)
+    # Report-only: silent unless the configuration schema logger is enabled for DEBUG.
+    from .dataflow_configuration import report_configuration
+    report_configuration(graph)
+    compiled = CompiledDataflow(graph=graph, declarations=declarations,
+                                report_bindings=tuple(capture.report_bindings),
+                                observation_labels=capture.observation_labels)
+    if on_compiled is not None:
+        # Final occurrence identities only: graph decoration/shared actors and
+        # validation have finished. No provenance allocation on execution paths.
+        from .dataflow_provenance import compiled_provenance
+        on_compiled(compiled_provenance(graph, sources=capture.alias_source, operations=capture.alias_op))
+    return compiled
 
 
-def lower_action(request: ActionRequest, *, bounds: Bounds) -> CompiledDataflow:
-    """Compile terminal collect/statistics/write semantics into the graph."""
+def lower_action(request: ActionRequest, *, bounds: Bounds, inputs=None, on_compiled=None) -> CompiledDataflow:
+    """Compile terminal collect/statistics/write semantics into the graph.
+
+    The compiler's whole input is ``request``, ``bounds`` and ``inputs``
+    (``execution.dataflow_compile_inputs.CompileInputs``). It reads nothing else
+    from its surroundings; when ``inputs`` is omitted it is resolved once at entry.
+    ``on_compiled`` optionally observes bounded provenance after final validation;
+    it is not a semantic input and its result never enters the compiled contract.
+    """
     definition = terminal_registry().get(request.kind)
     if definition is None:
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     if request.kind == "write_datasink" and request.sink is None:
         raise _error("INVALID_CONTRACT", "write terminal requires a registered sink declaration")
-    return capture_graph(request, bounds=bounds)
+    return capture_graph(request, bounds=bounds, inputs=inputs, on_compiled=on_compiled)

@@ -127,7 +127,8 @@ class LocalExecutionSession:
 def local_execution(*, workers=4, worker_mode=None, partitions=None,
                     batch_rows=8192, memory_bytes=256 * 1024 * 1024,
                     temp_directory=None, native_resources=None, unified_chain=True,
-                    unified_queue_chain=True, planning=None):
+                    unified_queue_chain=True, planning=None, resource_root=None,
+                    diagnostics_root=None, block_size=256):
     """Bind existing Dataset readers to a single-machine partition executor.
 
     Callbacks must be partition-local: no driver side effects or dependence on
@@ -140,6 +141,11 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     omitting planning retains the platform defaults, including 32 workers.
     native_resources optionally tightens native query limits separately from
     Python workers/memory_bytes; shared admission and sampled guards remain.
+    resource_root resolves relative Dataset/Prompt resources (default: cwd).
+    diagnostics_root overrides native diagnostics placement; None retains the
+    current run's diagnostics fallback. Neither option creates a directory here.
+    block_size controls the executor's source blocks independently of batch_rows;
+    its ordinary default remains 256. Managed hosts may explicitly bind both.
     unified_chain selects the platform-side unified Runtime for stream-op
     materialize (fixed-source chain in one managed worker, single native commit
     authority). It defaults to True for the workbench Local stream-materialize
@@ -158,6 +164,8 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     from .executors.local import LocalDatasetExecutor
     from ..planning.policy import parse_platform_planning_policy
     planning_policy = parse_platform_planning_policy(planning)
+    if type(block_size) is not int or block_size < 1:
+        raise ValueError("local_execution block_size must be a positive integer")
     if _current_executor.get() is not None:
         raise ValueError("local_execution cannot replace a bound Pipeline or nested executor")
     options = LocalKernelOptions(workers, "process" if worker_mode is None else worker_mode,
@@ -169,6 +177,8 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     except ImportError as exc:
         raise ImportError("local_execution requires the demiflow cloudpickle dependency") from exc
     executor = LocalDatasetExecutor(workers=workers, local_kernel=options,
+                                    resource_root=resource_root, diagnostics_root=diagnostics_root,
+                                    block_size=block_size,
                                     planning_policy=planning_policy,
                                     unified_chain=unified_chain,
                                     unified_queue_chain=unified_queue_chain)

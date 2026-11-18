@@ -29,12 +29,12 @@ from demiflow.execution.contracts.dataflow import (
     Record,
     RuntimeServices,
 )
+from demiflow.execution.contracts.dataflow_kinds import kinds_with
 
 from .dataflow import (
     KERNEL_KINDS,
     RECORD_MEDIA_TYPE,
     _AGGREGATE_KINDS,
-    _BATCH_KINDS,
     _canonical,
     _cfg,
     _check_stop,
@@ -54,8 +54,10 @@ from .dataflow import (
 IMAGE_VERSION = "demiflow-kernel-image-v3"
 IMAGE_MEDIA_TYPE = "application/x-demiflow-kernel-image-v3"
 _SPOOL_OWNER = "kernel-spool"
-_INSTANCE_KINDS = frozenset({"MapOp", "FlatMapOp", "BoundMapOp", "FilterOp", "AddColumnOp"}) | _BATCH_KINDS | _MODEL_KINDS
-_BATCH_INSTANCE_KINDS = _BATCH_KINDS | {"embedding", "EmbeddingMapOp", "RegisterDocumentsBatchOp", "SaveLanceOp"}
+# Kinds whose kernel constructs and owns a callable instance, and those among
+# them whose instance is called with a batch (roles of the kind table).
+_INSTANCE_KINDS = kinds_with("instance")
+_BATCH_INSTANCE_KINDS = kinds_with("batch_instance")
 
 
 def _segment_rows(services: RuntimeServices) -> int:

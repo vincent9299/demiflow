@@ -179,8 +179,9 @@ def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_pa
         return data.from_items([{'i': i} for i in range(23)]).map(callback, **options)
     original = DataflowCheckpointCoordinator.commit
     cut = {}
-    def interrupt(coordinator, cut_id, *, sinks):
-        image = original(coordinator, cut_id, sinks=sinks)
+    def interrupt(coordinator, cut_id, *, sinks, **forwarded):
+        # The driver also passes native_queue_state; forward whatever the real commit is given.
+        image = original(coordinator, cut_id, sinks=sinks, **forwarded)
         if not image.cut.final and not cut:
             for contribution in image.contributions:
                 for ref in contribution.operator_states.values():
