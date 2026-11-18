@@ -23,9 +23,20 @@ from .model import OperatorLLMResponse, OperatorLLMRequestUsage
 
 
 class CodexExecPromptClient:
-    def __init__(self, model, options, max_requests=None):
+    def __init__(self, model, options, max_requests=None, *, native_journal=None):
         if set(options) - {'codex_exec', 'sqlite_journal', 'timeout_s'}:
             raise ValueError('Unknown Codex execution options')
+        if native_journal is not None:
+            from ..execution.dataflow_model_journal import RemotePromptJournal
+            from ..execution.dataflow_prompt_journal import RemotePrivatePromptJournal
+            if (not isinstance(native_journal, RemotePromptJournal)
+                    or isinstance(native_journal, RemotePrivatePromptJournal)
+                    or native_journal.read_only or type(native_journal.limit) is not int
+                    or native_journal.limit < 0):
+                raise ValueError('Codex native journal requires a writable bounded RemotePromptJournal')
+            if options.get('sqlite_journal'):
+                raise ValueError('Native remote journal cannot coexist with a private Codex journal')
+        self.options = dict(options)
         self.settings = dict(options['codex_exec'])
         if set(self.settings) - {'bin', 'reasoning_effort', 'output_schema', 'web_search',
                                  'image_generation', 'artifact_store', 'max_artifact_files', 'max_artifact_bytes'}:
@@ -67,7 +78,7 @@ class CodexExecPromptClient:
         if self.timeout <= 0:
             raise ValueError('Codex timeout must be positive')
         self.journal = (SQLitePromptJournal(**options['sqlite_journal'], max_requests=max_requests)
-                        if options.get('sqlite_journal') else None)
+                        if options.get('sqlite_journal') else native_journal)
         self.processes = set()
 
     def record(self, request):
@@ -92,7 +103,7 @@ class CodexExecPromptClient:
         collect_artifacts(directory, record, store=self.artifact_store,
                           max_files=self.max_artifact_files, max_bytes=self.max_artifact_bytes)
 
-    def decode(self, request, record, reused=False):
+    def decode(self, request, record, reused=False, refs=None):
         events = []
         malformed = False
         for line in record['stdout'].splitlines():

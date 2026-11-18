@@ -843,10 +843,8 @@ def create_async_operator_llm_client(model: PromptModel, options=None, max_reque
     if options and 'codex_agent' in options:
         raise ValueError('codex_agent transport requires agentmap_async with runtime=codex')
     if options and 'codex_exec' in options:
-        if native_journal is not None:
-            raise ValueError('Codex exec declares its own journal capability; native_journal is not accepted')
         from .codex_exec import CodexExecPromptClient
-        return CodexExecPromptClient(model, options, max_requests)
+        return CodexExecPromptClient(model, options, max_requests, native_journal=native_journal)
     if options and 'offline_store' in options:
         if native_journal is not None:
             from ..execution.dataflow_offline import RemoteOfflinePromptClient
