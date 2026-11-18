@@ -18,7 +18,16 @@
     source_call: '调用入口', source: '数据源', read_table: '读取', write_table: '写出',
     terminal: '写出', map: '自定义算子', join: '关联', filter: '过滤', query: '查询',
     reduce: '聚合', union: '合并',
-    MapOp:'逐行处理',FlatMapOp:'展开',FilterOp:'筛选',prompt:'模型调用',
+    MapOp:'逐行处理',BoundMapOp:'逐行处理',AsyncMapOp:'异步处理',
+    FlatMapOp:'展开',FilterOp:'筛选',prompt:'模型调用',OperatorLLMMapOp:'模型调用',
+    MapBatchesOp:'批量处理',BatchMapOp:'批量处理',StreamGroupBatchesOp:'分组批处理',
+    EmbeddingMapOp:'向量编码',DeduplicateOp:'去重',AgentMapOp:'智能体处理',
+    LimitOp:'截取',SelectColumnsOp:'选择字段',DropColumnsOp:'删除字段',
+    RenameColumnsOp:'重命名字段',AddColumnOp:'新增字段',RandomSampleOp:'抽样',
+    SortOp:'排序',RepartitionOp:'重新分区',RandomShuffleOp:'打乱顺序',
+    RandomizeBlockOrderOp:'打乱批次',VectorSearchOp:'向量检索',SearchWebOp:'网页检索',
+    RegisterDocumentsOp:'登记文档',RegisterDocumentsBatchOp:'批量登记文档',
+    ReadDocumentsOp:'读取文档',StreamPrependOp:'前置数据',
     lance:'固定表读取',write_lance:'写出结果',SaveLanceOp:'固定中间交付',
     materialized:'内存输入',take_all:'读取结果',ReadObjectOp:'读取对象',
   };
@@ -50,7 +59,13 @@
   const jsonKey = parts => JSON.stringify(parts);
   const fail = (reason, detail) => ({available: false, reason, detail: bounded(detail, 512)});
   const reasonText = reason => REASON_TEXT[reason] || String(reason || '未知原因');
-  const kindLabel = kind => KIND_LABEL[kind] || bounded(kind, 40);
+  const kindLabel = kind => KIND_LABEL[kind] || '自定义算子';
+  // Translate platform names only; preserve business-authored labels and UDF names.
+  function displayTitle(name, kind) {
+    if(name===kind||!name)return kindLabel(kind);
+    if(name==='read_lance'&&['lance','read_table'].includes(kind))return '读取数据表';
+    return bounded(name,80);
+  }
 
   class ProjectionError extends Error {
     constructor(reason, detail) { super(detail); this.reason = reason; }
@@ -533,7 +548,7 @@
     const reportId = bridgeEntry ? bridgeEntry.report_node_id
       : (typeof context.nodeMap[node.logicalNodeId] === 'string' ? context.nodeMap[node.logicalNodeId] : null);
     let name = reportName(findReportNode(graph, reportId)) || (reportId ? indexLabel(graph, reportId) : null);
-    if (!name) name = kindLabel(node.kind);
+    name = displayTitle(name, node.kind);
     if (identity.format === 'v3' && sameLogicalCount > 1) name = bounded(name + ' · 第' + ordinal + '次', 80);
     return name;
   }
@@ -821,7 +836,7 @@
         execution: null, previewDigest: value.basis.digest}, occurrences: [],
         // Optional labels are supplied by the compiler's declaration, never joined from AST nodes.
         kindLabel: kindLabel(node.op_kind), title: typeof node.label === 'string' && node.label.trim()
-          && node.label.length <= 256 ? bounded(node.label, 80) : kindLabel(node.op_kind),
+          && node.label.length <= 256 ? displayTitle(node.label, node.op_kind) : kindLabel(node.op_kind),
         summary: [{label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
           + (node.output_ports.join(', ') || '—'), 160), basis: 'compile', reason: null},
           node.data_source ? {label: '版本', value: Number.isInteger(node.data_source.version)

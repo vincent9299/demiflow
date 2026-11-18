@@ -29,10 +29,38 @@
     return {label, tone: unique.includes('failed') ? 'failed' : unique.includes('running') ? 'running' : unique.every(s => ['succeeded', 'reused'].includes(s)) ? 'success' : 'neutral'};
   }
 
+  // Only declared port names carry branch semantics. A plain fan-out does not
+  // imply exclusive conditions or success/failure routes.
+  function portLabel(port, side, target) {
+    if(!port||port==='main')return '';
+    if(side==='input'&&port==='left')return '左侧输入';
+    if(side==='input'&&port==='right')return '右侧输入';
+    if(side==='input'&&/^(0|[1-9][0-9]{0,3})$/.test(port))
+      return (target?.kindLabel==='合并'?'合并输入 ':'输入 ')+(Number(port)+1);
+    const branches={success:'成功分支',error:'错误分支',errors:'错误分支',failure:'失败分支',
+      failed:'失败分支',accepted:'通过分支',rejected:'未通过分支',true:'条件成立',false:'条件不成立'};
+    return side==='output'?(branches[port]||'分支：'+port):'输入：'+port;
+  }
+  function edgeCaption(edge,target) {
+    return [portLabel(edge.fromPort,'output',target),portLabel(edge.toPort,'input',target)].filter(Boolean).join(' → ');
+  }
+  function visibleSummary(card) {
+    return card.summary.filter(line=>!['端口','阶段','出现'].includes(line.label)
+      &&(line.label!=='材料'||line.value?.includes('Prompt'))).slice(0,1);
+  }
+
   /* C05: bounded DAG layering + fork layout, stable in model order, O(V+E). */
-  function layoutGraph(model, {width = 0, nodeWidth = 200, nodeHeight = 116, gapX = 36, gapY = 20, direction = 'horizontal'} = {}) {
+  function layoutGraph(model, {width = 0, nodeWidth = 200, nodeHeight = 100, gapX = 36, gapY = 20, direction = 'horizontal'} = {}) {
     const nodes = model.nodes, edges = model.edges;
     if (nodes.length > MAX_NODES || edges.length > MAX_EDGES) throw new Error('图超过显示预算');
+    // Reserve readable space for declared branch/merge labels in horizontal mode.
+    if(direction==='horizontal'){
+      const cards=new Map(nodes.map(card=>[card.key,card]));
+      for(const edge of edges){
+        const caption=edgeCaption(edge,cards.get(edge.to));
+        if(caption)gapX=Math.max(gapX,Math.min(160,Array.from(caption).reduce((w,ch)=>w+(/[\u1100-\uFFFF]/.test(ch)?12:7),0))+24);
+      }
+    }
     const index = new Map(nodes.map((node, i) => [node.key, i]));
     const incoming = new Array(nodes.length).fill(0);
     const outgoing = Array.from({length: nodes.length}, () => []);
@@ -176,6 +204,13 @@
       return line.label + '：' + line.value;
     }
     function drawEdges(model, pos) {
+      const cards=new Map(model.nodes.map(card=>[card.key,card]));
+      const incoming=new Map(),inputSlots=new Map();
+      for(const edge of model.edges){
+        if(!incoming.has(edge.to))incoming.set(edge.to,[]);
+        incoming.get(edge.to).push(edge);
+      }
+      for(const list of incoming.values())list.forEach((edge,index)=>inputSlots.set(edge,{index,fraction:(index+1)/(list.length+1)}));
       const markerId = 'wb-arrow-' + Math.random().toString(16).slice(2);
       const defs = svg('defs');
       const marker = svg('marker', {id: markerId, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 5, markerHeight: 5, orient: 'auto'});
@@ -192,29 +227,32 @@
         if (!a || !b) continue;
         list.forEach((edge, idx) => {
           const fraction = (idx + 1) / (list.length + 1);
+          const input=inputSlots.get(edge),caption=edgeCaption(edge,cards.get(edge.to));
+          const shownCaption=fitWidth(caption,160,12);
           let d, labelX, labelY;
           if (edge.from === edge.to) {
             const x = a.x + a.width, y = a.y + a.height * fraction;
             d = `M${x} ${y} C${x + 46} ${y - 30},${x + 46} ${y + 30},${x} ${Math.min(a.y + a.height - 8, y + 18)}`;
             labelX = x + 40; labelY = y;
           } else if(direction==='vertical'&&b.y>a.y){
-            const x1=a.x+a.width*fraction,y1=a.y+a.height,x2=b.x+b.width*fraction,y2=b.y,my=(y1+y2)/2;
+            const x1=a.x+a.width*fraction,y1=a.y+a.height,x2=b.x+b.width*input.fraction,y2=b.y,my=(y1+y2)/2;
             d=`M${x1} ${y1} C${x1} ${my},${x2} ${my},${x2} ${y2}`;
-            labelX=(x1+x2)/2+30;labelY=my-5;
+            // Put input labels beside their actual destination, not midway over
+            // unrelated operators crossed by a long branch. Stagger adjacent labels.
+            labelX=x2;labelY=y2-14-(input.index%2)*18;
           } else if (b.x > a.x) {
-            const x1 = a.x + a.width, y1 = a.y + a.height * fraction, x2 = b.x, y2 = b.y + b.height * fraction, mx = (x1 + x2) / 2;
+            const x1 = a.x + a.width, y1 = a.y + a.height * fraction, x2 = b.x, y2 = b.y + b.height * input.fraction, mx = (x1 + x2) / 2;
             d = `M${x1} ${y1} C${mx} ${y1},${mx} ${y2},${x2} ${y2}`;
-            labelX = mx; labelY = (y1 + y2) / 2 - 6;
+            labelX=x2-12-Array.from(shownCaption).reduce((w,ch)=>w+charWidth(ch,12),0)/2;labelY=y2-5;
           } else {
             const x1 = a.x + a.width / 2, y1 = a.y + a.height, x2 = b.x + b.width / 2, y2 = b.y + b.height, dip = Math.max(y1, y2) + 34 + idx * 12;
             d = `M${x1} ${y1} C${x1} ${dip},${x2} ${dip},${x2} ${y2}`;
             labelX = (x1 + x2) / 2; labelY = dip - 4;
           }
           const path = svg('path', {d, class: 'wb-edge wb-edge-' + edge.kind, 'marker-end': 'url(#' + markerId + ')'});
-          path.append(svg('title', {}, (EDGE_LABEL[edge.kind] || edge.kind) + ' · ' + (edge.fromPort || '—') + ' → ' + (edge.toPort || '—')));
+          path.append(svg('title', {}, (EDGE_LABEL[edge.kind] || edge.kind) + (caption?' · '+caption:'')));
           canvas.append(path);
-          if ((edge.fromPort || edge.toPort) && !(edge.fromPort==='main'&&edge.toPort==='main'))
-            canvas.append(svg('text', {x: labelX, y: labelY, class: 'wb-edge-port'}, (edge.fromPort || '—') + '→' + (edge.toPort || '—')));
+          if(caption)canvas.append(svg('text', {x: labelX, y: labelY, class: 'wb-edge-port'}, shownCaption));
         });
       }
     }
@@ -224,8 +262,8 @@
         const group = svg('g', {class: 'wb-node', transform: `translate(${p.x} ${p.y})`, tabindex: 0, role: 'button', 'aria-pressed': 'false'});
         const kindText = svg('text', {x: 14, y: 22, class: 'wb-node-kind'});
         const titleLines = [svg('text', {x: 14, y: 42, class: 'wb-node-title'}), svg('text', {x: 14, y: 60, class: 'wb-node-title'})];
-        const summaryLines = [svg('text', {x: 14, y: 78, class: 'wb-node-summary'}), svg('text', {x: 14, y: 94, class: 'wb-node-summary'})];
-        const stateText = svg('text', {x: 14, y: 110, class: 'wb-node-state'});
+        const summaryLines = [svg('text', {x: 14, y: 78, class: 'wb-node-summary'})];
+        const stateText = svg('text', {x: 14, y: 94, class: 'wb-node-state'});
         const tip = svg('title', {});
         group.append(svg('rect', {width: p.width, height: p.height, rx: 10}), kindText, ...titleLines, ...summaryLines, stateText, tip);
         const activate = () => {if (!disposed) onSelect(card.selection);};
@@ -242,13 +280,14 @@
       el.kindText.textContent = fitWidth(card.kindLabel + (memberCount > 1 ? ' · ×' + memberCount : ''), el.width - 28, 12);
       const titleLines = wrapText(card.title, el.width - 28, 14, 2);
       el.titleLines.forEach((node, i) => {node.textContent = titleLines[i] || '';});
-      el.summaryLines.forEach((node, i) => {node.textContent = fitWidth(summaryText(card.summary[i]), el.width - 28, 12);});
-      el.stateText.textContent = fitWidth((TONE_GLYPH[card.state.tone] || '') + card.state.label, el.width - 28, 12);
+      const summary=visibleSummary(card),preview=currentModel?.choice.kind==='preview';
+      el.summaryLines.forEach((node, i) => {node.textContent = fitWidth(summaryText(summary[i]), el.width - 28, 12);});
+      el.stateText.textContent = preview?'':fitWidth((TONE_GLYPH[card.state.tone] || '') + card.state.label, el.width - 28, 12);
       el.group.dataset.state = card.state.tone;
-      const facts = card.summary.map(summaryText).filter(Boolean);
+      const facts = summary.map(summaryText).filter(Boolean);
       const sealed = card.selection.execution !== null;
       el.group.setAttribute('aria-label', card.title + ' · ' + card.kindLabel + (facts.length ? ' · ' + facts.join(' · ') : '') + ' · ' + card.state.label);
-      el.tip.textContent = card.title + '\n' + card.kindLabel + '\n' + card.selection.key + (memberCount ? '\n成员 ' + memberCount + ' 次出现' : '') + (facts.length ? '\n' + facts.join('\n') : '') + (sealed ? '\n物理 stage/profile/exchange 与恢复限制见节点详情' : '');
+      el.tip.textContent = card.title + '\n' + card.kindLabel + (memberCount>1 ? '\n共 ' + memberCount + ' 次出现' : '') + (facts.length ? '\n' + facts.join('\n') : '') + '\n' + card.state.label + (sealed ? '\n资源与恢复限制见执行详情' : '\n点击查看源码与配置');
     }
     function renderNotices(model) {
       notices.replaceChildren();

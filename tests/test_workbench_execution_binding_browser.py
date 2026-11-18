@@ -84,7 +84,7 @@ def run_selected_flow(page, app, root):
     assert status == 200, graph
     assert graph['binding']['run_id'] == run_id
     assert graph['binding']['attempt'] == shown['attempt']
-    action_id = page.get_by_label('执行 action', exact=True).input_value()
+    action_id = page.get_by_label('执行步骤', exact=True).input_value()
     action = next(item for item in graph['logical']['actions'] if item['action_id'] == action_id)
     assert action['status'] == 'sealed' and action['version'] == 'v3'
     assert action['dag']['schema_version'] == 'demiflow.dataflow_graph.v3'

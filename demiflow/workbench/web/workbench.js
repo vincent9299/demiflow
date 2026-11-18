@@ -285,12 +285,12 @@
       const show=graphValue.binding.basis_kind==='run'&&actions.length>0;
       actionBar.hidden=!show;
       if(!show)return;
-      const items=actions.map(a=>({value:a.action_id,label:String(a.action_id||'无效 action').slice(-12)+' · '+actionStatusLabel(a)+(a.version==='v3'?' · v3':'')}));
+      const items=actions.map((a,index)=>({value:a.action_id,label:'步骤 '+(index+1)+' · '+actionStatusLabel(a)}));
       const chosen=choice.actionId??actions[0]?.action_id;
-      const choiceNode=select('执行 action',items,chosen);
+      const choiceNode=select('执行步骤',items,chosen);
       choiceNode.onchange=()=>{if(disposed||!choiceNode.isConnected)return;actionExplicit=true;state.setGraphView({preference:data().graphPreference,actionId:choiceNode.value,execution:null});paintGraph();afterGraphPaint();};
-      field('action',choiceNode,actionBar);
-      actionBar.append($('span','共 '+view.action_count+' 个 action'+(view.truncated?' · 显示已截断':''),'wb-caption'));
+      field('执行步骤',choiceNode,actionBar);
+      actionBar.append($('span','共 '+view.action_count+' 个步骤'+(view.truncated?' · 显示已截断':''),'wb-caption'));
       const selected=actions.find(a=>a.action_id===chosen);
       if(selected?.status==='sealed'){
         const value=selected.sealed_at;
@@ -476,7 +476,7 @@
       basisLabel.textContent=(model.execution?'封存运行图':g.binding.basis_kind==='report'?'静态检查 · '+g.status+' · 尚无运行执行图':choice.label)+(scopeNode?' · 节点邻域':'');
       paintActionSelector(g,choice);
       paintAdvancedDiagnostics(g,choice,model);
-      graphLegend.textContent=model.execution?(model.execution.format==='v3'?'实线：数据流（精确实例端口）　一实例一节点':'实线：逻辑数据流（标注端口）　×N：同一逻辑节点多次出现'):'这里只展示引擎执行计划；源码调用关系与静态检查报告不会作为替代图。';
+      graphLegend.textContent=model.execution?'箭头表示数据流向；点击算子查看源码与执行详情。':'这里只展示引擎执行计划；源码调用关系与静态检查报告不会作为替代图。';
       return model;
     }
     function afterGraphPaint(){

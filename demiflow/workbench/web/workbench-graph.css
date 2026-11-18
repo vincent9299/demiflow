@@ -29,7 +29,7 @@
 .wb-graph-view .wb-edge-value{stroke:#7295dc;stroke-dasharray:6 4}
 .wb-graph-view .wb-edge-action{stroke:#96a2b8;stroke-dasharray:2 5}
 .wb-graph-view .wb-edge-reference{stroke:#afbbcc;stroke-dasharray:4 5}
-.wb-graph-view .wb-edge-port{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#5b6b86;
+.wb-graph-view .wb-edge-port{font:12px system-ui,-apple-system,"Segoe UI",sans-serif;fill:#5b6b86;
   text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:#fafcff;stroke-width:3px}
 
 .wb-graph-view .wb-node{cursor:pointer}
