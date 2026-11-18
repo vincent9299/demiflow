@@ -84,27 +84,28 @@
 .wb-plan-preview-controls input{display:block;width:100%;box-sizing:border-box;min-width:0;margin-top:4px}
 .wb-plan-preview-controls>.wb-caption{flex-basis:100%;margin:0}
 
-/* The operator directory shares the graph's identity-bound material reader. */
+/* Persistent directory and one shared identity-bound reader. */
 .wb-operators{min-width:0;margin:12px 0 20px}
 .wb-operator-heading{display:flex;align-items:center;gap:10px;margin-bottom:4px}
 .wb-operator-heading h3{margin:0}
-.wb-operators>input[type=search]{width:min(100%,480px);margin:8px 0 12px;padding:8px 12px}
-.wb-operator-list{border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.wb-operator-layout{--operator-height:clamp(420px,calc(100dvh - 350px),900px);display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);gap:16px;align-items:start}
+.wb-operator-sidebar{min-width:0;height:var(--operator-height);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;border:1px solid var(--line);border-radius:8px;background:#fff}
+.wb-operator-sidebar>input[type=search]{position:sticky;top:0;z-index:1;width:calc(100% - 16px);margin:8px;padding:8px 10px;background:#fff}
+.wb-operator-sidebar>.wb-caption{padding:8px 12px}
 .wb-operator-list:empty{display:none}
-.workbench .wb-operator-row{margin:0;border-bottom:1px solid var(--line)}
-.wb-operator-row:last-child{border-bottom:0}
-.wb-operator-row>summary{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;list-style:none;background:#fff}
-.wb-operator-row>summary::-webkit-details-marker{display:none}
-.wb-operator-row>summary:before{content:'›';font-size:20px;line-height:1;color:#7b89a0;flex:0 0 10px;transition:transform .12s}
-.wb-operator-row[open]>summary:before{transform:rotate(90deg)}
-.wb-operator-row>summary:hover{background:#f7f9ff}
-.wb-operator-row>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.wb-operator-row.selected>summary{background:#f0f5ff}
-.wb-operator-number{font:12px ui-monospace,monospace;color:#8792a5;flex:0 0 22px}
-.wb-operator-name{font-size:13px;overflow-wrap:anywhere;flex:1;min-width:0;line-height:1.6}
-.wb-operator-materials{color:#79879c;font-size:11px;min-width:0}
-.wb-operator-content{padding:0 16px 16px;background:#fafbfe;min-width:0}
-.wb-operator-content>.wb-inline-actions{margin:0;padding-top:10px}
-.wb-operator-content .wb-source{background:#fff}
-.wb-operator-content .wb-source-body{max-height:min(65vh,620px)}
-@media(max-width:760px){.wb-operator-row>summary{gap:7px;padding:10px}.wb-operator-row>summary{flex-wrap:wrap}.wb-operator-name{flex-basis:calc(100% - 65px)}.wb-operator-row>summary>.wb-tag{margin-left:39px}.wb-operator-content{padding:0 10px 10px}.wb-operator-content .wb-source-tabs{gap:3px}}
+.workbench .wb-operator-row{display:grid;grid-template-columns:22px minmax(0,1fr);gap:3px 8px;width:100%;margin:0;padding:10px 12px;text-align:left;border:0;border-top:1px solid #eef1f6;border-radius:0;background:#fff;color:inherit;cursor:pointer}
+.wb-operator-row:hover{background:#f7f9ff}
+.wb-operator-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.workbench .wb-operator-row.selected{background:#edf3ff;box-shadow:inset 3px 0 #5d7fda}
+.wb-operator-number{grid-column:1;grid-row:1 / span 3;font:12px/1.8 ui-monospace,monospace;color:#8792a5}
+.wb-operator-name{font-size:13px;overflow-wrap:anywhere;min-width:0;line-height:1.6}
+.wb-operator-row>.wb-tag{grid-column:2;justify-self:start;font-size:10px;padding:0 5px;white-space:normal;overflow-wrap:anywhere}
+.wb-operator-materials{grid-column:2;color:#79879c;font-size:11px;min-width:0}
+.wb-operator-viewer{min-width:0;height:var(--operator-height);display:flex;flex-direction:column}
+.wb-operator-content>.wb-inline-actions{margin:0 0 10px}
+.wb-operator-viewer>.wb-source{margin:0;background:#fff;flex:1;min-height:0;display:flex;flex-direction:column}
+.wb-operator-viewer .wb-source-header,.wb-operator-viewer .wb-source-tabs{flex-shrink:0}
+.wb-operator-viewer .wb-source-body{max-height:none;min-height:0;flex:1}
+.wb-operator-viewer>.wb-caption{padding:24px;border:1px dashed var(--line);border-radius:8px}
+.wb-plan-preview-controls>label{display:grid;grid-template-columns:max-content minmax(0,1fr)}
+@media(max-width:760px){.wb-operator-layout{grid-template-columns:minmax(0,1fr);gap:12px}.wb-operator-sidebar{height:250px}.wb-operator-viewer{height:clamp(420px,70dvh,700px)}.wb-operator-viewer .wb-source-tabs{gap:3px}}

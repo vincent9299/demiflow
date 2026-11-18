@@ -36,33 +36,37 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
         expect(page.locator('.wb-operator-row')).to_have_count(4)
         expect(page.get_by_role('button', name='算子', exact=True)).to_have_attribute('aria-pressed', 'true')
         clean = operator(page, '整理输入')
-        clean.locator(':scope > summary').click()
-        expect(clean.locator('.wb-source-body')).to_contain_text('def clean(row):')
-        expect(clean.locator('.wb-source-body')).to_contain_text('准确的业务函数正文')
-        expect(clean.get_by_role('button', name='Prompt', exact=True)).to_be_disabled()
-        expect(page.locator('.wb-operator-row[open]')).to_have_count(1)
+        before_list = page.locator('.wb-operator-sidebar').bounding_box()
+        clean.click()
+        after_list = page.locator('.wb-operator-sidebar').bounding_box()
+        assert before_list == after_list
+        reader_box = page.locator('.wb-operator-viewer').bounding_box()
+        assert reader_box['x'] >= after_list['x'] + after_list['width']
+        expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('def clean(row):')
+        expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('准确的业务函数正文')
+        expect(page.locator('.wb-operator-viewer').get_by_role('button', name='Prompt', exact=True)).to_be_disabled()
+        expect(page.locator('.wb-operator-row[aria-pressed=true]')).to_have_count(1)
         page.get_by_role('searchbox', name='搜索算子').fill('Prompt')
         expect(page.locator('.wb-operator-row:visible')).to_have_count(1)
         prompt = operator(page, '联合出题')
-        prompt.locator(':scope > summary').focus()
+        prompt.focus()
         page.keyboard.press('Enter')
-        expect(prompt.locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
-        expect(prompt.locator('.wb-prompt-summary')).to_contain_text('请求上限：1')
-        expect(page.locator('.wb-operator-row[open]')).to_have_count(1)
-        prompt.get_by_role('button', name='配置', exact=True).click()
-        expect(prompt.locator('.wb-source-body')).to_contain_text('prompt_name')
-        prompt.get_by_role('button', name='在运行图中定位', exact=True).click()
+        expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('{{ payload | json }}')
+        expect(page.locator('.wb-operator-viewer .wb-prompt-summary')).to_contain_text('请求上限：1')
+        expect(page.locator('.wb-operator-row[aria-pressed=true]')).to_have_count(1)
+        page.locator('.wb-operator-viewer').get_by_role('button', name='配置', exact=True).click()
+        expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('prompt_name')
+        page.locator('.wb-operator-viewer').get_by_role('button', name='在运行图中定位', exact=True).click()
         expect(page.locator('.wb-body')).to_be_visible()
         expect(page.locator('.wb-node').filter(has_text='联合出题')).to_have_attribute('aria-pressed', 'true')
         page.get_by_role('button', name='算子', exact=True).click()
         page.get_by_role('searchbox', name='搜索算子').fill('不存在的算子')
         expect(page.get_by_role('region', name='算子目录')).to_contain_text('没有匹配的算子')
         page.get_by_role('searchbox', name='搜索算子').fill('')
-        # Collapse and reopen, then reload the same compiled selection.
-        if prompt.get_attribute('open') is not None:
-            prompt.locator(':scope > summary').click()
-        prompt.locator(':scope > summary').click()
-        expect(prompt.locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
+        # Switch nodes in place, then reload the same compiled selection.
+        clean.click()
+        prompt.click()
+        expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('{{ payload | json }}')
         # Reload re-compiles against current source. Await the real response,
         # rather than treating the default 5 s DOM assertion as a compiler SLA.
         for _ in range(2):
@@ -71,10 +75,17 @@ def test_directory_real_source_prompt_config_graph_link_reload_and_narrow(origin
             assert restored.value.status == 200, restored.value.text()
             expect(page.locator('.wb-operator-row')).to_have_count(4)
             expect(page.get_by_role('button', name='算子', exact=True)).to_have_attribute('aria-pressed', 'true')
-            expect(operator(page, '联合出题').locator('.wb-source-body')).to_contain_text('{{ payload | json }}')
+            expect(page.locator('.wb-operator-viewer .wb-source-body')).to_contain_text('{{ payload | json }}')
         page.set_viewport_size({'width': 780, 'height': 1000})
-        expect(operator(page, '联合出题').locator(':scope > summary')).to_be_visible()
+        expect(operator(page, '联合出题')).to_be_visible()
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.get_by_role('button', name='检查问题', exact=True).click()
+        provenance = page.locator('.wb-checks details').filter(has=page.locator('summary', has_text='当前项目检查与来源'))
+        expect(provenance).to_be_visible()
+        page.get_by_role('button', name='算子', exact=True).click()
+        expect(provenance).to_be_hidden()
+        page.get_by_role('button', name='读图与配置', exact=True).click()
+        expect(provenance).to_be_hidden()
         assert not errors
         assert all(url.endswith(('/plan-preview', '/plan-node-detail'))
                    for method, url in requests if method == 'POST')
@@ -109,14 +120,14 @@ def test_directory_configuration_switch_clears_old_rows_and_keeps_tab(tmp_path, 
             assert compiled.value.status == 200, compiled.value.text()
             expect(page.locator('.wb-operator-row')).to_have_count(expected)
             if name == 'extra.json':
-                operator(page, '仅此配置的转换').locator(':scope > summary').click()
+                operator(page, '仅此配置的转换').click()
                 expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('def keep(row)')
             else:
                 expect(page.locator('.wb-operators')).not_to_contain_text('def keep(row)')
         expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
 
 
-def test_directory_late_material_cannot_replace_other_expanded_operator(original, tmp_path, browser):
+def test_directory_late_material_cannot_replace_other_selected_operator(original, tmp_path, browser):
     setup_materials(original)
     path = tmp_path / 'registry.json'
     registry.add(path, original)
@@ -132,9 +143,9 @@ def test_directory_late_material_cannot_replace_other_expanded_operator(original
             else:
                 route.continue_()
         page.route('**/plan-node-detail', delay)
-        operator(page, '整理输入').locator(':scope > summary').click()
+        operator(page, '整理输入').click()
         expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('正在读取解析时快照')
-        operator(page, '联合出题').locator(':scope > summary').click()
+        operator(page, '联合出题').click()
         expect(page.locator('.wb-operators .wb-source-body')).to_contain_text('{{ payload | json }}')
         assert pending
         for route, response in pending:

@@ -56,7 +56,8 @@ def navigate(page,label):
 
 def project_info(page):
     if not page.locator('.workbench').count():navigate(page,'管道')
-    disclosure=page.locator('.workbench > details').filter(has=page.locator('summary').filter(has_text='当前项目检查与来源'))
+    page.get_by_role('button',name='检查问题',exact=True).click()
+    disclosure=page.locator('.wb-checks details').filter(has=page.locator('summary').filter(has_text='当前项目检查与来源'))
     if disclosure.get_attribute('open') is None:disclosure.locator(':scope > summary').click()
     page.get_by_role('button',name='检查当前项目',exact=True).wait_for()
     return disclosure

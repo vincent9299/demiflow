@@ -84,8 +84,11 @@
     operatorHeading.append($('h3','算子目录'),operatorCount);operators.append(operatorHeading);
     const operatorBasis=$('p',undefined,'wb-caption'),operatorControls=$('div'),operatorSearch=$('input'),operatorList=$('div',undefined,'wb-operator-list'),operatorEmpty=$('p',undefined,'wb-caption');
     operatorSearch.type='search';operatorSearch.placeholder='搜索算子名称或类型';operatorSearch.maxLength=160;operatorSearch.setAttribute('aria-label','搜索算子');
-    operators.append(operatorBasis,operatorControls,operatorSearch,operatorList,operatorEmpty);
-    const operatorRows=new Map();let operatorOpen=null;
+    const operatorLayout=$('div',undefined,'wb-operator-layout'),operatorSidebar=$('nav',undefined,'wb-operator-sidebar'),operatorViewer=$('section',undefined,'wb-operator-viewer'),operatorActions=$('div'),operatorPlaceholder=$('p','选择左侧算子，查看源码、Prompt 或配置。','wb-caption');
+    operatorSidebar.setAttribute('aria-label','Pipeline 算子');operatorViewer.setAttribute('aria-label','算子内容');
+    operatorSidebar.append(operatorSearch,operatorList,operatorEmpty);operatorViewer.append(operatorActions,operatorPlaceholder);operatorLayout.append(operatorSidebar,operatorViewer);
+    operators.append(operatorBasis,operatorControls,operatorLayout);
+    const operatorRows=new Map();let operatorKey=null;
     const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('aside',undefined,'wb-inspector');
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
     const graphTools=$('div',undefined,'wb-graph-tools'),graphTitle=$('span','运行执行图'),graphHost=$('div',undefined,'wb-graph');
@@ -123,7 +126,7 @@
     for(const[key,label]of [['implementation','实现'],['callsite','调用点'],['prompt','Prompt'],['configuration','配置']])sourceButtons.set(key,button(label,async()=>{sourceKind=key;sourceOpen=true;sourceBody.hidden=false;sourceTabs.hidden=false;await loadSource();},sourceTabs));
     sourceHeader.append(sourceTitle);const sourceToggle=button('收起代码',async()=>{sourceOpen=!sourceOpen;sourceBody.hidden=sourceTabs.hidden=!sourceOpen;sourceSequence++;disposeReaders(sourceBody);sourceBody.replaceChildren();if(sourceOpen)await loadSource();updateActions();},sourceHeader);bottom.append(sourceHeader,sourceTabs,sourceBody);graphSection.append(bottom);
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
-    const documents=details('当前项目检查与来源',root);
+    const documents=details('当前项目检查与来源',checks);
     let projectInfoRendered=false,projectInfoPending=null,projectInfoDirty=false;
     const checkState=()=>options.projectCheckState?.()||{version:0,active:false};
     const projectInfo=$('div');documents.append(projectInfo);
@@ -191,7 +194,7 @@
       body.hidden=resultsActive||operatorsActive;operators.hidden=!operatorsActive;checks.hidden=!checksActive;runDetail.hidden=!run||resultsActive||operatorsActive;runFacts.hidden=!run||resultsActive||operatorsActive;trend.hidden=!run||resultsActive||operatorsActive;
       placeOperatorReader();
       runBar.hidden=!run||!!comparison;
-      if(!checksActive&&documents.parentElement===checkIssues){documents.open=false;root.append(documents);}
+      if(!checksActive)documents.open=false;
       const dirty=working&&Object.keys(getDraft().values).length>0;
       checkButton.disabled=busy||previewBusy||!!run||!registered()||dirty;
       if(scopedCheckButton?.isConnected)scopedCheckButton.disabled=checkButton.disabled;
@@ -324,7 +327,7 @@
       nodeJump.value=model.selected||'';nodeJump.disabled=!model.nodes.length;
     }
     // The directory is another view of the same validated plan. It owns no
-    // source cache: one shared, identity-checked reader serves the expanded row.
+    // source cache: one shared, identity-checked reader serves the right pane.
     function placeOperatorReader(){
       const inDirectory=data().mode==='operators';
       if(inDirectory){
@@ -332,11 +335,14 @@
       }else if(previewControls.parentElement!==graphSection){
         graphTools.after(previewControls);promptNav.after(actionBar);
       }
-      const row=inDirectory?operatorRows.get(operatorOpen):null;
-      const target=row?.content||graphSection;
-      if(bottom.parentElement!==target)target.append(bottom);
       const selected=previewSelection?.key||data().selection?.key;
-      for(const [key,item]of operatorRows){item.row.classList.toggle('selected',key===selected);item.row.open=key===operatorOpen;}
+      const row=inDirectory?operatorRows.get(operatorKey||selected):null;
+      const target=row?operatorViewer:graphSection;
+      if(bottom.parentElement!==target)target.append(bottom);
+      if(row){if(row.content.parentElement!==operatorActions)operatorActions.replaceChildren(row.content);}
+      else operatorActions.replaceChildren();
+      operatorPlaceholder.hidden=!!row;
+      for(const [key,item]of operatorRows){item.row.classList.toggle('selected',key===selected);item.row.setAttribute('aria-pressed',String(key===selected));}
     }
     function filterOperators(){
       const query=operatorSearch.value.trim().toLocaleLowerCase();let visible=0;
@@ -350,9 +356,8 @@
     }
     operatorSearch.oninput=filterOperators;
     async function openOperator(card,selection=card.selection){
-      if(!graphModel?.nodes.some(n=>n.key===card.key))return;
-      operatorOpen=card.key;
-      for(const [key,item]of operatorRows)item.row.open=key===card.key;
+      if(disposed||!root.isConnected||!graphModel?.nodes.some(n=>n.key===card.key))return;
+      operatorKey=card.key;
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;
       placeOperatorReader();
       if(selection.occurrenceId===null&&card.occurrences.length>1){
@@ -362,23 +367,21 @@
       updateActions();savePreviewLocator();
     }
     function paintOperators(model){
-      // Move the shared reader out before removing old rows (including refresh
-      // or a changed action), so no detached reader or stale material survives.
-      if(bottom.parentElement!==graphSection)graphSection.append(bottom);
+      const scrollTop=operatorSidebar.scrollTop;
       operatorRows.clear();operatorList.replaceChildren();
       const cards=model?.nodes||[];
-      if(!cards.some(c=>c.key===operatorOpen))operatorOpen=null;
+      if(!cards.some(c=>c.key===operatorKey))operatorKey=null;
       operatorBasis.textContent=planPreview&&!run
-        ?'当前入口与配置 · 编译计划，尚未运行 · 首个执行动作的 '+cards.length+' 个算子。展开查看材料；编号不代表并行分支的执行先后。'
+        ?'当前入口与配置 · 编译计划，尚未运行 · 首个执行动作的 '+cards.length+' 个算子。选择左侧算子查看材料；编号不代表并行分支的执行先后。'
         :run?'历史运行 · 封存执行计划 · 当前所选执行动作。材料缺失时明确提示，不借用当前代码。'
         :'目录与运行图使用同一份引擎计划；不会把静态源码调用当作数据算子。';
       cards.forEach((card,index)=>{
-        const row=$('details',undefined,'wb-operator-row'),summary=$('summary'),name=$('strong',card.title),kind=$('span',card.kindLabel,'wb-tag');
-        name.className='wb-operator-name';summary.append($('span',String(index+1).padStart(2,'0'),'wb-operator-number'),name,kind);
+        const row=$('button',undefined,'wb-operator-row'),name=$('strong',card.title),kind=$('span',card.kindLabel,'wb-tag');
+        row.type='button';name.className='wb-operator-name';row.append($('span',String(index+1).padStart(2,'0'),'wb-operator-number'),name,kind);
         const node=planPreview?.dag.nodes.find(n=>n.occurrence_id===card.selection.occurrenceId);
         const materials=node?.source_views;
         const available=materials?[['implementation','源码'],['prompt','Prompt'],['configuration','配置']].filter(([key])=>materials[key]?.available).map(([,label])=>label):[];
-        if(available.length)summary.append($('span',available.join(' · '),'wb-operator-materials'));
+        if(available.length)row.append($('span',available.join(' · '),'wb-operator-materials'));
         const content=$('div',undefined,'wb-operator-content'),links=$('div',undefined,'wb-inline-actions');
         button('在运行图中定位',async()=>{
           if(card.selection.occurrenceId!==null||card.occurrences.length<=1)await selectGraphNode(card.selection);
@@ -389,21 +392,18 @@
           content.append($('p','同一逻辑算子的多次出现；选择具体实例查看封存材料。','wb-caption'));
           for(const occurrence of card.occurrences)button('出现 '+occurrence.occurrenceId.slice(0,8),()=>openOperator(card,occurrence),links);
         }
-        content.append(links);row.append(summary,content);row.open=card.key===operatorOpen;
-        summary.onclick=event=>{
-          event.preventDefault();
-          if(row.open){row.open=false;operatorOpen=null;sourceSequence++;placeOperatorReader();}
-          else openOperator(card).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
-        };
+        content.append(links);
+        row.onclick=()=>openOperator(card).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});
         operatorRows.set(card.key,{row,content,search:(card.title+' '+card.kindLabel+' '+available.join(' ')).toLocaleLowerCase()});operatorList.append(row);
       });
       filterOperators();placeOperatorReader();
+      operatorSidebar.scrollTop=scrollTop;
     }
     function paintPreviewNode(selection){
       if(!planPreview||run||selection.previewDigest!==planPreview.basis.digest)return;
       const node=planPreview.dag.nodes.find(n=>n.occurrence_id===selection.occurrenceId&&n.logical_node_id===selection.logicalNodeId);
       const card=graphModel?.nodes.find(n=>n.key===selection.key);if(!node||!card)return;
-      previewSelection=selection;operatorOpen=data().mode==='operators'?card.key:null;graph.select(card.key);nodeJump.value=card.key;inspectorWhole=false;
+      previewSelection=selection;operatorKey=data().mode==='operators'?card.key:null;graph.select(card.key);nodeJump.value=card.key;inspectorWhole=false;
       inspector.replaceChildren($('h3',card.title),$('span','编译计划 · 尚未运行','wb-tag'));
       inspector.append($('p','算子类型：'+node.op_kind,'wb-caption'));
       factLines(inspector,'输入端口',node.input_ports.map(port=>({label:port,value:'引擎输入端口',basis:'compile'})));
@@ -514,7 +514,7 @@
       const logical=member.logicalNodeId?{logical_node_id:member.logicalNodeId,occurrence_id:member.occurrenceId}:null;
       state.chooseNode(member.reportNodeId,logical);
       state.setGraphSelection(member);
-      operatorOpen=data().mode==='operators'?card.key:null;
+      operatorKey=data().mode==='operators'?card.key:null;
       graph.select(card.key);
       observationCursor=null;observationPages=[];lastObservationRevision=null;
       const binding=data().graph.binding;
@@ -590,10 +590,10 @@
       }finally{busy=false;updateActions();}
     }
     function paintIssues(){
-      const g=data().graph;if(documents.parentElement===checkIssues)root.append(documents);
+      const g=data().graph;if(documents.parentElement===checkIssues)checks.append(documents);
       scopedCheckButton=null;
       checkScopes.replaceChildren($('span','检查范围','wb-caption'));checkIssues.replaceChildren();checkCoverage.replaceChildren($('h3','本次检查依据'));
-      for(const[key,label]of [['flow','当前流程'],['project','整个项目']]){const item=button(label,()=>{issueScope=key;paintIssues();},checkScopes);item.classList.toggle('active',issueScope===key);item.setAttribute('aria-pressed',String(issueScope===key));}
+      for(const[key,label]of [['flow','当前流程'],['project','整个项目']]){const item=button(label,()=>{issueScope=key;if(key==='flow')documents.open=false;paintIssues();},checkScopes);item.classList.toggle('active',issueScope===key);item.setAttribute('aria-pressed',String(issueScope===key));}
       if(issueScope==='project'){
         checkIssues.append(documents);documents.open=true;refreshProjectInfo();
         checkCoverage.append($('p','沿用项目已有的检查结果与覆盖；不会把单个流程的通过结论扩大为整个项目通过。','wb-caption'));return;
@@ -1227,7 +1227,7 @@
           if(planPreview?.basis.digest===saved.digest){const card=graphModel?.nodes.find(n=>n.selection.occurrenceId===saved.occurrence);
             if(card){paintPreviewNode(card.selection);const node=planPreview.dag.nodes.find(n=>n.occurrence_id===saved.occurrence);
               if(node.source_views?.[saved.kind]?.available){sourceKind=saved.kind;await loadSource();}}}
-          if(planPreview&&saved.mode==='operators'){state.setMode('operators');operatorOpen=previewSelection?.key||null;paintOperators(graphModel);updateActions();savePreviewLocator();}
+          if(planPreview&&saved.mode==='operators'){state.setMode('operators');operatorKey=previewSelection?.key||null;paintOperators(graphModel);updateActions();savePreviewLocator();}
         }catch(error){if(error.name!=='AbortError')message('重新解析未完成：'+error.message,'error-box');}
       }
     }

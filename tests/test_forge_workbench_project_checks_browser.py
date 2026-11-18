@@ -44,7 +44,7 @@ def test_late_project_status_cannot_replace_newer_check_result(project,browser,m
         expect(page.get_by_role('button',name='刷新当前视图',exact=True)).to_be_enabled(timeout=65000)
         evidence=dict(old_status=old['status'],old_static_status=old['static_status'],
                       explicit_check_status=fresh['status'],explicit_static_status=fresh['static_status'],
-                      shown=page.locator('.workbench > details').last.inner_text())
+                      shown=page.locator('.wb-checks details').filter(has=page.locator('summary',has_text='当前项目检查与来源')).inner_text())
         out=tmp_path/'evidence'
         out.mkdir(exist_ok=True)
         (out/('project-check-status-'+('error' if late_error else 'success')+'.json')).write_text(json.dumps(evidence,ensure_ascii=False,indent=2)+'\n')
